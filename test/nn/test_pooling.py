@@ -14,7 +14,8 @@ from torch import inf, nan
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, set_default_dtype, \
-    instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps, gcIfJetson
+    instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps, gcIfJetson, \
+    skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import largeTensorTest, onlyNativeDeviceTypes, dtypes, \
@@ -207,13 +208,13 @@ class TestPoolingNN(NNTestCase):
             self.assertEqual(out, ref_out)
             self.assertEqual(input.grad, ref_input.grad)
 
-    def test_adaptive_pooling_bfloat16(self):
-        def _test_adaptive_pooling_bfloat16(self, device, mod, memory_format):
+    def test_adaptive_pooling_lower_precision(self):
+        def _test_adaptive_pooling_lower_precision(self, device, dtype, mod, memory_format):
             input = torch.randint(1, 10, (3, 19, 8, 8), dtype=torch.float32)
             input = input.to(device).to(memory_format=memory_format).requires_grad_()
             pool = mod((7, 7)).to(device)
 
-            input2 = input.detach().clone().bfloat16().requires_grad_(True)
+            input2 = input.detach().clone().to(dtype=dtype).requires_grad_(True)
 
             out = pool(input)
             out.sum().backward()
@@ -221,17 +222,18 @@ class TestPoolingNN(NNTestCase):
             out2.sum().backward()
 
             self.assertTrue(out2.is_contiguous(memory_format=memory_format))
-            self.assertEqual(out2.dtype, torch.bfloat16)
-            self.assertEqual(input2.grad.dtype, torch.bfloat16)
+            self.assertEqual(out2.dtype, dtype)
+            self.assertEqual(input2.grad.dtype, dtype)
             self.assertEqual(out, out2.float(), atol=0.1, rtol=0)
             self.assertEqual(input.grad, input2.grad.float(), atol=0.1, rtol=0)
 
         device_list = ['cpu']
         for device in device_list:
-            _test_adaptive_pooling_bfloat16(self, device, torch.nn.AdaptiveAvgPool2d, torch.contiguous_format)
-            _test_adaptive_pooling_bfloat16(self, device, torch.nn.AdaptiveAvgPool2d, torch.channels_last)
-            _test_adaptive_pooling_bfloat16(self, device, torch.nn.AdaptiveMaxPool2d, torch.contiguous_format)
-            _test_adaptive_pooling_bfloat16(self, device, torch.nn.AdaptiveMaxPool2d, torch.channels_last)
+            for dtype in [torch.bfloat16, torch.float16]:
+                _test_adaptive_pooling_lower_precision(self, device, dtype, torch.nn.AdaptiveAvgPool2d, torch.contiguous_format)
+                _test_adaptive_pooling_lower_precision(self, device, dtype, torch.nn.AdaptiveAvgPool2d, torch.channels_last)
+                _test_adaptive_pooling_lower_precision(self, device, dtype, torch.nn.AdaptiveMaxPool2d, torch.contiguous_format)
+                _test_adaptive_pooling_lower_precision(self, device, dtype, torch.nn.AdaptiveMaxPool2d, torch.channels_last)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @largeTensorTest('12GB', device='cuda')
@@ -821,6 +823,7 @@ torch.cuda.synchronize()
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
+    @skipIfTorchDynamo("OOMs https://github.com/pytorch/pytorch/issues/111320")
     def test_max_pool1d(self, device, dtype):
         # FIXME For now compare against max_pool1d with indices
         def check(x, *args, **kwargs):

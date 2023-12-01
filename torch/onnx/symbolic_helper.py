@@ -476,8 +476,8 @@ def _if_scalar_type_as(self, tensor):
 
 
 @_beartype.beartype
-def _is_none(x: _C.Value) -> bool:
-    return x.node().mustBeNone()
+def _is_none(x: Any) -> bool:
+    return x is None or (x.node().mustBeNone() if isinstance(x, _C.Value) else False)
 
 
 @_beartype.beartype
@@ -1388,6 +1388,8 @@ def _index_fill_reshape_helper(g: jit_utils.GraphContext, self, dim, index):
         return _unimplemented("index_fill", "input rank not accessible")
     self_dim = self.type().dim()
     dim_value = _parse_arg(dim, "i")
+    if dim_value < 0:
+        dim_value += self_dim
     unsqueezed_index = _unsqueeze_helper(
         g, index, [i for i in range(self_dim) if i != dim_value]
     )

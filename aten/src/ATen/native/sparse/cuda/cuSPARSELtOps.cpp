@@ -18,8 +18,13 @@
 
 namespace at::native {
 
-cusparseLtHandle_t handle;
-bool handle_initialized = false;
+// Ideally we would use the same DeviceThreadHandlePool mechanism as used in aten/src/ATen/cuda/CuSparseHandlePool.cpp
+// which would handle this for us. However, the cuSPARSELt handle signature is different from that of cuSPARSE/cuBLAS,
+// so it's not possible to reuse the existing pooling mechanism. Instead we have to handle our handles ourselves, which
+// is why these variables are thread local. Once cuSPARSELt updates their handle signature to be consistent with the rest
+// of CUDA, we can switch to using DeviceThreadHandlePool.
+thread_local cusparseLtHandle_t handle;
+thread_local bool handle_initialized = false;
 
 at::Tensor _cslt_compress(const Tensor& sparse_input)
 {
@@ -119,7 +124,6 @@ at::Tensor _cslt_sparse_mm(
   cudaDataType output_type;
   cusparseComputeType compute_type;
   auto compression_factor = 9;
-  c10::ScalarType pytorch_output_type;
 
 
   switch(compressed_A.scalar_type())
@@ -158,13 +162,6 @@ at::Tensor _cslt_sparse_mm(
     {
         output_type = CUDA_R_16F;
         mixed_dtype_mode = true;
-        pytorch_output_type = out_dtype;
-    }
-    else if (input_type == CUDA_R_8I and out_dtype == at::ScalarType::Int)
-    {
-        output_type = CUDA_R_32I;
-        mixed_dtype_mode = true;
-        pytorch_output_type = out_dtype;
     }
     else
     {
@@ -205,8 +202,8 @@ at::Tensor _cslt_sparse_mm(
   at::Tensor res;
   if (mixed_dtype_mode)
   {
-      res = (transpose_result) ? at::empty({n, m}, c10::TensorOptions().dtype(pytorch_output_type).device(dense_B.device()))
-                               : at::empty({m, n}, c10::TensorOptions().dtype(pytorch_output_type).device(dense_B.device()));
+      res = (transpose_result) ? at::empty({n, m}, c10::TensorOptions().dtype(c10::kHalf).device(dense_B.device()))
+                               : at::empty({m, n}, c10::TensorOptions().dtype(c10::kHalf).device(dense_B.device()));
   }
   else
   {

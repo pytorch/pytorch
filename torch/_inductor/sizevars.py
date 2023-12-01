@@ -1,13 +1,14 @@
 import functools
 import itertools
 import logging
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import sympy
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.value_ranges import bound_sympy
 
 from .utils import sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
@@ -343,13 +344,11 @@ class SizeVarAllocator:
         """return the smaller of left and right, and guard on that choice"""
         lv = self.size_hint(left)
         rv = self.size_hint(right)
-        if lv == rv:
-            return self.guard_equals(left, right)
-        elif lv < rv:
-            self.guard_lt(left, right)
+        if lv <= rv:
+            self.guard_leq(left, right)
             return left
         else:
-            self.guard_lt(right, left)
+            self.guard_leq(right, left)
             return right
 
     def evaluate_static_shape(self, left: Expr) -> int:
@@ -377,6 +376,14 @@ class SizeVarAllocator:
         out = self.symbolic_hint(expr)
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint
+            sym_vrs = {
+                s: self.shape_env.var_to_range.get(s, None) for s in expr.free_symbols
+            }
+            if all(vr is not None for vr in sym_vrs.values()):
+                expr_vr = bound_sympy(expr, sym_vrs)
+                lower = self.size_hint(expr_vr.lower)
+                upper = self.size_hint(expr_vr.upper)
+                fallback = min(max(fallback, lower), upper)
             return fallback
         try:
             return int(out)
@@ -384,8 +391,13 @@ class SizeVarAllocator:
             log.debug("failed on: %s", out)
             raise
 
-    def size_hints(self, exprs: List[Expr]) -> Tuple[int, ...]:
-        return tuple(self.size_hint(x) for x in exprs)
+    def size_hints(
+        self,
+        exprs: Iterable[Expr],
+        *,
+        fallback: Optional[int] = None,
+    ) -> Tuple[int, ...]:
+        return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -479,9 +491,7 @@ class SizeVarAllocator:
         return result
 
     def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
-        strides = tuple(
-            map(abs, self.stride_hints(index, vars))  # type: ignore[arg-type]
-        )
+        strides = tuple(map(abs, self.stride_hints(index, vars)))
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
         return order

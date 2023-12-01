@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
-    TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
+    TEST_WITH_CROSSREF, skipIfTorchDynamo, skipRocmIfTorchInductor, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
@@ -58,6 +58,9 @@ from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
     get_all_qint_dtypes,
+)
+from torch.testing._internal.common_cuda import (
+    _create_scaling_case, _create_scaling_models_optimizers
 )
 
 # Protects against includes accidentally setting the default dtype
@@ -820,6 +823,8 @@ class TestTorchDeviceType(TestCase):
     def test_cpp_warnings_have_python_context(self, device):
         # Creates long string in advance to avoid a too-long Python line
         s = ".+Triggered internally at.+RangeFactories.+"
+        # nvfuser deprecation warning filter
+        warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
 
         def cpp_warn_fn():
             out = torch.empty((5,))
@@ -1253,7 +1258,7 @@ else:
                         + e.output.decode("utf-8")))
 
     @onlyCPU
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @dtypes(*get_all_qint_dtypes())
     def test_nondeterministic_resize_quantized(self, device, dtype):
         a = torch.tensor([-1, 0, 1, 2, 3], dtype=torch.float, device=device)
@@ -1263,7 +1268,7 @@ else:
             'quantized_resize_cpu_')
 
     @skipXLA
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_deterministic_resize(self, device, dtype):
         test_cases = [
@@ -1290,7 +1295,7 @@ else:
             else:
                 a = torch.empty_strided(size, stride, dtype=dtype, device=device).fill_(0)
             old_storage = a.untyped_storage().clone()
-            with DeterministicGuard(True):
+            with DeterministicGuard(True, fill_uninitialized_memory=True):
                 a.resize_(resize_size)
 
             new_storage = a.untyped_storage()
@@ -1321,7 +1326,7 @@ else:
     # When deterministic algorithms are enabled, `torch.empty` should fill floating
     # point tensors with NaN and integer tensors with MAX_INT
     @skipXLA
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_deterministic_empty(self, device, dtype):
         gen_fns = [
@@ -1334,7 +1339,7 @@ else:
         ]
 
         for gen_fn in gen_fns:
-            with DeterministicGuard(True):
+            with DeterministicGuard(True, fill_uninitialized_memory=True):
                 res = gen_fn()
 
             if dtype.is_floating_point or dtype.is_complex:
@@ -1349,7 +1354,7 @@ else:
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_AvgPool3d(self, device):
         module = torch.nn.AvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1362,7 +1367,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_AdaptiveAvgPool2d(self, device):
         module = torch.nn.AdaptiveAvgPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
@@ -1375,7 +1380,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_AdaptiveAvgPool3d(self, device):
         module = torch.nn.AdaptiveAvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1388,7 +1393,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_MaxPool3d(self, device):
         module = torch.nn.MaxPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1401,7 +1406,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_AdaptiveMaxPool2d(self, device):
         module = torch.nn.AdaptiveMaxPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
@@ -1414,7 +1419,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_FractionalMaxPool2d(self, device):
         module = torch.nn.FractionalMaxPool2d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1427,7 +1432,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_FractionalMaxPool3d(self, device):
         module = torch.nn.FractionalMaxPool3d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, 3, requires_grad=True, device=device)
@@ -1482,7 +1487,7 @@ else:
             'max_unpooling3d_forward_out')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_linear(self, device):
         input = torch.randn(1, 2, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1497,7 +1502,7 @@ else:
             'upsample_linear1d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1512,7 +1517,7 @@ else:
             'upsample_bilinear2d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_deterministic_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         grad = None
@@ -1531,7 +1536,7 @@ else:
                 input.grad = None
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1547,7 +1552,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_trilinear(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1563,7 +1568,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReflectionPad1d(self, device):
         module = torch.nn.ReflectionPad1d((1, 2))
         input = torch.randn(2, 3, 8, device=device, requires_grad=True)
@@ -1575,7 +1580,7 @@ else:
             'reflection_pad1d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReflectionPad2d(self, device):
         module = torch.nn.ReflectionPad2d((1, 2, 3, 4))
         input = torch.randn(2, 3, 8, 8, device=device, requires_grad=True)
@@ -1588,7 +1593,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReflectionPad3d(self, device):
         module = torch.nn.ReflectionPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 8, 8, 8, device=device, requires_grad=True)
@@ -1601,7 +1606,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReplicationPad1d(self, device):
         module = torch.nn.ReplicationPad1d((1, 2))
         input = torch.randn(2, 3, 4, device=device, requires_grad=True)
@@ -1613,7 +1618,7 @@ else:
             'replication_pad1d_backward_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReplicationPad2d(self, device):
         module = torch.nn.ReplicationPad2d((1, 2, 3, 4))
         input = torch.randn(2, 3, 4, 4, device=device, requires_grad=True)
@@ -1626,7 +1631,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReplicationPad3d(self, device):
         module = torch.nn.ReplicationPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 4, 4, 4, device=device, requires_grad=True)
@@ -1650,7 +1655,7 @@ else:
             'nll_loss2d_forward_out_cuda_template',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_CTCLoss(self, device):
         module = torch.nn.CTCLoss()
         input = torch.randn(50, 3, 15, device=device, requires_grad=True)
@@ -1665,7 +1670,7 @@ else:
             'ctc_loss_backward_gpu',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_EmbeddingBag_max(self, device):
         module = torch.nn.EmbeddingBag(
             4, 3, None, 2., False, 'max',
@@ -1680,7 +1685,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @dtypes(*all_types_and_complex_and(torch.bool))
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_cumsum(self, device, dtype):
         input = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
         should_alert = torch.device(device).type == 'cuda' and (dtype.is_floating_point or dtype.is_complex)
@@ -1770,7 +1775,7 @@ else:
                 torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_grid_sample_2d(self, device):
         input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -1783,7 +1788,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_grid_sample_3d(self, device):
         input = torch.empty(1, 1, 2, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, 3, device=device)
@@ -2066,7 +2071,7 @@ else:
             self.assertEqual(a_with_output.size(), torch.Size([3, 2]))
 
     @dtypes(*floating_types())
-    @dtypesIfCPU(*floating_types_and(torch.bfloat16))
+    @dtypesIfCPU(*floating_types_and(torch.bfloat16, torch.half))
     @dtypesIfCUDA(*floating_types_and(torch.half))
     def test_bernoulli_p(self, device, dtype):
         for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
@@ -2088,7 +2093,7 @@ else:
 
     # RngUniform not implemented for Integral type in XLA test
     @dtypes(*floating_types())
-    @dtypesIfCPU(*all_types_and(torch.bool))
+    @dtypesIfCPU(*all_types_and(torch.bool, torch.half))
     @dtypesIfCUDA(*all_types_and(torch.bool, torch.half))
     def test_bernoulli_self(self, device, dtype):
 
@@ -2116,7 +2121,7 @@ else:
             self.assertTrue(isBinary(t))
 
     @slowTest
-    @dtypes(*floating_types())
+    @dtypes(*floating_types_and(torch.half))
     @dtypesIfCUDA(*floating_types_and(torch.half))
     def test_bernoulli_edge_cases(self, device, dtype):
         # Need to draw a lot of samples to cover every random floating point number.
@@ -2174,6 +2179,7 @@ else:
             ref = np.corrcoef(x.cpu().numpy())
             self.assertEqual(res, ref, exact_dtype=False)
 
+    @skipRocmIfTorchInductor
     @dtypes(torch.int, torch.float, torch.cfloat)
     def test_cov(self, device, dtype):
         def check(t, correction=1, fweights=None, aweights=None):
@@ -2219,6 +2225,7 @@ else:
 
     @skipIfMps
     @skipIfNoSciPy
+    @skipRocmIfTorchInductor
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_lognormal_kstest(self, device, dtype):
         from scipy import stats
@@ -2245,6 +2252,7 @@ else:
 
     @skipIfMps
     @skipIfNoSciPy
+    @skipRocmIfTorchInductor
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_cauchy_kstest(self, device, dtype):
         from scipy import stats
@@ -2281,6 +2289,7 @@ else:
 
     @skipIfMps
     @skipIfNoSciPy
+    @skipRocmIfTorchInductor
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_geometric_kstest(self, device, dtype):
         from scipy import stats
@@ -2909,7 +2918,7 @@ else:
         large_size = 100000
         t = make_tensor((large_size,), dtype=dtype, device=device)
         t_np = t.cpu().numpy()
-        coordinates_np = list(np.random.randn(large_size))
+        coordinates_np = np.random.randn(large_size)
         coordinates = [torch.tensor(coordinates_np, device=device)]
         actual = torch.gradient(t, spacing=coordinates, dim=0, edge_order=1)
         expected = [np.gradient(t_np, coordinates_np, axis=0, edge_order=1)]
@@ -3144,7 +3153,6 @@ else:
             self.assertEqual(dst, src.neg().conj_physical(), exact_dtype=False)
 
     # FIXME: move to data movement test suite
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/98175")
     @onlyNativeDeviceTypes
     @dtypes(torch.int64, torch.float32, torch.complex64)
     def test_copy_transpose_math_view(self, device, dtype):
@@ -4284,8 +4292,10 @@ else:
 
     # FIXME: move to an elementwise ternary test suite and make this an OpInfo test
     @dtypes(torch.double)
-    @skipIfTorchInductor("FIXME")
     def test_ternary_op_mem_overlap(self, device, dtype):
+        if device == "cpu" and TEST_WITH_TORCHINDUCTOR:
+            self.skipTest("Failing on cpu")
+
         ops = [
             ("addcmul", True, True, 'cpu'),
             ("addcmul", True, True, 'cuda'),
@@ -4492,7 +4502,6 @@ else:
     # FIXME: move to test distributions
     @deviceCountAtLeast(2)
     @onlyCUDA
-    @skipIfTorchInductor("out_wrapper does not check devices correctly")
     def test_multinomial_gpu_device_constrain(self, devices):
         x = torch.empty(3, device=devices[0])
         y = torch.empty(3, device=devices[1])
@@ -4994,7 +5003,7 @@ else:
     # FIXME: move to test distributions
     @skipIfMps
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.half)
     def test_multinomial(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
             if is_contiguous:
@@ -5312,8 +5321,9 @@ else:
                 'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
 
     # FIXME: move to test_serialization
+    @onlyNativeDeviceTypes
     def test_pickle_gradscaler(self, device):
-        # This test is not in test_cuda.py because it should pass in 3 cases:
+        # This test should pass in 3 cases for cuda:
         #  1. cuda is not available.
         #  2. cuda is available but device is not cuda.
         #  3. cuda is available and device is cuda.
@@ -5323,7 +5333,7 @@ else:
         # In case 3, a and b are enabled and we may also try lazy-initing _scale to a cuda tensor.
         device = torch.device(device)
         try_lazy_inits = (True, False)
-        GradScaler = torch.cuda.amp.GradScaler if device.type == "cuda" else torch.cpu.amp.GradScaler
+        GradScaler = partial(torch.amp.GradScaler, device=device.type)
         for lazy_init_scale in try_lazy_inits:
             a = GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
             if device.type == "cuda":
@@ -5424,15 +5434,12 @@ else:
     @onlyNativeDeviceTypes
     @dtypes(torch.float)
     def test_grad_scaling_update_scale(self, device, dtype):
-        device0 = "cpu"
-        if "cuda" in device:
-            device0 = "cuda:0"
         growth = 2.0
         backoff = 0.25
         growth_interval = 2
         scale = torch.full((1,), 4.0, dtype=dtype, device=device)
         growth_tracker = torch.full((1,), 0.0, dtype=torch.int32, device=device)
-        found_inf = torch.full((1,), 0.0, dtype=torch.float, device=device0)
+        found_inf = torch.full((1,), 0.0, dtype=torch.float, device=device)
 
         # Simulates 2 consecutive unskipped iterations
         torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
@@ -5452,7 +5459,8 @@ else:
     @onlyNativeDeviceTypes
     @dtypes(torch.float)
     def test_grad_scaling_unscale_sparse(self, device, dtype):
-        scaler = torch.cuda.amp.GradScaler() if "cuda" in device else torch.cpu.amp.GradScaler()
+        device = torch.device(device)
+        scaler = torch.amp.GradScaler(device=device.type)
 
         inv_scale = torch.full((1,), 0.25, dtype=dtype, device=device)
         found_inf = torch.empty((1,), dtype=dtype, device=device)
@@ -5509,11 +5517,8 @@ else:
     @skipMeta
     @onlyNativeDeviceTypes
     def test_grad_scaling_state_dict(self, device):
-        device0 = "cpu"
-        GradScaler = torch.cpu.amp.GradScaler
-        if "cuda" in device:
-            device0 = "cuda:0"
-            GradScaler = torch.cuda.amp.GradScaler
+        device = torch.device(device)
+        GradScaler = partial(torch.amp.GradScaler, device=device.type)
         for lazy_init_scale in True, False:
             s0 = GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
             s1 = GradScaler(init_scale=6., growth_factor=7., backoff_factor=.8, growth_interval=1)
@@ -5523,8 +5528,8 @@ else:
 
             if lazy_init_scale:
                 # Dummy scale() call to ensure the scale tensor is lazily initialized.
-                s1.scale(torch.full((1,), 4.0, dtype=torch.float32, device=device0))
-                if "cuda" in device:
+                s1.scale(torch.full((1,), 4.0, dtype=torch.float32, device=device))
+                if "cuda" == device.type:
                     self.assertTrue(isinstance(s1._scale, torch.cuda.FloatTensor))
                 else:
                     self.assertTrue(isinstance(s1._scale, torch.FloatTensor))
@@ -5537,52 +5542,17 @@ else:
             self.assertEqual(s1.get_growth_interval(), 2)
             self.assertEqual(s1._init_growth_tracker, 0)
 
-    def _create_scaling_models_optimizers(self, device="cuda", optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
-        # Create a module+optimizer that will use scaling, and a control module+optimizer
-        # that will not use scaling, against which the scaling-enabled module+optimizer can be compared.
-        mod_control = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
-        mod_scaling = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
-        with torch.no_grad():
-            for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-                s.copy_(c)
-
-        kwargs = {"lr": 1.0}
-        if optimizer_kwargs is not None:
-            kwargs.update(optimizer_kwargs)
-        if device == "cpu" and optimizer_ctor in [torch.optim.AdamW, torch.optim.Adam]:
-            kwargs["fused"] = False
-        opt_control = optimizer_ctor(mod_control.parameters(), **kwargs)
-        opt_scaling = optimizer_ctor(mod_scaling.parameters(), **kwargs)
-
-        return mod_control, mod_scaling, opt_control, opt_scaling
-
-    def _create_scaling_case(self, device="cuda", dtype=torch.float, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
-        data = [(torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
-                (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
-                (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
-                (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device))]
-
-        loss_fn = torch.nn.MSELoss().to(device)
-
-        skip_iter = 2
-        return self._create_scaling_models_optimizers(
-            device=device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
-        ) + (data, loss_fn, skip_iter)
-
     # _run_scaling_case generalizes some single-optimizer test logic to avoid too much copy-pasting below.
     def _run_scaling_case(self, device, run, unskipped, skipped, atol=1e-7, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
         # Ensure scaling can be disabled without changing user control flow.
         for enabled in True, False:                
             (
                 mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter,
-            ) = self._create_scaling_case(device=device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
+            ) = _create_scaling_case(device=device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
 
-            # for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-            #     self.assertEqual(c.grad, s.grad, atol=0, rtol=0)
-            #     self.assertEqual(c, s, atol=0, rtol=0)
             # For functionality, test with a modest initial scale, and an unrealistically-large growth factor
             # so any potential errors with the growth factor handling will be magnified.
-            GradScaler = torch.cuda.amp.GradScaler if "cuda" in device else torch.cpu.amp.GradScaler
+            GradScaler = partial(torch.amp.GradScaler, device=device)
             scaler = GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
 
             _ = run(device, data, mod_control, opt_control, scaler, loss_fn, skip_iter, False)
@@ -5607,7 +5577,7 @@ else:
                 for k in c_state:
                     self.assertEqual(c_state[k], s_state[k], atol=atol, rtol=1e-05, msg=k)
 
-                self.assertEqual(c, s, atol=2e-3, rtol=1e-05)
+                self.assertEqual(c, s, atol=atol, rtol=1e-05)
 
     # Compares no scaling + no autocasting against scaling + autocasting.
     def _grad_scaling_autocast_test(self, *, device="cuda", atol=1e-3, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
@@ -5616,7 +5586,7 @@ else:
         def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             for i, (input, target) in enumerate(data):
                 optimizer.zero_grad()
-                with torch.autocast("cuda" if "cuda" in device else "cpu", enabled=try_scaling_api):
+                with torch.autocast(device_type=device, dtype=torch.half, enabled=try_scaling_api):
                     output = model(input)
                     loss = loss_fn(output, target)
                 if try_scaling_api:
@@ -5655,85 +5625,25 @@ else:
     @skipIfTorchInductor
     @onlyNativeDeviceTypes
     def test_grad_scaling_autocast(self, device):
+        device = torch.device(device)
         for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(device=device, optimizer_ctor=optimizer_ctor)
+            self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor)
 
     @skipMeta
     @skipIfTorchInductor
     @onlyNativeDeviceTypes
     def test_grad_scaling_autocast_foreach(self, device):
+        device = torch.device(device)
         for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(device=device, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
+            self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
 
-    @skipMeta
-    @skipIfTorchInductor
-    @onlyNativeDeviceTypes
-    def test_grad_scaling_autocast_fused(self, device):
-        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(device=device, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
-
-    # Compare non-fused optimizer vs fused one as the fused one unscales gradients
-    # inside its cuda kernel unlike the other.
-    @onlyCUDA
-    def test_grad_scaling_autocast_fused_optimizers(self, device):
-        for optimizer_ctor, optimizer_kwargs, separate_unscale in product(
-            (torch.optim.Adam, torch.optim.AdamW),
-            ({"fused": True, "amsgrad": False}, {"fused": True, "amsgrad": True}),
-            (False, True),
-        ):
-            with self.subTest(optim=optimizer_ctor, kwargs=optimizer_kwargs, separate_unscale=separate_unscale):
-                self._grad_scaling_autocast_fused_optimizers(
-                    device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs, separate_unscale=separate_unscale)
-
-    def _grad_scaling_autocast_fused_optimizers(self, device, optimizer_ctor, optimizer_kwargs, separate_unscale):
-        (
-            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, _,
-        ) = self._create_scaling_case(device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
-        from copy import deepcopy
-        kwargs = deepcopy(optimizer_kwargs)
-        kwargs["fused"] = False
-        opt_control = optimizer_ctor(mod_control.parameters(), lr=1.0, **kwargs)
-
-        GradScaler = torch.cuda.amp.GradScaler if "cuda" in device else torch.cpu.amp.GradScaler
-        scaler = GradScaler(init_scale=128.0)
-
-        for input, target in data:
-            opt_control.zero_grad()
-            with torch.autocast("cuda" if "cuda" in device else "cpu"):
-                output_control = mod_control(input)
-                loss_control = loss_fn(output_control, target)
-            scaler.scale(loss_control).backward()
-            scaler.step(opt_control)
-            scaler.update()
-
-            opt_scaling.zero_grad()
-            with torch.autocast("cuda" if "cuda" in device else "cpu"):
-                output_scaling = mod_scaling(input)
-                loss_scaling = loss_fn(output_scaling, target)
-            scaler.scale(loss_scaling).backward()
-            if separate_unscale:
-                scaler.unscale_(opt_scaling)
-            scaler.step(opt_scaling)
-            scaler.update()
-
-            self.assertEqual(loss_control, loss_scaling)
-            for param_control, param_scaling in zip(mod_control.parameters(), mod_scaling.parameters()):
-                self.assertEqual(param_control.grad, param_scaling.grad)
-                self.assertEqual(param_control, param_scaling)
-
-                state_control, state_scaling = opt_control.state[param_control], opt_scaling.state[param_scaling]
-
-                for k in state_control:
-                    actual = state_scaling[k]
-                    if k == "step":
-                        actual = actual.squeeze()
-                    self.assertEqual(state_control[k], actual)
 
     # Make sure that the parameters become nonsense when scaled gradients are finite
     # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
     @skipMeta
     @onlyNativeDeviceTypes
     def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device):
+        device = torch.device(device)
         for optimizer_ctor, optimizer_kwargs in product(
             (torch.optim.Adam, torch.optim.AdamW),
             (
@@ -5742,19 +5652,21 @@ else:
                 {"foreach": False, "fused": True},
             ),
         ):
+            if device.type != "cuda":
+                optimizer_kwargs['fused'] = False
             with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
-                self._test_grads_invalidated_between_unscale_and_step(device, optimizer_ctor, optimizer_kwargs)
+                self._test_grads_invalidated_between_unscale_and_step(device.type, optimizer_ctor, optimizer_kwargs)
 
     def _test_grads_invalidated_between_unscale_and_step(self, device, optimizer_ctor, optimizer_kwargs):
-        model, _, optimizer, _, data, loss_fn, _ = self._create_scaling_case(
+        model, _, optimizer, _, data, loss_fn, _ = _create_scaling_case(
             device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
         )
-        GradScaler = torch.cuda.amp.GradScaler if "cuda" in device else torch.cpu.amp.GradScaler
+        GradScaler = partial(torch.amp.GradScaler, device=device)
         scaler = GradScaler(init_scale=128.0)
 
         for input, target in data:
             optimizer.zero_grad()
-            with torch.autocast("cuda" if "cuda" in device else "cpu"):
+            with torch.autocast(device_type=device, dtype=torch.half):
                 output = model(input)
                 loss = loss_fn(output, target)
             scaler.scale(loss).backward()
@@ -5772,9 +5684,10 @@ else:
     @skipMeta
     @onlyNativeDeviceTypes
     def test_grad_scale_will_not_overflow(self, device):
+        device = torch.device(device)
         model = torch.nn.Linear(5, 1).to(device)
         optimizer = torch.optim.Adam(model.parameters())
-        GradScaler = torch.cuda.amp.GradScaler if "cuda" in device else torch.cpu.amp.GradScaler
+        GradScaler = partial(torch.amp.GradScaler, device=device.type)
         scaler = GradScaler(growth_interval=1, growth_factor=2**4, init_scale=1e38)
         optimizer.zero_grad()
         x = torch.randn(1, 5).to(device)
@@ -5789,6 +5702,7 @@ else:
     @skipIfTorchInductor("No inf checks were recorded for this optimizer")
     @onlyNativeDeviceTypes
     def test_grad_scaling_clipping(self, device):
+        device = torch.device(device)
         def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
             for i, (input, target) in enumerate(data):
@@ -5808,12 +5722,13 @@ else:
                     if (not scaler.is_enabled()) or (i != skip_iter):
                         optimizer.step()
 
-        self._run_scaling_case(device, run, unskipped=3, skipped=1, atol=1e-5)
+        self._run_scaling_case(device.type, run, unskipped=3, skipped=1, atol=1e-5)
 
     @skipMeta
     @skipIfTorchInductor("No inf checks were recorded for this optimizer")
     @onlyNativeDeviceTypes
     def test_grad_scaling_clipping_separate_unscale(self, device):
+        device = torch.device(device)
         def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
             for i, (input, target) in enumerate(data):
@@ -5834,13 +5749,14 @@ else:
                     if (not scaler.is_enabled()) or (i != skip_iter):
                         optimizer.step()
 
-        self._run_scaling_case(device, run, unskipped=3, skipped=1)
+        self._run_scaling_case(device.type, run, unskipped=3, skipped=1)
 
     @skipMeta
     @skipIfTorchInductor("torch.compile with aot_autograd does not currently support double backward")
     @onlyNativeDeviceTypes
     @unittest.skipIf(IS_WINDOWS, 'FIXME: fix this test for Windows')
     def test_grad_scaling_penalty(self, device):
+        device = torch.device(device)
         def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             for i, (input, target) in enumerate(data):
                 optimizer.zero_grad()
@@ -5872,12 +5788,13 @@ else:
                     if (not scaler.is_enabled()) or (i != skip_iter):
                         optimizer.step()
 
-        self._run_scaling_case(device, run, unskipped=3, skipped=1)
+        self._run_scaling_case(device.type, run, unskipped=3, skipped=1)
 
     @skipMeta
     @skipIfTorchInductor("No inf checks were recorded for this optimizer")
     @onlyNativeDeviceTypes
     def test_grad_scaling_accumulation(self, device):
+        device = torch.device(device)
         def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             iters_to_accumulate = 2
             for i, (input, target) in enumerate(data):
@@ -5897,21 +5814,22 @@ else:
                         optimizer.step()
                         optimizer.zero_grad()
 
-        self._run_scaling_case(device, run, unskipped=2, skipped=0)
+        self._run_scaling_case(device.type, run, unskipped=2, skipped=0)
 
     @skipMeta
     @skipIfTorchInductor("No inf checks were recorded for this optimizer")
     @onlyNativeDeviceTypes
     def test_grad_scaling_multiple(self, device):
+        device = torch.device(device)
         # Tests gradient scaling with 2 models and 2 optimizers that both receive gradients from 2 losses.
         # Some of the logic here cannot reuse the generic helper functions created for the 1-optimizer cases.
         for enabled in True, False:
             mod_control0, mod_scaling0, opt_control0, opt_scaling0, data, loss_fn, skip_iter = \
-                self._create_scaling_case(device)
+                _create_scaling_case(device.type)
             mod_control1, mod_scaling1, opt_control1, opt_scaling1 = \
-                self._create_scaling_models_optimizers(device)
+                _create_scaling_models_optimizers(device.type)
 
-            GradScaler = torch.cuda.amp.GradScaler if "cuda" in device else torch.cpu.amp.GradScaler
+            GradScaler = partial(torch.amp.GradScaler, device=device.type)
             scaler = GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
 
             def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
@@ -5956,7 +5874,9 @@ else:
     @skipMeta
     @onlyNativeDeviceTypes
     def test_grad_scaler_pass_itself(self, device):
-        GradScaler = torch.cuda.amp.GradScaler if "cuda" in device else torch.cpu.amp.GradScaler
+        device = torch.device(device)
+        GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
+
         class _PlaceHolderOptimizer(torch.optim.Optimizer):
             tester = self
 
@@ -5983,7 +5903,7 @@ else:
         o2 = Optimizer2(m.parameters())
         scaler = GradScaler(init_scale=2.0)
 
-        with torch.autocast("cuda" if "cuda" in device else "cpu"):
+        with torch.autocast(device_type=device.type, dtype=torch.half):
             y = m(x)
             loss = y.mean()
         scaler.scale(loss).backward()
@@ -5993,7 +5913,7 @@ else:
         scaler.update()
 
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
-    @dtypesIfCPU(torch.float, torch.double, torch.bfloat16)
+    @dtypesIfCPU(torch.float, torch.double, torch.bfloat16, torch.half)
     @dtypes(torch.float, torch.double)
     def test_multinomial_cpu(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
@@ -6650,7 +6570,7 @@ class TestTorch(TestCase):
                     added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor, alpha=-1)
                     self.assertEqual(added, -tensor)
 
-    @skipIfTorchInductor("AssertionError: RuntimeError not raised by <lambda>")
+    @unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
     @set_default_dtype(torch.double)
     def test_index_add_correctness(self):
         # Check whether index_add can get correct result when
@@ -6973,6 +6893,11 @@ class TestTorch(TestCase):
             self.assertNotEqual(t_0.stride(), t_1.stride())
             self.assertNotEqual(t_0.size(), t_1.size())
             self.assertFalse(torch.equal(t_0, t_1))
+
+            # Fast path: tensor containing `nan` is not equal to self
+            for dtype in floating_and_complex_types():
+                t = torch.tensor([1., float('nan')], dtype=dtype)
+                self.assertFalse(torch.equal(t, t))
 
     def test_element_size(self):
         byte = torch.ByteStorage().element_size()
@@ -9048,7 +8973,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertIs(torch.int32, b.to(dtype=torch.int32).dtype)
                     self.assertEqual(b.device, b.to(dtype=torch.int32).device)
 
-    @skipIfTorchInductor("FIXME")
     def test_to(self):
         self._test_to_with_layout(torch.strided)
         is_cuda10_2_or_higher = (
@@ -9307,6 +9231,38 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 TypeError,
                 r"_set_deterministic_algorithms\(\): argument 'warn_only' must be bool, not int"):
             torch.use_deterministic_algorithms(False, warn_only=1)
+
+    # Tests that torch.utils.deterministic.fill_uninitialized_memory can be set as expected
+    def test_deterministic_fill_uninitialized_memory(self):
+        with DeterministicGuard(True, fill_uninitialized_memory=False):
+            self.assertFalse(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertFalse(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            with DeterministicGuard(True, fill_uninitialized_memory=True):
+                self.assertTrue(torch.utils.deterministic.fill_uninitialized_memory)
+                self.assertTrue(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            self.assertFalse(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertFalse(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            torch.utils.deterministic.fill_uninitialized_memory = False
+            self.assertFalse(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertFalse(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            torch.utils.deterministic.fill_uninitialized_memory = True
+            self.assertTrue(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertTrue(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            torch._C._set_deterministic_fill_uninitialized_memory(False)
+            self.assertFalse(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertFalse(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            torch._C._set_deterministic_fill_uninitialized_memory(True)
+            self.assertTrue(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertTrue(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            with self.assertRaisesRegex(RuntimeError, r"expected a bool, but got int"):
+                torch.utils.deterministic.fill_uninitialized_memory = 1
 
     def test_type_conversion_via_dtype_name(self):
         x = torch.tensor([1])
@@ -10188,6 +10144,20 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertNotEqual(t.data_ptr(), 0)
         t2 = t[0:0].view(0, 1)
         self.assertEqual(t2.data_ptr(), 0)
+
+    def test_size_stride(self) -> None:
+        t = torch.rand(2, 3, dtype=torch.float32)
+        self.assertEqual(t.size(0), 2)
+        self.assertEqual(t.size(dim=None), torch.Size([2, 3]))
+        self.assertEqual(t.stride(dim=None), torch.Size([3, 1]))
+        self.assertEqual(t.t().stride(), torch.Size([1, 3]))
+
+    def test_invalid_arg_error_handling(self) -> None:
+        """ Tests that errors from old TH functions are propagated back """
+        for invalid_val in [-1, 2**65]:
+            self.assertRaises(RuntimeError, lambda: torch.set_num_threads(invalid_val))
+            self.assertRaises(RuntimeError, lambda: torch.set_num_interop_threads(invalid_val))
+
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests

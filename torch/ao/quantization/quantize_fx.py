@@ -655,7 +655,6 @@ def convert_to_reference_fx(
 def _convert_to_reference_decomposed_fx(
     graph_module: GraphModule,
     convert_custom_config: Union[ConvertCustomConfig, Dict[str, Any], None] = None,
-    _remove_qconfig: bool = True,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> GraphModule:
@@ -699,7 +698,7 @@ def _convert_to_reference_decomposed_fx(
         graph_module,
         is_reference=True,
         convert_custom_config=convert_custom_config,
-        _remove_qconfig=_remove_qconfig,
+        _remove_qconfig=False,
         qconfig_mapping=qconfig_mapping,
         backend_config=backend_config,
         is_decomposed=True,

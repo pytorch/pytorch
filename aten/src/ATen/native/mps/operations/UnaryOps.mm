@@ -6,6 +6,7 @@
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#include <ATen/MPSFunctions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_copy_from_and_resize.h>
@@ -36,9 +37,12 @@
 #include <ATen/ops/logit_native.h>
 #include <ATen/ops/neg_native.h>
 #include <ATen/ops/reciprocal_native.h>
+#include <ATen/ops/reshape.h>
 #include <ATen/ops/round_native.h>
 #include <ATen/ops/rsqrt_native.h>
+#include <ATen/ops/sgn_native.h>
 #include <ATen/ops/sigmoid_native.h>
+#include <ATen/ops/sign_mps_dispatch.h>
 #include <ATen/ops/sign_native.h>
 #include <ATen/ops/signbit_native.h>
 #include <ATen/ops/sin_native.h>
@@ -47,6 +51,7 @@
 #include <ATen/ops/tan_native.h>
 #include <ATen/ops/tanh_native.h>
 #include <ATen/ops/trunc_native.h>
+#include <ATen/ops/view_as_real.h>
 #endif
 
 namespace at::native {
@@ -66,19 +71,29 @@ static bool is_empty_tensor(const Tensor& self) {
 }
 
 static void unary_op(const Tensor& self,
-                     const Tensor& output,
+                     const Tensor& output_,
                      std::string op_name,
                      UnaryOpBlock unaryBlock,
                      is_noop_p is_noop = is_empty_tensor) {
   TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte),
               "MPS support unary op with uint8 natively starting from macOS 13.0");
-  if (!output.is_same_size(self)) {
-    output.resize_(self.sizes());
+
+  if (!output_.is_same_size(self)) {
+    output_.resize_(self.sizes());
   }
+
   if (is_noop(self)) {
-    output.copy_(self);
+    output_.copy_(self);
     return;
   }
+
+  auto output = output_;
+  bool needsCopyToOutput = false;
+  if (output.storage_offset() || !output.is_contiguous()) {
+    output = at::empty(output.sizes(), output.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    needsCopyToOutput = true;
+  }
+
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, output});
     auto cachedGraph = LookUpOrCreateCachedGraph<MPSUnaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
@@ -115,6 +130,10 @@ static void unary_op(const Tensor& self,
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
         @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+
+    if (needsCopyToOutput) {
+      output_.copy_(output);
+    }
   }
 }
 
@@ -451,6 +470,32 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
 TORCH_IMPL_FUNC(cumprod_out_mps)
 (const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, const Tensor& result) {
   return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMPROD, "cumprod_out_mps");
+}
+
+TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
+  if (!self.is_complex()) {
+    at::mps::sign_outf(self, const_cast<Tensor&>(output));
+    return;
+  }
+
+  if (!output.is_same_size(self)) {
+    output.resize_(self.sizes());
+  }
+
+  Tensor realInput = at::view_as_real(self);
+  Tensor realOutput = at::view_as_real(output);
+
+  auto complex_sgn_op = [&](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) -> MPSGraphTensor* {
+    MPSGraphTensor* squares = [mpsGraph squareWithTensor:inputTensor name:nil];
+    MPSGraphTensor* sumSquares = [mpsGraph reductionSumWithTensor:squares axis:-1 name:nil];
+    MPSGraphTensor* norm = [mpsGraph squareRootWithTensor:sumSquares name:nil];
+    MPSGraphTensor* zero = [mpsGraph constantWithScalar:0.0 dataType:norm.dataType];
+    MPSGraphTensor* isZero = [mpsGraph equalWithPrimaryTensor:norm secondaryTensor:zero name:nil];
+    MPSGraphTensor* sgnTensor = [mpsGraph divisionWithPrimaryTensor:inputTensor secondaryTensor:norm name:nil];
+    return [mpsGraph selectWithPredicateTensor:isZero truePredicateTensor:zero falsePredicateTensor:sgnTensor name:nil];
+  };
+
+  mps::unary_op(realInput, realOutput, "sgn_out_mps", complex_sgn_op);
 }
 
 } // namespace at::native

@@ -486,6 +486,14 @@ static inline float calc_digamma(float x) {
   return result + logf(x) - (0.5f / x) - y;
 }
 
+static inline c10::BFloat16 calc_digamma(c10::BFloat16 a) {
+  return calc_digamma(static_cast<float>(a));
+}
+
+static inline c10::Half calc_digamma(c10::Half a) {
+  return calc_digamma(static_cast<float>(a));
+}
+
 template <typename scalar_t, bool is_cuda=false>
 static inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
   // already blocked if n <= 1

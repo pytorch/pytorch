@@ -106,6 +106,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
             0
             >>> next(it1)  # Further usage of `it1` will raise a `RunTimeError`
     """
+
     functions: Dict[str, Callable] = {}
     reduce_ex_hook: Optional[Callable] = None
     getstate_hook: Optional[Callable] = None
@@ -159,7 +160,8 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
 
     def __getstate__(self):
         """
-        This contains special logic to serialize `lambda` functions when `dill` is available.
+        Serialize `lambda` functions when `dill` is available.
+
         If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
         `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
         """
@@ -206,8 +208,10 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
 
     def reset(self) -> None:
         r"""
-        Reset the `IterDataPipe` to the initial state. By default, no-op. For subclasses of `IterDataPipe`,
-        depending on their functionalities, they may want to override this method with implementations that
+        Reset the `IterDataPipe` to the initial state.
+
+        By default, no-op. For subclasses of `IterDataPipe`, depending on their functionalities,
+        they may want to override this method with implementations that
         may clear the buffers and reset pointers of the DataPipe.
         The `reset` method is always called when `__iter__` is called as part of `hook_iterator`.
         """
@@ -252,6 +256,7 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         >>> list(batch_dp)
         [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]
     """
+
     functions: Dict[str, Callable] = {}
     reduce_ex_hook: Optional[Callable] = None
     getstate_hook: Optional[Callable] = None
@@ -291,7 +296,8 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
 
     def __getstate__(self):
         """
-        This contains special logic to serialize `lambda` functions when `dill` is available.
+        Serialize `lambda` functions when `dill` is available.
+
         If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
         `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
         """

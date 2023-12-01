@@ -151,6 +151,10 @@ def validate_op_between_ort_torch(
         for torch_output, function_output in zip(
             flattened_torch_outputs, flattened_function_outputs
         ):
+            if isinstance(
+                torch_output, torch.Tensor
+            ) and fx_type_utils.is_torch_complex_dtype(torch_output.dtype):
+                torch_output = torch.view_as_real(torch_output.resolve_conj())
             try:
                 if isinstance(function_output, onnxscript.tensor.Tensor):
                     function_output = function_output.value
@@ -229,8 +233,8 @@ def generate_random_tensors(shape: torch.Size, dtype: torch.dtype):
         )
     if fx_type_utils.is_torch_complex_dtype(dtype):
         # ONNX does not support complex values, but supports their real representation
-        return torch.randn(
-            (*shape, 2), dtype=fx_type_utils.from_complex_to_float(dtype)
+        return torch.view_as_complex(
+            torch.randn((*shape, 2), dtype=fx_type_utils.from_complex_to_float(dtype))
         )
     return torch.randn(shape, dtype=dtype)
 
@@ -359,10 +363,13 @@ def _convert_torch_args_to_onnxfunction_args(
 def _convert_tensor_to_numpy(input: fx_type_utils.Argument) -> Any:
     try:
         import numpy as np
-    except ImportError:
-        raise ImportError(f"{__name__} needs numpy, but it's not installed.")
+    except ImportError as exc:
+        raise ImportError(f"{__name__} needs numpy, but it's not installed.") from exc
 
     if isinstance(input, torch.Tensor):
+        if torch.is_complex(input):
+            # from complex to real representation
+            input = torch.view_as_real(input.resolve_conj())
         return input.detach().cpu().numpy()
     if isinstance(input, torch.dtype):
         return int(jit_type_utils.JitScalarType.from_dtype(input).onnx_type())  # type: ignore[union-attr]

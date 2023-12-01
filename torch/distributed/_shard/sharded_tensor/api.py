@@ -44,7 +44,7 @@ from .utils import (
     build_global_metadata
 )
 from torch.distributed.remote_device import _remote_device
-from torch.utils._pytree import tree_map
+from torch.utils import _pytree as pytree
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -436,6 +436,9 @@ class ShardedTensor(ShardedTensorBase):
 
             for shard in local_shards:
                 src = shard.tensor.flatten()
+                if src.nelement() == 0 :
+                    warnings.warn("Gathering a tensor with zero elements on rank " + str(rank))
+                    return
                 shard_offset = shard_placement[shard.metadata][1]
                 data[shard_offset: shard_offset + src.numel()].copy_(src)
 
@@ -1134,8 +1137,8 @@ class ShardedTensor(ShardedTensorBase):
             if st_instance is None and isinstance(e, ShardedTensor):
                 st_instance = e
 
-        tree_map(find_sharded_tensor, args)
-        tree_map(find_sharded_tensor, kwargs)
+        pytree.tree_map_(find_sharded_tensor, args)
+        pytree.tree_map_(find_sharded_tensor, kwargs)
 
         if st_instance is not None:
             return dispatch(st_instance, func)

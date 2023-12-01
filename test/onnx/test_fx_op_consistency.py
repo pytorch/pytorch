@@ -113,6 +113,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "gather",
         "hstack",  # aten::cat is invoked instead
         "index_put",
+        "linalg.vector_norm",
         "logit",
         "mean",
         "native_batch_norm",
@@ -142,12 +143,15 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.max_pool2d",
         "nn.functional.max_pool3d",
         "nn.functional.nll_loss",
+        "nn.functional.normalize",
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
         "nonzero",
+        "rsub",
         "scatter_add",
         "scatter_reduce",
         "square",
         "stft",
+        "sub",
         "sum",
         "unflatten",
         "var_mean",
@@ -371,6 +375,15 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "cumsum", dtypes=onnx_test_common.BOOL_TYPES + (torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_does_not_support("Cumsum", "bool, uint8, int8, int16")
     ),
+    # See https://github.com/pytorch/pytorch/issues/111454
+    xfail(
+        "cumsum", dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("RUNTIME_EXCEPTION : \
+            Exception during initialization: /onnxruntime_src/onnxruntime/core/framework/\
+            allocation_planner.cc:230 int& onnxruntime::PlannerImpl::\
+            UseCount(onnxruntime::OrtValueIndex) n >= 0 && static_cast<size_t>(n) \
+            < ort_value_info_.size() was false.")
+    ),
     xfail(
         "cross",
         reason=onnx_test_common.reason_onnx_script_does_not_support("linalg_cross"),
@@ -442,10 +455,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("Dropout"),
     ),
     xfail(
-        "nn.functional.embedding",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.embedding_renorm.default"),
-    ),
-    xfail(
         "nn.functional.max_pool2d",
         dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Max_pool2d"),
@@ -459,6 +468,13 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "nonzero",
         dtypes=(torch.int8, torch.int16),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("NonZero", "int8, int16"),
+    ),
+    xfail(
+        "rsub",
+        dtypes=(torch.uint8, torch.int8, torch.int16),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Mul", "uint8, int8, int16"
+        ),
     ),
     xfail(
         "scatter_add",
@@ -504,6 +520,13 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("aten._fft_r2c.default"),
     ),
     xfail(
+        "sub",
+        dtypes=(torch.uint8, torch.int8, torch.int16),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Mul", "uint8, int8, int16"
+        ),
+    ),
+    xfail(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Unflatten")
     ),
@@ -514,9 +537,9 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "addmm",  # xfail can't only use dtypes to catch all cases
         matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_script_does_not_support(
-            "Add", "int8, int16, uint8"
+        in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Gemm", "uint8, int8, int16, int32, int64"
         ),
     ),
     skip(
@@ -541,14 +564,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support(
             "https://github.com/pytorch/pytorch/issues/101150"
         ),
-    ),
-    xfail(
-        "native_batch_norm",
-        matcher=lambda sample: sample.args[4]
-        and (
-            isinstance(sample.args[0], torch.Tensor) and sample.args[0].shape == (1,)
-        ),  # Edge case with training=True and mean being 1d tensor of single element.
-        reason="AssertionError: The values for attribute 'shape' do not match: torch.Size([1]) != torch.Size([]).",
     ),
     xfail(
         "nn.functional.avg_pool1d",
@@ -749,11 +764,19 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     opset_version = -1
     op_level_debug: bool = False
     dynamic_shapes: bool = False
+    # TODO: Should onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM also be tested?
+    model_type: onnx_test_common.TorchModelType = (
+        onnx_test_common.TorchModelType.TORCH_NN_MODULE
+    )
 
     fp16_low_precision_list = [
+        "baddbmm",
         "nn.functional.batch_norm",
         "native_batch_norm",
         "dot",
+        "logit",
+        "rsub",
+        "sub",
     ]
 
     @common_device_type.ops(

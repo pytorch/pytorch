@@ -233,7 +233,7 @@ def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.
             (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
             (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device))]
 
-    loss_fn = torch.nn.MSELoss().cuda()
+    loss_fn = torch.nn.MSELoss().to(device)
 
     skip_iter = 2
 
