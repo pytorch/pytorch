@@ -189,6 +189,12 @@ def mps_ops_grad_modifier(ops):
         'msort': [torch.float16],
     }
 
+    ON_MPS_XFAILLIST = {
+        # Failures due to lack of implementation of downstream functions on MPS backend
+        # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
+        'linalg.matrix_rank': None,
+    }
+
     def addDecorator(op, d) -> None:
         op.decorators = list(op.decorators) if op.decorators is not None else []
         op.decorators.append(d)
@@ -204,6 +210,11 @@ def mps_ops_grad_modifier(ops):
             addDecorator(op, DecorateInfo(
                          unittest.skip,
                          dtypes=SKIPLIST_GRAD[key]))
+
+        if key in ON_MPS_XFAILLIST:
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=ON_MPS_XFAILLIST[key]))
 
         if key in MACOS_12_3_XFAILLIST_GRAD and (not torch.backends.mps.is_macos13_or_newer()):
             addDecorator(op, DecorateInfo(
@@ -792,9 +803,7 @@ def mps_ops_modifier(ops):
         'softmaxwith_dtype': None,
         'float_power': None,
         'full_like': None,
-        'linalg.matrix_rank': None,
         'linalg.matrix_rankhermitian': None,
-        'linalg.pinv': None,
         'linalg.pinvhermitian': None,
         'nonzero_static': None,
 
@@ -918,6 +927,12 @@ def mps_ops_modifier(ops):
         'logit': [torch.float16],
     }
 
+    ON_MPS_XFAILLIST = {
+        # Failures due to lack of implementation of downstream functions on MPS backend
+        # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
+        'linalg.matrix_rank': None,
+    }
+
     EMPTY_OPS_SKIPLIST = {
         # Fill tensors with uninitialized data, causing mismatch with CPU.
         # They occasionally match, thus skipping them.
@@ -954,7 +969,7 @@ def mps_ops_modifier(ops):
                          dtypes=EMPTY_OPS_SKIPLIST[key]))
         if key in SKIPLIST:
             addDecorator(op, DecorateInfo(unittest.skip("Skipped!"), dtypes=SKIPLIST[key]))
-        for xfaillist in [UNIMPLEMENTED_XFAILLIST, UNDEFINED_XFAILLIST]:
+        for xfaillist in [UNIMPLEMENTED_XFAILLIST, UNDEFINED_XFAILLIST, ON_MPS_XFAILLIST]:
             if key in xfaillist:
                 addDecorator(op, DecorateInfo(
                              unittest.expectedFailure,
@@ -8767,15 +8782,7 @@ class TestLinalgMPS(TestCaseMPS):
         shapes = (3, 13)
         batches = ((), (0, ), (4, ), (3, 5, ))
         for (shape0, shape1), batch in zip(itertools.product(shapes, reversed(shapes)), batches):
-            # TODO: remove this once the other function is implemented
-            try:
-                run_test(shape0, shape1, batch)
-            except NotImplementedError as e:
-                if "is not currently implemented for the MPS device." in str(e):
-                    # skip the test
-                    unittest.skip(str(e))
-                else:
-                    raise e
+            run_test(shape0, shape1, batch)
 
     def test_pinv(self, device="mps", dtype=torch.float32, precision=1e-5):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
@@ -8830,16 +8837,8 @@ class TestLinalgMPS(TestCaseMPS):
             A = random_hermitian_pd_matrix(sizes[-1], *sizes[:-2], dtype=dtype, device=device)
             hermitian = True
             # TODO: remove this once the other function is implemented
-            try:
-                run_test_main(A, hermitian)
-                run_test_numpy(A, hermitian)
-            except NotImplementedError as e:
-                if "is not currently implemented for the MPS device." in str(e):
-                    if 'pinv' not in str(e):
-                        # skip the test
-                        unittest.skip(str(e))
-                else:
-                    raise e
+            run_test_main(A, hermitian)
+            run_test_numpy(A, hermitian)
 
 
 
@@ -11387,6 +11386,10 @@ class TestConsistency(TestCaseMPS):
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
 
+        # # TODO: Remove once implemented required functions
+        # if op.name == 'linalg.matrix_rank':
+        #     unittest.skipTest("Required downstream function is not implemented")
+
         def get_samples():
             return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
         cpu_samples = get_samples()
@@ -11448,6 +11451,10 @@ class TestConsistency(TestCaseMPS):
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
+
+        # if op.name in ['linalg.matrix_rank', 'linalg.pinv']:
+        #     # TODO: Remove once implemented required functions
+        #     unittest.skipTest("Not implemented")
 
         def get_samples():
             return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
