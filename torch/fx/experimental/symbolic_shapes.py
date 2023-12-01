@@ -2826,7 +2826,8 @@ class ShapeEnv:
         issued = set()
 
         def issue_guard(guard: ShapeGuard) -> None:
-            expr = self.simplify(guard.expr)
+            # expr = self.simplify(guard.expr)
+            expr = guard.expr
 
             # Avoid re-issueing the same guard.
             if expr in issued:
@@ -2869,8 +2870,8 @@ class ShapeEnv:
 
         # First, issue all the non-trivial guards.
         for guard in self.guards:
-            if self._maybe_evaluate_static(guard.expr) is not None:
-                continue
+            # if self._maybe_evaluate_static(guard.expr) is not None:
+            #     continue
             issue_guard(guard)
 
         # Then, issue the guards that refine the value range of tracked symbols.
