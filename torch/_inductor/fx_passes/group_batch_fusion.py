@@ -5,6 +5,7 @@ from typing import Any, DefaultDict, Deque, Dict, Iterator, List, Optional, Set,
 
 import torch
 from torch._dynamo.utils import counters
+from torch._utils_internal import print_graph
 
 from .. import config
 from ..pattern_matcher import (
@@ -12,9 +13,6 @@ from ..pattern_matcher import (
     get_arg_value,
     stable_topological_sort,
 )
-
-if config.is_fbcode():
-    from torch._inductor.fb.utils import get_everpaste_url
 
 try:
     # importing this will register fbgemm lowerings for inductor
@@ -659,11 +657,6 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 log.info(
                     f"{rule.__class__.__name__}: key = {key}; subset size = {len(subset)}"  # noqa: G004
                 )
-
-
-def print_graph(graph: torch.fx.Graph, msg: str):
-    if config.is_fbcode():
-        log.info("%s Print graph: %s", msg, get_everpaste_url(str(graph)))  # noqa: F401
 
 
 def generate_fusion_from_config(config_options: Dict[str, Any], pre_grad=True):
