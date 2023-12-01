@@ -83,6 +83,10 @@ inline bool has_for_dense_inputs(sdp_params const& params) {
   return !params.query.is_nested() || !params.key.is_nested() || !params.value.is_nested();
 }
 
+inline bool has_only_dense_inputs(sdp_params const& params) {
+  return !params.query.is_nested() && !params.key.is_nested() && !params.value.is_nested();
+}
+
 template <typename dtype_vector>
 inline bool check_tensor_dtype(
     sdp_params const& params,
@@ -309,6 +313,7 @@ inline bool check_safe_kv_broadcast(at::Tensor const& param, bool debug) {
 inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the
   // size() calls won't error since the inputs are all 4 dimensional
+
   auto q_batch_size = params.query.sym_size(0);
   auto k_batch_size = params.key.sym_size(0);
   auto v_batch_size = params.value.sym_size(0);
@@ -327,11 +332,11 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
       TORCH_WARN(
           "For dense inputs, both fused kernels require query, key and value to have the same batch_size and num_heads. ",
           "Query.sizes(): ",
-          params.query.is_nested() ? "(Nested)" : c10::str(params.query.sizes()),
+          params.query.sizes(),
           ", Key sizes(): ",
-          params.key.is_nested() ? "(Nested)" : c10::str(params.key.sizes()),
+          params.key.sizes(),
           ", Value sizes(): ",
-          params.value.is_nested() ? "(Nested)" : c10::str(params.value.sizes()),
+          params.value.sizes(),
           " instead. To broadcast dense inputs, try using unsqueeze and expand_to before passing them into the kernel.");
     }
     return false;

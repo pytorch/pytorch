@@ -243,7 +243,9 @@ bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug)
   // FlashAttention 2 updated the default mask meaning for causal in this PR:
   // 9e5e8bc91e it is now aligned to lower_right which would be a BC break
   // for non-square masks. We will not support non-square masks for causal w/ FAV2
-  if (params.is_causal && params.query.sym_size(-2) != params.key.sym_size(-2)) {
+  if (params.is_causal &&
+      !params.query.is_nested() && !params.key.is_nested() &&
+      params.query.sym_size(-2) != params.key.sym_size(-2)) {
     if (debug) {
       TORCH_WARN(
           "Flash attention does not support the is_causal flag when seqlen_q != seqlen_k. ",
@@ -289,7 +291,7 @@ TORCH_API bool can_use_flash_attention(sdp_params const& params, bool debug) {
       }
     }
   }
-  if (has_for_dense_inputs(params)) {
+  if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
         check_batch_size_and_num_heads_dense,
         check_nonzero_sequence_lengths_dense,
@@ -339,20 +341,18 @@ TORCH_API bool can_use_mem_efficient_attention(sdp_params const& params, bool de
     constexpr auto nested_constraints = array_of<bool (*)(sdp_params const&, bool)>(
         check_requires_grad_and_nested,
         check_batch_size_nested,
-        check_for_seq_len_0_nested_tensor
-        );
+        check_for_seq_len_0_nested_tensor);
     for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
         return false;
       }
     }
   }
-  if (has_for_dense_inputs(params)) {
+  if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
         check_batch_size_and_num_heads_dense,
         check_nonzero_sequence_lengths_dense,
-        check_last_dim_stride_equals_1_dense
-        );
+        check_last_dim_stride_equals_1_dense);
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;
