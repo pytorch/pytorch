@@ -202,6 +202,7 @@ MOD_INLINELIST = {
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
     "torch._inductor.test_operators",
+    "torch.amp.autocast_mode",
     "torch.ao.nn",
     "torch.distributions",
     "torch.fx._pytree",

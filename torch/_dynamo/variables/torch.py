@@ -22,7 +22,7 @@ import torch.nn
 import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
 
-from .. import config, variables
+from .. import config, polyfill, variables
 from ..allowed_functions import torch_get_name
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
@@ -297,6 +297,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
+            )
+        elif self.value == math.radians and not (constant_args or unspec_python_args):
+            # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder()(tx, polyfill.radians), args, kwargs
             )
         elif self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
             assert len(args) == 1
