@@ -113,6 +113,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "gather",
         "hstack",  # aten::cat is invoked instead
         "index_put",
+        "linalg.vector_norm",
         "logit",
         "mean",
         "native_batch_norm",
@@ -145,11 +146,12 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.normalize",
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
         "nonzero",
-        "linalg.vector_norm",
+        "rsub",
         "scatter_add",
         "scatter_reduce",
         "square",
         "stft",
+        "sub",
         "sum",
         "unflatten",
         "var_mean",
@@ -246,11 +248,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "addmm", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Addmm")
     ),
-    xfail_torchlib_forward_compatibility(
-        "all",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.all.dims"),
-        github_issue="https://github.com/microsoft/onnxscript/pull/1084"
-    ),
     xfail(
         "allclose", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
@@ -263,11 +260,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "amin", dtypes=(torch.int16, *onnx_test_common.BOOL_TYPES),
         reason=onnx_test_common.reason_dynamo_does_not_support("ReduceMin", "bool, int16")
-    ),
-    xfail_torchlib_forward_compatibility(
-        "any",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.any.dims"),
-        github_issue="https://github.com/microsoft/onnxscript/pull/1084"
     ),
     xfail(
         "arange",
@@ -478,6 +470,13 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("NonZero", "int8, int16"),
     ),
     xfail(
+        "rsub",
+        dtypes=(torch.uint8, torch.int8, torch.int16),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Mul", "uint8, int8, int16"
+        ),
+    ),
+    xfail(
         "scatter_add",
         dtypes=(torch.float16,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=sum", "float16"),
@@ -519,6 +518,13 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "stft",
         reason=onnx_test_common.reason_dynamo_does_not_support("aten._fft_r2c.default"),
+    ),
+    xfail(
+        "sub",
+        dtypes=(torch.uint8, torch.int8, torch.int16),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Mul", "uint8, int8, int16"
+        ),
     ),
     xfail(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
@@ -758,12 +764,19 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     opset_version = -1
     op_level_debug: bool = False
     dynamic_shapes: bool = False
+    # TODO: Should onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM also be tested?
+    model_type: onnx_test_common.TorchModelType = (
+        onnx_test_common.TorchModelType.TORCH_NN_MODULE
+    )
 
     fp16_low_precision_list = [
+        "baddbmm",
         "nn.functional.batch_norm",
         "native_batch_norm",
         "dot",
         "logit",
+        "rsub",
+        "sub",
     ]
 
     @common_device_type.ops(
