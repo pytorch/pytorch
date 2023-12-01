@@ -156,6 +156,14 @@ class MemoryBoundedTests(TestCase):
         inp = (T(10),)
         self.assertNotZero(calculate_runtime(f, *inp))
 
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_dynamic(self):
+        def f(x):
+            return x.cos()
+
+        inp = (T(10),)
+        self.assertNotZero(calculate_runtime(f, *inp))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

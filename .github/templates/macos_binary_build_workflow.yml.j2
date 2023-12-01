@@ -61,6 +61,9 @@ jobs:
     runs-on: !{{ macos_runner }}
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, true) }}
+    {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
+    {%- endif %}
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}

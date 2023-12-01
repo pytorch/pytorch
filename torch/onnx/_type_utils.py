@@ -170,7 +170,9 @@ class JitScalarType(enum.IntEnum):
             SymbolicValueError: when value.type()'s info are empty and default is None
         """
 
-        if not isinstance(value, (torch._C.Value, torch.Tensor)):
+        if not isinstance(value, (torch._C.Value, torch.Tensor)) or (
+            isinstance(value, torch._C.Value) and value.node().mustBeNone()
+        ):
             # default value of type JitScalarType is returned when value is not valid
             if default is None:
                 raise errors.OnnxExporterError(

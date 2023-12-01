@@ -81,7 +81,7 @@ static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t 
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, self.scalar_type(), "cumsum_out_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, self.scalar_type(), "cumsum_out_cpu", [&] {
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
@@ -100,7 +100,7 @@ static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, self.scalar_type(), "cumprod_out_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, self.scalar_type(), "cumprod_out_cpu", [&] {
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
@@ -119,7 +119,7 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, self.scalar_type(), "logcumsumexp_out_cpu", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "logcumsumexp_out_cpu", [&] {
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
@@ -176,7 +176,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
         // NOLINTNEXTLINE(bugprone-argument-comment)
         /*identity=*/1);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "prod_out_cpu", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "prod_out_cpu", [&] {
       binary_kernel_reduce_vec(
           iter,
           [=](scalar_t a, scalar_t b)

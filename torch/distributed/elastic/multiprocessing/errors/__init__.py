@@ -81,8 +81,8 @@ T = TypeVar("T")
 @dataclass
 class ProcessFailure:
     """
-    Represents the failed process result. When the worker process fails,
-    it may record failure root cause into the file.
+    Represent the failed process result. When the worker process fails, it may record failure root cause into the file.
+
     Tries to read the failure timestamp from the provided ``error_file``,
     if the ``error_file`` does not exist, the timestamp is the current
     timestamp (seconds since epoch).
@@ -150,14 +150,17 @@ class ProcessFailure:
 
     def signal_name(self) -> str:
         if self.exitcode < 0:
-            return signal.Signals(-self.exitcode).name
+            # We don't want to kill the parent process trying to find the signal name.
+            # if the signal doesn't map to a known name, use not available.
+            try:
+                return signal.Signals(-self.exitcode).name
+            except Exception:
+                return _NOT_AVAILABLE
         else:
             return _NOT_AVAILABLE
 
     def timestamp_isoformat(self):
-        """
-        Returns timestamp in ISO format (YYYY-MM-DD_HH:MM:SS)
-        """
+        """Return timestamp in ISO format (YYYY-MM-DD_HH:MM:SS)."""
         return datetime.fromtimestamp(self.timestamp).isoformat(sep="_")
 
 
@@ -200,7 +203,6 @@ class ChildFailedError(Exception):
               support both function and binary launches.
 
     Example:
-
     ::
 
      # process tree on a host (container)
@@ -333,7 +335,6 @@ def record(
         main()
 
     """
-
     if not error_handler:
         error_handler = get_error_handler()
 

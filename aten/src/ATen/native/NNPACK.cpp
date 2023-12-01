@@ -121,7 +121,11 @@ struct Workspace {
     constexpr size_t nnpack_memory_alignment_boundary = 64;
 
     // Won't work on Windows, but NNPACK doesn't support Windows either
-    posix_memalign(&buffer, nnpack_memory_alignment_boundary, size);
+    auto res = posix_memalign(&buffer, nnpack_memory_alignment_boundary, size);
+    if (res != 0) {
+      TORCH_CHECK(false, "posix_memalign failed:", strerror(errno), " (", errno, ")");
+    }
+    return;
   }
 
   ~Workspace() {

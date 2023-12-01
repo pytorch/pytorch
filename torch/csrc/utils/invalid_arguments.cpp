@@ -17,6 +17,11 @@ std::string py_typename(PyObject* object) {
 }
 
 struct Type {
+  Type() = default;
+  Type(const Type&) = default;
+  Type& operator=(const Type&) = default;
+  Type(Type&&) noexcept = default;
+  Type& operator=(Type&&) noexcept = default;
   virtual bool is_matching(PyObject* object) = 0;
   virtual ~Type() = default;
 };

@@ -117,7 +117,7 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
                 re.search("({.+})", captured.output[0]).group(0).replace("'", '"')
             )
 
-            self.assertEqual(len(error_msg_dict), 9)
+            self.assertEqual(len(error_msg_dict), 10)
 
             self.assertIn("pg_name", error_msg_dict.keys())
             self.assertEqual("None", error_msg_dict["pg_name"])
@@ -129,6 +129,12 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
 
             self.assertIn("backend", error_msg_dict.keys())
             self.assertEqual("nccl", error_msg_dict["backend"])
+
+            self.assertIn("nccl_version", error_msg_dict.keys())
+            nccl_ver = torch.cuda.nccl.version()
+            self.assertEqual(
+                ".".join(str(v) for v in nccl_ver), error_msg_dict["nccl_version"]
+            )
 
             # In this test case, group_size = world_size, since we don't have multiple processes on one node.
             self.assertIn("group_size", error_msg_dict.keys())
@@ -155,7 +161,7 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
             msg_dict = json.loads(
                 re.search("({.+})", captured.output[0]).group(0).replace("'", '"')
             )
-            self.assertEqual(len(msg_dict), 9)
+            self.assertEqual(len(msg_dict), 10)
 
             self.assertIn("pg_name", msg_dict.keys())
             self.assertEqual("None", msg_dict["pg_name"])
@@ -167,6 +173,12 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
 
             self.assertIn("backend", msg_dict.keys())
             self.assertEqual("nccl", msg_dict["backend"])
+
+            self.assertIn("nccl_version", msg_dict.keys())
+            nccl_ver = torch.cuda.nccl.version()
+            self.assertEqual(
+                ".".join(str(v) for v in nccl_ver), msg_dict["nccl_version"]
+            )
 
             # In this test case, group_size = world_size, since we don't have multiple processes on one node.
             self.assertIn("group_size", msg_dict.keys())

@@ -346,7 +346,7 @@ inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
     SmoothL1LossFuncOptions::reduction_t reduction,
-    double beta = 1.) {
+    c10::optional<double> beta_opt = c10::nullopt) {
   if (target.sizes() != input.sizes()) {
     TORCH_WARN(
         "Using a target size (",
@@ -357,6 +357,7 @@ inline Tensor smooth_l1_loss(
         "This will likely lead to incorrect results due to broadcasting. ",
         "Please ensure they have the same size.");
   }
+  double beta = beta_opt.value_or(1.0);
 
   std::vector<Tensor> expanded_tensors =
       torch::broadcast_tensors({input, target});
@@ -384,8 +385,29 @@ inline Tensor smooth_l1_loss(
 inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
-    const SmoothL1LossFuncOptions& options = {},
-    double beta = 1.) {
+    const SmoothL1LossFuncOptions& options = {}) {
+  return detail::smooth_l1_loss(
+      input, target, options.reduction(), options.beta());
+}
+
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.smooth_l1_loss
+/// about the exact behavior of this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::smooth_l1_loss(input, target, /*options=*/torch::kNone, /*beta=*/0.5);
+/// ```
+inline Tensor smooth_l1_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const SmoothL1LossFuncOptions& options,
+    double beta) {
+  TORCH_CHECK(
+      options.beta() == c10::nullopt,
+      "expected beta not to be provided in 'options', but got ",
+      options.beta().value());
   return detail::smooth_l1_loss(input, target, options.reduction(), beta);
 }
 

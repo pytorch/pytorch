@@ -721,6 +721,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           const c10::optional<at::Tensor>& scale_a,
           const c10::optional<at::Tensor>& scale_b,
           const c10::optional<at::Tensor>& scale_result,
+          bool use_fast_accum,
           Tensor& out, Tensor& amax) {
   // Check sizes
   auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -752,7 +753,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
   TORCH_CHECK(amax.scalar_type() == kFloat, "amax must be a float scalar");
   TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
-  TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat1.scalar_type());
+  TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat2.scalar_type());
   // Type restrictions imposed by CuBLASLt as of CUDA-12.1
   TORCH_CHECK(mat1.scalar_type() != ScalarType::Float8_e5m2 || mat2.scalar_type() != ScalarType::Float8_e5m2,
         "Multiplication of two Float8_e5m2 matrices is not supported");
@@ -806,7 +807,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       scale_result ? scale_result->data_ptr() : nullptr,
       args.result_ld,
       out_dtype_,
-      amax.data_ptr());
+      amax.data_ptr(),
+      use_fast_accum);
 #else
   TORCH_CHECK(false, "_scaled_mm_out_cuda is not compiled for this platform.");
 #endif
@@ -820,11 +822,12 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
           c10::optional<c10::ScalarType> out_dtype,
           const c10::optional<at::Tensor>& scale_a,
           const c10::optional<at::Tensor>& scale_b,
-          const c10::optional<at::Tensor>& scale_result) {
+          const c10::optional<at::Tensor>& scale_result,
+          bool use_fast_accum) {
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
   Tensor amax = at::empty({0}, mat_a.options().dtype(ScalarType::Float));
-  return _scaled_mm_out_cuda(mat_a, mat_b, bias, out_dtype, scale_a, scale_b, scale_result, out ,amax);
+  return _scaled_mm_out_cuda(mat_a, mat_b, bias, out_dtype, scale_a, scale_b, scale_result, use_fast_accum, out, amax);
 }
 
 } // namespace at::native
