@@ -1162,8 +1162,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         actual = compiled(x, number_doubled)
         expected = eager(x, number_doubled)
 
-        print(actual, expected)
-
         assert counter.frame_count == 1
         self.assertEqual(actual, expected)
 
