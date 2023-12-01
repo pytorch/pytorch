@@ -10055,7 +10055,7 @@ class DistributedTest:
             model = TwoLinLayerNet().cuda()
             ddp_model = torch.nn.parallel.DistributedDataParallel(model, device_mesh=device_mesh)
             self.assertEqual(ddp_model.device_mesh, device_mesh)
-            self.assertEqual(ddp_model.device_mesh.get_dim_groups(mesh_dim=0), pg)
+            self.assertEqual(ddp_model.device_mesh.get_group(mesh_dim=0), pg)
 
             with self.assertRaisesRegex(
                 RuntimeError, "Cannot specify both process_group and device_mesh arguments."

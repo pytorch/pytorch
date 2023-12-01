@@ -1276,7 +1276,8 @@ class BuiltinVariable(VariableTracker):
                     # This handles options prop, guards and ends with a clone
                     # Step 4 - replace all reference to the current object with the new one
                     return tx.replace_all(obj, out)
-
+            
+            tx.output.side_effects.store_attr(obj, name, val)
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
