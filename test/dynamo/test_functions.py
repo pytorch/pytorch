@@ -812,6 +812,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return max(a, b) - min(a, b) + c
 
     @make_test
+    def test_symbool_to_int(x):
+        # this is roughly the pattern found in einops.unpack()
+        if sum(s == -1 for s in x.size()) == 0:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_map_sum(a, b, c, d):
         return sum(map(lambda x: x + 1, [a, b, c, d]))
 

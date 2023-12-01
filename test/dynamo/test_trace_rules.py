@@ -67,7 +67,11 @@ ignored_ctx_manager_class_names = {
 }
 
 ignored_c_binding_in_graph_function_names = {
-    "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode"
+    # Ignored because they have manual rules defined at `trace_rules.manual_torch_name_rule_map`.
+    "torch._nested_tensor_from_mask",
+    "torch._nested_from_padded",
+    # Ignored and go through rules defined at `skipfiles.check`.
+    "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
 }
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {
