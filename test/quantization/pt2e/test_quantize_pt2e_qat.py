@@ -160,9 +160,7 @@ class PT2EQATTestCase(QuantizationTestCase):
 
         if verify_convert:
             torch.ao.quantization.move_exported_model_to_eval(model_pt2e)
-            # print("model_pt2e is: {}".format(model_pt2e), flush=True)
             model_pt2e = convert_pt2e(model_pt2e)
-            # torch.ao.quantization.move_exported_model_to_eval(model_pt2e)
             quant_result_pt2e = model_pt2e(*example_inputs)
             model_fx.eval()
             model_fx = _convert_to_reference_decomposed_fx(
