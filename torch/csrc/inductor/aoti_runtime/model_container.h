@@ -131,7 +131,7 @@ class AOTInductorModelContainer {
           internal_constants_ptr,
           user_constant_ptr,
           constant_size,
-          cudaMemcpyDeviceToDevice));
+          cudaMemcpyDefault));
 
       // Generate Tensor from container handled blob.
       // We extract stride and offset from provided Tensor since we do not

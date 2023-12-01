@@ -111,22 +111,33 @@ void test_aoti_double_buffering(const std::string& device) {
   } else {
     testing::AssertionFailure() << "unsupported device: " << device;
   }
+  // By default, buffer #1 get loaded with burned in weights. Correct results.
   auto actual_output_tensors = runner->run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
+  // We update the weights to buffer #2 and activate it. This should still produce
+  // correct result, as it's the real constant map.
   runner->update_inactive_constant_buffer(real_map);
   runner->swap_constant_buffer();
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
+  // We update random weights to buffer #1. But do not swap in the weight yet.
   runner->update_inactive_constant_buffer(rand_map);
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
+  // We swap and activate the weight to buffer #1. This is random weight and
+  // should produce in correct results.
   runner->swap_constant_buffer();
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_FALSE(
       torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+
+  // Swap back to buffer #2 which is the real constants.
+  runner->swap_constant_buffer();
+  actual_output_tensors = runner->run(input_tensors);
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
 } // namespace
@@ -134,7 +145,6 @@ void test_aoti_double_buffering(const std::string& device) {
 namespace torch {
 namespace inductor {
 
-/*
 TEST(AotInductorTest, BasicTestCpu) {
   test_aoti("cpu");
 }
@@ -142,10 +152,8 @@ TEST(AotInductorTest, BasicTestCpu) {
 TEST(AotInductorTest, BasicScriptTestCpu) {
   test_aoti_script("cpu");
 }
-*/
 
 #ifdef USE_CUDA
-/*
 TEST(AotInductorTest, BasicTestCuda) {
   test_aoti("cuda");
 }
@@ -153,7 +161,6 @@ TEST(AotInductorTest, BasicTestCuda) {
 TEST(AotInductorTest, BasicScriptTestCuda) {
   test_aoti_script("cuda");
 }
-*/
 
 TEST(AotInductorTest, UpdateConstantsCuda) {
   test_aoti_double_buffering("cuda");

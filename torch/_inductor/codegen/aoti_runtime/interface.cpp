@@ -110,8 +110,10 @@ AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
   auto* container =
       reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
           container_handle);
-      auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
-      container->update_inactive_constant_buffer(*input_map);
+  auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    container->update_inactive_constant_buffer(*input_map);
+  })
 }
 
 AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
@@ -120,7 +122,7 @@ AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
       reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
           container_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
-      container->swap_constant_buffer();
+    container->swap_constant_buffer();
   })
 }
 
