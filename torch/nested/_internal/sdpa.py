@@ -299,7 +299,7 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
                 params
             ):
                 return SDPBackend.EFFICIENT_ATTENTION
-        if backend == SDPBackend.EFFICIENT_ATTENTION:
+        if backend == SDPBackend.MATH:
             if math_sdp_enabled() and _can_use_math_sdpa_jagged(params):
                 return SDPBackend.MATH
 
@@ -327,14 +327,16 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, in
         cumulative_seqlen = qkv.offsets().to(dtype=torch.int32, device=qkv.device)
         # TODO: Explore performance impact when compiling
         max_seqlen = torch.max(qkv.offsets().diff()).item()
+        n_elem = qkv.values().shape[0]
     else:
         cumulative_seqlen = (
             qkv.lengths().cumsum(0).to(dtype=torch.int32, device=qkv.device)
         )
         batch_size = qkv.size(0)
         max_seqlen = qkv.values().size(0) // batch_size
+        n_elem = int(cumulative_seqlen[-1].item())
     # TODO: Explore performance impact when compiling
-    return cumulative_seqlen, int(max_seqlen), int(cumulative_seqlen[-1].item())
+    return cumulative_seqlen, int(max_seqlen), n_elem
 
 
 def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor):
@@ -706,11 +708,11 @@ def jagged_scaled_dot_product_attention(
             dropout_p,
             int(is_causal),
             compute_logsumexp,
-            scale,
+            scale=scale,
         )
 
         # Reshape output to convert nnz to batch_size and seq_len
-        return NestedTensor(attention, **output_nt_info).transpose(1, 2)
+        return NestedTensor(attention.squeeze(0), **output_nt_info).transpose(1, 2)
     elif backend_choice == SDPBackend.MATH:
         return torch._scaled_dot_product_attention_math(
             query, key, value, attn_mask, dropout_p, is_causal, scale=scale

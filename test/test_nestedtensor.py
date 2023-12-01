@@ -8,6 +8,7 @@ from functools import partial
 import numpy as np
 import torch
 import torch.nn
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -3386,17 +3387,27 @@ class TestNestedTensorSubclass(NestedTestCase):
         self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
 
-    def test_sdpa(self, device):
+    # CPU Fused kernels do not support nested, Math is missing ops to work with NT jagged
+    @onlyCUDA
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
+                 SM80OrLater else [torch.float16, torch.float32])
+    def test_sdpa(self, device, dtype):
         batch_size = 1
         emb_dims = 1024
         n_heads = 8
         head_dims = emb_dims // n_heads
-        sen1 = torch.randn(11, emb_dims, dtype=torch.float16, device=device)
-        sen2 = torch.randn(13, emb_dims, dtype=torch.float16, device=device)
 
-        query = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=torch.float16)
-        key = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=torch.float16)
-        value = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=torch.float16)
+        # Unless running on newer GPUs, only mem-effn or math are available, and mem-effn
+        # will fail with gradients and math has ops that aren't implemented. Therefore, in
+        # order to get some kernel to work with most GPUs, we have to disable gradients in
+        # this more general test
+        torch.set_grad_enabled(False)
+        sen1 = torch.randn(11, emb_dims, dtype=dtype, device=device)
+        sen2 = torch.randn(13, emb_dims, dtype=dtype, device=device)
+
+        query = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
+        key = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
+        value = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
 
         # Simplest case: 1 sentence, no batching
         x_d1 = sen1.unsqueeze(0)
@@ -3433,6 +3444,7 @@ class TestNestedTensorSubclass(NestedTestCase):
         attn_nts = attn_nt.unbind()
         self.assertEqual(attn_d1, attn_nts[0].unsqueeze(0))
         self.assertEqual(attn_d2, attn_nts[1].unsqueeze(0))
+        torch.set_grad_enabled(True)
 
 
 

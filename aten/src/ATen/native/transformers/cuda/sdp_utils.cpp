@@ -416,7 +416,7 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
   sdp::can_use_mem_efficient_attention(kernel_params, print_debug);
   TORCH_WARN("Flash attention kernel not used because:");
   sdp::can_use_flash_attention(kernel_params, print_debug);
-  TORCH_CHECK(!print_debug, "No available kernel.  Aborting execution.")
+  TORCH_CHECK(!print_debug, "No available kernel. Aborting execution.")
   return SDPBackend::error;
 }
 

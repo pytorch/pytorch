@@ -231,10 +231,10 @@ inline bool check_for_seq_len_0_nested_tensor(sdp_params const& params, bool deb
 
 inline bool check_nested_tensor(sdp_params const& params, bool debug) {
   // Return false if have nested tensor
-  if (has_for_nested_inputs(params)) {
+  if (!has_for_dense_inputs(params)) {
     if (debug) {
       TORCH_WARN(
-          "Both fused kernels of cpp version currently do support Nested Tensor inputs.");
+          "Both fused kernels of cpp version currently do not support Nested Tensor inputs.");
     }
     return false;
   }
@@ -327,11 +327,11 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
       TORCH_WARN(
           "For dense inputs, both fused kernels require query, key and value to have the same batch_size and num_heads. ",
           "Query.sizes(): ",
-          params.query.sizes(),
+          params.query.is_nested() ? "(Nested)" : c10::str(params.query.sizes()),
           ", Key sizes(): ",
-          params.key.sizes(),
+          params.key.is_nested() ? "(Nested)" : c10::str(params.key.sizes()),
           ", Value sizes(): ",
-          params.value.sizes(),
+          params.value.is_nested() ? "(Nested)" : c10::str(params.value.sizes()),
           " instead. To broadcast dense inputs, try using unsqueeze and expand_to before passing them into the kernel.");
     }
     return false;
