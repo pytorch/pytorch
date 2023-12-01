@@ -106,8 +106,6 @@ def save(
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
-    torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
-
     dumpable_state_dict = {}
     for key, elem in state_dict.items():
         dumpable_state_dict[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
