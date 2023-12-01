@@ -12,6 +12,7 @@ from unittest.mock import patch
 import weakref
 from dataclasses import dataclass, field
 from typing import List, Optional
+import pkg_resources
 
 import expecttest
 import subprocess
@@ -78,7 +79,6 @@ except ImportError:
 import pickle
 
 from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
-
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
 @unittest.skipIf(TEST_WITH_ASAN, "Cannot test with ASAN")
@@ -2754,9 +2754,7 @@ class TestExperimentalUtils(TestCase):
     @staticmethod
     def load_mock_profile():
         accept = expecttest.ACCEPT
-        json_file_path = os.path.join(
-            os.path.dirname(os.path.realpath(__file__)),
-            "profiler_utils_mock_events.json")
+        json_file_path = pkg_resources.resource_filename(__name__, "profiler_utils_mock_events.json")
         if accept and torch.cuda.is_available():
 
             def garbage_code(x):
