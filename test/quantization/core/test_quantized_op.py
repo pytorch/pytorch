@@ -4165,7 +4165,7 @@ class TestQuantizedLinear(TestCase):
                                         use_bias, post_op, use_multi_dim_input,
                                         use_channelwise)
 
-    def _test_qlinear_pt2e_helper(self, post_op_to_qlinear_ref_dict, supported_post_ops, post_op_algorithm):
+    def _test_qlinear_pt2e_helper(self, post_op_to_qlinear_ref_dict, supported_post_ops, post_op_algorithms):
         qlinear_prepack = torch.ops.onednn.qlinear_prepack
         qlinear = torch.ops.onednn.qlinear_pointwise
         qlinear_prepack_ref = torch.ops.quantized.linear_prepack
@@ -4181,7 +4181,7 @@ class TestQuantizedLinear(TestCase):
         post_op_args = []
         cases = itertools.product(
             in_channels_list, out_channels_list, use_bias_list,
-            supported_post_ops, weight_quant_per_channel_list, output_dtype_list, post_op_algorithm)
+            supported_post_ops, weight_quant_per_channel_list, output_dtype_list, post_op_algorithms)
         with override_quantized_engine('onednn'):
             for ic, oc, use_bias, post_op, weight_quant_per_channel, output_dtype, post_op_algo in cases:
                 used_y_scale = y_scale
@@ -4247,15 +4247,15 @@ class TestQuantizedLinear(TestCase):
             'relu': torch.ops.quantized.linear_relu,
         }
         supported_post_ops = ['none', 'relu']
-        post_op_algorithm = ''
-        self._test_qlinear_pt2e_helper(post_op_to_qlinear_ref_dict, supported_post_ops, post_op_algorithm)
+        post_op_algorithms = []
+        self._test_qlinear_pt2e_helper(post_op_to_qlinear_ref_dict, supported_post_ops, post_op_algorithms)
 
     @skipIfNoONEDNN
     def test_qlinear_gelu_pt2e(self):
         post_op_to_qlinear_ref_dict = {}
         supported_post_ops = ['gelu']
-        post_op_algorithm = ['none', 'tanh']
-        self._test_qlinear_pt2e_helper(post_op_to_qlinear_ref_dict, supported_post_ops, post_op_algorithm)
+        post_op_algorithms = ['none', 'tanh']
+        self._test_qlinear_pt2e_helper(post_op_to_qlinear_ref_dict, supported_post_ops, post_op_algorithms)
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
 class TestQuantizedEmbeddingOps(TestCase):
