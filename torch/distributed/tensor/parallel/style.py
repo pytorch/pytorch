@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from abc import ABC, abstractmethod
 from typing import Optional, Union, Tuple
+from functools import partial
 
 import torch.nn as nn
 from torch.distributed._tensor import DeviceMesh, DTensor, Placement, Replicate, Shard, distribute_tensor, distribute_module
@@ -77,19 +78,18 @@ class ColwiseParallel(ParallelStyle):
         self.desired_input_layouts = (Replicate(), )
         self.use_local_output = use_local_output
 
-    def _prepare_input_fn(self, inputs, device_mesh):
+    @staticmethod
+    def _prepare_input_fn(input_layouts, desired_input_layouts, inputs, device_mesh):
+        # TODO: figure out dynamo support for instance method and switch this to instance method
+
         # annotate module input placements/sharding with input_layouts
         input_tensor = inputs[0]
         if not isinstance(input_tensor, DTensor):
-            input_tensor = DTensor.from_local(input_tensor, device_mesh, self.input_layouts, run_check=False)
-        else:
-            assert input_tensor.placements == self.input_layouts, \
-                "The input_layouts must match the placements of the input DTensor."
+            input_tensor = DTensor.from_local(input_tensor, device_mesh, input_layouts, run_check=False)
 
         # transform the input layouts to the desired layouts of ColwiseParallel
-        desired_sharding = (Replicate(), )
-        if self.input_layouts != desired_sharding:
-            input_tensor = input_tensor.redistribute(placements=self.desired_input_layouts)
+        if input_layouts != desired_input_layouts:
+            input_tensor = input_tensor.redistribute(placements=desired_input_layouts)
         return input_tensor
 
     def _partition_fn(self, name, module, device_mesh):
@@ -115,20 +115,20 @@ class ColwiseParallel(ParallelStyle):
                 f"and nn.Embedding for now, but found {type(module)}!"
             )
 
-    def _prepare_output_fn(self, outputs, device_mesh):
+    @staticmethod
+    def _prepare_output_fn(output_layouts, use_local_output, outputs, device_mesh):
         # outputs is a shard on last dimension DTensor, i.e. Shard(-1)
-        if outputs.placements != self.output_layouts:
-            outputs = outputs.redistribute(placements=self.output_layouts)
+        outputs = outputs.redistribute(placements=output_layouts)
         # back to local tensor
-        return outputs.to_local() if self.use_local_output else outputs
+        return outputs.to_local() if use_local_output else outputs
 
     def apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         return distribute_module(
             module,
             device_mesh,
             self._partition_fn,
-            self._prepare_input_fn,
-            self._prepare_output_fn
+            partial(self._prepare_input_fn, self.input_layouts, self.desired_input_layouts),
+            partial(self._prepare_output_fn, self.output_layouts, self.use_local_output),
         )
 
 
@@ -181,16 +181,14 @@ class RowwiseParallel(ParallelStyle):
         self.desired_input_layouts = (Shard(-1), )
         self.use_local_output = use_local_output
 
-    def _prepare_input_fn(self, inputs, device_mesh):
+    @staticmethod
+    def _prepare_input_fn(input_layouts, desired_input_layouts, inputs, device_mesh):
         input_tensor = inputs[0]
         if not isinstance(input_tensor, DTensor):
-            input_tensor = DTensor.from_local(input_tensor, device_mesh, self.input_layouts, run_check=False)
-        else:
-            assert input_tensor.placements == self.input_layouts, \
-                "The input_layouts must match the placements of the input DTensor."
+            input_tensor = DTensor.from_local(input_tensor, device_mesh, input_layouts, run_check=False)
 
-        if self.input_layouts != self.desired_input_layouts:
-            input_tensor = input_tensor.redistribute(placements=self.desired_input_layouts)
+        if input_layouts != desired_input_layouts:
+            input_tensor = input_tensor.redistribute(placements=desired_input_layouts)
         return input_tensor
 
     def _partition_fn(self, name, module, device_mesh):
@@ -206,19 +204,19 @@ class RowwiseParallel(ParallelStyle):
                 distribute_tensor(module.bias, device_mesh, [Replicate()])
             ))
 
-    def _prepare_output_fn(self, outputs, device_mesh):
-        if outputs.placements != self.output_layouts:
-            outputs = outputs.redistribute(placements=self.output_layouts)
+    @staticmethod
+    def _prepare_output_fn(output_layouts, use_local_output, outputs, device_mesh):
+        outputs = outputs.redistribute(placements=output_layouts)
         # back to local tensor if use_local_output is True
-        return outputs.to_local() if self.use_local_output else outputs
+        return outputs.to_local() if use_local_output else outputs
 
     def apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         return distribute_module(
             module,
             device_mesh,
             self._partition_fn,
-            self._prepare_input_fn,
-            self._prepare_output_fn
+            partial(self._prepare_input_fn, self.input_layouts, self.desired_input_layouts),
+            partial(self._prepare_output_fn, self.output_layouts, self.use_local_output),
         )
 
 
