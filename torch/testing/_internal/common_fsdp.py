@@ -34,6 +34,30 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
 
 
+# usage
+# if dist.get_rank() == 0:
+#    ForkedPdb().set_trace()
+# dist.barrier()
+
+import pdb
+import sys
+
+
+class ForkedPdb(pdb.Pdb):
+    """
+    PDB Subclass for debugging multi-processed code
+    Suggested in: https://stackoverflow.com/questions/4716533/how-to-attach-debugger-to-a-python-subproccess
+    """
+
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open("/dev/stdin")
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
+
+
 class FSDPInitMode(Enum):
     # No FSDP wrapping
     NO_FSDP = auto()
@@ -946,15 +970,20 @@ class FSDPTest(MultiProcessTestCase):
         enable_sharded_grad_scaler: bool = False,
         use_pure_fp16: bool = False,
         sharded_grad_scaler_kwargs: Optional[Dict[str, Any]] = None,
+        enable_amp_grad_scaler: bool = False,
+        override_grad_with_inf: bool = False,
     ):
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
         model_device = next(model.parameters()).device
         if sharded_grad_scaler_kwargs is None:
             sharded_grad_scaler_kwargs = {}
-        sharded_grad_scaler = ShardedGradScaler(
-            enabled=enable_sharded_grad_scaler, **sharded_grad_scaler_kwargs
-        )
+        if enable_sharded_grad_scaler:
+            grad_scaler = ShardedGradScaler(
+                enabled=enable_sharded_grad_scaler, **sharded_grad_scaler_kwargs
+            )
+        elif enable_amp_grad_scaler:
+            grad_scaler = torch.cuda.amp.GradScaler(enabled=enable_amp_grad_scaler, **sharded_grad_scaler_kwargs)
         # use SGD with momentum instead of Adam, since Adam is scale invariant
         # and this makes it bad for tests
         optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
@@ -983,7 +1012,7 @@ class FSDPTest(MultiProcessTestCase):
                         self.assertEqual(p.device, torch.device("cpu"))
 
                 loss = model.module.get_loss(input, output).to(model_device)
-            loss = sharded_grad_scaler.scale(loss)
+            loss = grad_scaler.scale(loss)
 
             if not mixed_precision and not use_pure_fp16:
                 assert (
@@ -1004,10 +1033,23 @@ class FSDPTest(MultiProcessTestCase):
                 for p in model.parameters():
                     # Params should always be on CPU
                     self.assertEqual(p.device, torch.device("cpu"))
+            if override_grad_with_inf:
+                if torch.distributed.get_rank() == 0:
+                    ForkedPdb().set_trace()
+                torch.distributed.barrier()
+
+                for param in model.parameters():
+                    # for sharded_grad_scaler
+                    # test whether other ranks find this inf
+                    # after collectives
+                    if param.grad is None:
+                        continue
+                    if enable_amp_grad_scaler or (enable_sharded_grad_scaler and self.rank == 0):
+                        param.grad.data.fill_(float("inf"))
             # Unscale the gradients and step
-            sharded_grad_scaler.step(optim)
+            grad_scaler.step(optim)
             # Update the scale factor
-            sharded_grad_scaler.update()
+            grad_scaler.update()
             # if save_model, simulate save + load.
             if save_model:
                 state_dict = {k: v.clone() for k, v in model.state_dict().items()}
@@ -1038,6 +1080,7 @@ class FSDPTest(MultiProcessTestCase):
         use_pure_fp16: bool = False,
         init_kwargs: Optional[Dict[str, Any]] = None,
         sharded_grad_scaler_kwargs: Optional[Dict[str, Any]] = None,
+        override_grad_with_inf: bool = False,
         **fsdp_kwargs,
     ):
         """
@@ -1082,9 +1125,11 @@ class FSDPTest(MultiProcessTestCase):
             lr=lr,
             fsdp_cpu_offload=cpu_offload,
             mixed_precision=mixed_precision,
-            enable_sharded_grad_scaler=enable_sharded_grad_scaler,
+            enable_sharded_grad_scaler=False,
             use_pure_fp16=use_pure_fp16,
             sharded_grad_scaler_kwargs=sharded_grad_scaler_kwargs,
+            enable_amp_grad_scaler=enable_sharded_grad_scaler,
+            override_grad_with_inf=override_grad_with_inf,
         )
         ddp_params = list(ref_model.parameters())
         # Check against FSDP behavior
@@ -1154,6 +1199,8 @@ class FSDPTest(MultiProcessTestCase):
                 enable_sharded_grad_scaler=enable_sharded_grad_scaler,
                 use_pure_fp16=use_pure_fp16,
                 sharded_grad_scaler_kwargs=sharded_grad_scaler_kwargs,
+                enable_amp_grad_scaler=False,
+                override_grad_with_inf=override_grad_with_inf,
             )
         # No need to check for parameter and loss parity if expecting an error
         if expects_device_error:
