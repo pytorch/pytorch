@@ -124,7 +124,7 @@ def _init_process_group_state(
     else:
         if device_mesh:
             state._device_mesh = device_mesh
-            state.process_group = device_mesh.get_dim_groups(mesh_dim=0)
+            state.process_group = device_mesh.get_group(mesh_dim=0)
         else:
             state.process_group = (
                 process_group if process_group is not None else _get_default_group()
@@ -157,12 +157,12 @@ def _init_process_group_state_for_hybrid_shard(
             state._device_mesh = device_mesh
             # We currently only allow _inter_node_pg to be the outermost dimension, and the
             # process_group(intra_node) to be the innermost dimension.
-            state._inter_node_pg = device_mesh.get_dim_groups(mesh_dim=0)
-            state.process_group = device_mesh.get_dim_groups(mesh_dim=1)
+            state._inter_node_pg = device_mesh.get_group(mesh_dim=0)
+            state.process_group = device_mesh.get_group(mesh_dim=1)
         else:
             raise ValueError(
                 "Expected device_mesh to have ndim=2 "
-                f"but got {len(device_mesh.get_dim_groups())}"
+                f"but got {len(device_mesh.get_group())}"
             )
     elif process_group is None:
         default_group = _get_default_group()
