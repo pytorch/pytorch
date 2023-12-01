@@ -999,8 +999,11 @@ SeqNr|OrigAten|SrcFn
 
         # We still want to make sure that this raises
         x = torch.ones(2, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "is being used in an in-place operation"):
+        with self.assertRaisesRegex(
+            RuntimeError, "is being used in an in-place operation"
+        ):
             f(x)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

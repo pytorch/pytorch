@@ -1268,7 +1268,11 @@ class BuiltinVariable(VariableTracker):
                         (out.as_proxy(),),
                         {},
                     )
-                    obj.as_proxy().node.meta['example_value'] = _lower_version_count_by_1(obj.as_proxy().node.meta['example_value'])
+                    obj.as_proxy().node.meta[
+                        "example_value"
+                    ] = _lower_version_count_by_1(
+                        obj.as_proxy().node.meta["example_value"]
+                    )
                     # This handles options prop, guards and ends with a clone
                     # Step 4 - replace all reference to the current object with the new one
                     return tx.replace_all(obj, out)

@@ -4,7 +4,12 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.testing import CompileCounter
+from torch._dynamo.testing import (
+    CompileCounter,
+    CompileCounterWithBackend,
+    EagerAndRecordGraphs,
+    normalize_gm,
+)
 
 
 class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
@@ -291,25 +296,43 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
 
         eager_result = fn(x, y)
 
-        counter = CompileCounter()
+        eager_and_record = EagerAndRecordGraphs()
+
+        counter = CompileCounterWithBackend(eager_and_record)
 
         fn = torch._dynamo.optimize(counter, nopython=True)(fn)
 
         compile_result = fn(x, y)
+
+        graph = eager_and_record.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+
         self.assertEqual(compile_result, eager_result)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 6)
-        # Graph for reference
-        # -------------  ---------------------------  -----------------------------------------------------------------------------------  --------------  --------
-        # placeholder    l_y_                         L_y_                                                                                 ()              {}
-        # placeholder    l_x_                         L_x_                                                                                 ()              {}
-        # call_method    detach                       detach                                                                               (l_y_,)         {}
-        # call_function  _set_grad_enabled            <built-in function _set_grad_enabled>                                                (False,)        {}
-        # call_function  set_                         <method 'set_' of 'torch._C.TensorBase' objects>                                     (l_x_, detach)  {}
-        # call_function  _set_grad_enabled_1          <built-in function _set_grad_enabled>                                                (True,)         {}
-        # call_function  _unsafe_set_version_counter  <built-in method _unsafe_set_version_counter of PyCapsule object at 0x7fdf207668b0>  (set_, 1)       {}
-        # call_function  mul                          <built-in function mul>                                                              (l_x_, l_y_)    {}
-        # output         output                       output                                                                               ((mul,),)       {}
+        self.assertExpectedInline(
+            """\
+
+class GraphModule(torch.nn.Module):
+    def forward(self, L_y_ : torch.Tensor, L_x_ : torch.Tensor):
+        l_y_ = L_y_
+        l_x_ = L_x_
+
+        detach = l_y_.detach()
+
+        _set_grad_enabled = torch._C._set_grad_enabled(False)
+
+        set_ = torch_Tensor_set_(l_x_, detach);  l_x_ = detach = None
+
+        _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
+
+        _lower_version_count_by_1 = torch__dynamo_variables_builtin__lower_version_count_by_1(set_)
+
+        mul = set_ * l_y_;  set_ = l_y_ = None
+        return (mul,)
+        """,
+            actual,
+        )
 
     # Note - this does not actually get captured in the graph yet.
     # The plan of record is to introduce a set_data op, entirely subsume the operation into a call_function
