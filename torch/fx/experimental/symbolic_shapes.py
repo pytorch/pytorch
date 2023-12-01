@@ -3235,11 +3235,13 @@ class ShapeEnv:
             if new_pows.issubset(pows) and new_rationals.issubset(rationals):
                 expr = new_expr
         if expr.has(Mod):
+            mod_replacements = {}
             for mod in expr.atoms(Mod):
                 # TODO: we should be able to simplify factors of the modulus too, e.g. knowing x % 4 == 0
                 # implies x % 2 == 0
                 if self.replace(mod) in self.divisible:
-                    expr = expr.replace(mod, sympy.Integer(0))
+                    mod_replacements[mod] = sympy.Integer(0)
+            expr = expr.xreplace(mod_replacements)
         return expr
 
     @lru_cache(256)
