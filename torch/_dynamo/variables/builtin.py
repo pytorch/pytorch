@@ -651,37 +651,14 @@ class BuiltinVariable(VariableTracker):
                 ),
             )
 
-        if self.fn is round and any(isinstance(arg, SymNodeVariable) for arg in args):
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    self._round,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
+        if self.fn is round and not (constant_args or unspec_python_args):
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder()(tx, polyfill.round), args, kwargs
             )
 
         return super().call_function(tx, args, kwargs)
-
-    def _round(self, number, ndigits=None):
-        if ndigits is None:
-            return self._round_half_to_even(number)
-        else:
-            return self._round_half_to_even(number * ndigits) / ndigits
-
-    def _round_half_to_even(self, number):
-        # Pythons builtin 'round' implements the "round half to even" strategy
-        # See https://en.wikipedia.org/wiki/Rounding#Rounding_half_to_even
-        # This is implemented here in terms of the "round half up" strategy (how non-programmers think about rounding)
-        # and correcting the relevant points.
-        x = number + 0.5
-        rounded_half_up = math.floor(x)
-        # In terms of 'number', the points that need to be corrected are .... -2.5, 0.5, 2.5, ...
-        # In terms of 'x', this simplifies to odd integers
-        is_integer = rounded_half_up == x
-        is_not_even_integer = bool(x % 2)
-        round_half_to_even_correction = float(is_integer and is_not_even_integer)
-        return rounded_half_up - round_half_to_even_correction
 
     def _call_min_max(self, tx, *args):
         if len(args) == 1 and args[0].has_unpack_var_sequence(tx):

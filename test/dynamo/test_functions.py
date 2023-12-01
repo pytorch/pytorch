@@ -1147,6 +1147,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(output, expected))
         assert cnt.frame_count == 1
 
+    # The number is doubled here since we are halfing it again inside the test function.
+    # This enforce sym ints in the graph as well as an exact 0.5 decimal
+    @common_utils.parametrize("number_doubled", [-5, -3, -1, 0, 1, 3, 5])
+    @common_utils.parametrize("ndigits", [None, 0, 1])
+    def test_round_sym(self, number_doubled, ndigits):
+        def eager(x, y):
+            return x + round(y / 2, ndigits=ndigits)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch._dynamo.optimize_assert(counter)(eager)
+
+        x = torch.zeros(1)
+        actual = compiled(x, number_doubled)
+        expected = eager(x, number_doubled)
+
+        print(actual, expected)
+
+        assert counter.frame_count == 1
+        self.assertEqual(actual, expected)
+
     @make_test
     def test_numpy_meshgrid(x, y):
         r1, r2 = np.meshgrid(x.numpy(), y.numpy())
@@ -1495,6 +1515,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         input2 = torch.randn(1)
 
         self.assertTrue(same(program(input1, input2), input1 + input1))
+
+
+common_utils.instantiate_parametrized_tests(FunctionTests)
 
 
 def udf_mul(x, y):
