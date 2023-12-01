@@ -1094,6 +1094,18 @@ class AOTInductorTestsTemplate:
         with config.patch({"profile_bandwidth": "1", "profile_bandwidth_regex": ""}):
             self.check_model(Model(), example_inputs)
 
+    def test_with_no_triton_profiler(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.permute(x, (1, 0))
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"profile_bandwidth": "1", "profile_bandwidth_regex": ""}):
+            self.check_model(Model(), example_inputs)
+
     def test_repeat_output(self):
         class Model(torch.nn.Module):
             def __init__(self):

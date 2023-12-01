@@ -569,6 +569,8 @@ class WrapperCodeGen(CodeGen):
 
     @dynamo_timed
     def generate(self, is_inference):
+        if config.profile_bandwidth:
+            self.write_triton_header_once()
         result = IndentedBuffer()
         result.splice(self.header)
 
@@ -577,7 +579,6 @@ class WrapperCodeGen(CodeGen):
             if config.profiler_mark_wrapper_call:
                 self.generate_profiler_mark_wrapper_call(stack)
             if config.profile_bandwidth:
-                self.write_triton_header_once()
                 self.generate_start_graph()
 
             # We disable planning during training because it presently increases peak memory consumption.
@@ -1893,6 +1894,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.wrapper_call.writeline(
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
+
+    def write_triton_header_once(self):
+        pass
 
     def generate_start_graph(self):
         pass
