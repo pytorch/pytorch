@@ -382,7 +382,7 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
     }
   }
 
-  // If batch  is 1 always call addmm_out_cuda_imlp
+  // If batch is 1 call addmm_out_cuda_impl (and squeeze is essentially noop)
   if (result.size(0) == 1) {
     auto result_s = result.squeeze(0);
     addmm_out_cuda_impl(result_s, self.squeeze(0), batch1.squeeze(0), batch2.squeeze(0), beta, alpha);
