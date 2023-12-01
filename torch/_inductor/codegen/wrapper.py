@@ -498,7 +498,7 @@ class WrapperCodeGen(CodeGen):
         return
 
     def generate_fallback_kernel(self, fallback_kernel, args):
-        return
+        self.generate_extern_kernel_alloc(fallback_kernel, args)
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         ending = self.ending
@@ -1785,7 +1785,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if V.graph.aot_mode and config.aot_inductor.abi_compatible:
             self.generate_c_shim_fallback_kernel(fallback_kernel, args)
         else:
-            super().generate_extern_kernel_alloc(fallback_kernel, args)
+            super().generate_fallback_kernel(fallback_kernel, args)
 
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
