@@ -3,7 +3,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
 #include <torch/library.h>
-#include <c10/util/strides.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -192,12 +191,7 @@ static Tensor mkldnn_linear_pointwise(
   auto input_size = input.sizes();
 
   // Make sure input has default contiguous strides if it's contiguous tensors for better performance.
-  // For example, for tensor of size = [1, 1280], stride = [0, 1], we'll convert it to size = [1, 1280], stride = [1280, 1]
-  // before calling oneDNN for better performance.
-  IntArrayRef input_default_contiguous_strides = c10::contiguous_strides(input_size);
-  if (input.is_contiguous() && input.strides() != input_default_contiguous_strides) {
-     input = input.as_strided(input_size, input_default_contiguous_strides);
-  }
+  input = may_convert_to_default_contiguous_strides(input);
 
   const int64_t dim = input.dim();
   auto input_reshaped =
