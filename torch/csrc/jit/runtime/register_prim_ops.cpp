@@ -182,6 +182,47 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::_SetGlobalCtx(int ctx_pos) -> int"),
+        [](Stack& stack) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+          int64_t ctx_pos = 0;
+          pop(stack, ctx_pos);
+          TORCH_CHECK(
+              (ctx_pos >= 0) && (ctx_pos < 64),
+              "prim::_SetGlobalCtx expects 0 <= ctx_pos < 64, but got %d",
+              ctx_pos);
+          at::globalContext().assignGlobalCtx(ctx_pos, true);
+          push(stack, 0);
+        },
+        aliasAnalysisConservative()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::_UnsetGlobalCtx(int ctx_pos) -> int"),
+        [](Stack& stack) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+          int64_t ctx_pos = 0;
+          pop(stack, ctx_pos);
+          TORCH_CHECK(
+              (ctx_pos >= 0) && (ctx_pos < 64),
+              "prim::_UnsetGlobalCtx expects 0 <= ctx_pos < 64, but got %d",
+              ctx_pos);
+          at::globalContext().assignGlobalCtx(ctx_pos, false);
+          push(stack, 0);
+        },
+        aliasAnalysisConservative()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::_GetGlobalCtx(int ctx_pos) -> bool"),
+        [](Stack& stack) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+          int64_t ctx_pos = 0;
+          pop(stack, ctx_pos);
+          TORCH_CHECK(
+              (ctx_pos >= 0) && (ctx_pos < 64),
+              "prim::_GetGlobalCtx expects 0 <= ctx_pos < 64, but got %d",
+              ctx_pos);
+          push(stack, (bool)(at::globalContext().getGlobalCtx(ctx_pos)));
+        },
+        aliasAnalysisConservative()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::TupleUnpack(Any tup) -> ..."),
         [](Stack& stack) { tupleUnpack(stack); },
         aliasAnalysisSpecialCase()),

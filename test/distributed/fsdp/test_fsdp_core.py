@@ -10,6 +10,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch._op_ctl
 from torch.distributed.fsdp import CPUOffload, MixedPrecision
 from torch.distributed.fsdp._flat_param import FlatParamHandle
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
@@ -413,11 +414,20 @@ class TestNoGrad(FSDPTest):
         input = fsdp_model.module.get_input(torch.device("cuda"))
         # Run a forward in eval mode
         fsdp_model.eval()
-        ref_output = fsdp_model(*input)
-        # Run a forward in `no_grad()` and compare
-        with torch.no_grad():
-            no_grad_output = fsdp_model(*input)
-        self.assertEqual(ref_output, no_grad_output)
+
+        # use AT FastPath backend manager to disable fastpath execution
+        # for numerical reproducibility
+        with torch._op_ctl.atfp_kernel(
+            enable_nested_tensor=False,
+            enable_encoder=False,
+            enable_mha=False,
+            enable_math=True,
+        ):
+            ref_output = fsdp_model(*input)
+            # Run a forward in `no_grad()` and compare
+            with torch.no_grad():
+                no_grad_output = fsdp_model(*input)
+            self.assertEqual(ref_output, no_grad_output)
 
 
 class TestAutograd(FSDPTest):
