@@ -4,13 +4,18 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from typing import Tuple, Union, List, Optional, cast, TYPE_CHECKING
-from torch.utils._pytree import tree_map_only
 from . import _functional_collectives_impl as fun_col_impl
 from ._functional_collectives_impl import _register_tensor_wrapper
 from torch.fx.experimental.proxy_tensor import (
     get_innermost_proxy_mode,
 )
 from torch._custom_ops import impl_abstract
+
+try:
+    from torch.utils._cxx_pytree import tree_map_only
+except ImportError:
+    from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
+
 
 if torch._running_with_deploy():
     def is_torchdynamo_compiling():
@@ -121,6 +126,20 @@ def wait_tensor(tensor):
     Waiting follows device semantics, which means blocking on CPU and synchronizing streams on CUDA.
     """
     return torch.ops.c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
+
+
+def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
+    """
+    Broadcasts the tensor to all processes in the given process group.
+
+    Args:
+        src (int): Source rank
+        group (ProcessGroup or List[int]): The process group to work on.
+        tag (str, optional): A unique identifier for the collective. Default: empty string
+    """
+    tag, rankset, group_size = _expand_group(group, tag)
+    tensor = torch.ops.c10d_functional.broadcast(self, src, tag, rankset, group_size)
+    return _maybe_wrap_tensor(tensor)
 
 
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
@@ -383,6 +402,10 @@ class AsyncCollectiveTensor(torch.Tensor):
         wait_tensor(self.elem)
         return self
 
+    def wait(self) -> torch.Tensor:
+        wait_tensor(self.elem)
+        return self.elem
+
     def _get_acs_underlying_tensor(self):
         """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
         return self.elem
@@ -416,6 +439,8 @@ class AsyncCollectiveTensor(torch.Tensor):
 
         return out
 
+    def numpy(self):
+        return self.wait().numpy()
 
 """
 Utils and infrastructure for tracing support
@@ -491,6 +516,11 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
 def _are_we_tracing() -> bool:
     if is_torchdynamo_compiling():
         return True
+    # If functionalization is turned on, we are almost definitely compiling/tracing.
+    # (In particular, AOTAutograd traces a model once with functionalization on
+    #  but proxy tracing turned of, so this is how we detect it).
+    if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL) is not None:
+        return True
     mode = get_innermost_proxy_mode()
     if mode is None:
         return False
@@ -513,6 +543,9 @@ def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
     return [mk_out_tensor(t) for t in self]
 
 # We now register meta kernels to deal with tracing
+def _broadcast_meta(self, *args):
+    return torch.empty_like(self)
+
 def _all_reduce_meta(self, *args):
     return torch.empty_like(self)
 
@@ -529,8 +562,14 @@ def _reduce_scatter_tensor_meta(input, reduce_op, tag, rankset, group_size):
     out_size[0] //= group_size
     return input.new_empty(out_size)
 
-def _all_reduce_coalesced_meta(self, reduceOp, tag, rankset, group_size):
+def _all_reduce_coalesced_meta(self, *args):
     return [torch.empty_like(t) for t in self]
+
+def _all_reduce__meta(inp, *args):
+    return inp
+
+def _all_reduce_coalesced__meta(inputs, *args):
+    return inputs
 
 def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_size):
     def mk_out_tensor(input):
@@ -556,9 +595,31 @@ def _all_to_all_single_meta(input, output_split_sizes, input_split_sizes, tag, r
         out_size[0] = sum(output_split_sizes)
         return input.new_empty(out_size)
 
+def _all_gather_into_tensor_native_meta(input, group_size, group_name):
+    shape = list(input.size())
+    shape[0] *= group_size
+    return input.new_empty(shape)
+
+def _all_gather_into_tensor_coalesced_native_meta(inputs, group_size, group_name):
+    return [
+        _all_gather_into_tensor_native_meta(input, group_size, group_name)
+        for input in inputs
+    ]
+
+def _reduce_scatter_tensor_native_meta(inp, reduce_op, group_size, group_name):
+    shape = list(inp.size())
+    shape[0] //= group_size
+    return inp.new_empty(shape)
+
+def _reduce_scatter_tensor_coalesced_native_meta(inputs, reduce_op, group_size, group_name):
+    return [
+        _reduce_scatter_tensor_native_meta(inp, reduce_op, group_size, group_name)
+        for inp in inputs
+    ]
 
 def _register_ops():
     ops_defs = [
+        "broadcast(Tensor self, int src, str tag, int[] ranks, int group_size) -> Tensor",
         "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
         "all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
         "wait_tensor(Tensor self) -> Tensor",
@@ -574,7 +635,7 @@ def _register_ops():
         op_name = op_def[0:op_def.index('(')]
         backend_impl = getattr(fun_col_impl, f"_{op_name}")
         meta_impl = getattr(my_module, f"_{op_name}_meta")
-        c10_lib.define(op_def)
+        c10_lib.define(op_def, tags=torch.Tag.pt2_compliant_tag)
         c10_lib_impl.impl(op_name, backend_impl, "CompositeExplicitAutograd")
         impl_abstract(f"c10d_functional::{op_name}")(meta_impl)
 
@@ -586,6 +647,17 @@ if not torch._running_with_deploy():
     c10_lib = torch.library.Library("c10d_functional", "DEF")
     c10_lib_impl = torch.library.Library("c10d_functional", "IMPL")
     _register_ops()
+
+    _c10_lib_impl = torch.library.Library("_c10d_functional", "IMPL")
+    _c10_lib_impl.impl("all_reduce", _all_reduce_meta, "Meta")
+    _c10_lib_impl.impl("all_reduce_", _all_reduce__meta, "Meta")
+    _c10_lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
+    _c10_lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
+    _c10_lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+    _c10_lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")
+    _c10_lib_impl.impl("all_gather_into_tensor_coalesced", _all_gather_into_tensor_coalesced_native_meta, "Meta")
+    _c10_lib_impl.impl("reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta")
+    _c10_lib_impl.impl("reduce_scatter_tensor_coalesced", _reduce_scatter_tensor_coalesced_native_meta, "Meta")
 else:
     warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")
 

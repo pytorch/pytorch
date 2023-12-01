@@ -115,6 +115,10 @@ class TORCH_API ProcessGroupWrapper : public Backend {
       at::Tensor& inputBuffer,
       const ReduceScatterOptions& opts) override;
 
+  void startCoalescing() override;
+
+  c10::intrusive_ptr<Work> endCoalescing() override;
+
   c10::intrusive_ptr<Backend> getWrappedPg() const;
 
  private:

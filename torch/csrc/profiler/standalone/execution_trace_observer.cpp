@@ -10,7 +10,6 @@
 #endif // _WIN32
 
 #include <fmt/format.h>
-#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -19,7 +18,6 @@
 #include <mutex>
 #include <sstream>
 #include <stack>
-#include <stdexcept>
 #include <vector>
 
 #include <ATen/core/TensorBody.h>
@@ -47,6 +45,7 @@ inline std::string vectorToString(const std::vector<T>& v) {
 std::string json_str_escape(const std::string& str);
 
 constexpr size_t maxNumElements = 4096;
+constexpr size_t maxStrLength = 8192;
 
 inline std::string getValueType(
     const c10::IValue& val,
@@ -86,7 +85,8 @@ inline std::string getValueShape(
     const size_t maxArrayLen = maxNumElements) {
   if (val.isTensor()) {
     auto& tensor = val.toTensor();
-    if (tensor.defined()) {
+    if (tensor.defined() &&
+        !tensor.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
       return vectorToString(tensor.sizes().vec());
     }
   } else if (val.isTuple()) {
@@ -127,11 +127,11 @@ inline std::string getScalarValue(const c10::IValue& val) {
     return val.toBool() ? "true" : "false";
   } else if (val.isString()) {
     const std::string& str_val = val.toStringRef();
-    if (str_val.size() > maxNumElements) {
+    if (str_val.size() > maxStrLength) {
       LOG(WARNING) << "string size=" << str_val.size()
-                   << " exceeded maxNumElements=" << maxNumElements;
+                   << " exceeded maxStrLength=" << maxStrLength;
       return fmt::format(
-          "\"{}\"", json_str_escape(str_val.substr(0, maxNumElements)));
+          "\"{}\"", json_str_escape(str_val.substr(0, maxStrLength)));
     }
 
     return fmt::format("\"{}\"", json_str_escape(str_val));
@@ -277,26 +277,27 @@ static void writeJsonNode(
   out << fmt::format(
       R"JSON(
     {{
-      "name": "{}", "id": {}, "rf_id": {}, "parent": {}, "fw_parent": {}, "seq_id": {}, "scope": {}, "tid": {}, "fw_tid": {}, "op_schema": "{}",
-      "inputs": {}, "input_shapes": {}, "input_types": {},
-      "outputs": {}, "output_shapes": {}, "output_types": {}
+      "id": {}, "name": "{}", "ctrl_deps": {},
+      "inputs": {{"values": {}, "shapes": {}, "types": {}}},
+      "outputs": {{"values": {}, "shapes": {}, "types": {}}},
+      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}}, {{"name": "fw_parent", "type": "uint64", "value": {}}}, {{"name": "seq_id", "type": "int64", "value": {}}}, {{"name": "scope", "type": "uint64", "value": {}}}, {{"name": "tid", "type": "uint64", "value": {}}}, {{"name": "fw_tid", "type": "uint64", "value": {}}}, {{"name": "op_schema", "type": "string", "value": "{}"}}]
     }})JSON",
-      name,
       id,
-      rf_id,
+      name,
       parent,
-      fw_parent,
-      seq_id,
-      scope,
-      tid,
-      fw_tid,
-      operator_schema,
       inputs,
       input_shapes,
       input_types,
       outputs,
       output_shapes,
-      output_types);
+      output_types,
+      rf_id,
+      fw_parent,
+      seq_id,
+      scope,
+      tid,
+      fw_tid,
+      operator_schema);
 }
 
 inline std::string timeString(const std::time_t timepoint) {
@@ -325,7 +326,7 @@ static bool initExecutionTraceStart(ExecutionTraceObserver& ob) {
 
   ob.out << fmt::format(
       R"JSON({{
-  "schema": "1.0.1", "pid": {}, "time": "{}", "start_ts": {},
+  "schema": "1.0.2-chakra.0.0.4", "pid": {}, "time": "{}", "start_ts": {},
   "nodes": [)JSON",
       ob.pid,
       ob.record_time,
@@ -388,7 +389,8 @@ inline std::string convertIValue(
     size_t numel = 0;
     size_t itemsize = 0;
     std::string device_str = "";
-    if (t->has_storage()) {
+    // symbolic sizes/strides implies t->storage_offset() will fail
+    if (t->has_storage() && !t->has_symbolic_sizes_strides()) {
       auto& t_storage = t->storage();
       storage_id = getObjectID(ob, t_storage.data());
       offset = t->storage_offset();

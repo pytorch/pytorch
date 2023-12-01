@@ -72,7 +72,7 @@ TEST(TensorpipeSerialize, Base) {
         recvingTpAllocation.payloads[i];
     if (srcPayload.length) {
       // Empty vector's data() can return nullptr, use the length to avoid
-      // coying into nullptr
+      // copying into nullptr
       memcpy(dstPayload.data, srcPayload.data, srcPayload.length);
     }
   }

@@ -287,6 +287,7 @@ class FakeTensorMeta:
     tensor_size: Tuple[Union[int, torch.SymInt], ...]
     tensor_stride: Tuple[Union[int, torch.SymInt], ...]
     tensor_storage_offset: Union[int, torch.SymInt]
+    is_nested: bool
 
     def size(self) -> Tuple[Union[int, torch.SymInt], ...]:
         return self.tensor_size
@@ -302,7 +303,9 @@ class FakeTensorMeta:
 
     @staticmethod
     def from_fake(fake) -> "FakeTensorMeta":
-        return FakeTensorMeta(fake.size(), fake.stride(), fake.storage_offset())
+        return FakeTensorMeta(
+            fake.size(), fake.stride(), fake.storage_offset(), fake.is_nested
+        )
 
 
 # [Note: ShapeEnv State Equality]

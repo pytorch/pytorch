@@ -6,7 +6,7 @@ from torch.distributed.tensor.parallel._data_parallel_utils import (
     _unflatten_tensor,
 )
 
-__all__ = ["pre_dp_module_transform"]
+__all__ = []  # type: ignore[var-annotated]
 
 
 def _get_submodule_n_params(module: nn.Module, path: str):
@@ -59,7 +59,7 @@ def _localize_dtensor(module: nn.Module, *_: Any):
     _update_module_param(param_list)  # type: ignore[arg-type]
 
 
-def pre_dp_module_transform(module: nn.Module):
+def _pre_dp_module_transform(module: nn.Module):
     """
     Enable the composability between Tensor Parallelism (TP) and Data
     Parallelism(DP) in PyTorch when using DDP. We need to convert Parameters which

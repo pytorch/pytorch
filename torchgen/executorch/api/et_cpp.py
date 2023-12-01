@@ -93,7 +93,7 @@ def valuetype_type(
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 
-# Translation of types occuring in JIT arguments to a C++ argument type.
+# Translation of types occurring in JIT arguments to a C++ argument type.
 # If remove_non_owning_ref_types is set, we'll guarantee that the outputed CType is not a non-owning reference type.
 # For example, we'll return std::vector<int> instead of IntArrayRef.
 # See Note [translation from C++ reference to value types]
