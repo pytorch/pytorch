@@ -1380,6 +1380,7 @@ def guard_error_hook(
     print(
         f"ERROR RUNNING GUARDS {code.co_name} {code.co_filename}:{code.co_firstlineno}"
     )
+    breakpoint()
     # TODO: If we passed in the exception here, we could get a precise
     # column number of which subexpression failed.  But that would also
     # require us to have the TRUE code that was eval'ed, not a shoddy

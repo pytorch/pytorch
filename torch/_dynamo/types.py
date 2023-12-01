@@ -46,6 +46,7 @@ class GuardFn(Protocol):
 @dataclasses.dataclass
 class GuardedCode:
     code: types.CodeType
+    check_fn: GuardFn
     frame: types.FrameType
     name: str
     compiled_fn: Any
@@ -105,8 +106,23 @@ class GuardedCode:
             else:
                 resume_fn_code_obj = None
 
+            def yolo_check_fn():
+                pycode = """
+                def yolo():
+                    return True
+                yolo()
+                """
+
+                out: Dict[str, Any] = dict()
+                exec(pycode, frame.f_globals, out)
+                guard_fn = out["___make_guard_fn"]()
+                guard_fn.pycode = pycode
+                breakpoint()
+                return guard_fn
+
             return GuardedCode(
                 code_obj,
+                yolo_check_fn(),
                 frame,
                 fn_name,
                 compiled_fn,

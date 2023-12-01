@@ -627,8 +627,14 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
 
         serialize_table = output.to_serialize
+        check_fn = CheckFunctionManager(
+            output,
+            hooks.guard_fail_fn if hooks else None,
+        )
+
         guarded_code = GuardedCode(
             code=out_code,
+            check_fn=check_fn,
             name=serialize_table["compiled_fn_name"],
             compiled_fn=serialize_table["compiled_fn"],
             global_alias_table=serialize_table["global_alias_table"],
