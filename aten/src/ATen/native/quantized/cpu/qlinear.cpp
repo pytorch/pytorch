@@ -565,14 +565,19 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl_xnnp(
     rows_input *= input_contig.size(i);
   }
 
+  // Reshape the operator
+  status = at::native::xnnp_utils::xnnp_reshape_fully_connected_nc(
+      xnnp_linear_op.get(),
+      rows_input, /* batch_size */
+      caffe2::pthreadpool_());
+
   // Setup the operator
   status = at::native::xnnp_utils::xnnp_setup_fully_connected_nc(
       xnnp_linear_op.get(),
-      rows_input, /* batch_size */
       reinterpret_cast<const underlying_t*>(
           input_contig.template data_ptr<scalar_t>()),
-      reinterpret_cast<underlying_t*>(output.template data_ptr<scalar_t>()),
-      caffe2::pthreadpool_());
+      reinterpret_cast<underlying_t*>(output.template data_ptr<scalar_t>())
+    );
 
   TORCH_CHECK(
       status == xnn_status_success,

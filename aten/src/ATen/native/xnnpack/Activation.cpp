@@ -34,12 +34,19 @@ static Tensor& hardswish_impl(Tensor& input, Tensor& output) {
 
   Operator hardswish_scoped_op(hardswish_op);
 
-  const xnn_status setup_status = xnn_setup_hardswish_nc_f32(
+  const xnn_status reshape_status = xnn_reshape_hardswish_nc_f32(
     hardswish_op,
     input.numel(),  // Batch
-    input.data_ptr<float>(),
-    output.data_ptr<float>(),
     caffe2::pthreadpool_());  // threadpool
+
+  TORCH_CHECK(
+    xnn_status_success == reshape_status,
+    "xnn_reshape_hardswish_nc_f32 failed!");
+
+  const xnn_status setup_status = xnn_setup_hardswish_nc_f32(
+    hardswish_op,
+    input.data_ptr<float>(),
+    output.data_ptr<float>());
 
   TORCH_CHECK(
     xnn_status_success == setup_status,
