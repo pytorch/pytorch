@@ -123,7 +123,7 @@ class GradScaler:
         enabled: bool = True,
     ) -> None:
         if enabled and amp_definitely_not_available():
-            warnings.warn(
+            raise RuntimeError(
                 "torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling."
             )
             self._enabled = False
