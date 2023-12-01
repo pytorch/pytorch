@@ -79,12 +79,18 @@ class ColwiseParallel(ParallelStyle):
 
     def _prepare_input_fn(self, inputs, device_mesh):
         # annotate module input placements/sharding with input_layouts
-        dtensor = DTensor.from_local(inputs[0], device_mesh, self.input_layouts)
+        input_tensor = inputs[0]
+        if not isinstance(input_tensor, DTensor):
+            input_tensor = DTensor.from_local(input_tensor, device_mesh, self.input_layouts, run_check=False)
+        else:
+            assert input_tensor.placements == self.input_layouts, \
+                "The input_layouts must match the placements of the input DTensor."
+
         # transform the input layouts to the desired layouts of ColwiseParallel
         desired_sharding = (Replicate(), )
         if self.input_layouts != desired_sharding:
-            dtensor = dtensor.redistribute(placements=self.desired_input_layouts)
-        return dtensor
+            input_tensor = input_tensor.redistribute(placements=self.desired_input_layouts)
+        return input_tensor
 
     def _partition_fn(self, name, module, device_mesh):
         if isinstance(module, nn.Linear):
@@ -176,10 +182,16 @@ class RowwiseParallel(ParallelStyle):
         self.use_local_output = use_local_output
 
     def _prepare_input_fn(self, inputs, device_mesh):
-        dtensor = DTensor.from_local(inputs[0], device_mesh, self.input_layouts)
+        input_tensor = inputs[0]
+        if not isinstance(input_tensor, DTensor):
+            input_tensor = DTensor.from_local(input_tensor, device_mesh, self.input_layouts, run_check=False)
+        else:
+            assert input_tensor.placements == self.input_layouts, \
+                "The input_layouts must match the placements of the input DTensor."
+
         if self.input_layouts != self.desired_input_layouts:
-            dtensor = dtensor.redistribute(placements=self.desired_input_layouts)
-        return dtensor
+            input_tensor = input_tensor.redistribute(placements=self.desired_input_layouts)
+        return input_tensor
 
     def _partition_fn(self, name, module, device_mesh):
         assert isinstance(module, nn.Linear), "Only support nn.Linear"
@@ -266,7 +278,11 @@ class PrepareModuleInput(ParallelStyle):
             inputs = (inputs,)
         for inp, input_layout, desired_layout in zip(inputs, self.input_layouts, self.desired_input_layouts):
             if input_layout is not None:
-                dt_inp = DTensor.from_local(inp, device_mesh, (input_layout,), run_check=False)
+                if isinstance(inp, DTensor):
+                    assert inp.placements[0] == input_layout
+                    dt_inp = inp
+                else:
+                    dt_inp = DTensor.from_local(inp, device_mesh, (input_layout,), run_check=False)
                 if input_layout != desired_layout:
                     dt_inp = dt_inp.redistribute(placements=(desired_layout,))
                 prepared_inputs.append(dt_inp.to_local() if self.use_local_output else dt_inp)
@@ -274,7 +290,7 @@ class PrepareModuleInput(ParallelStyle):
                 prepared_inputs.append(inp)
         return tuple(prepared_inputs)
 
-    def apply(self, module, device_mesh):
+    def apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         module.register_forward_pre_hook(lambda _, inputs: self._prepare_input_fn(inputs, device_mesh))  # type: ignore[misc, call-arg]
         return module
 
@@ -348,6 +364,6 @@ class PrepareModuleOutput(ParallelStyle):
         else:
             return tuple(prepared_outputs)
 
-    def apply(self, module, device_mesh):
+    def apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         module.register_forward_hook(lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh))  # type: ignore[misc, call-arg]
         return module
