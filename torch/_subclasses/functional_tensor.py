@@ -229,7 +229,6 @@ class FunctionalTensorMode(TorchDispatchMode):
             super().__exit__(a, b, c)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        print(func, torch._C._dispatch_tls_local_include_set() - torch._C._dispatch_tls_local_exclude_set())
         if kwargs is None:
             kwargs = {}
 
@@ -280,25 +279,37 @@ class FunctionalTensorMode(TorchDispatchMode):
             FunctionalTensor, unwrap, (args, kwargs)
         )
 
-        try:
-            # By default for python functionalization (for AOTAutograd), we reapply views.
-            old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
-            from torch._ops import mode_stack_per_key
-            #print("HERERE", func, torch._C._dispatch_tls_local_include_set() - torch._C._dispatch_tls_local_exclude_set(), mode_stack_per_key())
+        include_to_set = (
+            torch._C._dispatch_tls_local_include_set()
+            | torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+        exclude_to_set = (
+            torch._C._dispatch_tls_local_exclude_set().remove(
+                torch._C.DispatchKey.Functionalize
+            )
+            - FunctionalTensor._extra_dispatch_keys
+        )
+        # All we want to do here is re-use the existing C++ functionalization logic.
+        # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
+        with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
+            try:
+                # By default for python functionalization (for AOTAutograd), we reapply views.
+                old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
+                from torch._ops import mode_stack_per_key
 
-            # Sometimes these functions cannot be directly dispatched to functionalize key
-            # because args are sometimes not functional tensors for some reason?
-            if func in FunctionalTensor.metadata_fns:
-                outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
-                outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
-            else:
-                outs_unwrapped = func._op_dk(
-                    torch._C.DispatchKey.Functionalize, *args_unwrapped, **kwargs_unwrapped
-                )
-                outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
-        finally:
-            torch._disable_functionalization()
-            torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
+                # Sometimes these functions cannot be directly dispatched to functionalize key
+                # because args are sometimes not functional tensors for some reason?
+                if func in FunctionalTensor.metadata_fns:
+                    outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
+                    outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
+                else:
+                    outs_unwrapped = func._op_dk(
+                        torch._C.DispatchKey.Functionalize, *args_unwrapped, **kwargs_unwrapped
+                    )
+                    outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
+            finally:
+                torch._disable_functionalization()
+                torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
 
         if (
             # If no outputs are our functional subclass, then don't try to fix up aliasing
