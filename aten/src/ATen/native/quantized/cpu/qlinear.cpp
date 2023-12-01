@@ -911,9 +911,9 @@ static at::Tensor linear_int8_with_onednn_weight(
     c10::optional<at::Tensor> bias, // plain tensor
     double output_scale,
     int64_t output_zero_point,
-    bool fp32_output,
+    c10::optional<c10::ScalarType> output_dtype,
     std::string& post_op_name, // e.g. "none", "relu"
-    torch::List<double>& post_op_args,
+    torch::List<c10::optional<at::Scalar>>& post_op_args,
     std::string& post_op_algorithm) {
   using ideep::tensor;
   const int64_t dim = input.dim();
@@ -924,7 +924,9 @@ static at::Tensor linear_int8_with_onednn_weight(
       "qlinear with mkldnn tensor: data type of weight should be int8 (char).");
   TORCH_CHECK(
       weight_scales.scalar_type() == c10::ScalarType::Float, "weight scales should be dtype c10::ScalarType::Float.");
-  if (fp32_output) {
+  bool fp32_output = output_dtype.has_value() && (output_dtype.value() == c10::kFloat);
+  bool bfloat16_output = output_dtype.has_value() && (output_dtype.value() == c10::kBFloat16);
+  if (fp32_output || bfloat16_output) {
     TORCH_CHECK(
         output_scale == 1.0f && output_zero_point == 0, "onednn qlinear: expect scale=1 and zero point=0 for fp32 output");
   }
@@ -935,21 +937,22 @@ static at::Tensor linear_int8_with_onednn_weight(
   int64_t K = input.size(dim - 1), M = input.numel() / K, N = packed_weight.get_dim(1);
   c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
   bool with_bias = bias.has_value();
+  at::Tensor bias_val_float;
   if (with_bias) {
-    if (bias.value().dim() == 1) {
-      auto b_reshape = bias.value().reshape({1, bias.value().size(0)});
+    bias_val_float = bias.value().to(at::kFloat);
+    if (bias_val_float.dim() == 1) {
+      auto b_reshape = bias_val_float.reshape({1, bias_val_float.size(0)});
       onednn_bias = at::native::itensor_view_from_dense(b_reshape);
     } else {
-      onednn_bias = at::native::itensor_view_from_dense(bias.value());
+      onednn_bias = at::native::itensor_view_from_dense(bias_val_float);
     }
   }
   std::vector<int64_t> src_dims = {M, K};
   std::vector<int64_t> dst_dims = {M, N};
-  auto output_dtype = fp32_output ? c10::kFloat : c10::kByte;
   at::Tensor output = at::empty(
     dst_dims,
     device(c10::kCPU)
-        .dtype(output_dtype)
+        .dtype(fp32_output ? c10::kFloat : (bfloat16_output ? c10::kBFloat16 : c10::kByte))
   );
   if (output.numel() == 0) {
     return output;
@@ -959,7 +962,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   // Create onednn primitive
   auto src_desc = tensor::desc(src_dims, ideep::data_type::u8, ideep::format_tag::any);
   auto weights_desc = packed_weight.get_desc();
-  auto dst_dtype = fp32_output ? ideep::data_type::f32 : ideep::data_type::u8;
+  auto dst_dtype = fp32_output ? ideep::data_type::f32 : (bfloat16_output ? ideep::tensor::data_type::bf16 : ideep::data_type::u8);
   auto dst_desc = tensor::desc(dst_dims, dst_dtype, ideep::format_tag::any);
   auto bias_desc = with_bias ?
       tensor::desc(onednn_bias.value().get_dims(), ideep::data_type::f32, ideep::format_tag::any) :
@@ -1117,15 +1120,15 @@ class QLinearOnednn final {
       c10::optional<Tensor> bias,
       double output_scale,
       int64_t output_zero_point,
-      bool fp32_output,
+      c10::optional<c10::ScalarType> output_dtype,
       std::string post_op_name,
-      torch::List<double> post_op_args,
+      torch::List<c10::optional<at::Scalar>> post_op_args,
       std::string post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     return linear_int8_with_onednn_weight(
         act, act_scale, act_zero_point,
         onednn_weight, weight_scales, weight_zero_points,
-        bias, output_scale, output_zero_point, fp32_output,
+        bias, output_scale, output_zero_point, output_dtype,
         post_op_name, post_op_args, post_op_algorithm
     );
 #endif

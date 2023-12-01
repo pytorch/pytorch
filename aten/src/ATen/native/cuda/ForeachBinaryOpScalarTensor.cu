@@ -8,6 +8,8 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_foreach_add_native.h>
+#include <ATen/ops/_foreach_div_native.h>
 #include <ATen/ops/_foreach_mul_native.h>
 
 #include <ATen/ops/empty_like_native.h>
@@ -18,7 +20,8 @@ namespace at::native {
 template <typename T, template <class> class Op>
 std::vector<Tensor> foreach_binary_op(
     TensorList tensors,
-    const Tensor& scalar) {
+    const Tensor& scalar,
+    const Scalar& alpha = 1) {
   TORCH_CHECK(
       scalar.dim() == 0 && scalar.numel() == 1,
       "scalar tensor expected to be 0 dim but it has ",
@@ -51,12 +54,16 @@ std::vector<Tensor> foreach_binary_op(
           /* r_args_depth */ 1,
           /* res_arg_index */ 1>(),
       Op<opmath_t>(),
-      scalar.data_ptr<T>());
+      scalar.data_ptr<T>(),
+      alpha.to<opmath_t>());
   return tensor_lists[1];
 }
 
 template <typename T, template <class> class Op>
-void foreach_binary_op_(TensorList tensors, const Tensor& scalar) {
+void foreach_binary_op_(
+    TensorList tensors,
+    const Tensor& scalar,
+    const Scalar& alpha = 1) {
   TORCH_CHECK(
       scalar.dim() == 0 && scalar.numel() == 1,
       "scalar tensor expected to be 0 dim but has ",
@@ -82,7 +89,8 @@ void foreach_binary_op_(TensorList tensors, const Tensor& scalar) {
           /* r_args_depth */ 1,
           /* res_arg_index */ 0>(),
       Op<opmath_t>(),
-      scalar.data_ptr<T>());
+      scalar.data_ptr<T>(),
+      alpha.to<opmath_t>());
   increment_version(tensors);
 }
 
@@ -91,6 +99,10 @@ void foreach_binary_op_(TensorList tensors, const Tensor& scalar) {
 #define FOREACH_BINARY_OP_SCALAR_TENSOR(FUNCTION, NAME, OP, DIVISION_OP) \
   void foreach_tensor_##NAME##_tensor_kernel_cuda_(                      \
       TensorList tensors, const Tensor& scalar) {                        \
+    if (scalar.device().type() == DeviceType::CPU) {                     \
+      return at::native::foreach_tensor_##NAME##_scalar_kernel_cuda_(    \
+          tensors, scalar.item());                                       \
+    }                                                                    \
     check_foreach_api_restrictions(tensors);                             \
     if (!(can_use_fast_route(                                            \
               ArrayRef<TensorList>{tensors}, {}, DIVISION_OP) &&         \
@@ -104,6 +116,10 @@ void foreach_binary_op_(TensorList tensors, const Tensor& scalar) {
                                                                          \
   std::vector<Tensor> foreach_tensor_##NAME##_tensor_kernel_cuda(        \
       TensorList tensors, const Tensor& scalar) {                        \
+    if (scalar.device().type() == DeviceType::CPU) {                     \
+      return at::native::foreach_tensor_##NAME##_scalar_kernel_cuda(     \
+          tensors, scalar.item());                                       \
+    }                                                                    \
     check_foreach_api_restrictions(tensors);                             \
     if (!(can_use_fast_route(                                            \
               ArrayRef<TensorList>{tensors}, {}, DIVISION_OP) &&         \
@@ -115,35 +131,76 @@ void foreach_binary_op_(TensorList tensors, const Tensor& scalar) {
     return FUNCTION<OP>(tensors, scalar);                                \
   }
 
+#define FOREACH_BINARY_OP_SCALAR_TENSOR_ALPHA(FUNCTION, NAME, OP)      \
+  void foreach_tensor_##NAME##_tensor_kernel_cuda_(                    \
+      TensorList tensors, const Tensor& scalar, const Scalar& alpha) { \
+    check_foreach_api_restrictions(tensors);                           \
+    if (!(can_use_fast_route(ArrayRef<TensorList>{tensors}, alpha) &&  \
+          tensors[0].scalar_type() == scalar.scalar_type())) {         \
+      return at::native::foreach_tensor_##NAME##_tensor_kernel_slow_(  \
+          tensors, scalar, alpha);                                     \
+    }                                                                  \
+                                                                       \
+    FUNCTION##_<OP>(tensors, scalar, alpha);                           \
+  }                                                                    \
+                                                                       \
+  std::vector<Tensor> foreach_tensor_##NAME##_tensor_kernel_cuda(      \
+      TensorList tensors, const Tensor& scalar, const Scalar& alpha) { \
+    check_foreach_api_restrictions(tensors);                           \
+    if (!(can_use_fast_route(ArrayRef<TensorList>{tensors}, alpha) &&  \
+          tensors[0].scalar_type() == scalar.scalar_type())) {         \
+      return at::native::foreach_tensor_##NAME##_tensor_kernel_slow(   \
+          tensors, scalar, alpha);                                     \
+    }                                                                  \
+                                                                       \
+    return FUNCTION<OP>(tensors, scalar, alpha);                       \
+  }
+
 template <template <class> class Op>
 std::vector<Tensor> all_types_complex_bool_half_bfloat16(
     TensorList tensors,
-    const Tensor& scalar) {
+    const Tensor& scalar,
+    const Scalar& alpha = 1) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool,
       kHalf,
       kBFloat16,
       tensors[0].scalar_type(),
       "foreach_binary_op_scalar_cuda",
-      [&]() { return foreach_binary_op<scalar_t, Op>(tensors, scalar); });
+      [&]() {
+        return foreach_binary_op<scalar_t, Op>(tensors, scalar, alpha);
+      });
 }
 
 template <template <class> class Op>
 void all_types_complex_bool_half_bfloat16_(
     TensorList tensors,
-    const Tensor& scalar) {
+    const Tensor& scalar,
+    const Scalar& alpha = 1) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool,
       kHalf,
       kBFloat16,
       tensors[0].scalar_type(),
       "foreach_binary_op_scalar_cuda_",
-      [&]() { foreach_binary_op_<scalar_t, Op>(tensors, scalar); });
+      [&]() { foreach_binary_op_<scalar_t, Op>(tensors, scalar, alpha); });
 }
+
+FOREACH_BINARY_OP_SCALAR_TENSOR_ALPHA(
+    all_types_complex_bool_half_bfloat16,
+    add,
+    std::plus);
 
 FOREACH_BINARY_OP_SCALAR_TENSOR(
     all_types_complex_bool_half_bfloat16,
     mul,
     std::multiplies,
     /* div_op */ false);
+
+FOREACH_BINARY_OP_SCALAR_TENSOR(
+    all_types_complex_bool_half_bfloat16,
+    div,
+    std::divides,
+    /* div_op */ true);
+
 } // namespace at::native

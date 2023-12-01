@@ -1,13 +1,15 @@
+import dataclasses
 import inspect
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 
 import torch._C
 from torch._guards import Guard
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
+from ..device_interface import get_interface_for_device
 from ..exc import unimplemented, Unsupported
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
 from .base import VariableTracker
 from .functions import (
@@ -19,27 +21,59 @@ from .functions import (
 )
 
 
+@dataclasses.dataclass
+class ContextMangerState:
+    """
+    Mutating `self` in VariableTracker is not allowed because we copy
+    them.  This is a mutable container pointed to by context managers
+    that won't get copied, so it is safe to mutate.
+    """
+
+    cleanup_fn: Optional[Callable] = None
+    proxy: Optional[torch.fx.Proxy] = None
+
+    def cleanup(self):
+        if self.cleanup_fn is not None:
+            self.cleanup_fn()
+            self.cleanup_fn = None
+
+    def cleanup_assert(self):
+        assert self.cleanup_fn, "multiple exits?"
+        self.cleanup()
+
+
 class ContextWrappingVariable(VariableTracker):
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    _nonvar_fields = {
+        "cm_obj",
+        "target_values",
+        "initial_values",
+        "state",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(self, target_values, initial_values=None, *, state=None, **kwargs):
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
-        self.recursively_contains = (
-            set()
-        )  # This var doesn't contain any child vars and doesn't support clone() properly,
-        # so don't populate this automatically
+        self.state = ContextMangerState() if state is None else state
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        self.set_cleanup_hook(tx)
+        return variables.ConstantVariable.create(None)
+
+    def set_cleanup_hook(self, tx, fn=None):
+        if fn is None:
+
+            def fn():
+                self._call_func(tx, self.initial_values)
+
+        self.state.cleanup_fn = fn
+        tx.output.add_cleanup_hook(self.state.cleanup)
 
     def exit(self, tx, *args):
-        self._call_func(tx, self.initial_values)
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        self.state.cleanup_assert()
+        return variables.ConstantVariable.create(None)
 
     def reconstruct(self, codegen):
         attr_source = AttrSource(
@@ -69,8 +103,7 @@ class ContextWrappingVariable(VariableTracker):
 
 
 class GenericContextWrappingVariable(ContextWrappingVariable):
-    def __init__(self, target_values, initial_values=None, **kwargs):
-        cm_obj = kwargs.pop("cm_obj", None)
+    def __init__(self, target_values, initial_values=None, *, cm_obj=None, **kwargs):
         assert cm_obj is not None
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
@@ -78,15 +111,12 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         self.cm_obj = cm_obj
 
     def enter(self, tx):
-        options = VariableTracker.propagate(self)
-        options["source"] = (
-            None if self.source is None else AttrSource(self.source, "__enter__")
-        )
+        source = None if self.source is None else AttrSource(self.source, "__enter__")
         try:
             return variables.UserMethodVariable(
                 self.cm_obj.__enter__.__func__,
-                variables.UserDefinedObjectVariable(self.cm_obj, **options),
-                **options,
+                variables.UserDefinedObjectVariable(self.cm_obj),
+                source=source,
             ).call_function(tx, [], {})
         except Unsupported as e:
             raise unimplemented(
@@ -94,15 +124,12 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
             ) from e
 
     def exit(self, tx, *args):
-        options = VariableTracker.propagate(self)
-        options["source"] = (
-            None if self.source is None else AttrSource(self.source, "__exit__")
-        )
+        source = None if self.source is None else AttrSource(self.source, "__exit__")
         try:
             x = variables.UserMethodVariable(
                 self.cm_obj.__exit__.__func__,
-                variables.UserDefinedObjectVariable(self.cm_obj, **options),
-                **options,
+                variables.UserDefinedObjectVariable(self.cm_obj),
+                source=source,
             ).call_function(
                 tx,
                 [
@@ -117,45 +144,55 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
                 f"Unsupported context manager {self.cm_obj}'s __exit__ function"
             ) from e
 
-        # Remove the checkpoint if there is no graph break
-        # under this GenericContextWrappingVariable.
-        tx.states_before_block.pop()
+        tx.generic_context_manager_depth -= 1
         return x
 
 
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
-    _guards_singleton = {Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)}
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)
 
     @staticmethod
-    def create(tx, target_value, **kwargs):
+    def create(tx, target_value, initialized=False, **kwargs):
         var = GradModeVariable(
             target_values=[target_value],
             initial_values=[torch.is_grad_enabled()],
             **kwargs,
         )
-        var._call_func(tx, [target_value])
+        if initialized:
+            var._call_func(tx, var.target_values)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, initialized=True, **kwargs):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.guards = self.guards | self._guards_singleton
+        install_guard(self._guards_singleton)
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        self._call_func(tx, self.target_values)
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx, *args):
+        self._call_func(tx, self.initial_values)
+        return variables.ConstantVariable.create(None)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ):
+        self._call_func(tx, self.initial_values)  # undo eager initialization
+        return super().call_function(tx, args, kwargs)
 
     def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]
-        tx.output.create_node(
-            "call_function", torch._C._set_grad_enabled, (value,), {}
-        ),
-        torch._C._set_grad_enabled(value)
+        # Coalesce grad mode mutations
+        if torch.is_grad_enabled() != value:
+            tx.output.create_node(
+                "call_function", torch._C._set_grad_enabled, (value,), {}
+            )
+            torch._C._set_grad_enabled(value)
 
     def module_name(self):
         return "torch"
@@ -173,35 +210,38 @@ class InferenceModeVariable(ContextWrappingVariable):
         return var
 
     def __init__(
-        self, target_values, initial_values=torch.is_inference_mode_enabled(), **kwargs
+        self,
+        target_values,
+        initial_values=None,
+        **kwargs,
     ):
-        mode = kwargs.pop("mode", None)
+        if initial_values is None:
+            # This must be called here since function defaults are evaluated at import time
+            initial_values = torch.is_inference_mode_enabled()
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.target_values = target_values
-        self.mode = mode
 
     def exit(self, tx, *args):
-        self.mode = (
-            torch.autograd.grad_mode._exit_inference_mode(self.mode[0]),
-            tx.output.create_node(
-                "call_function",
-                torch.autograd.grad_mode._exit_inference_mode,
-                (self.mode[1],),
-                {},
-            ),
+        self.state.cleanup_assert()
+        tx.output.create_node(
+            "call_function",
+            torch.autograd.grad_mode._exit_inference_mode,
+            (self.state.proxy,),
+            {},
         )
 
     def enter(self, tx):
-        self.mode = (
-            torch.autograd.grad_mode._enter_inference_mode(self.target_values),
-            tx.output.create_node(
-                "call_function",
-                torch.autograd.grad_mode._enter_inference_mode,
-                (self.target_values,),
-                {},
-            ),
+        ctx = torch.autograd.grad_mode._enter_inference_mode(self.target_values)
+        self.set_cleanup_hook(
+            tx, lambda: torch.autograd.grad_mode._exit_inference_mode(ctx)
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch.autograd.grad_mode._enter_inference_mode,
+            (self.target_values,),
+            {},
         )
 
     def module_name(self):
@@ -214,29 +254,28 @@ class InferenceModeVariable(ContextWrappingVariable):
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 
-    _guards_singleton = {Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)}
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)
 
     @staticmethod
     def create(tx, **kwargs):
         var = TorchFunctionDisableVariable(
             target_values=[False],
-            initial_values=[torch._C._is_torch_function_enabled()],
+            initial_values=[tx.output.torch_function_enabled],
             **kwargs,
         )
         # mlazos: I think this is here to make sure we don't reinvoke on clone()
         var._call_func(tx, [False])
+        var.set_cleanup_hook(tx)
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.guards = self.guards | self._guards_singleton
+        install_guard(self._guards_singleton)
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        return variables.ConstantVariable.create(None)
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -246,9 +285,9 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
 class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     """represents torch.{are_deterministic_algorithms_enabled,use_deterministic_algorithms}()"""
 
-    _guards_singleton = {
-        Guard(GlobalStateSource(), GuardBuilder.DETERMINISTIC_ALGORITHMS)
-    }
+    _guards_singleton = Guard(
+        GlobalStateSource(), GuardBuilder.DETERMINISTIC_ALGORITHMS
+    )
 
     @staticmethod
     def create(tx, target_value, **kwargs):
@@ -258,18 +297,17 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
             **kwargs,
         )
         var._call_func(tx, [target_value])
+        var.set_cleanup_hook(tx)
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.guards = self.guards | self._guards_singleton
+        install_guard(self._guards_singleton)
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        return variables.ConstantVariable.create(None)
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -299,6 +337,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
             **kwargs,
         )
         var._call_func(tx, [target_value])
+        var.set_cleanup_hook(tx)
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
@@ -307,9 +346,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        return variables.ConstantVariable.create(None)
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -373,27 +410,22 @@ class AutocastModeVariable(ContextWrappingVariable):
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
-        mode = kwargs.pop("mode", None)
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.target_values = target_values
-        self.mode = mode
 
     def exit(self, tx, *args):
-        self.mode = (
-            torch.amp._exit_autocast(self.mode[0]),
-            tx.output.create_node(
-                "call_function", torch.amp._exit_autocast, (self.mode[1],), {}
-            ),
+        self.state.cleanup_assert()
+        tx.output.create_node(
+            "call_function", torch.amp._exit_autocast, (self.state.proxy,), {}
         )
 
     def enter(self, tx):
-        self.mode = (
-            torch.amp._enter_autocast(*self.target_values),
-            tx.output.create_node(
-                "call_function", torch.amp._enter_autocast, (*self.target_values,), {}
-            ),
+        ctx = torch.amp._enter_autocast(*self.target_values)
+        self.set_cleanup_hook(tx, lambda: torch.amp._exit_autocast(ctx))
+        self.state.proxy = tx.output.create_node(
+            "call_function", torch.amp._enter_autocast, (*self.target_values,), {}
         )
 
     def module_name(self):
@@ -414,14 +446,10 @@ class NullContextVariable(ContextWrappingVariable):
         super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        return variables.ConstantVariable.create(None)
 
     def exit(self, tx, *args):
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        return variables.ConstantVariable.create(None)
 
     def module_name(self):
         return "contextlib"
@@ -430,69 +458,136 @@ class NullContextVariable(ContextWrappingVariable):
         return "nullcontext"
 
 
-class CUDAStreamContextVariable(ContextWrappingVariable):
+class StreamContextVariable(ContextWrappingVariable):
     @staticmethod
     def create(tx, target_value, **kwargs):
         from .builder import wrap_fx_proxy_cls
 
+        current_stream_method = get_interface_for_device(
+            target_value.device
+        ).current_stream
         current_stream = wrap_fx_proxy_cls(
-            CUDAStreamVariable,
+            StreamVariable,
             tx,
             tx.output.create_proxy(
                 "call_function",
-                torch.cuda.current_stream,
+                current_stream_method,
                 (None,),
                 {},
             ),
         )
-        return CUDAStreamContextVariable(
+        return StreamContextVariable(
             target_values=[target_value],
             initial_values=[current_stream],
+            device=target_value.device,
             **kwargs,
         )
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, device, initial_values=None, **kwargs):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        self.device = device
+        self.set_stream = get_interface_for_device(self.device).set_stream
+        self.set_stream_id = get_interface_for_device(self.device)._set_stream_by_id
 
     def enter(self, tx):
-        # CUDA stream generated inside of traced function
+        # stream generated inside the traced function
         if self.target_values[0].as_proxy() is not None:
             tx.output.create_proxy(
                 "call_function",
-                torch.cuda.set_stream,
+                self.set_stream,
                 (self.target_values[0].as_proxy(),),
                 {},
             )
-        # CUDA stream passed from outside of traced function
+        # stream passed from outside the traced function
         else:
             stream = self.target_values[0].value
             tx.output.create_proxy(
                 "call_function",
-                torch._C._cuda_setStream,
+                self.set_stream_id,
                 (stream.stream_id, stream.device_index, stream.device_type),
                 {},
             )
-        torch.cuda.set_stream(self.target_values[0].value)
+        self.set_stream(self.target_values[0].value)
+        self.set_cleanup_hook(tx, lambda: self.set_stream(self.initial_values[0].value))
 
     def exit(self, tx, *args):
         tx.output.create_proxy(
             "call_function",
-            torch.cuda.set_stream,
+            self.set_stream,
             (self.initial_values[0].as_proxy(),),
             {},
         )
-        torch.cuda.set_stream(self.initial_values[0].value)
+        self.state.cleanup_assert()
 
     def module_name(self):
-        return "torch.cuda"
+        return "torch." + str(self.device)
 
     def fn_name(self):
         return "stream"
 
 
-class CUDAStreamVariable(VariableTracker):
+class StreamVariable(VariableTracker):
+    def __init__(self, proxy, value, device, **kwargs):
+        if proxy is not None and "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == value
+        assert (
+            value.device.type == device
+        ), "stream value is not equal to the passed device"
+        super().__init__(**kwargs)
+        self.proxy = proxy
+        self.value = value
+        self.device = device
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        assert hasattr(self.value, name), f"no stream method found named {name}"
+        assert name in [
+            "wait_stream",
+            "synchronize",
+            "query",
+            "record_event",
+            "wait_event",
+        ], f" unsupported stream method {name}"
+
+        from ..utils import proxy_args_kwargs
+        from .builder import wrap_fx_proxy_cls
+
+        if name in ("wait_stream", "synchronize", "wait_event"):
+            tx.output.create_proxy(
+                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+            )
+            return variables.ConstantVariable(None)
+        elif name == "query":
+            return wrap_fx_proxy_cls(
+                target_cls=variables.ConstantVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                ),
+            )
+        elif name == "record_event":
+            return wrap_fx_proxy_cls(
+                target_cls=EventVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                ),
+            )
+        else:
+            unimplemented(self.device + " stream method " + name + " unsupported")
+
+    def as_proxy(self):
+        return self.proxy
+
+
+class EventVariable(VariableTracker):
     def __init__(self, proxy, value, **kwargs):
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
@@ -507,7 +602,24 @@ class CUDAStreamVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented("cuda stream")
+        from ..utils import proxy_args_kwargs
+        from .builder import wrap_fx_proxy_cls
+
+        if name in ("wait", "record", "synchronize"):
+            tx.output.create_proxy(
+                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+            )
+            return variables.ConstantVariable(None)
+        elif name == "query":
+            return wrap_fx_proxy_cls(
+                target_cls=variables.ConstantVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                ),
+            )
+        else:
+            unimplemented(f"event method {name} unsupported")
 
     def as_proxy(self):
         return self.proxy

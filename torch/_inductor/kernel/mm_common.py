@@ -7,6 +7,7 @@ import sympy
 import torch
 from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
+
 from ..utils import ceildiv as cdiv, next_power_of_2
 
 log = logging.getLogger(__name__)
@@ -31,9 +32,30 @@ def filtered_configs(
     # it's safer to use at least [32, 32] block size for int8/uint8
     # tensors
     min_block_size = 32 if has_int8_tensor else 16
-    m = max(next_power_of_2(V.graph.sizevars.size_hint(m)), min_block_size)
-    n = max(next_power_of_2(V.graph.sizevars.size_hint(n)), min_block_size)
-    k = max(next_power_of_2(V.graph.sizevars.size_hint(k)), min_block_size)
+    m = max(
+        next_power_of_2(
+            V.graph.sizevars.size_hint(
+                m, fallback=torch._inductor.config.unbacked_symint_fallback
+            )
+        ),
+        min_block_size,
+    )
+    n = max(
+        next_power_of_2(
+            V.graph.sizevars.size_hint(
+                n, fallback=torch._inductor.config.unbacked_symint_fallback
+            )
+        ),
+        min_block_size,
+    )
+    k = max(
+        next_power_of_2(
+            V.graph.sizevars.size_hint(
+                k, fallback=torch._inductor.config.unbacked_symint_fallback
+            )
+        ),
+        min_block_size,
+    )
     used = set()
     for block_m, block_n, block_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
@@ -192,9 +214,9 @@ def mm_args(mat1, mat2, *others, layout=None, out_dtype=None, use_4x2_dim=False)
 def addmm_epilogue(dtype, alpha, beta):
     def epilogue(acc, bias):
         if alpha != 1:
-            acc = V.ops.mul(acc, V.ops.constant(alpha, dtype))  # type: ignore[attr-defined]
+            acc = V.ops.mul(acc, V.ops.constant(alpha, dtype))
         if beta != 1:
-            bias = V.ops.mul(bias, V.ops.constant(beta, dtype))  # type: ignore[attr-defined]
-        return V.ops.add(acc, bias)  # type: ignore[attr-defined]
+            bias = V.ops.mul(bias, V.ops.constant(beta, dtype))
+        return V.ops.add(acc, bias)
 
     return epilogue
