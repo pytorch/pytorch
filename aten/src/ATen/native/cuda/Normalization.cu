@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/Resize.h>
@@ -27,6 +28,9 @@
 #endif
 
 #include <ATen/ops/cudnn_batch_norm.h>
+#include <ATen/ops/miopen_batch_norm.h>
+
+static const int MIOPEN_DIM_MAX = 5;
 
 namespace at::native {
 
@@ -453,14 +457,73 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, co
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, bool train, double momentum, double epsilon) {
+  printf("ANDREW calling batch_norm_cuda\n");
+
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
+  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+
+  // TODO(andrew): refactor into common function and merge this with _batch_norm_impl_index
+  // TODO(andrew): do this for backward pass too
+  const bool use_cudnn = (
+      self.is_cuda()
+      && self.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
+      && (self.scalar_type() != at::kHalf
+        || weight.scalar_type() == at::kFloat)
+      && weight.defined() && bias.defined()
+      && ((running_mean.defined() && running_var.defined())
+        || (!running_mean.defined() && !running_var.defined() && train))
+      && (self.dim() >= 3)
+      && ((self.sym_size(0) <= 880801 && train) // spatial, training
+          ||(self.sym_size(0) <= 65535 && !train)) //spatial, eval
+      && at::detail::getCUDAHooks().compiledWithCuDNN()
+      && epsilon >= at::detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
+      && at::detail::getCUDAHooks().versionCuDNN() >= 5110L
+      && self.sym_numel() < std::numeric_limits<std::int32_t>::max() // some cuDNN kernels have 32-bit indexing limitations
+      );
+
+  bool use_miopen = (
+      self.is_cuda()
+      && self.dim() <= MIOPEN_DIM_MAX
+      && self.scalar_type() != at::kDouble
+      && self.scalar_type() != at::kBFloat16
+      && (weight.scalar_type() != at::kHalf)
+      && weight.defined() && bias.defined()
+      && ((running_mean.defined() && running_var.defined())
+        || (!running_mean.defined() && !running_var.defined() && train))
+      && at::detail::getCUDAHooks().compiledWithMIOpen()
+      && self.suggest_memory_format() != MemoryFormat::ChannelsLast
+      && self.suggest_memory_format() != MemoryFormat::ChannelsLast3d
+      );
+
+  printf("ANDREW in batch_norm_cuda, use_cudnn = %d, use_miopen = %d\n", use_cudnn, use_miopen);
+
+  if (use_cudnn or use_miopen) {
+    auto weight_c = weight.contiguous();
+    auto bias_c = bias.contiguous();
+    auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
+    auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
+
+    if (use_cudnn) {
+      Tensor output, save_mean, save_var, reserve;
+      auto input_c = self.contiguous(self.suggest_memory_format());
+      std::tie(output, save_mean, save_var, reserve) =
+          at::cudnn_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c, train, momentum, epsilon);
+      return std::tuple<Tensor, Tensor, Tensor>(output, save_mean, save_var);
+    } else {
+      return at::miopen_batch_norm(self.contiguous(), weight_c, bias_c, rmean_c, rvar_c, train, momentum, epsilon);
+    }
+  }
+
   auto output = at::empty_like(self);
   int64_t n_input = self.size(1);
   auto options = self.options().dtype(
       at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));
   auto save_mean = at::empty({n_input}, options);
   auto save_invstd = at::empty({n_input}, options);
-
-  printf("ANDREW calling batch_norm_cuda\n");
 
   at::native::batch_norm_cuda_out(
       self,
@@ -479,14 +542,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
 
 std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var, bool train, double momentum, double epsilon) {
   printf("ANDREW calling batch_norm_legit_cuda\n");
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  Tensor output, save_mean, save_var, reserve;
-  std::tie(output, save_mean, save_var, reserve) =
-      at::cudnn_batch_norm(self, weight, bias_opt, running_mean, running_var,
-                           train, momentum, epsilon);
-  return std::tuple<Tensor, Tensor, Tensor>(output, save_mean, save_var);
-  // return batch_norm_cuda(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, epsilon);
+  return batch_norm_cuda(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, epsilon);
 }
 
 std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, bool train, double momentum, double epsilon) {

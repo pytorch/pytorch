@@ -4,6 +4,7 @@ import collections
 import functools
 import inspect
 import itertools
+import math
 import operator
 import sys
 import unittest
@@ -19,7 +20,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.testing import expectedFailureDynamic
-from torch._dynamo.utils import same
+from torch._dynamo.utils import ifdynstaticdefault, same
 
 from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
@@ -811,6 +812,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return max(a, b) - min(a, b) + c
 
     @make_test
+    def test_symbool_to_int(x):
+        # this is roughly the pattern found in einops.unpack()
+        if sum(s == -1 for s in x.size()) == 0:
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_map_sum(a, b, c, d):
         return sum(map(lambda x: x + 1, [a, b, c, d]))
 
@@ -1016,13 +1025,50 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         y = torch.jit.annotate(Any, x + 1)
         return y + 2
 
-    @expectedFailureDynamic
     @make_test
     def test_is_contiguous_memory_format(tensor):
         if torch.jit.is_scripting():
             return None
         elif tensor.is_contiguous(memory_format=torch.contiguous_format):
             return tensor + 1
+
+    def test_is_contiguous_frame_counts(self):
+        data = [
+            torch.rand(10),
+            torch.rand(2, 3, 32, 32),
+            torch.rand(2, 3, 32, 32).contiguous(memory_format=torch.channels_last),
+            torch.rand(10)[::2],
+            torch.rand(12),
+            torch.rand(2, 3, 24, 24).contiguous(memory_format=torch.channels_last),
+            torch.rand(50)[::2],
+            torch.rand(2, 3, 32, 32)[:, :, 2:-2, 3:-3],
+        ]
+        # dynamo should recompile for all inputs in static shapes mode
+        expected_frame_counts_static = [1, 2, 3, 4, 5, 6, 7, 8]
+        # dynamo should recompile for items 0, 1, 2, 6 in dynamic shapes mode
+        expected_frame_counts_dynamic = [1, 2, 3, 4, 4, 4, 4, 5]
+        expected_frame_counts = ifdynstaticdefault(
+            expected_frame_counts_static, expected_frame_counts_dynamic
+        )
+        dynamic = ifdynstaticdefault(False, True)
+
+        def func(x):
+            if x.is_contiguous():
+                return x + 1
+            elif x.is_contiguous(memory_format=torch.channels_last):
+                return x + 2
+            else:
+                return x + 3
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        cfunc = torch._dynamo.optimize_assert(cnt, dynamic=dynamic)(func)
+
+        assert cnt.frame_count == 0
+        for i, x in enumerate(data):
+            expected = func(x)
+            output = cfunc(x)
+            self.assertTrue(same(output, expected))
+            assert cnt.frame_count == expected_frame_counts[i]
 
     @make_test
     def test_list_slice_assignment(x):
@@ -1086,6 +1132,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #             return x * param
     #         case {"b": param}:
     #             return x / param
+
+    def test_math_radians(self):
+        def func(x, a):
+            return x + math.radians(a)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        cfunc = torch._dynamo.optimize_assert(cnt)(func)
+
+        assert cnt.frame_count == 0
+        x = torch.rand(10)
+        expected = func(x, 12)
+        output = cfunc(x, 12)
+        self.assertTrue(same(output, expected))
+        assert cnt.frame_count == 1
 
     @make_test
     def test_numpy_meshgrid(x, y):
@@ -1214,6 +1274,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         multiply = lambda x, y: x * y
         triple = functools.partial(multiply, y=3)
         return triple(x)
+
+    def test_pow_int(self):
+        def fn(a, b):
+            return torch.pow(a, b)
+
+        x = torch.ones(2, 2)
+        opt_fn = torch.compile(fullgraph=True, backend="eager", dynamic=True)(fn)
+        self.assertEqual(opt_fn(x, 2), fn(x, 2))
 
     def test_tensor_size_indexed_by_symint(self):
         def fn(x, y):
@@ -1881,6 +1949,12 @@ def forward(self, x_1, output_1):
         # to be in the metadata, so there might be false negatives
         self.assertTrue("aten.copy" not in codes[0])
         self.assertTrue("aten.clone" not in codes[0])
+        # The following checks that there are only the tensor output is in
+        # the compiled graph
+        if dynamic and grad:
+            self.assertTrue("return (buf0, s0, )" in codes[0])
+        else:
+            self.assertTrue("return (buf0, )" in codes[0])
 
     @requires_cuda()
     @skipIfRocm
@@ -1952,13 +2026,20 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @skipIfRocm
-    def test_triton_kernel_None_arg(self):
+    def test_triton_kernel_various_args(self):
+        @triton.autotune(
+            configs=[triton.Config({"BLOCK_SIZE": 128})],
+            key=[],
+        )
         @triton.jit
         def pass_kernel(
             out_ptr,
-            dummy_None,
             n_elements,
+            dummy_None,
+            dummy_empty,
+            dummy_float,
             BLOCK_SIZE: "tl.constexpr",
+            RANDOM_SIZE: "tl.constexpr",
         ):
             pass
 
@@ -1966,7 +2047,14 @@ def forward(self, x_1, output_1):
         def call_triton(output):
             n_elements = output.numel()
             grid = (n_elements,)
-            pass_kernel[grid](output, None, n_elements, BLOCK_SIZE=16)
+            pass_kernel[grid](
+                output,
+                n_elements,
+                None,
+                torch.empty_like(output),
+                3.1415926,
+                RANDOM_SIZE=0,
+            )
             return output
 
         output = torch.randn(5, device="cuda")
@@ -2534,6 +2622,34 @@ def forward(self, x_1, output_1):
         # Test aliased
         self.assertEqual(opt_fn(param, param), fn(param, param))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
+    @unittest.skipIf(
+        sys.version_info < (3, 10),
+        "zip strict kwargs not implemented for Python < 3.10",
+    )
+    def test_zip_strict(self):
+        def fn(x, ys, zs):
+            x = x.clone()
+            for y, z in zip(ys, zs, strict=True):
+                x += y * z
+            return x
+
+        opt_fn = torch._dynamo.optimize(backend="eager")(fn)
+        nopython_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+
+        x = torch.ones(3)
+        ys = [1.0, 2.0, 3.0]
+        zs = [2.0, 5.0, 8.0]
+
+        self.assertEqual(opt_fn(x, ys, zs), fn(x, ys, zs))
+
+        # If nopython, should raise UserError
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+            nopython_fn(x, ys[:1], zs)
+
+        # Should cause fallback if allow graph break
+        with self.assertRaisesRegex(ValueError, "zip()"):
+            opt_fn(x, ys[:1], zs)
 
     def test_compare_constant_and_tensor(self):
         for op in [
