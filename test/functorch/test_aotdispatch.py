@@ -1807,7 +1807,7 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
 
-        with self.assertRaisesRegex(RuntimeError, "is a tensor subclass. This is not supported today"):
+        with self.assertRaisesRegex(RuntimeError, "Metadata mutations are currently not allowed on tensor subclasses"):
             self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
 
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
