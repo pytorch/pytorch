@@ -31,6 +31,8 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
+
+import torch.utils._pytree as pytree
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
@@ -44,8 +46,6 @@ from torch._dynamo.testing import (
     skipIfNotPy311,
     unsupported,
 )
-
-import torch.utils._pytree as pytree
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
@@ -407,6 +407,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_can_auto_functionalize(self):
         from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
+
         expected_true = [
             "(Tensor(a!) x) -> ()",
             "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> ()",
@@ -423,7 +424,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             try:
                 lib = torch.library.Library("mylib", "FRAGMENT")
                 torch.library.define("mylib::a", schema, lib=lib)
-                self.assertTrue(can_auto_functionalize(torch.ops.mylib.a.default), msg=schema)
+                self.assertTrue(
+                    can_auto_functionalize(torch.ops.mylib.a.default), msg=schema
+                )
                 self.assertFalse(can_auto_functionalize(torch.ops.mylib.a))
             finally:
                 del torch.ops.mylib.a
@@ -432,7 +435,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             try:
                 lib = torch.library.Library("mylib", "FRAGMENT")
                 torch.library.define("mylib::a", schema, lib=lib)
-                self.assertFalse(can_auto_functionalize(torch.ops.mylib.a.default), msg=schema)
+                self.assertFalse(
+                    can_auto_functionalize(torch.ops.mylib.a.default), msg=schema
+                )
                 self.assertFalse(can_auto_functionalize(torch.ops.mylib.a))
             finally:
                 del torch.ops.mylib.a
@@ -445,7 +450,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 "mylib::foo",
                 "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> ()",
                 tags=torch.Tag.pt2_compliant_tag,
-                lib=lib)
+                lib=lib,
+            )
 
             @torch.library.impl("mylib::foo", "cpu", lib=lib)
             @torch._dynamo.disable
@@ -463,7 +469,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            torch.compile(f, backend='aot_eager')(*compiled_args)
+            torch.compile(f, backend="aot_eager")(*compiled_args)
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
@@ -479,7 +485,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 "mylib::foo",
                 "(Tensor(a!)? x, Tensor[] y, Tensor(b!)? z, SymInt w, Tensor n) -> ()",
                 tags=torch.Tag.pt2_compliant_tag,
-                lib=lib)
+                lib=lib,
+            )
 
             @torch.library.impl("mylib::foo", "cpu", lib=lib)
             @torch._dynamo.disable
@@ -499,7 +506,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            torch.compile(f, backend='aot_eager')(*compiled_args)
+            torch.compile(f, backend="aot_eager")(*compiled_args)
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
