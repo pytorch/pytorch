@@ -45,6 +45,7 @@ from torch._dynamo.testing import (
     unsupported,
 )
 
+import torch.utils._pytree as pytree
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
@@ -402,6 +403,109 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         finally:
             del torch.ops.mylib.bar3
+            del lib
+
+    def test_can_auto_functionalize(self):
+        from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
+        expected_true = [
+            "(Tensor(a!) x) -> ()",
+            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> ()",
+            "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> ()",
+        ]
+        expected_false = [
+            "(Tensor x) -> ()",
+            "(Tensor(a) x) -> Tensor(a)",
+            "(Tensor(a!) x) -> Tensor(a!)",
+            "(Tensor(a!) x, Tensor y, Tensor(b!)[] z, SymInt w) -> ()",
+            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> Tensor",
+        ]
+        for schema in expected_true:
+            try:
+                lib = torch.library.Library("mylib", "FRAGMENT")
+                torch.library.define("mylib::a", schema, lib=lib)
+                self.assertTrue(can_auto_functionalize(torch.ops.mylib.a.default), msg=schema)
+                self.assertFalse(can_auto_functionalize(torch.ops.mylib.a))
+            finally:
+                del torch.ops.mylib.a
+                del lib
+        for schema in expected_false:
+            try:
+                lib = torch.library.Library("mylib", "FRAGMENT")
+                torch.library.define("mylib::a", schema, lib=lib)
+                self.assertFalse(can_auto_functionalize(torch.ops.mylib.a.default), msg=schema)
+                self.assertFalse(can_auto_functionalize(torch.ops.mylib.a))
+            finally:
+                del torch.ops.mylib.a
+                del lib
+
+    def test_auto_functionalize(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib)
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y, z, w, n):
+                x.add_(y[0] + w)
+                z.add_(y[1] + n)
+
+            def f(x, y, z, n):
+                torch.ops.mylib.foo(x, y, z, 2, n)
+
+            x = torch.randn(3)
+            y = (torch.randn(3), torch.randn(3))
+            z = torch.randn(3)
+            n = torch.randn(3)
+            orig_args = (x, y, z, n)
+
+            compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            torch.compile(f, backend='aot_eager')(*compiled_args)
+
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            f(*eager_args)
+            self.assertEqual(compiled_args, eager_args)
+        finally:
+            del torch.ops.mylib.foo
+            del lib
+
+    def test_auto_functionalize_optional(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!)? x, Tensor[] y, Tensor(b!)? z, SymInt w, Tensor n) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib)
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y, z, w, n):
+                if x is not None:
+                    x.add_(y[0] + w)
+                if z is not None:
+                    z.add_(y[1] + n)
+
+            def f(x, y, z, n):
+                torch.ops.mylib.foo(x, y, z, 2, n)
+
+            x = None
+            y = (torch.randn(3), torch.randn(3))
+            z = torch.randn(3)
+            n = torch.randn(3)
+            orig_args = (x, y, z, n)
+
+            compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            torch.compile(f, backend='aot_eager')(*compiled_args)
+
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            f(*eager_args)
+            self.assertEqual(compiled_args, eager_args)
+        finally:
+            del torch.ops.mylib.foo
             del lib
 
     def test_shape_int_inplace_binops(self):
@@ -7149,8 +7253,6 @@ def ___make_guard_fn():
         opt()
 
     def test_tracing_py_tree(self):
-        import torch.utils._pytree as pytree
-
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
