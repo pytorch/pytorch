@@ -1447,17 +1447,22 @@ class TestMPS(TestCaseMPS):
         tensor_cpu = tensor_0[:][1].fill_(val)
 
         self.assertEqual(tensor_mps, tensor_cpu)
+        self.assertEqual(tensor, tensor_0)
 
         shape = [1, 10]
         val = 0.0
         tensor = torch.ones(shape, device="mps")
         val_tensor_mps = torch.tensor(val, device="mps")
         tensor_mps = tensor[:, 9].fill_(val_tensor_mps)
+        # Regression test for https://github.com/pytorch/pytorch/issues/114692
+        tensor[:, 5].fill_(val_tensor_mps)
         tensor_0 = torch.ones(shape, device="cpu")
         val_tensor_cpu = torch.tensor(val, device="cpu")
         tensor_cpu = tensor_0[:, 9].fill_(val_tensor_cpu)
+        tensor_0[:, 5].fill_(val_tensor_cpu)
 
-        self.assertEqual(tensor_mps, tensor_cpu)
+        self.assertEqual(tensor_mps.to(device="cpu"), tensor_cpu)
+        self.assertEqual(tensor.to(device="cpu"), tensor_0)
 
     def test_cdist_large(self, device="mps"):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
