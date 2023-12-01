@@ -624,17 +624,37 @@ def expand_default(func, *args, **kwargs):
     expand_arg = [-1, *size[2:]]
     return NestedTensor(func(inp._values, expand_arg), **extract_kwargs(inp))
 
-
-@register_jagged_func(torch.ops.aten.expand_as.default, "self: t, other: jt")
-def expand_as_default(func, *args, **kwargs):
+# Allow both jt and t for self
+@register_jagged_func(torch.ops.aten._nested_expand.default, "self: any, size: any, dummy: jt")
+def _nested_expand(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-
     inp = new_kwargs.pop("input")
-    other = new_kwargs.pop("other")
+    size = new_kwargs.pop("size")
+    _unused_B, singleton, *Ds = size
+    offsets = singleton.node.singleton_values()
+    sum_offsets = singleton.node.singleton_sum_offsets()
+    assert inp.dim() <= len(size)
 
-    return NestedTensor(func(inp, other._values), **extract_kwargs(other))
+    if inp.is_nested:
+        # B and j0 of inp.shape must match that of size
+        # ex: (B, j0, 1) -> (B, j0, D)
+        assert inp.dim() == len(size)
+        assert singleton == size[1]
+        inp = inp._values
+    else:
+        # currently you must either expand both or neither
+        # and since j0 must be expanded, both are always expanded
+        # cannot expand (B, j0, D) to (B, 1, D) today
+        # ex: (1, 1, D) -> (B, j0 ,D)
+        # - (1, 1, D) is squeezed to (1, D,) and then expanded to (sum_offsets, D)
+        if inp.dim() == len(size):
+            # because both B and j0 must be expanded, the two leading dimensions
+            # are 1 here. squeeze until expandable to [sum_offsets, *Ds]
+            # TODO: decide whether we want to do error checking here.
+            inp = inp.squeeze(0)
+    return NestedTensor(inp.expand([sum_offsets, *Ds]), offsets)
 
 
 @register_jagged_func(torch.ops.aten.where.self, "condition: jt, self: jt, other: jt")
@@ -705,6 +725,12 @@ def sum_dim_IntList(func, *args, **kwargs):
         if new_kwargs["keepdim"]:
             out = out.unsqueeze(0)
         return out
+
+@register_jagged_func(
+    torch.ops.aten.sum.default, "self: jt, dtype: any?"
+)
+def sum_default(func, *args, **kwargs):
+    return args[0]._values.sum(**kwargs)
 
 
 @register_jagged_func(torch.ops.aten.transpose.int, "self: jt, dim0: any, dim1: any")

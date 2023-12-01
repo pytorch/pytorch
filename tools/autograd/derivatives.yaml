@@ -653,6 +653,12 @@
   self: at::sum_to(grad, self.sym_sizes())
   result: auto_linear
 
+# TODO: this derivative is not SymInt safe, need sum_to support
+- name: _nested_expand(Tensor(a) self, SymInt[] size, Tensor dummy) -> Tensor(a)
+  self: at::sum_to(grad, self.sym_sizes())
+  dummy: non_differentiable
+  result: auto_linear
+
 - name: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   self: at::zeros_like(grad)
   result: self_t.zero_()
@@ -1621,8 +1627,12 @@
   result: auto_element_wise
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand_symint(self.sym_sizes())
-  result: auto_linear
+  dispatch:
+    Default:
+      self: grad.expand_symint(self.sym_sizes())
+      result: auto_linear
+    AutogradNestedTensor:
+      self: grad.expand_as(torch::empty_symint(self.sym_sizes(), self.options()))
 
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   dispatch:

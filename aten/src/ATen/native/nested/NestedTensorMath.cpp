@@ -567,6 +567,12 @@ Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
       self, sizemat_transposed, stridemat_transposed, self_ptr->get_storage_offsets().clone());
 }
 
+Tensor expand_nested_symint(const Tensor& self, c10::SymIntArrayRef size, const Tensor& dummy) {
+  TORCH_INTERNAL_ASSERT(
+      false, "expand_nested(): expected to be implemented from Python");
+  return Tensor();
+}
+
 Tensor squeeze_nested(const Tensor& self) {
   TORCH_CHECK(false,
   "squeeze(): For nested tensors, squeeze without the dim argument is not supported ",

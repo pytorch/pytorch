@@ -2602,6 +2602,22 @@
   device_check: NoCheck
   device_guard: False
 
+- func: _nested_expand(Tensor(a) self, SymInt[] size, Tensor dummy) -> Tensor(a)
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: expand_nested_symint
+
+- func: _nested_expand_copy(Tensor self, SymInt[] size, Tensor dummy) -> Tensor
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: expand_nested_copy_symint
+  tags: view_copy
+  autogen: _nested_expand_copy.out
+
 # decomposes to eye.m
 - func: eye(SymInt n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:

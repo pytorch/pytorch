@@ -1084,10 +1084,22 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             out = torch.zeros(nt.shape)
             return out
 
-        compile_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        compile_fn = torch.compile(fn, fullgraph=True, backend="aot_eager", dynamic=True)
         out = compile_fn(x)
 
         self.assertEqual(out, torch.zeros(x.shape))
+
+    def test_sum(self):
+        # Need more extensive testing with various settings dtype/device etc.
+        x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
+
+        def fn(nt):
+            out = torch.sum(nt)
+            return out
+
+        compile_fn = torch.compile(fn, fullgraph=True, backend="aot_eager", dynamic=True)
+        out = compile_fn(x)
+        out.backward()
 
 
 if __name__ == "__main__":
