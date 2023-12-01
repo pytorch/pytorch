@@ -3699,7 +3699,79 @@ class NCCLTraceTest(MultiProcessTestCase):
                 pg.allreduce(a).wait()
             torch.cuda.synchronize(device=device)
 
+class NCCLTraceTestShortTimeout(NCCLTraceTest):
+    timeout_sec = 3
 
+    def setUp(self):
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '10'
+        self.tempdir = tempfile.TemporaryDirectory()
+        # will be cleaned up (reliably?) on gc?
+        os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"] = self._trace_basename()
+        super().setUp()
+
+    def _create_process_group_nccl(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            timeout=timedelta(seconds=NCCLTraceTestShortTimeout.timeout_sec))
+        pg = c10d.distributed_c10d._get_default_group()
+        return pg
+
+    def _trace_basename(self):
+        # we pass the base to the env, and the dump util will append rank
+        return os.path.join(self.tempdir.name, "trace_")
+
+    def _trace_name(self, rank):
+        return self._trace_basename() + str(rank)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_timeout_dumps(self):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            for c in self.children_pipes:
+                self.assertEqual(c.recv(), 'next')
+            for c in self.children_pipes:
+                c.send('next')
+
+            # allow extra time for both timeout interval and dump process
+            with open(self._trace_name(rank=0), 'rb') as f:
+                t = pickle.load(f)
+                self.assertEqual(len(t), 2)
+                self.assertEqual(t[0]['seq_id'], 1)
+                self.assertEqual(t[0]['state'], 'completed')
+                self.assertEqual(t[1]['seq_id'], 2)
+                self.assertEqual(t[1]['state'], 'started')
+
+            self.assertFalse(os.path.exists(self._trace_name(rank=1)))
+
+            return
+
+        pg = self._create_process_group_nccl()
+        device = self.local_device
+        with torch.cuda.device(device):
+            a = torch.full((3, 4), float(self.rank), device=device)
+
+            pg.allreduce(a).wait()
+            if self.rank == 0:
+                pg.allreduce(a).wait()
+
+
+            if self.rank == 0:
+                # we expect our trace file to be written, but it happens asynchronously.
+                # just ensure we produce a file and it's unpickleable. then let the parent
+                # proceed and validate the file.
+                for _ in range(4):
+                    try:
+                        with open(self._trace_file(self.rank), 'rb') as f:
+                            pickle.load(f)
+                    except Exception:
+                        time.sleep(NCCLTraceTestShortTimeout.timeout_sec)
+
+            self.parent.send('next')
+            self.assertEqual('next', self.parent.recv())
 
 if __name__ == "__main__":
     assert (
