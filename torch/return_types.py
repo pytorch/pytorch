@@ -1,37 +1,28 @@
-import inspect
-import warnings
-
 import torch
+import inspect
 
 __all__ = ["pytree_register_structseq"]
 
 # error: Module has no attribute "_return_types"
 return_types = torch._C._return_types  # type: ignore[attr-defined]
 
-
 def pytree_register_structseq(cls):
-    if torch.utils._pytree.is_structseq_class(cls):
-        return
-
-    warnings.warn(f"Class {cls!r} is not a PyStructSequence class.")
-
     def structseq_flatten(structseq):
-        return list(structseq), type(structseq)
+        return list(structseq), None
 
     def structseq_unflatten(values, context):
-        return context(values)
+        return cls(values)
 
     torch.utils._pytree.register_pytree_node(cls, structseq_flatten, structseq_unflatten)
 
-
 for name in dir(return_types):
-    if name.startswith("__"):
+    if name.startswith('__'):
         continue
 
     _attr = getattr(return_types, name)
     globals()[name] = _attr
 
-    if not name.startswith("_"):
+    if not name.startswith('_'):
         __all__.append(name)
 
     # Today everything in torch.return_types is a structseq, aka a "namedtuple"-like
