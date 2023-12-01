@@ -470,7 +470,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
     const Tensor& input,
     optional<double> atol_opt,
     optional<double> rtol_opt) {
-  double atol = atol_opt.has_value() ? atol_opt.value() : 0.0;
+  auto atol = atol_opt.has_value() ? atol_opt.value() : 0.0;
   c10::SymFloat rtol;
   if (rtol_opt.has_value()) {
     rtol = rtol_opt.value();
@@ -481,7 +481,12 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
            ? 0.0
            : default_rtol;
   }
-  auto options = input.options().dtype(ScalarType::Double);
+  auto options = input.options();
+  if (input.device().type() == kMetal || input.device().type() == kMPS) {
+    options = options.dtype(ScalarType::Float);
+  } else {
+    options = options.dtype(ScalarType::Double);
+  }
   auto atol_tensor = at::full({}, atol, options);
   auto rtol_tensor = at::full({}, rtol, options);
   return std::make_tuple(atol_tensor, rtol_tensor);
