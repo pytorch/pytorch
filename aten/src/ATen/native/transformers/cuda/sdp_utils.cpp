@@ -182,6 +182,11 @@ const char* over_arch = nullptr;
 
 void init_gcn_arch_override() {
   over_arch = std::getenv("PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE");
+  if (over_arch) {
+      TORCH_WARN("SDPA functions only loads value from PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE once. "
+                 "Later changes to this environment variable with os.environ "
+                 "(or other methods) will not affect SDPA function's behavior.");
+  }
 }
 
 bool check_flash_attention_hardware_support(sdp_params const& params, bool debug) {

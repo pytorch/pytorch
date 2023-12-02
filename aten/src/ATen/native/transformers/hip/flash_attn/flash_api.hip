@@ -74,6 +74,11 @@ const char* fa_override_arch = nullptr;
 
 void init_fa_override_arch() {
   fa_override_arch = std::getenv("PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE");
+  if (fa_override_arch) {
+      TORCH_WARN("ROCM flash attention backend only loads value from PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE once. "
+                 "Later changes to this environment variable with os.environ "
+                 "(or other methods) will not affect this backend's behavior.");
+  }
 }
 
 void check_gpu_arch() {
