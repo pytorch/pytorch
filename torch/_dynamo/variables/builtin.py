@@ -909,7 +909,7 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstDictVariable(
                 dict(kwargs), user_cls=user_cls, mutable_local=MutableLocal()
             )
-        unimplemented(f"dict(): {args} {kwargs}")
+        unimplemented(f"{user_cls.__name__}(): {args} {kwargs}")
 
     @staticmethod
     def call_custom_dict_fromkeys(tx, user_cls, *args, **kwargs):
