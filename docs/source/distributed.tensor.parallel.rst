@@ -23,9 +23,11 @@ Tensor Parallelism supports the following parallel styles:
 
 .. autoclass:: torch.distributed.tensor.parallel.ColwiseParallel
   :members:
+  :undoc-members:
 
 .. autoclass:: torch.distributed.tensor.parallel.RowwiseParallel
   :members:
+  :undoc-members:
 
 To simply configure the nn.Module's inputs and outputs with DTensor layouts
 and perform necessary layout redistributions, without distribute the module
@@ -34,9 +36,11 @@ the ``parallelize_plan``of ``parallelize_module``:
 
 .. autoclass:: torch.distributed.tensor.parallel.PrepareModuleInput
   :members:
+  :undoc-members:
 
 .. autoclass:: torch.distributed.tensor.parallel.PrepareModuleOutput
   :members:
+  :undoc-members:
 
 
 For models like Transformer, we recommend users to use ``ColwiseParallel``
