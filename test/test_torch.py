@@ -1520,11 +1520,15 @@ else:
             # size, padding
             [(1, 2, 4, 4), (0, 0, 0, 0)],
             [(1, 2, 4, 4), (3, 4, 5, 6)],
-            [(4, 3, 5, 10), (-9, 4, 5, 6)],
             [(3, 8, 7), (0, 0, 0, 0)],
-            [(3, 8, 7), (-4, -2, -2, -3)],
             [(3, 8, 7), (4, 3, 2, 7)],
         ]
+
+        if torch.device(device).type != 'xla':
+            test_cases += [
+                [(4, 3, 5, 10), (-9, 4, 5, 6)],
+                [(3, 8, 7), (-4, -2, -2, -3)],
+            ]
 
         for size, padding in test_cases:
             input = torch.randn(*size, device=device, requires_grad=True)
