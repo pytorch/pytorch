@@ -670,7 +670,7 @@ def _annotate_add_relu(
             if _is_input_large_scalar(input_act0, gm):
                 continue
             if _is_input_non_float_tensor(input_act0):
-               continue
+                continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = add_node.args[1]
@@ -678,7 +678,7 @@ def _annotate_add_relu(
             if _is_input_large_scalar(input_act1, gm):
                 continue
             if _is_input_non_float_tensor(input_act1):
-               continue
+                continue
             input_qspec_map[input_act1] = input_act_qspec
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -718,7 +718,7 @@ def _annotate_add(
             if _is_input_large_scalar(input_act0, gm):
                 continue
             if _is_input_non_float_tensor(input_act0):
-               continue
+                continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = add_node.args[1]
@@ -726,7 +726,7 @@ def _annotate_add(
             if _is_input_large_scalar(input_act1, gm):
                 continue
             if _is_input_non_float_tensor(input_act1):
-               continue
+                continue
             input_qspec_map[input_act1] = input_act_qspec
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -769,7 +769,7 @@ def _annotate_mul_relu(
             if _is_input_large_scalar(input_act0, gm):
                 continue
             if _is_input_non_float_tensor(input_act0):
-               continue
+                continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = mul_node.args[1]
@@ -777,7 +777,7 @@ def _annotate_mul_relu(
             if _is_input_large_scalar(input_act1, gm):
                 continue
             if _is_input_non_float_tensor(input_act1):
-               continue
+                continue
             input_qspec_map[input_act1] = input_act_qspec
 
         mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -817,7 +817,7 @@ def _annotate_mul(
             if _is_input_large_scalar(input_act0, gm):
                 continue
             if _is_input_non_float_tensor(input_act0):
-               continue
+                continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = mul_node.args[1]
@@ -825,7 +825,7 @@ def _annotate_mul(
             if _is_input_large_scalar(input_act1, gm):
                 continue
             if _is_input_non_float_tensor(input_act1):
-               continue
+                continue
             input_qspec_map[input_act1] = input_act_qspec
 
         mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
