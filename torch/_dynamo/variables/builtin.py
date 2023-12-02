@@ -915,8 +915,9 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict_fromkeys(tx, user_cls, *args, **kwargs):
         assert user_cls in {dict, OrderedDict, defaultdict}
         if kwargs:
+            # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
             assert user_cls is OrderedDict
-            assert len(kwargs) == 1 and "value" in kwargs
+            assert len(args) == 1 and len(kwargs) == 1 and "value" in kwargs
             args = (*args, kwargs.pop("value"))
         if len(args) == 0:
             raise UserError(TypeError, "fromkeys expected at least 1 argument, got 0")
@@ -927,15 +928,12 @@ class BuiltinVariable(VariableTracker):
         DictVariableType = (
             ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
         )
+
+        iterable = None
         if isinstance(arg, dict):
-            return DictVariableType(
-                user_cls.fromkeys(arg, value), user_cls, mutable_local=MutableLocal()
-            )
+            iterable = arg
         elif isinstance(arg, variables.ConstDictVariable):
-            keys = arg.unpack_var_sequence(tx)
-            return DictVariableType(
-                user_cls.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
-            )
+            iterable = arg.unpack_var_sequence(tx)
         elif isinstance(
             arg,
             (
@@ -944,9 +942,14 @@ class BuiltinVariable(VariableTracker):
                 ListIteratorVariable,
             ),
         ):
-            keys = [DictVariableType.get_key(x) for x in arg.unpack_var_sequence(tx)]
-            items = user_cls.fromkeys(keys, value)
-            return DictVariableType(items, user_cls, mutable_local=MutableLocal())
+            iterable = [
+                DictVariableType.get_key(x) for x in arg.unpack_var_sequence(tx)
+            ]
+
+        if iterable is not None:
+            return DictVariableType(
+                dict.fromkeys(iterable, value), user_cls, mutable_local=MutableLocal()
+            )
         unimplemented(f"{user_cls.__name__}.fromkeys(): {args} {kwargs}")
 
     def call_zip(self, tx, *args, **kwargs):
