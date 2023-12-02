@@ -20,7 +20,10 @@ WARN_FOR_UNFUSED_KERNELS = False
 
 
 def _raise_kernel_warnings(params: SDPAParams) -> None:
-    # Raise warnings as to why we cant run the efficient kernels
+    """
+    If WARN_FOR_UNFUSED_KERNELS is set to True, this will raise warnings
+    for all the reasons why the fused kernels can't be run.
+    """
     if WARN_FOR_UNFUSED_KERNELS:
         if not can_use_efficient_attention(params):
             warn("Efficient attention can't be used because:")
