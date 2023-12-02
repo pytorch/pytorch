@@ -7,8 +7,8 @@ import torch._dynamo as torchdynamo
 from torch._export import capture_pre_autograd_graph
 from torch.ao.ns.fx.utils import compute_sqnr
 from torch.ao.quantization import (
-    default_dynamic_qconfig,
     default_dynamic_fake_quant,
+    default_dynamic_qconfig,
     observer,
     QConfig,
     QConfigMapping,
