@@ -922,33 +922,29 @@ class BuiltinVariable(VariableTracker):
         if len(args) == 0:
             raise UserError(TypeError, "fromkeys expected at least 1 argument, got 0")
         if len(args) == 1:
-            args = (*args, None)
+            args = (*args, ConstantVariable.create(None))
         assert len(args) == 2
         arg, value = args
         DictVariableType = (
             ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
         )
 
-        iterable = None
         if isinstance(arg, dict):
-            iterable = arg
-        elif isinstance(arg, variables.ConstDictVariable):
-            iterable = arg.unpack_var_sequence(tx)
+            return DictVariableType(
+                dict.fromkeys(arg, value), user_cls, mutable_local=MutableLocal()
+            )
         elif isinstance(
             arg,
             (
+                ConstDictVariable,
                 ListVariable,
                 TupleVariable,
                 ListIteratorVariable,
             ),
         ):
-            iterable = [
-                DictVariableType.get_key(x) for x in arg.unpack_var_sequence(tx)
-            ]
-
-        if iterable is not None:
+            keys = [DictVariableType.get_key(x) for x in arg.unpack_var_sequence(tx)]
             return DictVariableType(
-                dict.fromkeys(iterable, value), user_cls, mutable_local=MutableLocal()
+                dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
             )
         unimplemented(f"{user_cls.__name__}.fromkeys(): {args} {kwargs}")
 
