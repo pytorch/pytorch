@@ -8786,8 +8786,9 @@ class TestLinalgMPS(TestCaseMPS):
             try:
                 run_test(shape0, shape1, batch)
             except NotImplementedError as e:
-                with self.assertRaisesRegex(NotImplementedError,
-                                             "The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device."):
+                with self.assertRaisesRegex(
+                        NotImplementedError,
+                        "The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device."):
                     raise e
 
     def test_pinv(self, device="mps", dtype=torch.float32, precision=1e-5):
