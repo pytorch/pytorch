@@ -53,6 +53,8 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 
 class WhyNoFuse:
+    # TODO when we drop support for Python < 3.10, we can use
+    # @dataclass(slots=True) instead of manually specifying __slots__.
     __slots__ = ["node1", "node2", "reason", "args"]
     reason: str
     args: Tuple[Any, ...]
@@ -67,9 +69,8 @@ class WhyNoFuse:
         fusion_log.debug(self)
 
     def __str__(self):
-        return (
-            f"cannot fuse {self.node1.get_name()} with {self.node2.get_name()}: "
-            + (self.reason % self.args)
+        return f"cannot fuse {self.node1.get_name()} with {self.node2.get_name()}: " + (
+            self.reason % self.args
         )
 
 
