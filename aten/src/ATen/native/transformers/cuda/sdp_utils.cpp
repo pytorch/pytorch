@@ -177,6 +177,7 @@ bool check_sm_version(cudaDeviceProp * dprops) {
   return is_gte_lower_bound && is_lte_upper_bound;
 }
 
+#if USE_ROCM
 c10::once_flag gcn_arch_override_flag;
 const char* over_arch = nullptr;
 
@@ -188,6 +189,7 @@ void init_gcn_arch_override() {
                  "(or other methods) will not affect SDPA function's behavior.");
   }
 }
+#endif
 
 bool check_flash_attention_hardware_support(sdp_params const& params, bool debug) {
   // Check that the gpu is capable of running flash attention
