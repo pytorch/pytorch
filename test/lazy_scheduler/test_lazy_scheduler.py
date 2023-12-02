@@ -314,6 +314,7 @@ class TestLazyScheduler(TestCase):
 
 """
 TODO:
+0. Check gradients equivalence for eager vs. compile in test_backward_simple_no_segment
 1. Add segment registration logic (do subgraph splitting above AOTAutograd, overwrite compile_fx), enable test_segment_tagging to check segment tagging is working
 2. Add scheduling logic, add unit test to check it's working
 """
