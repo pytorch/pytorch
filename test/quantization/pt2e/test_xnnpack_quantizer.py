@@ -7,6 +7,7 @@ import torch._dynamo as torchdynamo
 from torch._export import capture_pre_autograd_graph
 from torch.ao.ns.fx.utils import compute_sqnr
 from torch.ao.quantization import (
+    default_dynamic_qconfig,
     default_dynamic_fake_quant,
     observer,
     QConfig,
@@ -97,7 +98,6 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(quantization_config)
-        example_inputs = (torch.randn(1, 3, 5, 5),)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
@@ -113,9 +113,10 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             torch.ops.aten.conv1d.default,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
         ]
+        m = TestHelperModules.Conv2dThenConv1d()
         self._test_quantizer(
-            TestHelperModules.Conv1dWithConv2d(),
-            example_inputs,
+            m,
+            m.example_inputs(),
             quantizer,
             node_occurrence,
             node_list,
