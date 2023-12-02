@@ -96,7 +96,7 @@ def parallelize_module(  # type: ignore[return]
 
 
     if isinstance(parallelize_plan, ParallelStyle):
-        return parallelize_plan.apply(module, device_mesh)
+        return parallelize_plan._apply(module, device_mesh)
     elif isinstance(parallelize_plan, dict):
         for module_path, parallelize_style in parallelize_plan.items():
             sub_module = module.get_submodule(module_path)

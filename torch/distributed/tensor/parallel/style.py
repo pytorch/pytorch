@@ -25,7 +25,7 @@ class ParallelStyle(ABC):
     """
 
     @abstractmethod
-    def apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         ...
 
 
@@ -122,7 +122,7 @@ class ColwiseParallel(ParallelStyle):
         # back to local tensor
         return outputs.to_local() if use_local_output else outputs
 
-    def apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         return distribute_module(
             module,
             device_mesh,
@@ -212,7 +212,7 @@ class RowwiseParallel(ParallelStyle):
         # back to local tensor if use_local_output is True
         return outputs.to_local() if use_local_output else outputs
 
-    def apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         return distribute_module(
             module,
             device_mesh,
@@ -290,7 +290,7 @@ class PrepareModuleInput(ParallelStyle):
                 prepared_inputs.append(inp)
         return tuple(prepared_inputs)
 
-    def apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         module.register_forward_pre_hook(lambda _, inputs: self._prepare_input_fn(inputs, device_mesh))  # type: ignore[misc, call-arg]
         return module
 
@@ -364,6 +364,6 @@ class PrepareModuleOutput(ParallelStyle):
         else:
             return tuple(prepared_outputs)
 
-    def apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         module.register_forward_hook(lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh))  # type: ignore[misc, call-arg]
         return module
