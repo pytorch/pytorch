@@ -9,6 +9,7 @@ import logging
 import math
 import operator
 import os
+import textwrap
 from typing import Any, Counter, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import sympy
@@ -19,6 +20,7 @@ import torch._logging
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
+
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path, PyCodeCache
@@ -857,6 +859,16 @@ class TritonKernel(Kernel):
 
         self.simplify_indexing = simplify_indexing
 
+    def need_numel_args(self):
+        r"""
+        Indicate whether we need provide numel as arguments for the generated
+        kernel calls in the benchmark.
+
+        Should be true for pointwise/reduction kernels but false for triton
+        matmul kernels.
+        """
+        return True
+
     def should_use_persistent_reduction(self) -> bool:
         """
         Heuristic to set self.persistent_reduction and add guards
@@ -1143,7 +1155,7 @@ class TritonKernel(Kernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
-            elif var.name.startswith(("s", "ps")):
+            elif var.name.startswith(("s", "ps", "i")):
                 pass
             else:
                 # var is one of xN, yN or rN
@@ -1536,9 +1548,11 @@ class TritonKernel(Kernel):
                 masked_value = _mask_value(value, default)
 
             if reduction_type in {"argmax", "argmin"}:
-                accumulator_index = self.cse.generate(
-                    self.compute,
-                    f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
+                accumulator_index = str(
+                    self.cse.generate(
+                        self.compute,
+                        f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
+                    )
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
                 final_argreduce(
@@ -1582,7 +1596,7 @@ class TritonKernel(Kernel):
                 )
 
             if reduction_type in {"argmax", "argmin"}:
-                accumulator_index = f"_{result_var}_index"  # type: ignore[assignment]
+                accumulator_index = f"_{result_var}_index"
                 long_max = torch.iinfo(torch.int64).max
                 self.body.writeline(
                     f"{accumulator_index} = tl.full({self.dense_size_str()}, {long_max}, tl.int64)"
@@ -1801,7 +1815,12 @@ class TritonKernel(Kernel):
 
                 stream_name = f"stream{index}"
                 result.writeline(f"{stream_name} = get_cuda_stream({index})")
-                extra_args_str = ", ".join(map(str, extra_args)) + ", "
+
+                if self.need_numel_args():
+                    extra_args_str = ", ".join(map(str, extra_args)) + ", "
+                else:
+                    extra_args_str = ""
+
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
                 )
@@ -1838,6 +1857,16 @@ class TritonKernel(Kernel):
             )
 
         return result
+
+    def imports_for_benchmark_kernel(self):
+        return textwrap.dedent(
+            """
+            from torch._dynamo.testing import rand_strided
+            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+            import torch
+            from torch._inductor.triton_heuristics import grid
+        """
+        )
 
     def codegen_kernel(self, name=None):
         from triton import next_power_of_2
@@ -1885,14 +1914,7 @@ class TritonKernel(Kernel):
                 """
             )
             if config.benchmark_kernel:
-                code.splice(
-                    """
-                        from torch._dynamo.testing import rand_strided
-                        from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-                        import torch
-                        from torch._inductor.triton_heuristics import grid
-                    """
-                )
+                code.splice(self.imports_for_benchmark_kernel())
 
         argdefs, _, signature = self.args.python_argdefs()
         # maps actual expression to SizeArg if its in sizevars replacements
@@ -2630,7 +2652,7 @@ class TritonScheduling(BaseScheduling):
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
 
-            basename, _, kernel_path = get_path(code_hash(src_code), "py")
+            basename, _, kernel_path = get_path(code_hash(src_code.strip()), "py")
 
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
@@ -2668,6 +2690,10 @@ class TritonScheduling(BaseScheduling):
                 else partial_code.finalize()
             )
             node_schedule = [template_node, *epilogue_nodes]
+
+            if config.benchmark_kernel:
+                src_code = f"{kernel.imports_for_benchmark_kernel()}\n{src_code}\n{kernel.codegen_kernel_benchmark().getvalue()}"
+
             kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name, template_node.node)
@@ -2889,7 +2915,8 @@ class TritonScheduling(BaseScheduling):
         mod = PyCodeCache.load(src_code)
 
         def cache_file_path():
-            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"  # type: ignore[type-var,operator]
+            assert mod.__file__ is not None
+            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
 
         def load_cache():
             path = cache_file_path()

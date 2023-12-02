@@ -394,6 +394,69 @@ def meta_unsqueeze_(self, dim):
     return self
 
 
+@register_meta(aten._sparse_semi_structured_linear)
+def meta_sparse_structured_linear(
+    input: Tensor,
+    weight: Tensor,
+    _meta: Tensor,
+    bias: Optional[Tensor] = None,
+    _activation_opt: Optional[str] = None,
+):
+    output_sizes = list(input.shape)
+    if bias is not None:
+        assert weight.size(0) == bias.size(0), "output size mismatch"
+    assert weight.size(1) == input.size(-1) / 2
+    output_sizes[-1] = weight.size(0)
+
+    # see: https://github.com/pytorch/pytorch/pull/114477#issuecomment-1830121375
+    # We assume that we have already squashed the inputs into a 2-D tensor
+    # Then, as the output is transposed, we need to propagate the transposed
+    # stride information to the output tensor
+    assert len(input.shape) == 2, "we can only handle the squashed input case"
+    transposed_strides = (1, input.size(0))
+
+    output = input.new_empty(
+        output_sizes,
+        dtype=input.dtype if input.dtype != torch.int8 else torch.int32,
+    ).as_strided(output_sizes, transposed_strides)
+
+    return output
+
+
+@register_meta(aten._cslt_sparse_mm)
+def meta__cslt_sparse_mm(
+    compressed_A: torch.Tensor,
+    dense_B: torch.Tensor,
+    bias: Optional[Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    transpose_result: bool = False,
+):
+    assert dense_B.dtype in {
+        torch.float16,
+        torch.bfloat16,
+        torch.int8,
+    }, "_cslt_sparse_mm only supports fp16, bf16, and int8"
+    assert compressed_A.dtype == dense_B.dtype, "inputs must have the same dtype"
+    assert len(dense_B.shape) == 2, "_cslt_sparse_mm only supports 2d inputs"
+
+    is_int8_input_type = compressed_A.dtype == torch.int8
+    compression_factor = 10 if is_int8_input_type else 9
+    k = dense_B.size(0)
+    n = dense_B.size(1)
+    m = (compressed_A.numel() * 16) // (compression_factor * k)
+    if bias is not None:
+        assert m == bias.size(0)
+
+    mixed_dtype = out_dtype is not None and (is_int8_input_type != out_dtype)
+    if mixed_dtype:
+        assert (
+            is_int8_input_type and mixed_dtype is torch.float16
+        ), "out_dtype is only supported for i8i8->fp16 matmul"
+    output_shape = (n, m) if transpose_result else (m, n)
+    result = dense_B.new_empty(output_shape, dtype=out_dtype if mixed_dtype else None)
+    return result
+
+
 @register_meta(aten.index_reduce.default)
 def meta_index_reduce(
     self: Tensor,

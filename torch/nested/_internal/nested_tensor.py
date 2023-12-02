@@ -111,19 +111,23 @@ class NestedTensor(torch.Tensor):
 
         # SDPA metadata
         def get_sdpa_extreme_seqlen(func, tensor):
-            yield int(func(tensor).item())
+            return int(func(tensor).item())
 
-        self._max_seqlen = kwargs.get(
-            "_max_seqlen",
-            get_sdpa_extreme_seqlen(
+        # Note: Not using kwargs.get to avoid execution of get_sdpa_extreme_seqlen
+        # unless it is really needed
+        self._max_seqlen = (
+            kwargs["_max_seqlen"]
+            if "_max_seqlen" in kwargs
+            else get_sdpa_extreme_seqlen(
                 torch.max, offsets.diff() if lengths is None else lengths
-            ),
+            )
         )
-        self._min_seqlen = kwargs.get(
-            "_min_seqlen",
-            get_sdpa_extreme_seqlen(
+        self._min_seqlen = (
+            kwargs["_min_seqlen"]
+            if "_min_seqlen" in kwargs
+            else get_sdpa_extreme_seqlen(
                 torch.min, offsets.diff() if lengths is None else lengths
-            ),
+            )
         )
 
     def values(self):
@@ -260,12 +264,16 @@ class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: NestedTensor):  # type: ignore[override]
         ctx.save_for_backward(x.offsets())
+        ctx.max_seqlen = x.max_seqlen()
+        ctx.min_seqlen = x.min_seqlen()
         return x.values()
 
     @staticmethod
     def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
         (offsets,) = ctx.saved_tensors
-        return NestedTensor(gO, offsets=offsets)
+        return NestedTensor(
+            gO, offsets=offsets, _max_seqlen=ctx.max_seqlen, _min_seqlen=ctx.min_seqlen
+        )
 
 
 # Not actually a view!

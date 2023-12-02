@@ -580,7 +580,11 @@ def _sdpa_nested_preprocessing(query, key, value):
     key_buffer_reshaped = _view_as_dense(k_t, Nnz_kv, num_heads, head_dim_qk)
     value_buffer_reshaped = _view_as_dense(v_t, Nnz_kv, num_heads, head_dim_v)
 
-    output_nt_info = {"offsets": q_t.offsets()}
+    output_nt_info = {
+        "offsets": q_t.offsets(),
+        "_max_seqlen": q_t.max_seqlen(),
+        "_min_seqlen": q_t.min_seqlen(),
+    }
 
     return (
         query_buffer_reshaped,
