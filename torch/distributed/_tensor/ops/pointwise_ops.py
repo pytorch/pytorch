@@ -2,7 +2,6 @@
 from typing import List, Tuple
 
 import torch
-from torch.distributed._tensor.device_mesh import DeviceMesh
 
 from torch.distributed._tensor.op_schema import (
     _is_inplace_op,
@@ -30,6 +29,7 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.distributed.device_mesh import DeviceMesh
 
 
 aten = torch.ops.aten

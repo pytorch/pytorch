@@ -177,12 +177,14 @@ Initialization
 --------------
 
 The package needs to be initialized using the :func:`torch.distributed.init_process_group`
-function before calling any other methods. This blocks until all processes have
-joined.
+or :func:`torch.distributed.init_device_mesh` function before calling any other methods.
+Both block until all processes have joined.
 
 .. autofunction:: is_available
 
 .. autofunction:: init_process_group
+
+.. autofunction:: init_device_mesh
 
 .. autofunction:: is_initialized
 
@@ -338,6 +340,18 @@ an opaque group handle that can be given as a ``group`` argument to all collecti
 .. autofunction:: get_global_rank
 
 .. autofunction:: get_process_group_ranks
+
+
+DeviceMesh
+----------
+
+DeviceMesh is a higher level abstraction that manages process groups (or NCCL communicators).
+It allows user to easily create inter node and intra node process groups without worrying about
+how to set up the ranks correctly for different sub process groups, and it helps manage those
+distributed process group easily. :func:`~torch.distributed.init_device_mesh` function can be
+used to create new DeviceMesh, with a mesh shape describing the device topology.
+
+.. autoclass:: DeviceMesh
 
 Point-to-point communication
 ----------------------------
@@ -846,6 +860,7 @@ If you are running single node training, it may be convenient to interactively b
 .. py:module:: torch.distributed.checkpoint.utils
 .. py:module:: torch.distributed.collective_utils
 .. py:module:: torch.distributed.constants
+.. py:module:: torch.distributed.device_mesh
 .. py:module:: torch.distributed.distributed_c10d
 .. py:module:: torch.distributed.elastic.agent.server.api
 .. py:module:: torch.distributed.elastic.agent.server.local_elastic_agent
