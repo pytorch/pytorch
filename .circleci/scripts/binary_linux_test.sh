@@ -83,11 +83,9 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       "numpy\${NUMPY_PIN}" \
       mkl>=2018 \
       ninja \
+      sympy \
       typing-extensions \
       ${PROTOBUF_PACKAGE}
-    if [[ "\$python_nodot" != *312* ]]; then
-      retry conda install \${EXTRA_CONDA_FLAGS} -yq sympy
-    fi
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
     else
