@@ -813,9 +813,8 @@ class WrapperCodeGen(CodeGen):
                     )
 
             call_str = f"call([{', '.join(V.graph.graph_inputs.keys())}])"
-            output.writeline(
-                f"return print_performance(lambda: {call_str}, times=times, repeat=repeat)"
-            )
+            output.writeline(f"fn = lambda: {call_str}")
+            output.writeline("return print_performance(fn, times=times, repeat=repeat)")
 
     def add_benchmark_harness(self, output):
         """
