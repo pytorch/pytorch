@@ -81,6 +81,11 @@ DTYPE_TO_ATEN = {
     torch.float8_e5m2: "at::kFloat8_e5m2",
 }
 
+LAYOUT_TO_ATEN = {
+    torch.strided: "at::kStrided",
+    torch._mkldnn: "at::kMkldnn",
+}
+
 DEVICE_TO_ATEN = {
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
