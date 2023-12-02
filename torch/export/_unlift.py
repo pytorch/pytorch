@@ -132,13 +132,13 @@ def _get_codegen(
         if (
             in_spec.type == tuple
             and in_spec.num_children == 2
-            and in_spec.children_specs[0].type == tuple
-            and in_spec.children_specs[1].type == dict
+            and in_spec.child(0).type == tuple
+            and in_spec.child(1).type == dict
         ):
             # if in_spec contains the args (tuple) and kwargs (dict)
-            names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]
+            names = [f"arg_{i}" for i in range(in_spec.child(0).num_children)]
             # add kwarg names
-            names.extend(in_spec.children_specs[1].context)
+            names.extend(in_spec.child(1).context)
         else:
             names = [f"arg_{i}" for i in range(in_spec.num_children)]
 
