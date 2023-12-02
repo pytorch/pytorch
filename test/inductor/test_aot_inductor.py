@@ -1422,6 +1422,27 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), inputs)
 
+    def test_convolution(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, w, b):
+                return torch.ops.aten.convolution(x, w, b, [4], [0], [1], True, [0], 1)
+
+        example_inputs = (
+            torch.randn([2, 32, 90], device=self.device),
+            torch.randn([32, 16, 8], device=self.device),
+            torch.randn([16], device=self.device),
+        )
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "Triton",
+            }
+        ):
+            self.check_model(Model(), example_inputs)
+
     def test_zero_size_weight(self):
         class Model(torch.nn.Module):
             def __init__(self, channel, r=8):
@@ -1470,8 +1491,8 @@ copy_tests(
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
         "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
-        # Need to support convolution
-        "test_missing_cubin": TestFailure(("abi_compatible_cpu",)),
+        # FIXME: failed with Segfault while exiting the Python runtime
+        "test_missing_cubin": TestFailure(("abi_compatible_cpu",), is_skip=True),
         "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # There is a double-free issue which will be fixed in another PR
@@ -1501,8 +1522,6 @@ copy_tests(
     # test_failures, xfail by default, set is_skip=True to skip
     {
         "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
-        # Need to support convolution
-        "test_missing_cubin": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
         # There is a double-free issue which will be fixed in another PR
         "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),
