@@ -1,15 +1,7 @@
 from typing import Any, Dict, Iterable, List, Tuple
 
-from torch.utils._pytree import (
-    _dict_flatten,
-    _dict_unflatten,
-    _list_flatten,
-    _list_unflatten,
-    Context,
-    register_pytree_node,
-)
-
 from ._compatibility import compatibility
+from torch.utils._pytree import Context, register_pytree_node
 
 __all__ = ["immutable_list", "immutable_dict"]
 
@@ -46,16 +38,16 @@ compatibility(is_backward_compatible=True)(immutable_dict)
 # Register immutable collections for PyTree operations
 
 def _immutable_dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
-    return _dict_flatten(d)
+    return list(d.values()), list(d.keys())
 
 def _immutable_dict_unflatten(values: Iterable[Any], context: Context) -> Dict[Any, Any]:
-    return immutable_dict(_dict_unflatten(values, context))
+    return immutable_dict(dict(zip(context, values)))
 
 def _immutable_list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
-    return _list_flatten(d)
+    return d, None
 
 def _immutable_list_unflatten(values: Iterable[Any], context: Context) -> List[Any]:
-    return immutable_list(_list_unflatten(values, context))
+    return immutable_list(values)
 
 
 register_pytree_node(immutable_dict, _immutable_dict_flatten, _immutable_dict_unflatten)
