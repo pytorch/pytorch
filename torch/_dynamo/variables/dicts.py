@@ -87,6 +87,7 @@ class ConstDictVariable(VariableTracker):
         val = self.items
 
         if name == "__getitem__":
+            assert len(args) == 1
             return self.getitem_const(args[0])
 
         elif name == "items":
@@ -144,10 +145,9 @@ class ConstDictVariable(VariableTracker):
             )
         elif (
             name in ("pop", "get")
-            and args
+            and len(args) == 2
             and ConstDictVariable.is_valid_key(args[0])
             and ConstDictVariable.get_key(args[0]) not in self.items
-            and len(args) == 2
         ):
             # missing item, return the default value
             return args[1]
@@ -163,17 +163,18 @@ class ConstDictVariable(VariableTracker):
             return result
         elif (
             name == "update"
-            and args
+            and len(args) == 1
             and isinstance(args[0], ConstDictVariable)
             and self.mutable_local
         ):
             newval = dict(val)
             newval.update(args[0].items)
+            newval.update(kwargs)  # all keys in kwargs are valid (`str`s)
             result = self.modifed(newval)
             return tx.replace_all(self, result)
         elif (
             name == "update"
-            and args
+            and len(args) == 1
             and isinstance(
                 args[0],
                 (
@@ -189,6 +190,7 @@ class ConstDictVariable(VariableTracker):
                 k, v = x.unpack_var_sequence(tx)
                 assert ConstDictVariable.is_valid_key(k)
                 newval[ConstDictVariable.get_key(k)] = v
+            newval.update(kwargs)  # all keys in kwargs are valid (`str`s)
             result = self.modifed(newval)
             return tx.replace_all(self, result)
         elif (
