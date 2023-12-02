@@ -85,6 +85,9 @@ class AsyncTensor(torch.Tensor):
       args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor, args)
       return func(*args_materialized)
 
+  def materialize_with_value(self, tensor):
+    self._materialized_tensor = tensor
+
   @staticmethod
   def check_materialized(async_tensors):
     all_materialized = True
@@ -127,7 +130,7 @@ class AsyncFuncHandle:
     self.is_going_to_be_scheduled = True
     gm = self._scheduler()._handle_to_gm_map[self]
     AsyncTensor.wait_until_materialized(self.args)
-    args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor, self.args)
+    args_materialized = pytree.tree_map(lambda x: x.detach(), self.args)
     self.outs = self.compiled_fn(list(args_materialized))
     self.cuda_event.record()
 
@@ -136,7 +139,7 @@ class AsyncFuncHandle:
     for out, out_async in zip(self.outs, self.outs_async):
       # Set the output AsyncTensor's underlying materialized tensor
       # to be the actual output tensor.
-      out_async._materialized_tensor = out
+      out_async.materialize_with_value(out)
 
   def is_completed(self):
     return self.cuda_event.query()
@@ -173,42 +176,19 @@ class LazyScheduler:
     self._gm_to_handle_map = OrderedDict()
     self._handle_to_gm_map = OrderedDict()
 
-  # NOTE: this matches compile_fx_inner signature
   def compile(
     self,
+    # NOTE: assumes first arg is GraphModule in compile_fx_inner signature
     gm: torch.fx.GraphModule,
-    example_inputs,
-    cudagraphs = None,
-    num_fixed = 0,
-    is_backward = False,
-    graph_id = None,
-    cpp_wrapper = False,
-    aot_mode = False,
-    is_inference = False,
-    boxed_forward_device_index = None,
-    user_visible_outputs = frozenset(),
-    layout_opt = None,
-    extern_node_serializer = None,
+    *args,
+    **kwargs,
   ):
     """
     Compiles a graph module using Inductor compile_fx_inner,
     and wraps the output compiled_fn in a LazyGraphModule to be called later.
     """
-    compiled_fn = compile_fx_inner(
-      gm,
-      example_inputs,
-      cudagraphs=cudagraphs,
-      num_fixed=num_fixed,
-      is_backward=is_backward,
-      graph_id=graph_id,
-      cpp_wrapper=cpp_wrapper,
-      aot_mode=aot_mode,
-      is_inference=is_inference,
-      boxed_forward_device_index=boxed_forward_device_index,
-      user_visible_outputs=user_visible_outputs,
-      layout_opt=layout_opt,
-      extern_node_serializer=extern_node_serializer,
-    )
+    assert isinstance(gm, torch.fx.GraphModule)
+    compiled_fn = compile_fx_inner(gm, *args, **kwargs)
     lazy_gm = LazyGraphModule(
       self,
       gm,
@@ -259,34 +239,34 @@ class TestCase(TorchTestCase):
     torch._dynamo.reset()
 
 
+class TestModule(torch.nn.Module):
+  def __init__(self):
+    super().__init__()
+
+  def func1(self, x, y):
+    z = torch.matmul(x, y)
+    return z
+
+  def forward(self, x, y):
+    z = self.func1(x, y)
+    z = z * z
+    return z
+
+
 class TestLazyScheduler(TestCase):
   def test_backward_simple_no_segment(self):
-    class TestModule(torch.nn.Module):
-      def __init__(self):
-        super().__init__()
-
-      def func1(self, x, y):
-        z = torch.matmul(x, y)
-        return z
-
-      def forward(self, x, y):
-        z = self.func1(x, y)
-        z = z * z
-        return z
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
-
     m = TestModule()
     m = m.to(device)
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
 
+    # Eager, 1st iter
     actual_e = m(x, y)
     actual_e.sum().backward()
-    print(f"eager: first iter done")
+    # Eager, 2nd iter
     actual_e = m(x, y)
     actual_e.sum().backward()
-    print(f"eager: second iter done")
 
     lazy_scheduler = LazyScheduler()
     compiled_m_ls = torch.compile(
@@ -295,14 +275,48 @@ class TestLazyScheduler(TestCase):
       fullgraph=False
     )
 
+    # w/ LazyScheduler, 1st iter
     actual_ls = compiled_m_ls(x, y)
-    print(f"actual_ls: {actual_ls}")
     actual_ls.sum().backward()
-    print(f"compiled_ls: first iter done")
+    # w/ LazyScheduler, 2nd iter
     actual_ls = compiled_m_ls(x, y)
-    print(f"actual_ls: {actual_ls}")
     actual_ls.sum().backward()
-    print(f"compiled_ls: second iter done")
+
+  def DISABLED_test_segment_tagging(self):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    m = TestModule()
+    m = m.to(device)
+    x = torch.randn(4, 4, requires_grad=True, device=device)
+    y = torch.randn(4, 4, requires_grad=True, device=device)
+
+    # Eager, 1st iter
+    actual_e = m(x, y)
+    actual_e.sum().backward()
+    # Eager, 2nd iter
+    actual_e = m(x, y)
+    actual_e.sum().backward()
+
+    register_segment(m.func1, "segment1")
+
+    lazy_scheduler = LazyScheduler()
+
+    def compile_then_check_segment_info(*args, **kwargs):
+      lazy_gm = lazy_scheduler.compile(*args, **kwargs)
+      for node in lazy_gm.graph.nodes:
+        print(f"node.meta: {node.meta}")
+
+    lazy_scheduler = LazyScheduler()
+    compiled_m_ls = torch.compile(
+      m,
+      backend=functools.partial(compile_fx, inner_compile=compile_then_check_segment_info),
+      fullgraph=False
+    )
+
+"""
+TODO:
+1. Add segment registration logic (do subgraph splitting above AOTAutograd, overwrite compile_fx), enable test_segment_tagging to check segment tagging is working
+2. Add scheduling logic, add unit test to check it's working
+"""
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
