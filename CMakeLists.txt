@@ -738,9 +738,9 @@ include(cmake/Dependencies.cmake)
 # TODO: Merge this into cmake_dependent_option as "NOT MSVC AND (USE_CUDA OR USE_ROCM)"
 #       once cmake_minimum_required is bumped to 3.22
 #       See https://cmake.org/cmake/help/latest/policy/CMP0127.html for the feature required here.
-if (MSVC)
+if(MSVC)
   set(CONFIG_FA OFF)
-elseif (USE_ROCM OR USE_CUDA)
+elseif(USE_ROCM OR USE_CUDA)
   set(CONFIG_FA ON)
 else()
   set(CONFIG_FA OFF)
