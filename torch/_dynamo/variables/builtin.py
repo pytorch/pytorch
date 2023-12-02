@@ -947,6 +947,7 @@ class BuiltinVariable(VariableTracker):
             keys = [DictVariableType.get_key(x) for x in arg.unpack_var_sequence(tx)]
             items = user_cls.fromkeys(keys, value)
             return DictVariableType(items, user_cls, mutable_local=MutableLocal())
+        unimplemented(f"{user_cls.__name__}.fromkeys(): {args} {kwargs}")
 
     def call_zip(self, tx, *args, **kwargs):
         if kwargs:
