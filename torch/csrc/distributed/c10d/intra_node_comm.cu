@@ -16,7 +16,7 @@ static constexpr uint32_t kNumelPerThread =
 static constexpr uint32_t kNumelPerWarp = kNumelPerThread * kWarpSize;
 
 #if defined(USE_ROCM)
-using __nv_bfloat162 = uint16_t;
+using __nv_bfloat162 = uint32_t;
 #endif
 
 struct __align__(16) bf16x8 {
@@ -43,8 +43,50 @@ DEVICE_INLINE bf16x8 add_bf16x8(bf16x8 a, bf16x8 b) {
   return c;
 }
 
-// releaseSignal and acquireSignal also enforces memory ordering
-// https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#memory-synchronization-domains
+/**
+ * NOTE [cross device memory synchronization]
+ *
+ * The multi-stage algorithms (e.g. two-shot, hcm allreduce) require the writes
+ * of a thread to be visible by threads with the same block/thread ID on other
+ * devices. To satisfy CUDA's memory consistency model, every thread has to
+ * release its writes at the system scope, and the consuming thread has to
+ * acquire the writes at the system scope. This incurs high overhead and
+ * attempts in optmizing this process can be prone to race condition.
+ *
+ * Instead, we go around caching by having each thread:
+ *
+ * - Directly write to global memory via st.wt (write-through).
+ * - Synchronize with threads within the block.
+ * - Perform cross device synchronization at block level (via system scope
+ * atomic ops).
+ * - Synchronize with threads within the block.
+ * - Directly read from global memory via ld.nc (non-coherent/non-cached).
+ */
+template <typename T>
+DEVICE_INLINE void streamLoad128(bf16x8& val, const T* addr) {
+#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+  CUDA_KERNEL_ASSERT(false);
+#else
+  unsigned long long int low, high;
+  asm("ld.global.nc.v2.u64 {%0, %1}, [%2];"
+      : "=l"(low), "=l"(high)
+      : "l"(addr));
+  reinterpret_cast<unsigned long long int*>(&val)[0] = low;
+  reinterpret_cast<unsigned long long int*>(&val)[1] = high;
+#endif
+}
+
+__device__ inline void streamStore128(at::BFloat16* addr, const bf16x8& val) {
+#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+  CUDA_KERNEL_ASSERT(false);
+#else
+  unsigned long long int low, high;
+  low = reinterpret_cast<const unsigned long long int*>(&val)[0];
+  high = reinterpret_cast<const unsigned long long int*>(&val)[1];
+  asm("st.global.wt.v2.u64 [%0], {%1, %2};" : : "l"(addr), "l"(low), "l"(high));
+#endif
+}
+
 DEVICE_INLINE void releaseSignal(uint32_t* addr) {
 #if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
@@ -161,7 +203,7 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     bf16x8 vals[kWorldSize];
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      LOAD_16(&vals[ii], &srcs[ii][N_start + i]);
+      streamLoad128(vals[ii], &srcs[ii][N_start + i]);
     }
     bf16x8 sums;
     memset(reinterpret_cast<void*>(&sums), 0, sizeof(sums));
@@ -170,8 +212,7 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
       sums = add_bf16x8(sums, vals[ii]);
     }
-    auto relayBuf = srcs[0] + kMaxIntraNodeSize / 2;
-    LOAD_16(&relayBuf[N_start + i], &sums);
+    streamStore128(&srcs[0][N_start + i], sums);
   }
   __syncthreads();
 
@@ -185,9 +226,10 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
   for (size_t i = offset; i < N_per_rank; i += stride) {
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      size_t i_r = N_start + i + (distRank[ii] - rank) * N_per_rank;
-      auto relayBuf = srcs[ii] + kMaxIntraNodeSize / 2;
-      LOAD_16(&input[i_r], &relayBuf[i_r]);
+      size_t k = N_start + i + (distRank[ii] - rank) * N_per_rank;
+      bf16x8 val;
+      streamLoad128(val, &srcs[ii][k]);
+      streamStore128(&input[k], val);
     }
   }
 }
@@ -202,6 +244,28 @@ struct HcmP2pState {
   size_t relayRank;
 };
 
+/**
+ * NOTE [hybrid cube mesh]
+ *
+ * In a hybrid cube mesh topology, every device has exactly 4 neighbors
+ * (directly connected via NVLink). For every device X, it has exactly 1
+ * neighbor X that is a neighbor of the 3 non-neighbor of X. We call Y the
+ * relay neighbor of X. This property is symmetrical: X is also guaranteed to
+ * be the relay neighbor of Y.
+ *
+ * With this property, we can perform a variant of one-shot allreduce algo that
+ * only moves data across NVLinks:
+ *
+ * - Each device one-shot allreduce among itself and 3 non-relay neighbors.
+ * - Each device exchange data with its relay neighbor.
+ *
+ * HybridCubeMesh is a data structure for describing the topology:
+ *
+ * - hcm[X][0:3] are the 3 neighbors of X.
+ * - hcm[X][3] is the relay neighbor of X.
+ * - For load balancing purpose, we also ensure that if hcm[X][k] = Y,
+ *   hcm[Y][k] = X.
+ */
 using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
 
 HybridCubeMesh getHybridCubeMesh(NvlMesh nvlMesh) {
@@ -231,7 +295,7 @@ HybridCubeMesh getHybridCubeMesh(NvlMesh nvlMesh) {
 
   for (size_t i = 0; i < kMaxDevices; ++i) {
     for (size_t k = 0; k < 3; ++k) {
-      // We can only fill hcm[i][k] with j hcm[j][k] is not filled
+      // We can only fill hcm[i][k] with j if hcm[j][k] is not filled
       for (size_t j : neighbors[i]) {
         if (hcm[j][k] == -1) {
           hcm[i][k] = j;
