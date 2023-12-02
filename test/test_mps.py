@@ -8781,7 +8781,14 @@ class TestLinalgMPS(TestCaseMPS):
         shapes = (3, 13)
         batches = ((), (0, ), (4, ), (3, 5, ))
         for (shape0, shape1), batch in zip(itertools.product(shapes, reversed(shapes)), batches):
-            run_test(shape0, shape1, batch)
+            # escape only when NotImplementedError of downstream function is raised
+            # TODO: remove this once the required function is implemented
+            try:
+                run_test(shape0, shape1, batch)
+            except NotImplementedError as e:
+                with self.assertRaisesRegex(NotImplementedError,
+                                             "The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device."):
+                    raise e
 
     def test_pinv(self, device="mps", dtype=torch.float32, precision=1e-5):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
@@ -8835,9 +8842,22 @@ class TestLinalgMPS(TestCaseMPS):
                       (0, 0), (3, 0, 0), ]:  # zero numel square matrices
             A = random_hermitian_pd_matrix(sizes[-1], *sizes[:-2], dtype=dtype, device=device)
             hermitian = True
-            # TODO: remove this once the other function is implemented
-            run_test_main(A, hermitian)
-            run_test_numpy(A, hermitian)
+            # escape only when NotImplementedError of downstream function is raised
+            # TODO: remove this once the required function is implemented
+            try:
+                run_test_main(A, hermitian)
+            except NotImplementedError as e:
+                with self.assertRaisesRegex(
+                        NotImplementedError,
+                        "The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device."):
+                    raise e
+            try:
+                run_test_numpy(A, hermitian)
+            except NotImplementedError as e:
+                with self.assertRaisesRegex(
+                        NotImplementedError,
+                        "The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device."):
+                    raise e
 
 
 
