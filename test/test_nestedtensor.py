@@ -3541,7 +3541,10 @@ class TestNestedTensorSubclass(NestedTestCase):
         v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
 
         # High Precision Math Reference
-        out_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1.to(torch.float32), k_d1.to(torch.float32), v_d1.to(torch.float32))[0]
+        q_d1_f32 = q_d1.to(torch.float32)
+        k_d1_f32 = k_d1.to(torch.float32)
+        v_d1_f32 = v_d1.to(torch.float32)
+        out_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1_f32, k_d1_f32, v_d1_f32)[0]
         # Low Precision Math Reference
         out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1, k_d1, v_d1)[0]
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)

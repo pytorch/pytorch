@@ -415,12 +415,19 @@ def jagged_from_tensor_and_lengths(
                 values[offsets[0] : offsets[-1]],
                 offsets - offsets[0],
                 actual_max_seqlen,
+                min_seqlen,
             ),
             offsets,
             None,
         )
 
-    return ViewNonContiguousNestedFromBuffer.apply(values, offsets, length_list, actual_max_seqlen, min_seqlen), offsets, length_list  # type: ignore[call-overload]
+    return (
+        ViewNonContiguousNestedFromBuffer.apply(
+            values, offsets, length_list, actual_max_seqlen, min_seqlen
+        ),
+        offsets,
+        length_list,
+    )  # type: ignore[call-overload]
 
 
 def buffer_from_jagged(jagged):
