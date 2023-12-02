@@ -58,7 +58,7 @@ DEVICE_INLINE bf16x8 add_bf16x8(bf16x8 a, bf16x8 b) {
  * - Directly write to global memory via st.wt (write-through).
  * - Synchronize with threads within the block.
  * - Perform cross device synchronization at block level (via system scope
- * atomic ops).
+ *   atomic ops).
  * - Synchronize with threads within the block.
  * - Directly read from global memory via ld.nc (non-coherent/non-cached).
  */
@@ -83,8 +83,18 @@ __device__ inline void streamStore128(at::BFloat16* addr, const bf16x8& val) {
   unsigned long long int low, high;
   low = reinterpret_cast<const unsigned long long int*>(&val)[0];
   high = reinterpret_cast<const unsigned long long int*>(&val)[1];
-  asm("st.global.wt.v2.u64 [%0], {%1, %2};" : : "l"(addr), "l"(low), "l"(high));
+  asm("st.global.cs.v2.u64 [%0], {%1, %2};" : : "l"(addr), "l"(low), "l"(high));
 #endif
+}
+
+template <typename T>
+DEVICE_INLINE void load128(bf16x8& val, const T* addr) {
+  *reinterpret_cast<uint4*>(&val) = reinterpret_cast<const uint4*>(addr)[0];
+}
+
+template <typename T>
+DEVICE_INLINE void store128(T* addr, const bf16x8& val) {
+  *reinterpret_cast<uint4*>(addr) = reinterpret_cast<const uint4*>(&val)[0];
 }
 
 DEVICE_INLINE void releaseSignal(uint32_t* addr) {
@@ -107,9 +117,6 @@ DEVICE_INLINE void acquireSignal(uint32_t* addr) {
 #endif
 }
 
-#define LOAD_16(a, b) \
-  *reinterpret_cast<uint4*>(a) = reinterpret_cast<const uint4*>(b)[0]
-
 ////////////////////////////////////////////////////////////////////////////////
 // Fully Connected Algos
 ////////////////////////////////////////////////////////////////////////////////
@@ -119,7 +126,7 @@ struct FcP2pState {
   uint32_t signals1[kMaxAllReduceBlocks][kMaxDevices];
 };
 
-template <uint32_t kWorldSize>
+template <uint32_t kWorldSize, bool kAligned>
 static __global__ void oneShotAllReduceKernel(
     at::BFloat16* input,
     size_t N,
@@ -151,8 +158,9 @@ static __global__ void oneShotAllReduceKernel(
     bf16x8 vals[kWorldSize];
 #pragma unroll kWorldSize
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      LOAD_16(&vals[ii], &srcs[ii][i]);
+      streamLoad128(vals[ii], &srcs[ii][i]);
     }
+
     bf16x8 sums;
     memset(reinterpret_cast<void*>(&sums), 0, sizeof(sums));
 
@@ -160,9 +168,13 @@ static __global__ void oneShotAllReduceKernel(
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
       sums = add_bf16x8(sums, vals[ii]);
     }
-    for (size_t ii = 0; ii < kNumelPerThread; ++ii) {
-      if (i + ii < N) {
-        input[i + ii] = reinterpret_cast<at::BFloat16*>(&sums)[ii];
+    if constexpr (kAligned) {
+      streamStore128(&input[i], sums);
+    } else {
+      for (size_t ii = 0; ii < kNumelPerThread; ++ii) {
+        if (i + ii < N) {
+          input[i + ii] = reinterpret_cast<at::BFloat16*>(&sums)[ii];
+        }
       }
     }
   }
@@ -191,12 +203,12 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
 
   // The source pointers. Distributed round-robin for the different warps
   at::BFloat16* srcs[kWorldSize];
-  size_t distRank[kWorldSize];
+  size_t srcRanks[kWorldSize];
 #pragma unroll kWorldSize
   for (int ii = 0; ii < kWorldSize; ++ii) {
     int srcRank = (rank + ii) % kWorldSize;
     srcs[ii] = buffers[srcRank];
-    distRank[ii] = srcRank;
+    srcRanks[ii] = srcRank;
   }
 
   for (size_t i = offset; i < N_per_rank; i += stride) {
@@ -213,6 +225,9 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
       sums = add_bf16x8(sums, vals[ii]);
     }
     streamStore128(&srcs[0][N_start + i], sums);
+    // Store local sums into input now so we can avoid
+    // a global memory access later for it.
+    streamStore128(&input[N_start + i], sums);
   }
   __syncthreads();
 
@@ -224,9 +239,9 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
   __syncthreads();
 
   for (size_t i = offset; i < N_per_rank; i += stride) {
-#pragma unroll kWorldSize
-    for (size_t ii = 0; ii < kWorldSize; ++ii) {
-      size_t k = N_start + i + (distRank[ii] - rank) * N_per_rank;
+#pragma unroll kWorldSize - 1
+    for (size_t ii = 1; ii < kWorldSize ; ++ii) {
+      size_t k = N_start + i + (srcRanks[ii] - rank) * N_per_rank;
       bf16x8 val;
       streamLoad128(val, &srcs[ii][k]);
       streamStore128(&input[k], val);
@@ -310,6 +325,7 @@ HybridCubeMesh getHybridCubeMesh(NvlMesh nvlMesh) {
   return hcm;
 }
 
+template <bool kAligned>
 static __global__ void hybridCubeMeshAllReduceKernel(
     at::BFloat16* input,
     size_t M,
@@ -345,7 +361,7 @@ static __global__ void hybridCubeMeshAllReduceKernel(
 
 #pragma unroll 4
     for (size_t ii = 0; ii < 4; ++ii) {
-      LOAD_16(&vals[ii], &srcs[ii][i]);
+      streamLoad128(vals[ii], &srcs[ii][i]);
     }
     bf16x8 sums;
     memset(reinterpret_cast<void*>(&sums), 0, sizeof(sums));
@@ -354,7 +370,8 @@ static __global__ void hybridCubeMeshAllReduceKernel(
     for (size_t ii = 0; ii < 4; ++ii) {
       sums = add_bf16x8(sums, vals[ii]);
     }
-    LOAD_16(&localRelay[i], &sums);
+    // Cached store for local sums
+    store128(&localRelay[i], sums);
   }
   __syncthreads();
 
@@ -366,12 +383,17 @@ static __global__ void hybridCubeMeshAllReduceKernel(
 
   for (size_t i = offset; i < N; i += stride) {
     bf16x8 localSum, remoteSum;
-    LOAD_16(&localSum, &localRelay[i]);
-    LOAD_16(&remoteSum, &remoteRelay[i]);
+    // Cached load for local sums
+    load128(localSum, &localRelay[i]);
+    streamLoad128(remoteSum, &remoteRelay[i]);
     localSum = add_bf16x8(localSum, remoteSum);
-    for (size_t ii = 0; ii < kNumelPerThread; ++ii) {
-      if (i + ii < M) {
-        input[i + ii] = reinterpret_cast<at::BFloat16*>(&localSum)[ii];
+    if constexpr (kAligned) {
+      streamStore128(&input[i], localSum);
+    } else {
+      for (size_t ii = 0; ii < kNumelPerThread; ++ii) {
+        if (i + ii < M) {
+          input[i + ii] = reinterpret_cast<at::BFloat16*>(&localSum)[ii];
+        }
       }
     }
   }
@@ -486,9 +508,9 @@ at::Tensor oneShotAllReduce(
       cudaMemcpyDeviceToDevice,
       at::cuda::getCurrentCUDAStream()));
 
-#define X(kWorldSize)                                               \
+#define X(kWorldSize, kAligned)                                     \
   if (worldSize == kWorldSize) {                                    \
-    oneShotAllReduceKernel<kWorldSize>                              \
+    oneShotAllReduceKernel<kWorldSize, kAligned>                    \
         <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>( \
             input.data_ptr<at::BFloat16>(),                         \
             input.numel(),                                          \
@@ -498,13 +520,23 @@ at::Tensor oneShotAllReduce(
             rank);                                                  \
     C10_CUDA_KERNEL_LAUNCH_CHECK();                                 \
   }
-  X(2);
-  X(3);
-  X(4);
-  X(5);
-  X(6);
-  X(7);
-  X(8);
+  if (N_aligned == static_cast<size_t>(input.numel())) {
+    X(2, true);
+    X(3, true);
+    X(4, true);
+    X(5, true);
+    X(6, true);
+    X(7, true);
+    X(8, true);
+  } else {
+    X(2, false);
+    X(3, false);
+    X(4, false);
+    X(5, false);
+    X(6, false);
+    X(7, false);
+    X(8, false);
+  }
 #undef X
   return input;
 }
@@ -591,18 +623,25 @@ at::Tensor hybridCubeMeshAllReduce(
       cudaMemcpyDeviceToDevice,
       at::cuda::getCurrentCUDAStream()));
 
-  hybridCubeMeshAllReduceKernel<<<
-      blocks,
-      threads,
-      0,
-      at::cuda::getCurrentCUDAStream()>>>(
-      input.data_ptr<at::BFloat16>(),
-      input.numel(),
-      N,
-      castArr<HcmP2pState*>(p2pStates),
-      castArr<at::BFloat16*>(buffers),
-      rank);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+#define X(kAligned)                            \
+    hybridCubeMeshAllReduceKernel<kAligned><<< \
+        blocks,                                \
+        threads,                               \
+        0,                                     \
+        at::cuda::getCurrentCUDAStream()>>>(   \
+        input.data_ptr<at::BFloat16>(),        \
+        input.numel(),                         \
+        N,                                     \
+        castArr<HcmP2pState*>(p2pStates),      \
+        castArr<at::BFloat16*>(buffers),       \
+        rank);                                 \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  if (N == static_cast<size_t>(input.numel())) {
+    X(true);
+  } else {
+    X(false);
+  }
+#undef X
   return input;
 }
 

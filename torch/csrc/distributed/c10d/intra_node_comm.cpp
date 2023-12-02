@@ -349,13 +349,14 @@ static NvlMesh getNvlMesh(size_t worldSize) {
       }
     }
   }
-  // Process NVSwitch connections
+  // Process NVSwitch connections. For simplicity, we assume all NVSwitches
+  // are interconnected.
   for (size_t i = 0; i < worldSize; ++i) {
     for (size_t j = 0; j < worldSize; ++j) {
       if (i == j) {
         continue;
       }
-      nvlMesh[i][j] = std::min(switchLinkCount[i], switchLinkCount[j]);
+      nvlMesh[i][j] += std::min(switchLinkCount[i], switchLinkCount[j]);
     }
   }
   return nvlMesh;
