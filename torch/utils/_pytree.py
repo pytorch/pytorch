@@ -283,11 +283,44 @@ def _private_register_pytree_node(
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
-    return list(d.values()), list(d.keys())
+    sorted_keys = sorted(d)
+    sorted_values = [d[key] for key in sorted_keys]
+    return sorted_values, [sorted_keys, dict.fromkeys(d)]
 
 
 def _dict_unflatten(values: Iterable[Any], context: Context) -> Dict[Any, Any]:
-    return dict(zip(context, values))
+    sorted_keys, original_copy = context
+    d: Dict[Any, Any] = original_copy.copy()
+    d.update(zip(sorted_keys, values))
+    return d
+
+
+def _dict_serialize(context: Context) -> DumpableContext:
+    sorted_keys, original_copy = context
+    json_dict = {
+        "sorted_keys": sorted_keys,
+        # We do not serialize the original copy (a dict) to JSON directly. Because
+        # all keys will be converted to strings when serialized to JSON, we will
+        # lose the original types of the keys (e.g., they might be `int`s).
+        "original_keys": list(original_copy),
+    }
+    return json_dict
+
+
+def _dict_deserialize(dumpable_context: DumpableContext) -> Context:
+    assert isinstance(dumpable_context, dict)
+    assert set(dumpable_context) == {
+        "sorted_keys",
+        "original_keys",
+    }
+
+    sorted_keys = dumpable_context["sorted_keys"]
+    original_keys = dumpable_context["original_keys"]
+    assert isinstance(sorted_keys, list)
+    assert isinstance(original_keys, list)
+    assert len(sorted_keys) == len(original_keys)
+    original_copy = dict.fromkeys(original_keys)
+    return [sorted_keys, original_copy]
 
 
 def _list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
@@ -362,7 +395,7 @@ def _defaultdict_serialize(context: Context) -> DumpableContext:
     json_defaultdict = {
         "default_factory_module": default_factory.__module__,
         "default_factory_name": default_factory.__qualname__,
-        "dict_context": dict_context,
+        "dict_context": _dict_serialize(dict_context),
     }
     return json_defaultdict
 
@@ -382,7 +415,7 @@ def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
     module = importlib.import_module(default_factory_module)
     default_factory = getattr(module, default_factory_name)
 
-    dict_context = dumpable_context["dict_context"]
+    dict_context = _dict_deserialize(dumpable_context["dict_context"])
     return [default_factory, dict_context]
 
 
@@ -411,14 +444,16 @@ _private_register_pytree_node(
     _dict_flatten,
     _dict_unflatten,
     serialized_type_name="builtins.dict",
+    to_dumpable_context=_dict_serialize,
+    from_dumpable_context=_dict_deserialize,
 )
 _private_register_pytree_node(
     namedtuple,  # type: ignore[arg-type]
     _namedtuple_flatten,
     _namedtuple_unflatten,
+    serialized_type_name="collections.namedtuple",
     to_dumpable_context=_namedtuple_serialize,
     from_dumpable_context=_namedtuple_deserialize,
-    serialized_type_name="collections.namedtuple",
 )
 _private_register_pytree_node(
     OrderedDict,
