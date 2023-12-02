@@ -5,6 +5,7 @@ import logging
 import math
 import operator
 import types
+from collections import defaultdict, OrderedDict
 from typing import Dict, List
 
 import torch
@@ -38,7 +39,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
-from .dicts import ConstDictVariable, SetVariable
+from .dicts import ConstDictVariable, DefaultDictVariable, SetVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -661,6 +662,17 @@ class BuiltinVariable(VariableTracker):
                 )
         return super().call_function(tx, args, kwargs)
 
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if self.fn == dict and name == "fromkeys":
+            return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
     def _call_min_max(self, tx, *args):
         if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
             # expand iterable
@@ -898,6 +910,43 @@ class BuiltinVariable(VariableTracker):
                 dict(kwargs), user_cls=user_cls, mutable_local=MutableLocal()
             )
         unimplemented(f"dict(): {args} {kwargs}")
+
+    @staticmethod
+    def call_custom_dict_fromkeys(tx, user_cls, *args, **kwargs):
+        assert user_cls in {dict, OrderedDict, defaultdict}
+        if kwargs:
+            assert user_cls is OrderedDict
+            assert len(kwargs) == 1 and "value" in kwargs
+            args = (*args, kwargs.pop("value"))
+        if len(args) == 0:
+            raise UserError(TypeError, "fromkeys expected at least 1 argument, got 0")
+        if len(args) == 1:
+            args = (*args, None)
+        assert len(args) == 2
+        arg, value = args
+        DictVariableType = (
+            ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
+        )
+        if isinstance(arg, dict):
+            return DictVariableType(
+                user_cls.fromkeys(arg, value), user_cls, mutable_local=MutableLocal()
+            )
+        elif isinstance(arg, variables.ConstDictVariable):
+            keys = arg.unpack_var_sequence(tx)
+            return DictVariableType(
+                user_cls.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
+            )
+        elif isinstance(
+            arg,
+            (
+                ListVariable,
+                TupleVariable,
+                ListIteratorVariable,
+            ),
+        ):
+            keys = [DictVariableType.get_key(x) for x in arg.unpack_var_sequence(tx)]
+            items = user_cls.fromkeys(keys, value)
+            return DictVariableType(items, user_cls, mutable_local=MutableLocal())
 
     def call_zip(self, tx, *args, **kwargs):
         if kwargs:
