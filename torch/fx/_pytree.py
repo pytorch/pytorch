@@ -40,7 +40,7 @@ def tree_flatten_spec(pytree: PyTree, spec: TreeSpec, exact_structural_match=Fal
     return result
 
 def _dict_flatten_spec(d: Dict[Any, Any], spec: TreeSpec) -> List[Any]:
-    return [d[k] for k in spec.context]
+    return [d[k] for k in spec.context[0]]
 
 def _list_flatten_spec(d: List[Any], spec: TreeSpec) -> List[Any]:
     return [d[i] for i in range(len(spec.children_specs))]
@@ -52,7 +52,7 @@ def _namedtuple_flatten_spec(d: NamedTuple, spec: TreeSpec) -> List[Any]:
     return [d[i] for i in range(len(spec.children_specs))]
 
 def _dict_flatten_spec_exact_match(d: Dict[Any, Any], spec: TreeSpec) -> bool:
-    return len(d) == len(spec.context)
+    return len(d) == len(spec.context[0])
 
 def _list_flatten_spec_exact_match(d: List[Any], spec: TreeSpec) -> bool:
     return len(d) == len(spec.children_specs)
@@ -66,4 +66,4 @@ def _namedtuple_flatten_spec_exact_match(d: NamedTuple, spec: TreeSpec) -> bool:
 register_pytree_flatten_spec(dict, _dict_flatten_spec, _dict_flatten_spec_exact_match)
 register_pytree_flatten_spec(list, _list_flatten_spec, _list_flatten_spec_exact_match)
 register_pytree_flatten_spec(tuple, _tuple_flatten_spec, _tuple_flatten_spec_exact_match)
-register_pytree_flatten_spec(namedtuple, _namedtuple_flatten_spec, _tuple_flatten_spec_exact_match)  # type: ignore[arg-type]
+register_pytree_flatten_spec(namedtuple, _namedtuple_flatten_spec, _namedtuple_flatten_spec_exact_match)  # type: ignore[arg-type]
