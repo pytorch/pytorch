@@ -126,7 +126,7 @@ def get_platform_specific_sdpa():
     if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
         ret.append(SDPBackend.EFFICIENT_ATTENTION)
     if not ret:
-        ret.append(SDPBackend.MATH) # Placeholder, an empty list causes "An empty arg_values was passed to @parametrize"
+        ret.append(SDPBackend.MATH)  # Placeholder, an empty list causes "An empty arg_values was passed to @parametrize"
     return ret
 
 PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
