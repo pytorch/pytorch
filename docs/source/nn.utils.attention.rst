@@ -13,7 +13,5 @@ Attention Biases
     :toctree: generated
     :nosignatures:
 
-    AttnBias
-    TensorBias
     CausalVariant
     CausalBias

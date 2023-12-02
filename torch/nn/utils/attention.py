@@ -98,6 +98,8 @@ def _validate_sdpa_input(
             f"Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: "
             f"{query.dim()}, key.dim: {key.dim()} and value.dim: {value.dim()} instead."
         )
+
+
 class AttnBias(ABC):
     """Abstract base class for attention biases"""
 
@@ -384,7 +386,7 @@ class CausalBias(AttnBias):
             return self._upper_left(device)
         elif self.variant == CausalVariant.LOWER_RIGHT:
             return self._lower_right(device)
-        
+
     def needs_materialization(self) -> bool:
         """
         Indicates whether the bias needs materialization.
