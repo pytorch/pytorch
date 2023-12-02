@@ -569,6 +569,50 @@ class AOTInductorTestsTemplate:
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, constraints=constraints)
 
+    @unittest.skipIf(
+        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        "FP8 is only supported on H100+",
+    )
+    def test_fp8(self):
+        class Model(torch.nn.Module):
+            def __init__(self, dtype):
+                super().__init__()
+                self.out_dtype = dtype
+
+            def forward(self, x, weight, bias, scale_a, scale_b):
+                weight = weight.to(torch.float8_e4m3fn)
+                output, updated_amax = torch._scaled_mm(
+                    x,
+                    weight,
+                    bias=input_bias,
+                    out_dtype=self.out_dtype,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                )
+                return output
+
+        dtype = torch.float16
+
+        a_scale = torch.Tensor([1.0]).to(device="cuda")
+        b_scale = torch.Tensor([1.0]).to(device="cuda")
+        input_bias = torch.rand(32, device="cuda", dtype=dtype)
+        weight_shape = (32, 16)
+        weight = torch.rand(*weight_shape, device="cuda", dtype=dtype).T
+        a_inverse_scale = 1 / a_scale
+        b_inverse_scale = 1 / b_scale
+
+        x_shape = (16, 16)
+        x = torch.rand(*x_shape, device="cuda", dtype=dtype).to(torch.float8_e4m3fn)
+        constraints = [
+            torch._export.dynamic_dim(x, 0) >= 1,
+            torch._export.dynamic_dim(x, 0) <= 2048,
+        ]
+        self.check_model(
+            Model(dtype),
+            (x, weight, input_bias, a_inverse_scale, b_inverse_scale),
+            constraints=constraints,
+        )
+
     def test_poi_multiple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1094,6 +1138,18 @@ class AOTInductorTestsTemplate:
         with config.patch({"profile_bandwidth": "1", "profile_bandwidth_regex": ""}):
             self.check_model(Model(), example_inputs)
 
+    def test_with_no_triton_profiler(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.permute(x, (1, 0))
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"profile_bandwidth": "1", "profile_bandwidth_regex": ""}):
+            self.check_model(Model(), example_inputs)
+
     def test_repeat_output(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1420,8 +1476,6 @@ copy_tests(
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # There is a double-free issue which will be fixed in another PR
         "test_repeat_output": TestFailure(("abi_compatible_cpu",), is_skip=True),
-        "test_sdpa": TestFailure(("abi_compatible_cpu",)),
-        "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # error: could not find s0
         "test_shifted_constraint_ranges": TestFailure(

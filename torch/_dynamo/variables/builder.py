@@ -1771,17 +1771,18 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
                 symbolic_context=symbolic_context,
             )
         )
-        # TODO: just store the whole symbolic_context here
-        tx.output.tracked_fakes.append(
-            TrackedFake(
-                fake_e,
-                source,
-                symbolic_context.constraint_sizes
-                if symbolic_context is not None
-                else None,
+        if is_tensor and not (static_shapes and source.is_nn_module()):
+            # TODO: just store the whole symbolic_context here
+            tx.output.tracked_fakes.append(
+                TrackedFake(
+                    fake_e,
+                    source,
+                    symbolic_context.constraint_sizes
+                    if symbolic_context is not None
+                    else None,
+                )
             )
-        )
-        tx.output.tracked_fakes_id_to_source[id(e)].append(source)
+            tx.output.tracked_fakes_id_to_source[id(e)].append(source)
         tx.output.tensor_weakref_to_sizes_strides[e] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
