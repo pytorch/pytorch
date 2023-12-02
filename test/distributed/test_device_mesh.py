@@ -86,6 +86,33 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(mesh_2d.get_group("tp"), tp_mesh.get_group())
 
     @with_comms
+    def test_get_local_rank_raises_exception(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=("dp", "tp")
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
+        ):
+            local_rank = mesh_2d.get_local_rank()
+
+    @with_comms
+    def test_get_local_rank(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=("dp", "tp")
+        )
+        self.assertEqual(mesh_2d.get_local_rank("dp"), mesh_2d.get_local_rank(0))
+        self.assertEqual(mesh_2d.get_local_rank("tp"), mesh_2d.get_local_rank(1))
+
+        dp_mesh = mesh_2d["dp"]
+        tp_mesh = mesh_2d["tp"]
+        self.assertEqual(dp_mesh.get_local_rank(), mesh_2d.get_local_rank("dp"))
+        self.assertEqual(tp_mesh.get_local_rank(), mesh_2d.get_local_rank("tp"))
+
+    @with_comms
     def test_device_mesh_2d(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
         # construct a cuda device mesh
