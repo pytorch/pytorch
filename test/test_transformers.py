@@ -3001,7 +3001,7 @@ class TestAttnMasks(NNTestCase):
         query, key, value = make_q(), make_kv(), make_kv()
         query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
 
-        realized = attn_bias.materialize(device) if attn_bias is not None else None
+        realized = attn_bias._materialize(device) if attn_bias is not None else None
         pytorch_output = scaled_dot_product_attention(
             query, key, value, attn_mask=realized, dropout_p=0.0, is_causal=False
         )
@@ -3084,7 +3084,42 @@ class TestAttnMasks(NNTestCase):
         self.run_test(device, True, make_q_tensor, make_kv_tensor,
                       CausalBias(causal_variant, seq_len_q, seq_len_kv), forw_tol, grad_tol)
 
+    @parametrize("shape", [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)])
+    def test_is_causal_equals_upper_left(self, device, shape: List[Tuple[int]]):
+        make_tensor = partial(
+            torch.rand, device=device, dtype=torch.float16, requires_grad=True
+        )
 
+        bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shape
+        make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
+        make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
+
+        forw_tol = Tolerances(1e-3, 1e-3)
+        grad_tol = Tolerances(5e-3, 5e-3)
+
+        query = make_q_tensor()
+        key = make_kv_tensor()
+        value = make_kv_tensor()
+        bias = CausalBias.upper_left(seq_len_q, seq_len_kv)
+
+        out_attn_bias = scaled_dot_product_attention(query, key, value, attn_mask=bias, dropout_p=0.0)
+        out_is_causal = scaled_dot_product_attention(query, key, value, is_causal=True, dropout_p=0.0)
+        torch.testing.assert_close(out_attn_bias, out_is_causal, rtol=forw_tol.rtol, atol=forw_tol.atol)
+
+    def test_is_causal_and_mask_fails(self, device):
+        make_tensor = partial(
+            torch.rand, device=device, dtype=torch.float16, requires_grad=True
+        )
+        make_q_tensor = partial(make_tensor, SdpaShape(16, 16, 128, 16))
+        make_kv_tensor = partial(make_tensor, SdpaShape(16, 16, 128, 16))
+
+        query = make_q_tensor()
+        key = make_kv_tensor()
+        value = make_kv_tensor()
+        bias = CausalBias.upper_left(128, 128)
+
+        with self.assertRaisesRegex(ValueError, "CausalBias should not be used with causal=True"):
+            scaled_dot_product_attention(query, key, value, attn_mask=bias, is_causal=True, dropout_p=0.0)
 
 if NOTEST_CPU:
     device_types = ("cuda", )

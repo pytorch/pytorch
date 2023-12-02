@@ -185,7 +185,7 @@ class CausalBias(torch.Tensor):
             diagonal=diagonal_offset,
         )
 
-    def materialize(self, device: Optional[torch.device] = None) -> torch.Tensor:
+    def _materialize(self, device: Optional[torch.device] = None) -> torch.Tensor:
         """
         Materializes the causal bias into a tensor form.
 
@@ -206,7 +206,7 @@ class CausalBias(torch.Tensor):
             return self._lower_right(device)
 
     @staticmethod
-    def dispatch(
+    def _dispatch(
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
@@ -303,7 +303,7 @@ class CausalBias(torch.Tensor):
                     query,
                     key,
                     value,
-                    attn_mask=attn_mask.materialize(query.device),
+                    attn_mask=attn_mask._materialize(query.device),
                     dropout_p=dropout_p,
                     is_causal=False,
                     scale=scale,
@@ -322,7 +322,7 @@ class CausalBias(torch.Tensor):
             raise NotImplementedError(
                 "CausalBias only supports scaled_dot_product_attention"
             )
-        return cls.dispatch(*args, **kwargs)
+        return cls._dispatch(*args, **kwargs)
 
     def __repr__(self):
-        return self.materialize().__repr__()
+        return self._materialize().__repr__()
