@@ -45,8 +45,10 @@ def replace_params_with_constants(
     # TODO (tmanlaibaatar) figure out why this is different
     # from mutated_inp_runtime_indices
     mutated_inps = [
-        i for i, m in enumerate(fw_metadata.input_info)
-        if m.mutation_type in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
+        i
+        for i, m in enumerate(fw_metadata.input_info)
+        if m.mutation_type
+        in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
     ]
 
     for i, (real_input, node) in enumerate(zip(flat_params, fake_inp_nodes)):
