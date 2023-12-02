@@ -2599,7 +2599,7 @@ class CppKernelProxy(CppKernel):
                         metrics.cpp_to_dtype_count += 1
                 elif is_lowp_fp_store(_node):
                     ops, name, _, value_var, _ = _node.args
-                    # No need to promote to float if it is a user of a load which are all redirect stored
+                    # No need to promote to float if it is a user of a load which are all directly stored
                     if value_var.target == "load" and all(
                         user.target == "store" for user in value_var.users
                     ):
