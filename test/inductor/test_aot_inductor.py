@@ -773,9 +773,11 @@ class AOTInductorTestsTemplate:
                 d = (b + c) @ y
                 return d.sum()
 
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
         example_inputs = (
-            torch.tensor([1, 1, 1], device="cuda"),
-            torch.randn((1, 32), dtype=torch.float16, device="cuda"),
+            torch.tensor([1, 1, 1], device=self.device),
+            torch.randn((1, 32), dtype=torch.float16, device=self.device),
         )
         self.check_model(Repro(), example_inputs)
 
@@ -787,7 +789,7 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.aten.repeat_interleave.Tensor(x, output_size=12)
 
-        example_inputs = (torch.ones((1,), dtype=torch.int32, device="cuda") * 12,)
+        example_inputs = (torch.ones((1,), dtype=torch.int32, device=self.device) * 12,)
         self.check_model(Repro(), example_inputs)
 
     def test_dynamic_cat(self):
@@ -1089,6 +1091,18 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, 10, device=self.device),
         )
+        with config.patch({"profile_bandwidth": "1", "profile_bandwidth_regex": ""}):
+            self.check_model(Model(), example_inputs)
+
+    def test_with_no_triton_profiler(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.permute(x, (1, 0))
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
         with config.patch({"profile_bandwidth": "1", "profile_bandwidth_regex": ""}):
             self.check_model(Model(), example_inputs)
 

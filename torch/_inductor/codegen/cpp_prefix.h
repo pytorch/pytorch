@@ -412,8 +412,9 @@ inline bool all_zero(at::vec::Vectorized<float> src) {
 #if defined(CPU_CAPABILITY_AVX2)
   return _mm256_testz_ps(src, src);
 #else
-  __mmask16 mask = _mm512_test_epi32_mask(_mm512_castps_si512(src), _mm512_set1_epi32(0));
-  return mask == 0xFFFF;
+  auto src_int = _mm512_castps_si512(src);
+  __mmask16 mask = _mm512_test_epi32_mask(src_int, src_int);
+  return mask == 0;
 #endif
 }
 #endif

@@ -350,8 +350,7 @@ class CppPrinter(ExprPrinter):
         base = self._print(base)
 
         if exp == 0.5 or exp == -0.5:
-            r = f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
-            return f"static_cast<INDEX_TYPE>({r})" if expr.is_integer else r
+            return f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
         assert exp.is_integer
         exp = int(exp)
         if exp > 0:
@@ -1589,7 +1588,7 @@ class CppKernel(Kernel):
         self.codegen_loops_impl(loop_nest, code, worksharing)
 
     @property
-    def assert_function(self):
+    def assert_function(self) -> str:
         return "TORCH_CHECK"
 
     def decide_parallel_depth(self, ranges, threads):
