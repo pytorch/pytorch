@@ -11405,10 +11405,6 @@ class TestConsistency(TestCaseMPS):
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
 
-        # # TODO: Remove once implemented required functions
-        # if op.name == 'linalg.matrix_rank':
-        #     unittest.skipTest("Required downstream function is not implemented")
-
         def get_samples():
             return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
         cpu_samples = get_samples()
@@ -11470,10 +11466,6 @@ class TestConsistency(TestCaseMPS):
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
-
-        # if op.name in ['linalg.matrix_rank', 'linalg.pinv']:
-        #     # TODO: Remove once implemented required functions
-        #     unittest.skipTest("Not implemented")
 
         def get_samples():
             return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
