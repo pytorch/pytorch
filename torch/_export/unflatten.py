@@ -319,7 +319,7 @@ class ModuleFrame:
                         self.graph_module.graph.placeholder(f"_positional_arg_{idx}")
                     )
                 kwarg_nodes = {}
-                for name in kwargs_spec.context:
+                for name in kwargs_spec.context[0]:
                     kwarg_nodes[name] = self.graph_module.graph.placeholder(name)
                 flat_args = _generate_flatten(
                     self.graph_module,
@@ -371,7 +371,7 @@ class ModuleFrame:
                     k: self.parent.graph.call_function(
                         operator.getitem, (kwargs_node, k)
                     )
-                    for k in kwargs_spec.context
+                    for k in kwargs_spec.context[0]
                 }
             assert self.parent_call_module is not None
             self.parent_call_module.args = tuple(arg_nodes)
