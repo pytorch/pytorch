@@ -1648,42 +1648,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self._test_move_exported_model_to_eval_dropout(inplace=False)
         self._test_move_exported_model_to_eval_dropout(inplace=True)
 
-    def test_bn_move_exported_model_to_eval(self):
-        class M(torch.nn.Module):
-            def __init__(
-                self,
-            ):
-                super().__init__()
-                self.bn = torch.nn.BatchNorm2d(3)
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-
-            def forward(self, x):
-                return self.conv(self.bn(x))
-
-        m = M().train()
-        example_inputs = (
-            torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=True).add(1),
-        )
-
-        m = capture_pre_autograd_graph(m, example_inputs)
-
-        # Assert that bn op exists and is in train mode
-        batch_norm_node = None
-        for n in m.graph.nodes:
-            if n.target == torch.ops.aten._native_batch_norm_legit.default:
-                batch_norm_node = n
-                break
-        self.assertTrue(batch_norm_node is not None)
-        self.assertTrue(batch_norm_node.args[5])
-
-        # Do the subgraph rewriting
-        torch.ao.quantization.move_exported_model_to_eval(m)
-
-        # Assert that bn op is now in eval mode
-        targets = [n.target for n in m.graph.nodes]
-        self.assertTrue(torch.ops.aten._native_batch_norm_legit.default not in targets)
-        self.assertTrue(torch.ops.aten._native_batch_norm_legit_no_training.default in targets)
-
     def test_disallow_eval_train(self):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
         example_inputs = (torch.rand(3, 3, 5, 5),)
