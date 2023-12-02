@@ -5,6 +5,7 @@ from typing import Callable, Dict, List, NamedTuple, Optional
 
 import torch
 import torch.nn.functional as F
+from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization.pt2e.utils import (
@@ -628,6 +629,15 @@ def _is_input_large_scalar(node: Node, gm: torch.fx.GraphModule):
     return False
 
 
+def _is_input_non_float_tensor(node: Node):
+    """Check if the input is not a float tensor, so that we can skip quantization for the node
+    since observers only works with float Tensors
+    """
+    if "val" not in node.meta or not isinstance(node.meta["val"], FakeTensor):
+        return True
+    return node.meta["val"].dtype != torch.float32
+
+
 @register_annotator("add_relu")
 def _annotate_add_relu(
     gm: torch.fx.GraphModule,
@@ -659,12 +669,16 @@ def _annotate_add_relu(
         if isinstance(input_act0, Node):
             if _is_input_large_scalar(input_act0, gm):
                 continue
+            if _is_input_non_float_tensor(input_act0):
+               continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = add_node.args[1]
         if isinstance(input_act1, Node):
             if _is_input_large_scalar(input_act1, gm):
                 continue
+            if _is_input_non_float_tensor(input_act1):
+               continue
             input_qspec_map[input_act1] = input_act_qspec
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -703,12 +717,16 @@ def _annotate_add(
         if isinstance(input_act0, Node):
             if _is_input_large_scalar(input_act0, gm):
                 continue
+            if _is_input_non_float_tensor(input_act0):
+               continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = add_node.args[1]
         if isinstance(input_act1, Node):
             if _is_input_large_scalar(input_act1, gm):
                 continue
+            if _is_input_non_float_tensor(input_act1):
+               continue
             input_qspec_map[input_act1] = input_act_qspec
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -750,12 +768,16 @@ def _annotate_mul_relu(
         if isinstance(input_act0, Node):
             if _is_input_large_scalar(input_act0, gm):
                 continue
+            if _is_input_non_float_tensor(input_act0):
+               continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = mul_node.args[1]
         if isinstance(input_act1, Node):
             if _is_input_large_scalar(input_act1, gm):
                 continue
+            if _is_input_non_float_tensor(input_act1):
+               continue
             input_qspec_map[input_act1] = input_act_qspec
 
         mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -794,12 +816,16 @@ def _annotate_mul(
         if isinstance(input_act0, Node):
             if _is_input_large_scalar(input_act0, gm):
                 continue
+            if _is_input_non_float_tensor(input_act0):
+               continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = mul_node.args[1]
         if isinstance(input_act1, Node):
             if _is_input_large_scalar(input_act1, gm):
                 continue
+            if _is_input_non_float_tensor(input_act1):
+               continue
             input_qspec_map[input_act1] = input_act_qspec
 
         mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
