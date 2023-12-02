@@ -710,7 +710,7 @@ class _PyTreeCodeGen(CodeGen):
                 count_args = len(self.pytree_info.in_spec.children_specs[0].children_specs)
                 fn_args = self.pytree_info.orig_args[:count_args]
                 fn_kwargs = '{' + ', '.join(f"'{k}':{v}" for k, v in zip(
-                                  self.pytree_info.in_spec.children_specs[1].context,
+                                  self.pytree_info.in_spec.children_specs[1].context[0],
                                   self.pytree_info.orig_args[count_args:])) + '}'
                 fn_signature = f"([{', '.join(fn_args)}], {fn_kwargs}), self._in_spec"
 
