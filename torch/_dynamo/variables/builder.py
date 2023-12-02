@@ -1828,7 +1828,9 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
 
             for fake, real, source, symbolic_context in tracking_info:
                 tx.output.tracing_context.tensor_to_context[real] = symbolic_context
-                tx.output.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))
+                tx.output.tracked_fakes.append(
+                    TrackedFake(fake, source, symbolic_context)
+                )
                 tx.output.tracked_fakes_id_to_source[id(real)].append(source)
                 tx.output.tensor_weakref_to_sizes_strides[real] = {
                     "size": fake.size(),
