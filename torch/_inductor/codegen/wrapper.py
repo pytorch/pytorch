@@ -1041,6 +1041,9 @@ class WrapperCodeGen(CodeGen):
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
 
+    def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
+        raise NotImplementedError()
+
     def val_to_arg_str(self, s):
         if isinstance(s, SymTypes):
             return pexpr(sympy.expand(repr(s)))

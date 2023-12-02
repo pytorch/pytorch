@@ -4362,7 +4362,7 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
 
-        if V.graph.cpp_wrapper:
+        if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = [
                 V.graph.wrapper_code.val_to_cpp_arg_str(
                     param.real_type, x, self.is_legacy_abi_kernel()
