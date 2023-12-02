@@ -426,7 +426,7 @@ class TestExecutionTrace(TestCase):
                 loop_count += 1
             # Check if tensor tuple representation size is correct.
             if n["name"] == "## TEST 2 ##":
-                assert len(n["inputs"][3][0]) == tensor_tuple_size
+                assert len(n["inputs"]["values"][3][0]) == tensor_tuple_size
         assert found_root_node
         assert loop_count == expected_loop_events
 
