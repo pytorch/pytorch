@@ -2920,6 +2920,14 @@ class ShapeEnv:
                 if len(bounds) > 1:
                     exprs.append(" <= ".join(bounds))
 
+        # 4. Add divisibility guards.
+        for mod_expr in self.divisible:
+            guard_expr = sympy.Eq(mod_expr, sympy.Integer(0))
+            exprs.append(
+                ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(guard_expr)
+            )
+            self._add_target_expr(guard_expr)
+
         if constraint_violations:
             warn_msgs = []
             error_msgs = []
