@@ -188,9 +188,9 @@ auto GetHipBlasLtTypeStringAndOps(ActivationType activation_type = ActivationTyp
     int algo_index = GETINDEXFROMALGO(algo);
     auto hipblaslt_gemm_op = [=](const ParamsT* params) -> TuningStatus {
       auto opa = _hipblasOpFromChar(params->transa);
-      auto opb = _hipblasOpFromChar(params->transa);
+      auto opb = _hipblasOpFromChar(params->transb);
 
-      TORCH_CHECK(transa_outer == opa || transb_outer == opb, "trans mismatch, shouldn't happen");
+      TORCH_CHECK(transa_outer == opa && transb_outer == opb, "trans mismatch, shouldn't happen");
 
       float alpha = static_cast<float>(params->alpha);
       float beta = static_cast<float>(params->beta);

@@ -125,6 +125,14 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
           [rocm_version](auto&& k) { return rocm_version == k ? OK : FAIL; });
     }
 
+    if (validators.find("GCN_ARCH_NAME") == validators.end()) {
+      std::string gcn_arch_name = at::cuda::getCurrentDeviceProperties()->gcnArchName;
+      getTuningContext()->GetTuningResultsValidator().RegisterValidator(
+          "GCN_ARCH_NAME",
+          [gcn_arch_name]() { return gcn_arch_name; },
+          [gcn_arch_name](auto&& k) { return gcn_arch_name == k ? OK : FAIL; });
+    }
+
     if (validators.find("ROCBLAS_VERSION") == validators.end()) {
       std::string rocblas_version = c10::str(
           XSTRINGIFY(ROCBLAS_VERSION_MAJOR), ".",
