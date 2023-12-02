@@ -108,8 +108,8 @@ class TestTPFSDPIntegration(FSDPTest):
             mesh=torch.arange(0, self.world_size).view(-1, tensor_parallel_size),
         )
 
-        fsdp_pg = twod_mesh.get_dim_groups()[0]
-        tp_pg = twod_mesh.get_dim_groups()[1]
+        fsdp_pg = twod_mesh.get_group(mesh_dim=0)
+        tp_pg = twod_mesh.get_group(mesh_dim=1)
         return twod_mesh, fsdp_pg, tp_pg
 
     def _get_chunk_sharding_spec(self, tp_world_size: int, tp_pg: dist.ProcessGroup):
@@ -259,7 +259,7 @@ class TestTPFSDPIntegration(FSDPTest):
             mesh_2d["tp"],
             sequence_parallelize_plan,
         )
-        tp_pg = mesh_2d["tp"].get_dim_groups(mesh_dim=0)
+        tp_pg = mesh_2d["tp"].get_group(mesh_dim=0)
         assert isinstance(tp_fsdp_model.net1.weight, DT)
         assert isinstance(tp_fsdp_model.net2.weight, DT)
         tp_fsdp_model = FSDP(
@@ -267,7 +267,7 @@ class TestTPFSDPIntegration(FSDPTest):
             cpu_offload=cpu_offload,
             device_mesh=mesh_2d["dp"],
         )
-        fsdp_pg = mesh_2d["dp"].get_dim_groups(mesh_dim=0)
+        fsdp_pg = mesh_2d["dp"].get_group(mesh_dim=0)
 
         # Check the forward by checking output equality
         fsdp_out = fsdp_model(inp)

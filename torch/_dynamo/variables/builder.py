@@ -83,7 +83,12 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
-from .ctx_manager import EventVariable, NullContextVariable, StreamVariable
+from .ctx_manager import (
+    AutocastModeVariable,
+    EventVariable,
+    NullContextVariable,
+    StreamVariable,
+)
 from .dicts import (
     ConstDictVariable,
     DataClassVariable,
@@ -142,7 +147,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
+from .torch import torch_special_class_types, TorchVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
@@ -340,14 +345,6 @@ class VariableBuilder:
                 dataclasses.fields,
                 lambda self, value: LambdaVariable(
                     _dataclasses_fields_lambda,
-                    source=self.source,
-                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
-                ),
-            ),
-            (
-                tensor_dunder_fns,
-                lambda self, value: TorchVariable(
-                    value,
                     source=self.source,
                     **self.install_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
@@ -689,6 +686,17 @@ class VariableBuilder:
                 value,
                 None,  # No kernel idx provided
                 None,  # No grid provided
+                source=self.source,
+            )
+        elif isinstance(value, torch.amp.autocast_mode.autocast):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return AutocastModeVariable(
+                target_values=[
+                    value.device,
+                    value.fast_dtype,
+                    value._enabled,
+                    value._cache_enabled,
+                ],
                 source=self.source,
             )
         elif trace_rules.lookup(value) is not None:
@@ -1791,30 +1799,31 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
             )
         )
 
-        # list of (fake_tensor, real_tensor, source, symbolic_context)
-        tracking_info = [(fake_e, e, source, symbolic_context)]
-        if is_traceable_wrapper_subclass(fake_e):
-            attrs, _ = fake_e.__tensor_flatten__()
-            for attr in attrs:
-                fake_inner = getattr(fake_e, attr)
-                inner = getattr(e, attr)
-                tracking_info.append(
-                    (
-                        fake_inner,
-                        inner,
-                        AttrSource(source, attr),
-                        symbolic_context.inner_contexts[attr],
+        if is_tensor and not (static_shapes and source.is_nn_module()):
+            # list of (fake_tensor, real_tensor, source, symbolic_context)
+            tracking_info = [(fake_e, e, source, symbolic_context)]
+            if is_traceable_wrapper_subclass(fake_e):
+                attrs, _ = fake_e.__tensor_flatten__()
+                for attr in attrs:
+                    fake_inner = getattr(fake_e, attr)
+                    inner = getattr(e, attr)
+                    tracking_info.append(
+                        (
+                            fake_inner,
+                            inner,
+                            AttrSource(source, attr),
+                            symbolic_context.inner_contexts[attr],
+                        )
                     )
-                )
 
-        for fake, real, source, symbolic_context in tracking_info:
-            tx.output.tracing_context.tensor_to_context[real] = symbolic_context
-            tx.output.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))
-            tx.output.tracked_fakes_id_to_source[id(real)].append(source)
-            tx.output.tensor_weakref_to_sizes_strides[real] = {
-                "size": fake.size(),
-                "stride": fake.stride(),
-            }
+            for fake, real, source, symbolic_context in tracking_info:
+                tx.output.tracing_context.tensor_to_context[real] = symbolic_context
+                tx.output.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))
+                tx.output.tracked_fakes_id_to_source[id(real)].append(source)
+                tx.output.tensor_weakref_to_sizes_strides[real] = {
+                    "size": fake.size(),
+                    "stride": fake.stride(),
+                }
 
         return fake_e
     else:
