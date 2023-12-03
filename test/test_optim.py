@@ -1,13 +1,16 @@
 # Owner(s): ["module: optimizer"]
+import unittest
 from copy import deepcopy
 
 import torch
 from optim.test_optim import TestOptim, TestDifferentiableOptimizer  # noqa: F401
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_optimizers import optim_db, optims, OptimizerErrorEnum
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, onlyCUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA)
+from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
 
 class TestOptimRenewed(TestCase):
 
@@ -107,9 +110,88 @@ class TestOptimRenewed(TestCase):
                     self.assertEqual(og_p_state[k], new_p_state[k], **assert_eq_kwargs)
 
 
+    def _test_derived_optimizers_mixed_device_dtype(self, device, dtype, optim_info, flag):
+        """
+        Similar in essence to _test_derived_optimizers above. The main difference is that
+        _test_derived_optimizers uses model parameters whereas we randomly pass in
+        parameters of different dtypes and devices here. We need multiple GPUs (vs just a
+        CPU and GPU) because fused adam only works on GPUs. (Thus we only run the tests
+        that call into this helper when TEST_MULTIGPU.)
+        """
+        assert flag in ("foreach", "fused")
+
+        params = [
+            torch.rand(2, 3, dtype=torch.float64, device='cuda:0', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float32, device='cuda:0', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float16, device='cuda:0', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.bfloat16, device='cuda:0', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float64, device='cuda:1', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float32, device='cuda:1', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.float16, device='cuda:1', requires_grad=True),
+            torch.rand(2, 3, dtype=torch.bfloat16, device='cuda:1', requires_grad=True),
+            torch.randint(1024, (2, 3), dtype=torch.int64, device='cuda:1', requires_grad=False),
+        ]
+
+        for p in params:
+            if p.requires_grad:
+                p.grad = torch.rand_like(p, device=p.device, dtype=p.dtype)
+
+        kIterations = 7 if flag == "foreach" else 1
+        optim_inputs = optim_info.optim_inputs_func()
+        optim_cls = optim_info.optim_cls
+        for optim_input in optim_inputs:
+            updated_params, state = [], []
+            kwargs = deepcopy(optim_input.kwargs)
+            if (kwargs.get("capturable", False) and
+               (str(device) == "cpu" or optim_cls.__name__ == "ASGD")):
+                # capturable is not supported on CPU nor in single tensor ASGD
+                continue
+            for flag_value in (False, True):
+                kwargs[flag] = flag_value
+                params_clone = []
+                for p in params:
+                    p_clone = p.clone().detach()
+                    if p.requires_grad:
+                        p_clone.requires_grad = True
+                        p_clone.grad = p.grad.clone().detach()
+                        params_clone.append(p_clone)
+
+                optimizer = optim_cls(params_clone, **kwargs)
+                for _ in range(kIterations):
+                    optimizer.step()
+
+                state.append(optimizer.state)
+                updated_params.append(params_clone)
+
+            og_state, new_state = state
+            for og_p, new_p in zip(updated_params[0], updated_params[1]):
+                # Increasing the tolerance as we are collating lots of ops together for optimizers and
+                # the designated tolerances are for single op only.
+                single_rtol, single_atol = torch.testing._comparison.get_tolerances(new_p.dtype, rtol=None, atol=None)
+                rtol = 5 * single_rtol
+                atol = 5 * single_atol
+
+                self.assertEqual(og_p, new_p, rtol=rtol, atol=atol)
+
+                # check that optimizer states are the same
+                og_p_state = og_state[og_p]
+                new_p_state = new_state[new_p]
+
+                for k in og_p_state:
+                    actual = new_p_state[k]
+                    self.assertEqual(og_p_state[k], actual, rtol=rtol, atol=atol)
+
+
     @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float64])
     def test_foreach(self, device, dtype, optim_info):
         self._test_derived_optimizers(device, dtype, optim_info, "foreach")
+
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @optims([optim for optim in optim_db if "foreach" in optim.supported_impls])
+    def test_foreach_mixed_device_dtype(self, device, dtype, optim_info):
+        self._test_derived_optimizers_mixed_device_dtype(device, dtype, optim_info, "foreach")
 
 
     @onlyCUDA
@@ -130,6 +212,24 @@ class TestOptimRenewed(TestCase):
                 )
             finally:
                 torch.set_default_dtype(old_default_dtype)
+
+
+
+    @onlyCUDA
+    @largeTensorTest("72GB", "cuda")
+    @skipIfRocm
+    @optims([  # all foreach except Adamax. H100 wasn't sufficient, surprisingly
+        optim for optim in optim_db if (optim.optim_cls.__name__ != "Adamax" and
+                                        "foreach" in optim.supported_impls)
+    ], dtypes=[torch.float16])
+    def test_foreach_large_tensor(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func()
+        for optim_input in optim_inputs:
+            params = [torch.ones(2 ** 32, device=device, dtype=dtype)]
+            params[0].grad = torch.zeros_like(params[0])
+            optimizer = optim_cls(params, foreach=True, **optim_input.kwargs)
+            optimizer.step()
 
 
     @onlyCUDA
@@ -193,6 +293,27 @@ class TestOptimRenewed(TestCase):
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float64])
     def test_fused(self, device, dtype, optim_info):
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
+
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @optims([optim for optim in optim_db if "fused" in optim.supported_impls])
+    def test_fused_mixed_device_dtype(self, device, dtype, optim_info):
+        self._test_derived_optimizers_mixed_device_dtype(device, dtype, optim_info, "fused")
+
+
+    @onlyCUDA
+    @largeTensorTest("64GB", "cuda")
+    @skipIfRocm
+    @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float16])
+    def test_fused_large_tensor(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func()
+        for optim_input in optim_inputs:
+            params = [torch.ones(2 ** 32, device=device, dtype=dtype)]
+            params[0].grad = torch.zeros_like(params[0])
+            optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
+            optimizer.step()
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
