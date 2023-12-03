@@ -803,6 +803,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return d1["a"] + d2["c"] + 1
 
     @make_test
+    def test_dict_fromkeys(x, y):
+        lst = ["a", "b"]
+        d = dict.fromkeys(lst)
+        d1 = dict.fromkeys(d, x + 1)
+        d2 = collections.defaultdict.fromkeys(iter(d1), x - 2)
+        d3 = collections.OrderedDict.fromkeys(tuple(lst), value=y)
+        return d1["a"] * d2["b"] + d2["a"] + d1["b"] + d3["a"] + d3["b"] + 1
+
+    @make_test
     def test_min_max(a, b):
         c = a + b
         a = a.sum()
