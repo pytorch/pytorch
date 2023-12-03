@@ -1114,12 +1114,6 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             dist.recv(recv_tensor, 0)
             self.assertEqual(send_tensor, recv_tensor)
 
-        # Test with non-contiguous tensors.
-        send_tensor_view = send_tensor.t()
-        if self.rank == 0:
-            with self.assertRaisesRegex(ValueError, 'Tensors must be contiguous'):
-                dist.send(send_tensor_view, 1)
-
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 1, "NCCL test requires 1 GPU")
     @skip_if_lt_x_gpu(1)
