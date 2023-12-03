@@ -1992,6 +1992,19 @@ class CommonTemplate:
                 check_lowp=True,
             )
 
+    def test_mm_mixed_dtype(self):
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        t1 = torch.arange(6, dtype=torch.float, device=self.device).view(2, 3)
+        t2 = torch.arange(9, dtype=torch.int64, device=self.device).view(3, 3)
+
+        msg = "expected .* and .* to have the same dtype, but got: float != long int"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn)(t1, t2)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(t1, t2)
+
     def test_scalar_input(self):
         def fn(x, y):
             a = torch.div(x, y, rounding_mode="floor")
