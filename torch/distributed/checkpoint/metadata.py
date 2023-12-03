@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Union, Optional, Sequence, Any
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
+from torch.distributed.checkpoint.stateful import StatefulT
 
 import torch
 from torch.distributed._shard.sharded_tensor import (
@@ -18,9 +19,7 @@ __all__ = [
 
 @dataclass
 class ChunkStorageMetadata:
-    """
-    Each chunk is expected to have the same properties of the TensorStorageMetadata that includes it.
-    """
+    """Each chunk is expected to have the same properties of the TensorStorageMetadata that includes it."""
 
     offsets: torch.Size
     sizes: torch.Size
@@ -40,7 +39,7 @@ class BytesStorageMetadata:
 
 TENSOR_TYPE = Union[torch.Tensor, ShardedTensor]
 STORAGE_TYPES = Union[TensorStorageMetadata, BytesStorageMetadata]
-STATE_DICT_TYPE = Dict[str, Any]
+STATE_DICT_TYPE = Dict[str, Union[StatefulT, Any]]
 
 
 @dataclass
@@ -53,9 +52,7 @@ class Metadata:
 
 @dataclass(frozen=True)
 class MetadataIndex:
-    """
-    This class represents a lookup key for items in a state dict or Metadata.
-    """
+    """This class represents a lookup key for items in a state dict or Metadata."""
 
     fqn: str
     """Fully Qualified Name of the object"""

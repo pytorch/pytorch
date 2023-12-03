@@ -4,7 +4,6 @@ import math
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-import torch.distributed._functional_collectives as funcol
 
 from torch.distributed.distributed_c10d import (
     _find_pg_by_ranks_and_tag,
@@ -82,7 +81,7 @@ class _MeshEnv:
             ), "The child mesh can only be a 1D mesh."
             child_mesh_dim_name = child_mesh_dim_names[0]
             if parent_mesh.mesh_dim_names:
-                return parent_mesh.mesh_dim_names.index(child_mesh_dim_name)
+                return parent_mesh._get_mesh_dim_by_name(child_mesh_dim_name)
         return None
 
     @staticmethod
@@ -124,6 +123,13 @@ class DeviceMesh:
     DTensor implementation.
 
     DeviceMesh can be used as a context manager.
+
+    .. note::
+        DeviceMesh follows SPMD programming model, which means the same PyTorch Python program
+        is running on all processes/ranks in the cluster. Therefore, users need to make sure the
+        `mesh` array (which describes the layout of devices) should be identical across all ranks.
+        Inconsistent `mesh` will lead to silent hang.
+
     Args:
         device_type (str): device type of the mesh. Currently supports: cpu, cuda/cuda-like.
         mesh (ndarray): could be a multi-dimension array or an integer tensor that
@@ -161,7 +167,6 @@ class DeviceMesh:
         *,
         mesh_dim_names: Optional[Tuple[str, ...]] = None,
         _init_process_groups: bool = True,
-        _validate_mesh: bool = True,
     ) -> None:
         self.device_type = device_type
         self.mesh = (
@@ -173,7 +178,7 @@ class DeviceMesh:
 
         # private field to pre-generate DeviceMesh's hash
         self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-        self._hash = hash((self._flatten_mesh_list, self.mesh.shape))
+        self._hash = hash((self._flatten_mesh_list, self.mesh.shape, id(self)))
 
         # Skip process group initialization if xla device.
         # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -183,7 +188,7 @@ class DeviceMesh:
             # process (we need to know if the current global rank is in the mesh or not).
             self._get_or_create_default_group()
             if _init_process_groups:
-                self._init_process_groups(_validate_mesh)
+                self._init_process_groups()
 
     def _get_or_create_default_group(self):
         default_initialized = is_initialized()
@@ -220,32 +225,7 @@ class DeviceMesh:
         )
         return _get_default_group()
 
-    def _validate_mesh(self):
-        # check mesh tensor validity
-        unique_mesh_values = self.mesh.unique(sorted=True)
-        if unique_mesh_values.numel() != self.mesh.numel():
-            raise RuntimeError(
-                f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
-            )
-
-        # validate that all calling ranks pass in the same `mesh` argument.
-        self_mesh = self.mesh.to(self.device_type).contiguous()
-        mesh_tensor = funcol.all_gather_tensor(
-            self_mesh, gather_dim=0, group=_get_default_group()
-        )
-        mesh_tensor_chunked = torch.chunk(mesh_tensor, get_world_size())
-        for other_rank, other_mesh in enumerate(mesh_tensor_chunked):
-            if not torch.equal(self_mesh, other_mesh):
-                raise RuntimeError(
-                    f"DeviceMesh initialization does not allow different mesh argument:"
-                    f"rank {get_rank()} has mesh {self_mesh} while rank {other_rank}"
-                    f"has mesh {other_mesh}!"
-                )
-
-    def _init_process_groups(self, _validate_mesh):
-        if _validate_mesh:
-            self._validate_mesh()
-
+    def _init_process_groups(self):
         # group tag/ranks associated with each mesh dimension, each mesh dimension should
         # have one sub-group per rank
         dim_group_infos: List[Tuple[str, List[int]]] = []
@@ -296,7 +276,7 @@ class DeviceMesh:
         _mesh_resources.mesh_stack.pop()
 
     def __repr__(self) -> str:
-        return f"DeviceMesh:({self.mesh.tolist()})"
+        return f"DeviceMesh({self.mesh.tolist()})"
 
     def __hash__(self):
         return self._hash
@@ -344,38 +324,47 @@ class DeviceMesh:
             raise RuntimeError(
                 f"Cannot slice a DeviceMesh with {self.mesh.ndim} dimension."
             )
-        if self.mesh_dim_names is None:
-            raise KeyError(
-                "No `mesh_dim_names` found.",
-                "To slice the device mesh, please call `init_device_mesh` with `mesh_dim_names`.",
-            )
-        if mesh_dim_name not in self.mesh_dim_names:
-            raise KeyError(
-                f"Mesh dimension '{mesh_dim_name}' does not exist.",
-                f"Available mesh dimensions are: {self.mesh_dim_names}",
-            )
-        mesh_dim = self.mesh_dim_names.index(mesh_dim_name)
+        mesh_dim = self._get_mesh_dim_by_name(mesh_dim_name)
         submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
 
         return submesh
 
-    def get_dim_groups(
-        self, mesh_dim: Optional[int] = None
+    def get_group(
+        self, mesh_dim: Optional[Union[int, str]] = None
     ) -> Union[ProcessGroup, List[ProcessGroup]]:
+        """
+        Returns a list of ProcessGroups corresponding to the mesh dimensions, or
+        returns a single ProcessGroup if mesh_dim is specified or the given mesh has
+        only one mesh dimension.
+
+        Optional Args:
+            mesh_dim (str/int): it can be the name of the mesh dimension or the index
+            of the mesh dimension. Default is None.
+        Returns:
+            A list of :class:`ProcessGroup` object when `mesh_dim` is not specified for
+            a DeviceMesh with more than 1 dimension; otherwise, returns a single
+            :class:`ProcessGroup` object.
+        """
         if not hasattr(self, "_dim_group_infos"):
             raise RuntimeError("DeviceMesh process groups not initialized!")
+
+        if self.mesh.ndim == 1:
+            return _find_pg_by_ranks_and_tag(*self._dim_group_infos[0])
+
         if mesh_dim is not None:
+            if isinstance(mesh_dim, str):
+                mesh_dim = self._get_mesh_dim_by_name(mesh_dim)
             return _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
         else:
             dim_groups = []
-            for mesh_dim in range(self.mesh.ndim):
+            for ith_dim in range(self.mesh.ndim):
                 dim_groups.append(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
+                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[ith_dim])
                 )
             return dim_groups
 
-    def size(self, dim: Optional[int] = None) -> int:
-        return self.mesh.numel() if dim is None else self.mesh.size(dim)
+    def size(self, mesh_dim: Optional[int] = None) -> int:
+        return self.mesh.numel() if mesh_dim is None else self.mesh.size(mesh_dim)
 
     @property
     def ndim(self) -> int:
@@ -386,7 +375,52 @@ class DeviceMesh:
         return tuple(self.mesh.shape)
 
     def get_rank(self) -> int:
+        """
+        Returns the current global rank.
+        """
         return get_rank()
+
+    def get_local_rank(self, mesh_dim: Optional[Union[int, str]] = None) -> int:
+        """
+        Returns the local rank of the given mesh_dim of the DeviceMesh.
+
+        Optional Args:
+            mesh_dim (str/int): it can be the name of the mesh dimension or the index
+            of the mesh dimension. Default is None.
+
+        Returns:
+            An integer denotes the local rank.
+
+        Example (2 host with 4 GPUs each):
+            ```
+            # Let's initialize device mesh with mesh_shape = (2, 4) to represent
+            # the topology of cross-host(dim 0), and within-host (dim 1).
+            mesh_2d = DeviceMesh(device_type="cuda",
+                            mesh=[
+                                [0, 1, 2, 3],
+                                [4, 5, 6, 7]
+                            ])
+            ```
+            Calling mesh_2d.get_local_rank(mesh_dim=0) on rank 0, 1, 2, 3 would return 0.
+            Calling mesh_2d.get_local_rank(mesh_dim=0) on rank 4, 5, 6, 7 would return 1.
+            Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 0, 4 would return 0.
+            Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 1, 5 would return 1.
+            Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 2, 6 would return 2.
+            Calling mesh_2d.get_local_rank(mesh_dim=1) on rank 3, 7 would return 3.
+        """
+        if self.ndim > 1 and mesh_dim is None:
+            raise RuntimeError(
+                f"Found the DeviceMesh have {self.mesh.ndim} dimensions",
+                "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
+            )
+        elif mesh_dim is None:
+            mesh_dim = 0
+
+        mesh_dim_group = self.get_group(mesh_dim)  # type: ignore[arg-type]
+        assert isinstance(
+            mesh_dim_group, ProcessGroup
+        ), "We expect ProcessGroup before calling `get_rank`!"
+        return get_rank(mesh_dim_group)  # type: ignore[arg-type]
 
     def get_coordinate(self) -> Optional[List[int]]:
         """
@@ -394,6 +428,18 @@ class DeviceMesh:
         dimensions of the mesh. If this rank is not part of the mesh, return None.
         """
         return self._coordinate_on_dim if self._coordinate_on_dim else None
+
+    def _get_mesh_dim_by_name(self, mesh_dim_name: str) -> int:
+        if self.mesh_dim_names is None or len(self.mesh_dim_names) == 0:
+            raise KeyError(
+                "No `mesh_dim_names` found.",
+            )
+        if mesh_dim_name not in self.mesh_dim_names:
+            raise KeyError(
+                f"Mesh dimension '{mesh_dim_name}' does not exist.",
+                f"Available mesh dimensions are: {self.mesh_dim_names}",
+            )
+        return self.mesh_dim_names.index(mesh_dim_name)  # type: ignore[union-attr]
 
 
 def init_device_mesh(
@@ -408,10 +454,15 @@ def init_device_mesh(
     and ith dimension being in size mesh_shape[i]. If mesh_dim_names is provided, each dimension is
     labeled as mesh_dim_names[i].
 
+    .. note::
+        `init_device_mesh` follows SPMD programming model, which means the same PyTorch Python program
+        is running on all processes/ranks in the cluster. Therefore, users need to make sure the `mesh_shape`
+        tuple (the dimension of the nD array that describes the layout of devices) should be identical across
+        all ranks. Inconsistent `mesh_shape` will lead to silent hang.
 
     Args:
         device_type (str): device type of the mesh. Currently supports: cpu, cuda/cuda-like.
-        mesh_shape: Tuple[int]: A tuple describes the dimension of the multi-dimesnion array
+        mesh_shape: Tuple[int]: A tuple defines the dimension of the multi-dimesnion array
         that describes the layout of devices.
     Kwargs:
         mesh_dim_names: Optional[Tuple[str]]: A tuple of mesh dim names to be assigned to each dimension
@@ -434,7 +485,7 @@ def init_device_mesh(
     if mesh_dim_names is not None:
         if len(set(mesh_dim_names)) != len(mesh_dim_names):
             raise RuntimeError(
-                "Each mesh_dim_name must be uqique.",
+                "Each mesh_dim_name must be unique.",
                 f"Found repeated mesh_dim_name in mesh_dim_names {mesh_dim_names}",
             )
 

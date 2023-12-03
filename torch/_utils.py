@@ -212,6 +212,29 @@ def _rebuild_tensor_v2(
     return tensor
 
 
+def _rebuild_tensor_v3(
+    storage,
+    storage_offset,
+    size,
+    stride,
+    requires_grad,
+    backward_hooks,
+    dtype,
+    metadata=None,
+):
+    t = torch.tensor(
+        [],
+        dtype=dtype,
+        device=storage._untyped_storage.device,
+        requires_grad=requires_grad,
+    )
+    t.set_(storage._untyped_storage, storage_offset, size, stride)
+    if metadata:
+        set_tensor_metadata(t, metadata)
+    t._backward_hooks = backward_hooks
+    return t
+
+
 _sparse_tensors_to_validate: List["torch.Tensor"] = []
 
 
@@ -302,6 +325,10 @@ def _rebuild_sparse_tensor(layout, data):
         return result
 
     raise NotImplementedError(f"rebuilding sparse tensor for layout {layout}")
+
+
+def _rebuild_nested_tensor(buffer, sizes, strides, storage_offsets):
+    return torch._nested_view_from_buffer(buffer, sizes, strides, storage_offsets)
 
 
 def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):

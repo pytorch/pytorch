@@ -15,6 +15,7 @@ import torch.distributed.distributed_c10d as c10d
 
 from functorch import make_fx
 from torch.testing import FileCheck
+from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._triton import has_triton
 
 if not dist.is_available():
@@ -120,13 +121,13 @@ class TestExpand(MultiThreadedTestCase):
     def test_expand_device_mesh(self):
         mesh = dt.DeviceMesh("cpu", torch.arange(4))
         tag, rankset, group_size = ft_c._expand_group(mesh)
-        self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
+        self.assertEqual(c10d._get_group_tag(mesh.get_group(mesh_dim=0)), tag)
         self.assertEqual([0, 1, 2, 3], rankset)
         self.assertEqual(4, group_size)
 
         mesh = dt.DeviceMesh("cpu", torch.arange(4))
         tag, rankset, group_size = ft_c._expand_group(mesh)
-        self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
+        self.assertEqual(c10d._get_group_tag(mesh.get_group(mesh_dim=0)), tag)
         self.assertEqual([0, 1, 2, 3], rankset)
         self.assertEqual(4, group_size)
 
@@ -136,14 +137,14 @@ class TestExpand(MultiThreadedTestCase):
             tag, rankset, group_size = ft_c._expand_group(mesh)
 
         tag, rankset, group_size = ft_c._expand_group((mesh, 0))
-        self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
+        self.assertEqual(c10d._get_group_tag(mesh.get_group(mesh_dim=0)), tag)
         expected_rankset = [0, 2] if dist.get_rank() in [0, 2] else [1, 3]
         self.assertEqual(expected_rankset, rankset)
         self.assertEqual(2, group_size)
 
         tag, rankset, group_size = ft_c._expand_group((mesh, 1))
         expected_rankset = [0, 1] if dist.get_rank() in [0, 1] else [2, 3]
-        self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[1]), tag)
+        self.assertEqual(c10d._get_group_tag(mesh.get_group(mesh_dim=1)), tag)
         self.assertEqual(expected_rankset, rankset)
         self.assertEqual(2, group_size)
 
@@ -231,6 +232,22 @@ class TestTraceableCollectives(MultiThreadedTestCase):
     def setUp(self):
         super().setUp()
         self._spawn_threads()
+
+    @parametrize("device", ["cpu", "cuda"])
+    def test_broadcast(self, device):
+        if device == "cuda":
+            if torch.cuda.device_count() < self.world_size:
+                self.skipTest("Not enough CUDA devices")
+            torch.cuda.set_device(dist.get_rank())
+
+        if dist.get_rank() == 0:
+            tensor = torch.ones([4], device=device)
+        else:
+            tensor = torch.zeros([4], device=device)
+
+        mesh = dt.DeviceMesh(device, torch.arange(4))
+        res = ft_c.broadcast(tensor, 0, mesh)
+        self.assertEqual(res, torch.ones([4], device=device))
 
     @parametrize("device", ["cpu", "cuda"])
     def test_all_reduce_eager(self, device):
@@ -574,6 +591,20 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
 
         compiled_allreduce = torch.compile(allreduce, fullgraph=True)
         compiled_allreduce(torch.randn(8, device=self.device), self.process_group)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_tracing_with_fakepg(self):
+        def allreduce(t, pg):
+            return ft_c.all_reduce(t, "sum", pg)
+
+        compiled_allreduce = torch.compile(allreduce, fullgraph=True)
+        dist.init_process_group(
+            backend="fake",
+            rank=0,
+            world_size=8,
+            store=FakeStore(),
+        )
+        allreduce(torch.randn(8, device=self.device), pg=dist.group.WORLD)
 
 
 class TestOpWaitiness(MultiThreadedTestCase):

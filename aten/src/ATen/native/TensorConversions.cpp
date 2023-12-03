@@ -20,6 +20,7 @@
 #include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
@@ -27,6 +28,11 @@
 #include <ATen/ops/_to_copy_native.h>
 #include <ATen/ops/_to_cpu_native.h>
 #include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/_to_sparse_bsc_native.h>
+#include <ATen/ops/_to_sparse_bsr_native.h>
+#include <ATen/ops/_to_sparse_csc_native.h>
+#include <ATen/ops/_to_sparse_csr_native.h>
+#include <ATen/ops/_to_sparse_native.h>
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
@@ -944,6 +950,9 @@ void _to_sparse_check_arguments(const std::string& funcname, const Tensor& self,
   }
 
   if (blocksize.has_value()) {
+    if (blocksize.value().size() != 2) {
+      AT_ERROR(funcname, ": blocksize needs to be a tuple of size 2, but got ", blocksize.value().size());
+    }
     auto blocksize_to = *blocksize;
     if (blocksize_to[0] <= 0 || blocksize_to[1] <= 0) {
       AT_ERROR(funcname, ": blocksize needs to be positive, but got ", blocksize_to);

@@ -169,8 +169,8 @@ _differentiable_doc = r"""differentiable (bool, optional): whether autograd shou
             performance, so leave it False if you don't intend to run autograd
             through this instance (default: False)"""
 
-_maximize_doc = r"""maximize (bool, optional): maximize the params based on the
-            objective, instead of minimizing (default: False)"""
+_maximize_doc = r"""maximize (bool, optional): maximize the objective with respect to the
+            params, instead of minimizing (default: False)"""
 
 
 def register_optimizer_step_pre_hook(hook: GlobalOptimizerPreHook) -> RemovableHandle:
@@ -255,9 +255,15 @@ class Optimizer:
         self._patch_step_function()
 
         if isinstance(params, torch.Tensor):
-            raise TypeError("params argument given to the optimizer should be "
-                            "an iterable of Tensors or dicts, but got " +
-                            torch.typename(params))
+            if self.__class__.__name__ == 'SparseAdam':
+                warnings.warn(("Passing in a raw Tensor as ``params`` to SparseAdam "
+                               "is deprecated. In the future, this will raise an error. "
+                               "Please wrap your Tensor in an iterable instead."),
+                              FutureWarning)
+            else:
+                raise TypeError("params argument given to the optimizer should be "
+                                "an iterable of Tensors or dicts, but got " +
+                                torch.typename(params))
 
         self.state: DefaultDict[torch.Tensor, Any] = defaultdict(dict)
         self.param_groups: List[Dict[str, Any]] = []

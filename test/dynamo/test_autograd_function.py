@@ -285,6 +285,32 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         opt_model(x)
 
+    def test_allow_in_graph(self):
+        torch._dynamo.utils.counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.allow_in_graph
+        class AllowInGraphFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                torch._dynamo.graph_break()
+                ctx.x0 = x.size(0)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out * ctx.x0
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return AllowInGraphFunc.apply(x)
+
+        x = torch.rand(2, 3, requires_grad=True)
+        result = fn(x)
+
+        self.assertEqual(result, AllowInGraphFunc.apply(x))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_classmethod(self):
         class Shake(torch.autograd.Function):
             @classmethod
@@ -343,6 +369,35 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         result = f(x)
 
         self.assertEqual(result, Foo.apply(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_amp_custom_fwd_bwd(self):
+        torch._dynamo.utils.counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class MyMM(torch.autograd.Function):
+            @staticmethod
+            @torch.cuda.amp.custom_fwd
+            def forward(ctx, a, b):
+                ctx.save_for_backward(a, b)
+                return a.mm(b)
+
+            @staticmethod
+            @torch.cuda.amp.custom_bwd
+            def backward(ctx, grad):
+                a, b = ctx.saved_tensors
+                return grad.mm(b.t()), a.t().mm(grad)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            return MyMM.apply(a, b)
+
+        a = torch.randn([64, 64], dtype=torch.float32, requires_grad=True)
+        grad = a.clone()
+        res = fn(a, a)
+        res.backward(grad)
+
+        self.assertEqual(res, MyMM.apply(a, a))
         self.assertEqual(cnt.frame_count, 1)
 
     def test_graph_break_if_lifted_free_variable(self):

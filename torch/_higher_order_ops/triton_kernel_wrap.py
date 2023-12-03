@@ -76,25 +76,18 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
 triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
 
 
-def grid_fn_code(name, configs, grids):
-    assert len(grids) == len(configs)
-    fn_name = f"grid_wrapper_for_{name}"
-    grid_fn_str = f"def {fn_name}(meta):"
-    for grid, config in zip(grids, configs):
-        guards = [f"meta['{name}'] == {val}" for name, val in config.kwargs.items()]
-        guards = " and ".join(guards)
-        grid_fn_str += f"\n\tif {guards}: return {grid}"
-    return fn_name, grid_fn_str
-
-
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_mutation_dense(*, kernel_idx, grid, kwargs):
+    from torch._inductor.codegen.wrapper import user_defined_kernel_grid_fn_code
+
     kernel = kernel_side_table.get_kernel(kernel_idx)
 
     if len(grid) == 1:
         grid_fn = grid[0]
     else:
-        fn_name, code = grid_fn_code(kernel.fn.__name__, kernel.configs, grid)
+        fn_name, code = user_defined_kernel_grid_fn_code(
+            kernel.fn.__name__, kernel.configs, grid
+        )
         namespace: Dict[str, Any] = {}
         exec(code, namespace)
         grid_fn = namespace[fn_name]

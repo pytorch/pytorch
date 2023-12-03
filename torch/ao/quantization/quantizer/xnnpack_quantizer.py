@@ -23,6 +23,7 @@ from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.ao.quantization.quantizer import QuantizationSpec, Quantizer
 
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
+    _convert_scalars_to_attrs,
     OP_TO_ANNOTATOR,
     OperatorConfig,
     OperatorPatternType,
@@ -246,8 +247,8 @@ def _get_not_module_type_or_name_filter(
 class XNNPACKQuantizer(Quantizer):
     supported_config_and_operators = _get_supported_config_and_operators()
     STATIC_QAT_ONLY_OPS = [
-        "conv2d_bn_relu",
-        "conv2d_bn",
+        "conv_bn_relu",
+        "conv_bn",
     ]
 
     # static quantization ops (both PTQ and QAT)
@@ -340,6 +341,12 @@ class XNNPACKQuantizer(Quantizer):
         ), " quantization_config == None is not supported yet"
         self.module_name_config[module_name] = quantization_config
         return self
+
+    def transform_for_annotation(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        """Transforms scalar values to tensor attributes"""
+        return _convert_scalars_to_attrs(model)
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""

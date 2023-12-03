@@ -407,10 +407,6 @@ Tensor std_mean_backward(
     at::OptionalIntArrayRef dim_opt,
     const c10::optional<c10::Scalar>& correction,
     bool keepdim);
-at::Tensor masked_scatter_backward(
-    const at::Tensor& grad,
-    const at::Tensor& mask,
-    c10::SymIntArrayRef sizes);
 at::Tensor cholesky_backward(
     const at::Tensor& grad,
     bool upper,
@@ -743,7 +739,8 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& self,
     const Tensor& input2,
     const Tensor& result,
-    const bool upper);
+    const bool upper,
+    std::array<bool, 2> output_mask);
 Tensor cholesky_solve_jvp(
     const Tensor& X,
     const Tensor& U,

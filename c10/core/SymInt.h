@@ -126,7 +126,8 @@ class C10_API SymInt {
     if (auto r = maybe_as_int()) {
       return *r;
     }
-    TORCH_CHECK(false, "expected int but got ", *this);
+    TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+        false, "when unpacking SymInt, expected int but got ", *this);
   }
 
   // Test if we have a hint for this int (e.g., guard_int would work).
