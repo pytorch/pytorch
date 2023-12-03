@@ -787,6 +787,16 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
+    def test_dict_fromkeys(self):
+        def fn(x, y):
+            lst = ["a", "b", x.shape[0]]
+            d1 = dict.fromkeys(lst)
+            d2 = collections.defaultdict.fromkeys(iter(d1), x)
+            d3 = collections.OrderedDict.fromkeys(d2, value=y)
+            return d3["a"] + d3["b"]
+
+        torch._dynamo.testing.standard_test(self, fn, 2, expected_ops=1)
+
     def test_min_max_over_iterable(self):
         def get_test_fn(func):
             def _fn(a, b, func=func):
