@@ -9,13 +9,13 @@ from torch.distributed._tensor import DeviceMesh, distribute_tensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorOpTestBase,
     skip_unless_torch_gpu,
     with_comms,
 )
 
 
-class DistMathOpsTest(DTensorTestBase):
+class DistMathOpsTest(DTensorOpTestBase):
     def linear_op_reductions(self, op_str):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -44,18 +44,18 @@ class DistMathOpsTest(DTensorTestBase):
         dt_full_reduced = op_dt().full_tensor()
         self.assertEqual(dt_full_reduced, full_reduced_tensor)
 
-    @with_comms
+    
     def test_linear_op_reductions(self):
         for op_str in ("all", "sum", "prod", "max", "min"):
             self.linear_op_reductions(op_str)
 
-    @with_comms
+    
     @skip_unless_torch_gpu
     def test_mean(self):
         self.linear_op_reductions("mean")
 
     # TODO: forward test can be removed once test_softmax_with_bwd passes on CPU
-    @with_comms
+    
     def test_softmax_fwd(self):
         device_mesh = self.build_device_mesh()
 
@@ -88,7 +88,7 @@ class DistMathOpsTest(DTensorTestBase):
     # TODO: get test_softmax_with_bwd pass on CPU
     # DTensor's _softmax_backward_data produces wrong result on CPU on certain dimension.
     # fail_on_cpu_list = [(0, -1), (1, -1)]
-    @with_comms
+    
     @skip_unless_torch_gpu
     def test_softmax_with_bwd(self):
         device_mesh = self.build_device_mesh()
@@ -126,7 +126,7 @@ class DistMathOpsTest(DTensorTestBase):
                 self.assertIsNotNone(dist_x.grad)
                 self.assertEqual(dist_x.grad.full_tensor(), x.grad)
 
-    @with_comms
+    
     def test_full_shard_math_ops(self):
         mesh_shape = (2, self.world_size // 2)
         mesh = DeviceMesh(

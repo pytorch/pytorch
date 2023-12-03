@@ -12,8 +12,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
-    with_comms,
+    DTensorOpTestBase,
 )
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -24,7 +23,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestEmbeddingOp(DTensorTestBase):
+class TestEmbeddingOp(DTensorOpTestBase):
     def _run_embedding_op_test(
         self,
         shard_dim,
@@ -112,7 +111,7 @@ class TestEmbeddingOp(DTensorTestBase):
         )
         self.assertEqual(local_output, sharded_output.full_tensor())
 
-    @with_comms
+    
     def test_sharded_embedding_colwise(self):
         self._run_embedding_op_test(1, [5, 4], 17, 12)
         self._run_embedding_op_test(1, [6, 7, 6], 21, 11)
@@ -122,7 +121,7 @@ class TestEmbeddingOp(DTensorTestBase):
         self._run_embedding_op_test(1, [34], 15, 14, padding_idx=10)
         self._run_embedding_op_test(1, [8, 6, 5, 4], 23, 13, padding_idx=12)
 
-    @with_comms
+    
     def test_sharded_embedding_colwise_errors(self):
         with self.assertRaisesRegex(
             NotImplementedError,
@@ -132,7 +131,7 @@ class TestEmbeddingOp(DTensorTestBase):
                 1, [8, 6, 5, 4], 23, 13, padding_idx=12, max_norm=2.0
             )
 
-    @with_comms
+    
     def test_sharded_embedding_rowwise(self):
         with self.assertRaisesRegex(
             NotImplementedError,
