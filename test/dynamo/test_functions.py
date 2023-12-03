@@ -818,6 +818,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return d1["a"] * d2["b"] + d2["a"] + d1["b"] + d3["a"] + d3["b"] + 1
 
     @make_test
+    def test_dict_copy(x):
+        my_list = [("a", x), ("b", x + 1), ("c", x + 2)]
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = d1.copy()
+        d2["a"] = x - 5
+        d2["b"] = x + 3
+        d3 = collections.OrderedDict(my_list)
+        d3["c"] = x + 20
+        d4 = d3.copy()
+        d4["c"] = x - 10
+        return d1["a"] * d2["a"] + d2["b"] + d3["c"] * d4["c"] + 1
+
+    @make_test
     def test_dict_update(x, y, z):
         d = {"a": x, "b": y}
         d.update({"a": y - 1})

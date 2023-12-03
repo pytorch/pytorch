@@ -89,7 +89,6 @@ class ConstDictVariable(VariableTracker):
         if name == "__getitem__":
             assert len(args) == 1
             return self.getitem_const(args[0])
-
         elif name == "items":
             assert not (args or kwargs)
             return TupleVariable(
@@ -118,10 +117,12 @@ class ConstDictVariable(VariableTracker):
                 ],
                 mutable_local=MutableLocal(),
             )
-
         elif name == "values":
             assert not (args or kwargs)
             return TupleVariable(list(val.values()))
+        elif name == "copy":
+            assert not (args or kwargs)
+            return self.modifed(self.items.copy(), mutable_local=MutableLocal())
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable.create(len(self.items))
