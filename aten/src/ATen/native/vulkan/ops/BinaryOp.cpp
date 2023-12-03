@@ -66,6 +66,39 @@ Tensor binary_op_scalar(
   return convert(v_output);
 }
 
+Tensor binary_op_preprocess_other_arg(const Tensor& other_arg) {
+  // Similar to binary_op_scalar where tensors is mapped to float, we
+  // also map known integer types (but not quant types) tensor to float.
+
+  // Such conversion can only to be done before moving to vulkan, since vulkan
+  // doesn't yet support integer types.
+  Tensor other = other_arg;
+  if (!other.is_vulkan()) {
+    switch (other.scalar_type()) {
+      case at::kByte:
+      case at::kChar:
+      case at::kShort:
+      case at::kInt:
+      case at::kLong:
+      case at::kDouble:
+        other = other.to(kFloat);
+        break;
+      case at::kFloat:
+        // No op for expected type.
+        break;
+      default:
+        TORCH_CHECK(
+            false,
+            "binary_op_tensor, doesn't support type %s",
+            other.scalar_type());
+        break;
+    }
+    other = other.vulkan();
+  }
+
+  return other;
+}
+
 Tensor& binary_op_scalar_(
     Tensor& self_arg,
     const Scalar& other,
@@ -127,7 +160,8 @@ Tensor binary_op_tensor(
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
   const vTensor& v_self = convert(self);
 
-  const Tensor other = other_arg.is_vulkan() ? other_arg : other_arg.vulkan();
+  Tensor other = binary_op_preprocess_other_arg(other_arg);
+
   const vTensor& v_other = convert(other);
 
   vTensor v_output{
@@ -301,7 +335,8 @@ Tensor& binary_op_tensor_(
 
   vTensor& v_self = convert(self_arg);
 
-  const Tensor other = other_arg.is_vulkan() ? other_arg : other_arg.vulkan();
+  Tensor other = binary_op_preprocess_other_arg(other_arg);
+
   const vTensor& v_other = convert(other);
 
   const double alpha = alpha_arg ? alpha_arg->to<double>() : 1.0;

@@ -9,7 +9,7 @@ import torch._inductor.utils
 from torch._inductor import config
 from torch.profiler import ProfilerActivity
 
-from torch.testing._internal.common_utils import TemporaryFileName, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import skipIfRocm, TemporaryFileName
 
 from torch.utils._triton import has_triton
 
@@ -39,14 +39,13 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue("traceEvents" in trace_json)
         events = trace_json["traceEvents"]
 
+        kernel_name = "hipModuleLaunchKernel" if torch.version.hip else "cuLaunchKernel"
+
         def nameMatchesLaunchKernel(event_name):
-            return "cuLaunchKernel" in event_name
+            return kernel_name in event_name
 
         self.assertTrue(
-            any(
-                ("name" in event and "cuLaunchKernel" == event["name"])
-                for event in events
-            )
+            any(("name" in event and kernel_name == event["name"]) for event in events)
         )
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
@@ -124,6 +123,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         self._test_profiling_kernel_names(fn, args, "sin")
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    @skipIfRocm
     def test_inductor_profiling_kernel_names_template(self):
         with config.patch(
             {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
@@ -156,5 +156,4 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if not TEST_WITH_ROCM:
-        run_tests()
+    run_tests()
