@@ -77,6 +77,8 @@ DTYPE_TO_ATEN = {
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
     torch.complex64: "at::kComplexFloat",
+    torch.float8_e4m3fn: "at::kFloat8_e4m3fn",
+    torch.float8_e5m2: "at::kFloat8_e5m2",
 }
 
 DEVICE_TO_ATEN = {
@@ -350,8 +352,7 @@ class CppPrinter(ExprPrinter):
         base = self._print(base)
 
         if exp == 0.5 or exp == -0.5:
-            r = f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
-            return f"static_cast<INDEX_TYPE>({r})" if expr.is_integer else r
+            return f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
         assert exp.is_integer
         exp = int(exp)
         if exp > 0:
