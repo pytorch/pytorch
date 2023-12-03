@@ -106,6 +106,7 @@ void PythonEngine::thread_on_exception(
     std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
+  // See Note [ Persisting PyErr state across autograd engine threads ]
   auto python_err = dynamic_cast<python_error*>(&e);
   if (python_err) {
     python_err->persist();
@@ -392,8 +393,25 @@ PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
   engine.queue_callback([callback]() {
     pybind11::gil_scoped_acquire gil;
     THPObjectPtr result{PyObject_CallFunctionObjArgs(callback.get(), nullptr)};
-    if (!result)
-      throw python_error();
+    if (!result) {
+      // Note [ Persisting PyErr state across autograd engine threads ]
+      //
+      // Since the autograd engine is multi-threaded, and Python error state is
+      // local to each thread, it must preserve the python error from the worker
+      // thread and rethrow it as-is in the calling thread. This is done via
+      // persisting the error in the two places that can encounter Python
+      // errors: (1) evaluate function and (2) queued callbacks.
+      //
+      // TODO: the engine is not actually responsible for persisting the error
+      // in the custom autograd Function case today! See the note above
+      // `raise_python_error()` function in python_function.cpp and
+      // python_hooks.cpp for more details. Persisting an extra time in the
+      // engine is fine because doing so is a no-op when the python_error has
+      // already been persisted.
+      python_error err;
+      err.persist();
+      throw std::move(err);
+    }
   });
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
