@@ -10,6 +10,7 @@
 #include <sys/types.h>
 
 #include <cstdlib>
+#include <fstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -269,6 +270,17 @@ inline std::string retrieveDesyncReport(
 
 #ifdef USE_C10D_NCCL
 
+// Write NCCL debug info to local disk or any storage users define.
+class TORCH_API DebugInfoWriter {
+ public:
+  DebugInfoWriter(int rank);
+  virtual ~DebugInfoWriter();
+  virtual void write(const std::string& ncclTrace);
+
+ protected:
+  std::string filename_;
+};
+
 DebugInfoWriter::DebugInfoWriter(int rank) {
   std::string fileName = getCvarString(
       {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
@@ -290,7 +302,7 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
   }
 
   file.write(ncclTrace.data(), ncclTrace.size());
-  LOG(INFO) << "Finished writing NCCLPG debug info.";
+  LOG(INFO) << "Finished writing NCCLPG debug info to " << filename_;
 }
 
 inline std::string pickle_str(const c10::IValue& v) {
