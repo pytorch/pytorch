@@ -5037,6 +5037,8 @@ Examples:
 
     Using Attention Biases:
 
+.. code-block:: python
+
     from torch.nn.utils.attention import CausalBias
 
     bsz, num_heads, seqlen_q, seqlen_kv, head_dim = 32, 8, 4, 12, 8
