@@ -68,22 +68,25 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        continue-on-error: true
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -105,15 +108,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout Blackhex/pytorch-builder
+      - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref:  arm64_windows
           submodules: recursive
-          repository: Blackhex/pytorch-builder
+          repository: mantaionut/builder
           path: builder
           quiet-checkout: true
-      - name: Clean Blackhex/pytorch-builder checkout
+      - name: Clean mantaionut/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -181,22 +184,25 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        continue-on-error: true
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -223,15 +229,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout Blackhex/pytorch-builder
+      - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref:  arm64_windows
           submodules: recursive
-          repository: Blackhex/pytorch-builder
+          repository: mantaionut/builder
           path: builder
           quiet-checkout: true
-      - name: Clean Blackhex/pytorch-builder checkout
+      - name: Clean mantaionut/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -276,9 +282,10 @@ jobs:
       build_name: libtorch-cpu-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-shared-without-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -314,22 +321,25 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        continue-on-error: true
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -351,15 +361,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout Blackhex/pytorch-builder
+      - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref:  arm64_windows
           submodules: recursive
-          repository: Blackhex/pytorch-builder
+          repository: mantaionut/builder
           path: builder
           quiet-checkout: true
-      - name: Clean Blackhex/pytorch-builder checkout
+      - name: Clean mantaionut/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -427,22 +437,25 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        continue-on-error: true
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -469,15 +482,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout Blackhex/pytorch-builder
+      - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref:  arm64_windows
           submodules: recursive
-          repository: Blackhex/pytorch-builder
+          repository: mantaionut/builder
           path: builder
           quiet-checkout: true
-      - name: Clean Blackhex/pytorch-builder checkout
+      - name: Clean mantaionut/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -522,9 +535,10 @@ jobs:
       build_name: libtorch-cpu-shared-without-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-static-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -560,22 +574,25 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        continue-on-error: true
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -597,15 +614,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout Blackhex/pytorch-builder
+      - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref:  arm64_windows
           submodules: recursive
-          repository: Blackhex/pytorch-builder
+          repository: mantaionut/builder
           path: builder
           quiet-checkout: true
-      - name: Clean Blackhex/pytorch-builder checkout
+      - name: Clean mantaionut/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -673,22 +690,25 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        continue-on-error: true
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -715,15 +735,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout Blackhex/pytorch-builder
+      - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref:  arm64_windows
           submodules: recursive
-          repository: Blackhex/pytorch-builder
+          repository: mantaionut/builder
           path: builder
           quiet-checkout: true
-      - name: Clean Blackhex/pytorch-builder checkout
+      - name: Clean mantaionut/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -768,9 +788,10 @@ jobs:
       build_name: libtorch-cpu-static-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-static-without-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -806,22 +827,25 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        continue-on-error: true
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -843,15 +867,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout Blackhex/pytorch-builder
+      - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref:  arm64_windows
           submodules: recursive
-          repository: Blackhex/pytorch-builder
+          repository: mantaionut/builder
           path: builder
           quiet-checkout: true
-      - name: Clean Blackhex/pytorch-builder checkout
+      - name: Clean mantaionut/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -919,22 +943,25 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        continue-on-error: true
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
       # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
       - name: Enable long paths on Windows
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -961,15 +988,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout Blackhex/pytorch-builder
+      - name: Checkout mantaionut/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref:  arm64_windows
           submodules: recursive
-          repository: Blackhex/pytorch-builder
+          repository: mantaionut/builder
           path: builder
           quiet-checkout: true
-      - name: Clean Blackhex/pytorch-builder checkout
+      - name: Clean mantaionut/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1014,7 +1041,8 @@ jobs:
       build_name: libtorch-cpu-static-without-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
