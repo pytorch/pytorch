@@ -179,6 +179,10 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(
                 ConstDictVariable.get_key(args[0]) in self.items
             )
+        elif name == "copy" and not (args or kwargs):
+            return ConstDictVariable(
+                self.items.copy(), user_cls=self.user_cls, mutable_local=MutableLocal()
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 

@@ -409,6 +409,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return z
 
     @make_test
+    def test_dict_copy2(x):
+        return {"foo": x + 1}.copy()
+
+    @make_test
     def test_callable_lambda(x):
         if callable(lambda x: True):
             return x + 1
