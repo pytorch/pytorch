@@ -2423,6 +2423,21 @@ class CPUReproTests(TestCase):
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
+    def test_invalid_dropout_args(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                x = x * 2
+                x = torch.nn.functional.dropout(x, p=0.5)
+                x = torch.relu(x)
+                return x
+
+        example_inputs = torch.tensor([[1, 2, 3], [4, 5, 6]])
+
+        func = MyModel()
+        jit_func = torch.compile(func)
+        self.assertRaises(RuntimeError, lambda: func(example_inputs))
+        self.assertRaises(RuntimeError, lambda: jit_func(example_inputs))
+
     @config.patch(inplace_buffers=True)
     def test_in_out_buffer(self):
         def fn(x, y):
