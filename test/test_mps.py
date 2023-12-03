@@ -44,7 +44,6 @@ import numpy as np
 import torch
 import torch.utils._pytree as pytree
 from itertools import product
-import platform
 
 test_consistency_op_db = copy.deepcopy(op_db)
 test_error_inputs_op_db = copy.deepcopy(op_db)
