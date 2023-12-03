@@ -564,7 +564,6 @@ def bsr_dense_addmm_meta(M, K, N, Ms, Ks, beta, alpha,
         key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
         meta = get_meta('bsr_dense_addmm', key,
                         device_name, version=(0, dtype, 0.5))
-        assert meta is not None, key
         if meta is not None:
             meta.update(**extra)
             return meta
