@@ -448,7 +448,7 @@ TORCH_IMPL_FUNC(cat_out_cuda)
       if (isBitsType(result.scalar_type())) {
         AT_DISPATCH_BIT_TYPES(result.scalar_type(), "cat_cuda", [&]() {
           using dtype = OpaqueType<sizeof(scalar_t)>;
-          parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE, CAT_ARRAY_BATCH_SIZE>(result, materialized, dim, nDims, memory_format);
+          parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(result, materialized, dim, nDims, memory_format);
         });
       } else {
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
