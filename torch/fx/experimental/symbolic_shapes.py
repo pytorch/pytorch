@@ -2928,6 +2928,8 @@ class ShapeEnv:
                 ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(guard_expr)
             )
             self._add_target_expr(guard_expr)
+            if any(is_dim(source) for s in mod_expr.free_symbols for source in symbol_to_source[s]):
+                self.dim_constraints.add(guard_expr)
 
         if constraint_violations:
             warn_msgs = []
