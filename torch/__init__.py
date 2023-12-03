@@ -667,6 +667,11 @@ def set_default_tensor_type(t):
 
     The default floating point tensor type is initially ``torch.FloatTensor``.
 
+    .. warning::
+
+        This function is deprecated as of PyTorch 2.1, please use :func:`torch.set_default_dtype()` and
+        :func:`torch.set_default_device()` as alternatives.
+
     Args:
         t (type or string): the floating point tensor type or its name
 
