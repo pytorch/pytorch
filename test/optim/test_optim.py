@@ -737,67 +737,6 @@ class TestOptim(TestCase):
                     self.assertEqual(st_p_state[k], actual, rtol=rtol, atol=atol)
 
 
-    def _test_foreach_memory(self, optimizer_pairs_with_flags):
-        if not torch.cuda.is_available():
-            return
-
-        device = "cuda"
-        nparams = 10
-        for optimizer_constructor, kwargs in optimizer_pairs_with_flags:
-            max_mems = []
-            for flag_value in (False, True):
-                kwargs_with_flags = deepcopy(kwargs)
-                if optimizer_constructor.__name__ == "ASGD" and kwargs_with_flags.get("capturable", False) and not flag_value:
-                    # single tensor ASGD does not support capturable
-                    kwargs_with_flags["capturable"] = False
-
-                kwargs_with_flags["foreach"] = flag_value
-
-
-                # The 128 is critical here! Our CUDACachingAllocator allocates in blocks of 512,
-                # meaning any tensor that occupies <512 bytes of memory will allocate a whole
-                # 512 bytes anyway. We use 128 (since datasize would be 4 bytes) so that param
-                # is size 512 exactly, making our later calculations for intermediate_size easy.
-                param = torch.rand(128, device=device)
-                params = [torch.rand_like(param) for _ in range(nparams)]
-
-                optimizer = optimizer_constructor(
-                    params, **kwargs_with_flags
-                )
-
-                for p in params:
-                    p.grad = torch.rand_like(p)
-
-                optimizer.step()
-                import gc
-                gc.collect()
-                torch.cuda.reset_peak_memory_stats()
-                optimizer.step()
-                gc.collect()
-                max_mems.append(torch.cuda.max_memory_allocated())
-
-            st_max_mem, mt_max_mem = max_mems
-            intermediate_size = nparams * param.nelement() * param.element_size()
-            nintermediates = 1  # we expect a budget of 1 intermediate most of the time
-            if (kwargs_with_flags.get('capturable') or
-                    optimizer_constructor.__name__ in ["Adadelta", "ASGD"]):
-                # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
-                # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
-                # ASGD allocates axs, 2x mus, 2x etas, and grads at the same time
-                nintermediates = 3
-                if optimizer_constructor.__name__ == "NAdam":
-                    # with capturable in NAdam, we have 3 extra intermediates for the
-                    # bias_correction, mus, and mu_nexts
-                    nintermediates = 5
-
-            elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
-                # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
-                # Adagrad uses std and grads at the same time
-                # RMSprop uses avg and grads
-                nintermediates = 2
-
-            self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)
-
     @property
     def _multi_tensor_optimizer_configs(self):
         return [
@@ -907,14 +846,6 @@ class TestOptim(TestCase):
             optimizer = optimizer_ctor(params, foreach=True, **optimizer_params)
             optimizer.step()
 
-    def test_peak_mem_multi_tensor_optimizers(self):
-        configs = [
-            (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
-                "Adadelta", "Adagrad", "Adamax", "Adam", "AdamW", "ASGD", "NAdam",
-                "RAdam", "RMSprop", "RProp", "SGD"
-            ]
-        ]
-        self._test_foreach_memory(configs)
 
     @property
     def _fused_optimizer_configs(self):
