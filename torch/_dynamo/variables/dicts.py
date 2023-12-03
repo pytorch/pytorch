@@ -562,6 +562,11 @@ class DataClassVariable(ConstDictVariable):
                 return variables.ConstantVariable.create(defaults[name])
         super().var_getattr(tx, name)
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if name in self.items:
+            return ConstantVariable(True)
+        return super().call_hasattr(tx, name)
+
 
 class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
