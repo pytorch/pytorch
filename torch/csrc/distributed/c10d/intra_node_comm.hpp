@@ -7,7 +7,7 @@ namespace c10d {
 namespace intra_node_comm {
 
 constexpr size_t kMaxDevices = 8;
-constexpr size_t kMaxIntraNodeSize = 50 * 1024 * 1024;
+constexpr size_t kMaxIntraNodeSize = 10 * 1024 * 1024;
 
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
 

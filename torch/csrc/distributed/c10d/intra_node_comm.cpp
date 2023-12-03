@@ -451,7 +451,18 @@ IntraNodeComm::IntraNodeComm(
       rank_(rank),
       worldSize_(worldSize) {}
 
-IntraNodeComm::~IntraNodeComm() {}
+IntraNodeComm::~IntraNodeComm() {
+  // Intentionally releasing resources without synchronizing devices.
+  for (size_t r = 0; r < worldSize_; ++r) {
+    if (r == rank_) {
+      continue;
+    }
+    cudaIpcCloseMemHandle(p2pStates_[r]);
+    cudaIpcCloseMemHandle(buffers_[r]);
+  }
+  cudaFree(p2pStates_[rank_]);
+  cudaFree(buffers_[rank_]);
+}
 
 c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
     const std::string& rdzvId,

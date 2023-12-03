@@ -11,9 +11,10 @@ static constexpr size_t kBytesPerThread = 16;
 static constexpr size_t kMaxAllReduceBlocks = 24;
 static constexpr size_t kThreadsPerBlock = 1024;
 static constexpr size_t kWarpSize = 32;
-static constexpr uint32_t kNumelPerThread =
-    kBytesPerThread / sizeof(at::BFloat16);
-static constexpr uint32_t kNumelPerWarp = kNumelPerThread * kWarpSize;
+
+static constexpr size_t kHcmThreshBytes = 256 * 1024;
+static constexpr size_t kOneShotThreshBytes = 256 * 1024;
+static constexpr size_t kTwoShotThreshBytes = 10 * 1024 * 1024;
 
 #if defined(USE_ROCM)
 using __nv_bfloat162 = uint32_t;
@@ -55,7 +56,7 @@ DEVICE_INLINE bf16x8 add_bf16x8(bf16x8 a, bf16x8 b) {
  *
  * Instead, we go around caching by having each thread:
  *
- * - Directly write to global memory via st.wt (write-through).
+ * - Directly write to global memory via st.cs (cache-streaming).
  * - Synchronize with threads within the block.
  * - Perform cross device synchronization at block level (via system scope
  *   atomic ops).
@@ -134,9 +135,10 @@ static __global__ void oneShotAllReduceKernel(
     std::array<FcP2pState*, kMaxDevices> p2pStates,
     std::array<at::BFloat16*, kMaxDevices> buffers,
     size_t rank) {
+  const size_t numelPerThread = kBytesPerThread / sizeof(at::BFloat16);
   const size_t offset =
-      (blockDim.x * blockIdx.x + threadIdx.x) * kNumelPerThread;
-  const size_t stride = blockDim.x * gridDim.x * kNumelPerThread;
+      (blockDim.x * blockIdx.x + threadIdx.x) * numelPerThread;
+  const size_t stride = blockDim.x * gridDim.x * numelPerThread;
 
   // Wait for all other ranks to enter the kernel
   if (threadIdx.x < kWorldSize) {
@@ -171,7 +173,7 @@ static __global__ void oneShotAllReduceKernel(
     if constexpr (kAligned) {
       streamStore128(&input[i], sums);
     } else {
-      for (size_t ii = 0; ii < kNumelPerThread; ++ii) {
+      for (size_t ii = 0; ii < numelPerThread; ++ii) {
         if (i + ii < N) {
           input[i + ii] = reinterpret_cast<at::BFloat16*>(&sums)[ii];
         }
@@ -187,9 +189,10 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     std::array<FcP2pState*, kMaxDevices> p2pStates,
     std::array<at::BFloat16*, kMaxDevices> buffers,
     size_t rank) {
+  const size_t numelPerThread = kBytesPerThread / sizeof(at::BFloat16);
   const size_t offset =
-      (blockDim.x * blockIdx.x + threadIdx.x) * kNumelPerThread;
-  const size_t stride = blockDim.x * gridDim.x * kNumelPerThread;
+      (blockDim.x * blockIdx.x + threadIdx.x) * numelPerThread;
+  const size_t stride = blockDim.x * gridDim.x * numelPerThread;
   const size_t N_per_rank = N_aligned / kWorldSize;
   const size_t N_start = N_per_rank * rank;
 
@@ -217,6 +220,7 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     for (size_t ii = 0; ii < kWorldSize; ++ii) {
       streamLoad128(vals[ii], &srcs[ii][N_start + i]);
     }
+
     bf16x8 sums;
     memset(reinterpret_cast<void*>(&sums), 0, sizeof(sums));
 
@@ -240,7 +244,7 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
 
   for (size_t i = offset; i < N_per_rank; i += stride) {
 #pragma unroll kWorldSize - 1
-    for (size_t ii = 1; ii < kWorldSize ; ++ii) {
+    for (size_t ii = 1; ii < kWorldSize; ++ii) {
       size_t k = N_start + i + (srcRanks[ii] - rank) * N_per_rank;
       bf16x8 val;
       streamLoad128(val, &srcs[ii][k]);
@@ -328,14 +332,15 @@ HybridCubeMesh getHybridCubeMesh(NvlMesh nvlMesh) {
 template <bool kAligned>
 static __global__ void hybridCubeMeshAllReduceKernel(
     at::BFloat16* input,
-    size_t M,
     size_t N,
+    size_t N_aligned,
     std::array<HcmP2pState*, kMaxDevices> p2pStates,
     std::array<at::BFloat16*, kMaxDevices> buffers,
     size_t rank) {
+  const size_t numelPerThread = kBytesPerThread / sizeof(at::BFloat16);
   const size_t offset =
-      (blockDim.x * blockIdx.x + threadIdx.x) * kNumelPerThread;
-  const size_t stride = blockDim.x * gridDim.x * kNumelPerThread;
+      (blockDim.x * blockIdx.x + threadIdx.x) * numelPerThread;
+  const size_t stride = blockDim.x * gridDim.x * numelPerThread;
 
   // Wait for HCM neigbors to enter the kernel
   if (threadIdx.x < 3) {
@@ -356,13 +361,14 @@ static __global__ void hybridCubeMeshAllReduceKernel(
   at::BFloat16* localRelay = buffers[rank] + kMaxIntraNodeSize / 2;
   at::BFloat16* remoteRelay = buffers[relayRank] + kMaxIntraNodeSize / 2;
 
-  for (size_t i = offset; i < N; i += stride) {
+  for (size_t i = offset; i < N_aligned; i += stride) {
     bf16x8 vals[4];
 
 #pragma unroll 4
     for (size_t ii = 0; ii < 4; ++ii) {
       streamLoad128(vals[ii], &srcs[ii][i]);
     }
+
     bf16x8 sums;
     memset(reinterpret_cast<void*>(&sums), 0, sizeof(sums));
 
@@ -381,7 +387,7 @@ static __global__ void hybridCubeMeshAllReduceKernel(
   }
   __syncthreads();
 
-  for (size_t i = offset; i < N; i += stride) {
+  for (size_t i = offset; i < N_aligned; i += stride) {
     bf16x8 localSum, remoteSum;
     // Cached load for local sums
     load128(localSum, &localRelay[i]);
@@ -390,8 +396,8 @@ static __global__ void hybridCubeMeshAllReduceKernel(
     if constexpr (kAligned) {
       streamStore128(&input[i], localSum);
     } else {
-      for (size_t ii = 0; ii < kNumelPerThread; ++ii) {
-        if (i + ii < M) {
+      for (size_t ii = 0; ii < numelPerThread; ++ii) {
+        if (i + ii < N) {
           input[i + ii] = reinterpret_cast<at::BFloat16*>(&localSum)[ii];
         }
       }
@@ -407,10 +413,6 @@ static inline size_t alignUp(uint32_t a, uint32_t b) {
   return divUp(a, b) * b;
 }
 
-static inline size_t getAlignedSize(const at::Tensor& input, size_t factor) {
-  return alignUp(input.numel(), kNumelPerWarp * factor) * input.element_size();
-}
-
 static void checkInput(const at::Tensor& input, size_t rank) {
   TORCH_CHECK(
       input.dtype() == at::kBFloat16,
@@ -420,15 +422,24 @@ static void checkInput(const at::Tensor& input, size_t rank) {
   TORCH_CHECK(static_cast<size_t>(input.get_device()) == rank);
 }
 
-static void getLaunchConfig(size_t N, dim3& blocks, dim3& threads) {
+static void getLaunchConfig(
+    size_t N_aligned,
+    size_t elemSize,
+    dim3& blocks,
+    dim3& threads) {
   blocks = dim3(0, 1, 1);
   threads = dim3(0, 1, 1);
-  if (N < kNumelPerThread * kThreadsPerBlock) {
-    threads.x = divUp(N, kNumelPerWarp) * kWarpSize;
+
+  const auto numelPerThread = kBytesPerThread / elemSize;
+  const auto numelPerWarp = numelPerThread * kWarpSize;
+  TORCH_CHECK(N_aligned % numelPerThread == 0);
+  TORCH_CHECK(N_aligned % numelPerWarp == 0);
+  if (N_aligned < numelPerThread * kThreadsPerBlock) {
+    threads.x = N_aligned / numelPerWarp * kWarpSize;
     blocks.x = 1;
   } else {
-    auto warpsRequired = divUp(N, kNumelPerWarp);
-    auto threadsRequired = divUp(N, kNumelPerThread);
+    auto warpsRequired = N_aligned / numelPerWarp;
+    auto threadsRequired = N_aligned / numelPerThread;
     blocks.x =
         std::min(divUp(threadsRequired, kThreadsPerBlock), kMaxAllReduceBlocks);
     auto warpsPerBlock = divUp(warpsRequired, blocks.x);
@@ -493,12 +504,12 @@ at::Tensor oneShotAllReduce(
     size_t worldSize) {
   checkInput(input, rank);
 
-  size_t N_aligned = alignUp(input.numel(), kNumelPerWarp);
-  TORCH_CHECK(N_aligned % kNumelPerWarp == 0);
-  TORCH_CHECK(N_aligned <= kMaxIntraNodeSize / sizeof(at::BFloat16));
+  size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
+  size_t N_aligned = alignUp(input.numel(), numelPerWarp);
+  TORCH_CHECK(N_aligned <= kMaxIntraNodeSize / input.element_size());
 
   dim3 blocks, threads;
-  getLaunchConfig(N_aligned, blocks, threads);
+  getLaunchConfig(N_aligned, input.element_size(), blocks, threads);
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
@@ -520,23 +531,23 @@ at::Tensor oneShotAllReduce(
             rank);                                                  \
     C10_CUDA_KERNEL_LAUNCH_CHECK();                                 \
   }
+
+#define DISPATCH_ALL_WORLD_SIZES(kAligned) \
+  X(2, kAligned);                          \
+  X(3, kAligned);                          \
+  X(4, kAligned);                          \
+  X(5, kAligned);                          \
+  X(6, kAligned);                          \
+  X(7, kAligned);                          \
+  X(8, kAligned);
+
   if (N_aligned == static_cast<size_t>(input.numel())) {
-    X(2, true);
-    X(3, true);
-    X(4, true);
-    X(5, true);
-    X(6, true);
-    X(7, true);
-    X(8, true);
+    DISPATCH_ALL_WORLD_SIZES(true);
   } else {
-    X(2, false);
-    X(3, false);
-    X(4, false);
-    X(5, false);
-    X(6, false);
-    X(7, false);
-    X(8, false);
+    DISPATCH_ALL_WORLD_SIZES(false);
   }
+
+#undef DISPATCH_ALL_WORLD_SIZES
 #undef X
   return input;
 }
@@ -549,13 +560,13 @@ at::Tensor twoShotAllReduce(
     size_t worldSize) {
   checkInput(input, rank);
 
-  size_t N_aligned = alignUp(input.numel(), worldSize * kNumelPerWarp);
+  size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
+  size_t N_aligned = alignUp(input.numel(), worldSize * numelPerWarp);
   size_t N_per_rank = N_aligned / worldSize;
-  TORCH_CHECK(N_per_rank % kNumelPerWarp == 0);
-  TORCH_CHECK(N_aligned <= kMaxIntraNodeSize / sizeof(at::BFloat16));
+  TORCH_CHECK(N_aligned <= kMaxIntraNodeSize / input.element_size());
 
   dim3 blocks, threads;
-  getLaunchConfig(N_per_rank, blocks, threads);
+  getLaunchConfig(N_per_rank, input.element_size(), blocks, threads);
 
   auto output = N_aligned == static_cast<size_t>(input.numel())
       ? input
@@ -608,12 +619,12 @@ at::Tensor hybridCubeMeshAllReduce(
     size_t worldSize) {
   checkInput(input, rank);
 
-  size_t N = alignUp(input.numel(), kNumelPerWarp);
-  TORCH_CHECK(N % kNumelPerWarp == 0);
-  TORCH_CHECK(N <= kMaxIntraNodeSize / sizeof(at::BFloat16));
+  size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
+  size_t N_aligned = alignUp(input.numel(), numelPerWarp);
+  TORCH_CHECK(N_aligned <= kMaxIntraNodeSize / input.element_size());
 
   dim3 blocks, threads;
-  getLaunchConfig(N, blocks, threads);
+  getLaunchConfig(N_aligned, input.element_size(), blocks, threads);
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
@@ -623,20 +634,18 @@ at::Tensor hybridCubeMeshAllReduce(
       cudaMemcpyDeviceToDevice,
       at::cuda::getCurrentCUDAStream()));
 
-#define X(kAligned)                            \
-    hybridCubeMeshAllReduceKernel<kAligned><<< \
-        blocks,                                \
-        threads,                               \
-        0,                                     \
-        at::cuda::getCurrentCUDAStream()>>>(   \
-        input.data_ptr<at::BFloat16>(),        \
-        input.numel(),                         \
-        N,                                     \
-        castArr<HcmP2pState*>(p2pStates),      \
-        castArr<at::BFloat16*>(buffers),       \
-        rank);                                 \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  if (N == static_cast<size_t>(input.numel())) {
+#define X(kAligned)                                               \
+  hybridCubeMeshAllReduceKernel<kAligned>                         \
+      <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>( \
+          input.data_ptr<at::BFloat16>(),                         \
+          input.numel(),                                          \
+          N_aligned,                                              \
+          castArr<HcmP2pState*>(p2pStates),                       \
+          castArr<at::BFloat16*>(buffers),                        \
+          rank);                                                  \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  if (N_aligned == static_cast<size_t>(input.numel())) {
     X(true);
   } else {
     X(false);
@@ -653,18 +662,20 @@ AllReduceAlgo selectAllReduceAlgo(
   if (input.dtype() != at::kBFloat16) {
     return AllReduceAlgo::NONE;
   }
+  const auto numel = input.numel();
+  const auto numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
   if (topology == Topology::HYBRID_CUBE_MESH) {
     TORCH_CHECK(
         worldSize == 8, "hyperCubeAllReduce only supports exactly 8 GPUs");
-    if (getAlignedSize(input, 1) <= 256 * 1024) {
+    if (alignUp(numel, numelPerWarp) <= kHcmThreshBytes) {
       return AllReduceAlgo::HCM;
     }
   }
   if (topology == Topology::FULLY_CONNECTED) {
-    if (getAlignedSize(input, 1) <= 256 * 1024) {
+    if (alignUp(numel, numelPerWarp) <= kOneShotThreshBytes) {
       return AllReduceAlgo::ONE_SHOT;
     }
-    if (getAlignedSize(input, worldSize) <= 10 * 1024 * 1024) {
+    if (alignUp(numel, numelPerWarp * worldSize) <= kTwoShotThreshBytes) {
       return AllReduceAlgo::TWO_SHOT;
     }
   }
