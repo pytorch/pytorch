@@ -139,13 +139,21 @@ class ConstDictVariable(VariableTracker):
             )
         elif (
             name in ("pop", "get")
-            and args
+            and len(args) == 2
+            and not kwargs
             and ConstDictVariable.is_valid_key(args[0])
             and ConstDictVariable.get_key(args[0]) not in self.items
-            and len(args) == 2
         ):
             # missing item, return the default value
             return args[1]
+        elif (
+            name == "get"
+            and len(args) == 1
+            and not kwargs
+            and ConstDictVariable.is_valid_key(args[0])
+            and ConstDictVariable.get_key(args[0]) not in self.items
+        ):
+            return ConstantVariable(None)
         elif (
             name == "pop"
             and args
