@@ -10,7 +10,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_optimizers import optim_db, optims, OptimizerErrorEnum
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA)
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestOptimRenewed(TestCase):
 
@@ -217,7 +217,6 @@ class TestOptimRenewed(TestCase):
 
     @onlyCUDA
     @largeTensorTest("72GB", "cuda")
-    @skipIfRocm
     @optims([  # all foreach except Adamax. H100 wasn't sufficient, surprisingly
         optim for optim in optim_db if (optim.optim_cls.__name__ != "Adamax" and
                                         "foreach" in optim.supported_impls)
@@ -304,7 +303,6 @@ class TestOptimRenewed(TestCase):
 
     @onlyCUDA
     @largeTensorTest("64GB", "cuda")
-    @skipIfRocm
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float16])
     def test_fused_large_tensor(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
