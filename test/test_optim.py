@@ -33,7 +33,7 @@ class TestOptimRenewed(TestCase):
 
     def _test_derived_optimizers(self, device, dtype, optim_info, flag, reduced_precision=False):
         """
-        Given a flag 'fused' or 'foreach, test for parity of optimizer state
+        Given a flag 'fused' or 'foreach', test for parity of optimizer state
         and updated parameters between when the flag is set to True and False
         for provided optimizer configurations.
         """
