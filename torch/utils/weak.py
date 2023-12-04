@@ -269,10 +269,7 @@ WeakTensorKeyDictionary = WeakIdKeyDictionary
 
 
 class TensorWeakRef:
-    """
-    Wrapper around a weak ref of a Tensor that handles the _fix_weakref() call required
-    when unwrapping a Tensor weakref.
-    """
+    """Wrapper around a weak ref of a Tensor that handles the _fix_weakref() call required when unwrapping a Tensor weakref."""
 
     ref: WeakRef[Tensor]
 

@@ -3573,6 +3573,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('le', device_type='cuda'),
         xfail('lt', device_type='cuda'),
         xfail('ne', device_type='cuda'),
+
+        # RuntimeError: aten::_flash_attention_forward hit the vmap fallback which is currently disabled
+        xfail('torch.ops.aten._flash_attention_forward'),
     }
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
@@ -3603,6 +3606,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('addcdiv'),
         xfail('addcmul'),
         xfail('clamp'),
+
+        xfail('torch.ops.aten._efficient_attention_forward'),  # outputs ints
 
         # TypeError: expected Tensor as element 0 in argument 0, but got float
         xfail('item'),
@@ -3660,6 +3665,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('nn.functional.scaled_dot_product_attention'),  # randomness
         xfail('nn.functional.multi_head_attention_forward'),  # randomness
+        xfail('torch.ops.aten._efficient_attention_forward'),  # outputs ints
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
@@ -3759,23 +3765,18 @@ class TestVmapOperatorsOpInfo(TestCase):
             'addmm',
             'addmv',
             'addr',
-            'atan2',
             'baddbmm',
             'clamp',
             'conj_physical',
             'cumprod',
             'cumsum',
-            'div',
-            'div',
             'floor_divide',
             'fmod',
-            'gcd',
             'heaviside',
             'hypot',
             'igamma',
             'igammac',
             'index_copy',
-            'lcm',
             'ldexp',
             'lerp',
             'neg',
