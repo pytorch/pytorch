@@ -29,7 +29,14 @@ from torch.nn.utils import stateless
 
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
-from .functional_utils import from_fun, is_fun, sync_functional_tensor, to_fun
+from .functional_utils import (
+    from_fun,
+    has_data_mutation,
+    has_metadata_mutation,
+    is_fun,
+    sync_functional_tensor,
+    to_fun,
+)
 from .logging_utils import setup_stacktrace_preservation_hooks
 from .schemas import (
     AOTConfig,
@@ -346,6 +353,56 @@ def create_functionalized_fn(
         with disable_above, FunctionalTensorMode():
             # Run the joint
             f_outs = fn(*f_args)
+
+        if trace_joint:
+            # We support a limited amount of mutation of graph inputs during the backward pass.
+            # (This is used e.g. by Float8, which needs to update buffers during the backward pass)
+            # Here, we perform extra checks for primals that were mutated in the **backward**
+            # We're doing the checks here instead of doing them with the rest of the input mutation handling because:
+            # - We need to detect inputs that were mutated in the backward **separately** from mutations that happened
+            #   during the forward, because the handling is different: some input mutations from the the forward
+            #   can be only handled in a fw-only runtime epilogue, and in theory if we wanted to handle those same
+            #   types of mutations in the backward we would need a bw-only runtime epilogue.
+            # - We could in theory have our analysis pass differentiate mutations in the fw from mutations in
+            #   the bw by running our analysis first on the fw-only graph, and then on the joint graph. This would
+            #   require an extra round of tracing though, so it's more efficient to do in-line here.
+            assert (
+                isinstance(args, tuple)
+                and len(args) == 2
+                and isinstance(args[0], (list, tuple))
+            )
+            # Only look at mutations that happened to forward inputs (e.g. fw buffers that were saved for bw)
+            primals_before = args[0]
+            primals_after = pytree.tree_map(from_fun, f_args[0])
+            for f_inpt, before, after, inpt_info in zip(
+                f_args[0], primals_before, primals_after, meta.input_info
+            ):
+                # Ban metadata mutations on fw inputs during the bw
+                if not inpt_info.mutates_metadata:
+                    assert not has_metadata_mutation(
+                        f_inpt, before, check_only_storage_mutation=False
+                    ), "Found a graph input that had its metadata mutated in the backward. This is not supported"
+                # Allow data mutations on fw inputs during the bw, but only if they do not require grad
+                # So we can guarantee that we can keep the mutations in the graph
+                if has_data_mutation(f_inpt) and not inpt_info.mutates_data:
+                    assert (
+                        not inpt_info.requires_grad
+                    ), "Found a graph input that requires_grad and was mutated in the backward. This is not supported"
+                    # Otherwise, put the mutation in the graph
+                    before.copy_(after)
+            # Now that we covered mutations to *forward* inputs during the backward,
+            # we also need to cover mutations to *backward-only* inputs during the backward (e.g. mutation to a grad_out).
+            # Today, we will just error in all cases of this happening unless someone needs us to support it.
+            tangents_before = args[1]
+            tangents_after = pytree.tree_map(from_fun, f_args[1])
+            for f_inpt, before, after in zip(
+                f_args[1], tangents_before, tangents_after
+            ):
+                assert not has_metadata_mutation(
+                    f_inpt, before, check_only_storage_mutation=False
+                ) and not has_data_mutation(
+                    f_inpt
+                ), "Found an input to the backward that was mutated during the backward pass. This is not supported"
 
         if aot_config.keep_inference_input_mutations:
             # Note: This is a bit annoying. There's a layering issue here, where:
