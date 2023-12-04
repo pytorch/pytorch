@@ -4990,6 +4990,7 @@ def _prepare_convolution_fusion_create(
     if bias is not None:
         bias.realize()
     with V.graph.fake_mode:
+        # TODO <Leslie> cleaned up the fake_tensor trace as Linear implementation
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
         dims = len(x_fake.size()) - 2
@@ -5077,37 +5078,25 @@ def _prepare_linear_fusion_create(
     weight.realize()
     if bias is not None:
         bias.realize()
-    with V.graph.fake_mode:
-        x_fake = ir_node_to_tensor(x, guard_shape=True)
-        weight_fake = ir_node_to_tensor(weight, guard_shape=True)
-        bias_fake = (
-            ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
-        )
-        if bias is not None:
-            output = torch.ops.aten.addmm.default(
-                bias_fake,
-                x_fake,
-                weight_fake,
-            )
-        else:
-            output = torch.ops.aten.mm.default(
-                x_fake,
-                weight_fake,
-            )
-        output_size = output.size()
 
-        req_stride_order = list(reversed(range(len(x.get_size()))))
-        output_stride = make_contiguous_strides_for(output_size)
+    *m, _ = x.get_size()
+    # The weight has been transposed during the qlinear weight prepack process.
+    # https://github.com/pytorch/pytorch/blob/4979f9c0d72490970e2019bb1d2284f83d93f76b/
+    # aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp#L291
+    _, oc = weight.get_size()
+    output_size = list(m) + [oc]
+    req_stride_order = list(reversed(range(len(x.get_size()))))
 
     x = cls.require_stride_order(x, req_stride_order)
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
 
+    output_stride = make_contiguous_strides_for(output_size)
     kernel_layout = FixedLayout(
         x.get_device(),
         x.get_dtype(),
-        convert_shape_to_inductor(output_size),
-        convert_shape_to_inductor(output_stride),
+        output_size,
+        output_stride,
     )
     constant_args: List[Any] = []
 
