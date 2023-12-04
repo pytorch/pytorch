@@ -217,7 +217,9 @@ class TestPoitwiseOps(torch.nn.Module):
 
 
 @requires_cuda()
-@torch._inductor.config.patch(post_grad_fusion_options={"group_linear": {}})
+@torch._inductor.config.patch(
+    post_grad_fusion_options={"group_linear": {"require_fbgemm": True}}
+)
 class TestGroupBatchFusion(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -411,6 +413,43 @@ class TestGroupBatchFusion(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
+
+
+class TestBMMFusionModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.my_modules = torch.nn.ModuleList()
+        for _ in range(10):
+            self.my_modules.append(torch.nn.Linear(10, 10))
+
+    def forward(self, inputs):
+        output = None
+        for linear, input in zip(self.my_modules, inputs):
+            if output is None:
+                output = linear(input)
+            else:
+                output += linear(input)
+        return output
+
+
+@requires_cuda()
+@torch._inductor.config.patch(
+    post_grad_fusion_options={"batch_linear": {"require_fbgemm": False}}
+)
+class TestPostGradBatchLinearFusion(TestCase):
+    def test_batch_linear_post_grad_fusion(self):
+        pt1_module = TestBMMFusionModule().cuda()
+        inputs = []
+        for _ in range(10):
+            inputs.append(torch.randn(10, 10).cuda())
+        eager_output = pt1_module(inputs)
+        pt2_module = torch.compile(pt1_module)
+        pt2_output = pt2_module(inputs)
+        self.assertTrue(torch.allclose(eager_output, pt2_output))
+        self.assertEqual(
+            counters["inductor"]["batch_fusion"],
+            2,
+        )
 
 
 if __name__ == "__main__":
