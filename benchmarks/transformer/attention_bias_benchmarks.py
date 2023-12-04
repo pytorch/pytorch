@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torch.utils.benchmark as benchmark
 from tabulate import tabulate
 from torch.nn.parameter import Parameter
-from torch.nn.utils.attention import CausalBias, CausalVariant
+from torch.nn.attention.bias import CausalBias, CausalVariant
 from tqdm import tqdm
 
 
@@ -156,7 +156,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     attn_mask = CausalBias(
         CausalVariant.LOWER_RIGHT, config.q_seq_len, config.k_seq_len
     )
-    attn_mask_tensor = attn_mask.materialize(device)
+    attn_mask_tensor = attn_mask._materialize(device)
 
     materialized_mask_time = benchmark_torch_function_in_microseconds(
         composite_mha, query, key, value, attn_mask_tensor

@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.functional import scaled_dot_product_attention
-from torch.nn.utils.attention import CausalVariant, CausalBias
+from torch.nn.attention.bias import CausalVariant, lower_right_causal, upper_left_causal
 from torch.nn.parameter import Parameter
 import unittest
 from unittest import expectedFailure as xfail
@@ -3057,8 +3057,12 @@ class TestAttnMasks(NNTestCase):
         forw_tol = Tolerances(1e-3, 1e-3)
         grad_tol = Tolerances(5e-3, 5e-3)
 
-        self.run_test(device, False, make_q_tensor, make_kv_tensor,
-                      CausalBias(causal_variant, seq_len_q, seq_len_kv), forw_tol, grad_tol)
+        if causal_variant == CausalVariant.UPPER_LEFT:
+            attn_bias = upper_left_causal(seq_len_q, seq_len_kv)
+        else:
+            attn_bias = lower_right_causal(seq_len_q, seq_len_kv)
+
+        self.run_test(device, False, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
 
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize(
@@ -3081,8 +3085,12 @@ class TestAttnMasks(NNTestCase):
         forw_tol = Tolerances(1e-3, 1e-3)
         grad_tol = Tolerances(5e-3, 5e-3)
 
-        self.run_test(device, True, make_q_tensor, make_kv_tensor,
-                      CausalBias(causal_variant, seq_len_q, seq_len_kv), forw_tol, grad_tol)
+        if causal_variant == CausalVariant.UPPER_LEFT:
+            attn_bias = upper_left_causal(seq_len_q, seq_len_kv)
+        else:
+            attn_bias = lower_right_causal(seq_len_q, seq_len_kv)
+
+        self.run_test(device, True, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
 
     @parametrize("shape", [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)])
     def test_is_causal_equals_upper_left(self, device, shape: List[Tuple[int]]):
@@ -3100,9 +3108,9 @@ class TestAttnMasks(NNTestCase):
         query = make_q_tensor()
         key = make_kv_tensor()
         value = make_kv_tensor()
-        bias = CausalBias.upper_left(seq_len_q, seq_len_kv)
+        attn_bias = upper_left_causal(seq_len_q, seq_len_kv)
 
-        out_attn_bias = scaled_dot_product_attention(query, key, value, attn_mask=bias, dropout_p=0.0)
+        out_attn_bias = scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, dropout_p=0.0)
         out_is_causal = scaled_dot_product_attention(query, key, value, is_causal=True, dropout_p=0.0)
         torch.testing.assert_close(out_attn_bias, out_is_causal, rtol=forw_tol.rtol, atol=forw_tol.atol)
 
@@ -3116,10 +3124,10 @@ class TestAttnMasks(NNTestCase):
         query = make_q_tensor()
         key = make_kv_tensor()
         value = make_kv_tensor()
-        bias = CausalBias.upper_left(128, 128)
+        attn_bias = upper_left_causal(128, 128)
 
         with self.assertRaisesRegex(ValueError, "CausalBias should not be used with causal=True"):
-            scaled_dot_product_attention(query, key, value, attn_mask=bias, is_causal=True, dropout_p=0.0)
+            scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
 
 if NOTEST_CPU:
     device_types = ("cuda", )

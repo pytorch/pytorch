@@ -1,7 +1,6 @@
 """Defines utilities for interacting with scaled_dot_product_attention"""
-import math
 from enum import auto, IntEnum
-from typing import Optional, Union
+from typing import Optional
 from warnings import warn
 
 import torch
@@ -10,77 +9,16 @@ from torch.backends.cuda import (
     can_use_flash_attention,
     SDPAParams,
 )
+from torch.nn.attention import _raise_kernel_warnings
+from torch.nn.attention.utils import (
+    _calculate_scale,
+    _input_requires_grad,
+    _postprocess_flash_output,
+    _validate_sdpa_input,
+)
 from torch.nn.functional import scaled_dot_product_attention
 
 __all__ = ["CausalVariant", "CausalBias"]
-
-# If this is set to True, we will warn the user if they are not using the fused kernels
-# As well, it will raise warnings for all the reasons why the fused kernels can't be run.
-WARN_FOR_UNFUSED_KERNELS = False
-
-
-def _raise_kernel_warnings(params: SDPAParams) -> None:
-    """
-    If WARN_FOR_UNFUSED_KERNELS is set to True, this will raise warnings
-    for all the reasons why the fused kernels can't be run.
-    """
-    if WARN_FOR_UNFUSED_KERNELS:
-        if not can_use_efficient_attention(params):
-            warn("Efficient attention can't be used because:")
-            can_use_efficient_attention(params, True)
-        if not can_use_flash_attention(params):
-            warn("Flash attention can't be used because:")
-            can_use_flash_attention(params, True)
-
-
-def _input_requires_grad(*tensors: torch.Tensor) -> bool:
-    """Returns True if any of the tensors requires grad"""
-    return any(t.requires_grad for t in tensors)
-
-
-def _postprocess_flash_output(inpt_tensor: torch.Tensor, og_size: int) -> torch.Tensor:
-    """Handles the unpad of the last dimension"""
-    if inpt_tensor.size(-1) != og_size:
-        return inpt_tensor[..., :og_size]
-    return inpt_tensor
-
-
-def _calculate_scale(head_dim_size: int, scale: Optional[float]) -> float:
-    """
-    For FlashAttention we pad the head dimension to be a multiple of 8 so we need to scale the output
-    by the original head size and not the padded.
-    """
-    if scale is not None:
-        return scale
-    return 1.0 / math.sqrt(head_dim_size)
-
-
-def _validate_sdpa_input(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attn_mask: Union["CausalBias", Optional[torch.Tensor]] = None,
-    dropout_p=0.0,
-    is_causal=False,
-    scale=None,
-):
-    if query.dtype != key.dtype or query.dtype != value.dtype:
-        raise ValueError(
-            f"Expected query, key, and value to have the same dtype, "
-            f"but got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
-            f"and value.dtype: {value.dtype} instead."
-        )
-    if query.device != key.device or query.device != value.device:
-        raise ValueError(
-            f"Expected query, key, and value to have the same device type, "
-            f"but got query.device: {query.device}, key.device: {key.device}, "
-            f"and value.device: {value.device} instead."
-        )
-    if query.dim() < 2 or key.dim() < 2 or value.dim() < 2:
-        raise ValueError(
-            f"Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: "
-            f"{query.dim()}, key.dim: {key.dim()} and value.dim: {value.dim()} instead."
-        )
 
 
 class CausalVariant(IntEnum):
@@ -122,6 +60,20 @@ class CausalBias(torch.Tensor):
     This class is used for defining causal (triangular) attention biases.
 
     .. warning:: This class is a prototype and subject to change.
+
+    Example:
+
+    .. code-block:: python
+
+        from torch.nn.utils.attention import CausalBias
+
+        bsz, num_heads, seqlen_q, seqlen_kv, head_dim = 32, 8, 4, 12, 8
+        q = torch.randn(bsz, num_heads, seqlen_q, head_dim, device="cuda", dtype=torch.float16)
+        k = torch.randn(bsz, num_heads, seqlen_kv, head_dim, device="cuda", dtype=torch.float16)
+        v = torch.randn(bsz, num_heads, seqlen_kv, head_dim, device="cuda", dtype=torch.float16)
+        bias = CausalBias.lower_right(seqlen_q, seqlen_kv)
+
+        out = F.scaled_dot_product_attention(q, k, v, bias)
     """
 
     def __init__(self, variant: CausalVariant, seq_len_q: int, seq_len_kv: int):
@@ -143,34 +95,6 @@ class CausalBias(torch.Tensor):
             warn(
                 "Lower right causal bias will produce NaNs in the output when seq_len_q > seq_len_kv!"
             )
-
-    @staticmethod
-    def upper_left(seq_len_q: int, seqlen_kv: int) -> "CausalBias":
-        """
-        Creates an upper-left triangular causal bias.
-
-        Args:
-            seq_len_q (int): The sequence length of the query tensor.
-            seq_len_kv (int): The sequence length of the key/value tensor.
-
-        Returns:
-            CausalBias: The upper-left triangular causal bias.
-        """
-        return CausalBias(CausalVariant.UPPER_LEFT, seq_len_q, seqlen_kv)
-
-    @staticmethod
-    def lower_right(seq_len_q: int, seq_len_kv: int) -> "CausalBias":
-        """
-        Creates a lower-right triangular causal bias.
-
-        Args:
-            seq_len_q (int): The sequence length of the query tensor.
-            seq_len_kv (int): The sequence length of the key/value tensor.
-
-        Returns:
-            CausalBias: The lower-right triangular causal bias.
-        """
-        return CausalBias(CausalVariant.LOWER_RIGHT, seq_len_q, seq_len_kv)
 
     def _upper_left(self, device: torch.device) -> torch.Tensor:
         """Upper left causal bias"""
@@ -329,3 +253,34 @@ class CausalBias(torch.Tensor):
 
     def __repr__(self):
         return self._materialize().__repr__()
+
+
+def upper_left_causal(*size) -> CausalBias:
+    """
+    Creates an upper-left triangular causal bias.
+
+    Args:
+        size:
+
+    Returns:
+        CausalBias: The upper-left triangular causal bias.
+    """
+    assert len(size) == 2, "upper_left_causal only supports 2D tensors"
+    seq_len_q, seq_len_kv = size
+    return CausalBias(CausalVariant.UPPER_LEFT, seq_len_q, seq_len_kv)
+
+
+def lower_right_causal(*size) -> CausalBias:
+    """
+    Creates a lower-right triangular causal bias.
+
+    Args:
+        seq_len_q (int): The sequence length of the query tensor.
+        seq_len_kv (int): The sequence length of the key/value tensor.
+
+    Returns:
+        CausalBias: The lower-right triangular causal bias.
+    """
+    assert len(size) == 2, "lower_right_causal only supports 2D tensors"
+    seq_len_q, seq_len_kv = size
+    return CausalBias(CausalVariant.LOWER_RIGHT, seq_len_q, seq_len_kv)
