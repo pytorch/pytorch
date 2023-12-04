@@ -691,7 +691,7 @@ provides functions to compare the differences between traces and functionality
 to visualize these differences. In particular, users can find operators and
 kernels which were added and removed from each group along with the frequency
 of each operator/kernel and the cumulative time taken by the operator/kernel.
-The `TraceDiff <../api/trace_diff_api.html#trace-diff-api>`_ class has 4 methods:
+The ``TraceDiff`` class has 4 methods:
 
 #. `compare_traces`
    Compare the frequency and total duration of CPU operators and GPU kernels from
