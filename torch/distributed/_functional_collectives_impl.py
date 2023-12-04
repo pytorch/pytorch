@@ -341,3 +341,14 @@ def _all_to_all_single(
     _register_tensor_work(out_tensor, work)
 
     return out_tensor
+
+def _batch_isend_irev(p2p_op_list):
+
+    works = c10d.batch_isend_irecv(p2p_op_list)
+
+    tensors = []
+    for p2p_op, work in zip(p2p_op_list, works):
+        _register_tensor_work(p2p_op.tensor, work)
+        tesnors.append(p2p_op.tensor)
+
+    return tensors

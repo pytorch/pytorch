@@ -353,6 +353,21 @@ def all_to_all_single(
     return _maybe_wrap_tensor(tensor)
 
 
+def batch_isend_irecv(p2p_op_list):
+    """
+    # TODO: fill
+    """
+
+    # maybe
+    import copy
+    copy.deepcopy(p2p_op_list)
+
+    return torch.ops.c10d_functional.batch_isend_irecv(p2p_op_list)
+
+
+
+
+
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
     A Tensor wrapper subclass that is used to trigger a call to wait
