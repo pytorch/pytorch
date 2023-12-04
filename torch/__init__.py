@@ -57,7 +57,7 @@ __all__ = [
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
     'sym_sqrt',
-    'export', 'autocast', 'cond',
+    'export', 'autocast', 'cond', 'GradScaler',
 ]
 
 ################################################################################
@@ -1405,7 +1405,7 @@ def manager_path():
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
 
-from torch.amp import autocast
+from torch.amp import autocast, GradScaler
 
 # Initializing the extension shadows the built-in python float / int classes;
 # store them for later use by SymInt / SymFloat.

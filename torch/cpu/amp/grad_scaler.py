@@ -1,5 +1,6 @@
 import torch
 
+__all__ = ["GradScaler"]
 
 class GradScaler(torch.amp.GradScaler):
     r"""
