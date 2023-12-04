@@ -89,7 +89,14 @@ def get_device(device):
 @register_graph_pattern(CallFunctionVarArgs(aten.randn.default), pass_dict=patterns)
 @register_graph_pattern(CallFunctionVarArgs(aten.randn.generator), pass_dict=patterns)
 def replace_random(
-    match: Match, size, *, generator=None, dtype=None, device=None, layout=None, pin_memory=None
+    match: Match,
+    size,
+    *,
+    generator=None,
+    dtype=None,
+    device=None,
+    layout=None,
+    pin_memory=None,
 ):
     if generator is not None:
         return
