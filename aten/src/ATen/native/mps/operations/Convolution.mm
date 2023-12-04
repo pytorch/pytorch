@@ -9,7 +9,6 @@
 
 namespace at::native {
 
-#ifdef MAC_OS_VERSION_13_2
 // Create 3D convolution descriptor
 static void fill_conv3d_desc(MPSGraphConvolution3DOpDescriptor* descriptor_,
                              NSUInteger strideInX,
@@ -47,8 +46,6 @@ static void fill_conv3d_desc(MPSGraphConvolution3DOpDescriptor* descriptor_,
 
   descriptor_.groups = groups; // not yet tested in Xcode/C++
 }
-
-#endif
 
 static void fill_depthwise_conv_desc(MPSGraphDepthwiseConvolution3DOpDescriptor* descriptor_,
                                      NSUInteger strideInX,
@@ -115,9 +112,9 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     IntArrayRef dilation,
                                     int64_t groups,
                                     c10::optional<IntArrayRef> input_shape) {
-  const bool is_macOS_13_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS);
+  const bool is_macOS_13_2_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS);
 
-  TORCH_CHECK(((input_t.dim() < 5) || is_macOS_13_0_or_newer),
+  TORCH_CHECK(((input_t.dim() < 5) || is_macOS_13_2_or_newer),
               "Conv3D is only supported on MPS for MacOS_13_2 or newer");
   bool is3DConv = input_t.dim() == 5;
 
@@ -214,7 +211,6 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
       MPSGraphTensor* outputTensor;
       if (is3DConv) {
-#ifdef MAC_OS_VERSION_13_2
         MPSGraphConvolution3DOpDescriptor* conv3dDescriptor_ = [[MPSGraphConvolution3DOpDescriptor new] autorelease];
         fill_conv3d_desc(conv3dDescriptor_,
                          stride[2],
@@ -232,7 +228,6 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                                                  weightsTensor:weightTensor
                                                     descriptor:conv3dDescriptor_
                                                           name:nil];
-#endif
       } else if (isDepthwiseConv) {
         MPSGraphDepthwiseConvolution3DOpDescriptor* depthWiseConv3dDescriptor_ =
             [[MPSGraphDepthwiseConvolution3DOpDescriptor new] autorelease];
@@ -412,7 +407,6 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
                               weightOutputShape.count >= 4 && !is_channels_last);
 
       if (is3DConv) {
-#ifdef MAC_OS_VERSION_13_2
         MPSGraphConvolution3DOpDescriptor* conv3dDescriptor_ = [[MPSGraphConvolution3DOpDescriptor new] autorelease];
         fill_conv3d_desc(conv3dDescriptor_,
                          stride[2],
@@ -430,7 +424,6 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
                                                                             outputShape:mps_input_shape
                                                            forwardConvolutionDescriptor:conv3dDescriptor_
                                                                                    name:nil];
-#endif
       } else if (isDepthwiseConv) {
         MPSGraphDepthwiseConvolution3DOpDescriptor* depthWiseConv3dDescriptor_ =
             [[MPSGraphDepthwiseConvolution3DOpDescriptor new] autorelease];
@@ -579,7 +572,6 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
 
       MPSGraphTensor* gradWeightTensor;
       if (is3DConv) {
-#ifdef MAC_OS_VERSION_13_2
         MPSGraphConvolution3DOpDescriptor* conv3dDescriptor_ = [[MPSGraphConvolution3DOpDescriptor new] autorelease];
         fill_conv3d_desc(conv3dDescriptor_,
                          stride[2],
@@ -597,7 +589,6 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
                                                                                 outputShape:mps_weight_shape
                                                                forwardConvolutionDescriptor:conv3dDescriptor_
                                                                                        name:nil];
-#endif
       } else if (isDepthwiseConv) {
         MPSGraphDepthwiseConvolution3DOpDescriptor* depthWiseConv3dDescriptor_ =
             [[MPSGraphDepthwiseConvolution3DOpDescriptor new] autorelease];
