@@ -697,7 +697,7 @@ The `TraceDiff <../api/trace_diff_api.html#trace-diff-api>`_ class has 4 methods
    Compare the frequency and total duration of CPU operators and GPU kernels from
    two sets of traces.
 
-#. `ops_diff` 
+#. `ops_diff`
    Get the operators and kernels which have been:
 
     #. **added** to the test trace and are absent in the control trace
