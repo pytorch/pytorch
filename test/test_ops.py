@@ -1903,6 +1903,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
         # other
+        '_refs.block_diag',  # only refs._block_diag_iterable is in decomposition table
         '_refs.empty',  # intentional; direct empty is faster and has less guards
         '_refs.empty_permuted',  # intentional; direct empty is faster and has less guards
         '_refs.expand_as',

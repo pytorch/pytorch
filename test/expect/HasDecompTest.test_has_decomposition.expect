@@ -665,8 +665,6 @@ aten::blackman_window
 aten::blackman_window.out
 aten::blackman_window.periodic
 aten::blackman_window.periodic_out
-aten::block_diag
-aten::block_diag.out
 aten::bmm
 aten::bmm.out
 aten::ccol_indices
