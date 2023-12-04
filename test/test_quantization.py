@@ -153,7 +153,10 @@ except ImportError as e:
     logging.warning(e)
 
 # Experimental functionality
-from quantization.core.experimental.test_bits import TestBitsCPU  # noqa: F401
+try:
+    from quantization.core.experimental.test_bits import TestBitsCPU  # noqa: F401
+except ImportError as e:
+    logging.warning(e)
 try:
     from quantization.core.experimental.test_bits import TestBitsCUDA  # noqa: F401
 except ImportError as e:
