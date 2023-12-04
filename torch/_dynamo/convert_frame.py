@@ -685,7 +685,9 @@ def _compile(
                     "backend_compile", None
                 )
                 non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
-                compliant_custom_ops = {op.__qualname__ for op in output.compliant_custom_ops}
+                compliant_custom_ops = {
+                    op.__qualname__ for op in output.compliant_custom_ops
+                }
             else:
                 guard_count = None
                 graph_op_count = None
