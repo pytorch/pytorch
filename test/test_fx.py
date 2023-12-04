@@ -4208,7 +4208,7 @@ class TestFunctionalTracing(JitTestCase):
         "linear": BUILT_IN_FUNC,
         "logsigmoid": BUILT_IN_FUNC,
         "one_hot": BUILT_IN_FUNC,
-        "pad": BUILT_IN_FUNC,
+        "pad": ARG_TYPE_MISMATCH,
         "pairwise_distance": BUILT_IN_FUNC,
         "pdist": BUILT_IN_FUNC,
         "pixel_shuffle": BUILT_IN_FUNC,
