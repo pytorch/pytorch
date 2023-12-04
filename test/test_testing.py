@@ -12,13 +12,13 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any, Callable, Iterator, List, Tuple, Generator
+from typing import Any, Callable, Iterator, List, Tuple
 
 import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
+    (IS_FBCODE, IS_JETSON, IS_LINUX, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
      parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM, decorateIf)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -1870,6 +1870,33 @@ class TestTestParametrizationDeviceType(TestCase):
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
 
+    def test_default_name_non_primitive(self, device):
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @parametrize("x", [1, .5, "foo", object()])
+            def test_default_names(self, device, x):
+                pass
+
+            @parametrize("x,y", [(1, object()), (object(), .5), (object(), object())])
+            def test_two_things_default_names(self, device, x, y):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()[f'TestParametrized{device.upper()}']
+        expected_test_names = sorted(name.format(device_cls.__name__, device) for name in (
+            '{}.test_default_names_x_1_{}',
+            '{}.test_default_names_x_0_5_{}',
+            '{}.test_default_names_x_foo_{}',
+            '{}.test_default_names_x3_{}',
+            '{}.test_two_things_default_names_x_1_y0_{}',
+            '{}.test_two_things_default_names_x1_y_0_5_{}',
+            '{}.test_two_things_default_names_x2_y2_{}')
+        )
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(expected_test_names, test_names)
+
     def test_name_fn(self, device):
         device = self.device_type
 
@@ -2291,6 +2318,15 @@ class TestImports(TestCase):
         out = self._check_python_output("; ".join(commands))
         self.assertEqual(out.strip(), expected)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "On-demand profiling early init not supported on ROCm")
+    @unittest.skipIf(not IS_LINUX, "On-demand profiling not supported outside of Linux")
+    def test_libkineto_profiler_is_initialized(self) -> None:
+        # Check that the profiler is initialized at import time.
+        out = self._check_python_output("""import sys; import torch;
+print(torch._C._autograd._isProfilerInitialized() if torch._C._autograd._is_use_kineto_defined() else 'True')
+""")
+        self.assertEqual(out.strip(), "True")
+
 class TestOpInfos(TestCase):
     def test_sample_input(self) -> None:
         a, b, c, d, e = (object() for _ in range(5))
@@ -2361,19 +2397,19 @@ class TestOpInfoSampleFunctions(TestCase):
     def test_opinfo_sample_generators(self, device, dtype, op):
         # Test op.sample_inputs doesn't generate multiple samples when called
         samples = op.sample_inputs(device, dtype)
-        self.assertIsInstance(samples, Generator)
+        self.assertIsInstance(samples, Iterator)
 
     @ops([op for op in op_db if op.reference_inputs_func is not None], dtypes=OpDTypes.any_one)
     def test_opinfo_reference_generators(self, device, dtype, op):
         # Test op.reference_inputs doesn't generate multiple samples when called
         samples = op.reference_inputs(device, dtype)
-        self.assertIsInstance(samples, Generator)
+        self.assertIsInstance(samples, Iterator)
 
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_opinfo_error_generators(self, device, op):
         # Test op.error_inputs doesn't generate multiple inputs when called
         samples = op.error_inputs(device)
-        self.assertIsInstance(samples, Generator)
+        self.assertIsInstance(samples, Iterator)
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())

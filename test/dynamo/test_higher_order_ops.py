@@ -1263,10 +1263,8 @@ class GraphModule(torch.nn.Module):
                 and node.target == torch.ops.higher_order.cond
             ):
                 _, _, _, operands = node.args
-                # Each branch takes 4 inputs (x, z, buffer_true_branch, buffer_false_branch)
-                # TODO: we should be able to de-duplicate the buffer accessed from two branches so that
-                # operands become (x, z, buffer)
-                self.assertEqual(len(operands), 4)
+                # Each branch takes 3 inputs (buffer, x, z)
+                self.assertEqual(len(operands), 3)
             if node.op == "get_attr":
                 if str(node.target) in ("cond_true_0, cond_false_0"):
                     num_placeholders = len(
@@ -1278,7 +1276,7 @@ class GraphModule(torch.nn.Module):
                             if node.op == "placeholder"
                         ]
                     )
-                    self.assertEqual(num_placeholders, 4)
+                    self.assertEqual(num_placeholders, 3)
 
     def _check_cond_graph_and_extract(self, fn, args):
         backend = EagerAndRecordGraphs()
@@ -1321,7 +1319,8 @@ def forward(self, L_x_ : torch.Tensor):
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [l_x_]);  gt = cond_true_0 = cond_false_0 = l_x_ = None
-    return (cond,)""",
+    getitem = cond[0];  cond = None
+    return (getitem,)""",
             )
             self.assertExpectedInline(
                 true_graph,
@@ -1329,7 +1328,7 @@ def forward(self, L_x_ : torch.Tensor):
 def forward(self, l_x_):
     l_x__1 = l_x_
     sin = torch.sin(l_x__1);  l_x__1 = None
-    return sin""",
+    return (sin,)""",
             )
             self.assertExpectedInline(
                 false_graph,
@@ -1337,7 +1336,7 @@ def forward(self, l_x_):
 def forward(self, l_x_):
     l_x__1 = l_x_
     cos = torch.cos(l_x__1);  l_x__1 = None
-    return cos""",
+    return (cos,)""",
             )
 
     def test_cond_branches_no_arguments_no_closure(self):
@@ -1364,14 +1363,15 @@ def forward(self, L_x_ : torch.Tensor):
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, []);  gt = cond_true_0 = cond_false_0 = None
-    return (cond,)""",
+    getitem = cond[0];  cond = None
+    return (getitem,)""",
             )
             self.assertExpectedInline(
                 true_graph,
                 """\
 def forward(self):
     ones = torch.ones(3, 4)
-    return ones""",
+    return (ones,)""",
             )
             self.assertExpectedInline(
                 false_graph,
@@ -1379,7 +1379,7 @@ def forward(self):
 def forward(self):
     ones = torch.ones(3, 4)
     sin = ones.sin();  ones = None
-    return sin""",
+    return (sin,)""",
             )
 
     def test_cond_side_effect_in_one_branches(self):
@@ -2122,6 +2122,94 @@ class GraphModule(torch.nn.Module):
  'sum_2': ['vmap_impl', 'vmap_impl', 'sum_2']}""",
         )
 
+    def test_cond_pytree_operands(self):
+        def _construct_pytree():
+            a = torch.randn(3, 3)
+            b = torch.randn(3, 3)
+            c = torch.randn(3, 3)
+            d = torch.randn(3, 3)
+            e = torch.randn(3, 3)
+            f = torch.randn(3, 3)
+            g = torch.randn(3, 3)
+            return (a, [[[b]]], c, (d, (e,), f), {"g": g})
+
+        pred = torch.tensor(True)
+        inp = _construct_pytree()
+
+        def _reduce_sum(flattened):
+            init = 0
+            for val in flattened:
+                init += val
+            return init
+
+        def _reduce_max(flattened):
+            init = flattened[0]
+            for val in flattened:
+                init = max(val, init)
+            return init
+
+        def true_fn(pytree_in):
+            flattened, spec = pytree.tree_flatten(pytree_in)
+            return _reduce_sum(flattened)
+
+        def false_fn(pytree_in):
+            flattened, spec = pytree.tree_flatten(pytree_in)
+            return _reduce_max(flattened)
+
+        def fn(pred, pytree_in):
+            return torch.cond(pred, true_fn, false_fn, [pytree_in])
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+        compiled_res = torch.compile(fn, backend=backend)(pred, inp)
+        eager_res = fn(pred, inp)
+        self.assertEqual(compiled_res, eager_res)
+        graph = backend.graphs[0]
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        self.assertExpectedInline(
+            graph.code.strip(),
+            """\
+def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytree_in_1_0_0_0_ : torch.Tensor, L_pytree_in_2_ : torch.Tensor, L_pytree_in_3_0_ : torch.Tensor, L_pytree_in_3_1_0_ : torch.Tensor, L_pytree_in_3_2_ : torch.Tensor, L_pytree_in_4_g_ : torch.Tensor):
+    l_pred_ = L_pred_
+    l_pytree_in_0_ = L_pytree_in_0_
+    l_pytree_in_1_0_0_0_ = L_pytree_in_1_0_0_0_
+    l_pytree_in_2_ = L_pytree_in_2_
+    l_pytree_in_3_0_ = L_pytree_in_3_0_
+    l_pytree_in_3_1_0_ = L_pytree_in_3_1_0_
+    l_pytree_in_3_2_ = L_pytree_in_3_2_
+    l_pytree_in_4_g_ = L_pytree_in_4_g_
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_, l_pytree_in_4_g_]);  l_pred_ = cond_true_0 = cond_false_0 = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = l_pytree_in_4_g_ = None
+    getitem = cond[0];  cond = None
+    return (getitem,)""",  # noqa: B950
+        )
+
+    def test_cond_pytree_operands_with_non_tensor_leaves(self):
+        def fn(pred, pytree_in):
+            return torch.cond(
+                pred, lambda x: x[0] + 1, lambda x: x[0] * 2, (pytree_in,)
+            )
+
+        pred = torch.tensor(True)
+        for pytree_in in [(1,), ("string",), (1.0,)]:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Expect operands to be a tuple of possibly nested dict/list/tuple",
+            ):
+                fn(pred, pytree_in)
+
+        for pytree_in in [(1,), ("string",), (1.0,)]:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                r"Cond doesn't work unless it is captured completely with torch.compile",
+            ):
+                torch.compile(fn, backend="eager")(pred, pytree_in)
+
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def run(self, result=None):
@@ -2247,12 +2335,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3, 3)
 
-        # Graph break because dynamo is unable to get source `fn` and
-        # functools.wraps in `grad` leads to graph-break
-        # There are two graphs, first for generating `y` and
-        # second for application of `grad`.
-        # We are interested in the second graph.
-        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False, graph_idx=1)
+        wrapped_gm = self._compile_check(wrapper_fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -2263,20 +2346,21 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+    def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
-        l_y_ = L_y_
+
+        y = torch.randn(3)
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
+        call = grad_proxy.__call__(l_x_, y);  grad_proxy = l_x_ = None
         contiguous = call.contiguous();  call = None
-        return (contiguous,)
+        return (y, contiguous)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, l_y_):
+        def forward(self, l_x_, y):
             sin = l_x_.sin();  l_x_ = None
-            add = sin + l_y_;  sin = l_y_ = None
+            add = sin + y;  sin = y = None
             sum_1 = add.sum();  add = None
             return sum_1
 """,
@@ -3517,6 +3601,18 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaises(AssertionError):
             opt_test(True, False, inp)
+
+    def test_non_aliasing_util(self):
+        from torch._dynamo.variables.higher_order_ops import _assert_tensors_nonaliasing
+
+        a = [torch.tensor(1), {"a": torch.tensor(1)}]
+        b = (torch.tensor(1),)
+        _assert_tensors_nonaliasing(a, b)
+
+        with self.assertRaisesRegex(
+            AssertionError, "inputs to function body cannot alias outputs"
+        ):
+            _assert_tensors_nonaliasing(a, a)
 
 
 if __name__ == "__main__":
