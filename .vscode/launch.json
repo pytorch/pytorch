@@ -1,0 +1,212 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "(Windows) Attach",
+            "type": "cppvsdbg",
+            "request": "attach",
+            "processId": "${command:pickProcess}"
+        },
+        {
+            "name": "Test C++",
+            "type": "pythoncpp",
+            "request": "launch",
+            "pythonLaunchName": "Test Single",
+            "cppAttachName": "(Windows) Attach",
+        },
+        {
+            "name": "Test Single",
+            "type": "python",
+            "request": "launch",
+            "program": "test_torch.py",
+            "cwd": "${workspaceFolder}/test",
+            "args": [
+               "-vvvv",
+               "-rfEsxXP",
+               "-p", "no:xdist",
+               "--use-pytest",
+               "-k", "conv_transposed_backward_agnostic_to_memory_format_cpu"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Test Autograd",
+            "type": "python",
+            "request": "launch",
+            "program": "test_autograd.py",
+            "cwd": "${workspaceFolder}/test",
+            "args": [
+               "-vvvv",
+               "-rfEsxXP",
+               "-p", "no:xdist",
+               "--use-pytest"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test Modules",
+            "type": "python",
+            "request": "launch",
+            "program": "test_modules.py",
+            "cwd": "${workspaceFolder}/test",
+            "args": [
+               "-vvvv",
+               "-rfEsxXP",
+               "-p", "no:xdist",
+               "--use-pytest"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test NN",
+            "type": "python",
+            "request": "launch",
+            "program": "test_nn.py",
+            "cwd": "${workspaceFolder}/test",
+            "args": [
+               "-vvvv",
+               "-rfEsxXP",
+               "-p", "no:xdist",
+               "--use-pytest"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test Ops",
+            "type": "python",
+            "request": "launch",
+            "program": "test_ops.py",
+            "cwd": "${workspaceFolder}/test",
+            "args": [
+               "-vvvv",
+               "-rfEsxXP",
+               "-p", "no:xdist",
+               "--use-pytest",
+               "-k", "not dtypes_linalg_lu_cpu and not dtypes_linalg_lu_factor_cpu and not dtypes_linalg_lu_factor_ex_cpu and not dtypes_linalg_lu_solve_cpu and not dtypes_linalg_solve_triangular_cpu and not dtypes_linalg_tensorinv_cpu and not dtypes_linalg_tensorsolve_cpu and not complex_half_reference_testing_H_cpu_complex32 and not dtypes_linalg_vecdot_cpu and not dtypes_lu_cpu and not dtypes_lu_solve_cpu and not numpy_ref_linalg_tensorinv_cpu_complex128 and not numpy_ref_linalg_tensorinv_cpu_complex128 and not numpy_ref_linalg_tensorinv_cpu_float64 and not numpy_ref_linalg_tensorsolve_cpu_complex128 and not numpy_ref_linalg_tensorsolve_cpu_float64 and not numpy_ref_linalg_vecdot_cpu_complex128 and not out_linalg_tensorinv_cpu_float32 and not out_linalg_tensorsolve_cpu_float32 and not out_warning_linalg_tensorinv_cpu and not out_warning_linalg_tensorsolve_cpu and not variant_consistency_eager_linalg_lu_solve_cpu_complex64 and not variant_consistency_eager_linalg_solve_triangular_cpu_complex64 and not variant_consistency_eager_linalg_tensorinv_cpu_complex64 and not variant_consistency_eager_linalg_tensorinv_cpu_float32 and not variant_consistency_eager_linalg_tensorsolve_cpu_complex64 and not variant_consistency_eager_linalg_tensorsolve_cpu_float32 and not variant_consistency_eager_linalg_vecdot_cpu_complex64 and not variant_consistency_eager_lu_solve_cpu_complex64 and not backward_linalg_tensorinv_cpu_float32 and not backward_linalg_tensorsolve_cpu_float32 and not backward_svd_lowrank_cpu_float32 and not forward_ad_linalg_tensorinv_cpu_float32 and not forward_ad_linalg_tensorsolve_cpu_float32 and not operator_linalg_tensorinv_cpu_float32 and not operator_linalg_tensorsolve_cpu_float32 and not conj_view_linalg_lu_solve_cpu_complex64 and not conj_view_linalg_solve_triangular_cpu_complex64 and not conj_view_linalg_tensorinv_cpu_complex64 and not conj_view_linalg_tensorsolve_cpu_complex64 and not conj_view_linalg_vecdot_cpu_complex64 and not conj_view_lu_solve_cpu_complex64 and not neg_conj_view_linalg_tensorinv_cpu_complex128 and not neg_conj_view_linalg_vecdot_cpu_complex128 and not neg_conj_view_lu_solve_cpu_complex128 and not neg_view_linalg_tensorinv_cpu_float64 and not neg_view_linalg_tensorsolve_cpu_float64 and not fake_autocast_linalg_tensorinv_cpu_float32 and not fake_linalg_tensorinv_cpu_float32 and not tags_linalg_tensorinv_cpu_float32 and not tags_linalg_tensorsolve_cpu_float32"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test Ops Fixed",
+            "type": "python",
+            "request": "launch",
+            "program": "test_ops.py",
+            "cwd": "${workspaceFolder}/test",
+            "args": [
+               "-vvvv",
+               "-rfEsxXP",
+               "-p", "no:xdist",
+               "--use-pytest",
+               "-k", "dtypes_linalg_lu_cpu or dtypes_linalg_lu_factor_cpu or dtypes_linalg_lu_factor_ex_cpu or dtypes_linalg_lu_solve_cpu or dtypes_linalg_solve_triangular_cpu or complex_half_reference_testing_H_cpu_complex32 or dtypes_lu_cpu or dtypes_lu_solve_cpu or variant_consistency_eager_linalg_lu_solve_cpu_complex64 or variant_consistency_eager_linalg_solve_triangular_cpu_complex64 or variant_consistency_eager_lu_solve_cpu_complex64 or conj_view_linalg_lu_solve_cpu_complex64 or conj_view_linalg_solve_triangular_cpu_complex64 or conj_view_lu_solve_cpu_complex64 or neg_conj_view_lu_solve_cpu_complex128"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test Ops Fwd Gradients",
+            "type": "python",
+            "request": "launch",
+            "program": "test_ops_fwd_gradients.py",
+            "cwd": "${workspaceFolder}/test",
+            "args": [
+               "-vvvv",
+               "-rfEsxXP",
+               "-p", "no:xdist",
+               "--use-pytest",
+               "-k", "not fn_fwgrad_bwgrad_linalg_lu_cpu_complex128 and not fn_fwgrad_bwgrad_linalg_lu_factor_cpu_complex128 and not fn_fwgrad_bwgrad_linalg_lu_factor_ex_cpu_complex128 and not fn_fwgrad_bwgrad_linalg_lu_solve_cpu_complex128 and not fn_fwgrad_bwgrad_linalg_solve_triangular_cpu_complex128 and not fn_fwgrad_bwgrad_linalg_tensorinv_cpu_complex128 and not fn_fwgrad_bwgrad_linalg_tensorinv_cpu_float64 and not fn_fwgrad_bwgrad_linalg_tensorsolve_cpu_complex128 and not fn_fwgrad_bwgrad_linalg_tensorsolve_cpu_float64 and not fn_fwgrad_bwgrad_linalg_vecdot_cpu_complex128 and not fn_fwgrad_bwgrad_lu_cpu_complex128 and not fn_fwgrad_bwgrad_lu_solve_cpu_complex128 and not forward_mode_AD_linalg_lu_solve_cpu_complex128 and not forward_mode_AD_linalg_solve_triangular_cpu_complex128 and not forward_mode_AD_linalg_tensorinv_cpu_complex128 and not forward_mode_AD_linalg_tensorinv_cpu_float64 and not forward_mode_AD_linalg_tensorsolve_cpu_complex128 and not forward_mode_AD_linalg_tensorsolve_cpu_float64 and not forward_mode_AD_linalg_vecdot_cpu_complex128"
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test Ops Fwd Gradients Fixed",
+            "type": "python",
+            "request": "launch",
+            "program": "test_ops_fwd_gradients.py",
+            "cwd": "${workspaceFolder}/test",
+            "args": [
+               "-vvvv",
+               "-rfEsxXP",
+               "-p", "no:xdist",
+               "--use-pytest",
+               "-k", "fn_fwgrad_bwgrad_linalg_lu_cpu_complex128 or fn_fwgrad_bwgrad_linalg_lu_factor_cpu_complex128 or fn_fwgrad_bwgrad_linalg_lu_factor_ex_cpu_complex128 or fn_fwgrad_bwgrad_linalg_lu_solve_cpu_complex128 or fn_fwgrad_bwgrad_linalg_solve_triangular_cpu_complex128 or fn_fwgrad_bwgrad_lu_cpu_complex128 or fn_fwgrad_bwgrad_lu_solve_cpu_complex128 or forward_mode_AD_linalg_lu_solve_cpu_complex128 or forward_mode_AD_linalg_solve_triangular_cpu_complex128",
+            ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test Ops Gradients",
+            "type": "python",
+            "request": "launch",
+            "program": "test_ops_gradients.py",
+            "cwd": "${workspaceFolder}/test",
+            "args": [
+               "-vvvv",
+               "-rfEsxXP",
+               "-p", "no:xdist",
+               "--use-pytest",
+               "-k", "not fn_grad_linalg_lu_cpu_complex128 and not fn_grad_linalg_lu_factor_cpu_complex128 and not fn_grad_linalg_lu_factor_ex_cpu_complex128 and not fn_grad_linalg_lu_solve_cpu_complex128 and not fn_grad_linalg_solve_triangular_cpu_complex128 and not fn_grad_linalg_tensorinv_cpu_complex128 and not fn_grad_linalg_tensorinv_cpu_float64 and not fn_grad_linalg_tensorsolve_cpu_complex128 and not fn_grad_linalg_tensorsolve_cpu_float64 and not fn_grad_linalg_vecdot_cpu_complex128 and not fn_grad_lu_cpu_complex128 and not fn_grad_lu_solve_cpu_complex128 and not fn_gradgrad_linalg_lu_cpu_complex128 and not fn_gradgrad_linalg_lu_factor_cpu_complex128 and not fn_gradgrad_linalg_lu_factor_ex_cpu_complex128 and not fn_gradgrad_linalg_lu_solve_cpu_complex128 and not fn_gradgrad_linalg_solve_triangular_cpu_complex128 and not fn_gradgrad_linalg_tensorinv_cpu_complex128 and not fn_gradgrad_linalg_tensorinv_cpu_float64 and not fn_gradgrad_linalg_tensorsolve_cpu_complex128 and not fn_gradgrad_linalg_tensorsolve_cpu_float64 and not fn_gradgrad_linalg_vecdot_cpu_complex128 and not fn_gradgrad_lu_cpu_complex128 and not fn_gradgrad_lu_solve_cpu_complex128"
+             ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test Ops Gradients Fixed",
+            "type": "python",
+            "request": "launch",
+            "program": "test_ops_gradients.py",
+            "cwd": "${workspaceFolder}/test",
+            "args": [
+               "-vvvv",
+               "-rfEsxXP",
+               "-p", "no:xdist",
+               "--use-pytest",
+               "-k", "fn_grad_linalg_lu_cpu_complex128 or fn_grad_linalg_lu_factor_cpu_complex128 or fn_grad_linalg_lu_factor_ex_cpu_complex128 or fn_grad_linalg_lu_solve_cpu_complex128 or fn_grad_linalg_solve_triangular_cpu_complex128 or fn_grad_lu_cpu_complex128 or fn_grad_lu_solve_cpu_complex128 or fn_gradgrad_linalg_lu_cpu_complex128 or fn_gradgrad_linalg_lu_factor_cpu_complex128 or fn_gradgrad_linalg_lu_factor_ex_cpu_complex128 or fn_gradgrad_linalg_lu_solve_cpu_complex128 or fn_gradgrad_linalg_solve_triangular_cpu_complex128 or fn_gradgrad_lu_cpu_complex128 or fn_gradgrad_lu_solve_cpu_complex128"
+             ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test Ops JIT",
+            "type": "python",
+            "request": "launch",
+            "program": "test_ops_jit.py",
+            "cwd": "${workspaceFolder}/test",
+            "args": [
+               "-vvvv",
+               "-rfEsxXP",
+               "-p", "no:xdist",
+               "--use-pytest",
+               "-k", "not variant_consistency_jit_linalg_lu_cpu_complex64 and not variant_consistency_jit_linalg_lu_factor_cpu_complex64 and not variant_consistency_jit_linalg_lu_factor_ex_cpu_complex64 and not variant_consistency_jit_linalg_lu_solve_cpu_complex64 and not variant_consistency_jit_linalg_solve_triangular_cpu_complex64 and not variant_consistency_jit_linalg_tensorinv_cpu_complex64 and not variant_consistency_jit_linalg_tensorinv_cpu_float32 and not variant_consistency_jit_linalg_tensorsolve_cpu_complex64 and not variant_consistency_jit_linalg_tensorsolve_cpu_float32 and not variant_consistency_jit_linalg_vecdot_cpu_complex64 and not variant_consistency_jit_lu_cpu_complex64 and not variant_consistency_jit_lu_solve_cpu_complex64"
+             ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test Ops JIT Fixed",
+            "type": "python",
+            "request": "launch",
+            "program": "test_ops_jit.py",
+            "cwd": "${workspaceFolder}/test",
+            "args": [
+               "-vvvv",
+               "-rfEsxXP",
+               "-p", "no:xdist",
+               "--use-pytest",
+               "-k", "variant_consistency_jit_linalg_lu_cpu_complex64 or variant_consistency_jit_linalg_lu_factor_cpu_complex64 or variant_consistency_jit_linalg_lu_factor_ex_cpu_complex64 or variant_consistency_jit_linalg_lu_solve_cpu_complex64 or variant_consistency_jit_linalg_solve_triangular_cpu_complex64 or variant_consistency_jit_lu_cpu_complex64 or variant_consistency_jit_lu_solve_cpu_complex64"
+             ],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Test Torch",
+            "type": "python",
+            "request": "launch",
+            "program": "test_torch.py",
+            "cwd": "${workspaceFolder}/test",
+            "args": [
+               "-vvvv",
+               "-rfEsxXP",
+               "-p", "no:xdist",
+               "--use-pytest",
+               "-k", "not conv_transposed_backward_agnostic_to_memory_format_cpu"
+            ],
+            "console": "integratedTerminal"
+        }
+    ]
+}
