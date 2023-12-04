@@ -7929,9 +7929,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 Instead, it transforms the fx graph so that its functions are
                 aten operations. It then saves this graph.
                 """
-                from torch._functorch.aot_autograd import Interpreter
                 from torch._inductor.decomposition import select_decomp_table
                 from torch._subclasses import FakeTensorMode
+                from torch.fx import Interpreter
 
                 fake_mode = FakeTensorMode()
 
