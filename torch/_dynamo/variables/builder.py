@@ -1805,33 +1805,34 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
             )
         )
 
-        if is_tensor and not (static_shapes and source.is_nn_module()):
-            # list of (fake_tensor, real_tensor, source, symbolic_context)
-            tracking_info = [(fake_e, e, source, symbolic_context)]
-            if is_traceable_wrapper_subclass(fake_e):
-                attrs, _ = fake_e.__tensor_flatten__()
-                for attr in attrs:
-                    fake_inner = getattr(fake_e, attr)
-                    inner = getattr(e, attr)
-                    tracking_info.append(
-                        (
-                            fake_inner,
-                            inner,
-                            AttrSource(source, attr),
-                            symbolic_context.inner_contexts[attr],
-                        )
+        # list of (fake_tensor, real_tensor, source, symbolic_context)
+        tracking_info = [(fake_e, e, source, symbolic_context)]
+        if is_traceable_wrapper_subclass(fake_e):
+            attrs, _ = fake_e.__tensor_flatten__()
+            for attr in attrs:
+                fake_inner = getattr(fake_e, attr)
+                inner = getattr(e, attr)
+                tracking_info.append(
+                    (
+                        fake_inner,
+                        inner,
+                        AttrSource(source, attr),
+                        symbolic_context.inner_contexts[attr],
                     )
+                )
 
-            for fake, real, source, symbolic_context in tracking_info:
-                tx.output.tracing_context.tensor_to_context[real] = symbolic_context
+        for fake, real, source, symbolic_context in tracking_info:
+            tx.output.tracing_context.tensor_to_context[real] = symbolic_context
+            tx.output.tensor_weakref_to_sizes_strides[real] = {
+                "size": fake.size(),
+                "stride": fake.stride(),
+            }
+
+            if is_tensor and not (static_shapes and source.is_nn_module()):
                 tx.output.tracked_fakes.append(
                     TrackedFake(fake, source, symbolic_context)
                 )
                 tx.output.tracked_fakes_id_to_source[id(real)].append(source)
-                tx.output.tensor_weakref_to_sizes_strides[real] = {
-                    "size": fake.size(),
-                    "stride": fake.stride(),
-                }
 
         return fake_e
     else:
