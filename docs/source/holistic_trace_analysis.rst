@@ -167,7 +167,7 @@ Installation
 ------------
 
 We recommend using a Conda environment to install HTA. To install Anaconda, see
-`here <https://docs.anaconda.com/anaconda/install/index.html>`_. Holistic Trace
+`here <https://docs.anaconda.com/anaconda/install/index.html>`__. Holistic Trace
 Analysis runs on Linux and Mac with Python >= 3.8.
 
 
@@ -785,7 +785,7 @@ The generated trace contains the following additional information:
 #. Performance measurement events are logged under the `cuda_profiler_range` category.
 #. The counter values are logged in the *args* section of the above events.
 
-For a complete example see `here <https://github.com/facebookresearch/HolisticTraceAnalysis/blob/main/examples/cupti_flops_analysis.py>`_.
+For a complete example see `here <https://github.com/facebookresearch/HolisticTraceAnalysis/blob/main/examples/cupti_flops_analysis.ipynb>`__.
 
 **CUPTI Counter Analyzer**
 
