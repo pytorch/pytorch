@@ -81,6 +81,7 @@ class AsyncTensor(torch.Tensor):
       AsyncTensor.wait_until_materialized(args)
       # TODO: handle tuple / list / etc in args
       # TODO: handle kwargs
+      print(f"kwargs: {kwargs}")
       assert not kwargs
       args_materialized = pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor, args)
       return func(*args_materialized)
@@ -176,7 +177,7 @@ class LazyScheduler:
     self._gm_to_handle_map = OrderedDict()
     self._handle_to_gm_map = OrderedDict()
 
-  def compile(
+  def compile_fx_inner(
     self,
     # NOTE: assumes first arg is GraphModule in compile_fx_inner signature
     gm: torch.fx.GraphModule,
@@ -254,6 +255,46 @@ class TestModule(torch.nn.Module):
 
 
 class TestLazyScheduler(TestCase):
+  def _validate(self, fn, backend, *args, skip_check=False):
+    cloned_args = []
+    for arg in args:
+        cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
+
+    # Eager, 1st iter
+    torch.manual_seed(0)
+    expected = fn(*args)
+    expected.sum().backward()
+
+    # Eager, 2nd iter
+    torch.manual_seed(0)
+    expected = fn(*args)
+    expected.sum().backward()
+
+    compiled_fn = torch.compile(fn, fullgraph=False, backend=backend)
+
+    # Compiled, 1st iter
+    torch.manual_seed(0)
+    result = compiled_fn(*cloned_args)
+    result.sum().backward()
+
+    # Compiled, 2nd iter
+    torch.manual_seed(0)
+    result = compiled_fn(*cloned_args)
+    result.sum().backward()
+
+    if not skip_check:
+      self.assertEqual(
+          result,
+          expected,
+          msg="Output mismatch between torch.compile and eager versions",
+      )
+      for arg, cloned_arg in zip(args, cloned_args):
+          self.assertEqual(
+              arg.grad,
+              cloned_arg.grad,
+              msg="Gradient mismatch between torch.compile and eager versions",
+          )
+
   def test_backward_simple_no_segment(self):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     m = TestModule()
@@ -261,26 +302,13 @@ class TestLazyScheduler(TestCase):
     x = torch.randn(4, 4, requires_grad=True, device=device)
     y = torch.randn(4, 4, requires_grad=True, device=device)
 
-    # Eager, 1st iter
-    actual_e = m(x, y)
-    actual_e.sum().backward()
-    # Eager, 2nd iter
-    actual_e = m(x, y)
-    actual_e.sum().backward()
-
     lazy_scheduler = LazyScheduler()
-    compiled_m_ls = torch.compile(
+    self._validate(
       m,
-      backend=functools.partial(compile_fx, inner_compile=lazy_scheduler.compile),
-      fullgraph=False
+      functools.partial(compile_fx, inner_compile=lazy_scheduler.compile_fx_inner),
+      x,
+      y,
     )
-
-    # w/ LazyScheduler, 1st iter
-    actual_ls = compiled_m_ls(x, y)
-    actual_ls.sum().backward()
-    # w/ LazyScheduler, 2nd iter
-    actual_ls = compiled_m_ls(x, y)
-    actual_ls.sum().backward()
 
   def DISABLED_test_segment_tagging(self):
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -315,7 +343,7 @@ class TestLazyScheduler(TestCase):
 """
 TODO:
 0. Check gradients equivalence for eager vs. compile in test_backward_simple_no_segment
-1. Add segment registration logic (do subgraph splitting above AOTAutograd, overwrite compile_fx), enable test_segment_tagging to check segment tagging is working
+1. Add segment registration logic (do subgraph splitting above AOTAutograd, overwrite compile_fx and call compile_fx inside), enable test_segment_tagging to check segment tagging is working
 2. Add scheduling logic, add unit test to check it's working
 """
 
