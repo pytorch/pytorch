@@ -795,6 +795,7 @@ inline static PyObject* eval_custom_code_impl(
   #else
   Py_ssize_t nlocals_new = code->co_nlocals;
   Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
+  Py_ssize_t nlocals_common = nlocals_new < nlocals_old ? nlocals_new : nlocals_old;
 
   Py_ssize_t ncells = PyCode_GetNCellvars(code);
   Py_ssize_t nfrees = PyCode_GetNFreevars(code);
@@ -810,12 +811,7 @@ inline static PyObject* eval_custom_code_impl(
   PyObject** fastlocals_old = frame->f_localsplus;
   PyObject** fastlocals_new = shadow->f_localsplus;
 
-  for (Py_ssize_t i = 0; i < nlocals_old; i++) {
-    if(fastlocals_old[i] == NULL)
-    {
-      // local only variables
-      continue;
-    }
+  for (Py_ssize_t i = 0; i < nlocals_common; i++) {
     Py_XINCREF(fastlocals_old[i]);
     fastlocals_new[i] = fastlocals_old[i];
   }
