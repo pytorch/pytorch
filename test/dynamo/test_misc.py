@@ -217,6 +217,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.testing.standard_test(self, inplace1, 2, expected_ops=3)
 
+    def test_inplace_desugaring(self):
+        def inplace_on_literals(y):
+            x0 = 1
+            x0 += y
+            x1 = 1
+            x1 -= y
+            return x0, x1
+
+        torch._dynamo.testing.standard_test(
+            self, inplace_on_literals, 1, expected_ops=2
+        )
+
     def test_unpack4(self):
         def unpack4(a, b):
             a = a[:5, :]
@@ -638,9 +650,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )(compare_shapes)
         opt_fn(torch.randn([3, 4]))
         opt_fn(torch.randn([4, 3]))
-        self.assertExpectedInline(
-            guard_failure.reason,
+        self.assertIn(
             """tensor 'L['a']' size mismatch at index 0. expected 3, actual 4""",
+            guard_failure.reason,
         )
 
     def test_builtin_abs(self):
@@ -699,12 +711,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # Filter out id-matches that won't reproduce run to run
         guard_code = filter(
-            lambda line: "id" not in line and "lookup_backend" not in line,
+            lambda line: not any(
+                banned in line for banned in ["id", "lookup_backend", "config_hash"]
+            ),
             sorted(guard_code),
         )
-        self.assertExpectedInline(
-            "\n".join(guard_code),
-            """\
+        guard_code_str = "\n".join(guard_code)
+
+        for line in """\
 2 <= L['x'].size()[0]
 L['x'] is L['y']
 L['x'].ndimension() == 2
@@ -720,8 +734,13 @@ not ___dict_contains('bbbbbbbb', G['sys'].modules)
 not ___dict_contains('cccccccc', G['sys'].modules)
 str(L['x'].device) == 'cpu'
 str(L['x'].dtype) == 'torch.float32'
-utils_device.CURRENT_DEVICE == None""",
-        )
+utils_device.CURRENT_DEVICE == None""".split(
+            "\n"
+        ):
+            self.assertIn(
+                line,
+                guard_code_str,
+            )
 
     def test_fold(self):
         def fn(a):
@@ -804,6 +823,25 @@ utils_device.CURRENT_DEVICE == None""",
         def f(x):
             y = x.item()
             torch._check(y >= 0)
+            return torch.arange(0, y)
+
+        f(torch.tensor([3]))
+        f(torch.tensor([4]))
+        self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_check_symbolic_shape_rel(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check(x.shape[0] == 1)
+            torch._check(x.shape[0] != 2)
+            torch._check(x.shape[0] >= 0)
+            torch._check(x.shape[0] > 0)
+            torch._check(x.shape[0] < 4)
+            torch._check(x.shape[0] <= 3)
             return torch.arange(0, y)
 
         f(torch.tensor([3]))
@@ -1541,7 +1579,7 @@ utils_device.CURRENT_DEVICE == None""",
         args = [torch.randn(10), 4096, np.int64(8)]
         correct = fn(*args)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, dynamic=True)(fn)
+        opt_fn = torch._dynamo.optimize(cnts, dynamic=True, nopython=True)(fn)
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)
@@ -1654,6 +1692,7 @@ utils_device.CURRENT_DEVICE == None""",
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         x = torch.randn(3)
         res = opt_fn(x)
+        self.assertEqual(type(res), np.ndarray)
         self.assertEqual(cnts.frame_count, 1)
 
         def fn(x):
@@ -1663,6 +1702,7 @@ utils_device.CURRENT_DEVICE == None""",
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         x = torch.randn(3, requires_grad=True)
         res = opt_fn(x)
+        self.assertEqual(type(res), np.ndarray)
         self.assertEqual(cnts.frame_count, 1)
 
     def test_numpy_recompilation_scalar(self):
@@ -1830,7 +1870,7 @@ utils_device.CURRENT_DEVICE == None""",
 
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(mandelbrot_numpy)
-        n_iter = torch._dynamo.config.cache_size_limit
+        n_iter = torch._dynamo.config.cache_size_limit - 2
         for i in range(n_iter):
             x = i + 3
             ref = mandelbrot_numpy(x)
@@ -1969,6 +2009,19 @@ utils_device.CURRENT_DEVICE == None""",
         self.assertEqual(fn(x), compiled_fn(x))
         self.assertEqual(counter.frame_count, 2)
 
+    def test_trace_ndarray_frame_2(self):
+        # no tensors/ndarray as inputs in the frame
+        def fn(x):
+            print("graph break.")
+            return 2 * np.arange(x)
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+
+        x = 8
+        self.assertEqual(fn(x), compiled_fn(x))
+        self.assertEqual(counter.frame_count, 1)
+
     def test_numpy_non_torch_dtype(self):
         # test that we gracefully graph break on dtypes
         # that do not have pytorch equivalents.
@@ -2000,10 +2053,9 @@ utils_device.CURRENT_DEVICE == None""",
         self.assertEqual(res, [np.array([0]), np.array([1]), np.array([2])])
         self.assertEqual(cnts.frame_count, 1)
 
+    # cache size limit needs to be larger than the `dtypes` list size
+    @torch._dynamo.config.patch(cache_size_limit=12)
     def test_dtypes_no_graphbreaks(self):
-        # cache size limit needs to be larger than the `dtypes` list size
-        torch._dynamo.config.cache_size_limit = 12
-
         dtypes = [
             # floats
             float,
@@ -2033,11 +2085,10 @@ utils_device.CURRENT_DEVICE == None""",
 
             self.assertEqual(cnts.frame_count, 1)  # no graph break
 
+    # setting the config value makes the PRNG identical to numpy's
+    # NB this may involve a graph break
+    @torch._dynamo.config.patch(use_numpy_random_stream=True)
     def test_numpy_random_config_to_numpy(self):
-        # setting the config value makes the PRNG identical to numpy's
-        # NB this may involve a graph break
-        torch._dynamo.config.use_numpy_random_stream = True
-
         @torch.compile
         def fn():
             return np.random.uniform(size=13)
@@ -2148,6 +2199,39 @@ utils_device.CURRENT_DEVICE == None""",
         ref = fn(x, mod)
         res = opt_fn(x, mod)
         self.assertTrue(same(ref, res))
+
+    def test_nested_wraps(self):
+        def foo(x, y):
+            def add(x, y):
+                return x + y
+
+            @functools.wraps(add)
+            def wrapped_call(x, y):
+                return add(x, y)
+
+            return wrapped_call(x, y)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        o = torch.compile(foo, fullgraph=True, backend="eager")(x, y)
+        self.assertEqual(o, x + y)
+
+        def foo(x, y):
+            def nested_call(x, y):
+                def mul(x, y):
+                    return x * y
+
+                @functools.wraps(mul)
+                def double_nested_call(x, y):
+                    return mul(x, y)
+
+                return double_nested_call(x, y)
+
+            return nested_call(x, y)
+
+        o = torch.compile(foo, fullgraph=True, backend="eager")(x, y)
+        self.assertEqual(o, x * y)
 
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
@@ -4484,13 +4568,15 @@ def fn():
         def count_graph_break_msgs(msgs):
             return sum(msg.find("Graph break") != -1 for msg in msgs)
 
-        with self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log:
-            torch._dynamo.config.verbose = True
+        with self.assertLogs(
+            logger="torch._dynamo", level=logging.DEBUG
+        ) as log, torch._dynamo.config.patch(verbose=True):
             f1(torch.randn(10), torch.randn(10))
             self.assertGreater(count_graph_break_msgs(log.output), 1)
 
-        with self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log:
-            torch._dynamo.config.verbose = False
+        with self.assertLogs(
+            logger="torch._dynamo", level=logging.DEBUG
+        ) as log, torch._dynamo.config.patch(verbose=False):
             g1(torch.randn(10), torch.randn(10))
             self.assertEqual(count_graph_break_msgs(log.output), 1)
 
@@ -5192,13 +5278,14 @@ def fn():
         opt_fn(x2, y2)
 
         self.assertTrue(guard_failure is not None)
+        first_guard_failure = guard_failure[0].partition("\n")[0]
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(
-                guard_failure[0],
+            self.assertIn(
                 """tensor 'L['x']' size mismatch at index 0. expected 2, actual 5""",
+                first_guard_failure,
             )
         else:
-            self.assertExpectedInline(guard_failure[0], """L['x'].size()[0] < 3""")
+            self.assertIn("""L['x'].size()[0] < 3""", first_guard_failure)
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -5226,9 +5313,9 @@ def fn():
         opt_fn(x2, y2)
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(
-                guard_failure[0],
+            self.assertIn(
                 """tensor 'L['x']' size mismatch at index 0. expected 2, actual 3""",
+                guard_failure[0],
             )
         else:
             self.assertTrue(guard_failure is None)
@@ -5261,7 +5348,10 @@ def fn():
 
         # guard is expected for both static and dynamic shapes
         self.assertTrue(guard_failure is not None)
-        self.assertExpectedInline(guard_failure[0], """len(L['x']) == 10""")
+        self.assertIn(
+            """len(L['x']) == 10""",
+            guard_failure[0],
+        )
 
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
@@ -6311,11 +6401,14 @@ def fn():
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
     def test_anomaly_aot_autograd(self):
+        def fail():
+            raise AssertionError("fail")
+
         @allow_in_graph
         def h(a):
             r = a.sum()
             # Trigger an exception in backwards
-            r.register_hook(lambda x: x + x.item())
+            r.register_hook(lambda x: fail())
             return r
 
         @torch.compile(backend="aot_eager")
@@ -6327,8 +6420,8 @@ def fn():
         ):
             f(torch.randn(2, 2, requires_grad=True))
 
-        self.assertEqual(len(w), 1)
-        self.assertIn("forward call that caused the error", str(w[0].message))
+        # Suppress unrelated pkg_resources warnings
+        self.assertIn("forward call that caused the error", str(w[-1].message))
 
     def test_py_guards_mark_dynamic(self):
         def my_dyn_fn(a):
@@ -6599,40 +6692,40 @@ def fn():
                 return input + input
 
         model = Model()
-        with CompileProfiler() as prof:
-            compiled = torch.compile(model, backend=prof)
-            base_checker = (
-                lambda: FileCheck()
-                .check("Torchdynamo Profiler Report")
-                .check("Graph Breaks")
-                .check("No graph breaks detected.")
-                .check("Recompilation")
-            )
-            input = torch.rand((2, 3, 4))
-            _ = compiled(input)
+        prof = CompileProfiler()
+        compiled = torch.compile(model, backend=prof)
+        base_checker = (
+            lambda: FileCheck()
+            .check("Torchdynamo Profiler Report")
+            .check("Graph Breaks")
+            .check("No graph breaks detected.")
+            .check("Recompilation")
+        )
+        input = torch.rand((2, 3, 4))
+        _ = compiled(input)
+        base_checker().check("No recompilation detected.").run(prof.report())
+
+        new_shape_input = torch.rand((3, 3, 4))
+        _ = compiled(new_shape_input)
+
+        # Not an exhaustive test of dynamic shapes behavior, but some sanity
+        if torch._dynamo.config.assume_static_by_default:
+            base_checker().check("Recompile Reasons").check("'forward'").check(
+                "cache_size_limit to 1"
+            ).run(prof.report())
+        else:
             base_checker().check("No recompilation detected.").run(prof.report())
 
-            new_shape_input = torch.rand((3, 3, 4))
-            _ = compiled(new_shape_input)
+        new_shape_input = torch.rand((4, 3, 4))
+        _ = compiled(new_shape_input)
 
-            # Not an exhaustive test of dynamic shapes behavior, but some sanity
-            if torch._dynamo.config.assume_static_by_default:
-                base_checker().check("Recompile Reasons").check("'forward'").check(
-                    "cache_size_limit to 1"
-                ).run(prof.report())
-            else:
-                base_checker().check("No recompilation detected.").run(prof.report())
-
-            new_shape_input = torch.rand((4, 3, 4))
-            _ = compiled(new_shape_input)
-
-            base_checker().check("Recompile Reasons").check("'forward'").check(
-                "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
-            ).check(
-                "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
-            ).run(
-                prof.report()
-            )
+        base_checker().check("Recompile Reasons").check("'forward'").check(
+            "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
+        ).check(
+            "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
+        ).run(
+            prof.report()
+        )
 
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call
@@ -7151,6 +7244,27 @@ def ___make_guard_fn():
         self.assertEqual(comp_out, real_out)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 18)
+
+    def test_tracing_py_tree_tensor_subclass(self):
+        import torch.utils._pytree as pytree
+        from torch.testing._internal.two_tensor import TwoTensor
+        from torch.utils.checkpoint import checkpoint
+
+        def fn(xs):
+            nested_xs = [[xs]]
+            flat_xs, spec = pytree.tree_flatten(xs)
+            return flat_xs[0].clone()
+
+        # use checkpoint to trigger a "sourceless" tensor subclass
+        def checkpoint_fn(xs):
+            return checkpoint(fn, xs)
+
+        xs = TwoTensor(torch.ones(2, 2), torch.ones(2, 2))
+
+        counter = CompileCounter()
+        torch._dynamo.optimize(counter, nopython=True)(checkpoint_fn)(xs)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 2)
 
     def test_tracing_tree_map_only(self):
         import torch.utils._pytree as pytree
@@ -7914,6 +8028,36 @@ def ___make_guard_fn():
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(counter.frame_count, 1)
 
+    def test_itertools_groupby_pure_python_default_identify_func(self):
+        counters.clear()
+
+        def fn(l):
+            return [(k, list(g)) for k, g in itertools.groupby(l)]
+
+        l = [1, 2, 2, 3, 4, 4, 4, 1, 2]
+        eager = fn(l)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(l)
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_groupby_pure_python_key_func(self):
+        counters.clear()
+
+        def fn(l):
+            return [(k, list(g)) for k, g in itertools.groupby(l, key=operator.neg)]
+
+        l = [1, 2, -2, 3, 4, 4, -4, 0, -2]
+        eager = fn(l)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(l)
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
 
@@ -8212,6 +8356,28 @@ ShapeEnv not equal: field values don't match:
             foo()
         with set_default_dtype(torch.double):
             foo()
+
+    def test_dict_subclass_cannot_be_initialized_in_graph(self):
+        for super_class in (
+            collections.OrderedDict,
+            dict,
+        ):
+
+            class CustomDict(super_class):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+
+            def fn(x):
+                c = CustomDict()
+                c["key"] = x
+                assert "key" in c
+                return c["key"] + 1
+
+            fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "call_function UserDefinedClassVariable"
+            ):
+                print(fn_opt(torch.zeros(1)))
 
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):

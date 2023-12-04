@@ -4,9 +4,9 @@ import re
 import sys
 import tempfile
 from os.path import abspath, dirname
+from typing import Any, Dict, Set, Type, TYPE_CHECKING
 
 import torch
-from . import external_utils
 
 # to configure logging for dynamo, aot, and inductor
 # use the following API in the torch._logging module
@@ -14,7 +14,8 @@ from . import external_utils
 # or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
 # see this design doc for more detailed info
 # Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
-# the name of a file to write the logs to
+# the name of a file to write the logs to (currently unused)
+# TODO(jon-chuang): use setup_log_file in setup_compile_debug
 # [@compile_ignored: debug]
 log_file_name = None
 
@@ -47,17 +48,6 @@ accumulated_cache_size_limit = 64
 # specialized, so this is mostly useful for export, where we want inputs
 # to be dynamic, but accesses to ints should NOT get promoted into inputs.
 specialize_int = False
-
-# Assume these functions return constants
-constant_functions = {
-    torch.jit.is_scripting: False,
-    torch.jit.is_tracing: False,
-    torch._C._get_tracing_state: None,
-    torch.fx._symbolic_trace.is_fx_tracing: False,
-    torch.onnx.is_in_onnx_export: False,
-    external_utils.is_compiling: True,
-    torch._utils.is_compiling: True,
-}
 
 # legacy config, does nothing now!
 dynamic_shapes = True
@@ -125,7 +115,7 @@ guard_nn_modules_using_dict_tags = True
 # We do NOT currently support __torch_dispatch__.  The implementation is
 # currently buggy, the main show stopper for nontrivial use is
 # https://github.com/pytorch/torchdynamo/issues/1952
-traceable_tensor_subclasses = set()
+traceable_tensor_subclasses: Set[Type[Any]] = set()
 
 # Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
 # This is a good way to get your model to work one way or another, but you may
@@ -148,7 +138,7 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
 # legacy config, does nothing now!
-skipfiles_inline_module_allowlist = {}
+skipfiles_inline_module_allowlist: Dict[Any, Any] = {}
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -263,13 +253,8 @@ allow_rnn = False
 # [@compile_ignored: runtime_behaviour]
 error_on_recompile = False
 
-# reports why guards fail. Useful to identify the guards failing frequently and
-# causing recompilations.
-# [@compile_ignored: debug]
-report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "1"
-
-# [@compile_ignored: debug] Whether to report all guard failures or just the first one that fails
-report_all_guard_failures = False
+# [@compile_ignored: debug] Whether to report any guard failures (deprecated: does not do anything)
+report_guard_failures = True
 
 # [@compile_ignored: debug] root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
@@ -350,6 +335,9 @@ _autograd_backward_strict_mode_banned_ops.extend(
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
+
+if TYPE_CHECKING:
+    from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
 

@@ -71,9 +71,9 @@ class Match:
         self.args = args or []
         self.kwargs = kwargs or {}
         # The nodes matched in this expression
-        self.nodes: List[torch.fx.Nodes] = []
+        self.nodes: List[torch.fx.Node] = []
         # Mapping CallFunction to the node.target
-        self.targets: Dict[_TargetExpr, torch.fx.Target] = {}
+        self.targets: Dict[_TargetExpr, torch.fx.node.Target] = {}
         self.ctx: Optional[MatchContext] = None
         self.replacement_graph: Optional[torch.fx.Graph] = None
 
@@ -903,7 +903,7 @@ def register_replacement(
 
         args = list(
             torch.fx.map_arg(
-                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]  # type: ignore[has-type]
+                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
         with torch._dynamo.utils.detect_fake_mode(args):
@@ -919,11 +919,19 @@ def register_replacement(
                         device=args[i].device,
                         requires_grad=grad,
                     )
-            specific_graph = trace_fn(search_fn, args)
+            try:
+                specific_graph = trace_fn(search_fn, args)
+            except RuntimeError as e:
+                log.info(
+                    "Replacement pattern %s failed to apply due to shape mismatch: %s",
+                    search_fn.__name__,
+                    e,
+                )
+                return False
             specific_pattern = fx_to_pattern(
                 specific_graph,
                 argnames=argnames,
-                exclusive_arg_names=exclusive_arg_names,  # type: ignore[has-type]
+                exclusive_arg_names=exclusive_arg_names,
                 scalar_workaround=scalar_workaround,
             )
             specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
@@ -935,7 +943,7 @@ def register_replacement(
 
     def normalize_args(**kwargs):
         args = []
-        for name in argnames:  # type: ignore[has-type]
+        for name in argnames:
             args.append(kwargs.pop(name))
         for i in range(1, len(kwargs) + 1):
             if f"tangents_{i}" not in kwargs:
@@ -1091,12 +1099,12 @@ def compute_mutation_region_ids(graph: torch.fx.GraphModule):
 class PatternMatcherPass:
     def __init__(self, prevent_match_across_mutations=False):
         super().__init__()
-        self.patterns: DefaultDict[torch.fx.Target, List[PatternEntry]] = defaultdict(
-            list
-        )
+        self.patterns: DefaultDict[
+            torch.fx.node.Target, List[PatternEntry]
+        ] = defaultdict(list)
         self.prevent_match_across_mutations = prevent_match_across_mutations
 
-    def __getitem__(self, item: torch.fx.Target) -> List[PatternEntry]:
+    def __getitem__(self, item: torch.fx.node.Target) -> List[PatternEntry]:
         return self.patterns[item]
 
     def apply(self, graph: torch.fx.GraphModule) -> int:
@@ -1251,6 +1259,7 @@ def joint_fwd_bwd(fn, args) -> torch.fx.GraphModule:
             lambda g, i: make_boxed_func(g),
             partition_fn=record_joint_graph,
             decompositions=select_decomp_table(),
+            keep_inference_input_mutations=True,
             enable_log=False,
         )(*args)
     assert gm

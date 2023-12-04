@@ -308,6 +308,7 @@ void initLazyBindings(PyObject* module) {
         return result;
       });
   lazy_ts_backend.def("_get_latest_computation_graph", []() {
+#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
     auto computation = LazyGraphExecutor::Get()
                            ->GetComputationCache()
                            ->GetLatest()
@@ -315,6 +316,11 @@ void initLazyBindings(PyObject* module) {
     auto ts_computation = dynamic_cast<TSComputation*>(computation.get());
     TORCH_CHECK(ts_computation, "Found non-TSComputation in cache");
     return ts_computation->graph()->toString();
+#else
+    TORCH_CHECK(
+        false, "TorchScript backend not yet supported in FBCODE builds");
+    return "";
+#endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
   });
 
   // GetPythonFramesFunction() has not ever worked with torchdeploy/multipy

@@ -1,6 +1,4 @@
-"""
-This module contains utility method for mobile model optimization and lint.
-"""
+"""This module contains utility method for mobile model optimization and lint."""
 
 import torch
 from enum import Enum
@@ -19,6 +17,8 @@ def optimize_for_mobile(
         preserved_methods: Optional[List[AnyStr]] = None,
         backend: str = 'CPU') -> torch.jit.RecursiveScriptModule:
     """
+    Optimize a torch script module for mobile deployment.
+
     Args:
         script_module: An instance of torch script module with type of ScriptModule.
         optimization_blocklist: A set with type of MobileOptimizerType. When set is not passed,
@@ -77,8 +77,10 @@ def optimize_for_mobile(
 
 def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
     """
+    Generate a list of lints for a given torch script module.
+
     Args:
-        script_module: An instance of torch script module with type of ScriptModule
+        script_module: An instance of torch script module with type of ScriptModule.
 
     Returns:
         lint_map: A list of dictionary that contains modules lints
