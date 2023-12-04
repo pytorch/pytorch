@@ -2705,6 +2705,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
+    def test_list_aliasing(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a):
+            a.append(torch.sin(a[0]))
+            return a
+
+        x = torch.randn(10)
+        l = [x]
+        self.assertIs(fn(l), l)
+        self.assertEqual(len(l), 2)
+        self.assertIs(l[0], x)
+        self.assertEqual(l[1], torch.sin(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
     def test_not_rewrite_assert_for_other_errors(self):
         def f(x):
             b = x.sin()
