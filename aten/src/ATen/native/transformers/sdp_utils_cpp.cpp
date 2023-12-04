@@ -1,5 +1,4 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
-
 namespace sdp {
 namespace {
 

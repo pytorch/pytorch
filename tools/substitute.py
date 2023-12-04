@@ -3,7 +3,7 @@ import os
 import os.path
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-file")
     parser.add_argument("--output-file")
@@ -22,3 +22,7 @@ if __name__ == "__main__":
 
     with open(output_file, "w") as f:
         f.write(contents)
+
+
+if __name__ == "__main__":
+    main()  # pragma: no cover
