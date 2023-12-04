@@ -1,16 +1,17 @@
 import torch
 from torch import Tensor
-from .optimizer import (Optimizer, required, _use_grad_for_differentiable, _default_to_fused_or_foreach,
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
                         _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
 
 __all__ = ['SGD', 'sgd']
 
+
 class SGD(Optimizer):
-    def __init__(self, params, lr=required, momentum=0, dampening=0,
+    def __init__(self, params, lr=1e-3, momentum=0, dampening=0,
                  weight_decay=0, nesterov=False, *, maximize: bool = False, foreach: Optional[bool] = None,
                  differentiable: bool = False):
-        if lr is not required and lr < 0.0:
+        if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
         if momentum < 0.0:
             raise ValueError(f"Invalid momentum value: {momentum}")
@@ -50,7 +51,6 @@ class SGD(Optimizer):
                     momentum_buffer_list.append(state['momentum_buffer'])
 
         return has_sparse_grad
-
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -130,7 +130,7 @@ SGD.__doc__ = r"""Implements stochastic gradient descent (optionally with moment
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float): learning rate
+        lr (float, optional): learning rate (default: 1e-3)
         momentum (float, optional): momentum factor (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
