@@ -4033,8 +4033,8 @@ def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
     inp_shape = a.shape[-dim:]
     nc_dim = a.dim() - dim
 
-    padding_left = [padding[2*(dim - 1 - i)] for i in range(dim)]
-    padding_right = [padding[2*(dim - 1 - i) + 1] for i in range(dim)]
+    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
+    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
 
     result = a
     for i in range(dim):
@@ -4087,8 +4087,8 @@ def _reflection_pad_backward(
             dim=d,
         )
 
-    padding_left = [padding[2*(dim - 1 - i)] for i in range(dim)]
-    padding_right = [padding[2*(dim - 1 - i) + 1] for i in range(dim)]
+    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
+    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
 
     result = grad_output
     for i in range(dim):
