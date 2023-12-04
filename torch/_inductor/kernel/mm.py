@@ -117,7 +117,7 @@ def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
 
-@register_lowering(aten.mm)
+@register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
@@ -155,7 +155,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
 
 
-@register_lowering(aten._int_mm)
+@register_lowering(aten._int_mm, type_promotion_kind=None)
 def tuned_int_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=torch.int32
@@ -176,7 +176,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
 
 
-@register_lowering(aten.addmm)
+@register_lowering(aten.addmm, type_promotion_kind=None)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
 
@@ -298,8 +298,8 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
             choices,
             input_nodes=(mat1, mat2, mat3),
             layout=layout,
-            **dict(mm_options(config, k, layout), **{"ACC_TYPE": "tl.int32"}),
+            **dict(mm_options(config, k, layout), ACC_TYPE="tl.int32"),
             suffix_args=1,
-            epilogue_fn=lambda acc, mat3: V.ops.mul(acc, mat3),
+            epilogue_fn=V.ops.mul,
         )
     return autotune_select_algorithm("int_mm", choices, [mat1, mat2, mat3], layout)
