@@ -7,7 +7,11 @@ import torch.distributed.checkpoint as DCP
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._tensor.device_mesh import init_device_mesh
-from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
+from torch.distributed.checkpoint.state_dict import (
+    _patch_model_state_dict,
+    _patch_optimizer_state_dict,
+    get_state_dict,
+)
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.tensor.parallel import (
@@ -30,8 +34,7 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
 
 
-# Simple and boring model to test interface and some corner cases that do not
-# require complicated wrapping strategy.
+# Simple and boring model
 class TestDummyModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -45,11 +48,25 @@ class TestDummyModel(torch.nn.Module):
         x = F.relu(self.net1(x))
         x = F.relu(self.net2(x))
         x = F.relu(self.net3(x))
-        x = self.net4(x)
+        x = F.relu(self.net4(x))
         return x
 
     def get_input(self):
         return torch.rand(8, 8, device="cuda")
+
+
+class TestStatefulObj:
+    def __init__(self):
+        self.data = torch.rand(10, 10, device="cuda")
+
+    def state_dict(self):
+        return {"data": self.data}
+
+    def load_state_dict(self, state_dict):
+        self.data = state_dict["data"]
+
+    def __eq__(self, other):
+        return torch.equal(self.data, other.data)
 
 
 class ModelType(Enum):
@@ -105,20 +122,21 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
             model = FSDP(model, device_mesh=dp_mesh, use_orig_params=True)
         else:
             model = dummy_model
-        optim = torch.optim.Adam(model.parameters(), lr=0.1)
 
         if compile:
             # TODO: enable dynamic=True when dynamic shape support is enabled.
             # model = torch.compile(model)
             model = torch.compile(model, dynamic=False)
 
+        optim = self._optim(model)
+        if model_type is not ModelType.NONE:
+            _patch_model_state_dict(model)
+            _patch_optimizer_state_dict(model, optimizers=optim)
+
         return model, optim
 
-    def _equal_state_dict(self, model_0, model_1):
-        for params_0, params_1 in zip(model_0.values(), model_1.values()):
-            if not torch.equal(params_0, params_1):
-                return False
-        return True
+    def _optim(self, model):
+        return torch.optim.Adam(model.parameters(), lr=0.1)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -135,26 +153,28 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
         dist_model, dist_optim = self._create_model(compile, model_type)
         _train(dist_model, dist_optim, train_steps=2)
 
-        # create and save a checkpoint for parallel model
-        dist_msd, dist_osd = get_state_dict(dist_model, optimizers=dist_optim)
-        DCP.save_state_dict(
-            state_dict={"model": dist_msd, "optimizer": dist_osd},
+        original_stateful_obj = TestStatefulObj()  # tests arbitrary saving/loading
+        DCP.save(
+            state_dict={
+                "model": dist_model,
+                "optimizer": dist_optim,
+                "s": original_stateful_obj,
+            },
             storage_writer=DCP.FileSystemWriter(self.temp_dir),
         )
 
-        # load the checkpoint, starting with a new model
+        loaded_stateful_obj = TestStatefulObj()
         dist_model, dist_optim = self._create_model(compile, model_type)
-        dist_msd, dist_osd = get_state_dict(dist_model, optimizers=dist_optim)
-        DCP.load_state_dict(
-            {"model": dist_msd, "optimizer": dist_osd},
+        DCP.load(
+            state_dict={
+                "model": dist_model,
+                "optimizer": dist_optim,
+                "s": loaded_stateful_obj,
+            },
             storage_reader=DCP.FileSystemReader(self.temp_dir),
         )
-        set_state_dict(
-            dist_model,
-            optimizers=dist_optim,
-            model_state_dict=dist_msd,
-            optim_state_dict=dist_osd,
-        )
+
+        self.assertEqual(original_stateful_obj, loaded_stateful_obj)
 
         # train one more step on both models
         loss = _train(model, optim, train_steps=1)
@@ -165,9 +185,7 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
         model_sd, optim_sd = get_state_dict(model, optimizers=optim)
 
         self._verify_msd(model_sd, dist_msd)
-        self._verify_osd_by_load(
-            model, optim, torch.optim.Adam(model.parameters(), lr=0.1), optim_sd
-        )
+        self._verify_osd_by_load(model, optim, self._optim(model), dist_osd)
 
 
 instantiate_parametrized_tests(TestE2ELoadAndSave)
