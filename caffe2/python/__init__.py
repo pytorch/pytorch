@@ -26,13 +26,6 @@ if sys.platform == "win32":
     th_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'torch')
     th_dll_path = os.path.join(th_root, 'lib')
 
-    if not os.path.exists(os.path.join(th_dll_path, 'nvToolsExt64_1.dll')) and \
-            not os.path.exists(os.path.join(py_dll_path, 'nvToolsExt64_1.dll')):
-        nvtoolsext_dll_path = os.path.join(
-            os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt'), 'bin', 'x64')
-    else:
-        nvtoolsext_dll_path = ''
-
     import importlib.util
     import glob
     spec = importlib.util.spec_from_file_location('torch_version', os.path.join(th_root, 'version.py'))
@@ -50,7 +43,7 @@ if sys.platform == "win32":
 
     import ctypes
     kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
-    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
+    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, cuda_path]))
     with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
     prev_error_mode = kernel32.SetErrorMode(0x0001)
 
