@@ -766,7 +766,7 @@ class RestrictedListSubclassVariable(ListVariable):
         raise AttributeError("value")
 
     def modified(self, items, **kwargs):
-        return RestrictedListSubclassVariable(
+        return type(self)(
             items,
             user_cls=self.user_cls,
             user_cls_source=self.user_cls_source,

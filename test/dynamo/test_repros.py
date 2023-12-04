@@ -2746,6 +2746,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(z.length_times_10(), 20)
         self.assertEqual(list(z), [x + 1, y + 2])
 
+    def test_restricted_list_subclass3(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a: CustomList2, b: CustomList2):
+            a.extend(b)
+            a.append_twice(b[2] + 1)
+            a.append(b[3] + 2)
+            return b
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+        l = CustomList2([x, y])
+        self.assertIs(fn(l, l), l)
+        self.assertEqual(len(l), 7)
+        self.assertIs(l[0], x)
+        self.assertIs(l[1], y)
+        self.assertIs(l[2], x)
+        self.assertIs(l[3], y)
+        self.assertEqual(l[4], x + 1)
+        self.assertIs(l[5], l[4])
+        self.assertEqual(l[6], y + 2)
+
     def test_rewrite_assert_with_msg(self):
         def f(x):
             b = x.sin()
@@ -2762,6 +2785,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
+
+    def test_list_aliasing(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a):
+            a.append(torch.sin(a[0]))
+            return a
+
+        x = torch.randn(10)
+        l = [x]
+        self.assertIs(fn(l), l)
+        self.assertEqual(len(l), 2)
+        self.assertIs(l[0], x)
+        self.assertEqual(l[1], torch.sin(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
 
     def test_not_rewrite_assert_for_other_errors(self):
         def f(x):

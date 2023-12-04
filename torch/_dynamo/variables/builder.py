@@ -117,6 +117,7 @@ from .lists import (
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
+    RestrictedListSubclassVariable,
     SizeVariable,
     SliceVariable,
     TupleIteratorVariable,
@@ -777,6 +778,22 @@ class VariableBuilder:
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
+            )
+        elif RestrictedListSubclassVariable.is_matching_cls(type(value)):
+            self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.LIST_LENGTH)
+            return self.tx.output.side_effects.track_list(
+                self.source,
+                value,
+                RestrictedListSubclassVariable(
+                    [
+                        LazyVariableTracker.create(
+                            value=value[i], source=GetItemSource(self.source, i)
+                        )
+                        for i in range(len(value))
+                    ],
+                    user_cls=type(value),
+                    user_cls_source=AttrSource(self.source, "__class__"),
+                ),
             )
         else:
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -1449,15 +1466,11 @@ def wrap_fx_proxy_cls(
         and isinstance(proxy.node.target.__self__, torch._C.Generator)
         or proxy.node.target == torch.random.set_rng_state
     ):
-        from . import TorchVariable
-
         return TorchVariable(proxy.node.target)
     elif (
         proxy.node.target == torch._C._DisableFuncTorch
         or proxy.node.target == torch.cuda._is_in_bad_fork
     ):
-        from . import UserDefinedObjectVariable
-
         return UserDefinedObjectVariable(example_value)
     elif istype(example_value, torch.Size) and all(
         isinstance(x, int) for x in example_value
