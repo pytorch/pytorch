@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,eager_fail_to_run,0
+torchrec_dlrm,model_fail_to_load,0
 
 
 
@@ -14,7 +14,7 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,timeout,0
+DALLE2_pytorch,pass,11
 
 
 
@@ -54,7 +54,7 @@ dcgan,pass,0
 
 
 
-demucs,eager_fail_to_run,0
+demucs,model_fail_to_load,0
 
 
 
@@ -62,27 +62,27 @@ densenet121,pass,0
 
 
 
-detectron2_fasterrcnn_r_101_c4,eager_fail_to_run,0
+detectron2_fasterrcnn_r_101_c4,model_fail_to_load,0
 
 
 
-detectron2_fasterrcnn_r_101_dc5,eager_fail_to_run,0
+detectron2_fasterrcnn_r_101_dc5,model_fail_to_load,0
 
 
 
-detectron2_fasterrcnn_r_101_fpn,eager_fail_to_run,0
+detectron2_fasterrcnn_r_101_fpn,model_fail_to_load,0
 
 
 
-detectron2_fasterrcnn_r_50_c4,eager_fail_to_run,0
+detectron2_fasterrcnn_r_50_c4,model_fail_to_load,0
 
 
 
-detectron2_fasterrcnn_r_50_dc5,eager_fail_to_run,0
+detectron2_fasterrcnn_r_50_dc5,model_fail_to_load,0
 
 
 
-detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
+detectron2_fasterrcnn_r_50_fpn,model_fail_to_load,0
 
 
 
@@ -90,19 +90,19 @@ detectron2_fcos_r_50_fpn,pass,41
 
 
 
-detectron2_maskrcnn_r_101_c4,eager_fail_to_run,0
+detectron2_maskrcnn_r_101_c4,model_fail_to_load,0
 
 
 
-detectron2_maskrcnn_r_101_fpn,eager_fail_to_run,0
+detectron2_maskrcnn_r_101_fpn,model_fail_to_load,0
 
 
 
-detectron2_maskrcnn_r_50_c4,eager_fail_to_run,0
+detectron2_maskrcnn_r_50_c4,model_fail_to_load,0
 
 
 
-detectron2_maskrcnn_r_50_fpn,eager_fail_to_run,0
+detectron2_maskrcnn_r_50_fpn,model_fail_to_load,0
 
 
 
@@ -166,11 +166,11 @@ hf_T5,pass,0
 
 
 
-hf_T5_base,eager_fail_to_run,0
+hf_T5_base,model_fail_to_load,0
 
 
 
-hf_T5_generate,pass,20
+hf_T5_generate,pass,18
 
 
 
@@ -182,7 +182,7 @@ hf_Whisper,pass,0
 
 
 
-hf_clip,eager_fail_to_run,0
+hf_clip,model_fail_to_load,0
 
 
 
@@ -194,7 +194,7 @@ llama,pass,0
 
 
 
-llama_v2_7b_16h,eager_fail_to_run,0
+llama_v2_7b_16h,model_fail_to_load,0
 
 
 
@@ -210,7 +210,7 @@ mobilenet_v2,pass,0
 
 
 
-mobilenet_v2_quantized_qat,eager_fail_to_run,0
+mobilenet_v2_quantized_qat,model_fail_to_load,0
 
 
 
@@ -234,7 +234,7 @@ opacus_cifar10,pass,0
 
 
 
-phi_1_5,eager_fail_to_run,0
+phi_1_5,model_fail_to_load,0
 
 
 
@@ -282,7 +282,7 @@ resnet50,pass,0
 
 
 
-resnet50_quantized_qat,eager_fail_to_run,0
+resnet50_quantized_qat,model_fail_to_load,0
 
 
 
