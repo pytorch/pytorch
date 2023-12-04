@@ -17,6 +17,8 @@ from torch.utils._python_dispatch import (
     transform_subclass,
 )
 
+from .schemas import MutationType
+
 
 def to_fun(t):
     if isinstance(t, Tensor):
@@ -334,3 +336,44 @@ def assert_functional_graph(
                     not n.target._schema.is_mutable
                 ), f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
     return copy_count
+
+
+def _check_if_mutation_can_be_in_graph(
+    keep_input_mutations: bool,
+    mutates_data,
+    mutates_metadata,
+    mutations_hidden_from_autograd,
+    mutations_under_no_grad_or_inference_mode,
+    requires_grad,
+):
+    if keep_input_mutations:
+        return mutates_data and (
+            (not mutates_metadata and not requires_grad)
+            or mutations_hidden_from_autograd
+            or mutations_under_no_grad_or_inference_mode
+        )
+    return False
+
+
+def _get_mutation_type(
+    keep_input_mutations: bool,
+    mutates_data,
+    mutates_metadata,
+    mutations_hidden_from_autograd,
+    mutations_under_no_grad_or_inference_mode,
+    requires_grad,
+):
+    if (not mutates_data) and (not mutates_metadata):
+        return MutationType.NOT_MUTATED
+
+    if _check_if_mutation_can_be_in_graph(
+        keep_input_mutations,
+        mutates_data,
+        mutates_metadata,
+        mutations_hidden_from_autograd,
+        mutations_under_no_grad_or_inference_mode,
+        requires_grad,
+    ):
+        return MutationType.MUTATED_IN_GRAPH
+
+    return MutationType.MUTATED_OUT_GRAPH
