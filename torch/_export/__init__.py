@@ -1147,7 +1147,7 @@ def aot_compile(
         constraints,
         disable_constraint_solver=disable_constraint_solver
     )
-    flat_example_inputs = pytree.arg_tree_leaves(*args, **kwargs or {})
+    flat_example_inputs = pytree.arg_tree_leaves(*args, **(kwargs or {}))
 
     with torch.no_grad():
         so_path = torch._inductor.aot_compile(gm, flat_example_inputs, options)  # type: ignore[arg-type]
