@@ -919,7 +919,15 @@ def register_replacement(
                         device=args[i].device,
                         requires_grad=grad,
                     )
-            specific_graph = trace_fn(search_fn, args)
+            try:
+                specific_graph = trace_fn(search_fn, args)
+            except RuntimeError as e:
+                log.info(
+                    "Replacement pattern %s failed to apply due to shape mismatch: %s",
+                    search_fn.__name__,
+                    e,
+                )
+                return False
             specific_pattern = fx_to_pattern(
                 specific_graph,
                 argnames=argnames,
