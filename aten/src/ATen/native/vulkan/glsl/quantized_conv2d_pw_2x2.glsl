@@ -17,8 +17,8 @@ layout(set = 0, binding = 0, rgba8ui) uniform PRECISION restrict writeonly uimag
  * Input Textures
  */
 layout(set = 0, binding = 1) uniform PRECISION isampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION isampler3D uKernel;
-layout(set = 0, binding = 3) uniform PRECISION isampler3D uBias;
+layout(set = 0, binding = 2) uniform PRECISION isampler2D uKernel;
+layout(set = 0, binding = 3) uniform PRECISION isampler2D uBias;
 
 /*
  * Params Buffer
@@ -100,7 +100,7 @@ void main() {
 
   vec4 sum[4];
   sum[0] = dequantize(
-      texelFetch(uBias, ivec3(gpos.z, 0, 0), 0),
+      texelFetch(uBias, ivec2(gpos.z, 0), 0),
       uBlock.scales.w,
       uBlock.zero_points.w);
   for (int i = 1; i < 4; ++i) {
@@ -114,19 +114,19 @@ void main() {
     // channel (IC) dim is along the x axis, and the batch (OC) dim is along
     // the z axis.
     const vec4 ktex_0 = dequantize(
-        texelFetch(uKernel, ivec3(z + 0, gpos.z, 0), 0),
+        texelFetch(uKernel, ivec2(z + 0, gpos.z), 0),
         uBlock.scales.z,
         uBlock.zero_points.z);
     const vec4 ktex_1 = dequantize(
-        texelFetch(uKernel, ivec3(z + 1, gpos.z, 0), 0),
+        texelFetch(uKernel, ivec2(z + 1, gpos.z), 0),
         uBlock.scales.z,
         uBlock.zero_points.z);
     const vec4 ktex_2 = dequantize(
-        texelFetch(uKernel, ivec3(z + 2, gpos.z, 0), 0),
+        texelFetch(uKernel, ivec2(z + 2, gpos.z), 0),
         uBlock.scales.z,
         uBlock.zero_points.z);
     const vec4 ktex_3 = dequantize(
-        texelFetch(uKernel, ivec3(z + 3, gpos.z, 0), 0),
+        texelFetch(uKernel, ivec2(z + 3, gpos.z), 0),
         uBlock.scales.z,
         uBlock.zero_points.z);
 
