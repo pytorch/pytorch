@@ -98,7 +98,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout Blackhex/builder
+      - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: vs-2022-build
@@ -106,7 +106,7 @@ jobs:
           repository: Blackhex/pytorch-builder
           path: builder
           quiet-checkout: true
-      - name: Clean Blackhex/builder checkout
+      - name: Clean Blackhex/pytorch-builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -218,7 +218,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout Blackhex/builder
+      - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
           ref: vs-2022-build
@@ -226,7 +226,7 @@ jobs:
           repository: Blackhex/pytorch-builder
           path: builder
           quiet-checkout: true
-      - name: Clean Blackhex/builder checkout
+      - name: Clean Blackhex/pytorch-builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd

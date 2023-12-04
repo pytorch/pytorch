@@ -76,14 +76,16 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -108,7 +110,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref: vs-2022-build
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -189,14 +191,16 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -226,7 +230,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref: vs-2022-build
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -276,7 +280,7 @@ jobs:
       build_name: libtorch-cpu-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -322,14 +326,16 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -354,7 +360,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref: vs-2022-build
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -435,14 +441,16 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -472,7 +480,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref: vs-2022-build
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -522,7 +530,7 @@ jobs:
       build_name: libtorch-cpu-shared-without-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -568,14 +576,16 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -600,7 +610,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref: vs-2022-build
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -681,14 +691,16 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -718,7 +730,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref: vs-2022-build
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -768,7 +780,7 @@ jobs:
       build_name: libtorch-cpu-static-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -814,14 +826,16 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -846,7 +860,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref: vs-2022-build
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -927,14 +941,16 @@ jobs:
         shell: powershell
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails
+      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+      # removed once Windows Defender is removed from the AMI
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+        continue-on-error: true
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -964,7 +980,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-built-arm64-binaries
+          ref: vs-2022-build
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -1014,7 +1030,7 @@ jobs:
       build_name: libtorch-cpu-static-without-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
