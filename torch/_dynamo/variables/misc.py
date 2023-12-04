@@ -972,6 +972,24 @@ class SkipFilesVariable(VariableTracker):
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
 
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if (
+            self.value in {collections.OrderedDict, collections.defaultdict}
+            and name == "fromkeys"
+        ):
+            from .builtin import BuiltinVariable
+
+            return BuiltinVariable.call_custom_dict_fromkeys(
+                tx, self.value, *args, **kwargs
+            )
+        return super().call_method(tx, name, args, kwargs)
+
 
 class TypingVariable(VariableTracker):
     def __init__(self, value, **kwargs):

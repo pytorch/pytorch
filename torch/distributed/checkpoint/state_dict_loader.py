@@ -11,7 +11,11 @@ from .storage import (
 from .planner import LoadPlanner
 from .default_planner import DefaultLoadPlanner
 
+<<<<<<< HEAD
 from .utils import _DistWrapper, _all_gather_keys
+=======
+from .utils import _DistWrapper
+>>>>>>> main
 
 __all__ = ["load_state_dict", "load"]
 
