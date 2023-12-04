@@ -252,7 +252,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
             mesh_dim_names=["dp", "tp"],
         )
 
-        fsdp_pg = twod_mesh.get_dim_groups()[0]
+        fsdp_pg = twod_mesh.get_group(mesh_dim=0)
 
         inp = torch.rand(20, 10, device=self.device_type)
         parallelize_plan = {
