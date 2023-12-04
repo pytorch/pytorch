@@ -23,6 +23,16 @@ from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch.utils._triton import has_triton
 from torch._inductor.utils import run_and_get_triton_code
 import torch._dynamo.logging
+import torch.distributed as dist
+import torch.nn as nn
+from torch.distributed._tensor import init_device_mesh, DeviceMesh, Shard, Replicate
+from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel, parallelize_module, PrepareModuleInput
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    with_comms,
+)
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 def _tolist_with_constrain_as_size(tensor):
     lst = tensor.tolist()
@@ -903,6 +913,100 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
+
+
+class TestDTensorCompile(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        fake_store = FakeStore()
+        dist.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=self.world_size
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    @property
+    def device_type(self) -> str:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
+    def test_2d_fsdp_tp_compile(self):
+        class FakeAttention(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.wq = nn.Linear(16, 16)
+                self.wk = nn.Linear(16, 16)
+                self.wv = nn.Linear(16, 16)
+                self.wo = nn.Linear(16, 16)
+
+            def forward(self, x):
+                xq = self.wq(x)
+                xk = self.wk(x)
+                xv = self.wv(x)
+                # fake attention:
+                xo = xq + xk + xv
+                return self.wo(xo)
+
+        class FakeTransformerBlock(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attn = FakeAttention()
+
+            def forward(self, x):
+                return self.attn(x)
+
+        class FakeTransformer(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = FakeTransformerBlock()
+
+            def forward(self, input):
+                return self.block(input)
+
+        model = FakeTransformer().to(self.device_type)
+
+        # 2-D mesh is [dp, tp]
+        mesh_2d = init_device_mesh("cuda", (2, 2), mesh_dim_names=("dp", "tp"))
+
+        tp_mesh = mesh_2d["tp"]
+
+        # apply sequence parallel
+        parallel_plan = {
+            "attn": PrepareModuleInput(
+                input_layouts=Shard(0),
+                desired_input_layouts=Replicate()
+            ),
+            "attn.wq": ColwiseParallel(),
+            "attn.wk": ColwiseParallel(),
+            "attn.wv": ColwiseParallel(),
+            "attn.wo": RowwiseParallel(output_layouts=Shard(0)),
+        }
+
+        parallelize_module(
+            module=model.block,
+            device_mesh=tp_mesh,
+            parallelize_plan=parallel_plan,
+        )
+
+        compiled_model = torch.compile(model)
+        fsdp_mod = FSDP(compiled_model, device_mesh=mesh_2d["dp"], use_orig_params=True)
+        inp = torch.rand(20, 16).to(self.device_type)
+        out = fsdp_mod(inp)
+
+        code = run_and_get_triton_code(fsdp_mod, inp)
+        # Check that `buf2` is correctly waited on before first use.
+        FileCheck() \
+            .check("buf1_work = dist.all_gather_into_tensor(buf1[0]") \
+            .check("buf2 = buf1[0]") \
+            .check("buf2 = _wait_tensor(buf2)") \
+            .check("extern_kernels.mm(buf2,") \
+            .run(code)
 
 
 if __name__ == "__main__":
