@@ -5318,6 +5318,7 @@ else:
                 'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
 
     # FIXME: move to test_serialization
+    @onlyNativeDeviceTypes
     def test_pickle_gradscaler(self, device):
         # This test should pass in 3 cases for cuda:
         #  1. cuda is not available.
@@ -5329,7 +5330,7 @@ else:
         # In case 3, a and b are enabled and we may also try lazy-initing _scale to a cuda tensor.
         device = torch.device(device)
         try_lazy_inits = (True, False)
-        GradScaler = partial(torch.amp.GradScaler, device=device.type)
+        GradScaler = partial(torch.GradScaler, device=device.type)
         for lazy_init_scale in try_lazy_inits:
             a = GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
             if device.type == "cuda":
