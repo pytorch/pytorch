@@ -1533,9 +1533,6 @@ utils_device.CURRENT_DEVICE == None""".split(
             )
             assert not other_fields_are_none
 
-            if not hasattr(obj, "a"):
-                return -1
-
             total = getattr(obj, class_fields[0].name)
             for field in class_fields[1:]:
                 v = getattr(obj, field.name)
