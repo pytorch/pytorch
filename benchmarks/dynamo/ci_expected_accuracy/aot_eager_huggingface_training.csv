@@ -30,7 +30,7 @@ BertForQuestionAnswering,pass,6
 
 
 
-BlenderbotForCausalLM,model_fail_to_load,0
+BlenderbotForCausalLM,eager_fail_to_run,0
 
 
 

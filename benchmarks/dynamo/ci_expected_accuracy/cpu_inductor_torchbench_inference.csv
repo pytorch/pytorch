@@ -158,7 +158,7 @@ hf_T5_large,pass_due_to_skip,0
 
 
 
-hf_clip,model_fail_to_load,0
+hf_clip,eager_fail_to_run,0
 
 
 
@@ -182,7 +182,7 @@ mobilenet_v2,pass,0
 
 
 
-mobilenet_v2_quantized_qat,model_fail_to_load,0
+mobilenet_v2_quantized_qat,eager_fail_to_run,0
 
 
 
@@ -250,7 +250,7 @@ resnet50,pass,0
 
 
 
-resnet50_quantized_qat,model_fail_to_load,0
+resnet50_quantized_qat,eager_fail_to_run,0
 
 
 
