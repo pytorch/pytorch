@@ -85,6 +85,7 @@ def get_device(device):
 
 
 @register_graph_pattern(CallFunctionVarArgs(aten.rand.default), pass_dict=patterns)
+@register_graph_pattern(CallFunctionVarArgs(aten.rand.generator), pass_dict=patterns)
 @register_graph_pattern(CallFunctionVarArgs(aten.randn.default), pass_dict=patterns)
 @register_graph_pattern(CallFunctionVarArgs(aten.randn.generator), pass_dict=patterns)
 def replace_random(
