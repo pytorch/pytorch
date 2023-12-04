@@ -362,7 +362,10 @@ def write(
     hash_type: str = "code",
     specified_dir: str = "",
 ) -> Tuple[str, str]:
-    key: str = get_hash(content, extra, hash_type)
+    # use striped content to compute hash so we don't end up with different
+    # hashes just because the content begins/ends with differnet number of
+    # spaces.
+    key: str = get_hash(content.strip(), extra, hash_type)
     basename, subdir, path = get_path(key, extension, specified_dir)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)

@@ -772,7 +772,7 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
         fbgemm_fusion_keys = [
             x
             for x in config.post_grad_fusion_options
-            if config.post_grad_fusion_options[x].get('require_fbgemm', False)
+            if config.post_grad_fusion_options[x].get("require_fbgemm", False)
         ]
         fbgemm_fusions = {
             fusion: config.post_grad_fusion_options[fusion]
