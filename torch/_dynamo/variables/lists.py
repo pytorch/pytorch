@@ -758,6 +758,13 @@ class RestrictedListSubclassVariable(ListVariable):
     def as_python_constant(self):
         raise NotImplementedError()
 
+    def is_python_constant(self):
+        return False
+
+    @property
+    def value(self):
+        raise AttributeError("value")
+
     def modified(self, items, **kwargs):
         return RestrictedListSubclassVariable(
             items,
