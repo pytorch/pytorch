@@ -446,7 +446,7 @@ unary_magic_methods = {
 
 
 # Adding math ops: sqrt, cos, sin, ...
-def get_sym_node_fn(name):
+def _get_sym_node_fn(name):
     def fn(self):
         return getattr(self, f"_sym_{name}")()
 
@@ -466,7 +466,7 @@ math_op_names = (
 )
 for name in math_op_names:
     sym_name = f"sym_{name}"
-    setattr(SymNode, sym_name, get_sym_node_fn(name))
+    setattr(SymNode, sym_name, _get_sym_node_fn(name))
     METHOD_TO_OPERATOR[sym_name] = getattr(torch, sym_name)
     unary_magic_methods.add(sym_name)
     __all__.append(sym_name)
@@ -663,7 +663,7 @@ def _sympy_sqrt(a):
 current_module = sys.modules[__name__]
 
 
-def get_sym_math_fn(name):
+def _get_sym_math_fn(name):
     def fn(a):
         import sympy
 
@@ -674,7 +674,7 @@ def get_sym_math_fn(name):
 
 
 for name in math_op_names:
-    setattr(current_module, f"_sym_{name}", get_sym_math_fn(name))
+    setattr(current_module, f"_sym_{name}", _get_sym_math_fn(name))
 
 
 def _sympy_abs(a):

@@ -761,7 +761,7 @@ class TestSymNumberMagicMethods(TestCase):
         values = (
             0.0,
             1.0,
-            2.5,
+            0.5 if fn in ("sym_acos", "sym_asin") else 2.5  # avoid math domain error
         )
 
         neg_values = tuple(-x for x in values)

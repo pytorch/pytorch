@@ -499,7 +499,7 @@ def sym_sqrt(a):
 
 current_module = sys.modules[__name__]
 
-def get_sym_math_fn(name):
+def _get_sym_math_fn(name):
     def fn(a):
         from .overrides import has_torch_function_unary, handle_torch_function
 
@@ -514,7 +514,7 @@ def get_sym_math_fn(name):
 
 for name in ("cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos", "atan"):
     sym_name = f"sym_{name}"
-    setattr(current_module, sym_name, get_sym_math_fn(name))
+    setattr(current_module, sym_name, _get_sym_math_fn(name))
     __all__.append(sym_name)
 
 def sym_ite(b, t, f):
