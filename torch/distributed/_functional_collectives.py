@@ -358,11 +358,13 @@ def batch_isend_irecv(p2p_op_list):
     # TODO: fill
     """
 
-    # maybe
+    # TODO: explore whether we need copy for send tensor, whether we can do deepcopy
+    # or if tensor.clone is req'd.
     import copy
-    copy.deepcopy(p2p_op_list)
+    p2p_op_list = copy.deepcopy(p2p_op_list)
 
-    return torch.ops.c10d_functional.batch_isend_irecv(p2p_op_list)
+    tensors = torch.ops.c10d_functional.batch_isend_irecv(p2p_op_list)
+    return [_maybe_wrap_tensor(tensor) for tensor in tensors]
 
 
 
