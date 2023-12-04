@@ -5333,7 +5333,7 @@ else:
         # In case 3, a and b are enabled and we may also try lazy-initing _scale to a cuda tensor.
         device = torch.device(device)
         try_lazy_inits = (True, False)
-        GradScaler = partial(torch.amp.GradScaler, device=device.type)
+        GradScaler = partial(torch.GradScaler, device=device.type)
         for lazy_init_scale in try_lazy_inits:
             a = GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
             if device.type == "cuda":
@@ -5460,7 +5460,7 @@ else:
     @dtypes(torch.float)
     def test_grad_scaling_unscale_sparse(self, device, dtype):
         device = torch.device(device)
-        scaler = torch.amp.GradScaler(device=device.type)
+        scaler = torch.GradScaler(device=device.type)
 
         inv_scale = torch.full((1,), 0.25, dtype=dtype, device=device)
         found_inf = torch.empty((1,), dtype=dtype, device=device)
@@ -5518,7 +5518,7 @@ else:
     @onlyNativeDeviceTypes
     def test_grad_scaling_state_dict(self, device):
         device = torch.device(device)
-        GradScaler = partial(torch.amp.GradScaler, device=device.type)
+        GradScaler = partial(torch.GradScaler, device=device.type)
         for lazy_init_scale in True, False:
             s0 = GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
             s1 = GradScaler(init_scale=6., growth_factor=7., backoff_factor=.8, growth_interval=1)
@@ -5552,7 +5552,7 @@ else:
 
             # For functionality, test with a modest initial scale, and an unrealistically-large growth factor
             # so any potential errors with the growth factor handling will be magnified.
-            GradScaler = partial(torch.amp.GradScaler, device=device)
+            GradScaler = partial(torch.GradScaler, device=device)
             scaler = GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
 
             _ = run(device, data, mod_control, opt_control, scaler, loss_fn, skip_iter, False)
@@ -5661,7 +5661,7 @@ else:
         model, _, optimizer, _, data, loss_fn, _ = _create_scaling_case(
             device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
         )
-        GradScaler = partial(torch.amp.GradScaler, device=device)
+        GradScaler = partial(torch.GradScaler, device=device)
         scaler = GradScaler(init_scale=128.0)
 
         for input, target in data:
@@ -5687,7 +5687,7 @@ else:
         device = torch.device(device)
         model = torch.nn.Linear(5, 1).to(device)
         optimizer = torch.optim.Adam(model.parameters())
-        GradScaler = partial(torch.amp.GradScaler, device=device.type)
+        GradScaler = partial(torch.GradScaler, device=device.type)
         scaler = GradScaler(growth_interval=1, growth_factor=2**4, init_scale=1e38)
         optimizer.zero_grad()
         x = torch.randn(1, 5).to(device)
@@ -5829,7 +5829,7 @@ else:
             mod_control1, mod_scaling1, opt_control1, opt_scaling1 = \
                 _create_scaling_models_optimizers(device.type)
 
-            GradScaler = partial(torch.amp.GradScaler, device=device.type)
+            GradScaler = partial(torch.GradScaler, device=device.type)
             scaler = GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
 
             def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
