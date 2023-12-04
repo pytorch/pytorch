@@ -36,7 +36,6 @@ __all__ = [
     "noop_context_fn",
     "set_checkpoint_early_stop",
     "DefaultDeviceType",
-    "pt2_selective_checkpoint_context_fn_gen",
     "set_checkpoint_debug_enabled",
 ]
 
@@ -1243,7 +1242,7 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
             return out
 
 
-def pt2_selective_checkpoint_context_fn_gen(policy_fn):
+def _pt2_selective_checkpoint_context_fn_gen(policy_fn):
     """
     A helper function that generates a pair of contexts to be later passed into
     `torch.utils.checkpoint` API to implment selective checkpointing.
@@ -1277,7 +1276,7 @@ def pt2_selective_checkpoint_context_fn_gen(policy_fn):
         >>>     return custom_policy
         >>>
         >>> def selective_checkpointing_context_fn():
-        >>>     return pt2_selective_checkpoint_context_fn_gen(get_custom_policy())
+        >>>     return _pt2_selective_checkpoint_context_fn_gen(get_custom_policy())
         >>>
         >>> def gn(x, y):
         >>>     return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
