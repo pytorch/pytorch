@@ -1410,7 +1410,7 @@ def check_pt2_compliant_op(output_graph, kind, target, args, kwargs):
         return
 
     def encountered_compliant_op(target):
-        if func.namespace in {"prim", "prims", "aten"}:
+        if target.namespace in {"prim", "prims", "aten"}:
             return
         output_graph.compliant_custom_ops.add(target)
 
