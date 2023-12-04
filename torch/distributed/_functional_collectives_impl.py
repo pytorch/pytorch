@@ -349,6 +349,6 @@ def _batch_isend_irev(p2p_op_list):
     tensors = []
     for p2p_op, work in zip(p2p_op_list, works):
         _register_tensor_work(p2p_op.tensor, work)
-        tesnors.append(p2p_op.tensor)
+        tensors.append(p2p_op.tensor)
 
     return tensors
