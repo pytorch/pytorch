@@ -2940,6 +2940,52 @@ class <lambda>(torch.nn.Module):
         ):
             aot_export_module(mod, [inp], trace_joint=True, output_loss_index=1)
 
+    @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond needs dynamo to run")
+    def test_aot_export_with_torch_cond(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                def true_fn(x):
+                    y = x + 4
+                    y.add_(5)
+                    return x.cos()
+
+                def false_fn(x):
+                    y = x + 5
+                    y.add_(6)
+                    return x.sin()
+
+                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                return (a + 3, a + 4)
+
+        inp = torch.randn(3, 4)
+        gm, _ = aot_export_module(M(), (inp,), trace_joint=False)
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, arg0_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
+    getitem = conditional[0];  conditional = None
+    add = torch.ops.aten.add.Tensor(getitem, 3)
+    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    return (add, add_1)""")  # noqa: B950
+
+        self.assertExpectedInline(gm.true_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 4)
+    add_1 = torch.ops.aten.add.Tensor(add, 5);  add = None
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    return (cos,)""")
+
+        self.assertExpectedInline(gm.false_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 5)
+    add_1 = torch.ops.aten.add.Tensor(add, 6);  add = None
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+    return (sin,)""")
+
     def test_aot_export_simplified_input_mutations_banned(self):
         def fn(x):
             x.mul_(2)

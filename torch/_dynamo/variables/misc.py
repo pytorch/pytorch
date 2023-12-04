@@ -276,9 +276,26 @@ class InspectSignatureVariable(VariableTracker):
             unimplemented(f"inspect.signature with {kwargs}")
         return InspectSignatureVariable(callable)
 
-    def __init__(self, inspected, **kwargs):
+    def __init__(self, inspected: VariableTracker, **kwargs):
         super().__init__(**kwargs)
         self.inspected = inspected
+
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        if name == "parameters":
+            return variables.ConstDictVariable(
+                {
+                    name: InspectParameterVariable()
+                    for name in self.inspected.inspect_parameter_names()
+                },
+                user_cls=dict,
+            )
+        return super().var_getattr(tx, name)
+
+
+class InspectParameterVariable(VariableTracker):
+    """This is not implemented, if used will graph break."""
+
+    pass
 
 
 def produce_trampoline_autograd_fwd(fn_cls):
@@ -642,23 +659,6 @@ class GetAttrVariable(VariableTracker):
     ) -> "VariableTracker":
         return self.obj.call_method(tx, self.name, args, kwargs)
 
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if (
-            name == "__len__"
-            and isinstance(self.obj, InspectSignatureVariable)
-            and self.name == "parameters"
-        ):
-            return variables.ConstantVariable.create(
-                self.obj.inspected.num_parameters(),
-            )
-        return super().call_method(tx, name, args, kwargs)
-
 
 class MethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper, **kwargs):
@@ -971,6 +971,24 @@ class SkipFilesVariable(VariableTracker):
             msg = f"'skip function {self.value.__qualname__} in file {path}'"
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if (
+            self.value in {collections.OrderedDict, collections.defaultdict}
+            and name == "fromkeys"
+        ):
+            from .builtin import BuiltinVariable
+
+            return BuiltinVariable.call_custom_dict_fromkeys(
+                tx, self.value, *args, **kwargs
+            )
+        return super().call_method(tx, name, args, kwargs)
 
 
 class TypingVariable(VariableTracker):
