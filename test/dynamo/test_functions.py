@@ -745,6 +745,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             dd["a"] = x + 1
             dd[param] = 123
             dd["c"] = x * 2
+            dd.update({"b": x * 3})
+            dd.update([["d", x - 2], ("e", x + 2)])
+            dd.update(zip("ab", [x + 3, x + 4]))
             return dd["b"], dd
 
         x = torch.randn(10, 10)
@@ -754,7 +757,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref[0], res[0]))
         self.assertTrue(same(ref[1]["a"], res[1]["a"]))
+        self.assertTrue(same(ref[1]["b"], res[1]["b"]))
         self.assertTrue(same(ref[1]["c"], res[1]["c"]))
+        self.assertTrue(same(ref[1]["d"], res[1]["d"]))
+        self.assertTrue(same(ref[1]["e"], res[1]["e"]))
         self.assertTrue(same(ref[1][param], res[1][param]))
 
     @make_test
@@ -801,6 +807,42 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         d2 = collections.OrderedDict(my_list)
         d2["c"] = x + 20
         return d1["a"] + d2["c"] + 1
+
+    @make_test
+    def test_dict_fromkeys(x, y):
+        lst = ["a", "b"]
+        d = dict.fromkeys(lst)
+        d1 = dict.fromkeys(d, x + 1)
+        d2 = collections.defaultdict.fromkeys(iter(d1), x - 2)
+        d3 = collections.OrderedDict.fromkeys(tuple(lst), value=y)
+        return d1["a"] * d2["b"] + d2["a"] + d1["b"] + d3["a"] + d3["b"] + 1
+
+    @make_test
+    def test_dict_copy(x):
+        my_list = [("a", x), ("b", x + 1), ("c", x + 2)]
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = d1.copy()
+        d2["a"] = x - 5
+        d2["b"] = x + 3
+        d3 = collections.OrderedDict(my_list)
+        d3["c"] = x + 20
+        d4 = d3.copy()
+        d4["c"] = x - 10
+        return d1["a"] * d2["a"] + d2["b"] + d3["c"] * d4["c"] + 1
+
+    @make_test
+    def test_dict_update(x, y, z):
+        d = {"a": x, "b": y}
+        d.update({"a": y - 1})
+        d.update([("b", z + 1), ["c", z]])
+        d.update(zip("ab", [z + 3, y + 2]))
+
+        od = collections.OrderedDict(a=x * 3, b=y + 2)
+        od.update({"a": y + 5})
+        od.update([["b", z + 6], ("c", z - 7)])
+        od.update(zip("ab", [z - 3, x + 2]))
+        return d["a"] * od["a"] + od["c"] + d["b"] + od["b"] * d["c"]
 
     @make_test
     def test_min_max(a, b):
