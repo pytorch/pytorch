@@ -13,7 +13,7 @@ import pickle
 import time
 import warnings
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta
 from itertools import chain, product
 from unittest import mock
 
@@ -3577,6 +3577,10 @@ class NCCLTraceTest(MultiProcessTestCase):
         self.assertEqual(last['input_sizes'], ((3, 4),))
         self.assertEqual(last['output_sizes'], ((3, 4),))
         self.assertEqual(last['seq_id'], 2)
+        now = datetime.now()
+        event_created_time = datetime.fromtimestamp(last['time_created_us'] / 1000000)
+        before_test = now - timedelta(minutes=1)
+        self.assertTrue(before_test < event_created_time < now)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
