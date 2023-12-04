@@ -172,7 +172,7 @@ def _dump_DDP_relevant_env_vars():
         "GLOO_SOCKET_IFNAME",
         "GLOO_DEVICE_TRANSPORT",
         "NCCL_SOCKET_IFNAME",
-        "NCCL_BLOCKING_WAIT",
+        "TORCH_NCCL_BLOCKING_WAIT",
         "NCCL_DEBUG",
         "NCCL_DEBUG_SUBSYS",
         "NCCL_IB_DISABLE",
@@ -210,7 +210,7 @@ def _dump_DDP_relevant_env_vars():
         "NCCL_COLLNET_ENABLE",
         "NCCL_TOPO_FILE",
         "NCCL_TOPO_DUMP_FILE",
-        "NCCL_ASYNC_ERROR_HANDLING",
+        "TORCH_NCCL_ASYNC_ERROR_HANDLING",
     ]
     formatted_output = ""
     for var in relevant_env_vars:
