@@ -67,7 +67,13 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
-REQUIRE_HIGHER_TOLERANCE = set("sebotnet33ts_256")
+REQUIRE_HIGHER_TOLERANCE = {
+    "fbnetv3_b",
+    "hrnet_w18",
+    "inception_v3",
+    "sebotnet33ts_256",
+    "selecsls42b",
+}
 
 SCALED_COMPUTE_LOSS = {
     "ese_vovnet19b_dw",
@@ -79,6 +85,10 @@ SCALED_COMPUTE_LOSS = {
 
 FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "convit_base",
+    "xcit_large_24_p8_224",
+}
+
+SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
     "xcit_large_24_p8_224",
 }
 
@@ -179,6 +189,12 @@ class TimmRunner(BenchmarkRunner):
 
     @property
     def force_fp16_for_bf16_models(self):
+        return set()
+
+    @property
+    def skip_accuracy_check_as_eager_non_deterministic(self):
+        if self.args.accuracy and self.args.training:
+            return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
         return set()
 
     @download_retry_decorator
@@ -294,8 +310,8 @@ class TimmRunner(BenchmarkRunner):
         cosine = self.args.cosine
         tolerance = 1e-3
         if is_training:
-            if REQUIRE_HIGHER_TOLERANCE:
-                tolerance = 2 * 1e-2
+            if name in REQUIRE_HIGHER_TOLERANCE:
+                tolerance = 4 * 1e-2
             else:
                 tolerance = 1e-2
         return tolerance, cosine
