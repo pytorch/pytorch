@@ -1692,6 +1692,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         x = torch.randn(3)
         res = opt_fn(x)
+        self.assertEqual(type(res), np.ndarray)
         self.assertEqual(cnts.frame_count, 1)
 
         def fn(x):
@@ -1701,6 +1702,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         x = torch.randn(3, requires_grad=True)
         res = opt_fn(x)
+        self.assertEqual(type(res), np.ndarray)
         self.assertEqual(cnts.frame_count, 1)
 
     def test_numpy_recompilation_scalar(self):
@@ -2197,6 +2199,39 @@ utils_device.CURRENT_DEVICE == None""".split(
         ref = fn(x, mod)
         res = opt_fn(x, mod)
         self.assertTrue(same(ref, res))
+
+    def test_nested_wraps(self):
+        def foo(x, y):
+            def add(x, y):
+                return x + y
+
+            @functools.wraps(add)
+            def wrapped_call(x, y):
+                return add(x, y)
+
+            return wrapped_call(x, y)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        o = torch.compile(foo, fullgraph=True, backend="eager")(x, y)
+        self.assertEqual(o, x + y)
+
+        def foo(x, y):
+            def nested_call(x, y):
+                def mul(x, y):
+                    return x * y
+
+                @functools.wraps(mul)
+                def double_nested_call(x, y):
+                    return mul(x, y)
+
+                return double_nested_call(x, y)
+
+            return nested_call(x, y)
+
+        o = torch.compile(foo, fullgraph=True, backend="eager")(x, y)
+        self.assertEqual(o, x * y)
 
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
@@ -6366,11 +6401,14 @@ def fn():
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
     def test_anomaly_aot_autograd(self):
+        def fail():
+            raise AssertionError("fail")
+
         @allow_in_graph
         def h(a):
             r = a.sum()
             # Trigger an exception in backwards
-            r.register_hook(lambda x: x + x.item())
+            r.register_hook(lambda x: fail())
             return r
 
         @torch.compile(backend="aot_eager")
@@ -6382,8 +6420,8 @@ def fn():
         ):
             f(torch.randn(2, 2, requires_grad=True))
 
-        self.assertEqual(len(w), 1)
-        self.assertIn("forward call that caused the error", str(w[0].message))
+        # Suppress unrelated pkg_resources warnings
+        self.assertIn("forward call that caused the error", str(w[-1].message))
 
     def test_py_guards_mark_dynamic(self):
         def my_dyn_fn(a):
@@ -7990,6 +8028,36 @@ def ___make_guard_fn():
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(counter.frame_count, 1)
 
+    def test_itertools_groupby_pure_python_default_identify_func(self):
+        counters.clear()
+
+        def fn(l):
+            return [(k, list(g)) for k, g in itertools.groupby(l)]
+
+        l = [1, 2, 2, 3, 4, 4, 4, 1, 2]
+        eager = fn(l)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(l)
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_itertools_groupby_pure_python_key_func(self):
+        counters.clear()
+
+        def fn(l):
+            return [(k, list(g)) for k, g in itertools.groupby(l, key=operator.neg)]
+
+        l = [1, 2, -2, 3, 4, 4, -4, 0, -2]
+        eager = fn(l)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(l)
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
 
@@ -8288,6 +8356,28 @@ ShapeEnv not equal: field values don't match:
             foo()
         with set_default_dtype(torch.double):
             foo()
+
+    def test_dict_subclass_cannot_be_initialized_in_graph(self):
+        for super_class in (
+            collections.OrderedDict,
+            dict,
+        ):
+
+            class CustomDict(super_class):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+
+            def fn(x):
+                c = CustomDict()
+                c["key"] = x
+                assert "key" in c
+                return c["key"] + 1
+
+            fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "call_function UserDefinedClassVariable"
+            ):
+                print(fn_opt(torch.zeros(1)))
 
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
