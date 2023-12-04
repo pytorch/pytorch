@@ -242,6 +242,10 @@ timm_vovnet,pass,0
 
 
 
+torch_multimodal_clip,pass,0
+
+
+
 tts_angular,fail_to_run,0
 
 
@@ -250,8 +254,8 @@ vgg16,pass,0
 
 
 
-yolov3,fail_to_run,0
-
-
-
 vision_maskrcnn,fail_to_run,0
+
+
+
+yolov3,fail_to_run,0
