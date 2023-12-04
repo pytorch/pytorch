@@ -367,6 +367,8 @@ def _verify_graph_equivalence(x: torch.nn.Module, y: torch.nn.Module):
             nodes_idx[id(node)] = i
         return "\n".join(ret)
 
+    assert isinstance(x.graph, torch.fx.Graph)
+    assert isinstance(y.graph, torch.fx.Graph)
     assert graph_dump(x.graph) == graph_dump(y.graph)
 
 
@@ -725,7 +727,7 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModu
         "",
         {
             entry.fqn: entry.signature
-            for entry in root_module.module_call_graph
+            for entry in root_module.module_call_graph  # type: ignore[union-attr]
             if entry.signature
         },
         module=root_module,

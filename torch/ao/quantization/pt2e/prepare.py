@@ -316,7 +316,6 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
 
     # otherwise, we'll insert a new observer/fake_quant node
 
-    existing_obs_node = None
     # skip inserting new observers if the same observer instance is inserted before for another user
     # Example:
     # conv1 -> obs1 -> existing_obs -> conv2
@@ -332,6 +331,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         if id(maybe_obs_mod) == id(input_edge_obs_or_fq):
             return maybe_obs_node
 
+    assert isinstance(model.graph, Graph)
     new_arg = _insert_obs_or_fq(arg, input_edge_obs_or_fq, model, named_modules, model.graph)
     return new_arg
 

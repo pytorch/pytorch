@@ -220,7 +220,9 @@ class OptimizedModule(torch.nn.Module):
         return getattr(self._orig_mod, name)
 
     def _call_lazy_check(self, *args, **kwargs):
-        if hasattr(self._orig_mod, "_initialize_hook"):
+        if hasattr(self._orig_mod, "_infer_parameters") and callable(
+            self._orig_mod._infer_parameters
+        ):
             # In the case of a lazy module, we want to run
             # the pre-hooks which initialize it.
             # Afterwards, lazy module deletes its pre-hooks

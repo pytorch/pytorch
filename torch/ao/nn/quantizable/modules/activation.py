@@ -164,7 +164,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         float.
         """
         fp = self._FLOAT_MODULE(self.embed_dim, self.num_heads, self.dropout,
-                                (self.linear_Q._weight_bias()[1] is not None),
+                                (self.linear_Q._weight_bias()[1] is not None),  # type: ignore[operator]
                                 (self.bias_k is not None),
                                 self.add_zero_attn, self.kdim, self.vdim, self.batch_first)
         assert fp._qkv_same_embed_dim == self._qkv_same_embed_dim
