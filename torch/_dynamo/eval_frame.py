@@ -94,27 +94,25 @@ unset = Unset.token
 
 compile_lock = threading.RLock()
 guarded_backend_cache = threading.local()
-
+cached_backends = {}
 
 def _maybe_init_guarded_backend_cache():
     if not hasattr(guarded_backend_cache, "skip_backend_check_for_run_only_mode"):
         guarded_backend_cache.skip_backend_check_for_run_only_mode = False
     if not hasattr(guarded_backend_cache, "current_backend"):
         guarded_backend_cache.current_backend = None
-    if not hasattr(guarded_backend_cache, "cached_backends"):
-        guarded_backend_cache.cached_backends = {}
 
 
 def _reset_guarded_backend_cache():
+    global cached_backends
     _maybe_init_guarded_backend_cache()
     guarded_backend_cache.skip_backend_check_for_run_only_mode = False
     guarded_backend_cache.current_backend = None
-    cached_backends = guarded_backend_cache.cached_backends
     for backend in cached_backends.values():
         if hasattr(backend, "reset"):
             backend.reset()
     cached_backends.clear()
-    guarded_backend_cache.cached_backends = {}
+    cached_backends = {}
 
 
 @contextlib.contextmanager
@@ -139,7 +137,7 @@ def backend_cache_wrapper(callback: DynamoCallback):
             prev_backend = guarded_backend_cache.current_backend
             guarded_backend_cache.current_backend = backend
             # Mapping id of a CompilerFn to itself
-            guarded_backend_cache.cached_backends[id(backend)] = backend
+            cached_backends[id(backend)] = backend
             return prev_backend
 
         prev_backend = _set_current_backend(backend)
