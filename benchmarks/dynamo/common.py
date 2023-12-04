@@ -3504,6 +3504,7 @@ def run(runner, args, original_dir=None):
     elif args.only:
 
         def write_csv_when_exception(name: str, status: str, device=None):
+            print(status)
             placeholder_batch_size = 0
             devices = [device] if device is not None else args.devices
             if args.accuracy:
@@ -3605,7 +3606,7 @@ def run(runner, args, original_dir=None):
                     status = (
                         "model_fail_to_load"
                         if isinstance(e, NotImplementedError)
-                        else "model_fail_to_load"
+                        else "eager_fail_to_run"
                     )
                     write_csv_when_exception(name, status, device)
                     continue  # bad benchmark implementation
@@ -3703,7 +3704,6 @@ def run(runner, args, original_dir=None):
                     [sys.executable] + sys.argv + [f"--only={name}"], timeout=timeout
                 )
             except subprocess.TimeoutExpired:
-                print("TIMEOUT", file=sys.stderr)
                 write_csv_when_exception(name, "timeout")
             except subprocess.CalledProcessError as e:
                 print("Run failed with return code: ", e.returncode, file=sys.stderr)
