@@ -401,9 +401,9 @@ def emit_view_functionalization_body(
       {{
         at::AutoDispatchSkipFunctionalize guard;
         if (reapply_views) {{
-            tmp_output = at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
+          tmp_output = at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
         }} else {{
-            tmp_output = at::_ops::{api_name}::call({', '.join(view_redispatch_args)});
+          tmp_output = at::_ops::{api_name}::call({', '.join(view_redispatch_args)});
         }}
       }}
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
@@ -716,7 +716,11 @@ def gen_functionalization_registration(
         return view_str
 
     elif isinstance(g, NativeFunctionsGroup):
-        fns = list(g.functions())
+        # Gets a hand-written functionalization kernel
+        if g.inplace is not None and str(g.inplace.func.name) == "set_.source_Tensor":
+            fns = []
+        else:
+            fns = list(g.functions())
     else:
         if str(g.func.name) in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION:
             return []

@@ -5,6 +5,7 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from torch._dynamo.utils import detect_fake_mode
+from torch._utils_internal import print_graph
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -70,20 +71,21 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
         gm = fuse_fx(gm, example_inputs)
         numpy_compat_normalization(gm.graph)
         group_batch_fusion_passes(gm.graph, pre_grad=True)
+        print_graph(gm.graph, "Before split cat in pre grad pass.")
         for pattern_matcher_pass in pattern_matcher_passes:
             pattern_matcher_pass.apply(gm.graph)
+            print_graph(
+                gm.graph,
+                f"Apply split cat pattern matcher {pattern_matcher_pass.__class__.__name__} in pre grad.",
+            )
 
+    if config.pre_grad_custom_pass is not None:
+        config.pre_grad_custom_pass(gm.graph)
     stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
 
-    if config.is_fbcode():
-        from torch._inductor.fb.utils import get_everpaste_url
-
-        log.info(
-            "Print graph after recompile in pre grad passes: %s",
-            get_everpaste_url(str(gm.graph)),
-        )
+    print_graph(gm.graph, "Aftre recompile in pre grad pass.")
 
     return gm
 

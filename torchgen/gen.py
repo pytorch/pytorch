@@ -4,7 +4,7 @@ import json
 import os
 import pathlib
 from collections import defaultdict, namedtuple, OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Any,
     Callable,
@@ -542,13 +542,21 @@ def static_dispatch(
 @dataclass(frozen=True)
 class RegisterSchema:
     selector: SelectiveBuilder
+    known_tags: Dict[str, int] = field(default_factory=dict)
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
         tags = "{" + ", ".join(f"at::Tag::{tag}" for tag in sorted(f.tags)) + "}"
-        return f"m.def({cpp_string(str(f.func))}, {tags});\n"
+        if tags == "{}":
+            return f"m.def({cpp_string(str(f.func))}, {{}});\n"
+        maybe_tags = ""
+        if tags not in self.known_tags:
+            idx = len(self.known_tags)
+            self.known_tags[tags] = idx
+            maybe_tags = f"const std::vector<at::Tag> tags_{idx} = {tags};\n"
+        return f"{maybe_tags}m.def({cpp_string(str(f.func))}, tags_{self.known_tags[tags]});\n"
 
 
 # Generates Operators.h and Operators.cpp.
@@ -2436,10 +2444,9 @@ def gen_source_files(
         def gen_op_headers(
             g: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]
         ) -> List[str]:
-            headers = []
             if isinstance(g, NativeFunctionsViewGroup):
                 # view ops always get a functionalization kernel
-                headers += [
+                headers = [
                     f"#include <ATen/ops/{g.view.root_name}_native.h>",
                     f"#include <ATen/ops/{g.view.root_name}_ops.h>",
                 ]
@@ -2450,7 +2457,7 @@ def gen_source_files(
                     ]
                 return headers
             elif isinstance(g, NativeFunctionsGroup):
-                headers += [
+                headers = [
                     f"#include <ATen/ops/{g.functional.root_name}_native.h>",
                     f"#include <ATen/ops/{g.functional.root_name}_ops.h>",
                     f"#include <ATen/ops/{g.out.root_name}_native.h>",
@@ -2468,7 +2475,7 @@ def gen_source_files(
                     ]
                 return headers
             else:
-                return headers + [
+                return [
                     f"#include <ATen/ops/{g.root_name}_native.h>",
                     f"#include <ATen/ops/{g.root_name}_ops.h>",
                 ]

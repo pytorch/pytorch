@@ -55,8 +55,7 @@ class TorchDispatchMode:
         raise NotImplementedError()
 
     def __enter__(self):
-        key = self.__dict__.get("_dispatch_key", None)
-        _push_mode(self, key)
+        _push_mode(self, self.__dict__.get("_dispatch_key", None))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

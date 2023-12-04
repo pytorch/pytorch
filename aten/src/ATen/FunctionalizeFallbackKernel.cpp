@@ -25,10 +25,7 @@
 #include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/_unsafe_view.h>
 
-#include <c10/core/DispatchKey.h>
-
 #include <utility>
-#include <iostream>
 #endif
 
 namespace {
@@ -303,6 +300,28 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
   return out;
 }
 
+static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
+  // error case
+  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(self) || !at::functionalization::impl::isFunctionalTensor(src),
+    "set__functionalize: Tried to mutate a non-functional tensor with a functional tensor, which is not allowed");
+
+  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(src),
+    "set__functionalize: We do not currently support x.set_(y) where y is not a FunctionalTensor. Please file an issue");
+
+  // nop case
+  if (!at::functionalization::impl::isFunctionalTensor(self) && !at::functionalization::impl::isFunctionalTensor(src)) {
+    at::AutoDispatchSkipFunctionalize guard;
+    return self.set_(src);
+  }
+
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(src));
+  auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
+  auto src_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(src);
+  self_impl->set__impl(src_impl);
+  return self;
+}
+
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
 }
@@ -314,4 +333,7 @@ TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   m.impl("lift_fresh_copy", TORCH_FN(lift_fresh_functionalize_copy));
   m.impl("_to_copy", TORCH_FN(_to_copy_functionalize));
   m.impl("_unsafe_view", TORCH_FN(_unsafe_view_functionalize));
+  // The overloads of set_() that take in a storage should never
+  // appear with torch.compile, because dynamo graph breaks
+  m.impl("set_.source_Tensor", TORCH_FN(set__functionalize));
 }
