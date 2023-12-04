@@ -1717,6 +1717,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         from torch.library import Library, impl
         test_lib = Library("test_int4", "DEF")
         test_lib.define("quantize_per_tensor_int4(Tensor input, float scale, int zero_point) -> Tensor")
+
         @impl(test_lib, "quantize_per_tensor_int4", "CompositeExplicitAutograd")
         def quantize_per_tensor_int4(
             input: torch.Tensor,
@@ -1727,6 +1728,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             return torch.clamp(torch.round(input * inv_scale) + zero_point, 0, 15).to(torch.uint8).view(torch.bits8)
 
         test_lib.define("dequantize_per_tensor_int4(Tensor input, float scale, int zero_point) -> Tensor")
+
         @impl(test_lib, "dequantize_per_tensor_int4", "CompositeExplicitAutograd")
         def dequantize_per_tensor_int4(
             input: torch.Tensor,
@@ -1750,8 +1752,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
             def convert(self, model: torch.fx.GraphModule, observer_node: Node):
                 with model.graph.inserting_before(observer_node):
-                    q_node = model.graph.call_function(torch.ops.test_int4.quantize_per_tensor_int4, (observer_node.args[0], 1.0, 0), {})
-                    dq_node = model.graph.call_function(torch.ops.test_int4.dequantize_per_tensor_int4, (q_node, 1.0, 0), {})
+                    q_node = model.graph.call_function(
+                        torch.ops.test_int4.quantize_per_tensor_int4, (observer_node.args[0], 1.0, 0), {})
+                    dq_node = model.graph.call_function(
+                        torch.ops.test_int4.dequantize_per_tensor_int4, (q_node, 1.0, 0), {})
                     observer_node.replace_all_uses_with(dq_node)
                     model.graph.erase_node(observer_node)
 
