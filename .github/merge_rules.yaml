@@ -332,6 +332,7 @@
   - XiaobingSuper
   - jgong5
   - vfdev-5
+  - leslie-fang-intel
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -342,6 +343,21 @@
   - torch/cpu/**
   - torch/utils/mkldnn.py
   - test/test_mkldnn.py
+  approved_by:
+  - leslie-fang-intel
+  - jgong5
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: x86 CPU quantization
+  patterns:
+  - torch/ao/quantization/quantizer/x86_inductor_quantizer.py
+  - torch/_inductor/fx_passes/quantization.py
+  - test/quantization/core/test_quantized_op.py
+  - test/inductor/test_mkldnn_pattern_matcher.py
+  - test/quantization/pt2e/test_x86inductor_quantizer.py
   approved_by:
   - leslie-fang-intel
   - jgong5
