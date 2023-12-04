@@ -1465,6 +1465,23 @@ class AOTInductorTestsTemplate:
         inputs = (torch.rand(4, 4, 4, 4, device=self.device),)
         self.check_model(Model(4), inputs)
 
+    @requires_cuda()
+    def test_cpp_codegen_cuda(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10, device="cuda")
+
+            def forward(self, x):
+                return self.linear(x)
+
+        with torch.no_grad(), config.patch({"cpp_wrapper": True}):
+            model = Model()
+            model_opt = torch.compile(model)
+
+            inp = torch.zeros(10, device="cuda")
+            self.assertEqual(model_opt(inp), model(inp))
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
