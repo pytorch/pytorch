@@ -117,7 +117,7 @@ class BatchPointwiseOpsFusionFactory(BatchFusion):
         self.op = op
 
 
-@register_fusion("batch_linear", pre_grad=False)
+@register_fusion("batch_linear_post_grad", pre_grad=False)
 class PostGradBatchLinearFusion(BatchFusion):
     """
     Fuse ops in a batch way in post grad (aten level).
@@ -172,20 +172,18 @@ class PostGradBatchLinearFusion(BatchFusion):
             fused_inputs = decompose_stack(graph, batch_inputs)
             fused_weights = decompose_stack(graph, batch_weights)
             fused_bmm = graph.call_function(
-                torch.ops.aten.bmm,
+                aten.bmm,
                 args=(fused_inputs, fused_weights),
             )
 
         for i, original_mm in enumerate(batch_nodes):
             has_bias = False
             with graph.inserting_after(fused_bmm):
-                new_mm = graph.call_function(
-                    torch.ops.aten.select, args=((fused_bmm, 0, i))
-                )
+                new_mm = graph.call_function(aten.select, args=((fused_bmm, 0, i)))
                 if batch_biases[i]:
                     has_bias = True
                     new_bias_add = graph.call_function(
-                        torch.ops.aten.add, args=((batch_biases[i], new_mm))
+                        aten.add, args=((batch_biases[i], new_mm))
                     )
             new_mm_cont = new_bias_add if has_bias else new_mm
             original_mm.replace_all_uses_with(new_mm_cont)
@@ -763,7 +761,25 @@ def generate_fusion_from_config(config_options: Dict[str, Any], pre_grad=True):
 def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
     print_graph(graph, "Before group_batch fusion in pre grad pass.")
     fusions: List[GroupBatchFusionBase] = []
-
+    # we keep all current pre grad fusions to keep
+    # current implementation, will remove this later
+    # TODO: deperate batch_fusion and group_fusion flags
+    if config.batch_fusion:
+        config.pre_grad_fusion_options = {
+            "batch_linear": {},
+            "batch_linear_lhs": {},
+            "batch_layernorm": {},
+            "batch_tanh": {},
+            "batch_relu": {},
+            "batch_sigmoid": {},
+        }
+        # config.post_grad_fusion_options = {
+        #     "batch_linear_post_grad": {},
+        # }
+    if config.group_fusion:
+        config.post_grad_fusion_options = {
+            "group_linear": {"require_fbgemm": True},
+        }
     if pre_grad:
         fusions += generate_fusion_from_config(
             config.pre_grad_fusion_options, pre_grad=True
