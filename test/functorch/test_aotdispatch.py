@@ -1463,6 +1463,91 @@ def forward(self, primals_1, primals_2):
         with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
             self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
+    # Mutations in the backward are allowed as long as the mutated object does not require grad
+    def test_backward_mutation_data(self):
+        class BwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, = ctx.saved_tensors
+                # bw mutation
+                x.mul_(2)
+                return grad_output.clone()
+
+        def f(a, b):
+            out = BwMutation.apply(b)
+            return a * out
+
+        inp_no_grad = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+
+        # Mutation on buffer that does not require grad during the backward is allowed
+        self.verify_aot_autograd(f, inp_no_grad, test_mutation=True)
+
+        inp_grad = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=True),
+        ]
+        with self.assertRaisesRegex(AssertionError, "input that requires_grad and was mutated in the backward"):
+            self.verify_aot_autograd(f, inp_grad, test_mutation=True)
+
+    def test_backward_mutation_metadata(self):
+        class BwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.save_for_backward(b)
+                return a.clone(), b.clone()
+
+            @staticmethod
+            def backward(ctx, grad_a, grad_b):
+                b, = ctx.saved_tensors
+                # bw metadata mutation
+                b.transpose_(1, 0)
+                return grad_a.clone(), grad_b.clone()
+
+        def f(a, b):
+            a_, b_ = BwMutation.apply(a, b)
+            out = a_ * b_
+            return out
+
+        inp_no_grad = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+
+        with self.assertRaisesRegex(AssertionError, "input that had its metadata mutated in the backward"):
+            self.verify_aot_autograd(f, inp_no_grad, test_mutation=True)
+
+    def test_backward_mutation_on_grad_out(self):
+        class BwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                grad_output.mul_(2)
+                return grad_output.clone()
+
+        def f(a, b):
+            tmp = a * b
+            out = BwMutation.apply(tmp)
+            return out
+
+        inp_grad = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=True),
+        ]
+        f_compiled = aot_function(f, nop)
+        with self.assertRaisesRegex(AssertionError, "input to the backward that was mutated during the backward"):
+            out = f_compiled(*inp_grad)
+
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
     def test_input_mutation_false_aliasing(self):
         def f(a, b):
