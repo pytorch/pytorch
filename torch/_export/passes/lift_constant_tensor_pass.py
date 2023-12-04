@@ -5,9 +5,7 @@ from torch._guards import detect_fake_mode
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
 
 
-def lift_constant_tensor_pass(
-    gm, graph_signature, state_dict
-) -> Dict[str, torch.Tensor]:
+def lift_constant_tensor_pass(gm, graph_signature) -> Dict[str, torch.Tensor]:
     """
     Takes an ExportedProgram and returns the ExportedProgram modified in-place,
     with the constant tensors as buffers.
