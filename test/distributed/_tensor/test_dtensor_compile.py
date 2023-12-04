@@ -24,6 +24,7 @@ from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     PrepareModuleInput,
+    PrepareModuleOutput,
     RowwiseParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -201,12 +202,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         model = SimpleModel(self.device_type)
-        module_prepare_input = (
-            PrepareModuleInput()
-            if is_seq_parallel
-            else PrepareModuleInput(input_layouts=Replicate())
-        )
-        no_input_prepare_colwise_style = ColwiseParallel(input_layouts=None)
+
         colwise_style = (
             ColwiseParallel(input_layouts=Shard(0))
             if is_seq_parallel
@@ -217,16 +213,37 @@ class TestDTensorCompileE2E(DTensorTestBase):
             if is_seq_parallel
             else RowwiseParallel()
         )
-        model = parallelize_module(
-            model,
-            mesh,
-            parallelize_plan={
-                "mlp_0": module_prepare_input,
-                "mlp_0.net1": no_input_prepare_colwise_style,
+
+        if is_seq_parallel:
+            # use input preparation to test out the compile of it
+            prepare_module_input = PrepareModuleInput(
+                input_layouts=Shard(0),
+                desired_input_layouts=Replicate(),
+            )
+            prepare_module_out = PrepareModuleOutput(
+                output_layouts=Replicate(),
+                desired_output_layouts=Shard(0),
+            )
+            plan = {
+                "mlp_0": prepare_module_input,
+                "mlp_0.net1": ColwiseParallel(),
+                "mlp_0.net2": rowwise_style,
+                "mlp_1.net1": colwise_style,
+                "mlp_1.net2": RowwiseParallel(),
+                "mlp_1": prepare_module_out,
+            }
+        else:
+            plan = {
+                "mlp_0.net1": colwise_style,
                 "mlp_0.net2": rowwise_style,
                 "mlp_1.net1": colwise_style,
                 "mlp_1.net2": rowwise_style,
-            },
+            }
+
+        model = parallelize_module(
+            model,
+            mesh,
+            parallelize_plan=plan,
         )
         rng_seed = self.rank if is_seq_parallel else 0
         torch.manual_seed(rng_seed)
