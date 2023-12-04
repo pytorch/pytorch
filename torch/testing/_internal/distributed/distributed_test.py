@@ -386,13 +386,13 @@ default_pg_timeout = 60
 
 CUSTOM_PG_TIMEOUT = {
     # This test runs slowly and needs additional time to complete, otherwise can
-    # be taken down by NCCL_ASYNC_ERROR_HANDLING
+    # be taken down by TORCH_NCCL_ASYNC_ERROR_HANDLING
     "test_ddp_uneven_inputs": 300,
     # This test has a short timeout since it tests being taken down by
-    # NCCL_ASYNC_ERROR_HANDLING which we want to happen quickly.
+    # TORCH_NCCL_ASYNC_ERROR_HANDLING which we want to happen quickly.
     "test_ddp_model_diff_across_ranks": 5,
     # This test has a short timeout since it tests being taken down by
-    # NCCL_ASYNC_ERROR_HANDLING which we want to happen quickly.
+    # TORCH_NCCL_ASYNC_ERROR_HANDLING which we want to happen quickly.
     "test_ddp_has_finalized": 5,
 }
 
@@ -548,7 +548,7 @@ class TestDistBackend(MultiProcessTestCase):
         # initialize Barrier
         Barrier.init()
         # Skip return code checking for following tests as they are expected to
-        # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
+        # crash a process due to TORCH_NCCL_ASYNC_ERROR_HANDLING.
         self.skip_return_code_checks = [self.test_ddp_has_finalized.__wrapped__]
 
     def tearDown(self):
@@ -667,7 +667,7 @@ class DistributedTest:
                 "MASTER_PORT",
                 "WORLD_SIZE",
                 "NCCL_TOPO_DUMP_FILE",  # N/A
-                "NCCL_ASYNC_ERROR_HANDLING",
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING",
             ]
             for var in vars:
                 line = format_line(var)
@@ -1333,7 +1333,7 @@ class DistributedTest:
             expected_tensors = [None for _ in range(world_size)]
 
             for val in ["1", "0"]:
-                os.environ["NCCL_BLOCKING_WAIT"] = val
+                os.environ["TORCH_NCCL_BLOCKING_WAIT"] = val
                 for src in range(0, world_size):
                     send_tensor = _build_tensor(rank + 1, device_id=device_id).fill_(
                         src
@@ -8108,9 +8108,9 @@ class DistributedTest:
             group_gloo = dist.new_group(
                 timeout=timedelta(seconds=60), backend=dist.Backend.GLOO
             )
-            # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
+            # Set TORCH_NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
             # determinism.
-            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
             group_to_use = dist.new_group(
                 backend=dist.get_backend(), timeout=timedelta(seconds=5)
             )
@@ -8160,7 +8160,7 @@ class DistributedTest:
             self, group_to_use, diff_num_params=False
         ):
             # When running with NCCL backend, we don't expect an error on rank 0,
-            # rather, it will be taken down by NCCL_ASYNC_ERROR_HANDLING. When
+            # rather, it will be taken down by TORCH_NCCL_ASYNC_ERROR_HANDLING. When
             # running with Gloo or with debug mode wrapper, we expect the error
             # to be caught inline.
             # All ranks report same error when there is a # of parameter
@@ -8190,9 +8190,9 @@ class DistributedTest:
             group_gloo = dist.new_group(
                 timeout=timedelta(seconds=60), backend=dist.Backend.GLOO
             )
-            # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
+            # Set TORCH_NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
             # determinism.
-            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
             group_to_use = dist.new_group(
                 backend=dist.get_backend(), timeout=timedelta(seconds=5)
             )
@@ -8279,9 +8279,9 @@ class DistributedTest:
             group_gloo = dist.new_group(
                 timeout=timedelta(seconds=60), backend=dist.Backend.GLOO
             )
-            # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
+            # Set TORCH_NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
             # determinism.
-            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
             group_to_use = dist.new_group(
                 backend=dist.get_backend(), timeout=timedelta(seconds=10)
             )
@@ -8305,9 +8305,9 @@ class DistributedTest:
             group_gloo = dist.new_group(
                 timeout=timedelta(seconds=60), backend=dist.Backend.GLOO
             )
-            # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
+            # Set TORCH_NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
             # determinism.
-            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
             group_to_use = dist.new_group(
                 backend=dist.get_backend(), timeout=timedelta(seconds=10)
             )
@@ -8612,7 +8612,7 @@ class DistributedTest:
             # All ranks besides 0 call into allreduce. This is to simulate a
             # desync across the world, where some ranks call into
             # monitored_barrier() and others are stuck in collective comm. In
-            # practice, we don't need NCCL_BLOCKING_WAIT, but we use it in this
+            # practice, we don't need TORCH_NCCL_BLOCKING_WAIT, but we use it in this
             # test to ensure it exits cleanly.
             if self.rank != 0:
                 # Can get different errors here depending on whether gloo-based
@@ -10071,6 +10071,38 @@ class DistributedTest:
                 ddp_model = torch.nn.parallel.DistributedDataParallel(
                     model, device_mesh=device_mesh
                 )
+
+        @skip_if_lt_x_gpu(2)
+        @require_world_size(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_compile_static_graph(self):
+            "Tests that DDP works with torch compile when static_graph=True"
+            model = torch.nn.Linear(10, 10).cuda(self.rank)
+            model_clone = copy.deepcopy(model)
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+            )
+            ddp_static = torch.nn.parallel.DistributedDataParallel(
+                model_clone,
+                device_ids=[self.rank],
+                static_graph=True
+            )
+            ddp = torch.compile(ddp)
+            ddp_static = torch.compile(ddp_static)
+            input = torch.rand(10, 10).cuda(self.rank)
+            # verify output and gradient parity
+            for _ in range(6):
+                out_ddp = ddp(input).sum()
+                out_ddp_static = ddp_static(input).sum()
+                self.assertEqual(out_ddp, out_ddp_static)
+                out_ddp.backward()
+                out_ddp_static.backward()
+                for p1, p2 in zip(ddp.parameters(), ddp_static.parameters()):
+                    self.assertEqual(p1.grad, p2.grad)
 
 
 instantiate_parametrized_tests(DistributedTest._DistTestBase)

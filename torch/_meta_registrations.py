@@ -5298,6 +5298,93 @@ def meta__scaled_dot_product_efficient_backward(
 
 @register_meta(
     [
+        aten._flash_attention_forward,
+    ]
+)
+def meta__flash_attention_forward(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    cum_seq_q: Optional[Tensor],
+    cum_seq_k: Optional[Tensor],
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    return_debug_mask: bool,
+    scale: Optional[float] = None,
+):
+    batch_size = query.size(0)
+    max_seqlen_batch_q = query.size(1)
+    num_heads = query.size(2)
+    head_dim = query.size(3)
+
+    max_seqlen_batch_k = key.size(1)
+
+    # Cuda Path
+    attention = torch.empty_like(query)
+    logsumexp = torch.empty(
+        (batch_size, num_heads, max_seqlen_batch_q),
+        dtype=torch.float,
+        device=query.device,
+    )
+
+    if return_debug_mask:
+        blocksize_c = 128 if head_dim > 64 else 256
+        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
+        if max_seqlen_batch_k <= 128:
+            max_seqlen_k = 128
+        elif max_seqlen_batch_k <= 256:
+            max_seqlen_k = 256
+        debug_mask = torch.empty(
+            (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_k),
+            dtype=query.dtype,
+            device=query.device,
+        )
+    else:
+        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+
+    # See Note [Seed and Offset]:
+    return (
+        attention,
+        logsumexp,
+        torch.empty((), dtype=torch.long, device="meta"),
+        torch.empty((), dtype=torch.long, device="meta"),
+        debug_mask,
+    )
+
+
+@register_meta(
+    [
+        aten._flash_attention_backward,
+    ]
+)
+def meta__flash_attention_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    cum_seq_q: Tensor,
+    cum_seq_k: Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
+    scale: Optional[float] = None,
+):
+    grad_query = torch.empty_like(query)
+    grad_key = torch.empty_like(key)
+    grad_value = torch.empty_like(value)
+
+    return grad_query, grad_key, grad_value
+
+
+@register_meta(
+    [
         aten._efficient_attention_forward,
     ]
 )
