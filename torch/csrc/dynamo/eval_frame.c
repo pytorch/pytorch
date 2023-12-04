@@ -739,9 +739,11 @@ inline static PyObject* eval_custom_code_impl(
 
   // look up new localsplus from old localsplus:
   // for i, name in enumerate(localsplusnames_old):
-  //   name_to_idx[name] = i
+  //   if name in args_old + freevars_old + cellvars_old:
+  //     name_to_idx[name] = i
   // for i, name in enumerate(localsplusnames_new):
-  //   fastlocals_new[i] = fastlocals_old[name_to_idx[name]]
+  //  if name in name_to_idx:
+  //    fastlocals_new[i] = fastlocals_old[name_to_idx[name]]
   PyObject* name_to_idx = PyDict_New();
   if (name_to_idx == NULL) {
     DEBUG_TRACE0("unable to create localsplus name dict");
@@ -793,7 +795,6 @@ inline static PyObject* eval_custom_code_impl(
   #else
   Py_ssize_t nlocals_new = code->co_nlocals;
   Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
-  Py_ssize_t nlocals_common = nlocals_new < nlocals_old ? nlocals_new : nlocals_old;
 
   Py_ssize_t ncells = PyCode_GetNCellvars(code);
   Py_ssize_t nfrees = PyCode_GetNFreevars(code);
@@ -809,7 +810,12 @@ inline static PyObject* eval_custom_code_impl(
   PyObject** fastlocals_old = frame->f_localsplus;
   PyObject** fastlocals_new = shadow->f_localsplus;
 
-  for (Py_ssize_t i = 0; i < nlocals_common; i++) {
+  for (Py_ssize_t i = 0; i < nlocals_old; i++) {
+    if(fastlocals_old[i] == NULL)
+    {
+      // enter the region of local only variables
+      break;
+    }
     Py_XINCREF(fastlocals_old[i]);
     fastlocals_new[i] = fastlocals_old[i];
   }
