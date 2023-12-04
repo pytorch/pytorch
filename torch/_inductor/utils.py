@@ -38,6 +38,7 @@ from typing import (
 from unittest import mock
 
 import sympy
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
@@ -382,20 +383,21 @@ def tuple_sorted(x):
     return sorted(x, key=sort_func)
 
 
+P = ParamSpec("P")
 RV = TypeVar("RV", covariant=True)
 
 
-# FIXME this should take in a ParamSpec too
-class CachedFunction(Generic[RV], Protocol):
+class CachedMethod(Generic[P, RV], Protocol):
     @staticmethod
     def clear_cache(self) -> None:
         ...
 
-    def __call__(self, *args, **kwargs) -> RV:
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV:
         ...
 
 
-def cache_on_self(fn: Callable[..., RV]) -> CachedFunction[RV]:
+# See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
+def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
     key = f"__{fn.__name__}_cache"
 
     @functools.wraps(fn)

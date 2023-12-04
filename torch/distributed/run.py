@@ -694,7 +694,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     assert 0 < min_nodes <= max_nodes
     assert args.max_restarts >= 0
 
-    if hasattr(args, "master_addr") and args.rdzv_backend != "static":
+    if hasattr(args, "master_addr") and args.rdzv_backend != "static" and not args.rdzv_endpoint:
         log.warning(
             "master_addr is only used for static rdzv_backend and when rdzv_endpoint "
             "is not specified."
