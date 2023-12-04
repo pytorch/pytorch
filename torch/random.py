@@ -4,6 +4,7 @@ import warnings
 
 from torch._C import default_generator
 import torch
+from torch.types import _int, _float
 
 
 def set_rng_state(new_state: torch.Tensor) -> None:
@@ -94,6 +95,17 @@ def _seed_custom_device(seed) -> None:
             message = f"Set seed for `{custom_backend_name}` device does not take effect, please add API's "
             message += f"`{_bad_fork_name}` and `{_seed_all_name}` to `{custom_backend_name}` device module."
             warnings.warn(message, UserWarning, stacklevel=3)
+
+
+def uniform(low: _float, high: _float, *size: _int) -> torch.Tensor:
+    r"""Returns a tensor filled with numbers sampled from a uniform random distribution
+    
+    Args:
+        low (float): Lower bound of the distribution.
+        high (float): Upper bound of the distribution.
+        *size (int): Sequence of integers that defines the shape of the Tensor. Can be a variable number or a list.
+    """
+    return torch.empty(*size).uniform_(low, high)
 
 
 def initial_seed() -> int:
