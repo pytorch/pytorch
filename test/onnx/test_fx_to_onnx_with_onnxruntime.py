@@ -458,9 +458,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        "torch._export.verifier.SpecViolationError: User input output slice_scatter_1 does not point to a user input that exists."
+        "torch._export.verifier.SpecViolationError: User input output view_1 does not point to a user input that exists."
         "Dict of user inputs that are mutated, in order: {'view_1': 'l_x_'}"
-        "User input nodes available: ('arg1_1',)"
+        "User input nodes available: ('arg0_1',)"
+        " Github issue: https://github.com/pytorch/pytorch/issues/112429"
     )
     def test_mutation(self):
         class MutationModel(torch.nn.Module):
@@ -519,8 +520,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "User input nodes available: ('arg1_1',)"
     )
     @pytorch_test_common.skip_dynamic_fx_test(
-        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node."
-        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 FillVectorsFromInput Starts must be a 1-D array"
+        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
+        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 "
+        "FillVectorsFromInput Starts must be a 1-D array"
     )
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):
