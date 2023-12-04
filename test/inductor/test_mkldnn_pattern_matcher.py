@@ -1069,16 +1069,16 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def __init__(self, use_bias, post_op_algo):
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4, use_bias)
-                if postop == torch.nn.GELU:
-                    self.unary_fn = postop(approximate=post_op_algo)
+                if postop == "gelu":
+                    self.unary_fn = torch.nn.GELU(approximate=post_op_algo)
                 else:
-                    self.unary_fn = postop
+                    self.unary_fn = torch.nn.ReLU()
 
                 self.linear2 = torch.nn.Linear(4, 4, use_bias)
-                if postop == torch.nn.GELU:
-                    self.unary_fn2 = postop(approximate=post_op_algo)
+                if postop == "gelu":
+                    self.unary_fn2 = torch.nn.GELU(approximate=post_op_algo)
                 else:
-                    self.unary_fn2 = postop
+                    self.unary_fn2 = torch.nn.ReLU()
 
             def forward(self, x):
                 tmp = self.unary_fn(self.linear(x))
@@ -1113,7 +1113,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a Linear->ReLU pattern.
         """
-        self._qlinear_unary_cpu_test_helper(postop=torch.nn.ReLU)
+        self._qlinear_unary_cpu_test_helper(postop="relu")
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -1123,7 +1123,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a Linear->GELU pattern.
         """
         self._qlinear_unary_cpu_test_helper(
-            postop=torch.nn.GELU, post_op_algorithms=["none", "tanh"]
+            postop="gelu", post_op_algorithms=["none", "tanh"]
         )
 
     @skipIfNoDynamoSupport
@@ -1134,7 +1134,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a Linear->ReLU pattern with int8_mixed_bf16 quantization.
         """
-        self._qlinear_unary_cpu_test_helper(int8_mixed_bf16=True)
+        self._qlinear_unary_cpu_test_helper(postop="relu", int8_mixed_bf16=True)
 
     def _qlinear_dequant_promotion_cpu_test_helper(self, int8_mixed_bf16=False):
         class M(torch.nn.Module):
