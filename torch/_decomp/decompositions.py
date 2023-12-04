@@ -4053,6 +4053,75 @@ def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
     return result
 
 
+@register_decomposition(aten.reflection_pad1d_backward.default)
+@register_decomposition(aten.reflection_pad2d_backward.default)
+@register_decomposition(aten.reflection_pad3d_backward.default)
+@pw_cast_for_opmath
+def _reflection_pad_backward(
+    grad_output: Tensor, a: Tensor, padding: Tuple[int, ...]
+) -> Tensor:
+    dim = len(padding) // 2
+    torch._check(
+        a.dim() in (dim + 1, dim + 2),
+        lambda: f"reflection_pad{dim}d_backward requires {dim + 1}D or {dim + 2}D input",
+    )
+    inp_shape = a.shape[-dim:]
+    nc_dim = a.dim() - dim
+
+    def zero_pad(a, d, left, right):
+        left_shape = list(a.shape)
+        left_shape[d] = left
+
+        right_shape = list(a.shape)
+        right_shape[d] = right
+
+        return torch.cat(
+            (
+                torch.zeros(left_shape, device=a.device),
+                a,
+                torch.zeros(right_shape, device=a.device),
+            ),
+            dim=d,
+        )
+
+    result = grad_output
+    for i in range(dim):
+        middle_idx: List[Any] = [slice(s) for s in result.shape]
+        middle_idx[i + nc_dim] = torch.arange(
+            padding[2 * i], padding[2 * i] + inp_shape[i], step=1, device=a.device
+        )
+        middle = result[middle_idx]
+
+        left_idx: List[Any] = [slice(s) for s in result.shape]
+        left_idx[i + nc_dim] = torch.arange(
+            padding[2 * i] - 1, -1, step=-1, device=a.device
+        )
+        left = zero_pad(
+            result[left_idx], i + nc_dim, 1, inp_shape[i] - padding[2 * i] - 1
+        )
+
+        right_idx: List[Any] = [slice(s) for s in result.shape]
+        right_idx[i + nc_dim] = torch.arange(
+            result.shape[i + nc_dim] - 1,
+            result.shape[i + nc_dim] - padding[2 * i + 1] - 1,
+            step=-1,
+            device=a.device,
+        )
+        right = zero_pad(
+            result[right_idx], i + nc_dim, inp_shape[i] - padding[2 * i + 1] - 1, 1
+        )
+
+        assert middle.shape == left.shape == right.shape
+        result = middle + left + right
+
+    assert result.shape == a.shape
+
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(result)
+    result = result.contiguous(memory_format=memory_format)
+    return result
+
+
 @register_decomposition(aten.aminmax)
 @out_wrapper("min", "max")
 def aminmax(self, *, dim=None, keepdim=False):
