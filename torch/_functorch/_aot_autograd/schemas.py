@@ -16,6 +16,10 @@ from torch._subclasses.fake_tensor import is_fake
 
 from .. import config
 
+from .utils import strict_zip
+
+zip = strict_zip
+
 OutputType = Enum(
     "OutputType",
     (
