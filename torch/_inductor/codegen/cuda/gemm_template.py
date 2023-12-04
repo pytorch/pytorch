@@ -52,6 +52,15 @@ extern "C" {
     auto status = gemm_op.can_implement(arguments);
     CUTLASS_CHECK(status);
   }
+#ifdef CUTLASS_DEBUG_TRACE_LEVEL
+#if CUTLASS_DEBUG_TRACE_LEVEL == 1
+  {
+    // Print the maximum number of active blocks per SM for the kernel if CUTLASS_DEBUG_TRACE_LEVEL == 1
+    // we don't need a print statement, it's happening inside the function.
+    gemm_op.maximum_active_blocks();
+  }
+#endif
+#endif
   {
     auto status = gemm_op.initialize(arguments, workspace, stream);
     CUTLASS_CHECK(status);
@@ -155,6 +164,82 @@ GEMM_ARGS_CUTLASS_3X_EPILOGUE = r"""
         {{template.cute_int(kernel.stride(Y, -3), "batch_stride_y")}}
       },  // StrideD dD
     },  // EpilogueArguments epilogue
+"""
+
+GEMM_STANDALONE_RUNNER_ADDITIONAL_INCLUDES = r"""
+#ifdef GENERATE_STANDALONE_RUNNER
+#include "cutlass/util/distribution.h"
+#include "cutlass/util/host_tensor.h"
+#include "cutlass/util/packed_stride.hpp"
+#include "cutlass/util/tensor_view_io.h"
+#include "cutlass/util/reference/device/gemm_complex.h"
+#include "cutlass/util/reference/device/tensor_compare.h"
+#include "cutlass/util/reference/device/tensor_fill.h"
+#include <iostream>
+#endif
+"""
+
+GEMM_STANDALONE_RUNNER_TEMPLATE = r"""
+#ifdef GENERATE_STANDALONE_RUNNER
+/// Helper to initialize a block of device data
+template <class Element>
+bool initialize_block(
+  cutlass::DeviceAllocation<Element>& block,
+  uint64_t seed, float max=1.0, float min=-1.0) {
+  if (block.size()<=0) return false;
+  Element scope_max(static_cast<Element>(max)), scope_min(static_cast<Element>(min));
+  cutlass::reference::device::BlockFillRandomUniform(
+    block.get(), block.size(), seed, scope_max, scope_min, 0);
+
+  return true;
+}
+
+extern "C" int run_standalone(uint64_t seed) {
+    std::cout << "Starting GEMM Standalone test run with seed " << seed << std::endl;
+    size_t workspace_size = 0;
+    size_t* workspace_size_ptr = &workspace_size;
+
+    using ElementA = {{kernel.cutlass_dtype(X)}};
+    using ElementB = {{kernel.cutlass_dtype(W)}};
+    using ElementC = {{kernel.cutlass_dtype(Bias, default_dtype='uint8_t')}}; // may not be void
+    using ElementD = {{kernel.cutlass_dtype(Y)}};
+    {% for aux_node in aux_input_nodes %}
+    using Element_{{aux_node.get_name()}} = {{kernel.cutlass_dtype(aux_node)}};
+    {% endfor %}
+
+    cutlass::DeviceAllocation<ElementA> X_data({{kernel.max_valid_index(X)+1}});
+    initialize_block(X_data, seed++);
+    cutlass::DeviceAllocation<ElementB> W_data({{kernel.max_valid_index(W)+1}});
+    initialize_block(W_data, seed++);
+    cutlass::DeviceAllocation<ElementC> Bias_data({{kernel.max_valid_index(Bias)+1}});
+    initialize_block(Bias_data, seed++);
+    cutlass::DeviceAllocation<ElementD> Y_data({{kernel.max_valid_index(Y)+1}});
+    {% for aux_node in aux_input_nodes %}
+    cutlass::DeviceAllocation<Element_{{aux_node.get_name()}}> aux_{{aux_node.get_name()}}_data({{kernel.max_valid_index(aux_node)+1}});
+    initialize_block(aux_{{aux_node.get_name()}}_data, seed++);
+    {% endfor %}
+
+    cutlass::DeviceAllocation<uint8_t> workspace_data;
+    // Call once with workspace_size_ptr set to get workspace size
+
+    std::cout << "Calling once to get workspace size" << std::endl;
+    {{test_call_statement}};
+    // Allocate workspace if neccessary
+    if (workspace_size > 0) {
+        workspace_data.reset(workspace_size);
+        std::cout << "Allocated workspace size of " << workspace_size << " bytes" << std::endl;
+    }
+    std::cout << "Calling Kernel as {{test_call_statement}};" << std::endl;
+    workspace_size_ptr = nullptr;
+    {{test_call_statement}};
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    return run_standalone(1);
+}
+
+#endif
 """
 
 
@@ -899,7 +984,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         kernel_call_signature = kernel.def_kernel(
             inputs=inputs, outputs=[Y], names_str=names_str, input_reorder=input_reorder
         )
-
+        test_call_statement = self.test_call_statement(kernel, inputs, names_str)
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout
         # we need to adapt, which might lead to suboptimal performance.
         # Also there might be a Bias / additional input node which was not present during autotuning
@@ -962,6 +1047,28 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             input_reorder=self.input_reorder,
             epilogue_args=epilogue_args,
             aux_input_nodes=aux_input_nodes,
+            test_call_statement=test_call_statement,
         )
         res = self._template_from_string(GEMM_TEMPLATE).render(**options)
+        if inductor_cuda_config.generate_test_runner:
+            test_runner_code = self._template_from_string(
+                GEMM_STANDALONE_RUNNER_TEMPLATE
+            ).render(**options)
+            res += "\n\n" + test_runner_code
         return res
+
+    def test_call_statement(
+        self,
+        kernel,
+        input_nodes,
+        names_str: str = "",
+    ) -> str:
+        _, __, arg_types = kernel.args.cpp_argdefs()
+        arg_names = [name.strip() for name in names_str.strip().split(",")]
+        if input_nodes[2] is None:
+            del arg_names[2]
+        arguments = [
+            f"(({arg_type}){arg_name}_data.get())"
+            for arg_type, arg_name in zip(arg_types, arg_names)
+        ]
+        return f"{kernel.kernel_name}({', '.join(arguments)}, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"
