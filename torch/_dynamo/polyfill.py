@@ -2,6 +2,7 @@
 Python polyfills for common builtins.
 """
 import math
+
 import torch
 
 
@@ -37,9 +38,13 @@ def round(number, ndigits=None):
 
     if ndigits is None:
         result = _round_half_to_even(number)
-        return torch.sym_int(result) if isinstance(number, torch.SymFloat) else int(result)
+        return (
+            torch.sym_int(result)
+            if isinstance(number, torch.SymFloat)
+            else int(result)
+        )
     else:
-        return _round_half_to_even(number * 10 ** ndigits) * 10 ** -ndigits
+        return _round_half_to_even(number * 10**ndigits) * 10**-ndigits
 
 
 def _round_half_to_even(x):
