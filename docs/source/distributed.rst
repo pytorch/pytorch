@@ -841,6 +841,7 @@ If you are running single node training, it may be convenient to interactively b
 .. py:module:: torch.distributed.checkpoint.resharding
 .. py:module:: torch.distributed.checkpoint.state_dict_loader
 .. py:module:: torch.distributed.checkpoint.state_dict_saver
+.. py:module:: torch.distributed.checkpoint.stateful
 .. py:module:: torch.distributed.checkpoint.storage
 .. py:module:: torch.distributed.checkpoint.utils
 .. py:module:: torch.distributed.collective_utils

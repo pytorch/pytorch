@@ -83,7 +83,12 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
-from .ctx_manager import EventVariable, NullContextVariable, StreamVariable
+from .ctx_manager import (
+    AutocastModeVariable,
+    EventVariable,
+    NullContextVariable,
+    StreamVariable,
+)
 from .dicts import (
     ConstDictVariable,
     DataClassVariable,
@@ -142,7 +147,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
+from .torch import torch_special_class_types, TorchVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
@@ -340,14 +345,6 @@ class VariableBuilder:
                 dataclasses.fields,
                 lambda self, value: LambdaVariable(
                     _dataclasses_fields_lambda,
-                    source=self.source,
-                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
-                ),
-            ),
-            (
-                tensor_dunder_fns,
-                lambda self, value: TorchVariable(
-                    value,
                     source=self.source,
                     **self.install_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
@@ -689,6 +686,17 @@ class VariableBuilder:
                 value,
                 None,  # No kernel idx provided
                 None,  # No grid provided
+                source=self.source,
+            )
+        elif isinstance(value, torch.amp.autocast_mode.autocast):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return AutocastModeVariable(
+                target_values=[
+                    value.device,
+                    value.fast_dtype,
+                    value._enabled,
+                    value._cache_enabled,
+                ],
                 source=self.source,
             )
         elif trace_rules.lookup(value) is not None:
@@ -1763,17 +1771,18 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
                 symbolic_context=symbolic_context,
             )
         )
-        # TODO: just store the whole symbolic_context here
-        tx.output.tracked_fakes.append(
-            TrackedFake(
-                fake_e,
-                source,
-                symbolic_context.constraint_sizes
-                if symbolic_context is not None
-                else None,
+        if is_tensor and not (static_shapes and source.is_nn_module()):
+            # TODO: just store the whole symbolic_context here
+            tx.output.tracked_fakes.append(
+                TrackedFake(
+                    fake_e,
+                    source,
+                    symbolic_context.constraint_sizes
+                    if symbolic_context is not None
+                    else None,
+                )
             )
-        )
-        tx.output.tracked_fakes_id_to_source[id(e)].append(source)
+            tx.output.tracked_fakes_id_to_source[id(e)].append(source)
         tx.output.tensor_weakref_to_sizes_strides[e] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
