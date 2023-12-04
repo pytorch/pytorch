@@ -1437,7 +1437,7 @@ def check_pt2_compliant_op(output_graph, kind, target, args, kwargs):
         if len(overloads) == 1:
             op = getattr(target, overloads[0])
             if torch.Tag.pt2_compliant_tag in op.tags:
-                encountered_compliant_op(target)
+                encountered_compliant_op(op)
                 return
             encountered_non_compliant_op(
                 op,
