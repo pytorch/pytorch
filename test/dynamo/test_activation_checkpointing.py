@@ -15,7 +15,7 @@ from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_CUDA
-from torch.utils.checkpoint import checkpoint, _pt2_selective_checkpoint_context_fn_gen
+from torch.utils.checkpoint import _pt2_selective_checkpoint_context_fn_gen, checkpoint
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
