@@ -79,6 +79,26 @@ class UtilTest(DTensorTestBase):
                 global_tensor[dim0_start:dim0_end],
             )
 
+            # Test when size < #ranks
+            global_tensor_small = torch.arange(16).view(4, 4)
+            global_shape_small = global_tensor_small.size()
+            dtensor_small = distribute_tensor(
+                global_tensor_small, device_mesh, placements
+            )
+            (
+                local_size_small,
+                global_offset_small,
+            ) = compute_local_shape_and_global_offset(
+                global_shape_small, device_mesh, placements
+            )
+
+            self.assertEqual(
+                dtensor_small.to_local(),
+                global_tensor_small[
+                    global_offset[0] : global_offset[0] + local_size[0]
+                ],
+            )
+
     @with_comms
     def test_compute_local_shape_and_global_offset_2D(self):
         two_d_placements_options = [Shard(0), Shard(1), Replicate()]
@@ -110,6 +130,28 @@ class UtilTest(DTensorTestBase):
             self.assertEqual(
                 dtensor.to_local(),
                 global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
+            )
+
+            # Test when size < #ranks
+            global_tensor_small = torch.arange(4).view(2, 2)
+            global_shape_small = global_tensor_small.size()
+            dtensor_small = distribute_tensor(
+                global_tensor_small, device_mesh, placements
+            )
+            (
+                local_size_small,
+                global_offset_small,
+            ) = compute_local_shape_and_global_offset(
+                global_shape_small, device_mesh, placements
+            )
+            self.assertEqual(
+                dtensor_small.to_local(),
+                global_tensor_small[
+                    global_offset_small[0] : global_offset_small[0]
+                    + local_size_small[0],
+                    global_offset_small[1] : global_offset_small[1]
+                    + local_size_small[1],
+                ],
             )
 
 
