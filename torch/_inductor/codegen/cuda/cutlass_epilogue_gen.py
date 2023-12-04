@@ -160,7 +160,12 @@ class CutlassEVTEpilogueTypeFormatter:
                     )
                 assert isinstance(pnode, Pointwise)
                 index = pnode._index(pnode.ranges)
-                assert len(pnode.ranges) == len(gemm_output_layout.stride)
+
+                CutlassEVTEpilogueTypeFormatter.check_range_and_stride_compatibility(
+                    gemm_output_layout, pnode
+                )
+
+                # assert len(pnode.ranges) == len(gemm_output_layout.stride), f"Pointwise.ranges {pnode.ranges} must have the same length as the strides of the GEMM output layout {gemm_output_layout}. Pointwise op: {pnode}"
                 formatter.current_index_symbols = index
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
@@ -172,6 +177,20 @@ class CutlassEVTEpilogueTypeFormatter:
                 )
             else:
                 return res
+
+    @staticmethod
+    def check_range_and_stride_compatibility(gemm_output_layout, pnode):
+        if len(pnode.ranges) == len(gemm_output_layout.stride):
+            return
+        if not gemm_output_layout.is_contiguous():
+            raise CUTLASSEVTOpNotImplementedError(
+                f"For non-contiguous tensors, Pointwise.ranges {pnode.ranges} must have the same length as the strides of the GEMM output layout {gemm_output_layout}. Pointwise op: {pnode}"
+            )
+        if len(pnode.ranges) > len(gemm_output_layout.stride):
+            raise CUTLASSEVTOpNotImplementedError(
+                f"For non-contiguous tensors, Pointwise.ranges {pnode.ranges} must have the same length as the strides of the GEMM output layout {gemm_output_layout}. Pointwise op: {pnode}"
+            )
+        return
 
     @staticmethod
     def create_pre_fused_addmm_evt_type() -> str:
@@ -226,7 +245,7 @@ class CutlassEVTEpilogueTypeFormatter:
         self.output.writeline(f"using {ALD} = {aux_load_descriptor};")
         aux_load_template_args = f"{ALD}::Stages, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride, typename {ALD}::SmemLayoutAtom, typename {ALD}::CopyOpS2R"
         return f"""cutlass::epilogue::fusion::Sm90EVT<
-                                        cutlass::epilogue::fusion::Sm90Compute<identity_op,ElementAcc, ElementC, RoundStyle >,
+                                        cutlass::epilogue::fusion::Sm90Compute<identity_op,ElementAcc, typename {ALD}::Element, RoundStyle >,
                                         cutlass::epilogue::fusion::Sm90AuxLoad<{aux_load_template_args}>> /* :={name} as aux operand, cast to accumulator dtype */"""
 
     def _op_load(self, name, index_expr):
@@ -479,7 +498,6 @@ class CutlassEVTEpilogueArgumentFormatter:
             strides: List[int] = map_pointwise_index_to_read_strides(
                 index_expr, self.gemm_output_layout
             )
-            assert len(strides) == 3
             load_stride_max_idx = sum(
                 [
                     stride * (dim - 1)
@@ -490,13 +508,14 @@ class CutlassEVTEpilogueArgumentFormatter:
             assert (
                 load_stride_max_idx < aux_input_node.get_numel()
             ), f"Aux input would read beyond bounds (A): Load stride {strides} for node {aux_input_node.get_name()} with layout {aux_input_node.get_layout()} - accessed using index expr {index_expr} is too large for the node when mapped onto GEMM with output layout {self.gemm_output_layout}."
+            if len(strides) == 2:
+                strides.insert(0, 0)
+
             stride_strings = [
                 f"{stride}L" if stride not in [0, 1] else f"cute::Int<{stride}L>{{}}"
                 for stride in strides
             ]
-            # Note: The datatype asks for strides in MNL, but this seems to be working correctly only if I pass strides in NML order
-            # TODO: Investigate
-            stride_strings = [stride_strings[-1], stride_strings[-2], stride_strings[0]]
+            stride_strings = [stride_strings[-2], stride_strings[-1], stride_strings[0]]
             stride_args = ", ".join(stride_strings)
             return f"""{{ (({cutlass_dtype}*)({data_ptr})), {cutlass_dtype}(0), {{ {stride_args} }} }} /* {name} data pointer incl. offset, zero element value and strides for MNL (L=batch) dims */"""
 
@@ -577,11 +596,9 @@ def cute_stride_decl(strides, stride_dtype: str = "int64_t"):
 
 
 def cute_stride_mnl_decl(strides):
-    # Note: The datatype asks for MNL strides, but this seems to be working correctly only if I pass strides in NML order
-    # TODO: Investigate why this is the case
     if len(strides) >= 3:
-        return cute_stride_decl([strides[-1], strides[-2]] + list(strides[:-2][::-1]))
-    return cute_stride_decl([strides[-1], strides[-2]] + [0])
+        return cute_stride_decl([strides[-2], strides[-1]] + list(strides[:-2][::-1]))
+    return cute_stride_decl([strides[-2], strides[-1]] + [0])
 
 
 def create_cutlass_aux_load_descriptor(

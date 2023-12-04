@@ -4,7 +4,9 @@ from typing import cast, List, Set
 from ...._dynamo.utils import counters
 
 from ... import config, ir
-from ...codecache import code_hash, get_path
+from ...codecache import code_hash, CUDACodeCache, get_path
+
+from ...exc import CUDACompileError
 from ...ir import ComputedBuffer, CUDATemplateBuffer, Pointwise
 from ...scheduler import (
     BaseSchedulerNode,
@@ -169,6 +171,14 @@ class CUDACPPScheduling(BaseScheduling):
                 )
                 return False
         return True
+        compilation_result = self.try_fused_template_compilation(
+            cuda_template_buffer, epilogue_nodes + [additional_node]
+        )
+        if not compilation_result:
+            log.warning(
+                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, due to compilation failure, this most likely means that the fused kernel would require too much shared memory."
+            )
+        return compilation_result
 
     @staticmethod
     def _unwrap_epilogue_nodes(fused_node: FusedSchedulerNode) -> List[ir.IRNode]:
@@ -224,6 +234,22 @@ class CUDACPPScheduling(BaseScheduling):
                 kernel_name, compile_wrapper.getvalue(), metadata_comment
             )
         return kernel_name
+
+    def try_fused_template_compilation(self, ctb, epilogue_ir_nodes) -> bool:
+        # Try codegen and see if we can compile the generated source
+        # this is the only reliable way to detect whether we would use too much
+        # shared memory for the fused kernel
+        if not all(isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes):
+            return False
+        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
+        with kernel:
+            src_code = render()
+        try:
+            CUDACodeCache.compile(src_code, "so")
+        except CUDACompileError as e:
+            log.debug(e, exc_info=False)
+            return False
+        return True
 
     def codegen_template(
         self, template_node: BaseSchedulerNode, epilogue_nodes: List[SchedulerNode]

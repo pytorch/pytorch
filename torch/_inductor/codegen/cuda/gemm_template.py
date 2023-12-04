@@ -134,6 +134,7 @@ GEMM_ARGS_CUTLASS_3X = r"""
       },  // StrideB dB
     },  // MainloopArguments mainloop
     {{epilogue_arguments}}
+    // hw_info // @TODO kadeng: Add optional hw_info argument of type cutlass::KernelHardwareInfo& to use all GPU SMs
   };
 """
 
@@ -340,6 +341,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 #include "cutlass/util/tensor_view_io.h"
             """
         )
+        if inductor_cuda_config.generate_test_runner:
+            res.splice(GEMM_STANDALONE_RUNNER_ADDITIONAL_INCLUDES)
         return res
 
     @staticmethod
@@ -432,7 +435,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             epilogue_nodes,
             pre_fused_addmm_evt,
             Bias.get_name() if Bias is not None else None,
-            gemm_output_layout=gemm_output_layout
+            gemm_output_layout=gemm_output_layout,
         )
 
     def define_gemm_instance(
@@ -466,7 +469,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                     epilogue_functor_type_name,
                     epilogue_nodes,
                     Bias=Bias,
-                    gemm_output_layout=gemm_output_layout
+                    gemm_output_layout=gemm_output_layout,
                 )
             else:
                 emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()
@@ -500,7 +503,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         bias: IRNode,
         beta: float,
     ) -> bool:
-        return True
+        return False
 
         # TODO(ipiszy): Check whether it's necessary to swap X/W.
         # strides = bias.get_stride()
@@ -554,9 +557,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         )
         if all_match:
             return op
-        log.warning(
-            f"Cutlass GEMM Layout change: Input and/or output layouts have changed between autotuning and call to render on {self}. Applying workaround. This can lead to suboptimal performance."  # noqa: G004, B950
-        )
+        # log.warning(
+        #    f"Cutlass GEMM Layout change: Input and/or output layouts have changed between autotuning and call to render on {self}. Applying workaround. This can lead to suboptimal performance."  # noqa: G004, B950
+        # )
         new_op = copy.deepcopy(op)
 
         if a_layout is not None:
@@ -853,14 +856,22 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             additional_input_nodes: List[
                 ir.ComputedBuffer
             ] = self.get_additional_input_nodes(template_buffer_node, epilogue_nodes)
+            aux_input_nodes = additional_input_nodes
             if Bias is None:
-                Bias = additional_input_nodes[0]
-                assert self.are_inputs_layout_compatible(
-                    [X.get_layout(), W.get_layout(), Bias.get_layout()]
-                ), "Input layouts are not compatible"
-                aux_input_nodes = additional_input_nodes[1:]
-            else:
-                aux_input_nodes = additional_input_nodes
+                # If we want to cast one of the additional inputs as Bias
+                for i in range(len(additional_input_nodes)):
+                    MaybeBias = additional_input_nodes[i]
+                    if len(MaybeBias.get_stride()) < 2:
+                        continue
+                    if not self.are_inputs_layout_compatible(
+                        [X.get_layout(), W.get_layout(), MaybeBias.get_layout()]
+                    ):
+                        continue
+                    aux_input_nodes = (
+                        additional_input_nodes[:i] + additional_input_nodes[i + 1 :]
+                    )
+                    Bias = MaybeBias
+                    break
             for i, aux_input_node in enumerate(aux_input_nodes):
                 assert (
                     aux_input_node.get_name() is not None
@@ -916,7 +927,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                         epilogue_nodes,
                         pre_fused_evt_args,
                         Bias.get_name() if Bias is not None else None,
-                        gemm_output_layout=self.output_node.get_layout()
+                        gemm_output_layout=self.output_node.get_layout(),
                     )
                 )
             epilogue_template = GEMM_ARGS_CUTLASS_3X_EPILOGUE
@@ -930,7 +941,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             cast(str, template_output_node_name),
             epilogue_nodes,
             Bias=Bias,
-            gemm_output_layout = self.output_node.get_layout()
+            gemm_output_layout=self.output_node.get_layout(),
         )
 
         options = dict(
