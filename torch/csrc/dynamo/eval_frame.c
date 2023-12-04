@@ -813,8 +813,8 @@ inline static PyObject* eval_custom_code_impl(
   for (Py_ssize_t i = 0; i < nlocals_old; i++) {
     if(fastlocals_old[i] == NULL)
     {
-      // enter the region of local only variables
-      break;
+      // local only variables
+      continue;
     }
     Py_XINCREF(fastlocals_old[i]);
     fastlocals_new[i] = fastlocals_old[i];
