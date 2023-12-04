@@ -294,7 +294,12 @@ class VariableBuilder:
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
             (
-                (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
+                (
+                    torch.Tensor,
+                    torch.nn.Parameter,
+                    torch._subclasses.FakeTensor,
+                    torch._subclasses.functional_tensor.FunctionalTensor,
+                ),
                 cls.wrap_tensor,
             ),
             ((tuple, list, odict_values, collections.deque), cls.wrap_listlike),
@@ -1005,6 +1010,7 @@ class VariableBuilder:
                 torch.Tensor,
                 torch.nn.Parameter,
                 torch._subclasses.fake_tensor.FakeTensor,
+                torch._subclasses.functional_tensor.FunctionalTensor,
             ) or is_traceable_wrapper_subclass(value), type(value)
             subclass_type = None
 
@@ -1771,17 +1777,18 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
                 symbolic_context=symbolic_context,
             )
         )
-        # TODO: just store the whole symbolic_context here
-        tx.output.tracked_fakes.append(
-            TrackedFake(
-                fake_e,
-                source,
-                symbolic_context.constraint_sizes
-                if symbolic_context is not None
-                else None,
+        if is_tensor and not (static_shapes and source.is_nn_module()):
+            # TODO: just store the whole symbolic_context here
+            tx.output.tracked_fakes.append(
+                TrackedFake(
+                    fake_e,
+                    source,
+                    symbolic_context.constraint_sizes
+                    if symbolic_context is not None
+                    else None,
+                )
             )
-        )
-        tx.output.tracked_fakes_id_to_source[id(e)].append(source)
+            tx.output.tracked_fakes_id_to_source[id(e)].append(source)
         tx.output.tensor_weakref_to_sizes_strides[e] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
