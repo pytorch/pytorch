@@ -20,11 +20,13 @@ bool _ge(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
       }
       TORCH_CHECK(false, "Singleton int ", op, ": Relation is indeterminate");
     }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (rhs->constant_int() && *rhs->constant_int() <= 2) {
       return true;
     }
     TORCH_CHECK(false, "Singleton int ", op, ": Relation is indeterminate");
   } else if (rhs->singleton_int()) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (lhs->constant_int() && *lhs->constant_int() < 2) {
       return false;
     }
