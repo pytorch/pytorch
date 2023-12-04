@@ -1021,8 +1021,8 @@ class CudaReproTests(TestCase):
             enable_flash=True, enable_math=False, enable_mem_efficient=False
         ):
             input1 = torch.rand(5, 512, 1024, device="cuda", dtype=torch.float16)
-            input2 = torch.rand(5, 513, 1024, device="cuda", dtype=torch.float16)
-            input3 = torch.rand(5, 514, 1024, device="cuda", dtype=torch.float16)
+            input2 = torch.rand(5, 516, 1024, device="cuda", dtype=torch.float16)
+            input3 = torch.rand(5, 520, 1024, device="cuda", dtype=torch.float16)
 
             out1 = model(input1)
             out2 = model(input2)
