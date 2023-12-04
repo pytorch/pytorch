@@ -7,7 +7,6 @@
 #include <forward_list>
 #include <new>
 #include <utility>
-#include <vector>
 
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
@@ -49,7 +48,7 @@ class AppendOnlyList {
  public:
   using array_t = block_t<T, ChunkSize>;
   static_assert(
-      std::is_base_of<std::array<T, ChunkSize>, array_t>::value,
+      std::is_base_of_v<std::array<T, ChunkSize>, array_t>,
       "AppendOnlyList expects raw low level pointer storage.");
   static_assert(ChunkSize > 0, "Block cannot be empty.");
 

@@ -109,6 +109,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
     void** ret_data_ptr // returns borrowed reference
 );
 
+// Get the nbytes of the underlying storage
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_storage_size(AtenTensorHandle tensor, int64_t* ret_size);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_sizes(
     AtenTensorHandle tensor,
     int64_t** ret_sizes // returns borrowed reference
@@ -177,6 +181,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     AtenTensorHandle* ret // returns new reference
 );
 
+// This version is deprecated. We will remove it later
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     AtenTensorHandle query,
     AtenTensorHandle key,
@@ -185,6 +190,26 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     bool is_causal,
     bool return_debug_mask,
     double scale,
+    AtenTensorHandle* ret0, // returns new reference
+    AtenTensorHandle* ret1, // returns new reference
+    AtenTensorHandle* ret2, // returns new reference
+    AtenTensorHandle* ret3, // returns new reference
+    int64_t* ret4,
+    int64_t* ret5,
+    AtenTensorHandle* ret6, // returns new reference
+    AtenTensorHandle* ret7, // returns new reference
+    AtenTensorHandle* ret8 // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch__scaled_dot_product_flash_attention_v2(
+    AtenTensorHandle query,
+    AtenTensorHandle key,
+    AtenTensorHandle value,
+    double dropout_p,
+    int is_causal,
+    int return_debug_mask,
+    double* scale,
     AtenTensorHandle* ret0, // returns new reference
     AtenTensorHandle* ret1, // returns new reference
     AtenTensorHandle* ret2, // returns new reference
@@ -207,6 +232,23 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
     int8_t use_fast_accum,
     AtenTensorHandle* ret0,
     AtenTensorHandle* ret1);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
+    AtenTensorHandle input,
+    AtenTensorHandle weight,
+    AtenTensorHandle bias, // optional argument
+    int64_t* stride_ptr,
+    int64_t stride_size,
+    int64_t* padding_ptr,
+    int64_t padding_size,
+    int64_t* dilation_ptr,
+    int64_t dilation_size,
+    int transposed,
+    int64_t* output_padding_ptr,
+    int64_t output_padding_size,
+    int64_t groups,
+    AtenTensorHandle* ret // returns new reference
+);
 
 // This function will create a new uninitialized tensor object
 // and its pointer is returned through *ret.
@@ -257,6 +299,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_repeat_interleave_Tensor(
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_check_inf_and_nan(AtenTensorHandle tensor);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    int64_t dim,
+    AtenTensorHandle index,
+    AtenTensorHandle src);
 
 #ifdef USE_CUDA
 

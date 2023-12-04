@@ -48,7 +48,7 @@ def data_type_logger(msg):
         schedule_log.debug("Data type propagation: %s", msg)
 
 
-TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
+TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype", "check_alignment"])
 SizeArg = namedtuple("SizeArg", ["name", "expr"])
 
 DeviceCodegen = namedtuple("DeviceCodegen", ["scheduling", "wrapper_codegen"])
@@ -289,30 +289,14 @@ class ExprPrinter(Printer):
             return string
         return f"({string})"
 
-    def _print_Pow(self, expr):
-        # Pow() confuses triton
-        base, exp = expr.args
-        # NB: Remember this is sizevar computation!  You don't typically
-        # expect to have to do floating point computation including exponents
-        # in sizevar compute.  Instead of adding support for floating
-        # point pow, you should make upstream retranslate the Sympy expression
-        # into Tensor expressions earlier and do that instead.
-        if exp == 0.5:
-            return self._helper_sqrt(base)  # type: ignore[attr-defined]
-        elif exp == -0.5:
-            return "1/" + self._helper_sqrt(base)  # type: ignore[attr-defined]
-        base = self._print(base)
-        assert exp == int(exp), exp
-        exp = int(exp)
-        if exp > 0:
-            return "*".join([self.paren(base)] * exp)
-        elif exp < 0:
-            return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
-        else:  # exp == 0
-            return "1"
+    def _print_Infinity(self, expr):
+        return "math.inf"
 
-    def _print_Unequality(self, expr):
-        return " != ".join(map(self.paren, map(self._print, expr.args)))
+    def _print_NegativeInfinity(self, expr):
+        return "-math.inf"
+
+    def _print_Relational(self, expr):
+        return f" {expr.rel_op} ".join(map(self.paren, map(self._print, expr.args)))
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))
@@ -323,8 +307,11 @@ class ExprPrinter(Printer):
     def _print_Mod(self, expr):
         return " % ".join(map(self.paren, map(self._print, expr.args)))
 
+    def _print_FloorDiv(self, expr):
+        raise NotImplementedError(f"_print_FloorDiv not implemented for {type(self)}")
+
     def _print_CleanDiv(self, expr):
-        return self._print_FloorDiv(expr)  # type: ignore[attr-defined]
+        return self._print_FloorDiv(expr)
 
     def _print_GreaterThan(self, expr):
         # GreaterThan:          >=
@@ -356,6 +343,28 @@ class PythonPrinter(ExprPrinter):
     def _helper_sqrt(self, expr):
         return f"math.sqrt({self._print(expr)})"
 
+    def _print_Pow(self, expr):
+        # Pow() confuses triton
+        base, exp = expr.args
+        # NB: Remember this is sizevar computation!  You don't typically
+        # expect to have to do floating point computation including exponents
+        # in sizevar compute.  Instead of adding support for floating
+        # point pow, you should make upstream retranslate the Sympy expression
+        # into Tensor expressions earlier and do that instead.
+        if exp == 0.5:
+            return self._helper_sqrt(base)
+        elif exp == -0.5:
+            return "1/" + self._helper_sqrt(base)
+        base = self._print(base)
+        assert exp == int(exp), exp
+        exp = int(exp)
+        if exp > 0:
+            return "*".join([self.paren(base)] * exp)
+        elif exp < 0:
+            return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+        else:  # exp == 0
+            return "1"
+
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         return f"math.floor({self._print(expr.args[0])})"
@@ -371,6 +380,10 @@ class PythonPrinter(ExprPrinter):
     def _print_Max(self, expr):
         assert len(expr.args) >= 2
         return f"max({', '.join(map(self._print, expr.args))})"
+
+    def _print_Min(self, expr):
+        assert len(expr.args) >= 2
+        return f"min({', '.join(map(self._print, expr.args))})"
 
 
 class OpOverrides:
@@ -633,6 +646,7 @@ class KernelArgs:
                     inplaced.inner_name,
                     inplaced.other_names[-1],
                     V.graph.get_dtype(inplaced.other_names[-1]),
+                    True,
                 )
             )
         for outer, inner in chain(
@@ -642,7 +656,9 @@ class KernelArgs:
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
-            precompile_args.append(TensorArg(inner, outer, V.graph.get_dtype(outer)))
+            precompile_args.append(
+                TensorArg(inner, outer, V.graph.get_dtype(outer), True)
+            )
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
@@ -978,6 +994,13 @@ class Kernel(CodeGen):
         """
         raise NotImplementedError()
 
+    @property
+    def assert_function(self) -> str:
+        raise NotImplementedError()
+
+    def index_to_str(self, index: sympy.Expr) -> str:
+        raise NotImplementedError()
+
     def __enter__(self):
         class CSEProxy:
             self.name = "CSEProxy"
@@ -1051,14 +1074,14 @@ class Kernel(CodeGen):
                         self.compute.writeline(
                             IndirectAssertLine(
                                 line,
-                                self.assert_function,  # type: ignore[attr-defined]
+                                self.assert_function,
                                 var,
                                 mask,
                                 self.indirect_max_sizes,
                             )
                         )
 
-                    self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))  # type: ignore[attr-defined]
+                    self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
                 return sympy_symbol(str(var))
 
             @staticmethod
