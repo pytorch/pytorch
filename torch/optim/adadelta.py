@@ -167,8 +167,7 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         {_foreach_doc}
         {_maximize_doc}
-        {_differentiable_doc}
-        
+        {_differentiable_doc} 
     .. _ADADELTA\: An Adaptive Learning Rate Method:
         https://arxiv.org/abs/1212.5701
 
