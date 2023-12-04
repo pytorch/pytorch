@@ -84,7 +84,9 @@ class DTensorConstructorTest(DTensorTestBase):
                 eq_op(exp_tensor, dist_tensor.to_local())
 
         # empty shape
-        local_tensor = dist_init_op([], *args, **kwargs, device_mesh=device_mesh, placements=[Replicate()]).to_local()
+        local_tensor = dist_init_op(
+            [], *args, **kwargs, device_mesh=device_mesh, placements=[Replicate()]
+        ).to_local()
         expected_tensor = init_op([], *args, **kwargs)
         eq_op(expected_tensor, local_tensor)
 
