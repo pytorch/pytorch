@@ -704,7 +704,6 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
 
 
 def speedup_experiment_onnx(
-    onnx_model_cls: Type[OnnxModelFromTorchScript],
     args,
     model_iter_fn,
     onnx_model: OnnxModel,
@@ -1069,10 +1068,7 @@ class OnnxModel(abc.ABC):
     _COMPILER_NAME: str
 
     def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
-        # Hack to get model name.
-        from torch._functorch import aot_autograd
-
-        model_name = aot_autograd.model_name
+        model_name = current_name
         self.model_dir = self._generate_onnx_model_directory(
             output_directory, self._COMPILER_NAME, model_name
         )
