@@ -15,7 +15,7 @@ c10::ScalarType toAccumulateType(c10::ScalarType type, c10::DeviceType device) {
           return CppTypeToScalarType<at::acc_type_device<scalar_t, c10::DeviceType::CPU>>::value;  \
       }
 
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_F8NZ(DEFINE_CASE)
 #undef DEFINE_CASE
 
     default: TORCH_INTERNAL_ASSERT(false, "Unrecognized ScalarType: ", type);
