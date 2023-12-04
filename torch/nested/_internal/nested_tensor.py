@@ -139,12 +139,6 @@ class NestedTensor(torch.Tensor):
     def lengths(self):
         return self._lengths
 
-    def max_seqlen(self):
-        return self._max_seqlen
-
-    def min_seqlen(self):
-        return self._min_seqlen
-
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
         grad_fn_str = (
@@ -264,15 +258,20 @@ class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: NestedTensor):  # type: ignore[override]
         ctx.save_for_backward(x.offsets())
-        ctx.max_seqlen = x.max_seqlen()
-        ctx.min_seqlen = x.min_seqlen()
+        ctx.max_seqlen = x._max_seqlen
+        ctx.min_seqlen = x._min_seqlen
+        ctx._ragged_idx = x._ragged_idx
         return x.values()
 
     @staticmethod
     def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
         (offsets,) = ctx.saved_tensors
         return NestedTensor(
-            gO, offsets=offsets, _max_seqlen=ctx.max_seqlen, _min_seqlen=ctx.min_seqlen
+            gO,
+            offsets=offsets,
+            _max_seqlen=ctx.max_seqlen,
+            _min_seqlen=ctx.min_seqlen,
+            _ragged_idx=ctx._ragged_idx,
         )
 
 

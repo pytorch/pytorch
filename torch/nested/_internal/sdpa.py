@@ -124,7 +124,7 @@ def _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
         return False
 
     # This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
-    if param.min_seqlen() == 0:
+    if param._min_seqlen == 0:
         if debug:
             log.warning(
                 "Fused kernels do not support seq_len == 0, %s has a seq len of 0.",
@@ -330,7 +330,7 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, in
     if qkv.lengths() is None:
         # TODO: Explore performance impact of copying
         cumulative_seqlen = qkv.offsets().to(dtype=torch.int32, device=qkv.device)
-        max_seqlen = qkv.max_seqlen()
+        max_seqlen = qkv._max_seqlen
         n_elem = qkv.values().shape[0]
     else:
         # TODO: Explore performance impact of copying
@@ -338,7 +338,7 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, in
             qkv.lengths().cumsum(0).to(dtype=torch.int32, device=qkv.device)
         )
         batch_size = qkv.size(0)
-        max_seqlen = qkv.max_seqlen()
+        max_seqlen = qkv._max_seqlen
         # TODO: Explore performance impact when compiling
         n_elem = int(cumulative_seqlen[-1].item())
     return cumulative_seqlen, max_seqlen, n_elem
@@ -582,8 +582,8 @@ def _sdpa_nested_preprocessing(query, key, value):
 
     output_nt_info = {
         "offsets": q_t.offsets(),
-        "_max_seqlen": q_t.max_seqlen(),
-        "_min_seqlen": q_t.min_seqlen(),
+        "_max_seqlen": q_t._max_seqlen,
+        "_min_seqlen": q_t._min_seqlen,
     }
 
     return (
