@@ -110,7 +110,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-build
+          ref: vs-2022-built-arm64-binaries
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -230,7 +230,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-build
+          ref: vs-2022-built-arm64-binaries
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -360,7 +360,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-build
+          ref: vs-2022-built-arm64-binaries
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -480,7 +480,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-build
+          ref: vs-2022-built-arm64-binaries
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -610,7 +610,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-build
+          ref: vs-2022-built-arm64-binaries
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -730,7 +730,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-build
+          ref: vs-2022-built-arm64-binaries
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -860,7 +860,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-build
+          ref: vs-2022-built-arm64-binaries
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
@@ -980,7 +980,7 @@ jobs:
       - name: Checkout Blackhex/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: vs-2022-build
+          ref: vs-2022-built-arm64-binaries
           submodules: recursive
           repository: Blackhex/pytorch-builder
           path: builder
