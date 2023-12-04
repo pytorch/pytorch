@@ -737,18 +737,60 @@ inline static PyObject* eval_custom_code_impl(
     fastlocals_new[i] = NULL;
   }
 
-  #else
-
-  THP_EVAL_API_FRAME_OBJECT* shadow = PyFrame_New(tstate, code, frame->f_globals, NULL);
-  if (shadow == NULL) {
+  // look up new localsplus from old localsplus:
+  // for i, name in enumerate(localsplusnames_old):
+  //   name_to_idx[name] = i
+  // for i, name in enumerate(localsplusnames_new):
+  //   fastlocals_new[i] = fastlocals_old[name_to_idx[name]]
+  PyObject* name_to_idx = PyDict_New();
+  if (name_to_idx == NULL) {
+    DEBUG_TRACE0("unable to create localsplus name dict");
+    THP_PyFrame_Clear(shadow);
+    free(shadow);
+    Py_DECREF(func);
     return NULL;
   }
 
-  PyObject** fastlocals_old = frame->f_localsplus;
-  PyObject** fastlocals_new = shadow->f_localsplus;
+  for (Py_ssize_t i = 0; i < frame->f_code->co_nlocalsplus; i++) {
+    if(fastlocals_old[i] == NULL) {
+      // local only variable (not arg/free/cell vars)
+      // nothing to copy
+      continue;
+    }
+    PyObject *name = PyTuple_GET_ITEM(frame->f_code->co_localsplusnames, i);
+    PyObject *idx = PyLong_FromSsize_t(i);
+    if (name == NULL || idx == NULL || PyDict_SetItem(name_to_idx, name, idx) != 0) {
+      Py_DECREF(name_to_idx);
+      THP_PyFrame_Clear(shadow);
+      free(shadow);
+      Py_DECREF(func);
+      return NULL;
+    }
+  }
 
-  #endif
+  for (Py_ssize_t i = 0; i < code->co_nlocalsplus; i++) {
+    PyObject *name = PyTuple_GET_ITEM(code->co_localsplusnames, i);
+    PyObject *idx = PyDict_GetItem(name_to_idx, name);
+    if(idx == NULL) {
+      // local only variable (not arg/free/cell vars)
+      // nothing to copy
+      continue;
+    }
+    Py_ssize_t old_i = PyLong_AsSsize_t(idx);
+    if (name == NULL || idx == NULL || (old_i == (Py_ssize_t)-1 && PyErr_Occurred() != NULL)) {
+      Py_DECREF(name_to_idx);
+      THP_PyFrame_Clear(shadow);
+      free(shadow);
+      Py_DECREF(func);
+      return NULL;
+    }
+    Py_XINCREF(fastlocals_old[old_i]);
+    fastlocals_new[i] = fastlocals_old[old_i];
+  }
 
+  Py_DECREF(name_to_idx);
+
+  #else
   Py_ssize_t nlocals_new = code->co_nlocals;
   Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
   Py_ssize_t nlocals_common = nlocals_new < nlocals_old ? nlocals_new : nlocals_old;
@@ -759,6 +801,14 @@ inline static PyObject* eval_custom_code_impl(
   DEBUG_CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
   DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
 
+  THP_EVAL_API_FRAME_OBJECT* shadow = PyFrame_New(tstate, code, frame->f_globals, NULL);
+  if (shadow == NULL) {
+    return NULL;
+  }
+
+  PyObject** fastlocals_old = frame->f_localsplus;
+  PyObject** fastlocals_new = shadow->f_localsplus;
+
   for (Py_ssize_t i = 0; i < nlocals_common; i++) {
     Py_XINCREF(fastlocals_old[i]);
     fastlocals_new[i] = fastlocals_old[i];
@@ -768,6 +818,8 @@ inline static PyObject* eval_custom_code_impl(
     Py_XINCREF(fastlocals_old[nlocals_old + i]);
     fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
   }
+
+  #endif
 
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
 

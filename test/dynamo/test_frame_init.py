@@ -3,12 +3,14 @@
 import torch
 import torch._dynamo.test_case
 
+
 def target(x):
     # one argument (x)
     # two local variables (y, z)
     y = 2
     z = 1
     return x - y + z
+
 
 def transformed_code1(x):
     # one argument (x)
@@ -35,16 +37,12 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
 
         def callback1(frame, cache_entry, frame_state):
             if frame.f_code.co_name == "target":
-                return torch._dynamo.types.GuardedCode(
-                    code1, lambda f_locals: True
-                )
+                return torch._dynamo.types.GuardedCode(code1, lambda f_locals: True)
             return None
 
         def callback2(frame, cache_entry, frame_state):
             if frame.f_code.co_name == "target":
-                return torch._dynamo.types.GuardedCode(
-                    code2, lambda f_locals: True
-                )
+                return torch._dynamo.types.GuardedCode(code2, lambda f_locals: True)
             return None
 
         torch._dynamo.reset()
@@ -56,6 +54,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
         original = torch._dynamo.eval_frame.set_eval_frame(callback2)
         self.assertEqual(target(5), 4)
         torch._dynamo.eval_frame.set_eval_frame(original)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
