@@ -1,5 +1,6 @@
 import os
 import io
+import itertools
 from typing import (
     List,
     Callable,
@@ -9,7 +10,7 @@ from typing import (
     Dict,
     Any,
     cast,
-    Sequence,
+    Sequence
 )
 import torch.distributed as dist
 from .api import (
@@ -46,6 +47,13 @@ def _get_failure_dict(
         {i: err for i, err in enumerate(results) if _is_wrapped_exception(err)},
     )
 
+def _all_gather_keys(local_dict: Dict[Any, Any]) -> List[Any]:
+    """Gathers all keys, and returns them sorted."""
+    keys = list(local_dict.keys())
+    gathered_keys: List[List[Any]] = [None] * dist.get_world_size()  # type: ignore[list-item]
+
+    dist.all_gather_object(gathered_keys, keys)
+    return sorted(set(itertools.chain.from_iterable(gathered_keys)))
 
 class _DistWrapper:
     """
@@ -82,9 +90,7 @@ class _DistWrapper:
         return 1
 
     def broadcast_object(self, object: Optional[T]) -> T:
-        """
-        Same as c10d::broadcast_object_list but works without distributed enabled.
-        """
+        """Implement functionality similar to c10d::broadcast_object_list but without distributed enabled."""
         object_list = [object]
         if self.use_dist:
             dist.broadcast_object_list(
@@ -95,9 +101,7 @@ class _DistWrapper:
         return cast(T, object_list[0])
 
     def gather_object(self, object: T) -> Optional[List[T]]:
-        """
-        Same as c10d::gather_object but works without distributed enabled.
-        """
+        """Implement functionality similar to c10d::gather_object but without distributed enabled."""
         if self.use_dist:
             gather_objs = (
                 cast(List[T], [None] * dist.get_world_size(self.group))
@@ -117,9 +121,7 @@ class _DistWrapper:
         return result
 
     def all_gather_object(self, object: T) -> List[T]:
-        """
-        Same as c10d::all_gather_object but works without distributed enabled.
-        """
+        """Implement functionality similar to c10d::all_gather_object but without distributed enabled."""
         if self.use_dist:
             gather_objs = cast(
                 List[T], [None] * dist.get_world_size(self.group)
@@ -133,9 +135,7 @@ class _DistWrapper:
         return gather_objs
 
     def scatter_object(self, object_list: Optional[List[T]]) -> T:
-        """
-        Same as c10d::scatter_object but works without distributed enabled.
-        """
+        """Implement functionality similar to c10d::scatter_object but without distributed enabled."""
         if self.use_dist:
             gather_result = cast(List[T], [None])
             dist.scatter_object_list(
@@ -394,9 +394,7 @@ def _create_file_view(file: io.IOBase, offset: int, length: int) -> io.IOBase:
 
 
 def _normalize_device_info(device_type: str, device_id: int) -> str:
-    """
-    Device info normalization.
-    """
+    """Device info normalization."""
     if device_type == "cpu":
         return "cpu"
     return f"{device_type}:{device_id}"

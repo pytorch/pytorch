@@ -209,50 +209,57 @@ TORCH_LIBRARY(_c10d_functional, m) {
   m.def(
       "all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce));
+          c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce),
+      {at::Tag::pt2_compliant_tag});
 
   m.def(
       "all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_));
+          c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_),
+      {at::Tag::pt2_compliant_tag});
 
   m.def(
       "all_reduce_coalesced(Tensor[] inputs, str reduce_op, str group_name) -> Tensor[]",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_coalesced));
+          c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_coalesced),
+      {at::Tag::pt2_compliant_tag});
 
   m.def(
       "all_reduce_coalesced_(Tensor[](a!) inputs, str reduce_op, str group_name) -> Tensor[](a!)",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd,
-          ::all_reduce_coalesced_));
+          c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_coalesced_),
+      {at::Tag::pt2_compliant_tag});
 
   m.def(
       "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
-          ::all_gather_into_tensor));
+          ::all_gather_into_tensor),
+      {at::Tag::pt2_compliant_tag});
 
   m.def(
       "all_gather_into_tensor_coalesced(Tensor[] inputs, int group_size, str group_name) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
-          ::all_gather_into_tensor_coalesced));
+          ::all_gather_into_tensor_coalesced),
+      {at::Tag::pt2_compliant_tag});
 
   m.def(
       "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd,
-          ::reduce_scatter_tensor));
+          c10::DispatchKey::CompositeExplicitAutograd, ::reduce_scatter_tensor),
+      {at::Tag::pt2_compliant_tag});
 
   m.def(
       "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduce_op, int group_size, str group_name) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
-          ::reduce_scatter_tensor_coalesced));
+          ::reduce_scatter_tensor_coalesced),
+      {at::Tag::pt2_compliant_tag});
 
   m.def(
       "wait_tensor(Tensor tensor) -> Tensor",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::wait_tensor));
+          c10::DispatchKey::CompositeExplicitAutograd, ::wait_tensor),
+      {at::Tag::pt2_compliant_tag});
 }

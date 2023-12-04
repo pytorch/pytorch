@@ -375,6 +375,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.rad2deg_,
             aten.renorm,
             aten.renorm_,
+            aten.replication_pad2d,
             aten.rot90,
             aten.rrelu_with_noise,
             aten.rrelu_with_noise_,
@@ -438,5 +439,6 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.zero_,
             aten.zeros,
             aten.zeros_like,
+            aten._weight_norm_interface,
         ]
     )

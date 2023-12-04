@@ -7,8 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Library that launches and manages ``n`` copies of worker subprocesses
-either specified by a function or a binary.
+Library that launches and manages ``n`` copies of worker subprocesses either specified by a function or a binary.
 
 For functions, it uses ``torch.multiprocessing`` (and therefore python
 ``multiprocessing``) to spawn/fork worker processes. For binaries it uses python
@@ -64,20 +63,32 @@ implementations of the parent :class:`api.PContext` class.
 """
 
 import os
-from typing import Callable, Dict, Tuple, Union
+from typing import Callable, Dict, Optional, Tuple, Union
 
 from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
+    _validate_full_rank,
     MultiprocessContext,
     PContext,
     ProcessFailure,
     RunProcsResult,
-    Std,
     SignalException,
+    Std,
     SubprocessContext,
-    _validate_full_rank,
     to_map,
 )
 from torch.distributed.elastic.utils.logging import get_logger
+
+__all__ = [
+    "start_processes",
+    "MultiprocessContext",
+    "PContext",
+    "ProcessFailure",
+    "RunProcsResult",
+    "SignalException",
+    "Std",
+    "SubprocessContext",
+    "to_map",
+]
 
 log = get_logger(__name__)
 
@@ -88,12 +99,14 @@ def start_processes(
     args: Dict[int, Tuple],
     envs: Dict[int, Dict[str, str]],
     log_dir: str,
+    log_line_prefixes: Optional[Dict[int, str]] = None,
     start_method: str = "spawn",
     redirects: Union[Std, Dict[int, Std]] = Std.NONE,
     tee: Union[Std, Dict[int, Std]] = Std.NONE,
 ) -> PContext:
     """
-    Starts ``n`` copies of ``entrypoint`` processes with the provided options.
+    Start ``n`` copies of ``entrypoint`` processes with the provided options.
+
     ``entrypoint`` is either a ``Callable`` (function) or a ``str`` (binary).
     The number of copies is determined by the number of entries for ``args`` and
     ``envs`` arguments, which need to have the same key set.
@@ -129,7 +142,6 @@ def start_processes(
     .. note:: It is expected that the ``log_dir`` exists, is empty, and is a directory.
 
     Example:
-
     ::
 
      log_dir = "/tmp/test"
@@ -184,7 +196,6 @@ def start_processes(
         tee: which std streams to redirect + print to console
 
     """
-
     # listdir raises FileNotFound or NotADirectoryError so no need to check manually
     if log_dir != os.devnull and os.listdir(log_dir):
         raise RuntimeError(
@@ -257,6 +268,7 @@ def start_processes(
             tee_stdouts=tee_stdouts,
             tee_stderrs=tee_stderrs,
             error_files=error_files,
+            log_line_prefixes=log_line_prefixes,
         )
     else:
         context = MultiprocessContext(
@@ -269,6 +281,7 @@ def start_processes(
             tee_stdouts=tee_stdouts,
             tee_stderrs=tee_stderrs,
             error_files=error_files,
+            log_line_prefixes=log_line_prefixes,
             start_method=start_method,
         )
 

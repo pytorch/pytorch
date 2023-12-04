@@ -69,6 +69,16 @@ inline Vectorized<double> cast<double, float>(const Vectorized<float>& src) {
   return _mm512_castps_pd(src);
 }
 
+template<>
+inline Vectorized<float> cast<float, int32_t>(const Vectorized<int32_t>& src) {
+  return _mm512_castsi512_ps(src);
+}
+
+template<>
+inline Vectorized<double> cast<double, int64_t>(const Vectorized<int64_t>& src) {
+  return _mm512_castsi512_pd(src);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<int64_t scale = 1>
@@ -88,7 +98,7 @@ inline gather(const float* base_addr, const Vectorized<int32_t>& vindex) {
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline mask_gather(const Vectorized<double>& src, const double* base_addr,
-                   const Vectorized<int64_t>& vindex, const Vectorized<double>& mask) {
+                   const Vectorized<int64_t>& vindex, Vectorized<double>& mask) {
   auto all_ones = _mm512_castsi512_pd(_mm512_set1_epi64(0xFFFFFFFFFFFFFFFF));
   auto mask_ = _mm512_cmp_pd_mask(all_ones, mask.values, _CMP_EQ_OQ);
   return _mm512_mask_i64gather_pd(src, mask_, vindex, base_addr, scale);
@@ -97,7 +107,7 @@ inline mask_gather(const Vectorized<double>& src, const double* base_addr,
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>>
 inline mask_gather(const Vectorized<float>& src, const float* base_addr,
-                   const Vectorized<int32_t>& vindex, const Vectorized<float>& mask) {
+                   const Vectorized<int32_t>& vindex, Vectorized<float>& mask) {
   auto all_ones = _mm512_castsi512_ps(_mm512_set1_epi32(0xFFFFFFFF));
   auto mask_ = _mm512_cmp_ps_mask(all_ones, mask.values, _CMP_EQ_OQ);
   return _mm512_mask_i32gather_ps(src, mask_, vindex, base_addr, scale);

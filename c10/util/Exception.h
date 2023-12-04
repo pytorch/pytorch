@@ -210,7 +210,7 @@ class C10_API WarningHandlerGuard {
 /// setWarnAlways(true) to turn it into TORCH_WARN, which can be
 /// tested for more easily.
 C10_API void set_warnAlways(bool) noexcept(true);
-C10_API bool get_warnAlways(void) noexcept(true);
+C10_API bool get_warnAlways() noexcept(true);
 
 // A RAII guard that sets warn_always (not thread-local) on
 // construction, and sets it back to the original value upon destruction.
@@ -586,7 +586,8 @@ namespace detail {
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
 
 #define TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(cond, ...) \
-  TORCH_CHECK_WITH_MSG(ErrorAlwaysShowCppStacktrace, cond, "TYPE", __VA_ARGS__)
+  TORCH_CHECK_WITH_MSG(                                   \
+      ErrorAlwaysShowCppStacktrace, cond, "TYPE", ##__VA_ARGS__)
 
 #ifdef STRIP_ERROR_MESSAGES
 #define WARNING_MESSAGE_STRING(...) \

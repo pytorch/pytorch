@@ -319,6 +319,9 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
         catMetaData.nElements[batchCounter]);
     }
 
+    // Skip if the tensor is empty. Otherwise, the grid dim is invalid
+    if (max_elements_per_tensor == 0)
+      continue;
 
     dim3 applyBlock, catGrid;
 

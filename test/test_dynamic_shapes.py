@@ -16,7 +16,7 @@ from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.sym_node import to_node, sym_sqrt, SymNode
+from torch.fx.experimental.sym_node import to_node, sym_sqrt, SymNode, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     ShapeEnv,
     is_symbolic,
+    StatelessSymbolicContext,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -136,8 +137,10 @@ def create_symbolic_tensor(name, arg, shape_env):
         shape_env.create_symbolic_sizes_strides_storage_offset(
             arg,
             source=ConstantSource(name),
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=dynamic_dims,
+                constraint_sizes=constraint_dims
+            ),
         )
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
@@ -453,10 +456,10 @@ class TestPySymInt(TestCase):
         self.assertEqual(len(gm.shape_env.guards), 0)
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    sym_size = torch.ops.aten.sym_size(x_1, 0)
-    eq = sym_size == 5
-    sym_size_1 = torch.ops.aten.sym_size(x_1, 1);  x_1 = None
-    sym_ite = torch.sym_ite(eq, sym_size, sym_size_1);  eq = sym_size = sym_size_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    eq = sym_size_int == 5
+    sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1);  x_1 = None
+    sym_ite = torch.sym_ite(eq, sym_size_int, sym_size_int_1);  eq = sym_size_int = sym_size_int_1 = None
     return sym_ite""")
         r1 = gm(torch.ones(4, 5))
         self.assertIsInstance(r1, int)
@@ -479,14 +482,11 @@ def forward(self, x_1):
     def test_expect_true_basic(self):
         shape_env = ShapeEnv()
         i0 = shape_env.create_unbacked_symint()
+        i0_sym = i0.node.expr
         # This doesn't error
         self.assertTrue(expect_true(i0 == 0))
-        # This generates a deferred runtime assert
-        self.assertExpectedInline(
-            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[Eq(i0, 0)]"""
-        )
-        self.assertIn("test_dynamic_shapes.py", shape_env.deferred_runtime_asserts[i0.node.expr][0].msg)
+        # This generates a deferred runtime assert via replacement
+        self.assertEqual(shape_env.replacements[i0_sym], 0)
         # After expecting true, guards now resolve given the runtime assert
         bool(i0 == 0)
 
@@ -497,7 +497,7 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 <= s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[i0 <= s0]"""
+            """[i0 - s0 <= 0]"""
         )
         self.assertTrue(i0 <= s0)
         self.assertFalse(i0 > s0)
@@ -506,10 +506,11 @@ def forward(self, x_1):
         shape_env = ShapeEnv()
         i0 = shape_env.create_unbacked_symint()
         i1 = shape_env.create_unbacked_symint()
+        i1_sym = i1.node.expr
         self.assertTrue(expect_true(i0 + i1 == 10))
         # Importantly, this is put in i1, not i0!
         self.assertExpectedInline(
-            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i1.node.expr]]),
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i1_sym]]),
             """[Eq(i0 + i1, 10)]"""
         )
         self.assertTrue(i0 + i1 == 10)
@@ -518,6 +519,18 @@ def forward(self, x_1):
         # system is no longer confluent (it's probably OK though, because
         # you're unlikely to get other equalities like this on the
         # unbacked SymInts.)
+
+    def test_unbacked_substitution(self):
+        shape_env = ShapeEnv()
+        i0 = shape_env.create_unbacked_symint()
+        i1 = shape_env.create_unbacked_symint()
+        self.assertTrue(expect_true(i0 == i1 * 4))
+        self.assertExpectedInline(str(i0), """4*i1""")
+
+        i2 = shape_env.create_unbacked_symint()
+        i3 = shape_env.create_unbacked_symint()
+        self.assertTrue(expect_true(i2 * 4 == i3))
+        self.assertExpectedInline(str(i3), """4*i2""")
 
     def test_expect_true_double_digits(self):
         shape_env = ShapeEnv()
@@ -606,18 +619,18 @@ def forward(self, x_1):
 
         self.assertExpectedInline(out.strip(), """\
 class f(torch.nn.Module):
-    def forward(self, a_1: f32[s0, s1], b_1: f32[s2, s1]):
+    def forward(self, a_1: "f32[s0, s1]", b_1: "f32[s2, s1]"):
         # No stacktrace found for following nodes
-        sym_size: Sym(s0) = torch.ops.aten.sym_size(a_1, 0)
-        sym_size_1: Sym(s2) = torch.ops.aten.sym_size(b_1, 0)
-        add: Sym(s0 + s2) = sym_size + sym_size_1;  sym_size = sym_size_1 = None
-        sym_size_2: Sym(s1) = torch.ops.aten.sym_size(a_1, 1)
-        sym_size_3: Sym(s1) = torch.ops.aten.sym_size(b_1, 1);  b_1 = None
-        add_1: Sym(2*s1) = sym_size_2 + sym_size_3;  sym_size_2 = sym_size_3 = None
-        new_empty: f32[s0 + s2, 2*s1] = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
+        sym_size_int: "Sym(s0)" = torch.ops.aten.sym_size.int(a_1, 0)
+        sym_size_int_1: "Sym(s2)" = torch.ops.aten.sym_size.int(b_1, 0)
+        add: "Sym(s0 + s2)" = sym_size_int + sym_size_int_1;  sym_size_int = sym_size_int_1 = None
+        sym_size_int_2: "Sym(s1)" = torch.ops.aten.sym_size.int(a_1, 1)
+        sym_size_int_3: "Sym(s1)" = torch.ops.aten.sym_size.int(b_1, 1);  b_1 = None
+        add_1: "Sym(2*s1)" = sym_size_int_2 + sym_size_int_3;  sym_size_int_2 = sym_size_int_3 = None
+        new_empty: "f32[s0 + s2, 2*s1]" = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
-        getitem: f32[s0 + s2, 2*s1] = native_dropout[0]
-        getitem_1: b8[s0 + s2, 2*s1] = native_dropout[1];  native_dropout = None
+        getitem: "f32[s0 + s2, 2*s1]" = native_dropout[0]
+        getitem_1: "b8[s0 + s2, 2*s1]" = native_dropout[1];  native_dropout = None
         return (getitem, getitem_1)""")  # noqa: B950
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
@@ -666,14 +679,7 @@ class TestSymNumberMagicMethods(TestCase):
             else:
                 return contextlib.nullcontext()
 
-        if fn in sym_node.magic_methods_on_math:
-            lambda_apply = getattr(math, fn)
-        elif fn in sym_node.magic_methods_on_submodule:
-            lambda_apply = getattr(sym_node, fn)
-        elif fn in sym_node.magic_methods_on_operator_with_trailing_underscore:
-            lambda_apply = getattr(operator, f"{fn}_")
-        else:
-            lambda_apply = getattr(operator, fn)
+        lambda_apply = method_to_operator(fn)
 
         def guard_fn(v):
             if type(v) in (SymBool, bool):
@@ -787,7 +793,7 @@ class TestSymNumberMagicMethods(TestCase):
             create_symbool(shape_env, True),
             # We should be passing in float here, but create_symbol currently
             # only supports int
-            create_symfloat(shape_env, 3),
+            create_symfloat(shape_env, 3.0),
         )
 
         for x in unhashable:

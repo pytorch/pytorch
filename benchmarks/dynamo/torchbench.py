@@ -59,6 +59,10 @@ USE_SMALL_BATCH_SIZE = {
     "yolov3": 8,  # reduced from 16 due to cudagraphs OOM in TorchInductor dashboard
 }
 
+INFERENCE_SMALL_BATCH_SIZE = {
+    "timm_efficientdet": 32,
+}
+
 DETECTRON2_MODELS = {
     "detectron2_fasterrcnn_r_101_c4",
     "detectron2_fasterrcnn_r_101_dc5",
@@ -84,6 +88,8 @@ SKIP = {
     "maml",
     # Failing in eager mode
     "clip",
+    # multi gpu not always available in benchmark runners
+    "simple_gpt_tp_manual",
 }
 
 SKIP_DUE_TO_CONTROL_FLOW = {
@@ -126,6 +132,8 @@ SKIP_TRAIN = {
     "llama",
     "llama_v2_7b_16h",
     "simple_gpt",
+    # doesnt fit in memory
+    "phi_1_5",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -259,6 +267,8 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "detectron2_fcos_r_50_fpn",
 }
 
+FORCE_FP16_FOR_BF16_MODELS = {"vision_maskrcnn"}
+
 # models in canary_models that we should run anyway
 CANARY_MODELS = {
     "torchrec_dlrm",
@@ -314,6 +324,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return FORCE_AMP_FOR_FP16_BF16_MODELS
 
     @property
+    def force_fp16_for_bf16_models(self):
+        return FORCE_FP16_FOR_BF16_MODELS
+
+    @property
     def skip_accuracy_checks_large_models_dashboard(self):
         if self.args.dashboard or self.args.accuracy:
             return SKIP_ACCURACY_CHECK_MODELS
@@ -363,6 +377,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         else:
             raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
+        if benchmark_cls is None:
+            raise NotImplementedError(f"{model_name}.Model is None")
+
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
 
@@ -374,6 +391,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             batch_size = None
         if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
+        elif (
+            batch_size is None
+            and not is_training
+            and model_name in INFERENCE_SMALL_BATCH_SIZE
+        ):
+            batch_size = INFERENCE_SMALL_BATCH_SIZE[model_name]
 
         # Control the memory footprint for few models
         if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:

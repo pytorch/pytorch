@@ -60,15 +60,10 @@ find_package(CUDAToolkit REQUIRED)
 
 cmake_policy(POP)
 
-if(NOT CMAKE_CUDA_COMPILER_VERSION STREQUAL CUDAToolkit_VERSION OR
-    NOT CUDA_INCLUDE_DIRS STREQUAL CUDAToolkit_INCLUDE_DIR)
-  message(FATAL_ERROR "Found two conflicting CUDA installs:\n"
+if(NOT CMAKE_CUDA_COMPILER_VERSION VERSION_EQUAL CUDAToolkit_VERSION)
+  message(FATAL_ERROR "Found two conflicting CUDA versions:\n"
                       "V${CMAKE_CUDA_COMPILER_VERSION} in '${CUDA_INCLUDE_DIRS}' and\n"
-                      "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIR}'")
-endif()
-
-if(NOT TARGET CUDA::nvToolsExt)
-  message(FATAL_ERROR "Failed to find nvToolsExt")
+                      "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIRS}'")
 endif()
 
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
@@ -215,10 +210,15 @@ else()
 endif()
 
 # nvToolsExt
-add_library(torch::nvtoolsext INTERFACE IMPORTED)
-set_property(
-    TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::nvToolsExt)
+find_path(nvtx3_dir NAMES nvtx3 PATHS "${CUDA_INCLUDE_DIRS}" "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
+find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
+if(nvtx3_FOUND)
+  add_library(torch::nvtoolsext INTERFACE IMPORTED)
+  target_include_directories(torch::nvtoolsext INTERFACE "${nvtx3_dir}")
+else()
+  message(WARNING "Cannot find NVTX3")
+endif()
+
 
 # cublas
 add_library(caffe2::cublas INTERFACE IMPORTED)
