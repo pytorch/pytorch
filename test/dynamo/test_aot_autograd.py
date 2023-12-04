@@ -992,6 +992,18 @@ SeqNr|OrigAten|SrcFn
                 ),
             )
 
+    def test_aot_autograd_raises_invalid_leaf_set(self):
+        @torch.compile
+        def f(x):
+            x.set_(torch.ones(2))
+
+        # We still want to make sure that this raises
+        x = torch.ones(2, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "is being used in an in-place operation"
+        ):
+            f(x)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
