@@ -5329,7 +5329,7 @@ else:
         # In case 3, a and b are enabled and we may also try lazy-initing _scale to a cuda tensor.
         device = torch.device(device)
         try_lazy_inits = (True, False)
-        GradScaler = torch.amp.Gradscaler(device=device.type)
+        GradScaler = partial(torch.amp.GradScaler, device=device.type)
         for lazy_init_scale in try_lazy_inits:
             a = GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
             if device.type == "cuda":
