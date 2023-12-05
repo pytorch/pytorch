@@ -440,8 +440,13 @@ def _builtin_function_ids() -> Dict[int, str]:
     rv.update(
         {id(v): f"functools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
     )
-    rv.update({id(cast): "typing.cast"})
-    rv[id(functools.reduce)] = "functools.reduce"
+    rv.update(
+        {
+            id(cast): "typing.cast",
+            id(functools.reduce): "functools.reduce",
+            id(copy.deepcopy): "copy.deepcopy",
+        }
+    )
     return rv
 
 
