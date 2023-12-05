@@ -5,10 +5,13 @@ from typing import ContextManager, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
 from torch._C._functorch import (
+    _add_batch_dim,
     _unwrap_functional_tensor,
     _wrap_functional_tensor,
     current_level,
+    get_unwrapped,
     is_batchedtensor,
+    maybe_get_bdim,
     peek_interpreter_stack,
     TransformType,
 )
@@ -308,9 +311,9 @@ class MetaConverter:
                             r = r.clone()
                 elif is_batchedtensor(t):
                     # Wraps a BatchedTensor in a FakeTensor
-                    sizes, strides, storage_offset = sym_sizes_strides_storage_offset(
-                        t, source
-                    )
+                    tensor = get_unwrapped(t)
+                    sizes = tensor.size()
+                    strides = tensor.stride()
                     r = callback(
                         lambda: torch.empty_strided(
                             sizes,
@@ -319,6 +322,9 @@ class MetaConverter:
                             device="meta",
                         )
                     )
+                    lvl = current_level()
+                    bdim = maybe_get_bdim(t)
+                    r = _add_batch_dim(r, bdim, lvl)
                 elif t._is_view():
                     # Construct views in two steps: recursively meta-fy their
                     # base, and then create view(s) off that.  NB: doing it
@@ -569,6 +575,12 @@ class MetaConverter:
                                 # emphasize how important it is to preserve
                                 # format here
                                 r = r.clone(memory_format=torch.preserve_format)
+
+                    # Graph-Break for wrapped tensors
+                    if not is_batchedtensor(
+                        t
+                    ) and torch._C._functorch.is_functorch_wrapped_tensor(t):
+                        return NotImplemented
 
                     s = t.untyped_storage()
                     swr = StorageWeakRef(s)

@@ -128,9 +128,19 @@ SymIntArrayRef BatchedTensorImpl::sym_strides_custom() const {
 // TODO: implement proper contiguity on batched tensor, then put
 // sizes_strides_policy back to Default
 bool BatchedTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
-  TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
-      "NYI: querying is_contiguous inside of vmap for memory_format ",
-      "other than torch.contiguous_format");
+  // TORCH_CHECK is disable for now as there is some code in
+  // torch/_dynamo/tensor.py::TensorVariable::specialize that calls `is_contiguous_custom`
+  // with different memory formats. Since the only memory format supported on
+  // BatchedTensors is MemoryFormat::Contiguous, PyTorch just return false for
+  // the other ones.
+
+  // TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
+  //     "NYI: querying is_contiguous inside of vmap for memory_format ",
+  //     "other than torch.contiguous_format");
+
+  if (memory_format != MemoryFormat::Contiguous) {
+    return false;
+  }
   return is_contiguous_default(memory_format);
 }
 
