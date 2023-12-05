@@ -704,16 +704,17 @@ def _should_skip_xfail_test_sample(
         return None, None
     for decorator_meta in SKIP_XFAIL_SUBTESTS:
         # Linear search on ops_test_data.SKIP_XFAIL_SUBTESTS. That's fine because the list is small.
-        if (
-            decorator_meta.op_name == op_name
-            and decorator_meta.torchmodeltype == model_type
+        # NOTE: If model_type is None, the test is decorator_meta is meant to skip/xfail all model types.
+        if decorator_meta.op_name == op_name and (
+            model_type == decorator_meta.torchmodeltype
+            or decorator_meta.torchmodeltype is None
         ):
+            if decorator_meta.matcher is None and decorator_meta.torchmodeltype is None:
+                raise TypeError(
+                    "Either Matcher or torchmodeltype must be defined in sub xfail and skip."
+                )
             if decorator_meta.matcher is not None and decorator_meta.matcher(sample):
                 return decorator_meta.test_behavior, decorator_meta.reason
-            elif decorator_meta.torchmodeltype is not None:
-                return decorator_meta.test_behavior, decorator_meta.reason
-            else:
-                raise TypeError("Either Matcher or torchmodeltype must be defined")
     return None, None
 
 
