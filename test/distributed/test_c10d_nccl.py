@@ -227,9 +227,9 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
     def setUp(self):
         super().setUp()
-        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
-        # that use NCCL_BLOCKING_WAIT will test it as expected.
-        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         # self.num_gpus = torch.cuda.device_count()
         self._spawn_processes()
 
@@ -1139,7 +1139,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     def test_abort_pg(self):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
         # abort the process group.
-        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
 
         store = c10d.FileStore(self.file_name, self.world_size)
         self._create_process_group_nccl(store, self.opts())
@@ -1178,7 +1178,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     def test_close_pg(self):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
         # abort the process group.
-        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
 
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
@@ -1252,7 +1252,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_tensor_register_hook(self):
-        os.environ["NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"] = "1"
+        os.environ["TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"] = "1"
 
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
@@ -1298,9 +1298,9 @@ class DistributedDataParallelTest(
 ):
     def setUp(self):
         super().setUp()
-        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
-        # that use NCCL_BLOCKING_WAIT will test it as expected.
-        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         self._spawn_processes()
 
     def _get_process_group(self):
@@ -1319,10 +1319,10 @@ class DistributedDataParallelTest(
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_nccl_propagate_error_reason(self):
-        # Need to use NCCL_BLOCKING_WAIT and not ASYNC_ERROR_HANDLING,
+        # Need to use TORCH_NCCL_BLOCKING_WAIT and not ASYNC_ERROR_HANDLING,
         # otherwise process will be taken down and we can't check for errors.
-        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
-        os.environ["NCCL_BLOCKING_WAIT"] = "1"
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
         # TODO: smaller timeout can fail since PG NCCl does health check in
         # constructor. Look into reducing this test's runtime.
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2614,14 +2614,14 @@ class WorkHookTest(MultiProcessTestCase):
 
     def setUp(self):
         super().setUp()
-        # set NCCL_ENABLE_TIMING to enable timing for CUDAEvents
+        # set TORCH_NCCL_ENABLE_TIMING to enable timing for CUDAEvents
         # in ProcessGroup Work
-        os.environ["NCCL_ENABLE_TIMING"] = "1"
+        os.environ["TORCH_NCCL_ENABLE_TIMING"] = "1"
         self._spawn_processes()
 
     def tearDown(self):
         super().tearDown()
-        del os.environ["NCCL_ENABLE_TIMING"]
+        del os.environ["TORCH_NCCL_ENABLE_TIMING"]
         try:
             os.remove(self.file_name)
         except OSError:
@@ -2805,9 +2805,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             self.test_nccl_errors_blocking_sigterm.__wrapped__,
             self.test_nccl_errors_blocking_nonzero_exit.__wrapped__,
         ]
-        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
-        # that use NCCL_BLOCKING_WAIT will test it as expected.
-        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         self._spawn_processes()
 
     def tearDown(self):
@@ -2838,13 +2838,13 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @skip_if_rocm
     @skip_but_pass_in_sandcastle("Test does not pass when run locally")
     def test_nccl_errors_nonblocking(self):
-        # Note: we unset and restore NCCL_ASYNC_ERROR_HANDLING for this test
+        # Note: we unset and restore TORCH_NCCL_ASYNC_ERROR_HANDLING for this test
         # since test_c10d_common runs with async error handling by default, but this
         # tests behavior when it is not enabled.
         prev_nccl_async_error_handling = os.environ.get(
-            "NCCL_ASYNC_ERROR_HANDLING", None
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING", None
         )
-        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         process_group.allreduce(torch.rand(10).cuda(self.rank))
@@ -2864,7 +2864,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             self.assertTrue(t.is_alive())
 
         if prev_nccl_async_error_handling is not None:
-            os.environ["NCCL_ASYNC_ERROR_HANDLING"] = prev_nccl_async_error_handling
+            os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = prev_nccl_async_error_handling
 
     def _test_nccl_errors_blocking(self, func):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2951,7 +2951,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                 process_group.barrier().wait(timeout=timedelta(seconds=self.op_timeout_sec))
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
-        os.environ["NCCL_BLOCKING_WAIT"] = val
+        os.environ["TORCH_NCCL_BLOCKING_WAIT"] = val
         store = c10d.FileStore(self.file_name, self.world_size)
         with self.assertRaises(RuntimeError):
             process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -3004,9 +3004,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     def setUp(self):
         super().setUp()
-        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
-        # that use NCCL_BLOCKING_WAIT will test it as expected.
-        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         self._spawn_processes()
 
     def tearDown(self):
@@ -3183,7 +3183,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier_timeout(self):
-        os.environ["ENABLE_NCCL_HEALTH_CHECK"] = "1"
+        os.environ["TORCH_ENABLE_NCCL_HEALTH_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         if self.rank == 0:
             with self.assertRaisesRegex(
@@ -3396,9 +3396,9 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
 class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
     def setUp(self):
         super().setUp()
-        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
-        # that use NCCL_BLOCKING_WAIT will test it as expected.
-        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         self._spawn_processes()
 
     def tearDown(self):
@@ -3435,9 +3435,9 @@ class SparseCollective(MultiProcessTestCase):
 
     def setUp(self):
         super().setUp()
-        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
-        # that use NCCL_BLOCKING_WAIT will test it as expected.
-        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         # self.num_gpus = torch.cuda.device_count()
         self._spawn_processes()
 
