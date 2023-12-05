@@ -463,10 +463,9 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
     def process_group(self):
         return dist.group.WORLD
 
-    def dist_init(self, backend=None):
-        test_backend = backend or BACKEND
+    def dist_init(self):
         dist.init_process_group(
-            backend=test_backend,
+            backend=BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             init_method=f"file://{self.file_name}",
@@ -613,6 +612,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
     @skip_if_lt_x_gpu(WORLD_SIZE)
     def test_batch_isend_irecv_cuda(self):
         device = "cuda"
+        # rank0: [0., 1.], rank1: [2., 3.]
         send_tensor = torch.arange(2, dtype=torch.float32, device=device) + 2 * self.rank
         send_op = dist.P2POp(
             dist.isend,
@@ -632,6 +632,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         # test recv_tensor has not changed
         self.assertEqual(recv_tensor, recv_clone)
 
+        # rank0: [2., 3.], rank1: [2., 3.]
         expected_tensors = [
             torch.arange(
                 2,
