@@ -13,8 +13,8 @@ Attention Biases
     :toctree: generated
     :nosignatures:
 
-    lower_right_causal
-    upper_left_causal
+    causal_lower_right
+    causal_upper_left
     CausalVariant
 
 CausalBias
