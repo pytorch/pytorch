@@ -336,8 +336,13 @@ namespace {
     RNNDescriptor rnn_desc;
     // NB: this won't actually lay out the tensor descriptor pointers
     // in the right way, so you'll have to preprocess them
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < 9000
     std::vector<TensorDescriptor> x_descs;
     std::vector<TensorDescriptor> y_descs;
+#else
+    std::vector<TensorDescriptor> x_descs;
+    std::vector<TensorDescriptor> y_descs;
+#endif
     TensorDescriptor hx_desc;
     TensorDescriptor hy_desc;
     TensorDescriptor cx_desc;
@@ -1071,6 +1076,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           &reserve_size
           ));
     reserve = at::empty(reserve_size, input.options().dtype(kByte));
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < 9000
     AT_CUDNN_CHECK(cudnnRNNForwardTraining(
           handle,
           descs.rnn_desc.desc(),
@@ -1084,9 +1090,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           descs.cy_desc.desc(), cy.defined() ? cy.data_ptr() : nullptr,
           workspace.data_ptr(), workspace.size(0),
           reserve.mutable_data_ptr(), reserve.size(0)
+#else
+
+#endif
           ));
   } else { // inference
     reserve = at::empty({0}, input.options().dtype(kByte));
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < 9000
     AT_CUDNN_CHECK(cudnnRNNForwardInference(
           handle,
           descs.rnn_desc.desc(),
@@ -1100,7 +1110,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           descs.cy_desc.desc(), cy.defined() ? cy.data_ptr() : nullptr,
           workspace.data_ptr(), workspace.size(0)
           ));
-
+#else
+#endif
   }
 
   if (batch_first && !is_input_packed) {

@@ -259,7 +259,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
            cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnDataType_t input_type, cudnnRNNAlgo_t algo, bool allow_tf32) {
     dropout_desc_ = std::move(dropout_desc);
-
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < 9000
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
           handle,
           mut_desc(),
@@ -278,6 +278,25 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
             /*recProjSize=*/proj_size,
             /*outProjSize=*/0));
     }
+#else
+    AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v8(
+          this->desc(),
+          algo,
+          mode,
+          CUDNN_RNN_NO_BIAS,
+          bidirectional,
+          input_mode,
+          datatype,
+          CUDNN_DATA_FLOAT,
+          allow_tf32 ? CUDNN_TENSOR_OP_MATH : CUDNN_DEFAULT_MATH,
+          hidden_size,
+          hidden_size,
+          proj_size,
+          num_layers,
+          dropout_desc_.desc(),
+          0));
+#endif
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < 9000
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major >= 7) {
       if (input_type == CUDNN_DATA_HALF) {
@@ -294,6 +313,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_DEFAULT_MATH);
       }
     }
+#endif
   }
 };
 
