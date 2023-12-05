@@ -306,7 +306,7 @@ def causal_upper_left(*size) -> CausalBias:
         size: The size of the bias matrix.
 
     Returns:
-        CausalBias: The upper-left triangular causal bias.
+        CausalBias: The UPPER_LEFT triangular causal bias variant.
     """
     assert len(size) == 2, "causal_upper_left only supports 2D tensors"
     seq_len_q, seq_len_kv = size
@@ -342,7 +342,7 @@ def causal_lower_right(*size) -> CausalBias:
         size: The size of the bias matrix.
 
     Returns:
-        CausalBias: The upper-left triangular causal bias.
+        CausalBias: The LOWER_RIGHT triangular causal bias variant.
     """
     assert len(size) == 2, "causal_lower_right only supports 2D tensors"
     seq_len_q, seq_len_kv = size
