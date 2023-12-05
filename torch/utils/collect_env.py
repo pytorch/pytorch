@@ -1,7 +1,7 @@
 
 # Unlike the rest of the PyTorch this file must be python2 compliant.
 # This script outputs relevant system environment info
-# Run it with `python collect_env.py`.
+# Run it with `python collect_env.py` or `python -m torch.utils.collect_env`
 import datetime
 import locale
 import re
@@ -46,6 +46,27 @@ SystemEnv = namedtuple('SystemEnv', [
     'cpu_info',
 ])
 
+DEFAULT_CONDA_PATTERNS = {
+    "torch",
+    "numpy",
+    "cudatoolkit",
+    "soumith",
+    "mkl",
+    "magma",
+    "triton",
+    "optree",
+}
+
+DEFAULT_PIP_PATTERNS = {
+    "torch",
+    "numpy",
+    "mypy",
+    "flake8",
+    "triton",
+    "optree",
+    "onnx",
+}
+
 
 def run(command):
     """Return (return-code, stdout, stderr)."""
@@ -89,7 +110,9 @@ def run_and_return_first_line(run_lambda, command):
     return out.split('\n')[0]
 
 
-def get_conda_packages(run_lambda):
+def get_conda_packages(run_lambda, patterns=None):
+    if patterns is None:
+        patterns = DEFAULT_CONDA_PATTERNS
     conda = os.environ.get('CONDA_EXE', 'conda')
     out = run_and_read_all(run_lambda, "{} list".format(conda))
     if out is None:
@@ -99,19 +122,7 @@ def get_conda_packages(run_lambda):
         line
         for line in out.splitlines()
         if not line.startswith("#")
-        and any(
-            name in line
-            for name in {
-                "torch",
-                "numpy",
-                "cudatoolkit",
-                "soumith",
-                "mkl",
-                "magma",
-                "triton",
-                "optree",
-            }
-        )
+        and any(name in line for name in patterns)
     )
 
 def get_gcc_version(run_lambda):
@@ -373,8 +384,11 @@ def get_libc_version():
     return '-'.join(platform.libc_ver())
 
 
-def get_pip_packages(run_lambda):
+def get_pip_packages(run_lambda, patterns=None):
     """Return `pip list` output. Note: will also find conda-installed pytorch and numpy packages."""
+    if patterns is None:
+        patterns = DEFAULT_PIP_PATTERNS
+
     # People generally have `pip` as `pip` or `pip3`
     # But here it is invoked as `python -mpip`
     def run_with_pip(pip):
@@ -382,18 +396,7 @@ def get_pip_packages(run_lambda):
         return "\n".join(
             line
             for line in out.splitlines()
-            if any(
-                name in line
-                for name in {
-                    "torch",
-                    "numpy",
-                    "mypy",
-                    "flake8",
-                    "triton",
-                    "optree",
-                    "onnx",
-                }
-            )
+            if any(name in line for name in patterns)
         )
 
     pip_version = 'pip3' if sys.version[0] == '3' else 'pip'
@@ -450,6 +453,8 @@ def get_env_info():
 
     sys_version = sys.version.replace("\n", " ")
 
+    conda_packages = get_conda_packages(run_lambda)
+
     return SystemEnv(
         torch_version=version_str,
         is_debug_build=debug_mode_str,
@@ -467,7 +472,7 @@ def get_env_info():
         miopen_runtime_version=miopen_runtime_version,
         pip_version=pip_version,
         pip_packages=pip_list_output,
-        conda_packages=get_conda_packages(run_lambda),
+        conda_packages=conda_packages,
         os=get_os(run_lambda),
         libc_version=get_libc_version(),
         gcc_version=get_gcc_version(run_lambda),
