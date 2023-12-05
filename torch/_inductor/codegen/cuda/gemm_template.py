@@ -40,6 +40,13 @@ extern "C" {
   int64_t N = {{kernel.size(W, -1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
+  static cutlass::KernelHardwareInfo hw_info;
+  if (hw_info.sm_count == 0) {
+    // @TODO kadeng: Add support for Multi-GPU machines with heterogeneous SM counts
+    // for now we just pick the SM count of the first GPU
+    hw_info.sm_count = cutlass::KernelHardwareInfo::query_device_multiprocessor_count(0);
+    CUTLASS_TRACE_HOST("Query result for SM count per device: " << hw_info.sm_count);
+  }
   {{instance_type}}::Arguments arguments;
   {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw,
                                     X, W, Bias, Y, alpha, beta, kernel, epilogue_args)}}
@@ -142,8 +149,8 @@ GEMM_ARGS_CUTLASS_3X = r"""
         {{template.cute_int(kernel.stride(W, -3), "batch_stride_w")}}
       },  // StrideB dB
     },  // MainloopArguments mainloop
-    {{epilogue_arguments}}
-    // hw_info // @TODO kadeng: Add optional hw_info argument of type cutlass::KernelHardwareInfo& to use all GPU SMs
+    {{epilogue_arguments}},
+    hw_info
   };
 """
 
