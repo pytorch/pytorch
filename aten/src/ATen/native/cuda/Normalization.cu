@@ -20,15 +20,14 @@
 #include <ATen/ops/batch_norm_gather_stats_with_counts_native.h>
 #include <ATen/ops/batch_norm_stats_native.h>
 #include <ATen/ops/batch_norm_update_stats_native.h>
+#include <ATen/ops/cudnn_batch_norm.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/from_blob.h>
+#include <ATen/ops/miopen_batch_norm.h>
 #include <ATen/ops/native_batch_norm_backward_native.h>
 #include <ATen/ops/native_batch_norm_native.h>
 #include <ATen/ops/scalar_tensor.h>
 #endif
-
-#include <ATen/ops/cudnn_batch_norm.h>
-#include <ATen/ops/miopen_batch_norm.h>
 
 static const int MIOPEN_DIM_MAX = 5;
 
@@ -90,6 +89,43 @@ inline Impl batch_norm_choose_impl(const Tensor& in1, const Tensor& in2) {
   }
   auto imp2 = batch_norm_choose_impl(in2);
   return imp1 == imp2 ? imp1 : Impl::General;
+}
+
+// TODO(andrew): merge this with _batch_norm_impl_index
+bool _use_cudnn(const Tensor& input, const Tensor& weight, const Tensor& bias, const Tensor& running_mean, const Tensor& running_var, bool train, bool epsilon) {
+  return (
+      input.is_cuda()
+      && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
+      && (input.scalar_type() != at::kHalf
+        || weight.scalar_type() == at::kFloat)
+      && weight.defined() && bias.defined()
+      && ((running_mean.defined() && running_var.defined())
+        || (!running_mean.defined() && !running_var.defined() && train))
+      && (input.dim() >= 3)
+      && ((input.sym_size(0) <= 880801 && train) // spatial, training
+          ||(input.sym_size(0) <= 65535 && !train)) //spatial, eval
+      && at::detail::getCUDAHooks().compiledWithCuDNN()
+      && epsilon >= at::detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
+      && at::detail::getCUDAHooks().versionCuDNN() >= 5110L
+      && input.sym_numel() < std::numeric_limits<std::int32_t>::max() // some cuDNN kernels have 32-bit indexing limitations
+  );
+}
+
+// TODO(andrew): merge this with _batch_norm_impl_index
+bool _use_miopen(const Tensor& input, const Tensor& weight, const Tensor& bias, const Tensor& running_mean, const Tensor& running_var, bool train) {
+  return (
+      input.is_cuda()
+      && input.dim() <= MIOPEN_DIM_MAX
+      && input.scalar_type() != at::kDouble
+      && input.scalar_type() != at::kBFloat16
+      && (weight.scalar_type() != at::kHalf)
+      && weight.defined() && bias.defined()
+      && ((running_mean.defined() && running_var.defined())
+        || (!running_mean.defined() && !running_var.defined() && train))
+      && at::detail::getCUDAHooks().compiledWithMIOpen()
+      && input.suggest_memory_format() != MemoryFormat::ChannelsLast
+      && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d
+  );
 }
 
 void batch_norm_elementwise(
@@ -466,41 +502,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
-  // TODO(andrew): refactor into common function and merge this with _batch_norm_impl_index
-  // TODO(andrew): do this for backward pass too
-  const bool use_cudnn = (
-      self.is_cuda()
-      && self.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
-      && (self.scalar_type() != at::kHalf
-        || weight.scalar_type() == at::kFloat)
-      && weight.defined() && bias.defined()
-      && ((running_mean.defined() && running_var.defined())
-        || (!running_mean.defined() && !running_var.defined() && train))
-      && (self.dim() >= 3)
-      && ((self.sym_size(0) <= 880801 && train) // spatial, training
-          ||(self.sym_size(0) <= 65535 && !train)) //spatial, eval
-      && at::detail::getCUDAHooks().compiledWithCuDNN()
-      && epsilon >= at::detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
-      && at::detail::getCUDAHooks().versionCuDNN() >= 5110L
-      && self.sym_numel() < std::numeric_limits<std::int32_t>::max() // some cuDNN kernels have 32-bit indexing limitations
-      );
-
-  bool use_miopen = (
-      self.is_cuda()
-      && self.dim() <= MIOPEN_DIM_MAX
-      && self.scalar_type() != at::kDouble
-      && self.scalar_type() != at::kBFloat16
-      && (weight.scalar_type() != at::kHalf)
-      && weight.defined() && bias.defined()
-      && ((running_mean.defined() && running_var.defined())
-        || (!running_mean.defined() && !running_var.defined() && train))
-      && at::detail::getCUDAHooks().compiledWithMIOpen()
-      && self.suggest_memory_format() != MemoryFormat::ChannelsLast
-      && self.suggest_memory_format() != MemoryFormat::ChannelsLast3d
-      );
-
+  // TODO(andrew): do this dispatching for the backward pass too
+  const bool use_cudnn = _use_cudnn(self, weight, bias, running_mean, running_var, train, epsilon);
+  const bool use_miopen = _use_miopen(self, weight, bias, running_mean, running_var, train);
   printf("ANDREW in batch_norm_cuda, use_cudnn = %d, use_miopen = %d\n", use_cudnn, use_miopen);
-
   if (use_cudnn or use_miopen) {
     auto weight_c = weight.contiguous();
     auto bias_c = bias.contiguous();
