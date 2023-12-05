@@ -415,10 +415,6 @@ class ExportedProgram:
                 return SymIntArgument(name=new_ph.name)
             raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
 
-        # Update the target of USER_INPUT_MUTATION outputs to the new placeholder
-        def update_target(old_target, new_ph):
-            return new_ph.name
-
         new_placeholders = _get_placeholders(gm)
         new_outputs = list(gm.graph.nodes)[-1].args[0]
 
