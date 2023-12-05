@@ -1165,7 +1165,7 @@ class GraphModule(torch.nn.Module):
 
         # We increase the number of ops to 3 and 4 for top-level graph because of an additional
         # get_item call created by the flatten/unflatten logic in HOP speculation.
-        self.assertEqual(cnt.op_count, ifdynstaticdefault(3, 4))
+        self.assertEqual(cnt.op_count, ifdynstaticdefault(2, 3))
 
     def test_map_lowers_to_graph(self):
         backend = EagerAndRecordGraphs()
@@ -1194,11 +1194,10 @@ class GraphModule(torch.nn.Module):
             """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    getitem = l_x_.__getitem__(0)
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
-    getitem_1 = map_impl[0];  map_impl = None
-    return (getitem_1,)""",
+    getitem_3 = map_impl[0];  map_impl = None
+    return (getitem_3,)""",
         )
 
     def test_cond_subgraph_name_is_valid(self):

@@ -730,12 +730,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from . import (
-            ConstantVariable,
-            NestedUserFunctionVariable,
-            TensorVariable,
-            UserFunctionVariable,
-        )
+        from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
 
         if len(kwargs) > 0:
             unimplemented(
@@ -759,9 +754,10 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # To get the example output from map() we will need to provide at least one sample to
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
-        first_dim = args[1].call_method(
-            tx, "__getitem__", args=[ConstantVariable.create(0)], kwargs={}
-        )
+        # first_dim = args[1].call_method(
+        #     tx, "__getitem__", args=[ConstantVariable.create(0)], kwargs={}
+        # )
+        first_dim = args[1].unpack_var_sequence(tx)[0]
 
         # TODO: Support kwargs
         (
