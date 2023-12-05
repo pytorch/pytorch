@@ -1212,14 +1212,3 @@ def _aot_export_function(
 
 compiled_function = aot_function
 compiled_module = aot_module
-
-def _sizes(tensor_or_size):
-    if isinstance(tensor_or_size, torch.Size):
-        return torch.Size([int(x) for x in tensor_or_size])
-    elif isinstance(tensor_or_size, torch.Tensor):
-        return _sizes(tensor_or_size.size())
-    elif isinstance(tensor_or_size, TensorAlias):
-        return _sizes(tensor_or_size.alias)
-    elif tensor_or_size is None:
-        return None
-    raise RuntimeError("What are you?", type(tensor_or_size))

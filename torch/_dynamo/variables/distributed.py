@@ -224,24 +224,3 @@ class ProcessGroupVariable(DistributedVariable):
         from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
         return istype(value, (ProcessGroup, FakeProcessGroup))
-
-# class FSDPAllocFreeStorageUtilVariable(VariableTracker):
-#     def __init__(self, fn, **kwargs):
-#         super().__init__(**kwargs)
-#         assert FSDPAllocFreeStorageUtilVariable.match(fn)
-#         self.fn = fn
-
-#     @staticmethod
-#     def match(value):
-#         return value in [torch.distributed.utils._alloc_storage, torch.distributed.utils._free_storage]
-
-#     def call_function(
-#         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-#     ) -> "VariableTracker":
-#         from .builder import wrap_fx_proxy
-#         return wrap_fx_proxy(
-#             tx,
-#             tx.output.create_proxy(
-#                 "call_function", self.fn, *proxy_args_kwargs(args, kwargs)
-#             )
-#         )
