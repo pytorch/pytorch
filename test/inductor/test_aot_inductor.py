@@ -1465,6 +1465,24 @@ class AOTInductorTestsTemplate:
         inputs = (torch.rand(4, 4, 4, 4, device=self.device),)
         self.check_model(Model(4), inputs)
 
+    def test_dynamic_scalar(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.criterion_ce = torch.nn.CrossEntropyLoss(reduction="none")
+
+            def forward(self, inputs, targets, split_index=None):
+                statistics = {}
+                total_loss = self.criterion_ce(inputs, targets).sum()
+                statistics["dl"] = total_loss.item()
+                return total_loss, statistics
+
+        inputs = (
+            torch.rand(4, 4, 4, 4, device=self.device),
+            torch.rand(4, 4, 4, 4, device=self.device),
+        )
+        self.check_model(Model(), inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
