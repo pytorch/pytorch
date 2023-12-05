@@ -445,7 +445,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 device = None
                 for t in args:
                     if isinstance(t, TensorBox):
-                        device = t.data.get_device()  # type: ignore[attr-defined]
+                        device = t.data.get_device()
                         break
                 assert (
                     device is not None
@@ -1076,12 +1076,14 @@ def cat(inputs, dim=0):
 
         return False
 
-    if len(inputs) <= config.max_pointwise_cat_inputs:
+    if (
+        len(inputs) <= config.max_pointwise_cat_inputs
+        and inputs[0].get_device().type != "cpu"
+    ):
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
-        all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
-        any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
+        all_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
 
-        if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
+        if all_pointwise_inputs and pointwise_uses:
             return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
@@ -2022,8 +2024,6 @@ make_fallback(aten.cumsum, require_dense, warn=False)
 make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
-make_fallback(aten._flash_attention_forward)
-make_fallback(aten._flash_attention_backward)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
@@ -2045,21 +2045,44 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
 
-        ALIGNMENT = 16
+        # This is the minimum alignment required by SDPA kernels for attention_bias.
+        # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
+        ALIGNMENT = 8
+
+        is_backward = fx_node.target in (
+            aten._scaled_dot_product_efficient_attention_backward.default,
+            aten._scaled_dot_product_flash_attention_backward.default,
+        )
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
 
         assert isinstance(arg, TensorBox)
-        unaligned_input_shape = isinstance(arg.data, ir.SliceView) and not is_aligned(
-            arg
-        )
-        aligned_input_view = unaligned_input_shape and is_aligned(arg.unwrap_view())
 
-        # input is padded, requiring_stride_order will unwrap the view and unpad.
-        # Would be nice to be able to require certain padding from inductor ir, nyi
-        if aligned_input_view:
-            return arg
+        # This correctly handles the forward case:
+        if isinstance(arg.data, (ir.SliceView, ir.ExpandView)):
+            if not is_aligned(arg):
+                # input is padded, requiring_stride_order will unwrap the view and unpad.
+                # Would be nice to be able to require certain padding from inductor ir, nyi
+                if is_aligned(arg.unwrap_view()):
+                    return arg
+
+        def is_aligned_backward(x):
+            aligned_strides = all(
+                (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
+                for i in range(len(x.get_stride()) - 1)
+            )
+            return (
+                V.graph.sizevars.size_hint(x.get_stride()[-1])
+            ) == 1 and aligned_strides
+
+        if (
+            isinstance(arg.data, ir.StorageBox)
+            and arg.data.is_input_buffer()
+            and is_backward
+        ):
+            if len(arg.data.get_size()) == 4 and is_aligned_backward(arg):
+                return arg
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
@@ -2090,8 +2113,10 @@ make_fallback(
     sdpa_constraint,
     warn=False,
 )
-make_fallback(torch.ops.aten._efficient_attention_forward.default)
-make_fallback(torch.ops.aten._efficient_attention_backward.default)
+make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
+make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
+make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
+make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
@@ -2212,6 +2237,7 @@ make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten._pdist_backward)
 make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
+make_fallback(aten.replication_pad2d_backward)
 make_fallback(aten.soft_margin_loss_backward, warn=False)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten.segment_reduce.default)
@@ -2977,7 +3003,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
     x_size = self.get_size()
     x_ndim = len(x_size)
 
-    if needs_fallback_due_to_atomic_add_limitations(self.get_dtype()):
+    if accumulate and needs_fallback_due_to_atomic_add_limitations(self.get_dtype()):
         # self is an scalar Tensor
         if x_ndim == 0:
             self = view(self, [1])

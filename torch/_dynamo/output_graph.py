@@ -1680,7 +1680,7 @@ class SubgraphTracer(fx.Tracer):
             frame_summaries.reverse()
 
             # official from_list stub doesn't have new-style type
-            msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
+            msgs = traceback.StackSummary.from_list(frame_summaries).format()
             rv.node.stack_trace = "".join(msgs)
 
         return rv
