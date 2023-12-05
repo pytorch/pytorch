@@ -694,9 +694,6 @@ coverage_ignore_functions = [
     "probs_to_logits",
     "tril_matrix_to_vec",
     "vec_to_tril_matrix",
-    # torch.export.dynamic_shapes
-    "Dim",
-    "dynamic_dim",
     # torch.functional
     "align_tensors",
     "atleast_1d",
@@ -1929,7 +1926,6 @@ coverage_ignore_functions = [
     "bundle_randn",
     # torch.utils.checkpoint
     "check_backward_validity",
-    "context_fn_gen",
     "detach_variable",
     "get_device_states",
     "noop_context_fn",

@@ -7,13 +7,9 @@ import torch.distributed._tensor.ops
 import torch.distributed._tensor.random as random
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import distribute_module, distribute_tensor, DTensor
-from torch.distributed._tensor.device_mesh import (
-    _mesh_resources,
-    DeviceMesh,
-    init_device_mesh,
-)
 from torch.distributed._tensor.ops.utils import normalize_to_torch_size
 from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 
 # All public APIs from dtensor package
 __all__ = [
@@ -52,15 +48,12 @@ def _dtensor_init_helper(
     # get local tensor shape
     local_shape = compute_local_shape(size, device_mesh, placements)
     # initialize the local tensor
-    if len(local_shape) == 0:
-        local_tensor = torch.empty(0, **kwargs)
-    elif init_op == torch.full:
+    if init_op == torch.full:
         fill_value = kwargs.pop("fill_value", 0)
         local_tensor = init_op(local_shape, fill_value, **kwargs)
     elif init_op == torch.rand or init_op == torch.randn:
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
-        requires_grad = kwargs.get("requires_grad", False)
 
         from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 
