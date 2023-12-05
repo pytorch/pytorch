@@ -550,12 +550,12 @@ API Reference
 
 .. automodule:: torch.export
 .. autofunction:: export
-.. autofunction:: torch.export.dynamic_dim
+.. autofunction:: torch.export.dynamic_shapes.dynamic_dim
 .. autofunction:: save
 .. autofunction:: load
 .. autofunction:: register_dataclass
-.. autofunction:: torch.export.Dim
-.. autofunction:: torch.export.dims
+.. autofunction:: torch.export.dynamic_shapes.Dim
+.. autofunction:: dims
 .. autoclass:: Constraint
 .. autoclass:: ExportedProgram
 
