@@ -215,7 +215,7 @@ std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<st
     dummyTensor(DispatchKey::CUDA),
     5,
     {dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA)},
-    c10::optional<int64_t>(c10::in_place, 0),
+    c10::optional<int64_t>(std::in_place, 0),
     dict
   );
 }
