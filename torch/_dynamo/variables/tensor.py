@@ -251,6 +251,7 @@ class TensorVariable(VariableTracker):
         # <tensor> is later changed to another type
         if result is not None and self.source is not None:
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+            result.source = AttrSource(self.source, name)
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
@@ -292,6 +293,7 @@ class TensorVariable(VariableTracker):
                 return wrap_fx_proxy(
                     tx=tx,
                     proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
+                    options={"source": AttrSource(self.source, name)},
                 )
 
             result = try_generic_attr_handling()
