@@ -73,7 +73,7 @@ c10::SymNode SingletonSymNodeImpl::mul(const c10::SymNode& other) {
   return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c, values_, dummy_, sum_offsets_));
 }
 
-std::optional<at::Tensor> try_call_with_dummy(std::function<at::Tensor(at::Tensor)> fn, c10::SymIntArrayRef size) {
+std::optional<at::Tensor> try_call_with_dummy(const std::function<at::Tensor(at::Tensor)>& fn, c10::SymIntArrayRef size) {
   at::TensorImpl* ptr = nullptr;
   for (const auto& s : size) {
     if (!s.is_heap_allocated()) {
