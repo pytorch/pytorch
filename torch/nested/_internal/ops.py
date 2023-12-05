@@ -185,8 +185,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
-        "_max_seqlen": arg._max_seqlen,
-        "_min_seqlen": arg._min_seqlen,
+        "_metadata_cache": arg._metadata_cache,
     }
     return kwargs
 
