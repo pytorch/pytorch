@@ -273,6 +273,19 @@ def jagged_torch_function(func, *args, **kwargs):
 
         # purposefully fall-through to NotImplemented
 
+    # Handle reshape() / reshape_as() here because they're CompositeImplicit.
+    if func.__name__ == "reshape":
+        inp = args[0]
+        shape = args[1:]
+
+        return inp.view(shape) if inp.is_contiguous() else inp.clone().view(shape)
+
+    if func.__name__ == "reshape_as":
+        inp = args[0]
+        other = args[1]
+
+        return inp.reshape(*other.shape)
+
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
 
