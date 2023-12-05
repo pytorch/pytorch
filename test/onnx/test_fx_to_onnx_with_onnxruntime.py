@@ -1068,7 +1068,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
     @pytorch_test_common.skip_dynamic_fx_test(
-        "AssertionError: Dynamic shape check failed for graph inputs"
+        "AssertionError: Dynamic shape check failed for graph inputs",
         skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
     )
     def test_fake_tensor_mode_simple(self):
