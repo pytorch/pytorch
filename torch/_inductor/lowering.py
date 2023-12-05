@@ -23,6 +23,7 @@ from torch._prims_common import (
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    get_computation_dtype,
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
@@ -4569,7 +4570,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
     return to_dtype(div(sum_result, denom), output_dtype)
 
 
-def var_mean_sum_(x, axis, correction, keepdim, return_mean):
+def var_mean_sum_(x, axis, correction, keepdim):
     if correction is None:
         correction = 1
 
@@ -4588,9 +4589,6 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
-    if not return_mean:
-        return x_var
-
     x_mean = x_mean if keepdim else squeeze(x_mean, axis)
     return x_var, x_mean
 
@@ -4611,7 +4609,7 @@ def use_two_step_variance(x, axis, keepdim):
     )
 
 
-def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
+def var_mean_welford_(x, axis, *, correction, keepdim):
     if correction is None:
         correction = 1
 
@@ -4647,33 +4645,36 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
         return data / ops.maximum(zero, N - c)
 
     var = make_pointwise(scale_fn)(m2)
+    return var, mean
 
-    if return_mean:
-        mean.realize()
-        return var, mean
-    return var
+def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
+    out_dtype = x.get_dtype()
+    compute_dtype = get_computation_dtype(out_dtype)
+    x = to_dtype(x, compute_dtype, copy=False)
+    impl_fn = (var_mean_sum_ if use_two_step_variance(x, axis=axis, keepdim=keepdim)
+            else var_mean_welford_)
+    var, mean = impl_fn(x, axis=axis, correction=correction, keepdim=keepdim)
+    var.realize()
+    var = to_dtype(var, out_dtype, copy=False)
+
+    if not return_mean:
+        return var
+
+    mean.realize()
+    mean = to_dtype(mean, out_dtype, copy=False)
+    return var, mean
 
 
 @register_lowering([aten.var, prims.var])
 def var_(x, axis=None, *, correction=None, keepdim=False):
-    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
-        return var_mean_sum_(
-            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
-        )
-
-    return var_mean_welford_(
+    return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
     )
 
 
 @register_lowering(aten.var_mean)
 def var_mean(x, axis=None, *, correction=None, keepdim=False):
-    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
-        return var_mean_sum_(
-            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
-        )
-
-    return var_mean_welford_(
+    return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
     )
 
