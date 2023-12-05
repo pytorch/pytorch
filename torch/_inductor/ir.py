@@ -1692,7 +1692,10 @@ class ExpandView(BaseView):
                 pass
             else:
                 # Expect broadcast compatibility
-                new_size[i] = V.graph.sizevars.expect_equals(new_size[i], old_size[i])
+                new_size[i] = V.graph.sizevars.expect_equals(
+                    new_size[i], old_size[i],
+                    msg=f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
+                )
         return new_size
 
     @classmethod
