@@ -702,7 +702,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
-  dumpOnTimeout_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, true);
+  dumpOnTimeout_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
+      (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, false));
   heartbeatTimeoutInSec_ =
@@ -1053,7 +1054,6 @@ void ProcessGroupNCCL::registerDebugInfoWriter(
 
 void ProcessGroupNCCL::dumpDebuggingInfo() {
   LOG(ERROR) << "ProcessGroupNCCL preparing to dump debug info.";
-  // TODO(whc) after rebase, make sure default bufsize is >0 for on-by-default
   if (ncclTraceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
