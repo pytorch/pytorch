@@ -66,9 +66,7 @@ ignored_ctx_manager_class_names = {
     "torch.sparse.check_sparse_tensor_invariants",
 }
 
-ignored_c_binding_in_graph_function_names = {
-    "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode"
-}
+ignored_c_binding_in_graph_function_names = set()
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {
         "torch._C._te.set_llvm_aot_workflow",
