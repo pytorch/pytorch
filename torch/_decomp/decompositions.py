@@ -4038,16 +4038,26 @@ def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
 
     result = a
     for i in range(dim):
-        left = torch.arange(padding_left[i], 0, step=-1, device=a.device)
         middle = torch.arange(0, inp_shape[i], step=1, device=a.device)
-        right = torch.arange(
-            inp_shape[i] - 2,
-            inp_shape[i] - 2 - padding_right[i],
-            step=-1,
-            device=a.device,
-        )
+        if padding_left[i] < 0:
+            middle = middle[-padding_left[i] :]
+            to_cat = [middle]
+        else:
+            left = torch.arange(padding_left[i], 0, step=-1, device=a.device)
+            to_cat = [left, middle]
+
+        if padding_right[i] < 0:
+            middle = middle[: -padding_right[i]]
+        else:
+            right = torch.arange(
+                inp_shape[i] - 2,
+                inp_shape[i] - 2 - padding_right[i],
+                step=-1,
+                device=a.device,
+            )
+            to_cat.append(right)
         idx: List[Any] = [slice(s) for s in result.shape]
-        idx[i + nc_dim] = torch.cat((left, middle, right))
+        idx[i + nc_dim] = torch.cat(tuple(to_cat))
         result = result[idx]
 
     # convert output to correct memory format, if necessary
@@ -4093,31 +4103,43 @@ def _reflection_pad_backward(
     result = grad_output
     for i in range(dim):
         middle_idx: List[Any] = [slice(s) for s in result.shape]
-        middle_idx[i + nc_dim] = torch.arange(
-            padding_left[i], padding_left[i] + inp_shape[i], step=1, device=a.device
-        )
-        middle = result[middle_idx]
+        if padding_left[i] < 0:
+            left = 0
+            middle = zero_pad(result, i + nc_dim, -padding_left[i], 0)
+            if padding_right[i] > 0:
+                middle_idx[i + nc_dim] = torch.arange(
+                    0, inp_shape[i], step=1, device=a.device
+                )
+                middle = middle[middle_idx]
+        else:
+            middle_idx[i + nc_dim] = torch.arange(
+                padding_left[i], padding_left[i] + inp_shape[i], step=1, device=a.device
+            )
+            middle = result[middle_idx]
 
-        left_idx: List[Any] = [slice(s) for s in result.shape]
-        left_idx[i + nc_dim] = torch.arange(
-            padding_left[i] - 1, -1, step=-1, device=a.device
-        )
-        left = zero_pad(
-            result[left_idx], i + nc_dim, 1, inp_shape[i] - padding_left[i] - 1
-        )
+            left_idx: List[Any] = [slice(s) for s in result.shape]
+            left_idx[i + nc_dim] = torch.arange(
+                padding_left[i] - 1, -1, step=-1, device=a.device
+            )
+            left = zero_pad(
+                result[left_idx], i + nc_dim, 1, inp_shape[i] - padding_left[i] - 1
+            )
 
-        right_idx: List[Any] = [slice(s) for s in result.shape]
-        right_idx[i + nc_dim] = torch.arange(
-            result.shape[i + nc_dim] - 1,
-            result.shape[i + nc_dim] - padding_right[i] - 1,
-            step=-1,
-            device=a.device,
-        )
-        right = zero_pad(
-            result[right_idx], i + nc_dim, inp_shape[i] - padding_right[i] - 1, 1
-        )
+        if padding_right[i] < 0:
+            right = 0
+            middle = zero_pad(middle, i + nc_dim, 0, -padding_right[i])
+        else:
+            right_idx: List[Any] = [slice(s) for s in result.shape]
+            right_idx[i + nc_dim] = torch.arange(
+                result.shape[i + nc_dim] - 1,
+                result.shape[i + nc_dim] - padding_right[i] - 1,
+                step=-1,
+                device=a.device,
+            )
+            right = zero_pad(
+                result[right_idx], i + nc_dim, inp_shape[i] - padding_right[i] - 1, 1
+            )
 
-        assert middle.shape == left.shape == right.shape
         result = middle + left + right
 
     assert result.shape == a.shape
