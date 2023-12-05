@@ -1111,9 +1111,9 @@ def blue_text(msg):
 @functools.lru_cache(None)
 def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
+
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
     if torch.version.hip:
-
         if dtype in (torch.float16, torch.bfloat16):
             return get_max_tensorcore_tflops(dtype)
 
