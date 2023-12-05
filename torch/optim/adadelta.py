@@ -158,7 +158,7 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
             parameter groups
         rho (float, optional): coefficient used for computing a running average
             of squared gradients (default: 0.9). A higher value of `rho` will
-            result in a slower average, which can be helpful for preventing 
+            result in a slower average, which can be helpful for preventing
             oscillations in the learning process.
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-6).
