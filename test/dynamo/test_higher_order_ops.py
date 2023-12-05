@@ -1131,7 +1131,25 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         result = f(x)
         self.assertEqual(result, (x.sin(), x.sin()))
-        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_map_pytree_return(self):
+        cnt = CompileCounter()
+
+        def _construct_pytree(a):
+            return (a, [[[a]]], a, (a, (a,), a), {"a": a})
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            def inner_f(xs):
+                return _construct_pytree(xs)
+
+            return control_flow.map(inner_f, x)
+
+        x = torch.randn(3)
+        result = f(x)
+        self.assertEqual(result, _construct_pytree(x))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_map_kwargs(self):
         cnt = CompileCounter()
@@ -1163,7 +1181,10 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(ref, res)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdynstaticdefault(2, 3))
+
+        # We increase the number of ops to 3 and 4 for top-level graph because of an additional
+        # get_item call created by the flatten/unflatten logic in HOP speculation.
+        self.assertEqual(cnt.op_count, ifdynstaticdefault(3, 4))
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
