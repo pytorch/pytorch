@@ -23,8 +23,6 @@ from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch.utils._triton import has_triton
 from torch._inductor.utils import run_and_get_triton_code
 import torch._dynamo.logging
-import torch.distributed as dist
-from torch.testing._internal.distributed.fake_pg import FakeStore
 
 def _tolist_with_constrain_as_size(tensor):
     lst = tensor.tolist()
@@ -905,27 +903,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
-
-
-class TestDTensorCompile(torch._dynamo.test_case.TestCase):
-    def setUp(self):
-        super().setUp()
-        fake_store = FakeStore()
-        dist.init_process_group(
-            "fake", store=fake_store, rank=0, world_size=self.world_size
-        )
-
-    def tearDown(self):
-        super().tearDown()
-        dist.destroy_process_group()
-
-    @property
-    def device_type(self) -> str:
-        return "cuda" if torch.cuda.is_available() else "cpu"
-
-    @property
-    def world_size(self) -> int:
-        return 2
 
 
 if __name__ == "__main__":
