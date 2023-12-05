@@ -1578,7 +1578,11 @@ class SubgraphTracer(fx.Tracer):
             "call_module",
         ):
             cur_inst = tx.current_instruction
-            if cur_inst is not self.prev_inst and cur_inst.positions.lineno is not None:
+            if (
+                cur_inst is not self.prev_inst
+                and cur_inst.positions is not None
+                and cur_inst.positions.lineno is not None
+            ):
                 tx_code = tx.f_code
                 header = tx.get_line_of_code_header(lineno=cur_inst.positions.lineno)
 

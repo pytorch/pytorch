@@ -22,7 +22,6 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
-#include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/custom_class.h>
 
 namespace c10d {
@@ -30,19 +29,19 @@ namespace c10d {
 // which ensures communicators are healthy at the beginning of init.
 static std::vector<std::string> TORCH_ENABLE_NCCL_HEALTH_CHECK = {
     "TORCH_ENABLE_NCCL_HEALTH_CHECK",
-    "ENABLE_NCCL_HEALTH_CHECK"};
+    "TORCH_ENABLE_NCCL_HEALTH_CHECK"};
 
 // Environment variable which controls whether or not wait() is blocking or
 // non-blocking.
 static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
     "TORCH_NCCL_BLOCKING_WAIT",
-    "NCCL_BLOCKING_WAIT"};
+    "TORCH_NCCL_BLOCKING_WAIT"};
 
 // Environment variable which controls whether or not we perform Async Error
 // Handling with NCCL.
 static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
     "TORCH_NCCL_ASYNC_ERROR_HANDLING",
-    "NCCL_ASYNC_ERROR_HANDLING"};
+    "TORCH_NCCL_ASYNC_ERROR_HANDLING"};
 
 // Environment Variable to control whether dumping debug info on watchdog
 // timeout is enabled. This variable must be set together with
@@ -54,17 +53,20 @@ static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
 // This variable must be set together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
 static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
     "TORCH_NCCL_DESYNC_DEBUG",
-    "NCCL_DESYNC_DEBUG"};
+    "TORCH_NCCL_DESYNC_DEBUG"};
 
 static std::vector<std::string> TORCH_NCCL_ENABLE_TIMING = {
     "TORCH_NCCL_ENABLE_TIMING",
-    "NCCL_ENABLE_TIMING"};
+    "TORCH_NCCL_ENABLE_TIMING"};
 
 static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
     "TORCH_NCCL_ENABLE_MONITORING"};
 
 static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
     "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"};
+
+static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
+    "TORCH_NCCL_TRACE_BUFFER_SIZE"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
@@ -103,7 +105,7 @@ static std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = {
 // can register/deregister the tensor on all available NCCL communicators.
 static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
     {"TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK",
-     "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"};
+     "TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"};
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -761,6 +763,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
+
+  // Size of ring buffer where we store NCCL Traces for debugging.
+  int ncclTraceBufferSize_;
 
   // We gate the heartbeat monitor thread so that we can roll it out gradually.
   std::atomic<bool> monitorThreadEnabled_;
