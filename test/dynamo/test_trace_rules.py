@@ -67,7 +67,7 @@ ignored_torch_name_rule_set = {
     "torch.cuda._DeviceGuard",
     "torch.cuda.device",
     "torch.cuda.graphs.graph",
-    "torch.device",  # constant folding
+    "torch.device",  # as constant folding function
     "torch.distributed.autograd.context",
     "torch.hub._Faketqdm",
     "torch.jit._ir_utils._InsertPoint",
