@@ -1463,6 +1463,91 @@ def forward(self, primals_1, primals_2):
         with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
             self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
+    # Mutations in the backward are allowed as long as the mutated object does not require grad
+    def test_backward_mutation_data(self):
+        class BwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, = ctx.saved_tensors
+                # bw mutation
+                x.mul_(2)
+                return grad_output.clone()
+
+        def f(a, b):
+            out = BwMutation.apply(b)
+            return a * out
+
+        inp_no_grad = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+
+        # Mutation on buffer that does not require grad during the backward is allowed
+        self.verify_aot_autograd(f, inp_no_grad, test_mutation=True)
+
+        inp_grad = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=True),
+        ]
+        with self.assertRaisesRegex(AssertionError, "input that requires_grad and was mutated in the backward"):
+            self.verify_aot_autograd(f, inp_grad, test_mutation=True)
+
+    def test_backward_mutation_metadata(self):
+        class BwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.save_for_backward(b)
+                return a.clone(), b.clone()
+
+            @staticmethod
+            def backward(ctx, grad_a, grad_b):
+                b, = ctx.saved_tensors
+                # bw metadata mutation
+                b.transpose_(1, 0)
+                return grad_a.clone(), grad_b.clone()
+
+        def f(a, b):
+            a_, b_ = BwMutation.apply(a, b)
+            out = a_ * b_
+            return out
+
+        inp_no_grad = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+
+        with self.assertRaisesRegex(AssertionError, "input that had its metadata mutated in the backward"):
+            self.verify_aot_autograd(f, inp_no_grad, test_mutation=True)
+
+    def test_backward_mutation_on_grad_out(self):
+        class BwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                grad_output.mul_(2)
+                return grad_output.clone()
+
+        def f(a, b):
+            tmp = a * b
+            out = BwMutation.apply(tmp)
+            return out
+
+        inp_grad = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=True),
+        ]
+        f_compiled = aot_function(f, nop)
+        with self.assertRaisesRegex(AssertionError, "input to the backward that was mutated during the backward"):
+            out = f_compiled(*inp_grad)
+
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
     def test_input_mutation_false_aliasing(self):
         def f(a, b):
@@ -2854,6 +2939,52 @@ class <lambda>(torch.nn.Module):
             RuntimeError, "Found an output of the forward that requires gradients, that was not"
         ):
             aot_export_module(mod, [inp], trace_joint=True, output_loss_index=1)
+
+    @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond needs dynamo to run")
+    def test_aot_export_with_torch_cond(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                def true_fn(x):
+                    y = x + 4
+                    y.add_(5)
+                    return x.cos()
+
+                def false_fn(x):
+                    y = x + 5
+                    y.add_(6)
+                    return x.sin()
+
+                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                return (a + 3, a + 4)
+
+        inp = torch.randn(3, 4)
+        gm, _ = aot_export_module(M(), (inp,), trace_joint=False)
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, arg0_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
+    getitem = conditional[0];  conditional = None
+    add = torch.ops.aten.add.Tensor(getitem, 3)
+    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    return (add, add_1)""")  # noqa: B950
+
+        self.assertExpectedInline(gm.true_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 4)
+    add_1 = torch.ops.aten.add.Tensor(add, 5);  add = None
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    return (cos,)""")
+
+        self.assertExpectedInline(gm.false_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 5)
+    add_1 = torch.ops.aten.add.Tensor(add, 6);  add = None
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+    return (sin,)""")
 
     def test_aot_export_simplified_input_mutations_banned(self):
         def fn(x):
