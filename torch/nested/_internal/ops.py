@@ -908,14 +908,14 @@ def embedding_default(func, *args, **kwargs):
     )
 
 @register_jagged_func(
-    torch.ops.aten._nested_zeros.default,
-    "size: any, dummy: jt, dtype: any?, layout: any?, device: any?, pin_memory: any?",
+    torch.ops.aten.new_zeros.default,
+    "self: jt, size: any, dtype: any?, layout: any?, device: any?, pin_memory: any?",
 )
-def _nested_zeros(func, *args, **kwargs):
+def new_zeros(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    new_kwargs.pop("dummy")
+    new_kwargs.pop("input")
     # TODO: don't assume that the ragged_idx == 1
     _unused_B, singleton, *Ds = new_kwargs.pop("size")
     offsets = singleton.node.singleton_values()
@@ -924,15 +924,14 @@ def _nested_zeros(func, *args, **kwargs):
     return NestedTensor(torch.zeros([sum_offsets, *Ds], **new_kwargs), offsets)
 
 @register_jagged_func(
-    torch.ops.aten._nested_empty.default,
-    "size: any, dummy: jt, dtype: any?, layout: any?, device: any?, pin_memory: any?, memory_format: any?",
+    torch.ops.aten.new_empty.default,
+    "self: jt, size: any, dtype: any?, layout: any?, device: any?, pin_memory: any?",
 )
-def _nested_empty(func, *args, **kwargs):
-    print("empty")
+def new_empty(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    new_kwargs.pop("dummy")
+    new_kwargs.pop("input")
     # TODO: don't assume that the ragged_idx == 1
     _unused_B, singleton, *Ds = new_kwargs.pop("size")
     offsets = singleton.node.singleton_values()
