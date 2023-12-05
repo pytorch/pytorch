@@ -405,7 +405,9 @@ def _load_model_state_dict(
     with info.fsdp_context():
         return cast(
             _IncompatibleKeys,
-            _state_dict_fn(model, "load_state_dict")(state_dict, strict=info.strict),
+            _state_dict_fn(model, "load_state_dict")(
+                state_dict=state_dict, strict=info.strict
+            ),
         )
 
 
@@ -562,7 +564,7 @@ def _load_optim_state_dict(
         # order in optim.param_groups[idx][PARAMS] is the same as the one in
         # optim_state_dict[PG][idx][PARAMS].
         _init_optim_state(optim)
-        _state_dict_fn(optim, "load_state_dict")(optim_state_dict)
+        _state_dict_fn(optim, "load_state_dict")(state_dict=optim_state_dict)
 
 
 def get_model_state_dict(
@@ -938,7 +940,7 @@ def _patch_model_state_dict(
     )
 
     def load_state_dict_call(state_dict: Dict[str, Any]):
-        _load_state_dict_call(model_state_dict=state_dict)[1]
+        _load_state_dict_call(model_state_dict=state_dict)
 
     model.load_state_dict = load_state_dict_call
 
@@ -1001,6 +1003,11 @@ def _patch_optimizer_state_dict(
 
     _patched_state_dict.add(state_dict_call)
     _patched_state_dict.add(load_state_dict_call)
+    optimizers = (
+        (optimizers,)
+        if isinstance(optimizers, torch.optim.Optimizer)
+        else tuple(optimizers)
+    )
     for optim in optimizers:
         optim.state_dict = state_dict_call
         optim.load_state_dict = load_state_dict_call
