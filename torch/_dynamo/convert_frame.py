@@ -685,6 +685,9 @@ def _compile(
                     "backend_compile", None
                 )
                 non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
+                compliant_custom_ops = {
+                    op.__qualname__ for op in output.compliant_custom_ops
+                }
             else:
                 guard_count = None
                 graph_op_count = None
@@ -693,6 +696,7 @@ def _compile(
                 entire_frame_compile_time = None
                 backend_compile_time = None
                 non_compliant_ops = set({})
+                compliant_custom_ops = set({})
             metrics = CompilationMetrics(
                 frame_key,
                 code.co_name,
@@ -708,6 +712,7 @@ def _compile(
                 backend_compile_time,
                 fail_reason,
                 non_compliant_ops,
+                compliant_custom_ops,
             )
             log_compilation_event(metrics)
 
