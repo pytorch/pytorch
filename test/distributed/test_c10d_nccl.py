@@ -3700,7 +3700,7 @@ class NCCLTraceTest(MultiProcessTestCase):
             torch.cuda.synchronize(device=device)
 
 class NCCLTraceTestShortTimeout(NCCLTraceTest):
-    timeout_sec = 3
+    timeout_sec = 1
 
     def setUp(self):
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '10'
@@ -3727,16 +3727,26 @@ class NCCLTraceTestShortTimeout(NCCLTraceTest):
     def _trace_name(self, rank):
         return self._trace_basename() + str(rank)
 
+    def _check_return_codes(self, elapsed_time):
+        # the base test infra assumes processes exit with matching return codes,
+        # but we want rank0 to abort and rank1 to exit cleanly in this test
+        self.assertEqual(self.processes[0].exitcode, -6)
+        self.assertEqual(self.processes[1].exitcode, 0)
+
+    def _wait_process(self, rank, timeout):
+        try:
+            self.processes[rank].join(timeout)
+            return self.processes[rank].exitcode
+        except TimeoutError:
+            return None
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_timeout_dumps(self):
         if self.rank == self.MAIN_PROCESS_RANK:
-            for c in self.children_pipes:
-                self.assertEqual(c.recv(), 'next')
-            for c in self.children_pipes:
-                c.send('next')
-
-            # allow extra time for both timeout interval and dump process
+            # wait for rank0 to crash before looking for its output file
+            # we rely on rank0 holding off its abort long enough to dump the debug info
+            self.assertEqual(self._wait_process(0, timeout=30), -6)
             with open(self._trace_name(rank=0), 'rb') as f:
                 t = pickle.load(f)
                 self.assertEqual(len(t), 2)
@@ -3758,20 +3768,9 @@ class NCCLTraceTestShortTimeout(NCCLTraceTest):
             if self.rank == 0:
                 pg.allreduce(a).wait()
 
+            # rank 0 will crash before it passes the sync, but rank1 will exit quickly and cleanly
+            torch.cuda.synchronize()
 
-            if self.rank == 0:
-                # we expect our trace file to be written, but it happens asynchronously.
-                # just ensure we produce a file and it's unpickleable. then let the parent
-                # proceed and validate the file.
-                for _ in range(4):
-                    try:
-                        with open(self._trace_file(self.rank), 'rb') as f:
-                            pickle.load(f)
-                    except Exception:
-                        time.sleep(NCCLTraceTestShortTimeout.timeout_sec)
-
-            self.parent.send('next')
-            self.assertEqual('next', self.parent.recv())
 
 if __name__ == "__main__":
     assert (

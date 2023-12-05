@@ -188,10 +188,8 @@ class ProcessGroupNCCLNoHeartbeatCaught
   }
 
   void forceTryWriteDebugInfo() {
-    auto thread = tryWriteDebugInfo();
-    if (thread) {
-      thread->join();
-    }
+    auto& fut = tryWriteDebugInfo();
+    fut.wait();
   }
 
  protected:
