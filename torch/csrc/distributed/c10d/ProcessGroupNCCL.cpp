@@ -707,7 +707,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, false));
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
-  ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
+  ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 20000);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
@@ -938,32 +938,8 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
 }
 
-// TODO this bit should be generalized, maybe stuck as a general 'c10' helper
-// template <typename Function>
-// std::future<typename std::result_of<Function()>::type> launchAsync(Function&&
-// func) {
-//     using ReturnType = typename std::result_of<Function()>::type;
-
-//     // Create a promise and a future
-//     std::promise<ReturnType> resultPromise;
-//     std::future<ReturnType> resultFuture = resultPromise.get_future();
-
-//     // Launch a thread to perform the work
-//     std::thread workerThread([promise = std::move(resultPromise), func =
-//     std::forward<Function>(func)]() mutable {
-//         try {
-//             // Set the result in the promise
-//             promise.set_value(func());
-//         } catch (...) {
-//             // Handle exceptions if necessary
-//         }
-//     });
-
-//     // Detach the thread to allow it to run independently
-//     workerThread.detach();
-
-//     return resultFuture;
-// }
+// TODO this launcher should be generalized, maybe stuck as a general 'c10'
+// helper
 std::future<bool> ProcessGroupNCCL::launchAsyncDebugDump() {
   std::promise<bool> resultPromise;
   std::future<bool> resultFuture = resultPromise.get_future();
@@ -982,11 +958,7 @@ std::future<bool> ProcessGroupNCCL::launchAsyncDebugDump() {
 
   return resultFuture;
 }
-/*
-1 create a future/promise that runs the debug dumper
-2 ensure only one dump attempt succeeds
-3 wait for a maximum time for the future to complete, but exit asap
-*/
+
 std::future<bool>& ProcessGroupNCCL::tryWriteDebugInfo() {
   // TODO do we need the mutex or is static init thread safe?
   std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);

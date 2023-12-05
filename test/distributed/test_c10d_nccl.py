@@ -3701,11 +3701,10 @@ class NCCLTraceTest(MultiProcessTestCase):
                 pg.allreduce(a).wait()
             torch.cuda.synchronize(device=device)
 
-class NCCLTraceTestShortTimeout(NCCLTraceTest):
+class NCCLTraceTestDumpOnTimeout(NCCLTraceTest):
     timeout_sec = 1
 
     def setUp(self):
-        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '10'
         self.tempdir = tempfile.TemporaryDirectory()
         # will be cleaned up (reliably?) on gc?
         os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"] = self._trace_basename()
@@ -3718,7 +3717,7 @@ class NCCLTraceTestShortTimeout(NCCLTraceTest):
             world_size=self.world_size,
             rank=self.rank,
             store=store,
-            timeout=timedelta(seconds=NCCLTraceTestShortTimeout.timeout_sec))
+            timeout=timedelta(seconds=NCCLTraceTestDumpOnTimeout.timeout_sec))
         pg = c10d.distributed_c10d._get_default_group()
         return pg
 
