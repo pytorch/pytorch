@@ -77,8 +77,8 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             )
         else:
             mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
-            intra_node_pg = mesh_2d.get_dim_groups(mesh_dim=1)
-            inter_node_pg = mesh_2d.get_dim_groups(mesh_dim=0)
+            intra_node_pg = mesh_2d.get_group(mesh_dim=1)
+            inter_node_pg = mesh_2d.get_group(mesh_dim=0)
             model = FSDP(
                 DenseModel().cuda(),
                 process_group=(intra_node_pg, inter_node_pg),

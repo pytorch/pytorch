@@ -2563,7 +2563,7 @@ class TestHelperModules:
             x = self.bn(x)
             return self.relu(x)
 
-    class Conv1dWithConv2d(torch.nn.Module):
+    class Conv2dThenConv1d(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.conv1d = torch.nn.Conv1d(3, 3, 3)
@@ -2574,6 +2574,9 @@ class TestHelperModules:
             x = x.squeeze(0)
             x = self.conv1d(x)
             return x
+
+        def example_inputs(self):
+            return (torch.randn(1, 3, 5, 5),)
 
     class Conv2dWithCat(torch.nn.Module):
         def __init__(self):
