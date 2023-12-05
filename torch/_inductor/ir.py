@@ -6590,6 +6590,10 @@ class Wait(ExternKernelAlloc):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].codegen_reference()]
 
+    def get_mutation_names(self):
+        # The generated `_wait_tensor` op mutates the input tensor
+        return [self.inputs[0].codegen_reference()]
+
 
 class CollectiveKernel(ExternKernel):
     """
