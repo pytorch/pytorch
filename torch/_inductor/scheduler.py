@@ -1701,7 +1701,7 @@ class Scheduler:
         Mutates self.nodes to combine nodes into FusedSchedulerNodes.
 
         This relies on two key functions to control the logic:
-            - self.can_fuses(): checks if a fusion is legal
+            - self.can_fuse(): checks if a fusion is legal
             - self.score_fusion(): assigns priority to a given fusion
         """
         fused_nodes = set(self.nodes)
@@ -1713,7 +1713,9 @@ class Scheduler:
             ):
                 if not self.speedup_by_fusion(node1, node2):
                     continue
-                fusion_log.debug("fusing %s with %s", node1.get_name(), node2.get_name())
+                fusion_log.debug(
+                    "fusing %s with %s", node1.get_name(), node2.get_name()
+                )
                 node3 = fuse(node1, node2)
                 fused_nodes.remove(node1)
                 fused_nodes.remove(node2)
@@ -1769,6 +1771,7 @@ class Scheduler:
                 check_all_pairs(node_grouping)
 
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
+        fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
 
     def will_fusion_create_cycle(self, node1, node2):
