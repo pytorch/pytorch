@@ -1470,6 +1470,9 @@ class BuiltinVariable(VariableTracker):
         else:
             unimplemented(f"call_id with args {args}")
 
+    def call_deepcopy(self, tx, x):
+        unimplemented(f"copy.deepcopy {repr(x)}")
+
     def _comparison(self, tx, left, right):
         """
         Used to implement comparison operators for different types.
