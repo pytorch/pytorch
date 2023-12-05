@@ -158,9 +158,8 @@ class SuperVariable(VariableTracker):
         ):
             assert not kwargs and len(args) == 2
             k = variables.ConstDictVariable.get_key(args[0])
-
-            self.objvar.items[k] = args[1]
             tx.output.side_effects.mutation(self)
+            self.objvar.items[k] = args[1]
             return variables.ConstantVariable.create(None)
         else:
             unimplemented(f"non-function or method super: {inner_fn}")

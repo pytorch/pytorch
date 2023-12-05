@@ -353,8 +353,9 @@ class BuiltinVariable(VariableTracker):
                 # Handler doesn't apply
                 return None
 
-            a.items.extend(b.unpack_var_sequence(tx))
+            seq = b.unpack_var_sequence(tx)
             tx.output.side_effects.mutation(a)
+            a.items.extend(seq)
             return a
 
         list_like_iadd_handlers = [

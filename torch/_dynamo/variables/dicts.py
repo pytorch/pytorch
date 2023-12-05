@@ -153,8 +153,8 @@ class ConstDictVariable(VariableTracker):
             and ConstDictVariable.is_valid_key(args[0])
             and self.mutable_local
         ):
-            var = self.items.pop(ConstDictVariable.get_key(args[0]))
             tx.output.side_effects.mutation(self)
+            var = self.items.pop(ConstDictVariable.get_key(args[0]))
             return var
         elif (
             name == "update"
@@ -162,9 +162,9 @@ class ConstDictVariable(VariableTracker):
             and isinstance(args[0], ConstDictVariable)
             and self.mutable_local
         ):
+            tx.output.side_effects.mutation(self)
             self.items.update(args[0].items)
             self.items.update(kwargs)  # all keys in kwargs are valid (`str`s)
-            tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         elif (
             name == "update"
@@ -179,12 +179,12 @@ class ConstDictVariable(VariableTracker):
             )
             and self.mutable_local
         ):
+            tx.output.side_effects.mutation(self)
             for x in args[0].unpack_var_sequence(tx):
                 k, v = x.unpack_var_sequence(tx)
                 assert ConstDictVariable.is_valid_key(k)
                 self.items[ConstDictVariable.get_key(k)] = v
             self.items.update(kwargs)  # all keys in kwargs are valid (`str`s)
-            tx.output.side_effects.mutation(self)
             return ConstantVariable.create(None)
         elif (
             name in ("get", "__getattr__")
@@ -276,8 +276,8 @@ class DefaultDictVariable(ConstDictVariable):
                     if istensor(k):
                         tx.store_global_weakref(global_key_name(k), k)
                     default_var = self.default_factory.call_function(tx, [], {})
-                    self.items[k] = default_var
                     tx.output.side_effects.mutation(self)
+                    self.items[k] = default_var
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)

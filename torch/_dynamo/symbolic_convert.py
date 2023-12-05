@@ -1413,8 +1413,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ConstDictVariable)
         assert obj.mutable_local
-        obj.items[k.as_python_constant()] = v
         self.output.side_effects.mutation(obj)
+        obj.items[k.as_python_constant()] = v
 
     def SET_ADD(self, inst):
         v = self.pop()
