@@ -490,6 +490,20 @@ def apply_chunking_to_forward(forward_fn, *input_tensors):
     return forward_fn(*input_tensors)
 
 
+def _validate_model_kwargs(fn, model_kwargs):
+    # simplified from transformers.generation.utils._validate_model_kwargs
+    unused_model_args = []
+    model_args = set(inspect.signature(fn).parameters)
+    for key, value in model_kwargs.items():
+        if value is not None and key not in model_args:
+            unused_model_args.append(key)
+    if unused_model_args:
+        raise ValueError(
+            f"The following `model_kwargs` are not used by the model: {unused_model_args} (note: typos in the"
+            " generate arguments will also show up in this list)"
+        )
+
+
 class FakeMamlInner(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -2416,6 +2430,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             y = torch.randn(4, requires_grad=b)
             self.assertEqual(f(x, x), opt_f(x, x))
             self.assertEqual(f(x, y), opt_f(x, y))
+
+    def test_validate_model_kwargs(self):
+        cnt = CompileCounter()
+
+        def f1(a, b):
+            return torch.sin(a) + torch.cos(b)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f2(**kwargs):
+            _validate_model_kwargs(f1, kwargs)
+            return f1(**kwargs)
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        self.assertEqual(f2(a=x, b=y), f1(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 3)
 
     def test_swin_base_tensor_attr(self):
         class Foo(torch.nn.Module):
