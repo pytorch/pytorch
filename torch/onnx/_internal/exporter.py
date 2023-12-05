@@ -692,7 +692,7 @@ class ONNXProgram:
         Args:
             args: The positional inputs to the model.
             kwargs: The keyword inputs to the model.
-            model: The PyTorch model  to fetch state from.
+            model: The PyTorch model to fetch state from.
             options: The options to use for running the model with ONNX Runtime.
 
         Returns:
