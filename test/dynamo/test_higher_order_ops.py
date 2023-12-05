@@ -2709,7 +2709,7 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
+            {".*torch.func.grad with body that accepts non-Tensors as input": 2},
         )
         self.assertEqual(actual, expected)
 
@@ -3244,7 +3244,7 @@ class GraphModule(torch.nn.Module):
             self,
             dict(counters["graph_break"]),
             {
-                ".*HigherOrderOperator with body that accepts non-Tensors as input": 2,
+                ".*torch.vmap with body that accepts non-Tensors as input": 2,
                 "Unsupported: meta converter nyi with fake tensor propagation.": 1,
             },
         )
