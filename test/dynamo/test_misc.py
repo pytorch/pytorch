@@ -415,6 +415,37 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             del torch.ops.mylib.bar3
             del lib
 
+    def test_generate_trivial_abstract_impl(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor x, Tensor[] y, Tensor(a!)? z, SymInt w) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y, z, w):
+                x + y[0] + w
+                return
+
+            def f(x, y, z, w):
+                return torch.ops.mylib.foo(x, y, z, 2)
+
+            x = torch.randn(3)
+            y = (torch.randn(3), torch.randn(3))
+            z = torch.randn(3)
+            w = torch.randn(3)
+            args = (x, y, z, w)
+
+            output = torch.compile(f, backend="eager", fullgraph=True)(*args)
+            self.assertEqual(output, None)
+        finally:
+            del torch.ops.mylib.foo
+            del lib
+
     def test_can_auto_functionalize(self):
         from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 
