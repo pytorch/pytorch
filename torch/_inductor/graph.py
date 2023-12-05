@@ -522,6 +522,7 @@ class GraphLowering(torch.fx.Interpreter):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
+        # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
         if not isinstance(buffer, ir.ComputedBuffer) or not buffer.is_zero_elements():
             self.add_device_info(buffer.get_device())
         return name
