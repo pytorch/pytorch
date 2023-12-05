@@ -5035,19 +5035,6 @@ Examples:
     >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
     >>>     F.scaled_dot_product_attention(query,key,value)
 
-    Using Attention Biases:
-
-.. code-block:: python
-
-    from torch.nn.utils.attention import CausalBias
-
-    bsz, num_heads, seqlen_q, seqlen_kv, head_dim = 32, 8, 4, 12, 8
-    q = torch.randn(bsz, num_heads, seqlen_q, head_dim, device="cuda", dtype=torch.float16)
-    k = torch.randn(bsz, num_heads, seqlen_kv, head_dim, device="cuda", dtype=torch.float16)
-    v = torch.randn(bsz, num_heads, seqlen_kv, head_dim, device="cuda", dtype=torch.float16)
-    bias = CausalBias.lower_right(seqlen_q, seqlen_kv)
-
-    out = F.scaled_dot_product_attention(q, k, v, bias)
 
 .. _FlashAttention-2\: Faster Attention with Better Parallelism and Work Partitioning:
     https://arxiv.org/abs/2307.08691
