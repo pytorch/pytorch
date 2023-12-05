@@ -313,8 +313,11 @@ class HigherOrderOperator(OperatorBase):
         if functionality_key == torch._C.DispatchKey.PreDispatch:
             from torch.utils._python_dispatch import _pop_mode_temporarily
 
-            if _len_torch_dispatch_stack_pre_dispatch() > 0 and not torch._C._dispatch_tls_is_dispatch_key_excluded(
-                DispatchKey.Python
+            if (
+                _len_torch_dispatch_stack_pre_dispatch() > 0
+                and not torch._C._dispatch_tls_is_dispatch_key_excluded(
+                    DispatchKey.Python
+                )
             ):
                 curr_mode = _get_current_dispatch_mode_pre_dispatch()
                 assert (
@@ -662,9 +665,6 @@ class OpOverload(OperatorBase):
 
     # This implements the pre-computation logic for the Python dispatcher.
     def _get_dispatch(self, key):
-        # print("HIT DISPATCH", self, key, torch._C._dispatch_tls_local_include_set(), torch._C._dispatch_tls_local_exclude_set())
-        # for i in range(0, torch._C._len_torch_dispatch_stack()):
-        #     print("AVAILABLE MODES: ", torch._C._get_dispatch_stack_at(i))
         # This is only called upon a cache miss
         assert key not in self._dispatch_cache, f"{self} {key}"
 
@@ -694,7 +694,6 @@ class OpOverload(OperatorBase):
             add_cached_op(self)
             return handler
 
-        cache_result = True
         functionality_key = torch._C._to_functionality_key(key)  # type: ignore[attr-defined]
         if functionality_key == torch._C.DispatchKey.PreDispatch:
             curr_stack_len = _len_torch_dispatch_stack_pre_dispatch()
@@ -723,22 +722,15 @@ class OpOverload(OperatorBase):
                             (args, kwargs.values())
                         )
                         for a in args_flattened:
-                            # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
-                            # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
-                            # where in one case we only include tensors with the python key, and in another
-                            # we include **all** tensors.
                             if isinstance(a, torch.Tensor) and torch._C._dispatch_keys(
                                 a
                             ).has(torch._C.DispatchKey.Python):
                                 overload_types.append(type(a))
-                        # TODO: check that I got these args correct (in C++, we pass in "0000"??)
                         return curr_mode.__torch_dispatch__(
                             self, overload_types, args, kwargs
                         )
 
                 return handler
-            else:
-                cache_result = False
 
         elif functionality_key in mode_stack_per_key():
             curr_stack = mode_stack_per_key()[functionality_key]
@@ -776,9 +768,9 @@ class OpOverload(OperatorBase):
                 # Also, not caching means that we don't have to reset the cache when any existing
                 # modes go out of scope (which in of itself takes time to loop through all operators).
                 return handler
-            else:
-                # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
-                cache_result = False
+
+        # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
+        cache_result = not functionality_key in mode_stack_per_key()
 
         final_key = resolve_key(self, key)
 

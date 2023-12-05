@@ -56,7 +56,7 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.aten.numel.default,  # type: ignore[has-type]
         torch.ops.aten.sym_numel.default,  # type: ignore[has-type]
         torch.ops.aten.dim.default,  # type: ignore[has-type]
-        torch.ops.prim.device.default,
+        torch.ops.prim.device.default,  # type: ignore[has-type]
     ]
 
     def __new__(cls, elem):
@@ -146,7 +146,7 @@ class FunctionalTensor(torch.Tensor):
         # - If we use the default tensor.__new__(), we have another problem: it returns inner_tensor.alias(),
         #   which causes every subclass created above autograd to have autograd view metadata
         #   (in addition to also being a FunctionalTensorWrapper).
-        #breakpoint()
+        # breakpoint()
         raise RuntimeError(
             "Attempting to use FunctionalTensor on its own. Instead, please use it with a corresponding FunctionalTensorMode()"
         )
@@ -279,6 +279,16 @@ class FunctionalTensorMode(TorchDispatchMode):
             FunctionalTensor, unwrap, (args, kwargs)
         )
 
+        # Expectation: functionalization should not **already** be enabled above our mode.
+        # Why would that be bad? when we return a FunctionalTensor here, we don't want functionalization
+        # to run above this mode and further wrap that output in **another** C++ FunctionalTensorWrapper.
+        is_included = torch._C._dispatch_tls_is_dispatch_key_included(
+            torch._C.DispatchKey.Functionalize
+        )
+        is_excluded = torch._C._dispatch_tls_is_dispatch_key_excluded(
+            torch._C.DispatchKey.Functionalize
+        )
+        assert is_excluded or not is_included
         include_to_set = (
             torch._C._dispatch_tls_local_include_set()
             | torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
@@ -295,21 +305,34 @@ class FunctionalTensorMode(TorchDispatchMode):
             try:
                 # By default for python functionalization (for AOTAutograd), we reapply views.
                 old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
-                from torch._ops import mode_stack_per_key
 
                 # Sometimes these functions cannot be directly dispatched to functionalize key
                 # because args are sometimes not functional tensors for some reason?
                 if func in FunctionalTensor.metadata_fns:
                     outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
-                    outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
+                    outs_wrapped = pytree.tree_map_only(
+                        torch.Tensor, wrap, outs_unwrapped
+                    )
                 else:
                     outs_unwrapped = func._op_dk(
-                        torch._C.DispatchKey.Functionalize, *args_unwrapped, **kwargs_unwrapped
+                        torch._C.DispatchKey.Functionalize,
+                        *args_unwrapped,
+                        **kwargs_unwrapped,
                     )
-                    outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
+                    outs_wrapped = pytree.tree_map_only(
+                        torch.Tensor, wrap, outs_unwrapped
+                    )
             finally:
                 torch._disable_functionalization()
                 torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
+
+        is_included = torch._C._dispatch_tls_is_dispatch_key_included(
+            torch._C.DispatchKey.Functionalize
+        )
+        is_excluded = torch._C._dispatch_tls_is_dispatch_key_excluded(
+            torch._C.DispatchKey.Functionalize
+        )
+        assert is_excluded or not is_included
 
         if (
             # If no outputs are our functional subclass, then don't try to fix up aliasing

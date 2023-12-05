@@ -227,13 +227,18 @@ and output of type {type(ret)}. But expected types to match."""
                 #     but we do *not* want it to change the sizes/strides that were compute for out.
 
                 # Don't dispatch to predispathc
-                with torch._C._ForceDispatchKeyGuard(torch._C._dispatch_tls_local_include_set(), torch._C._dispatch_tls_local_exclude_set().add(torch._C.DispatchKey.PreDispatch)):
+                with torch._C._ForceDispatchKeyGuard(
+                    torch._C._dispatch_tls_local_include_set(),
+                    torch._C._dispatch_tls_local_exclude_set().add(torch._C.DispatchKey.PreDispatch)
+                ):
                     if isinstance(ret, list):
                         for r in ret:
                             torch.ops.aten.set_.source_Storage_storage_offset(r, arg.untyped_storage(), r.storage_offset(), r.shape)
                     else:
                         assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
-                        torch.ops.aten.set_.source_Storage_storage_offset(ret, arg.untyped_storage(), ret.storage_offset(), ret.shape)
+                        torch.ops.aten.set_.source_Storage_storage_offset(
+                            ret, arg.untyped_storage(), ret.storage_offset(), ret.shape
+                        )
             finally:
                 torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
 
