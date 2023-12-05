@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import TYPE_CHECKING
+from typing import Any, Dict, TYPE_CHECKING
 
 import torch
 
@@ -79,17 +79,37 @@ pattern_matcher = True
 post_grad_custom_pre_pass = None
 post_grad_custom_post_pass = None
 
+# Registers a custom pregrad pass. Note that the pre-grad IR is 1.
+# non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
+# use post-grad passes.
+pre_grad_custom_pass = None
+
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
 efficient_conv_bn_eval_fx_passes = False
 
-# enable pattern match with group fusion (using fbgemm)
+# Deprecated
 group_fusion = False
 
-# enable pattern match with batch fusion (using torch op)
+# Deprecated
 batch_fusion = True
+
+# Pre grad group/batch fusion and options in order, set to empty dict to disable fusion.
+# Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions()` to see available fusions.
+pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
+    "batch_linear": {},
+    "batch_linear_lhs": {},
+    "batch_layernorm": {},
+    "batch_tanh": {},
+    "batch_relu": {},
+    "batch_sigmoid": {},
+}
+
+# Post grad group/batch fusion and options, set to empty dict to disable fusion.
+# Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
+post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
@@ -179,6 +199,10 @@ coordinate_descent_search_radius = int(
 )
 
 layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
+
+
+force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
+
 
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
@@ -333,6 +357,9 @@ _raise_error_for_testing = False
 _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
+# Specify a file where we print out the profiling results.
+# None means we do not dump results to a file.
+profile_bandwidth_output = os.environ.get("TORCHINDUCTOR_PROFILE_OUTPUT", None)
 
 # TODO: remove later
 disable_cpp_codegen = False
@@ -399,6 +426,9 @@ class cpp:
     # Make scatter_reduce fallback when reduce is sum to avoid performance regression
     # using atomic_add.
     fallback_scatter_reduce_sum = True
+
+    # Use funsafe-math-optimizations when compiling
+    enable_unsafe_math_opt_flag = False
 
 
 # config specific to codegen/triton.py
@@ -601,6 +631,16 @@ class trace:
 
     # SVG figure showing fx with fusion
     draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
+
+    # We draw our fx graphs with the "record" shape attribute by default.
+    # Sometimes, when the graph is very complex, we may hit dot errors like below:
+    #   "flat edge between adjacent nodes one of which has a record shape -
+    #    replace records with HTML-like labels"
+    # and thus fail to generate a graph. So, let's give the user an option
+    # to specify the shape attribute for the dot graph. For example, passing
+    # INDUCTOR_DOT_GRAPH_SHAPE_SVG = "none" would let us generate HTML-like lables
+    # to workaround the above failure.
+    dot_graph_shape = os.environ.get("INDUCTOR_DOT_GRAPH_SHAPE_SVG", None)
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False

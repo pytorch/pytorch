@@ -708,6 +708,7 @@ void GraphTask::exec_post_processing() {
       // If leaf_stream.device_index() happens to be for a new device,
       // operator* on the c10::nullopt should throw an error.
       const auto caller_current_stream =
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           *caller_current_streams_[leaf_stream.device_index()];
 
       if (caller_current_stream != leaf_stream) {
