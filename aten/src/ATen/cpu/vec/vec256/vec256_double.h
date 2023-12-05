@@ -169,6 +169,9 @@ public:
   Vectorized<double> expm1() const {
     return Vectorized<double>(Sleef_expm1d4_u10(values));
   }
+  Vectorized<double> exp_u20() const {
+    return Vectorized<double>(Sleef_expd4_u10(values));
+  }
   Vectorized<double> fmod(const Vectorized<double>& q) const {
     return Vectorized<double>(Sleef_fmodd4(values, q));
   }

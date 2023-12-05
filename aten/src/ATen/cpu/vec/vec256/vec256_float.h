@@ -204,6 +204,9 @@ public:
   Vectorized<float> expm1() const {
     return Vectorized<float>(Sleef_expm1f8_u10(values));
   }
+  Vectorized<float> exp_u20() const {
+    return Vectorized<float>(Sleef_expf8_u10(values));
+  }
   Vectorized<float> fmod(const Vectorized<float>& q) const {
     return Vectorized<float>(Sleef_fmodf8(values, q));
   }
