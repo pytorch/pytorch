@@ -355,8 +355,24 @@ def all_to_all_single(
 
 def batch_isend_irecv(p2p_op_list: List[c10d.P2POp]) -> List[torch.Tensor]:
     """
-    # TODO: fill
+    Send or Receive a batch of tensors asynchronously and return a list of requests.
+
+    This is the functional implementation of :func:`~torch.distributed.batch_isend_irecv`.
+
+    .. warning:: Gloo backend is not supported.
+
+    Args:
+        p2p_op_list: A list of point-to-point operations(type of each operator is
+            ``torch.distributed.P2POp``). The order of the isend/irecv in the list
+            matters and it needs to match with corresponding isend/irecv on the
+            remote end.
+
+    Returns:
+        A list of Received Tensors
+
     """
+
+    assert dist.get_backend() != dist.Backend.GLOO, "Gloo backend is not supported for functional `batch_isend_irecv`"
 
     # we need to deconstruct P2POp objects for dispatcher compatability and to ensure this
     # method is functional
@@ -373,10 +389,11 @@ def batch_isend_irecv(p2p_op_list: List[c10d.P2POp]) -> List[torch.Tensor]:
         tensors.append(p2p_op.tensor)
         peers.append(p2p_op.peer)
 
+        # group is not allowed in the dispatcher, and cannot be optional
         expanded_tag, rankset, group_size = _expand_group(
-            p2p_op.group or dist.GroupMember.WORLD,
-            p2p_op.tag
+            p2p_op.group or c10d._get_default_group()
         )
+
         expanded_tags.append(expanded_tag)
         ranksets.append(rankset)
         group_sizes.append(group_size)
@@ -619,14 +636,15 @@ def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_
 
 def _batch_isend_irecv_meta(p2p_op_list, *args):
     def mk_out_tensor(p2p_op):
-        input = [p2p_op[2]]
+        input = p2p_op[2]
+        group_size = p2p_op[5]
 
         out_size = list(input.size())
         out_size[0] //= group_size
         out_tensor = input.new_empty(out_size)
         return out_tensor
 
-    return [mk_out_tensor(t) for t in inputs]
+    return [mk_out_tensor(p2p_op) for p2p_op in p2p_op_list]
 
 # NB: We often say all_to_all has dynamic output size, but this is not
 # technically true: instead, what typically happens is you manually
