@@ -104,6 +104,7 @@ from .distributed import (
     PlacementClassVariable,
     PlacementVariable,
     ProcessGroupVariable,
+    # FSDPAllocFreeStorageUtilVariable,
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
@@ -735,6 +736,9 @@ class VariableBuilder:
                 skipfiles.check_verbose(value, is_inlined_call=True).reason,
                 source=self.source,
             )
+        # elif FSDPAllocFreeStorageUtilVariable.match(value):
+        #     self.install_guards(GuardBuilder.FUNCTION_MATCH)
+        #     return FSDPAllocFreeStorageUtilVariable(value)
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             self.install_guards(GuardBuilder.CLOSURE_MATCH)
             return UserFunctionVariable(

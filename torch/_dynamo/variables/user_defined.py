@@ -189,17 +189,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             options = {"mutable_local": MutableLocal()}
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
 
-        if self.value == functools.partial:
-            if not args:
-                unimplemented("functools.partial malformed")
-            # The first arg, a callable (the ctor below will assert on types)
-            fn = args[0]
-            rest_args = args[1:]
-            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
-            # args and keywords
-            return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs, **options
-            )
         return super().call_function(tx, args, kwargs)
 
     def const_getattr(self, tx, name):
@@ -335,15 +324,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     tx, args, kwargs
                 )
 
-            # This is for cases when we have sus keys and we cannot make a ConstDictVariable
-            # if name == "__contains__" and isinstance(self.value, dict):
-            #     from .distributed import ProcessGroupVariable
-
-            #     if isinstance(
-            #         args[0],
-            #         (UserDefinedObjectVariable, ConstantVariable, ProcessGroupVariable),
-            #     ):
-            #         return ConstantVariable(args[0].value in self.value, **options)
             if method is list.__len__ and self.source and not (args or kwargs):
                 install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
                 return ConstantVariable(len(self.value))

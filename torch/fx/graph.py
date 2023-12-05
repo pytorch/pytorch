@@ -524,8 +524,14 @@ class CodeGen:
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
 
                 # use string as annotation, to make it valid python code
+
                 if isinstance(meta_val, FakeTensor):
-                    maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
+                    base = meta_val._base
+                    if base is not None:
+                        base_annotation = f" | base: {stringify_shape(base.shape)} "
+                    else:
+                        base_annotation = ""
+                    maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}{base_annotation}"'
                 elif isinstance(meta_val, py_sym_types):
                     maybe_type_annotation = f': "Sym({meta_val})"'
                 elif isinstance(meta_val, TensorMetadata):

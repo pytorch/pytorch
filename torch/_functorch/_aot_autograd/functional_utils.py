@@ -207,6 +207,10 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
             or abt.stride() != b.stride()
             or abt.storage_offset() != b.storage_offset()
         ):
+            print("as_strided:", b.size())
+            print("target_meta_tensor?", target_meta_tensor.size())
+            print("target_meta_tensor base?", target_meta_tensor._base.size())
+            print("aliased_base_tensor candidate?", aliased_base_tensor.size())
             reshaped_base_tensor = aliased_base_tensor.as_strided(
                 b.size(), b.stride(), b.storage_offset()
             )

@@ -158,6 +158,8 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
         if (
             not torch.distributed._functional_collectives.is_torchdynamo_compiling()
         ):
+            if not isinstance(size, torch.Size):
+                size = torch.Size(size)
             already_allocated = tensor._typed_storage()._size() == size.numel()
             if not already_allocated:
                 _p_assert(

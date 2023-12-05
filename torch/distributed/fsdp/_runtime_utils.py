@@ -1427,7 +1427,6 @@ def _register_post_backward_hook(
     already_registered = hasattr(flat_param, "_post_backward_hook_handle")
     if already_registered or not flat_param.requires_grad:
         return
-    # print("Flat param size at register?", flat_param.size())
     hook = functools.partial(_post_backward_hook, state, handle)
     hook_handle = flat_param.register_post_accumulate_grad_hook(hook)
     flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined]
