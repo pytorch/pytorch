@@ -110,6 +110,7 @@ def process_function(f: NativeFunction, all_fns: List[NativeFunction]) -> Option
             formals: List[str] = []
             exprs: List[str] = []
             requires_grad = "false"
+            check_memory_format = ""
             for arg in sig.arguments():
                 qualified_type = fully_qualified_type(arg.type)
                 if arg.default:
@@ -130,14 +131,15 @@ def process_function(f: NativeFunction, all_fns: List[NativeFunction]) -> Option
                 else:
                     if arg.name == "memory_format" and not include_memory_format:
                         # skip memory_format argument
+                        check_memory_format = "TORCH_CHECK(memory_format == c10::nullopt);"
                         continue
                     exprs.append(arg.name)
 
-            return formals, exprs, requires_grad
+            return formals, exprs, requires_grad, check_memory_format
 
         # new_like functions don't accept memory_format argument
-        formals, exprs_w_mf, requires_grad = get_formals_and_exprs(True)
-        _, exprs_wo_mf, _ = get_formals_and_exprs(False)
+        formals, exprs_w_mf, requires_grad, _ = get_formals_and_exprs(True)
+        _, exprs_wo_mf, _, check_memory_format = get_formals_and_exprs(False)
 
         def get_return_stmt(name, exprs):
             return f"return autograd::make_variable({name}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});"
@@ -146,7 +148,7 @@ def process_function(f: NativeFunction, all_fns: List[NativeFunction]) -> Option
             # symint signature is always the second one
             try_call_stmt = f"""\
 auto ret = c10::try_call_with_dummy([=](at::Tensor dummy) {{
-    TORCH_CHECK(memory_format == c10::nullopt);s
+    {check_memory_format}
     {get_return_stmt('dummy.' + new_fn_sig.name(), exprs_wo_mf)}
   }}, size);
   if (ret.has_value()) {{
