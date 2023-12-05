@@ -953,11 +953,14 @@ def _convert_scalars_to_attrs(model: torch.fx.GraphModule) -> torch.fx.GraphModu
             prefix = "_tensor_constant_"
             get_new_attr_name = get_new_attr_name_with_prefix(prefix)
             tensor_constant_name = get_new_attr_name(model)
-            model.register_buffer(tensor_constant_name, torch.tensor(float(args[i])))
+            float_tensor = torch.tensor(float(args[i]))
+            model.register_buffer(tensor_constant_name, float_tensor)
+            fake_mode = n.meta["val"].fake_mode
             with model.graph.inserting_before(n):
                 get_attr_node = model.graph.create_node(
                     "get_attr", tensor_constant_name, (), {}
                 )
+                get_attr_node.meta["val"] = fake_mode.from_tensor(float_tensor, static_shapes=True)
                 new_args.append(get_attr_node)
         n.args = tuple(new_args)
     model.recompile()
