@@ -5,6 +5,7 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from torch._dynamo.utils import detect_fake_mode
+from torch._utils_internal import print_graph
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -22,7 +23,8 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 from ..utils import is_cpu_device
-from .group_batch_fusion import group_batch_fusion_pre_grad_passes
+from .group_batch_fusion import group_batch_fusion_passes
+from .misc_patterns import numpy_compat_normalization
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
 
     if config.is_fbcode():
-        from .fb import split_cat as split_cat_fb  # type: ignore[import]  # noqa: F401
+        from . import fb  # type: ignore[attr-defined]  # noqa: F401
 
 
 def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
@@ -67,21 +69,23 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     if config.pattern_matcher:
         lazy_init()
         gm = fuse_fx(gm, example_inputs)
-        group_batch_fusion_pre_grad_passes(gm.graph)
+        numpy_compat_normalization(gm.graph)
+        group_batch_fusion_passes(gm.graph, pre_grad=True)
+        print_graph(gm.graph, "Before split cat in pre grad pass.")
         for pattern_matcher_pass in pattern_matcher_passes:
             pattern_matcher_pass.apply(gm.graph)
+            print_graph(
+                gm.graph,
+                f"Apply split cat pattern matcher {pattern_matcher_pass.__class__.__name__} in pre grad.",
+            )
 
+    if config.pre_grad_custom_pass is not None:
+        config.pre_grad_custom_pass(gm.graph)
     stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
 
-    if config.is_fbcode():
-        from torch._inductor.fb.utils import get_everpaste_url  # type: ignore[import]
-
-        log.info(
-            "Print graph after recompile in pre grad passes: %s",
-            get_everpaste_url(str(gm.graph)),
-        )
+    print_graph(gm.graph, "Aftre recompile in pre grad pass.")
 
     return gm
 

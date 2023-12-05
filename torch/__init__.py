@@ -56,6 +56,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
+    'sym_sqrt',
     'export', 'autocast', 'cond',
 ]
 
@@ -79,12 +80,6 @@ if sys.platform == 'win32':
 
     dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path]))
 
-    if all(not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths):
-        nvtoolsext_dll_path = os.path.join(
-            os.getenv('NVTOOLSEXT_PATH', os.path.join(pfiles_path, 'NVIDIA Corporation', 'NvToolsExt')), 'bin', 'x64')
-    else:
-        nvtoolsext_dll_path = ''
-
     from .version import cuda as cuda_version
     import glob
     if cuda_version and all(not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths):
@@ -95,7 +90,7 @@ if sys.platform == 'win32':
     else:
         cuda_path = ''
 
-    dll_paths.extend(filter(os.path.exists, [nvtoolsext_dll_path, cuda_path]))
+    dll_paths.extend(filter(os.path.exists, [cuda_path]))
 
     kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
     with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
@@ -187,7 +182,6 @@ def _load_global_deps() -> None:
             'cusolver': 'libcusolver.so.*[0-9]',
             'cusparse': 'libcusparse.so.*[0-9]',
             'nccl': 'libnccl.so.*[0-9]',
-            'nvtx': 'libnvToolsExt.so.*[0-9]',
         }
         is_cuda_lib_err = [lib for lib in cuda_libs.values() if(lib.split('.')[0] in err.args[0])]
         if not is_cuda_lib_err:
@@ -238,7 +232,7 @@ else:
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
 if TYPE_CHECKING:
-    import torch._C as _C
+    from . import _C as _C
 
 class SymInt:
     """
@@ -285,6 +279,9 @@ class SymInt:
         raise AssertionError("type stub not overridden")
 
     def __sym_float__(self):
+        raise AssertionError("type stub not overridden")
+
+    def __neg__(self):
         raise AssertionError("type stub not overridden")
 
     def __repr__(self):
@@ -411,8 +408,15 @@ def sym_not(a):
     Args:
         a (SymBool or bool): Object to negate
     """
+    import sympy
+    from .overrides import has_torch_function_unary, handle_torch_function
+
+    if has_torch_function_unary(a):
+        return handle_torch_function(sym_not, (a,), a)
     if hasattr(a, '__sym_not__'):
         return a.__sym_not__()
+    if isinstance(a, sympy.Basic):
+        return ~a  # type: ignore[operator]
     return not a
 
 def sym_float(a):
@@ -421,6 +425,10 @@ def sym_float(a):
     Args:
         a (SymInt, SymFloat, or object): Object to cast
     """
+    from .overrides import has_torch_function_unary, handle_torch_function
+
+    if has_torch_function_unary(a):
+        return handle_torch_function(sym_float, (a,), a)
     if isinstance(a, SymFloat):
         return a
     elif hasattr(a, '__sym_float__'):
@@ -434,6 +442,10 @@ def sym_int(a):
     Args:
         a (SymInt, SymFloat, or object): Object to cast
     """
+    from .overrides import has_torch_function_unary, handle_torch_function
+
+    if has_torch_function_unary(a):
+        return handle_torch_function(sym_int, (a,), a)
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
@@ -442,6 +454,10 @@ def sym_int(a):
 
 def sym_max(a, b):
     """ SymInt-aware utility for max()."""
+    from .overrides import has_torch_function, handle_torch_function
+
+    if has_torch_function((a, b)):
+        return handle_torch_function(sym_max, (a, b), a, b)
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_max__(b)
     elif isinstance(b, (SymInt, SymFloat)):
@@ -453,13 +469,31 @@ def sym_max(a, b):
 
 def sym_min(a, b):
     """ SymInt-aware utility for max()."""
+    from .overrides import has_torch_function, handle_torch_function
+
+    if has_torch_function((a, b)):
+        return handle_torch_function(sym_min, (a, b), a, b)
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_min__(b)
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
     return builtins.min(a, b)  # type: ignore[operator]
 
+# Drop in replacement for math.sqrt
+def sym_sqrt(a):
+    from .overrides import has_torch_function_unary, handle_torch_function
+
+    if has_torch_function_unary(a):
+        return handle_torch_function(sym_sqrt, (a,), a)
+    if hasattr(a, "__sym_sqrt__"):
+        return a.__sym_sqrt__()
+    return math.sqrt(a)
+
 def sym_ite(b, t, f):
+    from .overrides import has_torch_function, handle_torch_function
+
+    if has_torch_function((b, t, f)):
+        return handle_torch_function(sym_ite, (b, t, f), b, t, f)
     assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
@@ -713,6 +747,7 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         * :class:`torch.nn.ConvTranspose1d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
+        * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
@@ -755,7 +790,6 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
-        * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
@@ -1168,7 +1202,7 @@ from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage,
 class ByteStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1178,7 +1212,7 @@ class ByteStorage(_LegacyStorage):
 class DoubleStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1188,7 +1222,7 @@ class DoubleStorage(_LegacyStorage):
 class FloatStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1198,7 +1232,7 @@ class FloatStorage(_LegacyStorage):
 class HalfStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1208,7 +1242,7 @@ class HalfStorage(_LegacyStorage):
 class LongStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1218,7 +1252,7 @@ class LongStorage(_LegacyStorage):
 class IntStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1228,7 +1262,7 @@ class IntStorage(_LegacyStorage):
 class ShortStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1238,7 +1272,7 @@ class ShortStorage(_LegacyStorage):
 class CharStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1248,7 +1282,7 @@ class CharStorage(_LegacyStorage):
 class BoolStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1258,7 +1292,7 @@ class BoolStorage(_LegacyStorage):
 class BFloat16Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1268,7 +1302,7 @@ class BFloat16Storage(_LegacyStorage):
 class ComplexDoubleStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1278,7 +1312,7 @@ class ComplexDoubleStorage(_LegacyStorage):
 class ComplexFloatStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1288,7 +1322,7 @@ class ComplexFloatStorage(_LegacyStorage):
 class QUInt8Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1298,7 +1332,7 @@ class QUInt8Storage(_LegacyStorage):
 class QInt8Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1308,7 +1342,7 @@ class QInt8Storage(_LegacyStorage):
 class QInt32Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1318,7 +1352,7 @@ class QInt32Storage(_LegacyStorage):
 class QUInt4x2Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty
@@ -1328,7 +1362,7 @@ class QUInt4x2Storage(_LegacyStorage):
 class QUInt2x4Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
-        _warn_typed_storage_removal()
+        _warn_typed_storage_removal(stacklevel=3)
         return self._dtype
 
     @classproperty

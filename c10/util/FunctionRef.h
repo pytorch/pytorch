@@ -36,7 +36,7 @@ class function_ref;
 template <typename Ret, typename... Params>
 class function_ref<Ret(Params...)> {
   Ret (*callback)(intptr_t callable, Params... params) = nullptr;
-  intptr_t callable;
+  intptr_t callable{};
 
   template <typename Callable>
   static Ret callback_fn(intptr_t callable, Params... params) {
@@ -55,7 +55,7 @@ class function_ref<Ret(Params...)> {
           typename std::remove_reference<Callable>::type,
           function_ref>::value>::type* = nullptr,
       typename std::enable_if<std::is_convertible<
-          typename c10::invoke_result_t<Callable, Params...>,
+          typename std::invoke_result_t<Callable, Params...>,
           Ret>::value>::type* = nullptr)
       : callback(callback_fn<typename std::remove_reference<Callable>::type>),
         callable(reinterpret_cast<intptr_t>(&callable)) {}

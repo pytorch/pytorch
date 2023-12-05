@@ -109,6 +109,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
     void** ret_data_ptr // returns borrowed reference
 );
 
+// Get the nbytes of the underlying storage
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_storage_size(AtenTensorHandle tensor, int64_t* ret_size);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_sizes(
     AtenTensorHandle tensor,
     int64_t** ret_sizes // returns borrowed reference
@@ -229,6 +233,23 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle* ret0,
     AtenTensorHandle* ret1);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
+    AtenTensorHandle input,
+    AtenTensorHandle weight,
+    AtenTensorHandle bias, // optional argument
+    int64_t* stride_ptr,
+    int64_t stride_size,
+    int64_t* padding_ptr,
+    int64_t padding_size,
+    int64_t* dilation_ptr,
+    int64_t dilation_size,
+    int transposed,
+    int64_t* output_padding_ptr,
+    int64_t output_padding_size,
+    int64_t groups,
+    AtenTensorHandle* ret // returns new reference
+);
+
 // This function will create a new uninitialized tensor object
 // and its pointer is returned through *ret.
 AOTI_TORCH_EXPORT AOTITorchError
@@ -278,6 +299,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_repeat_interleave_Tensor(
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_check_inf_and_nan(AtenTensorHandle tensor);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_out(
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    int64_t dim,
+    AtenTensorHandle index,
+    AtenTensorHandle src);
 
 #ifdef USE_CUDA
 

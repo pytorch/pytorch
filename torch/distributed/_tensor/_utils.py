@@ -23,7 +23,7 @@ def compute_local_shape(
 
     if my_coordinate is None:
         # if rank not in the mesh, return empty shape
-        return ()
+        return (0,)
     else:
         local_shape = list(global_shape)  # start with global shape
         ndim = len(global_shape)
@@ -145,8 +145,10 @@ def compute_global_tensor_info(
         if placement.is_shard():
             shard_placement = cast(Shard, placement)
             if shard_placement.dim < 0:
-                # normalize shard dim to be positive
-                shard_placement.dim += len(tensor_shape)
+                raise AssertionError(
+                    "Shard placements should have negative dims normalized in "
+                    f"the user-facing APIs: {shard_placement}"
+                )
             shard_dim = shard_placement.dim
 
             assert (
