@@ -1,4 +1,4 @@
-# Owner(s): ["module: inductor"]
+# Owner(s): ["oncall: cpu inductor"]
 import functools
 import importlib
 import itertools
