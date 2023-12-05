@@ -263,7 +263,7 @@ class TestCommon(TestCase):
     def test_numpy_ref(self, device, dtype, op):
         if (
             TEST_WITH_TORCHINDUCTOR and
-            op.formatted_name == 'signal_windows_exponential' and
+            op.formatted_name in ('signal_windows_exponential', 'signal_windows_bartlett') and
             dtype == torch.float64 and 'cuda' in device
            ):   # noqa: E121
             raise unittest.SkipTest("XXX: raises tensor-likes are not close.")

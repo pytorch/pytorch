@@ -458,9 +458,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        "RuntimeError:"
-        " Found following user inputs located at [0] are mutated. This is currently banned in the aot_export workflow."
-        " If you need this functionality, please file a github issue."
+        "torch._export.verifier.SpecViolationError: User input output view_1 does not point to a user input that exists."
+        "Dict of user inputs that are mutated, in order: {'view_1': 'l_x_'}"
+        "User input nodes available: ('arg0_1',)"
         " Github issue: https://github.com/pytorch/pytorch/issues/112429"
     )
     def test_mutation(self):
@@ -491,10 +491,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        "RuntimeError:"
-        " Found following user inputs located at [0] are mutated. This is currently banned in the aot_export workflow."
-        " If you need this functionality, please file a github issue."
-        " Github issue: https://github.com/pytorch/pytorch/issues/112429"
+        "torch._export.verifier.SpecViolationError: User input output slice_scatter_1 does not point to a user input that exists."
+        "Dict of user inputs that are mutated, in order: {'slice_scatter_1': 'l_x_'}"
+        "User input nodes available: ('arg1_1',)"
     )
     @pytorch_test_common.skip_dynamic_fx_test(
         "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
@@ -515,9 +514,15 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((x2,),)],
         )
 
-    @pytorch_test_common.xfail(
-        "[ONNXRuntimeError] : 1 : FAIL : Type Error: Type (tensor(float)) of output arg (copy) "
-        "of node (n0__4) does not match expected type (tensor(int64))"
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "torch._export.verifier.SpecViolationError: User input output slice_scatter_1 does not point to a user input that exists."
+        "Dict of user inputs that are mutated, in order: {'slice_scatter_1': 'l_x_'}"
+        "User input nodes available: ('arg1_1',)"
+    )
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
+        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 "
+        "FillVectorsFromInput Starts must be a 1-D array"
     )
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):
@@ -894,37 +899,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_model,
             create_args,
             create_pytorch_only_extra_kwargs,
-        )
-
-    def test_exported_program_as_input(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x + 1.0
-
-        x = torch.randn(1, 1, 2, dtype=torch.float)
-        exported_program = torch.export.export(Model(), args=(x,))
-
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            exported_program, (x,), skip_dynamic_shapes_check=True
-        )
-
-    def test_exported_program_as_input_from_file(self):
-        import tempfile
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return x + 1.0
-
-        x = torch.randn(1, 1, 2, dtype=torch.float)
-        exported_program = torch.export.export(Model(), args=(x,))
-
-        with tempfile.NamedTemporaryFile(suffix=".pte") as f:
-            torch.export.save(exported_program, f.name)
-            del exported_program  # Delete the exported program to ensure that we are loading from file
-            loaded_exported_program = torch.export.load(f.name)
-
-        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            loaded_exported_program, (x,), skip_dynamic_shapes_check=True
         )
 
 

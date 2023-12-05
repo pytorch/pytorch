@@ -115,7 +115,6 @@ for a more comprehensive overview of the tradeoffs between these quantization
 types.
 
 Operator coverage varies between dynamic and static quantization and is captured in the table below.
-Note that for FX quantization, the corresponding functionals are also supported.
 
 +---------------------------+-------------------+--------------------+
 |                           |Static             | Dynamic            |
@@ -135,7 +134,7 @@ Note that for FX quantization, the corresponding functionals are also supported.
 |nn.EmbeddingBag            | Y (activations    |                    |
 |                           | are in fp32)      | Y                  |
 +---------------------------+-------------------+--------------------+
-|nn.Embedding               | Y                 | N                  |
+|nn.Embedding               | Y                 | Y                  |
 +---------------------------+-------------------+--------------------+
 | nn.MultiheadAttention     | Y (through        | Not supported      |
 |                           | custom modules)   |                    |
@@ -881,7 +880,7 @@ Note that for FX Graph Mode Quantization, the corresponding functionals are also
 |nn.EmbeddingBag            | Y (activations    |                    |
 |                           | are in fp32)      | Y                  |
 +---------------------------+-------------------+--------------------+
-|nn.Embedding               | Y                 | N                  |
+|nn.Embedding               | Y                 | Y                  |
 +---------------------------+-------------------+--------------------+
 |nn.MultiheadAttention      |Not Supported      | Not supported      |
 +---------------------------+-------------------+--------------------+

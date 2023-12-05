@@ -301,6 +301,7 @@ void TensorImpl::throw_cannot_call_with_symbolic(const char* meth) const {
 
 void TensorImpl::throw_storage_access_error() const {
   if (extra_meta_ && extra_meta_->custom_storage_error_msg_) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     TORCH_CHECK(false, *extra_meta_->custom_storage_error_msg_);
   }
   TORCH_CHECK_NOT_IMPLEMENTED(
@@ -309,6 +310,7 @@ void TensorImpl::throw_storage_access_error() const {
 
 void TensorImpl::throw_data_ptr_access_error() const {
   if (extra_meta_ && extra_meta_->custom_data_ptr_error_msg_) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     TORCH_CHECK(false, *extra_meta_->custom_data_ptr_error_msg_);
   }
   TORCH_CHECK(
@@ -414,7 +416,7 @@ int64_t TensorImpl::storage_offset_custom() const {
     // TODO: fix this
     return pyobj_slot_.load_pyobj_interpreter()
         ->sym_storage_offset(this)
-        .expect_int();
+        .guard_int(__FILE__, __LINE__);
   }
   return storage_offset_default();
 }
