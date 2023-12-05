@@ -2784,6 +2784,7 @@ def forward(self, arg0_1, arg1_1):
             def __init__(self):
                 super().__init__()
                 self.register_buffer('foo', torch.zeros(2, 2))
+
             def forward(self, x):
                 self.foo.add_(4)
                 return (x.sum() + self.foo.sum(),)

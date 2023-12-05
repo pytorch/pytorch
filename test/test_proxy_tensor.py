@@ -448,7 +448,7 @@ def forward(self, x_1):
         def f(x):
             a = FunctionalTensorMode(pre_dispatch=True)
             with a:
-                x_unwrapped = FunctionalTensor.to_functional(x, is_pre_dispatch=True)
+                x_unwrapped = FunctionalTensor.to_functional(x)
                 y = torch.matmul(x_unwrapped, x_unwrapped)
                 y = y + x_unwrapped
                 y.mul_(5)
@@ -473,7 +473,7 @@ def forward(self, x_1):
         def f(x):
             a = FunctionalTensorMode(pre_dispatch=True)
             with a:
-                x_unwrapped = FunctionalTensor.to_functional(x, is_pre_dispatch=True)
+                x_unwrapped = FunctionalTensor.to_functional(x)
                 y = torch.matmul(x_unwrapped, x_unwrapped)
                 x_unwrapped = x_unwrapped.transpose(1, 0)
                 y = y + x_unwrapped

@@ -20,7 +20,7 @@ from torch.utils._python_dispatch import (
 from .schemas import MutationType
 
 
-def to_fun(t, pre_dispatch=False):
+def to_fun(t):
     if isinstance(t, Tensor):
         if is_traceable_wrapper_subclass(t):
             # See Note [Functionalization always runs last]
@@ -31,7 +31,7 @@ def to_fun(t, pre_dispatch=False):
             torch._mirror_autograd_meta_to(t, out)  # type: ignore[attr-defined]
             return out
         else:
-            return FunctionalTensor.to_functional(t, pre_dispatch)
+            return FunctionalTensor.to_functional(t)
     else:
         return t
 

@@ -343,14 +343,13 @@ def create_functionalized_fn(
     trace_joint: bool,
 ) -> Any:
     def _functionalized_f_helper(*args):
-        # Wrap inputs into functional wrappers
-        f_args = pytree.tree_map(to_fun, args)
-
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
         with disable_above, FunctionalTensorMode(aot_config.pre_dispatch):
+            # Wrap inputs into functional wrappers
+            f_args = pytree.tree_map(to_fun, args)
             # Run the joint
             f_outs = fn(*f_args)
 
