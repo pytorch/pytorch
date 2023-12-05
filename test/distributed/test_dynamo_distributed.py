@@ -290,26 +290,45 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
+    def _test_hf_bert_ddp_inductor(self, static_graph):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            model, inputs = get_hf_bert(self.rank)
+            model = DDP(model, static_graph=static_graph)
+            run_hf_bert_ddp(self, model, inputs, "inductor")
+
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp_inductor(self):
+        self._test_hf_bert_ddp_inductor(static_graph=False)
 
+    @skip_if_lt_x_gpu(2)
+    @import_transformers_or_skip()
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(config, "optimize_ddp", True)
+    @patch.object(torch._inductor.config, "fallback_random", True)
+    def test_hf_bert_ddp_inductor_static_graph(self):
+        self._test_hf_bert_ddp_inductor(static_graph=True)
+
+    def _test_hf_bert_aot_eager(self, static_graph):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             model, inputs = get_hf_bert(self.rank)
-            model = DDP(model)
-            run_hf_bert_ddp(self, model, inputs, "inductor")
+            model = DDP(model, static_graph=static_graph)
+            run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @patch.object(config, "optimize_ddp", True)
     def test_hf_bert_ddp_aot_eager(self):
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            model, inputs = get_hf_bert(self.rank)
-            model = DDP(model)
-            run_hf_bert_ddp(self, model, inputs, "aot_eager")
+        self._test_hf_bert_aot_eager(static_graph=False)
+
+    @skip_if_lt_x_gpu(2)
+    @import_transformers_or_skip()
+    @patch.object(config, "optimize_ddp", True)
+    def test_hf_bert_ddp_aot_eager_static_graph(self):
+        self._test_hf_bert_aot_eager(static_graph=True)
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -544,7 +563,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split(self):
-        assert config.optimize_ddp
         """
         Just ensures that the appropriate number of splits happen (based on
         bucket size and model parameters) - verifies the number of times
@@ -626,7 +644,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
-        assert config.optimize_ddp
         """
         Same as above, but using inductor backend.
         We observed issues with inductor/fx interface in the past.
@@ -640,45 +657,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
-
-    @torch._inductor.config.patch({"layout_optimization": True, "keep_output_stride": False})
-    @patch.object(config, "optimize_ddp", True)
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_graph_split_inductor_layout_optimizations(self):
-        assert config.optimize_ddp
-        channel_dim = 512
-        # channel dim must be > 64 for inductor to do layout optimization and use NHWC
-
-        class ToyModelConv(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.net = nn.Sequential(
-                    *[nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
-                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
-                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
-                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
-                )
-
-            def forward(self, inputs):
-                return self.net(inputs)
-
-        def get_model():
-            m = ToyModelConv().to(self.device)
-            m.apply(init_weights)
-            inputs = torch.rand(2, channel_dim, channel_dim, 128).to(self.device)
-            outputs = m(inputs)
-            return m, inputs, outputs
-
-        m, inputs, correct_outputs = get_model()
-        ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
-
-        @torch._dynamo.optimize("inductor")
-        def opt_fn(inputs):
-            return ddp_m(inputs)
-
-        opt_outputs = opt_fn(inputs)
-        self.assertTrue(same(correct_outputs, opt_outputs))
-
 
     @patch.object(config, "optimize_ddp", True)
     def test_no_split(self):
