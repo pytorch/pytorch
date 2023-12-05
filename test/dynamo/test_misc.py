@@ -7437,6 +7437,32 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 18)
 
+    def test_any_all_symnode(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def fn(x):
+            t = x.size(0) >= 10
+            f = x.size(0) >= 100
+            if any([]) or any([f]) or any([f, f]):
+                return x - 1
+            if all([f]) or all([t, f]) or all([f, t]) or all([f, f]):
+                return x - 2
+            if not (all([]) and all([t]) and all([t, t])):
+                return x - 3
+            if not (any([t]) and any([t, f]) and any([f, t])):
+                return x - 4
+            return x + 1
+
+        y1 = torch.randn(16)
+        y2 = torch.randn(18)
+        self.assertEqual(fn(y1), y1 + 1)
+        self.assertEqual(fn(y2), y2 + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        y3 = torch.randn(5)
+        self.assertEqual(fn(y3), y3 - 3)
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_tracing_py_tree_tensor_subclass(self):
         import torch.utils._pytree as pytree
         from torch.testing._internal.two_tensor import TwoTensor

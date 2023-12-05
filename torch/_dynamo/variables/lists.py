@@ -661,6 +661,11 @@ class ListIteratorVariable(VariableTracker):
         self.items = items
         self.index = index
 
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}({repr(self.items)}, index={repr(self.index)})"
+        )
+
     def next_variables(self, tx):
         assert self.mutable_local
         if self.index >= len(self.items):
