@@ -79,6 +79,8 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
     }
     if cuda:
         supported_dtype.add(torch.float16)
+        supported_dtype.add(torch.float8_e4m3fn)
+        supported_dtype.add(torch.float8_e5m2)
 
     return dtype in supported_dtype
 
@@ -520,7 +522,8 @@ class GraphLowering(torch.fx.Interpreter):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
-        self.add_device_info(buffer.get_device())
+        if not buffer.is_zero_elements():
+            self.add_device_info(buffer.get_device())
         return name
 
     def register_list(self, buffer_names: List[str]):

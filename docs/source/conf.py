@@ -1926,7 +1926,6 @@ coverage_ignore_functions = [
     "bundle_randn",
     # torch.utils.checkpoint
     "check_backward_validity",
-    "context_fn_gen",
     "detach_variable",
     "get_device_states",
     "noop_context_fn",

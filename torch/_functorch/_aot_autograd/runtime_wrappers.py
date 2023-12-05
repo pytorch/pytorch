@@ -139,7 +139,8 @@ def create_runtime_wrapper(
                     if trace_joint:
                         assert isinstance(updated_inpt, TensorAlias)
                         updated_inpt = updated_inpt.alias
-                    original_inpt.set_(updated_inpt)
+                    with torch.no_grad():
+                        original_inpt.set_(updated_inpt)
                     continue
                 if meta.mutates_metadata and not meta.mutates_data:
                     if trace_joint:
