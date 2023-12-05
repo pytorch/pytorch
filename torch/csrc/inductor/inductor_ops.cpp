@@ -60,6 +60,7 @@ Tensor _reinterpret_tensor(
 
 static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
   at::Tensor& grad = variable.mutable_grad();
+
   if (new_grad.device() != kMeta) {
     torch::autograd::AccumulateGrad::accumulateGrad(
         variable,

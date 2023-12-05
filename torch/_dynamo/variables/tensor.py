@@ -727,7 +727,7 @@ class TensorVariable(VariableTracker):
                 mutable_local=variables.base.MutableLocal(),
             )
 
-            if not self.source:
+            if not self.source or name == "register_post_accumulate_grad_hook":
                 # Intermediary
                 src = fn_var.source
                 if (
@@ -779,6 +779,7 @@ class TensorVariable(VariableTracker):
                         {},
                     ),
                 )
+
             tx.output.side_effects.register_hook(self, fn_var, handle_variable, name)
             return handle_variable
         elif name == "requires_grad_" and self.as_proxy().node.meta[

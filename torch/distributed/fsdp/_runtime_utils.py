@@ -730,8 +730,10 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
+    # print("Running post backward hook!")
     _log_post_backward_hook(state, handle, log)
     flat_param = handle.flat_param
+    # print("Flat param size at invoke?", flat_param.size())
     assert flat_param is handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(
@@ -1430,6 +1432,7 @@ def _register_post_backward_hook(
     already_registered = hasattr(flat_param, "_post_backward_hook_handle")
     if already_registered or not flat_param.requires_grad:
         return
+    # print("Flat param size at register?", flat_param.size())
     hook = functools.partial(_post_backward_hook, state, handle)
     hook_handle = flat_param.register_post_accumulate_grad_hook(hook)
     flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined]
