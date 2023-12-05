@@ -368,12 +368,11 @@ if torch._C._has_mkldnn:
 
     def _is_valid_computation_binary_inplace(computation_op, binary_op, other_index):
         def fn(match):
-            print("---- check _is_valid_computation_binary_inplace ----", flush=True)
             if not _is_valid_computation_binary(computation_op, binary_op)(match):
                 return False
             binary_nodes = filter_nodes(match.nodes, binary_op)
 
-            def _is_all_users_ancestor_node(_binary_node):
+            def _is_all_users_are_ancestor_node(_binary_node):
                 # Think about this pattern:
                 #      ReLU
                 #     /   \
@@ -389,7 +388,7 @@ if torch._C._has_mkldnn:
                 if len(_binary_node.all_input_nodes) != 2:
                     # Binary node should have 2 input nodes.
                     return False
-                
+
                 # Step 1: Get the compute node and othe node of binary node
                 # As above example:
                 #   * binary node is Add
@@ -404,7 +403,11 @@ if torch._C._has_mkldnn:
                         if input == _check_node:
                             return True
                         elif isinstance(input, torch.fx.Node):
-                            if input.op == 'placeholder' or input.op == 'output' or input.op == 'get_attr':
+                            if (
+                                input.op == "placeholder"
+                                or input.op == "output"
+                                or input.op == "get_attr"
+                            ):
                                 return False
                             return _is_ancestor_node(input, _check_node)
                         else:
@@ -415,12 +418,15 @@ if torch._C._has_mkldnn:
                     if user == _binary_node:
                         continue
                     if not _is_ancestor_node(compute_node, user):
-                        print("--- not ancestor_node ----", flush=True)
                         return False
 
                 return True
 
-            if any((len(n.args[other_index].users) > 1 and not _is_all_users_ancestor_node(n) for n in binary_nodes)):
+            if any(
+                len(n.args[other_index].users) > 1
+                and not _is_all_users_are_ancestor_node(n)
+                for n in binary_nodes
+            ):
                 return False
             if any(
                 n.args[other_index].op in ["placeholder", "output"]
@@ -498,7 +504,6 @@ if torch._C._has_mkldnn:
                 isinstance(other.data, ir.ReinterpretView)
                 or isinstance(other.get_layout(), (ir.MutationLayout, ir.AliasedLayout))
             )
-            print("inside _register_binary_unary_maybe_inplace_fusion_lowering can_be_inplace is :{}".format(can_be_inplace), flush=True)
             if not can_be_inplace:
                 return L[outplace_fusion_op](*computation_args)
             return L[inplace_fusion_op](*computation_args)
