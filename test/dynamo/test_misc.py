@@ -1693,6 +1693,11 @@ utils_device.CURRENT_DEVICE == None""".split(
             )
             assert not other_fields_are_none
 
+            if not hasattr(obj, "a"):
+                return -1
+            if hasattr(obj, "z"):
+                return -2
+
             total = getattr(obj, class_fields[0].name)
             for field in class_fields[1:]:
                 v = getattr(obj, field.name)
@@ -1718,6 +1723,35 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(opt_fn(obj2), correct2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+        # guard failure
+        obj2.z = True
+        self.assertEqual(opt_fn(obj2), -2)
+
+    def test_dataclass_local_hasattr(self):
+        cnt = CompileCounter()
+        x = torch.randn(10)
+
+        @dataclasses.dataclass
+        class MyDataClass:
+            a: torch.Tensor
+            b: torch.Tensor
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn():
+            obj = MyDataClass(x + 1, x - 1)
+            if not hasattr(obj, "a"):
+                return -1
+            if hasattr(obj, "z"):
+                return -2
+            return obj
+
+        result = fn()
+        self.assertIsInstance(result, MyDataClass)
+        self.assertEqual(result.a, x + 1)
+        self.assertEqual(result.b, x - 1)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
 
     def test_tensor_build_list_unpack(self):
         def fn(x):
