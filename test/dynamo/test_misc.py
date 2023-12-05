@@ -7664,6 +7664,62 @@ def ___make_guard_fn():
         # assert no recompile
         self.assertEqual(counter.frame_count, 6)
 
+    def test_str_format_return1(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(img):
+            x = torch.sin(img)
+            y = f"shape {img.shape[-2:]} batch size {img.shape[0]}"
+            return img + x, y
+
+        img1 = torch.randn(1, 1, 8, 8)
+        res, msg = fn(img1)
+        self.assertEqual(msg, "shape torch.Size([8, 8]) batch size 1")
+        self.assertEqual(res, img1 + torch.sin(img1))
+
+    def test_str_format_return2(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(img):
+            x = torch.sin(img)
+            y = "shape {} batch size {y:.2f}".format(img.shape[-2:], y=img.shape[0])
+            return img + x, y
+
+        img1 = torch.randn(1, 1, 8, 8)
+        res, msg = fn(img1)
+        self.assertEqual(msg, "shape torch.Size([8, 8]) batch size 1.00")
+        self.assertEqual(res, img1 + torch.sin(img1))
+
+    def test_str_format_assert1(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(img):
+            x = torch.sin(img)
+            val = x.shape[-2:]
+            torch._assert(len(val) == 2, f"shape {img.shape}")
+            return img + x
+
+        img1 = torch.randn(1, 1, 8, 8)
+        res = fn(img1)
+        self.assertEqual(res, img1 + torch.sin(img1))
+
+    def test_str_format_assert2(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(img):
+            x = torch.sin(img)
+            torch._assert(
+                img.shape[-2] == 8 and img.shape[-1] == 16, f"shape {img.shape}"
+            )
+            return img + x
+
+        img1 = torch.randn(1, 3, 8, 16)
+        res = fn(img1)
+        self.assertEqual(res, img1 + torch.sin(img1))
+        self.assertEqual(cnt.frame_count, 1)
+
+        # trigger a recompile and graph break
+        img2 = torch.randn(1, 3, 8, 15)
+        self.assertRaises(AssertionError, lambda: fn(img2))
+
     def test_tolist_scalar(self):
         def fn(x):
             new_list = []
