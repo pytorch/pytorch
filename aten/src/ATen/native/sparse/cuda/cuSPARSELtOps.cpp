@@ -106,7 +106,8 @@ at::Tensor _cslt_sparse_mm(
     const c10::optional<Tensor>& bias_opt,
     const c10::optional<Tensor>& alpha_opt,
     const c10::optional<c10::ScalarType> out_dtype_opt,
-    bool transpose_result
+    bool transpose_result,
+    long alg_id
 )
 {
   if (!handle_initialized){
@@ -248,8 +249,10 @@ at::Tensor _cslt_sparse_mm(
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSelectionInit(
       &handle, &alg_sel, &matmul, CUSPARSELT_MATMUL_ALG_DEFAULT));
 
-  TORCH_CUDASPARSE_CHECK(
-      cusparseLtMatmulPlanInit(&handle, &plan, &matmul, &alg_sel));
+  // set alg_id, which needs to be 4 bytes but long is 8
+  int alg_id_int = (int) alg_id;
+  TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
+      &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_ID, &alg_id_int, sizeof(alg_id_int)));
 
   // set tensor_alpha_mode and alpha pointer for matmut
   const auto alpha_tensor = alpha_opt.has_value() ? *alpha_opt: Tensor{};
@@ -258,6 +261,10 @@ at::Tensor _cslt_sparse_mm(
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
         &handle, &matmul, CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING, &tensor_alpha_mode, sizeof(tensor_alpha_mode)));
   }
+
+  TORCH_CUDASPARSE_CHECK(
+      cusparseLtMatmulPlanInit(&handle, &plan, &matmul, &alg_sel));
+
 
   size_t workspace_size;
   TORCH_CUDASPARSE_CHECK(
@@ -327,7 +334,8 @@ at::Tensor _cslt_sparse_mm(
     const c10::optional<Tensor>& bias_opt,
     const c10::optional<Tensor>& alpha_opt,
     const c10::optional<c10::ScalarType> out_dtype,
-    bool transpose_result)
+    bool transpose_result,
+    long alg_id)
 {
     TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");
 }
