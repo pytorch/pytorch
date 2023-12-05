@@ -10,7 +10,7 @@ from torch.backends.cuda import (
     SDPAParams,
 )
 from torch.nn.attention import _raise_kernel_warnings
-from torch.nn.attention.utils import (
+from torch.nn.attention._utils import (
     _calculate_scale,
     _input_requires_grad,
     _postprocess_flash_output,
