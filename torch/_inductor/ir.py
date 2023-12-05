@@ -4160,10 +4160,8 @@ class DeviceCopy(ExternKernelOut):
         ):
             return x.constant_to_device(device)
 
-        V.graph.device_types.add(device.type)
-        V.graph.add_device_idx(device.index)
-        V.graph.device_types.add(x.get_device().type)
-        V.graph.add_device_idx(x.get_device().index)
+        V.graph.add_device_info(device)
+        V.graph.add_device_info(x.get_device())
 
         developer_warning("DeviceCopy in input program")
         return DeviceCopy(

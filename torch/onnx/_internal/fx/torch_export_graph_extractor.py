@@ -48,7 +48,7 @@ class TorchExport(exporter.FXGraphExtractor):
             io_adapter.FlattenInputWithTreeSpecValidationInputStep()
         )
         self.input_adapter.append_step(
-            io_adapter.PrependParamsAndBuffersAotAutogradInputStep()
+            io_adapter.PrependParamsBuffersConstantAotAutogradInputStep()
         )
 
         # ONNX does not support None inputs. During graph building, all None inputs

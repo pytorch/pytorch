@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING
 
 import torch
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from . import allowed_functions
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
@@ -158,6 +159,19 @@ def forbid_in_graph(fn):
     return fn
 
 
+# Helper function to flatten a tensor subclass and apply a function to
+# all inner tensors that match the outer dim. Used to reduce duplication
+# across the various marking APIs.
+def _apply_func_to_inner_tensors_of_same_dim(func, t, *args):
+    assert is_traceable_wrapper_subclass(t)
+
+    attrs, ctx = t.__tensor_flatten__()
+    for attr in attrs:
+        inner = getattr(t, attr)
+        if inner.dim() == t.dim():
+            func(inner, *args)
+
+
 @forbid_in_graph
 def mark_dynamic(t, index):
     """
@@ -183,6 +197,11 @@ def mark_dynamic(t, index):
     before torch.compile.
 
     """
+    if is_traceable_wrapper_subclass(t):
+        # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
+        # TODO: Make this configurable via a supported public API
+        _apply_func_to_inner_tensors_of_same_dim(mark_dynamic, t, index)
+
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
@@ -201,6 +220,11 @@ def maybe_mark_dynamic(t, index):
     Mark a tensor as having a dynamic dim, but don't enforce it (i.e., if this
     dimension ends up getting specialized, don't error).
     """
+    if is_traceable_wrapper_subclass(t):
+        # default behavior: mirror maybe_mark_dynamic() on all inner tensors with same dim as t
+        # TODO: Make this configurable via a supported public API
+        _apply_func_to_inner_tensors_of_same_dim(maybe_mark_dynamic, t, index)
+
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_weak_dynamic_indices"):
             t._dynamo_weak_dynamic_indices = set()
@@ -223,6 +247,11 @@ def mark_static(t, index=None):
 
     This has lower precedence than mark_dynamic.
     """
+    if is_traceable_wrapper_subclass(t):
+        # default behavior: mirror mark_static() on all inner tensors with same dim as t
+        # TODO: Make this configurable via a supported public API
+        _apply_func_to_inner_tensors_of_same_dim(mark_static, t, index)
+
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_static_indices"):
             t._dynamo_static_indices = set()
@@ -261,7 +290,7 @@ def _allow_in_graph_einops():
 
     try:
         # requires einops > 0.6.1, torch >= 2.0
-        from einops._torch_specific import (  # noqa: F401
+        from einops._torch_specific import (  # type: ignore[attr-defined]  # noqa: F401
             _ops_were_registered_in_torchdynamo,
         )
 
