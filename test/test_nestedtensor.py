@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -3429,7 +3430,9 @@ class TestNestedTensorSubclass(NestedTestCase):
     # will fail with gradients and math has ops that aren't implemented. Therefore, in
     # order to get some kernel to work with most GPUs, we have to disable gradients in
     # this more general test
+    # Note 3: ROCm only supports the math kernel, which doesn't work with jagged NTs
     @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @torch.set_grad_enabled(False)
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
                  SM80OrLater else [torch.float16, torch.float32])
