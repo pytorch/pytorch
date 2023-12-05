@@ -56,7 +56,7 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.aten.numel.default,  # type: ignore[has-type]
         torch.ops.aten.sym_numel.default,  # type: ignore[has-type]
         torch.ops.aten.dim.default,  # type: ignore[has-type]
-        torch.ops.prim.device.default,
+        torch.ops.prim.device.default,  # type: ignore[has-type]
     ]
 
     def __new__(cls, elem):
@@ -279,6 +279,16 @@ class FunctionalTensorMode(TorchDispatchMode):
             FunctionalTensor, unwrap, (args, kwargs)
         )
 
+        # Expectation: functionalization should not **already** be enabled above our mode.
+        # Why would that be bad? when we return a FunctionalTensor here, we don't want functionalization
+        # to run above this mode and further wrap that output in **another** C++ FunctionalTensorWrapper.
+        is_included = torch._C._dispatch_tls_is_dispatch_key_included(
+            torch._C.DispatchKey.Functionalize
+        )
+        is_excluded = torch._C._dispatch_tls_is_dispatch_key_excluded(
+            torch._C.DispatchKey.Functionalize
+        )
+        assert is_excluded or not is_included
         include_to_set = (
             torch._C._dispatch_tls_local_include_set()
             | torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
@@ -315,6 +325,14 @@ class FunctionalTensorMode(TorchDispatchMode):
             finally:
                 torch._disable_functionalization()
                 torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
+
+        is_included = torch._C._dispatch_tls_is_dispatch_key_included(
+            torch._C.DispatchKey.Functionalize
+        )
+        is_excluded = torch._C._dispatch_tls_is_dispatch_key_excluded(
+            torch._C.DispatchKey.Functionalize
+        )
+        assert is_excluded or not is_included
 
         if (
             # If no outputs are our functional subclass, then don't try to fix up aliasing
