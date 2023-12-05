@@ -298,7 +298,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 lib=lib,
                 tags=(torch.Tag.pt2_compliant_tag,),
             )
-            torch.library.impl("mylib::bar", "CompositeImplicitAutograd", torch.sin)
+            torch.library.impl(
+                "mylib::bar", "CompositeImplicitAutograd", torch.sin, lib=lib
+            )
             assert torch.Tag.pt2_compliant_tag in torch.ops.mylib.bar.default.tags
 
             def f(x):
@@ -325,8 +327,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_non_pt2_compliant_ops_graph_break(self):
         lib = torch.library.Library("mylib", "FRAGMENT")
         try:
-            torch.library.define("mylib::bar2", "(Tensor x) -> Tensor")
-            torch.library.impl("mylib::bar2", "CompositeImplicitAutograd", torch.sin)
+            torch.library.define("mylib::bar2", "(Tensor x) -> Tensor", lib=lib)
+            torch.library.impl(
+                "mylib::bar2", "CompositeImplicitAutograd", torch.sin, lib=lib
+            )
             assert torch.Tag.pt2_compliant_tag not in torch.ops.mylib.bar2.default.tags
 
             def f(x):
@@ -363,14 +367,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 "mylib::bar3.tensor",
                 "(Tensor x) -> Tensor",
                 tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
             )
-            torch.library.define("mylib::bar3.int", "(Tensor x, int dim) -> Tensor")
+            torch.library.define(
+                "mylib::bar3.int", "(Tensor x, int dim) -> Tensor", lib=lib
+            )
 
             torch.library.impl(
-                "mylib::bar3.tensor", "CompositeImplicitAutograd", torch.sin
+                "mylib::bar3.tensor",
+                "CompositeImplicitAutograd",
+                torch.sin,
+                lib=lib,
             )
             torch.library.impl(
-                "mylib::bar3.int", "CompositeImplicitAutograd", torch.sum
+                "mylib::bar3.int", "CompositeImplicitAutograd", torch.sum, lib=lib
             )
 
             def f(x):
