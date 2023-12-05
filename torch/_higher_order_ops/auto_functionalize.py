@@ -68,6 +68,9 @@ auto_functionalized = AutoFunctionalized()
 def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
     if not isinstance(op, torch._ops.OpOverload):
         return False
+    # Built-in operators should be handled via built-in codegen.
+    if op.namespace == "aten":
+        return False
     schema = op._schema
     if not schema.is_mutable:
         return False

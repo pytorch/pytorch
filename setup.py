@@ -189,8 +189,6 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
-#   NVTOOLSEXT_PATH (Windows only)
-#     specify where nvtoolsext is installed
 #
 #   ACL_ROOT_DIR
 #     specify where Compute Library is installed
@@ -1238,6 +1236,7 @@ def main():
         "include/torch/csrc/profiler/*.h",
         "include/torch/csrc/profiler/orchestration/*.h",
         "include/torch/csrc/profiler/stubs/*.h",
+        "include/torch/csrc/profiler/unwind/*.h",
         "include/torch/csrc/utils/*.h",
         "include/torch/csrc/tensor/*.h",
         "include/torch/csrc/lazy/backend/*.h",

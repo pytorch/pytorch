@@ -298,7 +298,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 lib=lib,
                 tags=(torch.Tag.pt2_compliant_tag,),
             )
-            torch.library.impl("mylib::bar", "CompositeImplicitAutograd", torch.sin, lib=lib)
+            torch.library.impl(
+                "mylib::bar", "CompositeImplicitAutograd", torch.sin, lib=lib
+            )
             assert torch.Tag.pt2_compliant_tag in torch.ops.mylib.bar.default.tags
 
             def f(x):
@@ -326,7 +328,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         lib = torch.library.Library("mylib", "FRAGMENT")
         try:
             torch.library.define("mylib::bar2", "(Tensor x) -> Tensor", lib=lib)
-            torch.library.impl("mylib::bar2", "CompositeImplicitAutograd", torch.sin, lib=lib)
+            torch.library.impl(
+                "mylib::bar2", "CompositeImplicitAutograd", torch.sin, lib=lib
+            )
             assert torch.Tag.pt2_compliant_tag not in torch.ops.mylib.bar2.default.tags
 
             def f(x):
@@ -365,10 +369,15 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
-            torch.library.define("mylib::bar3.int", "(Tensor x, int dim) -> Tensor", lib=lib)
+            torch.library.define(
+                "mylib::bar3.int", "(Tensor x, int dim) -> Tensor", lib=lib
+            )
 
             torch.library.impl(
-                "mylib::bar3.tensor", "CompositeImplicitAutograd", torch.sin, lib=lib,
+                "mylib::bar3.tensor",
+                "CompositeImplicitAutograd",
+                torch.sin,
+                lib=lib,
             )
             torch.library.impl(
                 "mylib::bar3.int", "CompositeImplicitAutograd", torch.sum, lib=lib
@@ -470,7 +479,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            torch.compile(f, backend="aot_eager")(*compiled_args)
+            torch.compile(f, backend="aot_eager_decomp_partition")(*compiled_args)
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
@@ -478,6 +487,41 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         finally:
             del torch.ops.mylib.foo
             del lib
+
+    def test_auto_functionalize_on_view(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x):
+                x_np = x.detach().numpy()  # view
+                np.sin(x_np, out=x_np)
+                return
+
+            x = torch.randn(3)
+            expected = x.sin()
+            torch.ops.mylib.foo(x)
+            assert torch.allclose(x, expected)
+
+            @torch.compile(backend="aot_eager_decomp_partition")
+            def f(x):
+                x = x.clone()
+                y = x[:]
+                torch.ops.mylib.foo(y)
+                return x
+
+            y = f(x)
+            self.assertEqual(y, x.sin())
+        finally:
+            del lib
+            del torch.ops.mylib.foo
 
     def test_auto_functionalize_optional(self):
         try:
@@ -507,7 +551,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            torch.compile(f, backend="aot_eager")(*compiled_args)
+            torch.compile(f, backend="aot_eager_decomp_partition")(*compiled_args)
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
