@@ -1109,12 +1109,10 @@ def blue_text(msg):
 
 
 @functools.lru_cache(None)
-def get_device_tflops(dtype) -> Optional[float]:
-    if dtype not in (torch.float16, torch.bfloat16, torch.float32):
-        return None
-
+def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops, nvsmi
 
+    assert dtype in (torch.float16, torch.bfloat16, torch.float32)
     cur_sm_clock = nvsmi(["clocks.current.sm"])[0]
     if dtype in (torch.float16, torch.bfloat16):
         return get_max_tensorcore_tflops(dtype, cur_sm_clock)
