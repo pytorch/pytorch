@@ -262,7 +262,9 @@ class TensorVariable(VariableTracker):
                 and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
             ):
                 # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
-                return variables.misc.DelayGraphBreakVariable()
+                return variables.misc.DelayGraphBreakVariable(
+                    source=AttrSource(self.source, name)
+                )
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
