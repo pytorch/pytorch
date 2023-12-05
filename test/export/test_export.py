@@ -1798,27 +1798,30 @@ def forward(self, l_x_):
         self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
         self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
 
-    def test_check_specialized_int(self):
+    def test_run_decomposition_supports_user_input_mutation(self):
         class SingleOp(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.op = torch.ops.aten.scatter_add
+                self.op = torch.ops.aten.native_batch_norm
 
-            def forward(self, t, dim, index, src, **kwargs):
-                return self.op(t, dim, index, src, **kwargs)
+            def forward(self, input, weight, bias, running_mean, running_var, training, momentum, eps, **kwargs):
+                return self.op(input, weight, bias, running_mean, running_var, training, momentum, eps, **kwargs)
 
-
-        t = torch.randn(10, 5)
-        dim = -1
-        index = torch.tensor([[2, 4, 3, 1, 0],[0, 2, 1, 4, 3],[3, 1, 4, 2, 0],[4, 0, 3, 1, 2],[3, 0, 4, 1, 2]])
-        src = torch.randn(5, 5)
+        input = torch.randn(5, 5, 5)
+        weight = torch.randn(5)
+        bias = torch.randn(5)
+        running_mean = torch.randn(5)
+        running_var = torch.randn(5)
+        training = True
+        momentum = 0.5
+        eps = 0.6
 
         model = SingleOp()
-        output = model(t, dim, index, src)
+        output = model(input, weight, bias, running_mean, running_var, training, momentum, eps)
 
-        ep = torch.export.export(model, args=(t, dim, index, src))
+        ep = torch.export.export(model, args=(input, weight, bias, running_mean, running_var, training, momentum, eps))
         ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
-        self.assertEqual(ep(t, dim, index, src), output)
+        self.assertEqual(ep(input, weight, bias, running_mean, running_var, training, momentum, eps), output)
 
 if __name__ == '__main__':
     run_tests()
