@@ -1,4 +1,4 @@
-# Owner(s): ["module: numpy"]
+# Owner(s): ["codule: numpy"]
 
 import torch
 import numpy as np
@@ -484,7 +484,7 @@ class TestNumPyInterop(TestCase):
 
     @onlyCPU
     def test_empty_tensors_interop(self, device):
-        x = torch.rand((), dtype=torch.float16);
+        x = torch.rand((), dtype=torch.float16)
         y = torch.tensor(np.random.rand(0), dtype=torch.float16)
         # Same can be achieved by running
         # y = torch.empty_strided((0,), (0,), dtype=torch.float16)
@@ -494,7 +494,7 @@ class TestNumPyInterop(TestCase):
         # Regression test for https://github.com/pytorch/pytorch/issues/115066
         self.assertEqual(torch.mul(x, y).shape, y.shape)
         # Regression test for https://github.com/pytorch/pytorch/issues/113037
-        self.assertEqual(torch,div(x, y, rouding_mode='floor')
+        self.assertEqual(torch.div(x, y, rouding_mode='floor'), y.shape)
 
 
 instantiate_device_type_tests(TestNumPyInterop, globals())
