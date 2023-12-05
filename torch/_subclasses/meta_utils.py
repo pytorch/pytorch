@@ -12,6 +12,7 @@ from torch._C._functorch import (
     get_unwrapped,
     is_batchedtensor,
     maybe_get_bdim,
+    maybe_get_level,
     peek_interpreter_stack,
     TransformType,
 )
@@ -311,20 +312,28 @@ class MetaConverter:
                             r = r.clone()
                 elif is_batchedtensor(t):
                     # Wraps a BatchedTensor in a FakeTensor
-                    tensor = get_unwrapped(t)
-                    sizes = tensor.size()
-                    strides = tensor.stride()
-                    r = callback(
-                        lambda: torch.empty_strided(
-                            sizes,
-                            strides,
-                            dtype=t.dtype,
-                            device="meta",
-                        )
-                    )
-                    lvl = current_level()
-                    bdim = maybe_get_bdim(t)
-                    r = _add_batch_dim(r, bdim, lvl)
+                    def _to_fake_tensor(t):
+                        if is_batchedtensor(t):
+                            ft = _to_fake_tensor(get_unwrapped(t))
+                            lvl = maybe_get_level(t)
+                            bdim = maybe_get_bdim(t)
+                            r = _add_batch_dim(ft, bdim, lvl)
+                        else:
+                            # regular tensor
+                            sizes = t.size()
+                            strides = t.stride()
+                            r = callback(
+                                lambda: torch.empty_strided(
+                                    sizes,
+                                    strides,
+                                    dtype=t.dtype,
+                                    device="meta",
+                                )
+                            )
+                        return r
+
+                    r = _to_fake_tensor(t)
+
                 elif t._is_view():
                     # Construct views in two steps: recursively meta-fy their
                     # base, and then create view(s) off that.  NB: doing it
