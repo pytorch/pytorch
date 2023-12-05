@@ -1337,6 +1337,7 @@ def register_onednn_fusion_ops():
             unary_scalars,
             unary_algorithm,
         ):
+            print("---- hit the convolution_binary_inplace lowering ----", flush=True)
             return TensorBox.create(
                 ir.ConvolutionBinaryInplace.create(
                     x,
