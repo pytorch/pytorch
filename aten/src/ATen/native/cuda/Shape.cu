@@ -377,7 +377,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
 }
 // The kernels are templated on an opaque, self-aligned type of the correct
 // size to avoid redundant kernels for different types of the same size.
-template <int N> struct alignas(N) OpaqueType { char data[N]; };
+template <unsigned N> struct alignas(N) OpaqueType { char data[N]; };
 
 } // namespace
 
