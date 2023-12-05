@@ -5,7 +5,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import sympy
 
@@ -66,6 +66,8 @@ tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
 needs_realized_inputs = set()
 foreach_ops = set()
+inplace_foreach_ops = set()
+inplaceable_foreach_ops = dict()
 
 
 def assert_nyi(cond, msg):
@@ -102,6 +104,7 @@ add_needs_realized_inputs(
         aten.max_pool2d_with_indices_backward,
         aten.mm,
         aten.upsample_nearest2d,
+        aten._upsample_nearest_exact2d,
         aten.upsample_bicubic2d,
         aten._int_mm,
     ]
@@ -442,7 +445,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 device = None
                 for t in args:
                     if isinstance(t, TensorBox):
-                        device = t.data.get_device()  # type: ignore[attr-defined]
+                        device = t.data.get_device()
                         break
                 assert (
                     device is not None
@@ -450,10 +453,13 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 out[(device, use_foreach)].append((i, args))
             return out
 
-        realize_outputs = False
+        realize_outputs = (
+            len(V.graph.current_node.users) == 0
+            or V.graph.current_node.target in inplace_foreach_ops
+        )
         for node in V.graph.current_node.users:
             for user in node.users:
-                if not (user.op == "call_function" and user.target in foreach_ops):
+                if not (user.op == "call_function" and (user.target in foreach_ops)):
                     realize_outputs = True
 
         a_list_input = None
@@ -811,6 +817,8 @@ def repeat(x, repeats):
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
         return expand(x, new_size)
 
+    x_loader: Callable[[Any], Any]
+
     def inner_fn(index):
         assert len(index) == len(repeats)
         index = list(index)
@@ -1068,12 +1076,14 @@ def cat(inputs, dim=0):
 
         return False
 
-    if len(inputs) <= config.max_pointwise_cat_inputs:
+    if (
+        len(inputs) <= config.max_pointwise_cat_inputs
+        and inputs[0].get_device().type != "cpu"
+    ):
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
-        all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
-        any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
+        all_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
 
-        if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
+        if all_pointwise_inputs and pointwise_uses:
             return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
@@ -1968,21 +1978,21 @@ def bucketize(
 
 def require_dense(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs)
+        ir.IRNode, ir.ExternKernel.require_stride1, (args, kwargs)
     )
     return args, kwargs
 
 
 def require_contiguous(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, lambda t: ir.ExternKernel.require_contiguous(t), (args, kwargs)
+        ir.IRNode, ir.ExternKernel.require_contiguous, (args, kwargs)
     )
     return args, kwargs
 
 
 def require_channels_last(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, lambda t: ir.ExternKernel.require_channels_last(t), (args, kwargs)
+        ir.IRNode, ir.ExternKernel.require_channels_last, (args, kwargs)
     )
     return args, kwargs
 
@@ -2014,8 +2024,6 @@ make_fallback(aten.cumsum, require_dense, warn=False)
 make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
-make_fallback(aten._flash_attention_forward)
-make_fallback(aten._flash_attention_backward)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
@@ -2037,21 +2045,44 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
 
-        ALIGNMENT = 16
+        # This is the minimum alignment required by SDPA kernels for attention_bias.
+        # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
+        ALIGNMENT = 8
+
+        is_backward = fx_node.target in (
+            aten._scaled_dot_product_efficient_attention_backward.default,
+            aten._scaled_dot_product_flash_attention_backward.default,
+        )
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
 
         assert isinstance(arg, TensorBox)
-        unaligned_input_shape = isinstance(arg.data, ir.SliceView) and not is_aligned(
-            arg
-        )
-        aligned_input_view = unaligned_input_shape and is_aligned(arg.unwrap_view())
 
-        # input is padded, requiring_stride_order will unwrap the view and unpad.
-        # Would be nice to be able to require certain padding from inductor ir, nyi
-        if aligned_input_view:
-            return arg
+        # This correctly handles the forward case:
+        if isinstance(arg.data, (ir.SliceView, ir.ExpandView)):
+            if not is_aligned(arg):
+                # input is padded, requiring_stride_order will unwrap the view and unpad.
+                # Would be nice to be able to require certain padding from inductor ir, nyi
+                if is_aligned(arg.unwrap_view()):
+                    return arg
+
+        def is_aligned_backward(x):
+            aligned_strides = all(
+                (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
+                for i in range(len(x.get_stride()) - 1)
+            )
+            return (
+                V.graph.sizevars.size_hint(x.get_stride()[-1])
+            ) == 1 and aligned_strides
+
+        if (
+            isinstance(arg.data, ir.StorageBox)
+            and arg.data.is_input_buffer()
+            and is_backward
+        ):
+            if len(arg.data.get_size()) == 4 and is_aligned_backward(arg):
+                return arg
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
@@ -2082,8 +2113,10 @@ make_fallback(
     sdpa_constraint,
     warn=False,
 )
-make_fallback(torch.ops.aten._efficient_attention_forward.default)
-make_fallback(torch.ops.aten._efficient_attention_backward.default)
+make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
+make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
+make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
+make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
@@ -2204,6 +2237,7 @@ make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten._pdist_backward)
 make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
+make_fallback(aten.replication_pad2d_backward)
 make_fallback(aten.soft_margin_loss_backward, warn=False)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten.segment_reduce.default)
@@ -2333,7 +2367,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = dim_size
 
     src_size = list(x.get_size())
-    src_size[dim] = FloorDiv(sympy.expand(end - start), sympy.expand(step))
+    src_size[dim] = FloorDiv(end - start + (step - 1), step)
     src = expand(src, src_size)
     src_loader = src.make_loader()
 
@@ -2877,7 +2911,9 @@ def index(x, indices):
     except NotImplementedError:
         # Fallback to ATen for boolean indexing
         x.realize()
-        return fallback_handler(aten.index.Tensor)(x, indices)
+        return fallback_handler(aten.index.Tensor, add_to_fallback_set=False)(
+            x, indices
+        )
 
 
 @register_lowering(aten._unsafe_index, type_promotion_kind=None)
@@ -2912,10 +2948,18 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    if is_triton(values) and (
-        accumulate is True or torch.are_deterministic_algorithms_enabled()
-    ):
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    if is_triton(values) and (accumulate or deterministic):
         V.graph.disable_cudagraphs = True
+        msg = (
+            "index put with accumulate."
+            if not deterministic
+            else "deterministic index put."
+        )
+        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
     ir.IndexPutFallback(self, indices, values, accumulate)
     return self
 
@@ -2959,7 +3003,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
     x_size = self.get_size()
     x_ndim = len(x_size)
 
-    if needs_fallback_due_to_atomic_add_limitations(self.get_dtype()):
+    if accumulate and needs_fallback_due_to_atomic_add_limitations(self.get_dtype()):
         # self is an scalar Tensor
         if x_ndim == 0:
             self = view(self, [1])
@@ -3089,6 +3133,7 @@ def scatter_fallback(
         reduce not in {None, reduce_ty}
         or (
             isinstance(src, TensorBox)
+            and src.get_device().type == torch.device("cuda").type
             and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
         )
         or (
@@ -3245,7 +3290,11 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
 
 
 def upsample_nearestnd(
-    x, output_size, scales_x: Tuple[Optional[float], ...], n: int = 2
+    x,
+    output_size,
+    scales_x: Tuple[Optional[float], ...],
+    n: int = 2,
+    exact: bool = False,
 ):
     x.realize_hint()  # elements are reused
     x_loader = x.make_loader()
@@ -3257,12 +3306,17 @@ def upsample_nearestnd(
     o_sizes = output_size
 
     scales = [i / o for i, o in zip(i_sizes, o_sizes)]
-    for i, scale in enumerate(scales):
+    for i, scale in enumerate(scales_x):
         if scale:
             scales[i] = scale
 
     def scale_fn(x, scale, size):
+        # Nearest Exact: input_index = round(scale * (output_index + 0.5) - 0.5)
+        #                            = floor(scale * (output_index + 0.5))
+        # Nearest: input_index = floor(scale * output_index)
         x = ops.index_expr(x, torch.float32)
+        if exact:
+            x = ops.add(x, ops.constant(0.5, torch.float32))
         x = ops.mul(x, ops.constant(scale, torch.float32))
         x = ops.to_dtype(x, torch.int32)
         return ops.indirect_indexing(x, size, check=False)
@@ -3287,11 +3341,23 @@ def upsample_nearest1d(x, output_size, scales: Optional[float] = None):
     return upsample_nearestnd(x, output_size, (scales,), n=1)
 
 
+@register_lowering(aten._upsample_nearest_exact1d.default)
+def _upsample_nearest_exact1d(x, output_size, scales: Optional[float] = None):
+    return upsample_nearestnd(x, output_size, (scales,), n=1, exact=True)
+
+
 @register_lowering(aten.upsample_nearest2d.default)
 def upsample_nearest2d(
     x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
 ):
     return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2)
+
+
+@register_lowering(aten._upsample_nearest_exact2d.default)
+def _upsample_nearest_exact2d(
+    x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
+):
+    return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2, exact=True)
 
 
 @register_lowering(aten.upsample_nearest3d.default)
@@ -3303,6 +3369,19 @@ def upsample_nearest3d(
     scales_w: Optional[float] = None,
 ):
     return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
+
+
+@register_lowering(aten._upsample_nearest_exact3d.default)
+def _upsample_nearest_exact3d(
+    x,
+    output_size,
+    scales_d: Optional[float] = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+):
+    return upsample_nearestnd(
+        x, output_size, (scales_d, scales_h, scales_w), n=3, exact=True
+    )
 
 
 def _create_constants(*args, dtype):
@@ -3567,7 +3646,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     n = len(sizes) - len(bounds)
 
     # if padding is a complicated expression, hoist it
-    bounds_precomp = []
+    bounds_precomp: List[Tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
         l_precomp = (
             V.graph.sizevars.lookup_precomputed_size(l)
@@ -3682,7 +3761,8 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
 
 
 fallback_max_pool2d_with_indices = fallback_handler(
-    aten.max_pool2d_with_indices.default
+    aten.max_pool2d_with_indices.default,
+    add_to_fallback_set=False,
 )
 
 
@@ -3768,7 +3848,8 @@ def max_pool2d_with_indices(
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
-    aten.max_pool2d_with_indices_backward.default
+    aten.max_pool2d_with_indices_backward.default,
+    add_to_fallback_set=False,
 )
 
 
@@ -3989,7 +4070,9 @@ def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
     return fn_sum
 
 
-fallback_adaptive_avg_pool2d = fallback_handler(aten._adaptive_avg_pool2d.default)
+fallback_adaptive_avg_pool2d = fallback_handler(
+    aten._adaptive_avg_pool2d.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten._adaptive_avg_pool2d)
@@ -4111,7 +4194,9 @@ def upsample_nearest2d_backward(
     return rv
 
 
-fallback_avg_pool2d = fallback_handler(aten.avg_pool2d.default)
+fallback_avg_pool2d = fallback_handler(
+    aten.avg_pool2d.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.avg_pool2d, type_promotion_kind=None)
@@ -4208,7 +4293,9 @@ def avg_pool2d(
     return rv
 
 
-fallback_avg_pool2d_backward = fallback_handler(aten.avg_pool2d_backward.default)
+fallback_avg_pool2d_backward = fallback_handler(
+    aten.avg_pool2d_backward.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.avg_pool2d_backward, type_promotion_kind=None)
@@ -4611,9 +4698,13 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
-fallback_pow_tensor_tensor = fallback_handler(aten.pow.Tensor_Tensor)
-fallback_pow_scalar = fallback_handler(aten.pow.Scalar)
-fallback_pow_tensor_scalar = fallback_handler(aten.pow.Tensor_Scalar)
+fallback_pow_tensor_tensor = fallback_handler(
+    aten.pow.Tensor_Tensor, add_to_fallback_set=False
+)
+fallback_pow_scalar = fallback_handler(aten.pow.Scalar, add_to_fallback_set=False)
+fallback_pow_tensor_scalar = fallback_handler(
+    aten.pow.Tensor_Scalar, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.pow, broadcast=True)
@@ -4664,7 +4755,7 @@ def pow(a, b):
     return pow_native(a, b)
 
 
-def mutate_to(changed, val):
+def mutate_to(changed, val, unsafe_alias=False):
     if isinstance(changed, TensorBox):
         changed_data = changed.data
     else:
@@ -4690,7 +4781,7 @@ def mutate_to(changed, val):
         changed_data.data = val.data
         return changed
 
-    ir.MutationLayout.realize_into(val, changed_data)
+    ir.MutationLayout.realize_into(val, changed_data, unsafe_alias=unsafe_alias)
     return changed
 
 
@@ -4962,19 +5053,23 @@ register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
-register_foreach_pointwise(aten._foreach_add.List, add, allow_alpha=True)
-register_foreach_pointwise(aten._foreach_add.Scalar, add, allow_alpha=True)
+foreach_add_list = register_foreach_pointwise(
+    aten._foreach_add.List, add, allow_alpha=True
+)
+foreach_add_scalar = register_foreach_pointwise(
+    aten._foreach_add.Scalar, add, allow_alpha=True
+)
 register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
-register_foreach_pointwise(aten._foreach_mul.List, mul)
-register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
+foreach_mul_list = register_foreach_pointwise(aten._foreach_mul.List, mul)
+foreach_mul_scalar = register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
 register_foreach_pointwise(aten._foreach_sub.List, sub)
 register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
 register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
-register_foreach_pointwise(aten._foreach_div.List, div)
-register_foreach_pointwise(aten._foreach_div.Scalar, div)
+foreach_div_list = register_foreach_pointwise(aten._foreach_div.List, div)
+foreach_div_scalar = register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
 register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
@@ -4987,6 +5082,44 @@ register_foreach_pointwise(aten._foreach_clamp_max.Scalar, minimum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
 register_foreach_pointwise(aten._foreach_copy, copy)
+
+
+# these are only encountered as outputs of the graph
+# reinplacing epilogue copies improves compile time
+# by removing extra buffers sent to the scheduler.
+def register_foreach_inplace(aten_op, outplace_aten_op, outplace_op):
+    inplaceable_foreach_ops[outplace_aten_op] = aten_op
+    inplace_foreach_ops.add(aten_op)
+
+    def fn(*args, **kwargs):
+        results = outplace_op(*args, **kwargs)
+        mut_results = []
+        for arg, result in zip(args[0], results):
+            mut_results.append(mutate_to(arg, result, unsafe_alias=True))
+
+        return mut_results
+
+    _register_foreach_lowering(aten_op, fn)
+
+
+register_foreach_inplace(
+    aten._foreach_add_.List, aten._foreach_add.List, foreach_add_list
+)
+register_foreach_inplace(
+    aten._foreach_add_.Scalar, aten._foreach_add.Scalar, foreach_add_scalar
+)
+register_foreach_inplace(
+    aten._foreach_mul_.List, aten._foreach_mul.List, foreach_mul_list
+)
+register_foreach_inplace(
+    aten._foreach_mul_.Scalar, aten._foreach_mul.Scalar, foreach_mul_scalar
+)
+register_foreach_inplace(
+    aten._foreach_div_.List, aten._foreach_div.List, foreach_div_list
+)
+register_foreach_inplace(
+    aten._foreach_div_.Scalar, aten._foreach_div.Scalar, foreach_div_scalar
+)
 
 
 def register_inplace(aten_op, outplace_op):

@@ -194,7 +194,8 @@ def all_gather_tensor(
     if gather_dim != 0:
         # torch.cat access the data so we already need to wait here, first do wait
         # and then chunk + cat avoid us going through ACT dispatching logic again
-        res = res.wait()  # type: ignore[attr-defined]
+        if isinstance(res, AsyncCollectiveTensor):
+            res = res.wait()  # type: ignore[attr-defined]
         res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
     return res
 

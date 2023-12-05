@@ -97,7 +97,7 @@ struct ObserverContext {
   virtual ~ObserverContext() = default;
 
  protected:
-  ObserverContext() {}
+  ObserverContext() = default;
 };
 
 typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
