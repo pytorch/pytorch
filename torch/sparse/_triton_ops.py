@@ -555,28 +555,14 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
                 num_stages=num_stages, num_warps=num_warps, SPLIT_N=SPLIT_N, **extra)
 
 
-def bsr_dense_mm_meta(M, K, N, Ms, Ks,
-                      GROUP_SIZE_ROW=None, num_warps=None, num_stages=None, **extra):
-    if {num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
-        device_name = torch.cuda.get_device_name()
-        meta = get_meta('bsr_dense_mm', (M, K, N, Ms, Ks), device_name,
-                        version=(0, torch.float16, 0.5))
-        if meta is not None:
-            meta.update(**extra)
-            return meta
-    GROUP_SIZE_ROW = GROUP_SIZE_ROW or 4
-    num_stages = num_stages or 1
-    num_warps = num_warps or 4
-    return dict(GROUP_SIZE_ROW=GROUP_SIZE_ROW, num_stages=num_stages, num_warps=num_warps, **extra)
-
-
 def bsr_dense_addmm_meta(M, K, N, Ms, Ks, beta, alpha,
                          SPLIT_N=None, GROUP_SIZE_ROW=None, num_warps=None, num_stages=None, dtype=None, **extra):
     if dtype is None:
         dtype = torch.float16
     if {SPLIT_N, num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
         device_name = torch.cuda.get_device_name()
-        meta = get_meta('bsr_dense_addmm', (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1),
+        key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
+        meta = get_meta('bsr_dense_addmm', key,
                         device_name, version=(0, dtype, 0.5))
         if meta is not None:
             meta.update(**extra)
@@ -832,9 +818,8 @@ def bsr_dense_addmm(
 
     # todo: implement checks
 
-    original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
-
     if out is None:
+        original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
         out = dense.new_empty(original_batch_dims_broadcasted + (M, N))
 
     if bsr._nnz() == 0 or alpha == 0:
@@ -857,10 +842,10 @@ def bsr_dense_addmm(
     SPLIT_N = meta.get('SPLIT_N', N // BM)
     BN = N // SPLIT_N
 
-    dense = tile_to_blocksize(dense, (BK, BN))
-    input = tile_to_blocksize(input, (BM, BN))
     out_untiled = out
     out = tile_to_blocksize(out, (BM, BN))
+    dense = tile_to_blocksize(dense, (BK, BN))
+    input = tile_to_blocksize(input, (BM, BN))
 
     dot_out_dtype = {torch.float16: tl.float32,
                      torch.bfloat16: tl.float32,
@@ -1168,43 +1153,6 @@ if has_triton():
         tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))
 
 
-    def _run_dense_rowspace_kernel(
-        blocksize, values, crow_indices, col_indices, dense, output, max_grid, meta
-    ):
-        n_batches = dense.size(0)
-        n_block_rows = crow_indices.size(-1) - 1
-        n_block_cols = dense.size(-3)
-
-        full_grid = (n_batches, n_block_cols, n_block_rows)
-        if max_grid is not None:
-            grid_blocks = tuple(max_grid[:3][::-1]) + (None,) * (3 - len(max_grid[:3]))
-        else:
-            grid_blocks = None
-        tensor_dims_map = {
-            values: (0, None, None),
-            crow_indices: (0, None, -1),
-            col_indices: (0, None, None),
-            dense: (0, -3, None),
-            output: (0, -3, -4)
-        }
-        if values.dtype in (torch.half, torch.bfloat16):
-            acc_dtype = tl.float32
-            allow_tf32 = True
-        else:
-            acc_dtype = tl.float64
-            allow_tf32 = False
-
-        def kernel(grid, *sliced_tensors):
-            _bsr_strided_dense_rowspace_kernel[grid](
-                *ptr_stride_extractor(*sliced_tensors),
-                *blocksize,
-                acc_dtype=acc_dtype,
-                allow_tf32=allow_tf32,
-                **meta)
-
-        launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
-
-
     def _run_sampled_addmm_kernel(
         alpha, beta, is_beta_zero,
         blocksize, k, tile_k,
@@ -1339,8 +1287,7 @@ if has_triton():
         out: Optional[torch.Tensor] = None,
         skip_checks: bool = False,
         max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
-        meta: Optional[dict] = None,
-        enable_bsr_scatter_mm: bool = True
+        meta: Optional[dict] = None
     ):
         f_name = "bsr_dense_mm"
         m, kl = bsr.shape[-2:]
@@ -1352,12 +1299,11 @@ if has_triton():
 
             n = dense.size(-1)
             row_block, col_block = bsr.values().shape[-2:]
-            check(
-                not n % row_block,
-                f"bsr_dense_mm(): dense.size(-1) == {n} should be divisible by "
-                f"blocksize[0] == {row_block}.",
-            )
             check_blocksize(f_name, (row_block, col_block))
+            check(
+                not n % 16,
+                f"{f_name}(): dense.size(-1) == {n} should be divisible by 16"
+            )
         else:
             kr, n = dense.shape[-2:]
 
@@ -1385,58 +1331,9 @@ if has_triton():
         if bsr._nnz() == 0:
             return out.zero_()
 
-        blocksize = bsr.values().shape[-2:]
-
-        if enable_bsr_scatter_mm and max(blocksize) == 16 and bsr.dense_dim() == 0 and bsr.ndim == 2:
-            dtype = bsr.dtype
-            # bsr_scatter_mm is more performant than bsr_dense_mm for
-            # 16x16 blocksizes and large enough input shapes:
-            if (
-                    (dtype in {torch.float16, torch.bfloat16}
-                     and ((m >= 4096 and n >= 8192)
-                          or (m == 2048 and n >= 32768)
-                          or (n >= 131072))) or
-                    (dtype == torch.float32
-                     and (m >= 1024
-                          or (m == 512 and n >= 512)
-                          or (m == 256 and n >= 2048)))
-            ):
-                return bsr_scatter_mm(bsr, dense, out=out)
-
-        if meta is None:
-            meta = bsr_dense_mm_meta(m, kl, n, blocksize[0], blocksize[1])
-        else:
-            meta = bsr_dense_mm_meta(m, kl, n, blocksize[0], blocksize[1], **meta)
-
-        # NOTE: out is contiguous, so prepare_inputs will create a view.
-        # out gets modified in-place, so we store a backup copy.
-        out_backup = out
-
-        # prepare inputs by reshaping them to be kernel-compatible.
-        crow_indices, col_indices, values, dense, out = prepare_inputs(bsr, dense, out)
-
-        # "Blockify" the row dimension of dense with blocksize[1]
-        # since dense is on the rhs of matmul
-        dense = tile_to_blocksize(dense, blocksize[::-1])
-        # "Blockify" the row dimension of out with blocksize[0]
-        # which is inherited from the bsr input.
-        # NOTE: tile_to_blocksize will create a view.
-        # NOTE: out.blocksize[-1] == dense.blocksize[-1],
-        # so it could be any value in [1, dense.shape[-1]).
-        # We need to probably use the largest possible blocksize
-        # so that it fits into SRAM.
-        out_untiled = out
-        out = tile_to_blocksize(out, (blocksize[0], blocksize[0]))
-
-        # Launch kernel
-        _run_dense_rowspace_kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid, meta)
-
-        if out.data_ptr() != out_backup.data_ptr():
-            # prepare_inputs has made a copy of out, copy its content
-            # back to out_backup:
-            out_backup.copy_(out_untiled.view(out_backup.shape))
-
-        return out_backup
+        # with beta==0, addmm ignores input content, so we can use out
+        # as a placeholder for input because their shapes match:
+        return bsr_dense_addmm(out, bsr, dense, alpha=1, beta=0, out=out)
 
 
     @triton.jit
@@ -1938,15 +1835,16 @@ if has_triton():
         inner_block_arange = tl.arange(0, BLOCKSIZE_INNER)
         col_block_arange = tl.arange(0, BLOCKSIZE_COL)
 
-        # Pointers are set to exact write-to locations
-        input_ptrs = (
-            input_ptr
-            + input_batch_stride * batch_pid
-            + input_tiled_row_stride * row_block_pid
-            + input_tiled_col_stride * col_block_pid
-            + input_row_block_stride * row_block_arange[:, None]
-            + input_col_block_stride * col_block_arange[None, :]
-        )
+        if beta_is_nonzero:
+            # Pointers are set to exact write-to locations
+            input_ptrs = (
+                input_ptr
+                + input_batch_stride * batch_pid
+                + input_tiled_row_stride * row_block_pid
+                + input_tiled_col_stride * col_block_pid
+                + input_row_block_stride * row_block_arange[:, None]
+                + input_col_block_stride * col_block_arange[None, :]
+            )
 
         # Pointers are set to the first block of the current row.
         values_block_ptrs = (
