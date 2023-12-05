@@ -1690,24 +1690,20 @@ class Scheduler:
 
         from triton.compiler.errors import CompilationError
 
+        why = WhyNoFuse(node1, node2)
+
         try:
             ms1, path1 = self.benchmark_fused_nodes(node_list_1)
             if math.isinf(ms1):
-                fusion_log.debug(
-                    "cannot fuse (benchmark): register spilling of the first kernel"
-                )
+                why("register spilling of the first kernel")
                 return False
             ms2, path2 = self.benchmark_fused_nodes(node_list_2)
             if math.isinf(ms2):
-                fusion_log.debug(
-                    "cannot fuse (benchmark): register spilling of the second kernel"
-                )
+                why("register spilling of the second kernel")
                 return False
             ms_fused, path_fused = self.benchmark_fused_nodes(node_list_fused)
             if math.isinf(ms_fused):
-                fusion_log.debug(
-                    "cannot fuse (benchmark): register spilling of the fused kernel"
-                )
+                why("register spilling of the fused kernel")
                 return False
         except CompilationError as e:
             # workaround triton issue: https://github.com/openai/triton/issues/2151
@@ -1756,7 +1752,7 @@ class Scheduler:
         Mutates self.nodes to combine nodes into FusedSchedulerNodes.
 
         This relies on two key functions to control the logic:
-            - self.can_fuses(): checks if a fusion is legal
+            - self.can_fuse(): checks if a fusion is legal
             - self.score_fusion(): assigns priority to a given fusion
         """
         fused_nodes = set(self.nodes)
@@ -1768,6 +1764,9 @@ class Scheduler:
             ):
                 if not self.speedup_by_fusion(node1, node2):
                     continue
+                fusion_log.debug(
+                    "fusing %s with %s", node1.get_name(), node2.get_name()
+                )
                 node3 = fuse(node1, node2)
                 fused_nodes.remove(node1)
                 fused_nodes.remove(node2)
@@ -1823,11 +1822,7 @@ class Scheduler:
                 check_all_pairs(node_grouping)
 
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
-        if fusion_log.isEnabledFor(logging.DEBUG):
-            fusion_log.debug("\nfound %d possible fusions:", len(possible_fusions))
-            for fusion in possible_fusions:
-                fusion_log.debug("%s", fusion)
-            fusion_log.debug("")
+        fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
 
     def will_fusion_create_cycle(self, node1, node2):
