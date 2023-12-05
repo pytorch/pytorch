@@ -134,11 +134,11 @@ class ConstDictVariable(VariableTracker):
         ):
             assert not kwargs and len(args) == 2
             k = ConstDictVariable.get_key(args[0])
-
+            tx.output.side_effects.mutation(self)
             if istensor(k):
                 tx.store_global_weakref(global_key_name(k), k)
             self.items[k] = args[1]
-            tx.output.side_effects.mutation(self)
+            return ConstantVariable.create(None)
         elif (
             name in ("pop", "get")
             and len(args) == 2
