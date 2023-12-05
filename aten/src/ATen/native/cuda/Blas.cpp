@@ -16,6 +16,7 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_scaled_mm_native.h>
+#include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/baddbmm_native.h>
@@ -384,8 +385,11 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
 
   // If batch is 1 call addmm_out_cuda_impl (and squeeze is essentially noop)
   if (result.size(0) == 1) {
-    auto result_s = result.squeeze(0);
-    addmm_out_cuda_impl(result_s, self.squeeze(0), batch1.squeeze(0), batch2.squeeze(0), beta, alpha);
+    auto result_s = native::_unsafe_view(result, {result.size(1), result.size(2)});
+    auto self_s = self.dim() == 3 ? native::_unsafe_view(self, {self.size(1), self.size(2)}) : self;
+    auto mat1 = native::_unsafe_view(batch1, {batch1.size(1), batch1.size(2)});
+    auto mat2 = native::_unsafe_view(batch2, {batch2.size(1), batch2.size(2)});
+    addmm_out_cuda_impl(result_s, self_s, mat1, mat2, beta, alpha);
     return result;
   }
 
