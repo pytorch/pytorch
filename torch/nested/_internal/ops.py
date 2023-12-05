@@ -264,6 +264,15 @@ def jagged_torch_function(func, *args, **kwargs):
     if func is torch._C._nn.scaled_dot_product_attention:
         return jagged_scaled_dot_product_attention(*args, **kwargs)
 
+    if func.__name__ == "contiguous":
+        if args[0]._ragged_idx != 1:
+            raise RuntimeError(
+                "contiguous(): not supported on a jagged layout nested tensor with "
+                "transposed ragged dim"
+            )
+
+        # purposefully fall-through to NotImplemented
+
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
 
