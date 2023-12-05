@@ -82,6 +82,13 @@ class FSDPParam:
     _sharded_param: nn.Parameter
     _unsharded_param: nn.Parameter
     _cpu_sharded_grad: torch.Tensor  # pinned memory
+    # For splitting autograd-computed gradient
+    unsharded_chunk_numels: List[int]
+    # For splitting reduce-scatter input: the next two lists have N elements
+    # for world size N, where each inner list has 1 element if pure or no
+    # padding or 2 elements if partial padding
+    padded_unsharded_chunk_numels: List[List[int]]
+    is_padding_mask: List[List[bool]]
     unsharded_accumulated_grad: Optional[torch.Tensor]
     padded_unsharded_numel: int
     padded_unsharded_bytes: int
@@ -281,6 +288,27 @@ class FSDPParam:
         self._sharded_size = chunks[shard_rank].size()
         self._padded_sharded_size = padded_chunks[0].size()
         self._padded_unsharded_size = padded_param.size()
+        padded_chunk_numel = padded_chunks[0].numel()
+        self.padded_unsharded_chunk_numels: List[List[int]] = []
+        self.is_padding_mask: List[List[bool]] = []
+        self.unsharded_chunk_numels = []
+        for chunk_idx, chunk in enumerate(chunks):
+            chunk_numel = chunk.numel()
+            self.unsharded_chunk_numels.append(chunk_numel)
+            if chunk_numel != padded_chunk_numel:
+                if chunk_numel == 0:  # pure padding
+                    self.padded_unsharded_chunk_numels.append([padded_chunk_numel])
+                    self.is_padding_mask.append([True])
+                else:  # partial padding
+                    padding_numel = (
+                        padded_chunks[0].size(0) - chunk.size(0)
+                    ) * padded_chunks[0][0].numel()
+                    numels = [chunk_numel, padding_numel]
+                    self.padded_unsharded_chunk_numels.append(numels)
+                    self.is_padding_mask.append([False, True])
+            else:  # no padding
+                self.padded_unsharded_chunk_numels.append([chunk_numel])
+                self.is_padding_mask.append([False])
         self._sharded_param_view = self._sharded_param_data[: self._sharded_size[0]]
         self._sharded_param_data = self._sharded_param_data.view(-1)
         self._sharded_param = nn.Parameter(

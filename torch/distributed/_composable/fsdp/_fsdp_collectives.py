@@ -1,10 +1,10 @@
-from typing import List, NamedTuple, Optional
+from typing import List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed as dist
 from torch.utils._contextlib import _DecoratorContextManager
 
-from ._fsdp_common import chunk_with_empty, print_and_raise_internal, to_dtype_if_needed
+from ._fsdp_common import print_and_raise_internal, to_dtype_if_needed
 from ._fsdp_param import FSDPParam, ShardedState
 
 
@@ -183,52 +183,31 @@ def foreach_reduce_scatter(
     current_stream = torch.cuda.current_stream()
     reduce_scatter_stream.wait_stream(current_stream)
     with torch.cuda.stream(reduce_scatter_stream):
-        # - Copy in
-        flat_grad = torch.empty(
+        reduce_scatter_input = torch.empty(
             (total_padded_unsharded_numel,), dtype=reduce_dtype, device=device
         )
-        foreach_copy_dests: List[torch.Tensor] = []
-        foreach_copy_srcs: List[torch.Tensor] = []
-        flat_grad_offset = 0  # [0, total_sharded_numel - 1]
-        for fsdp_param, grad in zip(fsdp_params, unsharded_grads):
-            padded_sharded_numel = fsdp_param._padded_sharded_size.numel()
-            chunks = chunk_with_empty(grad, world_size, dim=0)
-            for rank in range(world_size):
-                grad_shard_start = rank * padded_sharded_numel
-                numel_in_shard = min(
-                    fsdp_param._unsharded_size.numel() - grad_shard_start,
-                    padded_sharded_numel,
-                )
-                if numel_in_shard > 0:
-                    flat_grad_start = flat_grad_offset + rank * total_sharded_numel
-                    foreach_copy_dests.append(
-                        flat_grad[flat_grad_start : flat_grad_start + numel_in_shard]
-                    )
-                    foreach_copy_srcs.append(chunks[rank].view(-1))
-            flat_grad_offset += padded_sharded_numel
-            del chunks
-        torch._foreach_copy_(foreach_copy_dests, foreach_copy_srcs)
-        del foreach_copy_dests
-        del foreach_copy_srcs
-        _div_if_needed(flat_grad, predivide_factor)
+        foreach_reduce_scatter_copy_in(
+            fsdp_params, unsharded_grads, reduce_scatter_input, world_size
+        )
+        _div_if_needed(reduce_scatter_input, predivide_factor)
         # Record a CUDA event in the reduce-scatter stream to mark the end of
         # the copy-in for the reduce-scatter input
         copy_in_event = torch.cuda.Event()
         copy_in_event.record()
-        flat_grad_shard = torch.empty(
+        reduce_scatter_output = torch.empty(
             (total_sharded_numel,), dtype=reduce_dtype, device=device
         )
-        # - Reduce-scatter
-        dist.reduce_scatter_tensor(output=flat_grad_shard, input=flat_grad, group=group)
-        # - Post-reduce-scatter
-        _div_if_needed(flat_grad_shard, postdivide_factor)
-        flat_grad_shard = to_dtype_if_needed(flat_grad_shard, orig_dtype)
+        dist.reduce_scatter_tensor(
+            output=reduce_scatter_output, input=reduce_scatter_input, group=group
+        )
+        _div_if_needed(reduce_scatter_output, postdivide_factor)
+        reduce_scatter_output = to_dtype_if_needed(reduce_scatter_output, orig_dtype)
         # - View out and accumulate
         flat_grad_offset = 0  # [0, total_sharded_numel - 1]
         for fsdp_param in fsdp_params:
             padded_sharded_numel = fsdp_param._padded_sharded_size.numel()
             sharded_numel = fsdp_param._sharded_size.numel()
-            new_sharded_grad = flat_grad_shard[
+            new_sharded_grad = reduce_scatter_output[
                 flat_grad_offset : flat_grad_offset + sharded_numel
             ].view(fsdp_param._sharded_size)
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
@@ -278,6 +257,44 @@ def foreach_reduce_scatter(
     # through the end of backward, and the RS stream transitively waits for the
     # default stream before the next backward.
     return reduce_scatter_view_out_event
+
+
+def foreach_reduce_scatter_copy_in(
+    fsdp_params: List[FSDPParam],
+    unsharded_grads: List[torch.Tensor],
+    reduce_scatter_input: torch.Tensor,
+    world_size: int,
+) -> None:
+    # Use `torch.split` to reduce CPU overhead since it pushes for loops of
+    # slices into C++ only
+    foreach_copy_dests: List[torch.Tensor] = []  # 1D tensors
+    foreach_copy_srcs: List[torch.Tensor] = []  # 1D tensors
+    split_sizes: List[int] = []
+    is_padding_mask: List[bool] = []
+    for rank in range(world_size):
+        for fsdp_param in fsdp_params:
+            split_sizes.extend(fsdp_param.padded_unsharded_chunk_numels[rank])
+            is_padding_mask.extend(fsdp_param.is_padding_mask[rank])
+    splits = torch.split(reduce_scatter_input, split_sizes, dim=0)
+    all_flat_grad_splits: List[Tuple[torch.Tensor, ...]] = []
+    for fsdp_param, grad in zip(fsdp_params, unsharded_grads):
+        # Flatten once per gradient to reduce number of `view` calls
+        flat_grad_splits = torch.split(grad.view(-1), fsdp_param.unsharded_chunk_numels)
+        all_flat_grad_splits.append(flat_grad_splits)
+    for rank in range(world_size):
+        for fsdp_param_idx in range(len(fsdp_params)):
+            if (split := all_flat_grad_splits[fsdp_param_idx][rank]).numel() > 0:
+                foreach_copy_srcs.append(split)
+            # Else pure padding
+    for is_padding, split in zip(is_padding_mask, splits):
+        if is_padding:
+            continue
+        foreach_copy_dests.append(split)
+    if len(foreach_copy_dests) != len(foreach_copy_srcs):
+        print_and_raise_internal(
+            f"dests={len(foreach_copy_dests)} srcs={len(foreach_copy_srcs)}"
+        )
+    torch._foreach_copy_(foreach_copy_dests, foreach_copy_srcs)
 
 
 def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
