@@ -4,6 +4,7 @@ import collections
 import functools
 import inspect
 import itertools
+import math
 import operator
 import sys
 import unittest
@@ -744,6 +745,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             dd["a"] = x + 1
             dd[param] = 123
             dd["c"] = x * 2
+            dd.update({"b": x * 3})
+            dd.update([["d", x - 2], ("e", x + 2)])
+            dd.update(zip("ab", [x + 3, x + 4]))
             return dd["b"], dd
 
         x = torch.randn(10, 10)
@@ -753,7 +757,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref[0], res[0]))
         self.assertTrue(same(ref[1]["a"], res[1]["a"]))
+        self.assertTrue(same(ref[1]["b"], res[1]["b"]))
         self.assertTrue(same(ref[1]["c"], res[1]["c"]))
+        self.assertTrue(same(ref[1]["d"], res[1]["d"]))
+        self.assertTrue(same(ref[1]["e"], res[1]["e"]))
         self.assertTrue(same(ref[1][param], res[1][param]))
 
     @make_test
@@ -802,6 +809,42 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return d1["a"] + d2["c"] + 1
 
     @make_test
+    def test_dict_fromkeys(x, y):
+        lst = ["a", "b"]
+        d = dict.fromkeys(lst)
+        d1 = dict.fromkeys(d, x + 1)
+        d2 = collections.defaultdict.fromkeys(iter(d1), x - 2)
+        d3 = collections.OrderedDict.fromkeys(tuple(lst), value=y)
+        return d1["a"] * d2["b"] + d2["a"] + d1["b"] + d3["a"] + d3["b"] + 1
+
+    @make_test
+    def test_dict_copy(x):
+        my_list = [("a", x), ("b", x + 1), ("c", x + 2)]
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = d1.copy()
+        d2["a"] = x - 5
+        d2["b"] = x + 3
+        d3 = collections.OrderedDict(my_list)
+        d3["c"] = x + 20
+        d4 = d3.copy()
+        d4["c"] = x - 10
+        return d1["a"] * d2["a"] + d2["b"] + d3["c"] * d4["c"] + 1
+
+    @make_test
+    def test_dict_update(x, y, z):
+        d = {"a": x, "b": y}
+        d.update({"a": y - 1})
+        d.update([("b", z + 1), ["c", z]])
+        d.update(zip("ab", [z + 3, y + 2]))
+
+        od = collections.OrderedDict(a=x * 3, b=y + 2)
+        od.update({"a": y + 5})
+        od.update([["b", z + 6], ("c", z - 7)])
+        od.update(zip("ab", [z - 3, x + 2]))
+        return d["a"] * od["a"] + od["c"] + d["b"] + od["b"] * d["c"]
+
+    @make_test
     def test_min_max(a, b):
         c = a + b
         a = a.sum()
@@ -809,6 +852,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         a = min(max(a, 0), 1)
         b = max(0, min(1, b))
         return max(a, b) - min(a, b) + c
+
+    @make_test
+    def test_symbool_to_int(x):
+        # this is roughly the pattern found in einops.unpack()
+        if sum(s == -1 for s in x.size()) == 0:
+            return x + 1
+        else:
+            return x - 1
 
     @make_test
     def test_map_sum(a, b, c, d):
@@ -1124,6 +1175,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #         case {"b": param}:
     #             return x / param
 
+    def test_math_radians(self):
+        def func(x, a):
+            return x + math.radians(a)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        cfunc = torch._dynamo.optimize_assert(cnt)(func)
+
+        assert cnt.frame_count == 0
+        x = torch.rand(10)
+        expected = func(x, 12)
+        output = cfunc(x, 12)
+        self.assertTrue(same(output, expected))
+        assert cnt.frame_count == 1
+
     @make_test
     def test_numpy_meshgrid(x, y):
         r1, r2 = np.meshgrid(x.numpy(), y.numpy())
@@ -1251,6 +1316,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         multiply = lambda x, y: x * y
         triple = functools.partial(multiply, y=3)
         return triple(x)
+
+    def test_pow_int(self):
+        def fn(a, b):
+            return torch.pow(a, b)
+
+        x = torch.ones(2, 2)
+        opt_fn = torch.compile(fullgraph=True, backend="eager", dynamic=True)(fn)
+        self.assertEqual(opt_fn(x, 2), fn(x, 2))
 
     def test_tensor_size_indexed_by_symint(self):
         def fn(x, y):
@@ -2006,6 +2079,7 @@ def forward(self, x_1, output_1):
             n_elements,
             dummy_None,
             dummy_empty,
+            dummy_float,
             BLOCK_SIZE: "tl.constexpr",
             RANDOM_SIZE: "tl.constexpr",
         ):
@@ -2020,6 +2094,7 @@ def forward(self, x_1, output_1):
                 n_elements,
                 None,
                 torch.empty_like(output),
+                3.1415926,
                 RANDOM_SIZE=0,
             )
             return output
@@ -2589,6 +2664,34 @@ def forward(self, x_1, output_1):
         # Test aliased
         self.assertEqual(opt_fn(param, param), fn(param, param))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
+    @unittest.skipIf(
+        sys.version_info < (3, 10),
+        "zip strict kwargs not implemented for Python < 3.10",
+    )
+    def test_zip_strict(self):
+        def fn(x, ys, zs):
+            x = x.clone()
+            for y, z in zip(ys, zs, strict=True):
+                x += y * z
+            return x
+
+        opt_fn = torch._dynamo.optimize(backend="eager")(fn)
+        nopython_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+
+        x = torch.ones(3)
+        ys = [1.0, 2.0, 3.0]
+        zs = [2.0, 5.0, 8.0]
+
+        self.assertEqual(opt_fn(x, ys, zs), fn(x, ys, zs))
+
+        # If nopython, should raise UserError
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
+            nopython_fn(x, ys[:1], zs)
+
+        # Should cause fallback if allow graph break
+        with self.assertRaisesRegex(ValueError, "zip()"):
+            opt_fn(x, ys[:1], zs)
 
     def test_compare_constant_and_tensor(self):
         for op in [
