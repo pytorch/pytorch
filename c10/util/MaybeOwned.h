@@ -2,10 +2,10 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/in_place.h>
 
 #include <memory>
 #include <type_traits>
+#include <utility>
 
 namespace c10 {
 
@@ -83,7 +83,7 @@ class MaybeOwned final {
 
   /// Don't use this; use owned() instead.
   template <class... Args>
-  explicit MaybeOwned(in_place_t, Args&&... args)
+  explicit MaybeOwned(std::in_place_t, Args&&... args)
       : isBorrowed_(false), own_(std::forward<Args>(args)...) {}
 
  public:
@@ -175,8 +175,8 @@ class MaybeOwned final {
   }
 
   template <class... Args>
-  static MaybeOwned owned(in_place_t, Args&&... args) {
-    return MaybeOwned(in_place, std::forward<Args>(args)...);
+  static MaybeOwned owned(std::in_place_t, Args&&... args) {
+    return MaybeOwned(std::in_place, std::forward<Args>(args)...);
   }
 
   ~MaybeOwned() noexcept(std::is_nothrow_destructible_v<T>&&
