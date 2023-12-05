@@ -2550,6 +2550,8 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
+        torch.cuda.empty_cache()
+
         if self.args.timing:
             from torch._dynamo.utils import op_count, print_time_report
             from torch.utils._stats import simple_call_counter

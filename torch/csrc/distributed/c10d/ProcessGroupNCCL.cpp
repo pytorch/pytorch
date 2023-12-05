@@ -1777,12 +1777,23 @@ uint64_t ProcessGroupNCCL::getCommSplitCounter() const {
 namespace {
 
 // Check validity of tensor
-void check_gpu_single_tensor(const at::Tensor& tensor) {
+void check_gpu_single_tensor(
+    const at::Tensor& tensor,
+    const bool p2p = false // whether operation is a P2P operation
+) {
   if (!tensor.is_cuda() || tensor.is_sparse()) {
     C10_THROW_ERROR(ValueError, "Tensors must be CUDA and dense");
   }
+  // Skip the following requirements for P2P operations
   if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
-    C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
+    if (p2p) {
+      TORCH_WARN_ONCE(
+          "Detected non-contiguous tensor in P2P operations. It is user "
+          "responsibility to guarantee that source and destination tensors have "
+          "the same contiguity format.");
+    } else {
+      C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
+    }
   }
 }
 
@@ -1792,7 +1803,9 @@ void check_gpu_single_tensor(const at::Tensor& tensor) {
 // here, ie, that deliberately pass invalid tensors and check the right
 // exception is thrown.
 void check_gpu_tensors_different_devices(
-    const std::vector<at::Tensor>& tensors) {
+    const std::vector<at::Tensor>& tensors,
+    const bool p2p = false // whether operation is a P2P operation
+) {
   if (tensors.size() == 0) {
     C10_THROW_ERROR(ValueError, "Tensor list must be nonempty");
   }
@@ -1821,8 +1834,16 @@ void check_gpu_tensors_different_devices(
     if (t.strides() != first.strides()) {
       C10_THROW_ERROR(ValueError, "Tensors must have identical strides");
     }
+    // Skip the following requirements for P2P operations
     if (!t.is_contiguous(t.suggest_memory_format())) {
-      C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
+      if (p2p) {
+        TORCH_WARN_ONCE(
+            "Detected non-contiguous tensor in P2P operations. It is user "
+            "responsibility to guarantee that source and destination tensors have "
+            "the same contiguity format.");
+      } else {
+        C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
+      }
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;
     if (!inserted) {
@@ -3288,8 +3309,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
     std::vector<int64_t>& outputSplitSizes,
     std::vector<int64_t>& inputSplitSizes,
     const AllToAllOptions& /* unused */) {
-  check_gpu_single_tensor(outputTensor);
-  check_gpu_single_tensor(inputTensor);
+  check_gpu_single_tensor(outputTensor, true);
+  check_gpu_single_tensor(inputTensor, true);
   if (outputSplitSizes.size() == 0 && inputSplitSizes.size() == 0) {
     std::vector<at::Tensor> inputTensors = {inputTensor};
     std::vector<at::Tensor> outputTensors = {outputTensor};
@@ -3402,8 +3423,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
 
   auto device = outputTensors[0].device();
   for (const auto r : c10::irange(outputTensors.size())) {
-    check_gpu_single_tensor(outputTensors[r]);
-    check_gpu_single_tensor(inputTensors[r]);
+    check_gpu_single_tensor(outputTensors[r], true);
+    check_gpu_single_tensor(inputTensors[r], true);
     TORCH_CHECK(
         device == outputTensors[r].device() &&
             device == inputTensors[r].device(),
@@ -3460,7 +3481,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int /* unused */) {
-  check_gpu_tensors_different_devices(tensors);
+  check_gpu_tensors_different_devices(tensors, true);
 
   // @lint-ignore CLANGTIDY
   auto tensor = tensors.back();
@@ -3498,7 +3519,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int /* unused */) {
-  check_gpu_tensors_different_devices(tensors);
+  check_gpu_tensors_different_devices(tensors, true);
 
   // @lint-ignore CLANGTIDY
   auto tensor = tensors.back();
@@ -3625,7 +3646,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
-  check_gpu_tensors_different_devices(inputTensors);
+  check_gpu_tensors_different_devices(inputTensors, true);
   assertSingleElementInput(invalidArgument, inputTensors);
 
   // @lint-ignore CLANGTIDY
@@ -3711,7 +3732,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
-  check_gpu_tensors_different_devices(outputTensors);
+  check_gpu_tensors_different_devices(outputTensors, true);
   assertSingleElementInput(invalidArgument, outputTensors);
 
   // @lint-ignore CLANGTIDY
