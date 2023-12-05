@@ -23,7 +23,7 @@ from torch.utils.weak import WeakIdRef
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
-    from torch.fx.experimental.symbolic_shapes import CreateSymbolicPolicy
+    from torch.fx.experimental.symbolic_shapes import SymbolicContext
 
 DimList = List
 
@@ -184,7 +184,7 @@ class MetaConverter:
         shape_env=None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
-        policy: Optional["CreateSymbolicPolicy"] = None,
+        symbolic_context: Optional["SymbolicContext"] = None,
     ):
         from torch._subclasses.fake_tensor import FakeTensor
 
@@ -250,10 +250,10 @@ class MetaConverter:
                         # the wrapper tensor and any inner tensors.
                         # We can revisit this if this assumption does not hold
                         # for any important subclasses later.
-                        policy=policy,
+                        symbolic_context=symbolic_context,
                     )
             else:
-                assert policy is None
+                assert symbolic_context is None
             return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages
@@ -315,22 +315,22 @@ class MetaConverter:
                     from torch._dynamo.source import AttrSource
                     from torch.fx.experimental.symbolic_shapes import (
                         DimDynamic,
-                        FreshCreateSymbolicPolicy,
+                        StatelessSymbolicContext,
                     )
 
                     if shape_env and not t.is_nested and not t._base.is_nested:
-                        base_policy = FreshCreateSymbolicPolicy(
+                        base_symbolic_context = StatelessSymbolicContext(
                             dynamic_sizes=[DimDynamic.STATIC] * t._base.dim(),
                             constraint_sizes=[None] * t._base.dim(),
                         )
                     else:
-                        base_policy = None
+                        base_symbolic_context = None
                     base = self.meta_tensor(
                         t._base,
                         shape_env,
                         callback,
                         source=AttrSource(source, "_base"),
-                        policy=base_policy,
+                        symbolic_context=base_symbolic_context,
                     )
 
                     def is_c_of_r(complex_dtype, real_dtype):
@@ -620,7 +620,7 @@ class MetaConverter:
                         shape_env,
                         callback,
                         source=AttrSource(source, "grad"),
-                        policy=policy,
+                        symbolic_context=symbolic_context,
                     )
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
@@ -637,7 +637,7 @@ class MetaConverter:
         *,
         callback=lambda t: t(),
         source=None,
-        policy=None,
+        symbolic_context=None,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
@@ -682,7 +682,7 @@ class MetaConverter:
                                 shape_env=shape_env,
                                 callback=callback,
                                 source=source,
-                                policy=policy,
+                                symbolic_context=symbolic_context,
                             )
                         out = torch._to_functional_tensor(fake_t)
                         torch._mirror_autograd_meta_to(fake_t, out)
@@ -700,7 +700,7 @@ class MetaConverter:
                                 shape_env=shape_env,
                                 callback=callback,
                                 source=source,
-                                policy=policy,
+                                symbolic_context=symbolic_context,
                             )
                         return _wrap_functional_tensor(fake_t, current_level())
                 self.miss += 1
@@ -712,7 +712,7 @@ class MetaConverter:
                     shape_env=shape_env,
                     callback=callback,
                     source=source,
-                    policy=policy,
+                    symbolic_context=symbolic_context,
                 )
                 if type(t) is torch.nn.Parameter:
                     # NB: Cannot directly use Parameter constructor
