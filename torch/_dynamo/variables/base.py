@@ -299,8 +299,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
-    def num_parameters(self):
-        unimplemented(f"num_parameters: {self}")
+    def inspect_parameter_names(self) -> List[str]:
+        unimplemented(f"inspect_parameter_names: {self}")
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         unimplemented(f"hasattr: {repr(self)}")

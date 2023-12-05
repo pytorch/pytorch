@@ -2,13 +2,13 @@ from typing import cast, List, Sequence, Tuple
 
 import torch
 from torch._prims_common import ShapeType
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import (
     _Partial,
     Placement,
     Replicate,
     Shard,
 )
+from torch.distributed.device_mesh import DeviceMesh
 
 
 # TODO: audit existing code base to see if we can safely remove this API.
@@ -23,7 +23,7 @@ def compute_local_shape(
 
     if my_coordinate is None:
         # if rank not in the mesh, return empty shape
-        return ()
+        return (0,)
     else:
         local_shape = list(global_shape)  # start with global shape
         ndim = len(global_shape)
