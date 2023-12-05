@@ -311,6 +311,32 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, AllowInGraphFunc.apply(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_once_differentiable(self):
+        from torch.autograd.function import once_differentiable
+
+        torch._dynamo.utils.counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class ScaleGradient(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, grad):
+                return grad * 0.5
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return ScaleGradient.apply(x)
+
+        x = torch.randn(3, requires_grad=True)
+        result = fn(x)
+
+        self.assertEqual(result, ScaleGradient.apply(x))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_classmethod(self):
         class Shake(torch.autograd.Function):
             @classmethod
