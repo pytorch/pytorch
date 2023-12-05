@@ -115,7 +115,7 @@ def validate_args_and_maybe_create_graph_inputs(
         SymNodeVariable,
         TensorVariable,
     )
-    from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
+    from .builder import wrap_fx_proxy_cls
 
     assert tracer.parent is not None
 
@@ -131,30 +131,29 @@ def validate_args_and_maybe_create_graph_inputs(
                 # future, we can clean this up.
                 tracer.create_graph_input("const")
             new_arg = a
-        elif isinstance(a, TensorVariable):
-            if manually_set_subgraph_inputs:
-                new_proxy = tracer.create_graph_input(a.as_proxy().node.name)
-                example_value = a.as_proxy().node.meta["example_value"]
-                new_arg = wrap_fx_proxy(
-                    tx=tx, proxy=new_proxy, example_value=example_value
-                )
-            else:
-                new_arg = a
-        elif isinstance(a, SymNodeVariable):
-            if manually_set_subgraph_inputs:
-                new_proxy = tracer.create_graph_input(str(a.sym_num.node.expr))
-                new_arg = wrap_fx_proxy_cls(
-                    target_cls=SymNodeVariable,
-                    tx=tx,
-                    proxy=new_proxy,
-                    example_value=a.sym_num,
-                )
-            else:
-                new_arg = a
+        # Weird special case, we probably want to delete it or fold it
+        # into the next case (of `a` being placeable into a graph)
         elif isinstance(a, AutogradFunctionContextVariable):
             if manually_set_subgraph_inputs:
                 tracer.create_graph_input(a.as_proxy().node.name)
             new_arg = a
+        # If `a` can be put into a graph
+        elif a.maybe_fx_node() is not None:
+            if manually_set_subgraph_inputs:
+                node = a.maybe_fx_node()
+                new_proxy = tracer.create_graph_input(node.name)
+                example_value = (
+                    node.meta["example_value"] if "example_value" in node.meta else None
+                )
+                new_arg = wrap_fx_proxy_cls(
+                    target_cls=type(a),
+                    tx=tx,
+                    proxy=new_proxy,
+                    example_value=example_value,
+                )
+            else:
+                new_arg = a
+        # If `a` cannot be put into a graph
         else:
             if manually_set_subgraph_inputs:
                 raise unimplemented(
