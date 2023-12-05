@@ -1451,7 +1451,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def forward(self, x, _):
                 conv_out1 = self.conv(x)
                 pow_out = torch.pow(conv_out1, 2)
-
                 conv_out2 = self.conv2(pow_out)
                 conv_out3 = self.conv3(conv_out2)
                 res = torch.add(conv_out3, pow_out)
