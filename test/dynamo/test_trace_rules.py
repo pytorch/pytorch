@@ -12,10 +12,9 @@ from torch._dynamo.skipfiles import (
     MOD_INLINELIST,
 )
 from torch._dynamo.trace_rules import (
+    get_torch_obj_rule_map,
     load_object,
-    torch_c_binding_in_graph_functions,
-    torch_ctx_manager_classes,
-    torch_non_c_binding_in_graph_functions,
+    manual_torch_name_rule_map,
 )
 from torch._dynamo.utils import istype
 
@@ -25,7 +24,7 @@ except ImportError:
     from utils import create_dummy_module_and_function
 
 
-ignored_ctx_manager_class_names = {
+ignored_torch_name_rule_set = {
     "torch.ExcludeDispatchKeyGuard",
     "torch._C.DisableTorchFunction",
     "torch._C._AutoDispatchBelowAutograd",
@@ -66,15 +65,6 @@ ignored_ctx_manager_class_names = {
     "torch.sparse.check_sparse_tensor_invariants",
 }
 
-ignored_c_binding_in_graph_function_names = set()
-if torch._C._llvm_enabled():
-    ignored_c_binding_in_graph_function_names |= {
-        "torch._C._te.set_llvm_aot_workflow",
-        "torch._C._te.set_llvm_target_cpu",
-        "torch._C._te.set_llvm_target_attrs",
-        "torch._C._te.set_llvm_target_triple",
-    }
-
 
 def gen_get_func_inlinelist(dummy_func_inlinelist):
     def get_func_inlinelist():
@@ -89,23 +79,14 @@ def gen_get_func_inlinelist(dummy_func_inlinelist):
     return get_func_inlinelist
 
 
-class TraceRuleTests(torch._dynamo.test_case.TestCase):
-    def _check_set_equality(self, generated, used, rule_map, ignored_set):
-        x = generated - used
-        y = used - generated
-        msg1 = (
-            f"New torch objects: {x} "
-            f"were not added to `trace_rules.{rule_map}` or `test_trace_rules.{ignored_set}`. "
-            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
-        )
-        msg2 = (
-            f"Existing torch objects: {y} were removed. "
-            f"Please remove them from `trace_rules.{rule_map}` or `test_trace_rules.{ignored_set}`. "
-            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
-        )
-        self.assertTrue(len(x) == 0, msg1)
-        self.assertTrue(len(y) == 0, msg2)
+# Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
+# allowed objects include:
+# - Torch context manager classes.
+def generate_allowed_object_set():
+    return gen_allowed_objs_and_ids().objects
 
+
+class TraceRuleTests(torch._dynamo.test_case.TestCase):
     # We are using python function and module string names for these inlinelist,
     # this unit test is to make sure the functions/modules can be correctly imported
     # or loaded in case there is typo in the strings.
@@ -123,54 +104,33 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                 f"{f} from skipfiles.FUNC_INLINELIST is not a python function, please check and correct it.",
             )
 
-    def test_torch_name_rule_map_updated(self):
-        # Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
-        objs = gen_allowed_objs_and_ids(record=True, c_binding_only=True)
-        # Test ctx manager classes are updated in torch_name_rule_map.
-        generated = objs.ctx_mamager_classes
-        used = set()
-        for x in (
-            set(torch_ctx_manager_classes.keys()) | ignored_ctx_manager_class_names
-        ):
-            obj = load_object(x)
-            if obj is not None:
-                used.add(obj)
-        self._check_set_equality(
-            generated,
-            used,
-            "torch_ctx_manager_classes",
-            "ignored_ctx_manager_class_names",
+    def test_torch_name_rule_map(self):
+        manual_torch_obj_rule_set = {
+            load_object(x) for x in manual_torch_name_rule_map.keys()
+        }
+        generated_torch_name_rule_set = (
+            generate_allowed_object_set() | manual_torch_obj_rule_set
         )
-        # Test C binding in graph functions are updated in torch_name_rule_map.
-        generated = objs.c_binding_in_graph_functions
-        used = set()
-        for x in (
-            set(torch_c_binding_in_graph_functions.keys())
-            | ignored_c_binding_in_graph_function_names
-        ):
-            obj = load_object(x)
-            if obj is not None:
-                used.add(obj)
-        self._check_set_equality(
-            generated,
-            used,
-            "torch_c_binding_in_graph_functions",
-            "ignored_c_binding_in_graph_function_names",
+        ignored_torch_obj_rule_set = {
+            load_object(x) for x in ignored_torch_name_rule_set
+        }
+        used_torch_name_rule_set = (
+            set(get_torch_obj_rule_map().keys()) | ignored_torch_obj_rule_set
         )
-        # For non C binding in graph functions, we only test if they can be loaded successfully.
-        for f in torch_non_c_binding_in_graph_functions:
-            self.assertTrue(
-                isinstance(
-                    load_object(f),
-                    (
-                        types.FunctionType,
-                        types.MethodType,
-                        types.BuiltinFunctionType,
-                        types.MethodDescriptorType,
-                        types.WrapperDescriptorType,
-                    ),
-                )
-            )
+        x = generated_torch_name_rule_set - used_torch_name_rule_set
+        y = used_torch_name_rule_set - generated_torch_name_rule_set
+        msg1 = (
+            f"New torch objects: {x} "
+            "were not added to trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
+            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
+        )
+        msg2 = (
+            f"Existing torch objects: {y} were removed. "
+            "Please remove them from trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
+            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
+        )
+        self.assertTrue(len(x) == 0, msg1)
+        self.assertTrue(len(y) == 0, msg2)
 
     def test_func_inlinelist_torch_function(self):
         def fn(x):
