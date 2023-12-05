@@ -3,6 +3,9 @@
 
 import copy
 import functools
+import unittest
+from unittest.mock import patch
+from torch._C import FileCheck
 
 import torch
 import torch._dynamo
@@ -40,6 +43,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils.checkpoint import checkpoint
+from torch.utils._triton import has_triton
+from torch._inductor.utils import run_and_get_triton_code
 
 
 class SimpleModel(nn.Module):
@@ -189,6 +194,84 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         )
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(1)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
+    def test_2d_fsdp_tp_compile_comm_reordering(self):
+        class FakeAttention(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.wq = nn.Linear(16, 16)
+                self.wk = nn.Linear(16, 16)
+                self.wv = nn.Linear(16, 16)
+                self.wo = nn.Linear(16, 16)
+
+            def forward(self, x):
+                xq = self.wq(x)
+                xk = self.wk(x)
+                xv = self.wv(x)
+                # fake attention:
+                xo = xq + xk + xv
+                return self.wo(xo)
+
+        class FakeTransformerBlock(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attn = FakeAttention()
+
+            def forward(self, x):
+                return self.attn(x)
+
+        class FakeTransformer(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = FakeTransformerBlock()
+
+            def forward(self, input):
+                return self.block(input)
+
+        model = FakeTransformer().to(self.device_type)
+
+        # 2-D mesh is [dp, tp]
+        mesh_2d = init_device_mesh("cuda", (1, 2), mesh_dim_names=("dp", "tp"))
+
+        tp_mesh = mesh_2d["tp"]
+
+        # apply sequence parallel
+        parallel_plan = {
+            "attn": PrepareModuleInput(
+                input_layouts=Shard(0),
+                desired_input_layouts=Replicate()
+            ),
+            "attn.wq": ColwiseParallel(),
+            "attn.wk": ColwiseParallel(),
+            "attn.wv": ColwiseParallel(),
+            "attn.wo": RowwiseParallel(output_layouts=Shard(0)),
+        }
+
+        parallelize_module(
+            module=model.block,
+            device_mesh=tp_mesh,
+            parallelize_plan=parallel_plan,
+        )
+
+        compiled_model = torch.compile(model)
+        # fsdp_mod = FSDP(compiled_model, device_mesh=mesh_2d["dp"], use_orig_params=True)
+        inp = torch.rand(20, 16).to(self.device_type)
+        out = compiled_model(inp)
+        # out = fsdp_mod(inp)
+
+        code = run_and_get_triton_code(compiled_model, inp)
+        # Check that `buf2` is correctly waited on before first use.
+        FileCheck() \
+            .check("buf1_work = dist.all_gather_into_tensor(buf1[0]") \
+            .check("buf2 = buf1[0]") \
+            .check("buf2 = _wait_tensor(buf2)") \
+            .check("extern_kernels.mm(buf2,") \
+            .run(code)
 
 
 class TestDTensorCompileE2E(DTensorTestBase):
