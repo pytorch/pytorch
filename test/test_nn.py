@@ -7320,21 +7320,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         net = torch.nn.ConvTranspose2d(8, 16, kernel_size=3, padding=(3, 3))
         y = net(x)
 
-    @largeTensorTest("60GB", "cpu")
-    @largeTensorTest("16GB", "cuda")
-    @onlyCUDA
-    def test_avg_pool_large_tensor(self):
-        # test for https://github.com/pytorch/pytorch/issues/113833
-        a = torch.randn(128, 256, 256, 256, dtype=torch.half, device='cuda', requires_grad=True)
-        a_cpu = a.detach().cpu().float()
-        m = torch.nn.AvgPool2d(2)
-        o = m(a)
-        a_cpu.requires_grad = True
-        o.sum().backward()
-        o_cpu = m(a_cpu)
-        o_cpu.sum().backward()
-        self.assertTrue(torch.allclose(a.grad.cpu(), a_cpu.grad.half()))
-
     def test_fractional_max_pool2d_invalid_output_ratio(self):
         arg_1 = [2, 1]
         arg_2 = [0.5, 0.5, 0.6]
@@ -8288,6 +8273,21 @@ class TestNNDeviceType(NNTestCase):
         ).to('cpu')
 
         self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
+
+    @onlyCUDA
+    @largeTensorTest("60GB", "cpu")
+    @largeTensorTest("16GB", "cuda", device)
+    def test_avg_pool_large_tensor(self):
+        # test for https://github.com/pytorch/pytorch/issues/113833
+        a = torch.randn(128, 256, 256, 256, dtype=torch.half, device=device, requires_grad=True)
+        a_cpu = a.detach().cpu().float()
+        m = torch.nn.AvgPool2d(2)
+        o = m(a)
+        a_cpu.requires_grad = True
+        o.sum().backward()
+        o_cpu = m(a_cpu)
+        o_cpu.sum().backward()
+        self.assertTrue(torch.allclose(a.grad.cpu(), a_cpu.grad.half()))
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
