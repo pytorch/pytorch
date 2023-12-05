@@ -42,6 +42,7 @@ class AutogradCompilerInstance:
             allow_non_fake_inputs=True,
             shape_env=self.shape_env,
         )
+        print(f"Initialized AutogradCompilerInstance with fake mode={self.fake_tensor_mode}")
         self.fx_tracer = PythonKeyTracer()
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy: Optional[Proxy] = None
@@ -192,7 +193,8 @@ class AutogradCompilerInstance:
         compiled_autograd_log.info(
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
         )
-        return self.compiler_fn(graph)
+        temp = self.compiler_fn(graph)
+        return temp
 
     def to_proxy(self, t):
         if t is None:

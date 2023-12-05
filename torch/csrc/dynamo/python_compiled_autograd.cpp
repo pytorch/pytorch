@@ -57,7 +57,7 @@ static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   return pyinput;
 }
 
-static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
+static PyObject* wrap_pyobject_list(std::vector<c10::SafePyObject>& inputs) {
   // inplace, consumes the input hooks
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
@@ -426,10 +426,10 @@ variable_list compiled_autograd(
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
       std::cout << "calling apply_with_saved on name=" << call.node->name() << std::endl;
       variable_list outputs;
-      if (call.node->name() == "MyFnBackward") {
-        std::cout << "lift custom autograd function's backward" << std::endl;
-        saved.hack_use_compiled_apply = true;
-      }
+      // if (call.node->name() == "MyFnBackward") {
+        // std::cout << "lift custom autograd function's backward" << std::endl;
+      saved.hack_use_compiled_apply = true;
+      // }
       outputs = call.node->apply_with_saved(inputs, saved);
       // if (call.node->name() == "MyFnBackward") {
         // compiler_call.backward_ctx = saved.hack_backward_obj;
@@ -487,12 +487,8 @@ variable_list compiled_autograd(
 
   THPObjectPtr inputs(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
-  THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
-  PyObject* pybackwards = PyTuple_New(static_cast<Py_ssize_t>(compiler_call.backwards.size()));
-  for (uint i=0; i<compiler_call.backwards.size(); i++) {
-    PyTuple_SET_ITEM(pybackwards, i, compiler_call.backwards[i].release());
-  }
-  THPObjectPtr backwards(pybackwards);
+  THPObjectPtr hooks(wrap_pyobject_list(compiler_call.hooks));
+  THPObjectPtr backwards(wrap_pyobject_list(compiler_call.backwards));
   std::cout << "calling compiled_fn (graph) start" << std::endl;
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), backwards.get(), NULL)));

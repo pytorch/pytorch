@@ -549,16 +549,21 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, torch.autograd.function.FunctionCtx):
-            # saved_tensors here may be empty due to proxy?
             saved_tensors_source = AttrSource(self.source, "saved_tensors")
             install_guard(
                 self.source.make_guard(GuardBuilder.TYPE_MATCH),
                 saved_tensors_source.make_guard(GuardBuilder.LIST_LENGTH),
             )
-            saved_tensors = [
-                VariableBuilder(self.tx, GetItemSource(saved_tensors_source, n))(v)
-                for n, v in enumerate(value.saved_tensors)
-            ]
+            # saved_tensors may be freed already, is it okay to replace with empty list?
+            try:
+                saved_tensors = [
+                    VariableBuilder(self.tx, GetItemSource(saved_tensors_source, n))(v)
+                    for n, v in enumerate(value.saved_tensors)
+                ]
+            except:
+                log.debug("Saved tensors already freed")
+                saved_tensors = []
+
             return self.tx.output.side_effects.track_object_existing(
                 self.source,
                 value,

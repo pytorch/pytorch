@@ -35,5 +35,4 @@ class FakeContext:
         self.saved_tensors = saved_tensors
 
 def call_backward(obj, saved_tensors, *args):
-    ctx = FakeContext(saved_tensors)
-    return obj._forward_cls.backward(ctx, *args)
+    return obj._forward_cls.backward(FakeContext(saved_tensors), *args)

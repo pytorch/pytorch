@@ -386,6 +386,8 @@ aot_autograd_decompositions = {}
 def create_aot_dispatcher_function(
     flat_fn, flat_args: List[Any], aot_config: AOTConfig
 ):
+    import pdb
+    pdb.set_trace()
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
     joint graph. The joint graph is an Fx graph with Aten ops. Please refer to
@@ -432,6 +434,8 @@ def create_aot_dispatcher_function(
     # mode instead.
 
     fake_mode = detect_fake_mode(flat_args)
+    import pdb
+    pdb.set_trace()
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
         fake_mode = FakeTensorMode(shape_env=shape_env)

@@ -294,6 +294,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             allow_non_fake_inputs=True if self.export else False,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
+        print("Output Graph init")
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
@@ -1081,6 +1082,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             # TODO(voz): Ostensibily, this should be scoped and
             # restore back to old_fake_mode, but doing so currently violates
             # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
+            log.debug(f"fake_mode changed from {old_fake_mode} -> {backend_fake_mode}")
             self.tracing_context.fake_mode = backend_fake_mode
 
         with self.restore_global_state():
@@ -1110,6 +1112,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+        import pdb
+        pdb.set_trace()
         assert self.compiler_fn is not None
         tot = 0
         placeholders = []

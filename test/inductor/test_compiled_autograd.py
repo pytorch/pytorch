@@ -23,6 +23,8 @@ def compiler_fn(gm):
 
     def inner_compiler(gm_, example_inputs_):
         counters["compiled_autograd"]["compiles"] += 1
+        import pdb
+        pdb.set_trace()
         return inductor.compile(gm_, example_inputs_)
 
     return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
@@ -78,7 +80,7 @@ class TestCompiledAutograd(TestCase):
                 x = torch.randn((i), requires_grad=True)
                 out = MyFn.apply(x)
                 print("PYTHON RUNNING BACKWARD")
-                out.sum().backward()
+                out.sum().backward()#retain_graph=True)
                 print("PYTHON DONE BACKWARD")
                 yield x.grad
 

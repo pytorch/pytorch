@@ -287,29 +287,29 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
             )
         user_fn = vjp_fn if vjp_fn is not Function.vjp else backward_fn
 
-        if self._is_compiled_autograd_tracing():
-            def compiled_autograd_getattribute(self, name):
-                allowed = [
-                    "saved_tensors",
-                    "save_for_backward",
-                    "_compiled_autograd_key",
-                    "_forward_cls",
-                    "apply",
-                    "_is_compiled_autograd_tracing",
-                    "__class__",
-                    "symints",
-                    "_get_compiled_autograd_symints",
-                    "mark_dirty",
-                    "mark_non_differentiable",
-                ]
-                if name not in allowed:
-                    raise AttributeError(
-                        f"Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.{name}"
-                    )
+        # if self._is_compiled_autograd_tracing():
+        #     def compiled_autograd_getattribute(self, name):
+        #         allowed = [
+        #             "saved_tensors",
+        #             "save_for_backward",
+        #             "_compiled_autograd_key",
+        #             "_forward_cls",
+        #             "apply",
+        #             "_is_compiled_autograd_tracing",
+        #             "__class__",
+        #             "symints",
+        #             "_get_compiled_autograd_symints",
+        #             "mark_dirty",
+        #             "mark_non_differentiable",
+        #         ]
+        #         if name not in allowed:
+        #             raise AttributeError(
+        #                 f"Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.{name}"
+        #             )
 
-                return super().__getattribute__(name)
+        #         return super().__getattribute__(name)
 
-            self.__class__.__getattribute__ = compiled_autograd_getattribute
+        #     self.__class__.__getattribute__ = compiled_autograd_getattribute
 
         return user_fn(self, *args)
 
@@ -592,8 +592,8 @@ class Function(_SingleLevelFunction):
         # TODO: figure out how to increment only once per compiled autograd graph
         # otherwise we'll recompile every time for compiled autograd
         from torch._functorch.aot_autograd import AOT_COUNTER
-        # return (next(AOT_COUNTER),)
-        return (1,)
+        return (next(AOT_COUNTER),)
+        # return (1,)
 
 
 def once_differentiable(fn):
