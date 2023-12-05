@@ -41,7 +41,7 @@ def replace_params_with_constants(
         if out_info.base_idx is not None
     ]
     for i, (real_input, node) in enumerate(zip(flat_params, fake_inp_nodes)):
-        if i in fw_metadata.mutated_inp_indices or i in aliased_input_args:
+        if i in fw_metadata.mutated_inp_runtime_indices or i in aliased_input_args:
             preserved_arg_indices.append(i)
             continue
         replace_node_with_constant(gm, node, real_input)
