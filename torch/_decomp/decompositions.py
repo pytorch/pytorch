@@ -4020,10 +4020,11 @@ def upsample_bicubic2d_vec(
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
-@register_decomposition(aten.reflection_pad1d.default)
-@register_decomposition(aten.reflection_pad2d.default)
-@register_decomposition(aten.reflection_pad3d.default)
+@register_decomposition(aten.reflection_pad1d)
+@register_decomposition(aten.reflection_pad2d)
+@register_decomposition(aten.reflection_pad3d)
 @pw_cast_for_opmath
+@out_wrapper()
 def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
     dim = len(padding) // 2
     torch._check(
@@ -4040,15 +4041,14 @@ def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
     for i in range(dim):
         middle = torch.arange(0, inp_shape[i], step=1, device=a.device)
         if padding_left[i] < 0:
-            middle = middle[-padding_left[i]:]
+            middle = middle[-padding_left[i] :]
             to_cat = [middle]
         else:
             left = torch.arange(padding_left[i], 0, step=-1, device=a.device)
             to_cat = [left, middle]
 
-
         if padding_right[i] < 0:
-            middle = middle[:-padding_right[i]]
+            middle = middle[: -padding_right[i]]
         else:
             right = torch.arange(
                 inp_shape[i] - 2,
