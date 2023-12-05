@@ -4020,10 +4020,11 @@ def upsample_bicubic2d_vec(
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
-@register_decomposition(aten.reflection_pad1d.default)
-@register_decomposition(aten.reflection_pad2d.default)
-@register_decomposition(aten.reflection_pad3d.default)
+@register_decomposition(aten.reflection_pad1d)
+@register_decomposition(aten.reflection_pad2d)
+@register_decomposition(aten.reflection_pad3d)
 @pw_cast_for_opmath
+@out_wrapper()
 def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
     dim = len(padding) // 2
     torch._check(
@@ -4066,10 +4067,11 @@ def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
     return result
 
 
-@register_decomposition(aten.reflection_pad1d_backward.default)
-@register_decomposition(aten.reflection_pad2d_backward.default)
-@register_decomposition(aten.reflection_pad3d_backward.default)
+@register_decomposition(aten.reflection_pad1d_backward)
+@register_decomposition(aten.reflection_pad2d_backward)
+@register_decomposition(aten.reflection_pad3d_backward)
 @pw_cast_for_opmath
+@out_wrapper("grad_input")
 def _reflection_pad_backward(
     grad_output: Tensor, a: Tensor, padding: Tuple[int, ...]
 ) -> Tensor:
