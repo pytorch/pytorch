@@ -453,13 +453,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             "(Tensor(a!) x) -> ()",
             "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> ()",
             "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> ()",
+            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> Tensor",
+            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> (Tensor, Tensor)",
         ]
         expected_false = [
             "(Tensor x) -> ()",
             "(Tensor(a) x) -> Tensor(a)",
             "(Tensor(a!) x) -> Tensor(a!)",
             "(Tensor(a!) x, Tensor y, Tensor(b!)[] z, SymInt w) -> ()",
-            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> Tensor",
+            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> Tensor(a)",
+            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> (Tensor, Tensor(a))",
+            "(Tensor(a) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> (Tensor, Tensor(a))",
+            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> (Tensor, Tensor[])",
         ]
         for schema in expected_true:
             try:
@@ -517,6 +522,49 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
             self.assertEqual(compiled_args, eager_args)
+        finally:
+            del torch.ops.mylib.foo
+            del lib
+
+    def test_auto_functionalize_with_returns(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> (Tensor, Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y, z, w, n):
+                x.add_(y[0] + w)
+                z.add_(y[1] + n)
+                return y[0] + w, y[1] + n
+
+            @torch.library.impl_abstract("mylib::foo", lib=lib)
+            def foo_abstract(x, y, z, w, n):
+                return y[0] + w, y[1] + n
+
+            def f(x, y, z, n):
+                return torch.ops.mylib.foo(x, y, z, 2, n)
+
+            x = torch.randn(3)
+            y = (torch.randn(3), torch.randn(3))
+            z = torch.randn(3)
+            n = torch.randn(3)
+            orig_args = (x, y, z, n)
+
+            compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            compiled_out = torch.compile(
+                f, backend="aot_eager_decomp_partition", fullgraph=True
+            )(*compiled_args)
+
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            eager_out = f(*eager_args)
+            self.assertEqual(compiled_args, eager_args)
+            self.assertEqual(compiled_out, eager_out)
         finally:
             del torch.ops.mylib.foo
             del lib
