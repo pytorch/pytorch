@@ -373,7 +373,7 @@ if torch._C._has_mkldnn:
             binary_nodes = filter_nodes(match.nodes, binary_op)
 
             def _is_all_users_are_ancestor_node(_binary_node):
-                # Think about this pattern:
+                # Think about this case:
                 #      ReLU
                 #     /   \
                 #  Conv1
@@ -399,28 +399,28 @@ if torch._C._has_mkldnn:
                 other_node = _binary_node.args[other_index]
 
                 def _is_ancestor_node(_src_node, _check_node):
-                    for input in _src_node.all_input_nodes:
-                        if input == _check_node:
-                            return True
-                        elif isinstance(input, torch.fx.Node):
-                            if (
-                                input.op == "placeholder"
-                                or input.op == "output"
-                                or input.op == "get_attr"
-                            ):
-                                return False
-                            return _is_ancestor_node(input, _check_node)
-                        else:
+                    if _src_node == _check_node:
+                        return True
+                    elif isinstance(_src_node, torch.fx.Node):
+                        if (
+                            _src_node.op == "placeholder"
+                            or _src_node.op == "output"
+                            or _src_node.op == "get_attr"
+                        ):
                             return False
-
-                # Step 2: Check all the users of other_node should be ancestor_node of compute node
-                for user in list(other_node.users):
-                    if user == _binary_node:
-                        continue
-                    if not _is_ancestor_node(compute_node, user):
+                        else:
+                            return any(
+                                _is_ancestor_node(input, _check_node)
+                                for input in _src_node.all_input_nodes
+                            )
+                    else:
                         return False
 
-                return True
+                # Step 2: Check all the users of other_node should be ancestor_node of compute node
+                return all(
+                    (user == _binary_node or _is_ancestor_node(compute_node, user))
+                    for user in list(other_node.users)
+                )
 
             if any(
                 len(n.args[other_index].users) > 1
