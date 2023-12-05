@@ -2291,6 +2291,15 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "comm_split_count",
               &::c10d::ProcessGroupNCCL::getCommSplitCounter)
+          .def(
+              "_reset_nccl_collective_timeout",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 int timeout_mil_sec) {
+                self->getOptions()->timeout =
+                    std::chrono::milliseconds(timeout_mil_sec);
+              },
+              py::arg("timeout_mil_sec"),
+              py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions);
 

@@ -552,10 +552,10 @@ class FlattenOutputWithTreeSpecValidationOutputStep(OutputAdaptStep):
         return flattened_outputs
 
 
-class PrependParamsAndBuffersAotAutogradInputStep(InputAdaptStep):
-    """Prepend model parameters and buffers to the user input.
+class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
+    """Prepend model parameters, buffers and constants to the user input.
 
-    :func:`torch.export.export` lifts model parameters and buffers as model input, thus, they
+    :func:`torch.export.export` lifts model parameters, buffers and constants as model input, thus, they
     must be added to the user input before the model is executed.
 
     Args:
@@ -584,10 +584,18 @@ class PrependParamsAndBuffersAotAutogradInputStep(InputAdaptStep):
         ordered_buffers = tuple(
             model.state_dict[name] for name in model.graph_signature.buffers  # type: ignore[union-attr,index]
         )
+        ordered_constant_tensors = tuple(
+            getattr(model.module(), name) for name in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
+        )
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
-        updated_args = (*ordered_params, *ordered_buffers, *model_args)
+        updated_args = (
+            *ordered_params,
+            *ordered_buffers,
+            *ordered_constant_tensors,
+            *model_args,
+        )
         if model_kwargs:
             return MergeKwargsIntoArgsInputStep().apply(
                 model, updated_args, model_kwargs
