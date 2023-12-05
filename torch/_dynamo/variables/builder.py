@@ -83,7 +83,12 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
-from .ctx_manager import EventVariable, NullContextVariable, StreamVariable
+from .ctx_manager import (
+    AutocastModeVariable,
+    EventVariable,
+    NullContextVariable,
+    StreamVariable,
+)
 from .dicts import (
     ConstDictVariable,
     DataClassVariable,
@@ -112,6 +117,7 @@ from .lists import (
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
+    RestrictedListSubclassVariable,
     SizeVariable,
     SliceVariable,
     TupleIteratorVariable,
@@ -142,7 +148,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
+from .torch import torch_special_class_types, TorchVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
@@ -289,7 +295,12 @@ class VariableBuilder:
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
             (
-                (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
+                (
+                    torch.Tensor,
+                    torch.nn.Parameter,
+                    torch._subclasses.FakeTensor,
+                    torch._subclasses.functional_tensor.FunctionalTensor,
+                ),
                 cls.wrap_tensor,
             ),
             ((tuple, list, odict_values, collections.deque), cls.wrap_listlike),
@@ -340,14 +351,6 @@ class VariableBuilder:
                 dataclasses.fields,
                 lambda self, value: LambdaVariable(
                     _dataclasses_fields_lambda,
-                    source=self.source,
-                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
-                ),
-            ),
-            (
-                tensor_dunder_fns,
-                lambda self, value: TorchVariable(
-                    value,
                     source=self.source,
                     **self.install_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
@@ -691,6 +694,17 @@ class VariableBuilder:
                 None,  # No grid provided
                 source=self.source,
             )
+        elif isinstance(value, torch.amp.autocast_mode.autocast):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return AutocastModeVariable(
+                target_values=[
+                    value.device,
+                    value.fast_dtype,
+                    value._enabled,
+                    value._cache_enabled,
+                ],
+                source=self.source,
+            )
         elif trace_rules.lookup(value) is not None:
             if is_user_defined_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -764,6 +778,22 @@ class VariableBuilder:
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
+            )
+        elif RestrictedListSubclassVariable.is_matching_cls(type(value)):
+            self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.LIST_LENGTH)
+            return self.tx.output.side_effects.track_list(
+                self.source,
+                value,
+                RestrictedListSubclassVariable(
+                    [
+                        LazyVariableTracker.create(
+                            value=value[i], source=GetItemSource(self.source, i)
+                        )
+                        for i in range(len(value))
+                    ],
+                    user_cls=type(value),
+                    user_cls_source=AttrSource(self.source, "__class__"),
+                ),
             )
         else:
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -997,6 +1027,7 @@ class VariableBuilder:
                 torch.Tensor,
                 torch.nn.Parameter,
                 torch._subclasses.fake_tensor.FakeTensor,
+                torch._subclasses.functional_tensor.FunctionalTensor,
             ) or is_traceable_wrapper_subclass(value), type(value)
             subclass_type = None
 
@@ -1435,15 +1466,11 @@ def wrap_fx_proxy_cls(
         and isinstance(proxy.node.target.__self__, torch._C.Generator)
         or proxy.node.target == torch.random.set_rng_state
     ):
-        from . import TorchVariable
-
         return TorchVariable(proxy.node.target)
     elif (
         proxy.node.target == torch._C._DisableFuncTorch
         or proxy.node.target == torch.cuda._is_in_bad_fork
     ):
-        from . import UserDefinedObjectVariable
-
         return UserDefinedObjectVariable(example_value)
     elif istype(example_value, torch.Size) and all(
         isinstance(x, int) for x in example_value
@@ -1763,17 +1790,18 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
                 symbolic_context=symbolic_context,
             )
         )
-        # TODO: just store the whole symbolic_context here
-        tx.output.tracked_fakes.append(
-            TrackedFake(
-                fake_e,
-                source,
-                symbolic_context.constraint_sizes
-                if symbolic_context is not None
-                else None,
+        if is_tensor and not (static_shapes and source.is_nn_module()):
+            # TODO: just store the whole symbolic_context here
+            tx.output.tracked_fakes.append(
+                TrackedFake(
+                    fake_e,
+                    source,
+                    symbolic_context.constraint_sizes
+                    if symbolic_context is not None
+                    else None,
+                )
             )
-        )
-        tx.output.tracked_fakes_id_to_source[id(e)].append(source)
+            tx.output.tracked_fakes_id_to_source[id(e)].append(source)
         tx.output.tensor_weakref_to_sizes_strides[e] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
