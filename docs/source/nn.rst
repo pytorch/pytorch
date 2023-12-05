@@ -5,7 +5,7 @@ torch.nn
 ===================================
 .. automodule:: torch.nn
 .. automodule:: torch.nn.modules
-.. automodule:: torch.nn.utils.attention
+.. automodule:: torch.nn.attention.bias
 
 These are the basic building blocks for graphs:
 

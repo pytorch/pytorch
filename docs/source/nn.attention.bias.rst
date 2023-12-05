@@ -1,10 +1,10 @@
 .. role:: hidden
     :class: hidden-section
 
-torch.nn.utils.attention
+torch.nn.attention.bias
 ========================
 
-.. currentmodule:: torch.nn.utils.attention
+.. currentmodule:: torch.nn.attention.bias
 
 Attention Biases
 ----------------------------------
@@ -13,5 +13,12 @@ Attention Biases
     :toctree: generated
     :nosignatures:
 
+    lower_right_causal
+    upper_left_causal
     CausalVariant
-    CausalBias
+
+CausalBias
+==========
+
+.. autoclass:: CausalBias
+    :members:

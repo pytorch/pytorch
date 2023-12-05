@@ -9,8 +9,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.benchmark as benchmark
 from tabulate import tabulate
-from torch.nn.parameter import Parameter
 from torch.nn.attention.bias import CausalBias, CausalVariant
+from torch.nn.parameter import Parameter
 from tqdm import tqdm
 
 
