@@ -931,6 +931,10 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def world_size(self) -> int:
         return 4
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(1)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
     def test_2d_fsdp_tp_compile(self):
         class FakeAttention(nn.Module):
