@@ -2022,8 +2022,6 @@ make_fallback(aten.cumsum, require_dense, warn=False)
 make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
-make_fallback(aten._flash_attention_forward)
-make_fallback(aten._flash_attention_backward)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
@@ -2113,8 +2111,10 @@ make_fallback(
     sdpa_constraint,
     warn=False,
 )
-make_fallback(torch.ops.aten._efficient_attention_forward.default)
-make_fallback(torch.ops.aten._efficient_attention_backward.default)
+make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
+make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
+make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
+make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
@@ -2235,6 +2235,7 @@ make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten._pdist_backward)
 make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
+make_fallback(aten.replication_pad2d_backward)
 make_fallback(aten.soft_margin_loss_backward, warn=False)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten.segment_reduce.default)
@@ -4633,7 +4634,7 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     rnumel = sympy_product(size[i] for i in axis)
 
     def get_constant_or_index_expr(x, dtype):
-        if isinstance(x, sympy.Expr) and not x.is_constant():
+        if isinstance(x, sympy.Expr) and not x.is_number:
             return ops.to_dtype(ops.index_expr(x, torch.int64), dtype)
         return ops.constant(x, dtype)
 

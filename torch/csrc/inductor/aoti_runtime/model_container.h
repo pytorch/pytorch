@@ -177,7 +177,7 @@ class AOTInductorModelContainer {
 
   void swap_constant_buffer() {
     std::lock_guard unique_lk(model_exec_mutex_);
-    // Need to wait?
+
     auto constants_map = get_inactive_map();
     auto constants_array = get_inactive_array();
 
@@ -235,6 +235,10 @@ class AOTInductorModelContainer {
   std::vector<size_t> constants_internal_offset_;
 #endif // USE_CUDA
 
+  // Determine which constants is being used for the model.
+  // If true,
+  // constants_map_secondary/constant_blob_secondary/constants_array_secondary
+  // is being used.
   bool use_secondary_;
 
   // Holds the mapping of constants to at::Tensor.

@@ -1,15 +1,7 @@
 #include <unordered_map>
 #ifdef USE_VULKAN_API
 
-#include <benchmark/benchmark.h>
-
-#include <ATen/ATen.h>
-#include <ATen/native/vulkan/api/api.h>
-#include <ATen/native/vulkan/ops/Common.h>
-#include <ATen/native/vulkan/ops/Copy.h>
-#include <ATen/native/vulkan/ops/Factory.h>
-#include <ATen/native/vulkan/ops/QuantizedFunctions.h>
-#include <ATen/native/vulkan/ops/Utils.h>
+#include "vulkan_perf_utils.h"
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
 #include <iostream>
 #endif
@@ -17,10 +9,6 @@
 namespace {
 
 namespace vulkan_api = at::native::vulkan::api;
-
-#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-static const float NANOSECONDS_IN_SECOND = 1000000000.0;
-#endif
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
 void report_pep(const std::string& name, const uint64_t duration) {
@@ -58,18 +46,6 @@ void report_aibench_res(vulkan_api::QueryPool& qpool) {
     const auto& duration = i.second / num_iters;
     report_pep(name, duration);
   }
-}
-#endif
-
-#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-static void extractTotalOpResultsAndSetState(
-    benchmark::State& state,
-    const char* op_name) {
-  at::native::vulkan::api::context()->querypool().extract_results();
-  float total_op_time =
-      at::native::vulkan::api::context()->querypool().get_total_op_ns(op_name) /
-      NANOSECONDS_IN_SECOND;
-  state.SetIterationTime(total_op_time);
 }
 #endif
 
