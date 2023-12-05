@@ -194,6 +194,7 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   int64_t sum_offsets_;
 };
 
-TORCH_API std::optional<at::Tensor> try_call_with_dummy(std::function<at::Tensor(at::Tensor)> fn, c10::SymIntArrayRef size);
+TORCH_API std::optional<at::Tensor> try_call_with_dummy(const std::function<at::Tensor(at::Tensor)>& fn, c10::SymIntArrayRef size);
+
 
 } // namespace c10
