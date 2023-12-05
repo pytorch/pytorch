@@ -293,7 +293,7 @@ class TensorVariable(VariableTracker):
                 return wrap_fx_proxy(
                     tx=tx,
                     proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
-                    options={"source": AttrSource(self.source, name)},
+                    source=AttrSource(self.source, name),
                 )
 
             result = try_generic_attr_handling()
