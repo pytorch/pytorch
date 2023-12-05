@@ -203,13 +203,24 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = [
-            "torch.optim",
-            "torch.nn.modules.rnn",
-            "torch._dynamo",
-            "torch._C._dynamo",
-            "torch._inductor",
-            "torch._C.inductor",
-            "torch.fx",
+            "torch.optim.",
+            "torch.utils._foreach_utils",  # omit the period so we match all the functions in this module
+            "torch.utils._pytree",
+            "torch.nn.modules.rnn.",
+            "torch._dynamo.",
+            "torch._C._dynamo.",
+            "torch._inductor.",
+            "torch._C.inductor.",
+            "torch.fx.",
+            "torch.distributed.fsdp.",
+            "torch.distributed._tensor.",
+            # Inline through the ActivationWrapper in
+            # torch.distributed.algorithms._checkpoint.checkpoint_wrapper. This
+            # nn module calls torch.utils.checkpoint internally. If Dynamo does
+            # not trace this, AOT Autograd will try to trace this and can cause
+            # issues observed in
+            # https://github.com/pytorch/pytorch/issues/108269
+            "torch.distributed.algorithms.",
             "torch._C._autograd",
             "torch._C._cudart",
             "torch._C._distributed_autograd",
@@ -247,7 +258,7 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
             "torch._utils_internal",
             "torch._vmap_internals",
             "torch.compiler",
-            "torch.distributed",
+            # "torch.distributed",
             "torch.export",
             "torch.hub",
             "torch.jit",
