@@ -9,6 +9,7 @@ import signal
 import sys
 import tempfile
 import threading
+import uuid
 import pickle
 import time
 import warnings
@@ -3512,6 +3513,8 @@ class NCCLTraceTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '10'
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = '1'
+        os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"] = f'/tmp/{str(uuid.uuid4())}'
         self._spawn_processes()
 
     @classmethod
@@ -3592,6 +3595,42 @@ class NCCLTraceTest(MultiProcessTestCase):
         event_created_time = datetime.fromtimestamp(last['time_created_us'] / 1000000)
         before_test = now - timedelta(minutes=1)
         self.assertTrue(before_test < event_created_time < now)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_dump_pipe(self):
+        def open_file_with_timeout(file_path, mode, timeout=1.0):
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                if os.path.exists(file_path):
+                    return open(file_path, mode)
+                time.sleep(.1)
+            raise FileNotFoundError
+
+        if self.rank == self.MAIN_PROCESS_RANK:
+            for c in self.children_pipes:
+                self.assertEqual(c.recv(), 'next')
+
+            pipe_file = f'{os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"]}0.pipe'
+            dump_file = f'{os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"]}0'
+            with open_file_with_timeout(pipe_file, 'w') as f:
+                f.write('1\n')
+            with open_file_with_timeout(dump_file, 'rb', timeout=10.0) as f:
+                self.assertTrue('all_reduce' in str(pickle.load(f)))
+
+            for c in self.children_pipes:
+                c.send('next')
+            return
+
+        pg = self._create_process_group_nccl()
+        device = self.local_device
+        a = torch.full((3, 4), float(self.rank), device=device)
+        for i in range(2):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        self.parent.send('next')
+        self.parent.recv()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
