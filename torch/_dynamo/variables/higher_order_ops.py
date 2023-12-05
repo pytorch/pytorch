@@ -766,7 +766,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # TODO: Support kwargs
         (
-            (body_r, body_spec),
+            (body_r, _),
             body_graph,
             body_lifted_freevars,
         ) = speculate_subgraph(
