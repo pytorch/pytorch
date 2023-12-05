@@ -255,6 +255,7 @@ HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, FakeTensor)
 
 def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     unrecognized_types = []
+
     def can_handle_tensor(x):
         r = type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
         if proxy_mode._allow_fake_constant:

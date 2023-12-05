@@ -1241,7 +1241,6 @@ def forward(self, primals_1):
         self.verify_aot_autograd(f, inp, test_mutation=True)
         inp = [torch.ones(3, 3, requires_grad=True)]
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
-        print("FORWARD", fw_graph.code.strip())
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
