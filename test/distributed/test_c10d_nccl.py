@@ -1194,6 +1194,11 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         with self.assertRaises(dist.DistBackendError):
             pg.allreduce([t])
 
+    def _check_nccl_timeout(self, expected_timeout):
+        pg = dist.distributed_c10d._get_default_group()
+        options = pg._get_backend(torch.device(f"cuda:{self.rank}")).options
+        self.assertEqual(options._timeout, expected_timeout)
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
         torch.cuda.device_count() == 0, "No GPUs available, skipping test"
@@ -1207,20 +1212,15 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
 
-        def _check_nccl_timeout(expected_timeout):
-            pg = dist.distributed_c10d._get_default_group()
-            options = pg._get_backend(torch.device(f"cuda:{self.rank}")).options
-            self.assertEqual(options._timeout, expected_timeout)
-
         # test the default value coming from the `init_process_group` kwarg default
         dist.init_process_group(**base_opts)
-        _check_nccl_timeout(torch.distributed.constants.default_pg_nccl_timeout)
+        self._check_nccl_timeout(torch.distributed.constants.default_pg_nccl_timeout)
         dist.destroy_process_group()
 
         # test that `kwarg` timeout takes effect
         new_timeout = timedelta(seconds=123)
         dist.init_process_group(**base_opts, timeout=new_timeout)
-        _check_nccl_timeout(new_timeout)
+        self._check_nccl_timeout(new_timeout)
         dist.destroy_process_group()
 
         # test that timeout value provided via `pg_options` kwarg is ignored and issues warning,
@@ -1232,7 +1232,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             # TODO(whc) i verified that we are indeed emitting this warning, and i can't figure out why i can't catch it.
             # self.assertEqual(len(w), 1)
             # self.assertTrue("pg_options._timeout was specified" in str(w[-1].message))
-        _check_nccl_timeout(torch.distributed.constants.default_pg_nccl_timeout)
+        self._check_nccl_timeout(torch.distributed.constants.default_pg_nccl_timeout)
         dist.destroy_process_group()
 
         # test that timeout value provided via `pg_options` kwarg is ignored and issues warning,
@@ -1240,8 +1240,25 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         opts = dist.ProcessGroupNCCL.Options()
         opts._timeout = timedelta(seconds=123)
         dist.init_process_group(**base_opts, pg_options=opts, timeout=timedelta(seconds=1240))
-        _check_nccl_timeout(timedelta(seconds=1240))
+        self._check_nccl_timeout(timedelta(seconds=1240))
         dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(
+        torch.cuda.device_count() == 0, "No GPUs available, skipping test"
+    )
+    def test_reset_nccl_pg_timeout(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        opts = dict(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size, timeout=timedelta(seconds=123)
+        )
+        dist.init_process_group(**opts)
+        pg = dist.distributed_c10d._get_default_group()
+        pg.allreduce(torch.rand(10).cuda(self.rank))
+        self._check_nccl_timeout(timedelta(seconds=123))
+        pg._get_backend(torch.device(f"cuda:{self.rank}"))._reset_nccl_collective_timeout(23000)
+        self._check_nccl_timeout(timedelta(seconds=23))
+        pg.allreduce(torch.rand(10).cuda(self.rank))
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
