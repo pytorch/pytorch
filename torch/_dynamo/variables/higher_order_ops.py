@@ -94,6 +94,37 @@ def _make_inlined(tx, f):
     return inline_call
 
 
+def _call_function_and_unflatten_output(tx, fn, args, kwargs, ret_vt, ret_treespec):
+    from .builder import wrap_fx_proxy
+
+    flat_example_value = pytree.tree_map_only(
+        torch.fx.Proxy,
+        lambda a: a.node.meta["example_value"],
+        ret_vt.as_proxy(),
+    )
+
+    # Store the invocation as a call
+    flat_variable = wrap_fx_proxy(
+        tx=tx,
+        proxy=tx.output.create_proxy(
+            "call_function",
+            fn,
+            args=args,
+            kwargs=kwargs,
+        ),
+        example_value=flat_example_value,
+    )
+
+    # Transform variable back into a list (previously made into a tuple by
+    # speculate_subgraph function) so as to respect the pytree API typing.
+    flat_list_variable = BuiltinVariable(list).call_function(tx, [flat_variable], {})
+    return (
+        _make_inlined(tx, pytree.tree_unflatten)(flat_list_variable, ret_treespec)
+        if ret_treespec
+        else flat_variable
+    )
+
+
 def _assert_tensors_nonaliasing(inputs, outputs):
     input_tensor_ids = {
         id(t) for t in pytree.tree_leaves(inputs) if isinstance(t, torch.Tensor)
@@ -399,7 +430,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             TensorVariable,
             UserFunctionVariable,
         )
-        from .builder import wrap_fx_proxy
 
         args, kwargs = VariableTracker.apply(lambda x: x.realize(), (args, kwargs))
 
@@ -670,33 +700,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # We pick true_shared but it shouldn't matter
             true_shared + unique_true + unique_false,
         )
-        flat_example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            true_r.as_proxy(),
-        )
 
-        # Store the invocation as a call
-        flat_variable = wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                torch.ops.higher_order.cond,
-                args=tuple(p_args),
-                kwargs={},
-            ),
-            example_value=flat_example_value,
-        )
-
-        # Transform variable back into a list (previously made into a tuple by
-        # speculate_subgraph function) so as to respect the pytree API typing.
-        flat_list_variable = BuiltinVariable(list).call_function(
-            tx, [flat_variable], {}
-        )
-        return (
-            _make_inlined(tx, pytree.tree_unflatten)(flat_list_variable, true_treespec)
-            if true_treespec
-            else flat_variable
+        return _call_function_and_unflatten_output(
+            tx, torch.ops.higher_order.cond, p_args, {}, true_r, true_treespec
         )
 
 
@@ -1329,41 +1335,22 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_r.as_proxy(),
         )
 
-        return proxy_args, {}, example_value, treespec, body_gmod
+        return proxy_args, {}, example_value, body_r, treespec, body_gmod
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from .builder import wrap_fx_proxy
-
         # This flattens the kwargs into lifted args
-        p_args, p_kwargs, example_value, treespec, _ = self.create_wrapped_node(
+        p_args, p_kwargs, example_value, body_r, treespec, _ = self.create_wrapped_node(
             tx, args, kwargs, "wrap"
         )
 
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
 
-        # Store the invocation as a call
-        variable = wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                self.value,
-                args=tuple(p_args),
-                kwargs={},
-            ),
-            example_value=example_value,
+        return _call_function_and_unflatten_output(
+            tx, self.value, tuple(p_args), p_kwargs, body_r, treespec
         )
-
-        if treespec is None:
-            return variable
-
-        # Transform variable back into a list (previously made into a tuple by
-        # speculate_subgraph function) so as to respect the pytree API typing.
-        variable = BuiltinVariable(list).call_function(tx, [variable], {})
-
-        return _make_inlined(tx, pytree.tree_unflatten)(variable, treespec)
 
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -1418,6 +1405,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             p_args,
             _,
             example_value,
+            body_r,
             treespec,
             checkpointed_gmod,
         ) = self.create_wrapped_node(
