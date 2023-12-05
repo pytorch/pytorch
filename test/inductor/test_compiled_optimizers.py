@@ -41,6 +41,9 @@ def compile_opt(opt_compiled, closure=None):
     # This ignores the outer _use_grad_if_differentiable wrapper
     # and instead manually disables grad before calling step, which is fine
     # for now as dynamo does not support differentiable optimizers anyway
+    if not hasattr(opt_compiled.step, "__wrapped__"):
+        return torch.compile(lambda : opt_compiled.step, backend="inductor", fullgraph=True)
+
     step_fn = opt_compiled.step.__wrapped__
     if closure is not None:
 
