@@ -169,7 +169,7 @@ def is_traceable_wrapper_subclass(t):
     is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
     return is_subclass and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
 
-def transform_subclass(t, callback, outer_size=None, outer_stride=None):
+def transform_subclass(t, callback, outer_size=None, outer_stride=None, base=None):
     """
     Given a traceable, wrapper tensor subclass ``t`` that implements
     ``__torch_dispatch__`` and holds some inner tensors,
@@ -190,6 +190,9 @@ def transform_subclass(t, callback, outer_size=None, outer_stride=None):
     transformed_tensors_dict = {}
     for attr in attrs:
         transformed_tensors_dict[attr] = callback(attr, getattr(t, attr))
+    # needed for reconstructing views
+    if base is not None:
+        transformed_tensors_dict["_base"] = base
     sub = type(t).__tensor_unflatten__(
         transformed_tensors_dict, ctx, outer_size, outer_stride
     )

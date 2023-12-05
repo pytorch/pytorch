@@ -395,8 +395,11 @@ class MetaConverter:
                                     # subclass view of subclass: replay view_func
                                     return t._view_func_unsafe(base)
                                 else:
-                                    # TODO: Reduce duplication of this vs. the non-view case
-                                    # subclass view of dense:
+                                    from torch._dynamo.source import AttrSource
+                                    from torch.fx.experimental.symbolic_shapes import (
+                                        SubclassSymbolicContext,
+                                    )
+
                                     (
                                         sizes,
                                         strides,
@@ -407,39 +410,23 @@ class MetaConverter:
                                         symbolic_context, SubclassSymbolicContext
                                     )
 
-                                    def t_callback(attr, inner_t):
-                                        return callback(
+                                    return transform_subclass(
+                                        t,
+                                        lambda attr, inner_t: callback(
                                             lambda: empty_create(
                                                 inner_t,
                                                 AttrSource(source, attr),
                                                 symbolic_context=(
-                                                    None
-                                                    if symbolic_context is None
-                                                    else symbolic_context.inner_contexts[
+                                                    symbolic_context.inner_contexts[
                                                         attr
                                                     ]
                                                 ),
                                             )
-                                        )
-
-                                    attrs, ctx = t.__tensor_flatten__()
-                                    transformed_tensors_dict = {}
-                                    for attr in attrs:
-                                        transformed_tensors_dict[attr] = t_callback(
-                                            attr, getattr(t, attr)
-                                        )
-                                    transformed_tensors_dict["_base"] = base
-                                    outer_size = sizes
-                                    outer_stride = strides
-                                    sub = type(t).__tensor_unflatten__(
-                                        transformed_tensors_dict,
-                                        ctx,
-                                        outer_size,
-                                        outer_stride,
+                                        ),
+                                        outer_size=sizes,
+                                        outer_stride=strides,
+                                        base=base,
                                     )
-                                    assert sub.size() == outer_size
-                                    assert sub.stride() == outer_stride
-                                    return sub
                             else:
                                 # TODO: Handle dense view of subclass
                                 (
