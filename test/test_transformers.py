@@ -126,7 +126,7 @@ def get_platform_specific_sdpa():
     if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
         ret.append(SDPBackend.EFFICIENT_ATTENTION)
     if not ret:
-        ret.append(SDPBackend.MATH)  # Placeholder, an empty list causes "An empty arg_values was passed to @parametrize"
+        ret.append(SDPBackend.EFFICIENT_ATTENTION)  # Placeholder, an empty list causes "An empty arg_values was passed to @parametrize"
     return ret
 
 PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
@@ -1353,8 +1353,8 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not flash_attention fused scaled dot product attention")
-    @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not flash_attention fused scaled dot product attention")
+    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_fused_inputs_head_dim(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # The embed dim per head is not divisible by 8 for flash attention
