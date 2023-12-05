@@ -55,6 +55,12 @@ class TorchExport(exporter.FXGraphExtractor):
         # are removed. Here we register this step to input adapter.
         options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNoneInputStep())
 
+        # NOTE: temp workaround for https://github.com/pytorch/pytorch/issues/99534
+        # Dynamo doesn't support non-tensor inputs.
+        options.fx_tracer.input_adapter.append_step(
+            io_adapter.RemoveNonTensorInputStep()
+        )
+
         updated_model_args = self.input_adapter.apply(
             *model_args, model=model, **model_kwargs
         )
