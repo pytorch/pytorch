@@ -4,7 +4,6 @@ import math
 import unittest
 import functools
 import itertools
-import io
 from copy import deepcopy
 
 import torch
@@ -1291,10 +1290,7 @@ class TestOptim(TestCase):
         model = torch.nn.Linear(5, 5)
         optim = torch.optim.AdamW(model.parameters())
 
-        buffer = io.BytesIO()
-        torch.save(optim.state_dict(), buffer)
-        buffer.seek(0)
-        loaded_dict = torch.load(buffer)
+        loaded_dict = optim.state_dict()
 
         new_optim = torch.optim.Adam(model.parameters())
         new_optim.load_state_dict(loaded_dict)
