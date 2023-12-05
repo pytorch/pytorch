@@ -139,17 +139,29 @@ Tensor _mul_out_xnnpack(
   const auto self_shape = xnnp_utils::get_mem_format_aware_shape(self_contig);
   const auto other_shape = xnnp_utils::get_mem_format_aware_shape(other_contig);
 
-  // set up operator
-  status = xnn_setup_multiply_nd_qs8(
+  // reshape operator
+  status = xnn_reshape_multiply_nd_qs8(
       xnnp_qmul_operator.get(),
       self_shape.size(),
       self_shape.data(),
       other_shape.size(),
       other_shape.data(),
+      caffe2::pthreadpool_());
+
+  TORCH_CHECK(
+      status == xnn_status_success,
+      func_name,
+      ": xnn reshape operator failed(",
+      status,
+      ")!");
+
+  // set up operator
+  status = xnn_setup_multiply_nd_qs8(
+      xnnp_qmul_operator.get(),
       reinterpret_cast<const underlying_t*>(self_contig.data_ptr<scalar_t>()),
       reinterpret_cast<const underlying_t*>(other_contig.data_ptr<scalar_t>()),
-      reinterpret_cast<underlying_t*>(out.data_ptr<scalar_t>()),
-      caffe2::pthreadpool_());
+      reinterpret_cast<underlying_t*>(out.data_ptr<scalar_t>())
+  );
 
   TORCH_CHECK(
       status == xnn_status_success,
