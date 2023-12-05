@@ -321,6 +321,7 @@ class TestPublicBindings(TestCase):
             "torch.distributed.algorithms.model_averaging.utils",
             "torch.distributed.checkpoint",
             "torch.distributed.constants",
+            "torch.distributed.device_mesh",
             "torch.distributed.distributed_c10d",
             "torch.distributed.elastic.agent.server",
             "torch.distributed.elastic.rendezvous",
