@@ -289,7 +289,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
         dimSize = inputs[i+batchCounter].get().size(dimension);
       }
 
-      catMetaData.input[batchCounter] = static_cast<scalar_t*>(inputs[i+batchCounter].get().const_data_ptr());
+      catMetaData.input[batchCounter] = (scalar_t*)(inputs[i+batchCounter].get().const_data_ptr());
       catMetaData.offset[batchCounter] = offset;
       catMetaData.dimSize[batchCounter] = dimSize;
       catMetaData.nElements[batchCounter] = inputs[i+batchCounter].get().numel();
