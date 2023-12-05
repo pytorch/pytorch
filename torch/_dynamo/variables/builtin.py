@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import inspect
 import itertools
@@ -5,6 +6,7 @@ import logging
 import math
 import operator
 import types
+from collections import defaultdict, OrderedDict
 from typing import Dict, List
 
 import torch
@@ -38,7 +40,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
-from .dicts import ConstDictVariable, SetVariable
+from .dicts import ConstDictVariable, DefaultDictVariable, SetVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -661,6 +663,17 @@ class BuiltinVariable(VariableTracker):
                 )
         return super().call_function(tx, args, kwargs)
 
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if self.fn == dict and name == "fromkeys":
+            return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
     def _call_min_max(self, tx, *args):
         if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
             # expand iterable
@@ -898,7 +911,44 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstDictVariable(
                 dict(kwargs), user_cls=user_cls, mutable_local=MutableLocal()
             )
-        unimplemented(f"dict(): {args} {kwargs}")
+        unimplemented(f"{user_cls.__name__}(): {args} {kwargs}")
+
+    @staticmethod
+    def call_custom_dict_fromkeys(tx, user_cls, *args, **kwargs):
+        assert user_cls in {dict, OrderedDict, defaultdict}
+        if kwargs:
+            # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
+            assert user_cls is OrderedDict
+            assert len(args) == 1 and len(kwargs) == 1 and "value" in kwargs
+            args = (*args, kwargs.pop("value"))
+        if len(args) == 0:
+            raise UserError(TypeError, "fromkeys expected at least 1 argument, got 0")
+        if len(args) == 1:
+            args = (*args, ConstantVariable.create(None))
+        assert len(args) == 2
+        arg, value = args
+        DictVariableType = (
+            ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
+        )
+
+        if isinstance(arg, dict):
+            return DictVariableType(
+                dict.fromkeys(arg, value), user_cls, mutable_local=MutableLocal()
+            )
+        elif isinstance(
+            arg,
+            (
+                ConstDictVariable,
+                ListVariable,
+                TupleVariable,
+                ListIteratorVariable,
+            ),
+        ):
+            keys = [DictVariableType.get_key(x) for x in arg.unpack_var_sequence(tx)]
+            return DictVariableType(
+                dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
+            )
+        unimplemented(f"{user_cls.__name__}.fromkeys(): {args} {kwargs}")
 
     def call_zip(self, tx, *args, **kwargs):
         if kwargs:
@@ -1233,10 +1283,23 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
+<<<<<<< HEAD
             if isinstance(obj, variables.TensorVariable):
                 from .builder import wrap_fx_proxy
 
                 name = name_var.as_python_constant()
+=======
+            name = name_var.as_python_constant()
+            if isinstance(obj, variables.TensorVariable):
+                from .builder import wrap_fx_proxy
+
+                if name == "requires_grad":
+                    # TODO(voz): Make it work properly
+                    unimplemented(
+                        "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
+                        "the middle of the graph, which aot_autograd does not currently know how to handle. "
+                    )
+>>>>>>> 1dc4588c6aa861bbb6539c5fca5afb493a8635fd
                 if name == "data":
                     # Remove the old reference in tracked fakes - if we don't do this
                     # new .data value size and shape differences will cause
@@ -1250,7 +1313,11 @@ class BuiltinVariable(VariableTracker):
                     for tf in to_remove:
                         tx.output.tracked_fakes.remove(tf)
 
+<<<<<<< HEAD
                     # Step 1 - disable grad
+=======
+                    # Step 1 - disable grads
+>>>>>>> 1dc4588c6aa861bbb6539c5fca5afb493a8635fd
                     with dynamo_disable_grad(tx), torch.no_grad():
                         # Step 2 - call `set_`
                         out = wrap_fx_proxy(
@@ -1261,8 +1328,16 @@ class BuiltinVariable(VariableTracker):
                                 *proxy_args_kwargs([obj, val], {}),
                             ),
                         )
+<<<<<<< HEAD
                     # Step 3 - drop the version counter - this is a hack required to get
                     # .data setting to play correctly with the autograd engine.
+=======
+
+                    # Step 3 - drop the version counter - this is a step required to get
+                    # .data setting to play correctly with the autograd engine.
+                    # Esentially, dynamo is trying to faithful preserve the (absurd)
+                    # behavior of .data= from eager mode
+>>>>>>> 1dc4588c6aa861bbb6539c5fca5afb493a8635fd
                     def _lower_version_count_by_1(x):
                         version = x._version
                         if version > 0:
@@ -1276,6 +1351,7 @@ class BuiltinVariable(VariableTracker):
                         (out.as_proxy(),),
                         {},
                     )
+<<<<<<< HEAD
                     # This handles options prop, guards and ends with a clone
                     # Step 4 - replace all reference to the current object with the new one
                     return tx.replace_all(obj, out)
@@ -1298,6 +1374,14 @@ class BuiltinVariable(VariableTracker):
 
 
             tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
+=======
+                    _lower_version_count_by_1(obj.as_proxy().node.meta["example_value"])
+                    # This handles options prop, guards and ends with a clone
+                    # Step 4 - replace all reference to the current object with the new one
+                    return out
+
+            tx.output.side_effects.store_attr(obj, name, val)
+>>>>>>> 1dc4588c6aa861bbb6539c5fca5afb493a8635fd
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
@@ -1660,7 +1744,11 @@ class BuiltinVariable(VariableTracker):
             SourcelessBuilder()(tx, polyfill.all), args, kwargs
         )
 
+<<<<<<< HEAD
 import contextlib
+=======
+
+>>>>>>> 1dc4588c6aa861bbb6539c5fca5afb493a8635fd
 @contextlib.contextmanager
 def dynamo_disable_grad(tx):
     from . import GradModeVariable

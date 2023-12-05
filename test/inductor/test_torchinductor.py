@@ -686,11 +686,27 @@ class CommonTemplate:
                 ],
             )
 
+    def test_index_put_bf16(self):
+        def fn(inp, src, index):
+            inp2 = inp.clone()
+            inp2[index] = src
+            return inp2
+
+        for dtype in [torch.int64, torch.bool, torch.bfloat16]:
+            self.common(
+                fn,
+                [
+                    torch.zeros(3, 5, dtype=dtype),
+                    torch.ones((2, 5), dtype=dtype),
+                    torch.tensor([0, 1]),
+                ],
+            )
+
     def test_randn_generator(self):
         def fn(a, generator):
-            torch.randn([20, 20], generator=generator, device=a.device)
+            return torch.randn([20, 20], generator=generator, device=a.device)
 
-        self.common(fn, (torch.linspace(-10, 10, 41), None))
+        self.common(fn, (torch.linspace(-10, 10, 41), None), assert_equal=False)
 
         # generator not yet supported in dynamo
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Generator"):
@@ -1991,6 +2007,43 @@ class CommonTemplate:
                 ),
                 check_lowp=True,
             )
+
+    def test_mm_mixed_dtype(self):
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        t1 = torch.arange(6, dtype=torch.float, device=self.device).view(2, 3)
+        t2 = torch.arange(9, dtype=torch.int64, device=self.device).view(3, 3)
+
+        msg = "expected .* and .* to have the same dtype, but got: .* != .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn)(t1, t2)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(t1, t2)
+
+    def test_linear_mixed_dtype(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()  # noqa: UP008
+                self.fc1 = nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.fc1(x.permute(1, 2, 0))
+                return x
+
+        fn = Net().to(self.device)
+        t = torch.arange(27, device=self.device).view(3, 3, 3)
+
+        msg = "expected .* and .* to have the same dtype, but got: .* != .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(t)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            with torch.no_grad():
+                torch.compile(fn)(t)
+        # TODO: Autograd internal assertion
+        msg = "Failed running call_module .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn)(t)
 
     def test_scalar_input(self):
         def fn(x, y):
@@ -7929,9 +7982,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 Instead, it transforms the fx graph so that its functions are
                 aten operations. It then saves this graph.
                 """
-                from torch._functorch.aot_autograd import Interpreter
                 from torch._inductor.decomposition import select_decomp_table
                 from torch._subclasses import FakeTensorMode
+                from torch.fx import Interpreter
 
                 fake_mode = FakeTensorMode()
 

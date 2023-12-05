@@ -3628,9 +3628,10 @@ class ExternKernel(InputsKernel):
             f"arg {arg_name} not found in self.kwargs or self.kwargs_default_value"
         )
 
+    def is_legacy_abi_kernel(self):
+        return False
+
     def codegen_kwargs(self):
-        if not self.kwargs:
-            return []
         if V.graph.cpp_wrapper:
             # FIXME: we should unconditionally fill self.kwargs with missing default values
             # instead of carrying an extra self.ordered_kwargs_for_cpp_kernel
@@ -3642,7 +3643,16 @@ class ExternKernel(InputsKernel):
                 if isinstance(v, sympy.Expr):
                     kwargs.append(v)
                 else:
-                    kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
+                    # FIXME We should let ExternKernel have access to the cpp schema where possible.
+                    if hasattr(self, "kwargs_default_value"):
+                        type_ = self.kwargs_default_value.get(arg_name).get("type")
+                    else:
+                        type_ = None
+                    kwargs.append(
+                        V.graph.wrapper_code.val_to_cpp_arg_str(
+                            type_, v, self.is_legacy_abi_kernel()
+                        )
+                    )
         else:
             kwargs = [
                 f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
@@ -4257,6 +4267,7 @@ class FallbackKernel(ExternKernelAlloc):
         # output through the abi-compatible interface.
         self.outputs: Sequence[Any] = []
         self.use_runtime_dispatch = False
+        self.abi_compatible_kernel = None
 
         assert isinstance(
             kernel,
@@ -4292,15 +4303,18 @@ class FallbackKernel(ExternKernelAlloc):
         ), f"{kernel.__name__} with alias_info returns is not supported with cpp_wrapper"
 
         self.cpp_kernel = kernel._schema.name
-        self.cpp_kernel_overlad_name = kernel._schema.overload_name
+        self.cpp_kernel_overload_name = kernel._schema.overload_name
         self.cpp_kernel_key = (
-            f"{self.cpp_kernel.replace('::', '_')}_{self.cpp_kernel_overlad_name}"
+            f"{self.cpp_kernel.replace('::', '_')}_{self.cpp_kernel_overload_name}"
         )
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.ordered_kwargs_for_cpp_kernel = [
             x.name for x in kernel._schema.arguments if x.kwarg_only
         ]
+
+    def is_legacy_abi_kernel(self):
+        return "_scaled_dot_product_flash_attention" in str(self.kernel)
 
     def get_arg_default_value(self, pos):
         assert hasattr(
@@ -4310,6 +4324,29 @@ class FallbackKernel(ExternKernelAlloc):
             self.args_default_value
         ), f"expected the index {pos} to be smaller than len(self.args_default_value): {len(self.args_default_value)}"
         return self.args_default_value[pos]["value"]
+
+    # Generate abi-compatible kernel names for shim kernels.
+    # Each individual shim kernel may have its own versioning rule.
+    # However, we don't expect we would end up with too many of such rules.
+    def _get_abi_compatible_kernel(self):
+        if not V.graph.cpp_wrapper:
+            return self.kernel
+
+        def sdpa_ver_fn():
+            # For sdpa, we need the v2 version only if any optional
+            # kwarg is missing.
+            if any(
+                self.get_kwargs_value(arg_name) is None
+                for arg_name in self.ordered_kwargs_for_cpp_kernel
+            ):
+                return f"{self.cpp_kernel}_v2"
+            else:
+                return self.cpp_kernel
+
+        kernel_to_ver = {"at::_scaled_dot_product_flash_attention": sdpa_ver_fn}
+        if (ver_fn := kernel_to_ver.get(self.cpp_kernel, None)) is not None:
+            return ver_fn()
+        return self.cpp_kernel
 
     def codegen_args(self):
         @dataclasses.dataclass
@@ -4321,7 +4358,20 @@ class FallbackKernel(ExternKernelAlloc):
 
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
-        args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
+        # Now we setup abi_compatible_kernel after self.kernel
+        # and kwargs are adjusted appropriately.
+        self.abi_compatible_kernel = self._get_abi_compatible_kernel()
+
+        if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
+            args = [
+                V.graph.wrapper_code.val_to_cpp_arg_str(
+                    param.real_type, x, self.is_legacy_abi_kernel()
+                )
+                for param, x in zip(self.op_overload._schema.arguments, args)
+            ]
+        else:
+            args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
+
         # Previously, we want to maintain forward-compatibility by skipping
         # default args in the serialized artifacts in fbcode. However,
         # some of our shim interfaces require default values being set.
@@ -4523,13 +4573,17 @@ class FallbackKernel(ExternKernelAlloc):
                 args,
                 self.cpp_op_schema,
                 self.cpp_kernel_key,
-                self.cpp_kernel_overlad_name,
+                self.cpp_kernel_overload_name,
                 self.op_overload,
                 exported_args,
                 self.outputs,
             )
         else:
-            super().codegen(wrapper)
+            self.codegen_comment(wrapper)
+            args = [*self.codegen_args(), *self.codegen_kwargs()]
+            V.graph.wrapper_code.generate_fallback_kernel(self, args)
+            if isinstance(self.layout, Layout):
+                self.codegen_size_asserts(wrapper)
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor):
@@ -5000,7 +5054,7 @@ class ConvolutionBinary(ExternKernelAlloc):
             kernel="torch.ops.mkldnn._convolution_pointwise.binary",
             cpp_kernel="mkldnn::_convolution_pointwise",
         )
-        self.cpp_kernel_overlad_name = "binary"
+        self.cpp_kernel_overload_name = "binary"
         self.cpp_kernel_key = "convolution_pointwise_binary"
         self.cpp_op_schema = """
             at::Tensor(
@@ -5026,7 +5080,7 @@ class ConvolutionBinary(ExternKernelAlloc):
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
-            self.cpp_kernel_overlad_name,
+            self.cpp_kernel_overload_name,
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -5090,7 +5144,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             kernel="torch.ops.mkldnn._convolution_pointwise_.binary",
             cpp_kernel="mkldnn::_convolution_pointwise_",
         )
-        self.cpp_kernel_overlad_name = "binary"
+        self.cpp_kernel_overload_name = "binary"
         self.cpp_kernel_key = "convolution_pointwise_binary_"
         # TODO: op.call: input[0] should be at::Tensor&
         self.cpp_op_schema = """
@@ -5116,7 +5170,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
-            self.cpp_kernel_overlad_name,
+            self.cpp_kernel_overload_name,
         )
 
     def get_mutation_names(self):
@@ -5304,7 +5358,7 @@ class LinearBinary(ExternKernelAlloc):
             kernel="torch.ops.mkldnn._linear_pointwise.binary",
             cpp_kernel="mkldnn::_linear_pointwise",
         )
-        self.cpp_kernel_overlad_name = "binary"
+        self.cpp_kernel_overload_name = "binary"
         self.cpp_kernel_key = "linear_pointwise_binary"
         self.cpp_op_schema = """
             at::Tensor(
@@ -5322,7 +5376,7 @@ class LinearBinary(ExternKernelAlloc):
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
-            self.cpp_kernel_overlad_name,
+            self.cpp_kernel_overload_name,
         )
 
     @classmethod
@@ -5745,7 +5799,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             kernel="torch.ops.onednn.qconv2d_pointwise.binary",
             cpp_kernel="onednn::qconv2d_pointwise",
         )
-        self.cpp_kernel_overlad_name = "binary"
+        self.cpp_kernel_overload_name = "binary"
         self.cpp_kernel_key = "qconv2d_pointwise_binary"
         self.cpp_op_schema = """
             at::Tensor(
@@ -5830,7 +5884,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             conv_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
-            self.cpp_kernel_overlad_name,
+            self.cpp_kernel_overload_name,
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -6536,6 +6590,10 @@ class Wait(ExternKernelAlloc):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].codegen_reference()]
 
+    def get_mutation_names(self):
+        # The generated `_wait_tensor` op mutates the input tensor
+        return [self.inputs[0].codegen_reference()]
+
 
 class CollectiveKernel(ExternKernel):
     """
@@ -7015,9 +7073,9 @@ class _CollectiveKernel(FallbackKernel):
         from .codegen.wrapper import get_cpp_op_schema
 
         self.cpp_kernel = kernel._schema.name
-        self.cpp_kernel_overlad_name = kernel._schema.overload_name
+        self.cpp_kernel_overload_name = kernel._schema.overload_name
         self.cpp_kernel_key = (
-            f"{self.cpp_kernel.replace('::', '_')}_{self.cpp_kernel_overlad_name}"
+            f"{self.cpp_kernel.replace('::', '_')}_{self.cpp_kernel_overload_name}"
         )
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)

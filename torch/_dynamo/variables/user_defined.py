@@ -20,7 +20,7 @@ from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..allowed_functions import is_allowed
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ODictGetItemSource, RandomValueSource
+from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -251,6 +251,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         }
         return fns
 
+    def _maybe_get_baseclass_method(self, name):
+        if name not in getattr(self.value, "__dict__", {}):
+            try:
+                return inspect.getattr_static(type(self.value), name)
+            except AttributeError:
+                pass
+        return None
+
     def call_method(
         self,
         tx,
@@ -265,11 +273,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             UserMethodVariable,
         )
 
-        if name not in getattr(self.value, "__dict__", {}):
-            try:
-                method = inspect.getattr_static(type(self.value), name)
-            except AttributeError:
-                method = None
+        method = self._maybe_get_baseclass_method(name)
+        if method is not None:
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
@@ -330,16 +335,37 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     tx, args, kwargs
                 )
 
-        # This is for cases when we have sus keys and we cannot make a ConstDictVariable
-        if name == "__contains__" and isinstance(self.value, dict):
-            from .distributed import ProcessGroupVariable
+            # This is for cases when we have sus keys and we cannot make a ConstDictVariable
+            # if name == "__contains__" and isinstance(self.value, dict):
+            #     from .distributed import ProcessGroupVariable
 
-            if isinstance(
-                args[0],
-                (UserDefinedObjectVariable, ConstantVariable, ProcessGroupVariable),
-            ):
-                return ConstantVariable(args[0].value in self.value, **options)
+            #     if isinstance(
+            #         args[0],
+            #         (UserDefinedObjectVariable, ConstantVariable, ProcessGroupVariable),
+            #     ):
+            #         return ConstantVariable(args[0].value in self.value, **options)
+            if method is list.__len__ and self.source and not (args or kwargs):
+                install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+                return ConstantVariable(len(self.value))
+
         return super().call_method(tx, name, args, kwargs)
+
+    def unpack_var_sequence(self, tx):
+        if (
+            self.source
+            and self._maybe_get_baseclass_method("__iter__") is list.__iter__
+            and self._maybe_get_baseclass_method("__len__") is list.__len__
+            and self._maybe_get_baseclass_method("__getitem__") is list.__getitem__
+        ):
+            install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+            return [
+                variables.LazyVariableTracker.create(
+                    self.value[k],
+                    source=GetItemSource(self.source, k),
+                )
+                for k in range(len(self.value))
+            ]
+        return super().unpack_var_sequence(tx)
 
     def is_supported_random(self):
         try:

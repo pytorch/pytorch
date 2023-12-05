@@ -7,7 +7,7 @@ import types
 from typing import Any, Callable, Dict, List, Type, Union
 
 import torch._C
-
+import torch.utils._pytree as pytree
 from torch import _utils_internal
 from torch._functorch.pyfunctorch import dispatch_functorch
 
@@ -369,7 +369,7 @@ class HigherOrderOperator(OperatorBase):
 
 
 def _to_flat_tuple(args, kwargs):
-    return torch.utils._pytree.arg_tree_leaves(*args, **kwargs)
+    return pytree.arg_tree_leaves(*args, **kwargs)
 
 
 def _compute_keyset(args, kwargs, non_fallthrough_keys):
@@ -506,7 +506,7 @@ class OpOverload(OperatorBase):
         )
 
     def __call__(self, *args, **kwargs):
-        return self._op(*args, **kwargs or {})
+        return self._op(*args, **(kwargs or {}))
 
     def __hash__(self):
         return hash(self._op)
@@ -601,9 +601,7 @@ class OpOverload(OperatorBase):
                     with temporarily_pop_mode(curr_stack) as curr_mode:
                         assert hasattr(curr_mode, "__torch_dispatch__")
                         overload_types = []
-                        args_flattened, _ = torch.utils._pytree.tree_flatten(
-                            (args, kwargs.values())
-                        )
+                        args_flattened = pytree.arg_tree_leaves(*args, **kwargs)
                         for a in args_flattened:
                             # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
                             # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
@@ -750,7 +748,7 @@ class OpOverloadPacket:
         # is still callable from JIT
         # We save the function ptr as the `op` attribute on
         # OpOverloadPacket to access it here.
-        return self._op(*args, **kwargs or {})
+        return self._op(*args, **(kwargs or {}))
 
     # TODO: use this to make a __dir__
     def overloads(self):
