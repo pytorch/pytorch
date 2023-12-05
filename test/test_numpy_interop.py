@@ -1,4 +1,4 @@
-# Owner(s): ["codule: numpy"]
+# Owner(s): ["module: numpy"]
 
 import torch
 import numpy as np
@@ -494,7 +494,7 @@ class TestNumPyInterop(TestCase):
         # Regression test for https://github.com/pytorch/pytorch/issues/115066
         self.assertEqual(torch.mul(x, y).shape, y.shape)
         # Regression test for https://github.com/pytorch/pytorch/issues/113037
-        self.assertEqual(torch.div(x, y, rouding_mode='floor'), y.shape)
+        self.assertEqual(torch.div(x, y, rounding_mode='floor'), y.shape)
 
 
 instantiate_device_type_tests(TestNumPyInterop, globals())
