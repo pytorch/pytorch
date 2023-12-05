@@ -852,8 +852,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             False,
         )
         # (dynamic shapes, static shapes)
-        self.assertIn(cnt.frame_count, (4, 7))
-        self.assertIn(cnt.op_count, (83, 127))
+        self.assertIn(cnt.frame_count, (5, 7))
+        self.assertIn(cnt.op_count, (106, 127))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
@@ -3545,6 +3545,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x2), opt_fn(x2))
         self.assertEqual(counter.frame_count, 2)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_deferred_runtime_asserts(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check_is_size(y)
+            if y >= 0:
+                return x * 2
+            else:
+                return x * 3
+
+        f(torch.tensor([3]))
+        self.assertRaises(RuntimeError, lambda: f(torch.tensor([-2])))
+
     def test_addr_alpha_beta_out(self):
         inp = torch.randn(2, 3)
         vec1 = torch.randn(2)
@@ -3611,6 +3625,32 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             same(torch.compile(forward)(torch.tensor([1.0])), torch.tensor([1.0]))
         )
 
+    def test_user_defined_object_callable(self):
+        # https://github.com/pytorch/pytorch/issues/114019
+        class MyCallable:
+            def __call__(self, x):
+                return x + 1
+
+        def fn(x):
+            # Create in graph - will not have source
+            return MyCallable()(x)
+
+        fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn_opt(torch.zeros(1)), fn(torch.zeros(1)))
+
+    def test_numpy_tobytes_no_error(self):
+        def fn(x):
+            x += 1
+            z = x.tobytes()
+            x += 1
+            return z
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_arg, arg = np.array([1, 2]), np.array([1, 2])
+        self.assertEqual(opt_fn(opt_arg), fn(arg))
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_numpy_not_ndarray_recompiles(self):
         import torch
 
@@ -3636,6 +3676,62 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(opt_fn("10"), fn("10"))
         self.assertEqual(cnt.frame_count, 4)
+
+    def test_tensor_set_data(self):
+        # https://github.com/pytorch/pytorch/issues/113030
+        def func1(x, y):
+            x.data = y
+            x.add_(1)
+            return x
+
+        def func2(x, y):
+            x.data = y
+            y.data = torch.zeros([0])
+            return x
+
+        def func3(x, y):
+            z = x
+            x.data = y
+            y.data = torch.zeros([0])
+            return x is z
+
+        for backend in ["eager", "aot_eager", "inductor"]:
+            for func in [func1, func2, func3]:
+                if backend != "eager" and func is func1:
+                    # add_ not working w/ aot_autograd?
+                    continue
+                torch._dynamo.reset()
+                cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+
+                compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
+                requires_grad = func is not func1
+                for i in range(0, 5):
+                    # Inputs
+                    eager_a = torch.ones([6], requires_grad=requires_grad)
+                    compiled_a = torch.ones([6], requires_grad=requires_grad)
+
+                    eager_b = torch.ones([6], requires_grad=requires_grad)
+                    compiled_b = torch.ones([6], requires_grad=requires_grad)
+
+                    # Eager
+                    out_eager = func(eager_a, eager_b)
+                    # Compiled
+                    out_compiled = compiled_fn(compiled_a, compiled_b)
+                    self.assertEqual(eager_a, compiled_a)
+                    self.assertEqual(eager_b, compiled_b)
+                    self.assertEqual(out_eager, out_compiled)
+
+                    # func1 hits a leaf Variable that requires grad is being used in an in-place operation
+                    if requires_grad:
+                        bwd_inp_eager = torch.randn([6])
+                        bwd_inp_compiled = torch.clone(bwd_inp_eager)
+                        eager_a.backward(bwd_inp_eager)
+                        compiled_a.backward(bwd_inp_compiled)
+                        self.assertEqual(eager_a.grad, compiled_a.grad)
+
+                # Prove guarding works - we run the compiled_fn 5 times
+                # frame_count should stay at 1.
+                self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":

@@ -59,6 +59,31 @@ static void extractTotalOpResultsAndSetState(
 }
 #endif
 
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+// This function aggregate the latency of all invoked shaders except
+// `vulkan.nchw_to_image` and `vulkan.image_to_nchw`, which are moving data
+// between CPU and GPU memory.
+static void extractTotalShaderResultsAndSetState(benchmark::State& state) {
+  at::native::vulkan::api::context()->querypool().extract_results();
+
+  uint64_t sum_shader_latency_in_nanoseconds = 0;
+  auto result_aggregator =
+      [&sum_shader_latency_in_nanoseconds](
+          const at::native::vulkan::api::ShaderDuration& s) {
+        if (s.kernel_name != "vulkan.nchw_to_image" &&
+            s.kernel_name != "vulkan.image_to_nchw") {
+          sum_shader_latency_in_nanoseconds += s.execution_duration_ns;
+        }
+      };
+  at::native::vulkan::api::context()->querypool().shader_log_for_each(
+      result_aggregator);
+
+  float sum_shader_latency_in_seconds =
+      sum_shader_latency_in_nanoseconds / NANOSECONDS_IN_SECOND;
+  state.SetIterationTime(sum_shader_latency_in_seconds);
+}
+#endif
+
 static void mm_benchmark(benchmark::State& state) {
   // Guard
   if (!at::is_vulkan_available()) {
@@ -116,7 +141,7 @@ static void addmm_benchmark(benchmark::State& state) {
         at::addmm(bias_vk, in_vulkan1, in_vulkan2, 1.0, 1.0).cpu();
   }
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  extractTotalOpResultsAndSetState(state, "vulkan.addmm");
+  extractTotalShaderResultsAndSetState(state);
   at::native::vulkan::api::context()->querypool().print_results();
 #endif
 }
@@ -157,6 +182,10 @@ static void create_linear_context_benchmark(benchmark::State& state) {
       at::native::vulkan::api::context()->querypool().get_total_op_ns(
           "vulkan.image_to_nchw") /
       NANOSECONDS_IN_SECOND;
+  total_op_time +=
+    at::native::vulkan::api::context()->querypool().get_total_op_ns(
+        "vulkan.convert_channels_to_height_packed") /
+    NANOSECONDS_IN_SECOND;
   state.SetIterationTime(total_op_time);
 
   at::native::vulkan::api::context()->querypool().print_results();
@@ -196,7 +225,7 @@ static void run_linear_context_benchmark(benchmark::State& state) {
     auto out_vulkan = vulkan_output[0].toTensor().cpu(); // force sync?
   }
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  extractTotalOpResultsAndSetState(state, "vulkan.addmm");
+  extractTotalShaderResultsAndSetState(state);
   at::native::vulkan::api::context()->querypool().print_results();
 #endif
 }

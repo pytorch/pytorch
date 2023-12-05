@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, TYPE_CHECKING
 
 from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
@@ -10,6 +10,9 @@ from ...virtualized import V
 
 from ..common import IndentedBuffer, Kernel, OpOverrides, PrimitiveInfoType
 from ..cpp import CppPrinter, DTYPE_TO_CPP
+
+if TYPE_CHECKING:
+    from torch._inductor.codegen.cuda.cuda_template import CUDATemplate
 
 log = logging.getLogger(__name__)
 
