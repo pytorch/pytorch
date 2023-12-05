@@ -94,7 +94,8 @@ unset = Unset.token
 
 compile_lock = threading.RLock()
 guarded_backend_cache = threading.local()
-cached_backends = {}
+cached_backends: Dict[int, CompilerFn] = {}
+
 
 def _maybe_init_guarded_backend_cache():
     if not hasattr(guarded_backend_cache, "skip_backend_check_for_run_only_mode"):

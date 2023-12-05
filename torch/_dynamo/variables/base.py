@@ -289,21 +289,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
-    def unpack_var_sequence(self, tx):
+    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
         raise NotImplementedError()
 
-    def has_unpack_var_sequence(self, tx):
+    def has_unpack_var_sequence(self, tx) -> bool:
         try:
             self.unpack_var_sequence(tx)
             return True
         except NotImplementedError:
             return False
 
-    def num_parameters(self):
-        unimplemented(f"num_parameters: {self}")
+    def inspect_parameter_names(self) -> List[str]:
+        unimplemented(f"inspect_parameter_names: {self}")
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        unimplemented(f"hasattr: {repr(self)}")
+        unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"

@@ -77,7 +77,19 @@ def check_blocksize(f_name, blocksize):
 
 
 def make_triton_contiguous(t):
-    if (t.stride(-2) > 1 or t.dtype is torch.float32) and t.stride(-1) > 1:
+    """Return input as a triton-contiguous tensor.
+
+    A triton-contiguous tensor is defined as a tensor that has strides
+    with minimal value equal to 1.
+
+    While triton kernels support triton-non-contiguous tensors (all
+    strides being greater than 1 or having 0 strides) arguments, a
+    considerable slow-down occurs because tensor data is copied
+    element-wise rather than chunk-wise.
+    """
+    if min(t.stride()) != 1:
+        # TODO: investigate if contiguity along other axes than the
+        # last one can be beneficial for performance
         return t.contiguous()
     else:
         return t
@@ -847,6 +859,7 @@ def bsr_dense_addmm(
 
     dense = tile_to_blocksize(dense, (BK, BN))
     input = tile_to_blocksize(input, (BM, BN))
+    out_untiled = out
     out = tile_to_blocksize(out, (BM, BN))
 
     dot_out_dtype = {torch.float16: tl.float32,
@@ -890,6 +903,11 @@ def bsr_dense_addmm(
             **meta)
 
     launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
+
+    if out.data_ptr() != out_backup.data_ptr():
+        # prepare_inputs has made a copy of out, copy its content back
+        # to out_backup:
+        out_backup.copy_(out_untiled.view(out_backup.shape))
 
     return out_backup
 
@@ -1407,10 +1425,16 @@ if has_triton():
         # so it could be any value in [1, dense.shape[-1]).
         # We need to probably use the largest possible blocksize
         # so that it fits into SRAM.
+        out_untiled = out
         out = tile_to_blocksize(out, (blocksize[0], blocksize[0]))
 
         # Launch kernel
         _run_dense_rowspace_kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid, meta)
+
+        if out.data_ptr() != out_backup.data_ptr():
+            # prepare_inputs has made a copy of out, copy its content
+            # back to out_backup:
+            out_backup.copy_(out_untiled.view(out_backup.shape))
 
         return out_backup
 
