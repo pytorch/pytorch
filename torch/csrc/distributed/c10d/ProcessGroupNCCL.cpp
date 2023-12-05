@@ -1172,7 +1172,6 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
-    std::cout << "EXCEPTION: " << e.what() << "\n";
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
       LOG(INFO)
