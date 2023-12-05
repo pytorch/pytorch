@@ -5,12 +5,13 @@ import copy
 import functools
 import unittest
 from unittest.mock import patch
-from torch._C import FileCheck
 
 import torch
 import torch._dynamo
 import torch.distributed as dist
 import torch.nn as nn
+from torch._C import FileCheck
+from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed._tensor import (
     DeviceMesh,
     DTensor,
@@ -42,9 +43,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.utils.checkpoint import checkpoint
 from torch.utils._triton import has_triton
-from torch._inductor.utils import run_and_get_triton_code
+from torch.utils.checkpoint import checkpoint
 
 
 class SimpleModel(nn.Module):
@@ -200,7 +200,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
-    def test_2d_fsdp_tp_compile_comm_reordering(self):
+    def test_tp_compile_comm_reordering(self):
         class FakeAttention(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -235,16 +235,12 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         model = FakeTransformer().to(self.device_type)
 
-        # 2-D mesh is [dp, tp]
-        mesh_2d = init_device_mesh("cuda", (1, 2), mesh_dim_names=("dp", "tp"))
-
-        tp_mesh = mesh_2d["tp"]
+        tp_mesh = init_device_mesh("cuda", (2,), mesh_dim_names=("tp",))
 
         # apply sequence parallel
         parallel_plan = {
             "attn": PrepareModuleInput(
-                input_layouts=Shard(0),
-                desired_input_layouts=Replicate()
+                input_layouts=Shard(0), desired_input_layouts=Replicate()
             ),
             "attn.wq": ColwiseParallel(),
             "attn.wk": ColwiseParallel(),
@@ -259,13 +255,12 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         )
 
         compiled_model = torch.compile(model)
-        # fsdp_mod = FSDP(compiled_model, device_mesh=mesh_2d["dp"], use_orig_params=True)
         inp = torch.rand(20, 16).to(self.device_type)
         out = compiled_model(inp)
-        # out = fsdp_mod(inp)
 
         code = run_and_get_triton_code(compiled_model, inp)
         # Check that `buf2` is correctly waited on before first use.
+        # fmt: off
         FileCheck() \
             .check("buf1_work = dist.all_gather_into_tensor(buf1[0]") \
             .check("buf2 = buf1[0]") \

@@ -24,10 +24,6 @@ from torch.utils._triton import has_triton
 from torch._inductor.utils import run_and_get_triton_code
 import torch._dynamo.logging
 import torch.distributed as dist
-import torch.nn as nn
-from torch.distributed._tensor import init_device_mesh, Shard, Replicate
-from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel, parallelize_module, PrepareModuleInput
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 def _tolist_with_constrain_as_size(tensor):
