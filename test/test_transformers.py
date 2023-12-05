@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.functional import scaled_dot_product_attention
-from torch.nn.attention.bias import CausalVariant, lower_right_causal, upper_left_causal
+from torch.nn.attention.bias import CausalVariant, causal_lower_right, causal_upper_left
 from torch.nn.parameter import Parameter
 import unittest
 from unittest import expectedFailure as xfail
@@ -3058,9 +3058,9 @@ class TestAttnMasks(NNTestCase):
         grad_tol = Tolerances(5e-3, 5e-3)
 
         if causal_variant == CausalVariant.UPPER_LEFT:
-            attn_bias = upper_left_causal(seq_len_q, seq_len_kv)
+            attn_bias = causal_upper_left(seq_len_q, seq_len_kv)
         else:
-            attn_bias = lower_right_causal(seq_len_q, seq_len_kv)
+            attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
         self.run_test(device, False, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
 
@@ -3086,9 +3086,9 @@ class TestAttnMasks(NNTestCase):
         grad_tol = Tolerances(5e-3, 5e-3)
 
         if causal_variant == CausalVariant.UPPER_LEFT:
-            attn_bias = upper_left_causal(seq_len_q, seq_len_kv)
+            attn_bias = causal_upper_left(seq_len_q, seq_len_kv)
         else:
-            attn_bias = lower_right_causal(seq_len_q, seq_len_kv)
+            attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
         self.run_test(device, True, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
 
@@ -3108,7 +3108,7 @@ class TestAttnMasks(NNTestCase):
         query = make_q_tensor()
         key = make_kv_tensor()
         value = make_kv_tensor()
-        attn_bias = upper_left_causal(seq_len_q, seq_len_kv)
+        attn_bias = causal_upper_left(seq_len_q, seq_len_kv)
 
         out_attn_bias = scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, dropout_p=0.0)
         out_is_causal = scaled_dot_product_attention(query, key, value, is_causal=True, dropout_p=0.0)
@@ -3124,7 +3124,7 @@ class TestAttnMasks(NNTestCase):
         query = make_q_tensor()
         key = make_kv_tensor()
         value = make_kv_tensor()
-        attn_bias = upper_left_causal(128, 128)
+        attn_bias = causal_upper_left(128, 128)
 
         with self.assertRaisesRegex(ValueError, "CausalBias should not be used with causal=True"):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)

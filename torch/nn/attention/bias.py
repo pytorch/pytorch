@@ -18,7 +18,7 @@ from torch.nn.attention._utils import (
 )
 from torch.nn.functional import scaled_dot_product_attention
 
-__all__ = ["upper_left_causal", "lower_right_causal", "CausalVariant", "CausalBias"]
+__all__ = ["causal_upper_left", "causal_lower_right", "CausalVariant", "CausalBias"]
 
 
 class CausalVariant(IntEnum):
@@ -58,19 +58,19 @@ class CausalBias(torch.Tensor):
     A bias representing causal attention patterns. For an overview of the bias structure, see the :class:`CausalVariant` enum.
 
     This class is used for defining causal (triangular) attention biases. For construing the bias, there exist
-    two factory functions: `upper_left_causal` and ` lower_right_causal`.
+    two factory functions: `causal_upper_left` and ` causal_lower_right`.
 
     Example:
 
     .. code-block:: python
 
-        from torch.nn.attention.bias import lower_right_causal
+        from torch.nn.attention.bias import causal_lower_right
 
         bsz, num_heads, seqlen_q, seqlen_kv, head_dim = 32, 8, 4, 12, 8
         q = torch.randn(bsz, num_heads, seqlen_q, head_dim, device="cuda", dtype=torch.float16)
         k = torch.randn(bsz, num_heads, seqlen_kv, head_dim, device="cuda", dtype=torch.float16)
         v = torch.randn(bsz, num_heads, seqlen_kv, head_dim, device="cuda", dtype=torch.float16)
-        bias = lower_right_causal(seqlen_q, seqlen_kv)
+        bias = causal_lower_right(seqlen_q, seqlen_kv)
 
         out = F.scaled_dot_product_attention(q, k, v, bias)
 
@@ -256,7 +256,7 @@ class CausalBias(torch.Tensor):
         return self._materialize().__repr__()
 
 
-def upper_left_causal(*size) -> CausalBias:
+def causal_upper_left(*size) -> CausalBias:
     """
     Creates an upper-left triangular causal bias.
 
@@ -264,7 +264,7 @@ def upper_left_causal(*size) -> CausalBias:
     diagonal offset set so that the inclusive values are aligned to the upper left corner of the matrix.
     This equivalent to the `is_causal=True` argument in `scaled_dot_product_attention`.
 
-    For instance, with `shape=(3,4)`, the `upper_left_causal`
+    For instance, with `shape=(3,4)`, the `causal_upper_left`
     function generates the following matrix:
 
     .. code-block:: text
@@ -279,19 +279,19 @@ def upper_left_causal(*size) -> CausalBias:
     Returns:
         CausalBias: The upper-left triangular causal bias.
     """
-    assert len(size) == 2, "upper_left_causal only supports 2D tensors"
+    assert len(size) == 2, "causal_upper_left only supports 2D tensors"
     seq_len_q, seq_len_kv = size
     return CausalBias(CausalVariant.UPPER_LEFT, seq_len_q, seq_len_kv)
 
 
-def lower_right_causal(*size) -> CausalBias:
+def causal_lower_right(*size) -> CausalBias:
     """
     Creates a lower-right triangular causal bias.
 
     This function generates a lower-right triangular matrix to represent causal attention bias with a
     diagonal offset set so that the inclusive values are aligned to the lower right corner of the matrix.
 
-    The for a lower_right_causal bias with `shape=(3,4)`, the resulting matrix is:
+    The for a causal_lower_right bias with `shape=(3,4)`, the resulting matrix is:
 
     .. code-block:: text
 
@@ -305,6 +305,6 @@ def lower_right_causal(*size) -> CausalBias:
     Returns:
         CausalBias: The upper-left triangular causal bias.
     """
-    assert len(size) == 2, "lower_right_causal only supports 2D tensors"
+    assert len(size) == 2, "causal_lower_right only supports 2D tensors"
     seq_len_q, seq_len_kv = size
     return CausalBias(CausalVariant.LOWER_RIGHT, seq_len_q, seq_len_kv)
