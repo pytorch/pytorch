@@ -770,7 +770,7 @@ class OpOverload(OperatorBase):
                 return handler
 
         # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
-        cache_result = not functionality_key in mode_stack_per_key()
+        cache_result = functionality_key not in mode_stack_per_key()
 
         final_key = resolve_key(self, key)
 
