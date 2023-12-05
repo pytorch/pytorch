@@ -41,7 +41,6 @@ ignored_torch_name_rule_set = {
     "torch._C._InferenceMode",
     "torch._C._RestorePythonTLSSnapshot",
     "torch._C._SetExcludeDispatchKeyGuard",
-    "torch.ao.nn.sparse.quantized.utils.LinearBlockSparsePattern",
     "torch.autograd.anomaly_mode.detect_anomaly",
     "torch.autograd.anomaly_mode.set_detect_anomaly",
     "torch.autograd.forward_ad._set_fwd_grad_enabled",
