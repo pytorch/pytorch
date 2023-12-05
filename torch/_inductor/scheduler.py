@@ -2130,8 +2130,7 @@ class Scheduler:
         assert (
             device.type != "cuda" or device.index is not None
         ), f"{device} should have been normalized in lowering"
-        V.graph.device_types.add(device.type)
-        V.graph.add_device_idx(device.index)
+        V.graph.add_device_info(device)
 
         device_scheduling = get_scheduling_for_device(device.type)
         if device_scheduling is None:
