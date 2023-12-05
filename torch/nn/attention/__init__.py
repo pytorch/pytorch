@@ -7,7 +7,7 @@ from torch.backends.cuda import (
 )
 
 # Note: [SDPA warnings]
-# TODO: Consider moving this to sdpa regardless of subclasses
+# TODO: Consider using this to sdpa regardless of subclasses
 # This only effects users of bias subclasses
 # If this is set to True, we will warn the user if they are not using the fused kernels
 # As well, it will raise warnings for all the reasons why the fused kernels can't be run.
