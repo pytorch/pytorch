@@ -24,8 +24,8 @@ import torch.distributed.fsdp._exec_order_utils as exec_order_utils
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
+from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.algorithms._comm_hooks import default_hooks
-from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
