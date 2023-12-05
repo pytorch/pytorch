@@ -808,5 +808,5 @@ TEST_F(RNNTest, CheckPadPackedSequenceWithCudaTensors_CUDA) {
 
   auto packed = torch::nn::utils::rnn::pack_padded_sequence(input, lengths, false, false);
 
-  auto error = torch::nn::utils::rnn::pad_packed_sequence(packed); 
+  auto error = torch::nn::utils::rnn::pad_packed_sequence(packed);
 }
