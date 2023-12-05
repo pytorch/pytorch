@@ -67,12 +67,15 @@ class CausalBias(torch.Tensor):
         from torch.nn.attention.bias import causal_lower_right
 
         bsz, num_heads, seqlen_q, seqlen_kv, head_dim = 32, 8, 4, 12, 8
+
+        # Create a lower-right causal bias
+        attn_bias = causal_lower_right(seqlen_q, seqlen_kv)
+
         q = torch.randn(bsz, num_heads, seqlen_q, head_dim, device="cuda", dtype=torch.float16)
         k = torch.randn(bsz, num_heads, seqlen_kv, head_dim, device="cuda", dtype=torch.float16)
         v = torch.randn(bsz, num_heads, seqlen_kv, head_dim, device="cuda", dtype=torch.float16)
-        bias = causal_lower_right(seqlen_q, seqlen_kv)
 
-        out = F.scaled_dot_product_attention(q, k, v, bias)
+        out = F.scaled_dot_product_attention(q, k, v, attn_bias)
 
     .. warning:: This class is a prototype and subject to change.
     """
@@ -264,8 +267,13 @@ def causal_upper_left(*size) -> CausalBias:
     diagonal offset set so that the inclusive values are aligned to the upper left corner of the matrix.
     This equivalent to the `is_causal=True` argument in `scaled_dot_product_attention`.
 
-    For instance, with `shape=(3,4)`, the `causal_upper_left`
-    function generates the following matrix:
+    The equivalent pytorch code for constructing this bias is:
+
+    .. code-block:: python
+
+        torch.tril(torch.ones(size, dtype=torch.bool))
+
+    For instance, with `shape=(3,4)`, the materialized bias tensor will be:
 
     .. code-block:: text
 
@@ -291,7 +299,17 @@ def causal_lower_right(*size) -> CausalBias:
     This function generates a lower-right triangular matrix to represent causal attention bias with a
     diagonal offset set so that the inclusive values are aligned to the lower right corner of the matrix.
 
-    The for a causal_lower_right bias with `shape=(3,4)`, the resulting matrix is:
+    The equivalent pytorch code for constructing this bias is:
+
+    .. code-block:: python
+
+        diagonal_offset = size[1] - size[0]
+        torch.tril(
+            torch.ones(size, dtype=torch.bool),
+            diagonal=diagonal_offset,
+        )
+
+    For instance, with `shape=(3,4)`, the materialized bias tensor will be:
 
     .. code-block:: text
 
