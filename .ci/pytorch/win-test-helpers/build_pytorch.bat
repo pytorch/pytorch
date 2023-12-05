@@ -66,13 +66,6 @@ set CUDA_PATH_V%VERSION_SUFFIX%=%CUDA_PATH%
 set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
 set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
 set CUDNN_ROOT_DIR=%CUDA_PATH%
-set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
-set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
-
-set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
-set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
-set CUDNN_ROOT_DIR=%CUDA_PATH%
-set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
 set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
 
 :cuda_build_end
