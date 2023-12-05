@@ -294,6 +294,7 @@ def lower_right_causal(*size) -> CausalBias:
     The for a lower_right_causal bias with `shape=(3,4)`, the resulting matrix is:
 
     .. code-block:: text
+
         [[1, 1, 0, 0],
          [1, 1, 1, 0],
          [1, 1, 1, 1]]
