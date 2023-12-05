@@ -578,10 +578,10 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
             "https://github.com/pytorch/pytorch/issues/101150"
         ),
     ),
-    xfail(
+    skip(
         "native_batch_norm",
         model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason="https://github.com/pytorch/pytorch/issues/115106",
+        reason="Flaky failure: https://github.com/pytorch/pytorch/issues/115106",
     ),
     xfail(
         "nn.functional.avg_pool1d",
@@ -615,10 +615,10 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         or (sample.kwargs.get("divisor_override") is not None),
         reason="ONNX doesn't support divisor_override argument",
     ),
-    xfail(
+    skip(
         "nn.functional.batch_norm",
         model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason="https://github.com/pytorch/pytorch/issues/115106",
+        reason="Flaky failure: https://github.com/pytorch/pytorch/issues/115106",
     ),
     skip(
         "nn.functional.conv1d",
