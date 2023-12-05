@@ -557,7 +557,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "arange",
         matcher=lambda sample: not isinstance(sample.input, torch.Tensor),
         reason="torch.export.export does not support non-tensor input (https://github.com/pytorch/pytorch/issues/115110)",
-        torchmodeltype=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     ),
     skip(
         "cat",
@@ -568,7 +568,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "full",
         matcher=lambda sample: not isinstance(sample.input, torch.Tensor),
         reason="torch.export.export does not support non-tensor input (https://github.com/pytorch/pytorch/issues/115110)",
-        torchmodeltype=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     ),
     xfail(
         "index_put",
@@ -580,7 +580,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "native_batch_norm",
-        torchmodeltype=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="https://github.com/pytorch/pytorch/issues/115106",
     ),
     xfail(
@@ -617,7 +617,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "nn.functional.batch_norm",
-        torchmodeltype=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="https://github.com/pytorch/pytorch/issues/115106",
     ),
     skip(
@@ -638,7 +638,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "nn.functional.embedding",
         matcher=lambda sample: sample.kwargs.get("max_norm") is not None,
-        torchmodeltype=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="https://github.com/pytorch/pytorch/issues/115106",
     ),
     skip_torchlib_forward_compatibility(
@@ -712,12 +712,11 @@ def _should_skip_xfail_test_sample(
         # Linear search on ops_test_data.SKIP_XFAIL_SUBTESTS. That's fine because the list is small.
         # NOTE: If model_type is None, the test is decorator_meta is meant to skip/xfail all model types.
         if decorator_meta.op_name == op_name and (
-            model_type == decorator_meta.torchmodeltype
-            or decorator_meta.torchmodeltype is None
+            model_type == decorator_meta.model_type or decorator_meta.model_type is None
         ):
-            if decorator_meta.matcher is None and decorator_meta.torchmodeltype is None:
+            if decorator_meta.matcher is None and decorator_meta.model_type is None:
                 raise TypeError(
-                    "Either Matcher or torchmodeltype must be defined in sub xfail and skip."
+                    "Either Matcher or model_type must be defined in sub xfail and skip."
                 )
             if decorator_meta.matcher is not None and decorator_meta.matcher(sample):
                 return decorator_meta.test_behavior, decorator_meta.reason
