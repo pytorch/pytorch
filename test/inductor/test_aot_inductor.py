@@ -1508,8 +1508,8 @@ CPU_TEST_FAILURES = {
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
     #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
-    # Need to support convolution
-    "test_missing_cubin": fail_with_and_without_stack_allocation(),
+    # FIXME: failed with Segfault while exiting the Python runtime
+    "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
     "test_poi_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # There is a double-free issue which will be fixed in another PR
