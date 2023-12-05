@@ -107,7 +107,11 @@ def _assert_tensors_nonaliasing(inputs, outputs):
 
 
 def validate_args_and_maybe_create_graph_inputs(
-    sub_args, tracer, tx, manually_set_subgraph_inputs
+    sub_args,
+    tracer,
+    tx,
+    manually_set_subgraph_inputs,
+    description,
 ):
     from . import AutogradFunctionContextVariable, ConstantVariable
     from .builder import wrap_fx_proxy_cls
@@ -150,7 +154,7 @@ def validate_args_and_maybe_create_graph_inputs(
         else:
             # HOPs work much better if they use speculate_subgraph(manually_set_subgraph_inputs=False).
             raise unimplemented(
-                f"HigherOrderOperator with body that accepts non-Tensors as input. "
+                f"{description} with body that accepts non-Tensors as input. "
                 f"Got: {a.python_type()}"
             )
         args.append(new_arg)
@@ -203,11 +207,15 @@ def speculate_subgraph(
         )
         with tx.output.subtracer(source_target, tracer) as subtracer:
             args = validate_args_and_maybe_create_graph_inputs(
-                sub_args, subtracer, tx, manually_set_subgraph_inputs
+                sub_args, subtracer, tx, manually_set_subgraph_inputs, description
             )
 
             validate_args_and_maybe_create_graph_inputs(
-                sub_kwargs.values(), subtracer, tx, manually_set_subgraph_inputs=False
+                sub_kwargs.values(),
+                subtracer,
+                tx,
+                manually_set_subgraph_inputs=False,
+                description=description,
             )
 
             autograd_ctx = (
