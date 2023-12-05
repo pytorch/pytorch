@@ -424,14 +424,6 @@ class ExportedProgram:
         ]
         output_specs = [
             OutputSpec(spec.kind, update_arg(spec.arg, new_outputs[i]), spec.target)
-            if spec.kind != OutputKind.USER_INPUT_MUTATION
-            else OutputSpec(
-                spec.kind,
-                update_arg(spec.arg, new_outputs[i]),
-                new_placeholders[
-                    i
-                ].name,  # USER_INPUT_MUTATION needs to be updated to the new placeholder
-            )
             for i, spec in enumerate(self.graph_signature.output_specs)
         ]
 

@@ -553,10 +553,22 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="Op (ReduceMax) [ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0",
     ),
+    xfail(
+        "arange",
+        matcher=lambda sample: not isinstance(sample.input, torch.Tensor),
+        reason="torch.export.export does not support non-tensor input (https://github.com/pytorch/pytorch/issues/115110)",
+        torchmodeltype=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+    ),
     skip(
         "cat",
         matcher=lambda sample: sample.input[0].equal(torch.tensor([])),
         reason="core dump - cat does not support zero-dim tensors yet",
+    ),
+    xfail(
+        "full",
+        matcher=lambda sample: not isinstance(sample.input, torch.Tensor),
+        reason="torch.export.export does not support non-tensor input (https://github.com/pytorch/pytorch/issues/115110)",
+        torchmodeltype=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     ),
     xfail(
         "index_put",
@@ -565,6 +577,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support(
             "https://github.com/pytorch/pytorch/issues/101150"
         ),
+    ),
+    xfail(
+        "native_batch_norm",
+        torchmodeltype=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="https://github.com/pytorch/pytorch/issues/115106",
     ),
     xfail(
         "nn.functional.avg_pool1d",
@@ -597,6 +614,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: (len(sample.args) > 5 and sample.args[5] is not None)
         or (sample.kwargs.get("divisor_override") is not None),
         reason="ONNX doesn't support divisor_override argument",
+    ),
+    xfail(
+        "nn.functional.batch_norm",
+        torchmodeltype=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="https://github.com/pytorch/pytorch/issues/115106",
     ),
     skip(
         "nn.functional.conv1d",
@@ -675,17 +697,23 @@ class SingleOpModel(torch.nn.Module):
 
 
 def _should_skip_xfail_test_sample(
-    op_name: str, sample
+    op_name: str, sample, model_type: onnx_test_common.TorchModelType
 ) -> Tuple[Optional[str], Optional[str]]:
     """Returns a reason if a test sample should be skipped."""
     if op_name not in OP_WITH_SKIPPED_XFAIL_SUBTESTS:
         return None, None
     for decorator_meta in SKIP_XFAIL_SUBTESTS:
         # Linear search on ops_test_data.SKIP_XFAIL_SUBTESTS. That's fine because the list is small.
-        if decorator_meta.op_name == op_name:
-            assert decorator_meta.matcher is not None, "Matcher must be defined"
-            if decorator_meta.matcher(sample):
+        if (
+            decorator_meta.op_name == op_name
+            and decorator_meta.torchmodeltype == model_type
+        ):
+            if decorator_meta.matcher is not None and decorator_meta.matcher(sample):
                 return decorator_meta.test_behavior, decorator_meta.reason
+            elif decorator_meta.torchmodeltype is not None:
+                return decorator_meta.test_behavior, decorator_meta.reason
+            else:
+                raise TypeError("Either Matcher or torchmodeltype must be defined")
     return None, None
 
 
@@ -714,7 +742,9 @@ def _run_test_output_match(
             inputs=repr(inputs),
             kwargs=repr(cpu_sample.kwargs),
         ):
-            test_behavior, reason = _should_skip_xfail_test_sample(op.name, cpu_sample)
+            test_behavior, reason = _should_skip_xfail_test_sample(
+                op.name, cpu_sample, test_suite.model_type
+            )
             with onnx_test_common.normal_xfail_skip_test_behaviors(
                 test_behavior, reason
             ):
@@ -782,7 +812,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     opset_version = -1
     op_level_debug: bool = False
     dynamic_shapes: bool = False
-    # TODO: Should onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM also be tested?
     model_type: onnx_test_common.TorchModelType = (
         onnx_test_common.TorchModelType.TORCH_NN_MODULE
     )

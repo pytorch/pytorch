@@ -531,6 +531,7 @@ class DecorateMeta:
     test_behavior: str
     matcher: Optional[Callable[[Any], bool]] = None
     enabled_if: bool = True
+    torchmodeltype: Optional[TorchModelType] = TorchModelType.TORCH_NN_MODULE
 
     def contains_opset(self, opset: int) -> bool:
         if self.opsets is None:
@@ -550,6 +551,7 @@ def xfail(
     dtypes: Optional[Collection[torch.dtype]] = None,
     matcher: Optional[Callable[[Any], bool]] = None,
     enabled_if: bool = True,
+    torchmodeltype: Optional[TorchModelType] = TorchModelType.TORCH_NN_MODULE,
 ):
     """Expects a OpInfo test to fail.
 
@@ -562,6 +564,7 @@ def xfail(
         matcher: A function that matches the test sample input. It is used only when
             xfail is in the SKIP_XFAIL_SUBTESTS list.
         enabled_if: Whether to enable xfail. Usually used on onnx/ort version control
+        torchmodeltype: The type of the torch model. Defaults to None.
     """
     return DecorateMeta(
         op_name=op_name,
@@ -573,6 +576,7 @@ def xfail(
         matcher=matcher,
         reason=reason,
         test_behavior="xfail",
+        torchmodeltype=torchmodeltype,
     )
 
 
@@ -585,6 +589,7 @@ def skip(
     dtypes: Optional[Collection[torch.dtype]] = None,
     matcher: Optional[Callable[[Any], Any]] = None,
     enabled_if: bool = True,
+    torchmodeltype: Optional[TorchModelType] = TorchModelType.TORCH_NN_MODULE,
 ):
     """Skips a test case in OpInfo that we don't care about.
 
@@ -599,6 +604,7 @@ def skip(
         matcher: A function that matches the test sample input. It is used only when
             skip is in the SKIP_XFAIL_SUBTESTS list.
         enabled_if: Whether to enable skip. Usually used on onnx/ort version control
+        torchmodeltype: The type of the torch model. Defaults to None.
     """
     return DecorateMeta(
         op_name=op_name,
@@ -610,6 +616,7 @@ def skip(
         matcher=matcher,
         enabled_if=enabled_if,
         test_behavior="skip",
+        torchmodeltype=torchmodeltype,
     )
 
 
