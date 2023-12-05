@@ -2711,7 +2711,7 @@ torch_non_c_binding_in_graph_functions = {
 }
 
 if torch.distributed.is_available():
-    torch_non_c_binding_in_graph_functions |= {
+    torch_non_c_binding_in_graph_functions.update({
         "torch.distributed.is_available": TorchInGraphFunctionVariable,
         "torch.distributed.get_debug_level": TorchInGraphFunctionVariable,
         "torch.distributed.breakpoint": TorchInGraphFunctionVariable,
@@ -2863,7 +2863,7 @@ if torch.distributed.is_available():
         "torch.distributed.rpc._init_rpc_backend": TorchInGraphFunctionVariable,
         "torch.distributed.rpc._get_debug_info": TorchInGraphFunctionVariable,
         "torch.distributed.algorithms.join.Join": TorchCtxManagerClassVariable,
-    }
+    })
 
 
 torch_name_rule_map = {
