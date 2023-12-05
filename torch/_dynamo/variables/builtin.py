@@ -1283,23 +1283,10 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
-<<<<<<< HEAD
-            if isinstance(obj, variables.TensorVariable):
-                from .builder import wrap_fx_proxy
-
-                name = name_var.as_python_constant()
-=======
             name = name_var.as_python_constant()
             if isinstance(obj, variables.TensorVariable):
                 from .builder import wrap_fx_proxy
 
-                if name == "requires_grad":
-                    # TODO(voz): Make it work properly
-                    unimplemented(
-                        "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
-                        "the middle of the graph, which aot_autograd does not currently know how to handle. "
-                    )
->>>>>>> 1dc4588c6aa861bbb6539c5fca5afb493a8635fd
                 if name == "data":
                     # Remove the old reference in tracked fakes - if we don't do this
                     # new .data value size and shape differences will cause
@@ -1313,11 +1300,7 @@ class BuiltinVariable(VariableTracker):
                     for tf in to_remove:
                         tx.output.tracked_fakes.remove(tf)
 
-<<<<<<< HEAD
-                    # Step 1 - disable grad
-=======
                     # Step 1 - disable grads
->>>>>>> 1dc4588c6aa861bbb6539c5fca5afb493a8635fd
                     with dynamo_disable_grad(tx), torch.no_grad():
                         # Step 2 - call `set_`
                         out = wrap_fx_proxy(
@@ -1328,16 +1311,11 @@ class BuiltinVariable(VariableTracker):
                                 *proxy_args_kwargs([obj, val], {}),
                             ),
                         )
-<<<<<<< HEAD
-                    # Step 3 - drop the version counter - this is a hack required to get
-                    # .data setting to play correctly with the autograd engine.
-=======
 
                     # Step 3 - drop the version counter - this is a step required to get
                     # .data setting to play correctly with the autograd engine.
                     # Esentially, dynamo is trying to faithful preserve the (absurd)
                     # behavior of .data= from eager mode
->>>>>>> 1dc4588c6aa861bbb6539c5fca5afb493a8635fd
                     def _lower_version_count_by_1(x):
                         version = x._version
                         if version > 0:
@@ -1351,7 +1329,7 @@ class BuiltinVariable(VariableTracker):
                         (out.as_proxy(),),
                         {},
                     )
-<<<<<<< HEAD
+                    _lower_version_count_by_1(obj.as_proxy().node.meta["example_value"])
                     # This handles options prop, guards and ends with a clone
                     # Step 4 - replace all reference to the current object with the new one
                     return tx.replace_all(obj, out)
@@ -1371,17 +1349,7 @@ class BuiltinVariable(VariableTracker):
                             *proxy_args_kwargs([obj, val], {}),
                         )
 
-
-
-            tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
-=======
-                    _lower_version_count_by_1(obj.as_proxy().node.meta["example_value"])
-                    # This handles options prop, guards and ends with a clone
-                    # Step 4 - replace all reference to the current object with the new one
-                    return out
-
             tx.output.side_effects.store_attr(obj, name, val)
->>>>>>> 1dc4588c6aa861bbb6539c5fca5afb493a8635fd
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
@@ -1744,11 +1712,6 @@ class BuiltinVariable(VariableTracker):
             SourcelessBuilder()(tx, polyfill.all), args, kwargs
         )
 
-<<<<<<< HEAD
-import contextlib
-=======
-
->>>>>>> 1dc4588c6aa861bbb6539c5fca5afb493a8635fd
 @contextlib.contextmanager
 def dynamo_disable_grad(tx):
     from . import GradModeVariable

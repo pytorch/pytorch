@@ -463,6 +463,7 @@ from a multi-output view call"
                 }
             else:
                 dynamic_dims = None
+            output_type = OutputType.non_alias
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
