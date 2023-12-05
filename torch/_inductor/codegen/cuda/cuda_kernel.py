@@ -352,6 +352,10 @@ class CUDATemplateCaller(ChoiceCaller):
         """Information returned here is logged to the autotune log file when that is enabled."""
         if self.info_kwargs is not None and "op" in self.info_kwargs:
             op = self.info_kwargs["op"]
+            epilogue_node_names = [
+                getattr(en, "name", "no_name")
+                for en in self.info_kwargs.get("epilogue_nodes", [])
+            ]
             return {
                 "backend": "CUDA",
                 "op_type": type(op).__name__,
@@ -360,6 +364,7 @@ class CUDATemplateCaller(ChoiceCaller):
                 "kernel_schedule": str(op.kernel_schedule),
                 "element_accumulator": str(op.accumulator_type()),
                 "op_name": str(op.procedural_name()),
+                "epilogue_node_names": epilogue_node_names,
                 "instruction_shape": str(
                     op.tile_description.math_instruction.instruction_shape
                 ),
