@@ -203,6 +203,9 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = [
+            "torch.distributed.fsdp.",
+            "torch.distributed._tensor.",
+            "torch.distributed.algorithms.",
             "torch.optim",
             "torch.nn.modules.rnn",
             "torch._dynamo",
@@ -247,7 +250,7 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
             "torch._utils_internal",
             "torch._vmap_internals",
             "torch.compiler",
-            "torch.distributed",
+            # "torch.distributed",
             "torch.export",
             "torch.hub",
             "torch.jit",
