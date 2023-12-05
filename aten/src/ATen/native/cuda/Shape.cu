@@ -239,7 +239,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
                   int nDims, c10::MemoryFormat memory_format) {
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
-  scalar_t *data = static_cast<scalar_t *>(out.mutable_data_ptr());
+  scalar_t *data = (scalar_t *)(out.mutable_data_ptr());
   CatArrInputTensorMetadata<scalar_t, unsigned int, batch_size, stride_size> catMetaData;
   TensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> outputParam;
 
