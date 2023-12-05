@@ -110,7 +110,14 @@ def save(
     for key, elem in state_dict.items():
         dumpable_state_dict[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
 
-    return _save_state_dict(dumpable_state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner)
+    return _save_state_dict(
+        dumpable_state_dict,
+        storage_writer,
+        process_group,
+        coordinator_rank,
+        no_dist,
+        planner
+    )
 
 def _save_state_dict(
     state_dict: STATE_DICT_TYPE,
