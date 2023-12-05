@@ -725,7 +725,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             TensorVariable,
             UserFunctionVariable,
         )
-        from .builder import wrap_fx_proxy
 
         if len(kwargs) > 0:
             unimplemented(
@@ -755,7 +754,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # TODO: Support kwargs
         (
-            (body_r, _),
+            (body_r, body_spec),
             body_graph,
             body_lifted_freevars,
         ) = speculate_subgraph(
@@ -770,6 +769,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             checkpoint,
             "torch.ops.higher_order.map",
             source_target=self.value,
+            should_flatten_outputs=True,
         )
 
         body_nn_modules = tx.copy_graphstate().output.nn_modules
@@ -787,20 +787,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             *(arg.as_proxy() for arg in args[1:]),
             *(arg for arg in body_lifted_freevars.keys()),
         )
-        non_single_tensor_return_unsupported("torch.ops.higher_order.map", body_r)
-        r = body_r.as_proxy().node.meta["example_value"]
-        example_value = r.new_empty([sample_shape[0], *r.shape])
-
-        # Store the invocation as a call
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                self.value,
-                args=tuple(p_args),
-                kwargs={},
-            ),
-            example_value=example_value,
+        return _call_function_and_unflatten_output(
+            tx, self.value, p_args, {}, body_r, body_spec
         )
 
 
