@@ -12,8 +12,7 @@ from torch.backends.cuda import (
 # If this is set to True, we will warn the user if they are not using the fused kernels
 # As well, it will raise warnings for all the reasons why the fused kernels can't be run.
 # To set this to True, run
-# from torch.nn.attention import WARN_FOR_UNFUSED_KERNELS
-# WARN_FOR_UNFUSED_KERNELS = True
+# torch.nn.attention.WARN_FOR_UNFUSED_KERNELS = True
 WARN_FOR_UNFUSED_KERNELS = False
 
 
