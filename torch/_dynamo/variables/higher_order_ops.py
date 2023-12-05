@@ -61,12 +61,12 @@ def raise_hard_error_if_graph_break(reason):
 
 
 @contextlib.contextmanager
-def dynamo_enable_grad(tx):
+def dynamo_enable_grad(tx, enable=True):
     from . import GradModeVariable
 
     org_value = torch.is_grad_enabled()
     try:
-        GradModeVariable.create(tx, True, initialized=True)
+        GradModeVariable.create(tx, enable, initialized=True)
         yield
     finally:
         GradModeVariable.create(tx, org_value, initialized=True)
@@ -221,7 +221,7 @@ def speculate_subgraph(
     # target of the proxy that we created for the higherOrderOperator.
     source_target=None,
     always_restore=False,
-    enable_grad=False,
+    enable_grad=None,
     # NOTE [Temporary argument `manually_set_subgraph_inputs`]
     # If manually_set_subgraph_inputs=True, then we manually add
     # the `sub_args` to `subgraph`, if False then we rely
@@ -261,7 +261,9 @@ def speculate_subgraph(
             )
 
             autograd_ctx = (
-                dynamo_enable_grad(tx) if enable_grad else contextlib.nullcontext()
+                dynamo_enable_grad(tx, enable_grad)
+                if enable_grad is not None
+                else contextlib.nullcontext()
             )
 
             if restore_side_effects:
@@ -1237,6 +1239,13 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         # TODO(jansel): BUG!!! we aren't copying on the line below, so the post-pre check below is pointless
         pre_guards = tx.output.guards
         graph_checkpoint = tx.output.graph
+        # In eager-mode PyTorch, if we only compute first-order gradients,
+        # then the grad_mode is False during the backward pass.
+        # torch.compile assumes that we only compute first-order gradients,
+        # so we want to speculate the backward pass with the grad mode disabled.
+        enable_grad = (
+            False if self.value.__name__ == "trampoline_autograd_bwd" else None
+        )
 
         # TODO: Support kwargs
         (
@@ -1258,6 +1267,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             always_restore=always_restore,
             restore_side_effects=False,
             tracer=tracer,
+            enable_grad=enable_grad,
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:

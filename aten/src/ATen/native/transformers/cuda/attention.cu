@@ -708,8 +708,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
               v_t,
               c10::nullopt,
               c10::nullopt,
-              c10::nullopt,
-              c10::nullopt,
+              max_seqlen_batch_q,
+              max_seqlen_batch_k,
               dropout_p,
               is_causal,
               return_debug_mask,
@@ -779,8 +779,8 @@ _flash_attention_forward(
     const Tensor& value,
     const c10::optional<Tensor>& cumulative_sequence_length_q,
     const c10::optional<Tensor>& cumulative_sequence_length_k,
-    c10::optional<int64_t> max_seqlen_batch_q,
-    c10::optional<int64_t> max_seqlen_batch_k,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
@@ -797,15 +797,9 @@ _flash_attention_forward(
       cumulative_sequence_length_q.has_value() ==
           cumulative_sequence_length_k.has_value(),
       "cumulative_sequence_length_q and cumulative_sequence_length_k must be both set or both not set");
-  TORCH_CHECK(
-      max_seqlen_batch_q.has_value() == max_seqlen_batch_k.has_value(),
-      "max_seqlen_batch_q and max_seqlen_batch_k must be both set or both not set");
   Tensor output, q_padded, k_padded, v_padded, logsumexp, output_shape,
       philox_seed, philox_offset, debug_attn_mask;
   if (cumulative_sequence_length_q.has_value()) {
-    TORCH_CHECK(
-        max_seqlen_batch_q.has_value(),
-        "max_seqlen_batch_q must be set when cumulative_sequence_length_q is set");
     std::tie(
         output,
         q_padded,
@@ -822,8 +816,8 @@ _flash_attention_forward(
             out,
             cumulative_sequence_length_q.value(),
             cumulative_sequence_length_k.value(),
-            max_seqlen_batch_q.value(),
-            max_seqlen_batch_k.value(),
+            max_seqlen_batch_q,
+            max_seqlen_batch_k,
             dropout_p,
             softmax_scale,
             false /*zero_tensors*/,
