@@ -7791,7 +7791,9 @@ add_docstr(
 multinomial(input, num_samples, replacement=False, *, generator=None, out=None) -> LongTensor
 
 Returns a tensor where each row contains :attr:`num_samples` indices sampled
-from the multinomial probability distribution located in the corresponding row
+from the multinomial (a stricter definition would be multivariate,
+refer to torch.distributions.multinomial.Multinomial for more details)
+probability distribution located in the corresponding row
 of tensor :attr:`input`.
 
 .. note::

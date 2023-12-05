@@ -110,7 +110,7 @@ class LoggingTests(LoggingTestCase):
         fn_opt(torch.ones(1000, 1000), 1)
         self.assertGreater(len(records), 0)
 
-    test_dynamo_debug = within_range_record_test(30, 60, dynamo=logging.DEBUG)
+    test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
     @make_logging_test(dynamo=logging.DEBUG)
@@ -244,14 +244,23 @@ LoweringException: AssertionError:
     def test_all(self, _):
         registry = torch._logging._internal.log_registry
 
-        dynamo_qname = registry.log_alias_to_log_qname["dynamo"]
+        dynamo_qnames = registry.log_alias_to_log_qnames["dynamo"]
         for logger_qname in torch._logging._internal.log_registry.get_log_qnames():
             logger = logging.getLogger(logger_qname)
 
-            if logger_qname == dynamo_qname:
-                self.assertEqual(logger.level, logging.INFO)
+            # if logger_qname is a.b.c and dynamo_qnames contains a.b, it still matches dynamo's INFO setting
+            if any(logger_qname.find(d) == 0 for d in dynamo_qnames):
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.INFO,
+                    msg=f"expected {logger_qname} is INFO, got {logging.getLevelName(logger.getEffectiveLevel())}",
+                )
             else:
-                self.assertEqual(logger.level, logging.DEBUG)
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.DEBUG,
+                    msg=f"expected {logger_qname} is DEBUG, got {logging.getLevelName(logger.getEffectiveLevel())}",
+                )
 
     @make_logging_test(graph_breaks=True)
     def test_graph_breaks(self, records):
@@ -588,6 +597,38 @@ print("arf")
                    ~~^~~""",
         )
 
+    @make_logging_test(guards=True, recompiles=True)
+    def test_guards_recompiles(self, records):
+        def fn(x, ys, zs):
+            return inner(x, ys, zs)
+
+        def inner(x, ys, zs):
+            for y, z in zip(ys, zs):
+                x += y * z
+            return x
+
+        ys = [1.0, 2.0]
+        zs = [3.0]
+        x = torch.tensor([1.0])
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(x, ys, zs)
+        fn_opt(x, ys[:1], zs)
+
+        record_str = "\n".join(r.getMessage() for r in records)
+
+        self.assertIn(
+            """\
+L['zs'][0] == 3.0                                             # for y, z in zip(ys, zs):""",
+            record_str,
+        )
+        self.assertIn(
+            """\
+    triggered by the following guard failure(s):\n\
+    - len(L['ys']) == 2                                             # for y, z in zip(ys, zs):""",
+            record_str,
+        )
+
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
     def test_default_logging(self, records):
         def fn(a):
@@ -622,6 +663,7 @@ exclusions = {
     "post_grad_graphs",
     "compiled_autograd",
     "recompiles",
+    "recompiles_verbose",
     "graph_breaks",
     "ddp_graphs",
     "perf_hints",

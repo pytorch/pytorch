@@ -1,8 +1,8 @@
-#include <ATen/native/ConvUtils.h>
-#include <ATen/native/utils/ParamUtils.h>
 
 #include <ATen/Context.h>
 
+#include <ATen/native/ConvUtils.h>
+#include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
@@ -529,7 +529,7 @@ vTensor pack_weights(
       api::context(),
       weight_rearranged.sizes(),
       weight_arg.scalar_type(),
-      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
+      api::StorageType::TEXTURE_2D,
   };
 
   if (quantized) {
@@ -548,16 +548,19 @@ vTensor pack_biases(
     const Tensor& weight,
     const bool transposed,
     const bool quantized) {
-  at::Tensor bias_rearranged = conv2d::rearrange_bias(bias, weight, transposed);
+  at::Tensor bias_arg = conv2d::rearrange_bias(bias, weight, transposed);
+  at::Tensor bias_rearranged = (quantized && bias_arg.scalar_type() == kFloat)
+      ? at::quantize_per_tensor(bias_arg, weight.q_scale(), 0, c10::kQInt32)
+      : bias_arg;
 
   vTensor v_bias{
       api::context(),
       bias_rearranged.sizes(),
       bias_rearranged.scalar_type(),
-      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
+      api::StorageType::TEXTURE_2D,
   };
 
-  if (quantized && bias->scalar_type() != c10::kFloat) {
+  if (quantized) {
     v_bias.set_is_quantized();
     v_bias.set_scale(bias_rearranged.q_scale());
     v_bias.set_zero_point(bias_rearranged.q_zero_point());
@@ -1136,11 +1139,6 @@ Tensor run_conv2d_context_impl(
 
   Tensor bias =
       conv_context->get_val(Conv2dPackedContext::Packed::Bias).toTensor();
-  if (quantized && bias.scalar_type() == c10::kFloat) {
-    bias = at::quantize_per_tensor(
-        bias, v_weight.get_scale() * v_input.get_scale(), 0, c10::kQInt32);
-    conv_context->set_val(Conv2dPackedContext::Packed::Bias, bias);
-  }
 
   const vTensor& v_bias = convert(bias);
 
