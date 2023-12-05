@@ -1416,6 +1416,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             p_args,
             _,
             example_value,
+            body_r,
             treespec,
             checkpointed_gmod,
         ) = self.create_wrapped_node(
