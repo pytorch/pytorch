@@ -9,8 +9,12 @@ from torch.distributed._tensor._collective_utils import (
     mesh_broadcast,
     mesh_scatter,
 )
+from torch.distributed._tensor.device_mesh import (
+    _mesh_resources,
+    DeviceMesh,
+    init_device_mesh,
+)
 from torch.distributed._tensor.placement_types import Shard
-from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 
 from torch.distributed.distributed_c10d import (
     get_global_rank,
