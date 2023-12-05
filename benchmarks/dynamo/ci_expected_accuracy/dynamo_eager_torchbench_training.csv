@@ -62,7 +62,7 @@ densenet121,pass,8
 
 
 
-detectron2_fcos_r_50_fpn,eager_fail_to_run,0
+detectron2_fcos_r_50_fpn,model_fail_to_load,0
 
 
 

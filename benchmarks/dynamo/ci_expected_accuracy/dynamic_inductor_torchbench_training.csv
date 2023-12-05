@@ -2,15 +2,15 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,infra_error,0
-
-
-
 BERT_pytorch,pass,8
 
 
 
 Background_Matting,pass_due_to_skip,0
+
+
+
+DALLE2_pytorch,eager_fail_to_run,0
 
 
 
@@ -42,6 +42,10 @@ basic_gnn_sage,pass,8
 
 
 
+cm3leon_generate,eager_fail_to_run,0
+
+
+
 dcgan,pass,8
 
 
@@ -54,7 +58,23 @@ densenet121,pass,8
 
 
 
+detectron2_fcos_r_50_fpn,model_fail_to_load,0
+
+
+
+detectron2_maskrcnn_r_50_c4,eager_fail_to_run,0
+
+
+
 dlrm,pass,8
+
+
+
+doctr_det_predictor,eager_fail_to_run,0
+
+
+
+doctr_reco_predictor,eager_fail_to_run,0
 
 
 
@@ -106,11 +126,19 @@ hf_T5_base,OOM,4
 
 
 
+hf_T5_generate,eager_fail_to_run,0
+
+
+
 hf_T5_large,pass_due_to_skip,0
 
 
 
 hf_Whisper,pass,7
+
+
+
+hf_clip,eager_fail_to_run,0
 
 
 
