@@ -187,6 +187,7 @@ def check_model(
             constraints,
             disable_constraint_solver,
         )
+
     self.assertTrue(same(actual, expected))
 
 
