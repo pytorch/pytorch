@@ -8276,8 +8276,8 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @largeTensorTest("60GB", "cpu")
-    @largeTensorTest("16GB", "cuda", device)
-    def test_avg_pool_large_tensor(self):
+    @largeTensorTest("16GB", "cuda")
+    def test_avg_pool_large_tensor(self, device):
         # test for https://github.com/pytorch/pytorch/issues/113833
         a = torch.randn(128, 256, 256, 256, dtype=torch.half, device=device, requires_grad=True)
         a_cpu = a.detach().cpu().float()
