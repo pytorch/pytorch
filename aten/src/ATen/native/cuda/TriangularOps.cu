@@ -19,6 +19,17 @@
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
+#define BOOL_SWITCH(COND, CONST_NAME, ...)      \
+  [&] {                                         \
+    if (COND) {                                 \
+      constexpr static bool CONST_NAME = true;  \
+      return __VA_ARGS__();                     \
+    } else {                                    \
+      constexpr static bool CONST_NAME = false; \
+      return __VA_ARGS__();                     \
+    }                                           \
+  }()
+
 namespace at::native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -97,7 +108,7 @@ __global__ void triu_tril_kernel(
   }
 }
 
-template <bool upper, bool inplace>
+template <bool upper>
 void triu_tril_cuda_template(const Tensor& result, const Tensor& self, int64_t k, const char* name) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       at::ScalarType::ComplexHalf,
@@ -114,40 +125,34 @@ void triu_tril_cuda_template(const Tensor& result, const Tensor& self, int64_t k
     if (cuda::detail::canUse32BitIndexMath(result) && cuda::detail::canUse32BitIndexMath(self)) {
       auto result_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(result);
       auto self_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(self);
-      triu_tril_kernel<scalar_t, int32_t, upper, elements_per_thread, inplace>
-        <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          result_info, self_info, k, N_padded, last_dim_padded);
+      BOOL_SWITCH(self.is_same(result), inplace, [&] {
+        triu_tril_kernel<scalar_t, int32_t, upper, elements_per_thread, inplace>
+          <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+            result_info, self_info, k, N_padded, last_dim_padded);
+      });
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       auto result_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(result);
       auto self_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(self);
-      triu_tril_kernel<scalar_t, int64_t, upper, elements_per_thread, inplace>
-        <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          result_info, self_info, k, N_padded, last_dim_padded);
+      BOOL_SWITCH(self.is_same(result), inplace, [&] {
+        triu_tril_kernel<scalar_t, int64_t, upper, elements_per_thread, inplace>
+          <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+            result_info, self_info, k, N_padded, last_dim_padded);
+      });
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   });
 }
 
 TORCH_IMPL_FUNC(tril_cuda)(const Tensor& self, int64_t k, const Tensor &result) {
-  bool inplace = &result == &self;
   if (self.numel() != 0) {
-    if (inplace) {
-      triu_tril_cuda_template<false, true>(result, self, k, "tril");
-    } else {
-      triu_tril_cuda_template<false, false>(result, self, k, "tril");
-    }
+    triu_tril_cuda_template<false>(result, self, k, "tril");
   }
 }
 
 TORCH_IMPL_FUNC(triu_cuda)(const Tensor& self, int64_t k, const Tensor &result) {
-  bool inplace = &result == &self;
   if (self.numel() != 0) {
-    if (inplace) {
-      triu_tril_cuda_template<true, true>(result, self, k, "triu");
-    } else {
-      triu_tril_cuda_template<true, false>(result, self, k, "triu");
-    }
+    triu_tril_cuda_template<true>(result, self, k, "triu");
   }
 }
 
