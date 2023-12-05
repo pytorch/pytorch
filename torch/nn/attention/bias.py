@@ -18,7 +18,7 @@ from torch.nn.attention.utils import (
 )
 from torch.nn.functional import scaled_dot_product_attention
 
-__all__ = ["CausalVariant", "CausalBias"]
+__all__ = ["upper_left_causal", "lower_right_causal", "CausalVariant", "CausalBias"]
 
 
 class CausalVariant(IntEnum):
