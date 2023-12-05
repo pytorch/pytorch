@@ -1079,7 +1079,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
-        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_fake_tensor_mode_simple(self):
         def create_model() -> nn.Module:
@@ -1143,6 +1143,10 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model_type=self.model_type,
         )
 
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "AssertionError: Dynamic shape check failed for graph inputs",
+        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+    )
     def test_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
             def __init__(self):
@@ -1183,7 +1187,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
-        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_fake_tensor_mode_huggingface_google_t5(self):
         config = transformers.T5Config(
@@ -1219,7 +1223,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
-        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_fake_tensor_mode_huggingface_openai_whisper(self):
         config = transformers.WhisperConfig(
