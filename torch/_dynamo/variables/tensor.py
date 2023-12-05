@@ -424,14 +424,22 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable.create(self.ndim)
         elif name == "is_floating_point" and self.dtype is not None:
             constant_result = ConstantVariable.create(self.dtype.is_floating_point)
-        elif name == "is_contiguous" and self.is_contiguous is not None:
-            if "memory_format" in kwargs:
-                memory_format = kwargs.pop("memory_format").as_python_constant()
-            else:
-                memory_format = torch.contiguous_format
-            constant_result = ConstantVariable.create(
-                memory_format in self.is_contiguous
+        elif name == "is_contiguous":
+            memory_format = (
+                kwargs.pop("memory_format").as_python_constant()
+                if "memory_format" in kwargs
+                else torch.contiguous_format
             )
+            if self.is_contiguous is not None:
+                constant_result = ConstantVariable.create(
+                    memory_format in self.is_contiguous
+                )
+            elif (fake := self.proxy.node.meta.get("example_value")) is not None:
+                constant_result = ConstantVariable.create(
+                    fake.is_contiguous(memory_format=memory_format)
+                )
+            else:
+                constant_result = None
         elif (
             name == "type"
             and self.dtype is not None
@@ -515,19 +523,18 @@ class TensorVariable(VariableTracker):
                     f"can't convert {self.layout} layout tensor to numpy. Use Tensor.dense() first"
                 )
             # We don't check that the tensor is on CPU when force is False, as this
-            # allows us to execute NumPy code on CUDA.
-            # We don't check that requires_grad=False as we are currently doing an
-            # unconditional detach.
-            # TODO: We may want to avoid detaching if `requires_grad=True`
-            #       and `force=False` to allow computing gradients.
+            # allows us to execute NumPy code on CUDA. Same for requires_grad=True
             force = "force" in kwargs and kwargs["force"].as_python_constant()
-            proxy = tx.output.create_proxy(
-                "call_method", "detach", *proxy_args_kwargs([self], {})
-            )
             if force:
-                # TODO Add resolve_conj and resolve_neg once we support complex tensors
+                # If the user set force=True we try to preserve the semantics (no gradients, move to CPU...)
+                t = self.call_method(tx, "detach", [], {})
                 proxy = tx.output.create_proxy(
-                    "call_method", "cpu", *proxy_args_kwargs([self], {})
+                    "call_method", "cpu", (t.as_proxy(),), {}
+                )
+            else:
+                # Hacky way to create a view of self that will be marked as NumpyNdarrayVariable
+                proxy = tx.output.create_proxy(
+                    "call_method", "view_as", *proxy_args_kwargs([self, self], {})
                 )
             return NumpyNdarrayVariable.create(tx, proxy)
         elif name == "tolist":
@@ -581,13 +588,12 @@ class TensorVariable(VariableTracker):
                     return False
 
             if (
-                not config.capture_dynamic_output_shape_ops
-                and has_bool_key(key)
+                has_bool_key(key)
                 and isinstance(value, TensorVariable)
                 and value.requires_grad
             ):
                 unimplemented(
-                    "boolean masking setitem backwards requires dynamic shapes"
+                    "boolean masking setitem backwards, see https://github.com/pytorch/pytorch/issues/114123"
                 )
             tx.output.create_proxy(
                 "call_function",
@@ -598,6 +604,14 @@ class TensorVariable(VariableTracker):
         elif name in ("resize_", "resize_as_"):
             # Handling resizing in its full generality is difficult.
             unimplemented(f"Tensor.{name}")
+        elif name == "set_" and len(args) > 1:
+            # torch.Tensor.set_() has several overloads.
+            # aten::set_.source_Tensor(Tensor) gets special handling
+            # in AOTAutograd and functionalization, because it is the most common
+            # overload and is used by FSDP.
+            # graph-breaking on aten::set_source_Tensor_storage_offset for now,
+            # unless we find that we need to make it work.
+            unimplemented("Tensor.set_.source_Tensor_storage_offset")
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
         ):
@@ -766,8 +780,9 @@ class SymNodeVariable(VariableTracker):
             sym_num = get_fake_value(proxy.node, tx)
         proxy.node.meta["example_value"] = sym_num
 
-        if isinstance(sym_num, (sympy.Integer, int)):
-            return ConstantVariable.create(int(sym_num))
+        if isinstance(sym_num, (sympy.Integer, int, bool)):
+            sym_num = int(sym_num) if isinstance(sym_num, sympy.Integer) else sym_num
+            return ConstantVariable.create(sym_num)
 
         return SymNodeVariable(proxy, sym_num, **options)
 
@@ -908,6 +923,8 @@ class NumpyNdarrayVariable(TensorVariable):
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
+        if name == "tobytes":
+            unimplemented("tobytes is not modelled in torch._numpy")
         proxy = tx.output.create_proxy(
             "call_function",
             numpy_method_wrapper(name),

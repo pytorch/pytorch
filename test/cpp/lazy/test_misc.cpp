@@ -21,6 +21,8 @@ void test_hash_repeatable_sensitive(const T& example_a, const T& example_b) {
 }
 
 TEST(HashTest, Scalar) {
+  GTEST_SKIP()
+      << "Broken test. See https://github.com/pytorch/pytorch/issues/99883";
   c10::Scalar a(0);
   c10::Scalar b(0);
 

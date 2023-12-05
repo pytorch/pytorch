@@ -13,6 +13,7 @@ from .quantize import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
 from .pt2e.eval_utils import _move_exported_model_to_eval as move_exported_model_to_eval
+from .pt2e.generate_numeric_debug_handle import generate_numeric_debug_handle  # noqa: F401
 from typing import Union, List, Callable, Tuple, Optional
 from torch import Tensor
 import torch
@@ -138,10 +139,12 @@ __all__ = [
     "script_qconfig_dict",
     "swap_module",
     "weight_observer_range_neg_127_to_127",
+    "generate_numeric_debug_handle",
 ]
 
 def default_eval_fn(model, calib_data):
-    r"""
+    r"""Define the default evaluation function.
+
     Default evaluation function takes a torch.utils.data.Dataset or a list of
     input Tensors and run the model on the dataset
     """
@@ -149,9 +152,10 @@ def default_eval_fn(model, calib_data):
         model(data)
 
 class _DerivedObserverOrFakeQuantize(ObserverBase):
-    r""" This observer is used to describe an observer whose quantization parameters
+    r"""This observer is used to describe an observer whose quantization parameters
     are derived from other observers
     """
+
     def __init__(
         self,
         dtype: torch.dtype,
