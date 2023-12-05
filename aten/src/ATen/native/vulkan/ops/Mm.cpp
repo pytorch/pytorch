@@ -91,16 +91,6 @@ vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
 
   // Rest of the logic are either quantized or batched.
 
-  bool quantized = false;
-  switch (weight_arg.scalar_type()) {
-    case at::kQInt8:
-    case at::kQUInt8:
-      quantized = true;
-      break;
-    default:
-      break;
-  }
-
   api::Context* const context = api::context();
 
   const Tensor weight = weight_arg.contiguous();
