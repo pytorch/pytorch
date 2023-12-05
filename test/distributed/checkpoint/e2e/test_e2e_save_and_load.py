@@ -3,6 +3,7 @@
 from enum import auto, Enum
 
 import torch
+import torch.distributed as dist
 import torch.distributed.checkpoint as DCP
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,6 +13,7 @@ from torch.distributed.checkpoint.state_dict import (
     _patch_optimizer_state_dict,
     get_state_dict,
 )
+from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.tensor.parallel import (
@@ -186,6 +188,58 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
 
         self._verify_msd(model_sd, dist_msd)
         self._verify_osd_by_load(model, optim, self._optim(model), dist_osd)
+
+    @with_comms
+    @with_temp_dir
+    @skip_if_lt_x_gpu(4)
+    def test_different_ordered_state_dict_keys(self):
+        """Tests that the order of keys in the state dict does not matter when loading
+        If order was not accounted for, the following test would cause a deadlock.
+        """
+
+        world_size = self.world_size
+
+        class Foo:
+            def state_dict(self):
+                return {}
+
+            def load_state_dict(self, state_dict):
+                tl = [
+                    torch.ones(2, dtype=torch.int64, device="cuda")
+                    for _ in range(world_size)
+                ]
+                t = (
+                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    + 1
+                    + 2 * dist.get_rank()
+                )
+                dist.all_gather(tl, t, async_op=False)
+
+        class Bar:
+            def state_dict(self):
+                return {}
+
+            def load_state_dict(self, state_dict):
+                tensor = (
+                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    + 1
+                    + 2 * dist.get_rank()
+                )
+                dist.all_reduce(tensor, op=ReduceOp.SUM)
+
+        if self.rank == 0:
+            sd = {
+                "A": Foo(),
+                "B": Bar(),
+            }
+        else:
+            sd = {
+                "B": Bar(),
+                "A": Foo(),
+            }
+
+        DCP.save(sd, DCP.FileSystemWriter(self.temp_dir))
+        DCP.load(sd, DCP.FileSystemReader(self.temp_dir))
 
 
 instantiate_parametrized_tests(TestE2ELoadAndSave)
