@@ -247,7 +247,8 @@ jobs:
   libtorch-rocm5_6-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_6-shared-with-deps-cxx11-abi-build
-    runs-on: linux.rocm.gpu
+    runs-on:
+      group: linux.rocm.gpu.group
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -352,7 +353,8 @@ jobs:
   libtorch-rocm5_7-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_7-shared-with-deps-cxx11-abi-build
-    runs-on: linux.rocm.gpu
+    runs-on:
+      group: linux.rocm.gpu.group
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch

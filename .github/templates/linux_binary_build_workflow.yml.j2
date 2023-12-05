@@ -78,8 +78,6 @@ jobs:
       {%- if "aarch64" in build_environment %}
       runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
-      {%- elif config["gpu_arch_type"] == "rocm" %}
-      runs_on: linux.rocm.gpu
       {%- elif config["gpu_arch_type"] == "cuda" %}
       runs_on: linux.4xlarge.nvidia.gpu
       {%- else %}
@@ -88,7 +86,8 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 {%- else %}
-    runs-on: linux.rocm.gpu
+    runs-on:
+      group: linux.rocm.gpu.group
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     steps:
