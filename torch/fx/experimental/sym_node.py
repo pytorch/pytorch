@@ -24,6 +24,7 @@ from torch import (  # noqa: F401
     sym_max,
     sym_min,
     sym_not,
+    sym_sqrt,
     SymBool,
     SymFloat,
     SymInt,
@@ -342,7 +343,9 @@ class SymNode:
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
+        r = self.shape_env.evaluate_expr(
+            self.expr, self.hint, fx_node=self.fx_node, expect_rational=False
+        )
         try:
             return float(r)
         except Exception:
@@ -398,13 +401,6 @@ class SymNode:
         return False
 
 
-# Drop in replacement for math.sqrt
-def sym_sqrt(a):
-    if hasattr(a, "__sym_sqrt__"):
-        return a.__sym_sqrt__()
-    return math.sqrt(a)
-
-
 # TODO: this probably needs the sizes-strides eval functions
 METHOD_TO_OPERATOR = {
     "abs": operator.abs,
@@ -449,6 +445,8 @@ unary_magic_methods = {
 # Most methods are only registered on SymInt and SymFloat
 # Some methods are only be registered on SymBool
 only_bool_magic_methods = {"and", "or", "sym_not", "sym_ite"}
+# Methods that implicitly convert SymBool into SymInt
+bool_becomes_int_magic_methods = {"add", "sub", "mul"}
 # Methods that are also on SymBool, in addition to on SymInt and SymFloat
 also_bool_magic_methods = {"eq"}
 bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
@@ -634,6 +632,14 @@ def _sympy_abs(a):
     return sympy.Abs(a)
 
 
+def _sympy_sym_float(a):
+    # Cannot use sympy.Float(a) here, coz it expects python literals
+    # Multiply by 1.0 to cast to float. This is needed when the input
+    # is a SymInt which has the assumption that it is integer and
+    # SymPy will otherwise assume that return value cannot be a float.
+    return a * 1.0
+
+
 magic_methods = {
     **reflectable_magic_methods,
     "sym_not": lambda a: ~a,
@@ -644,7 +650,7 @@ magic_methods = {
     "le": _sympy_le,
     "ge": _sympy_ge,
     "floor": _sympy_floor,
-    "sym_float": lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
+    "sym_float": _sympy_sym_float,
     "ceil": _sympy_ceil,
     "neg": lambda a: -a,
     "sym_min": _sympy_min,
@@ -1049,6 +1055,19 @@ def _make_user_magic(method, user_type):
             return x.node.is_constant()
         return False
 
+    if method in bool_becomes_int_magic_methods:
+
+        def promote(x):
+            """Implements True+True=2, which works in python but not sympy"""
+            if isinstance(x, SymBool):
+                return SymInt(x.node.wrap_int(int(x)))
+            return x
+
+    else:
+
+        def promote(x):
+            return x
+
     # Before and after performing the operation, check if any operands are constant.
     # If so, extract out the constant values first. If `self` itself is a
     # constant, then "redispatch" by calling back into the operator. Sometimes
@@ -1057,11 +1076,14 @@ def _make_user_magic(method, user_type):
     # implementing wrap_bool in ConstantSymNodeImpl), but we're not doing that
     # today for no particular reason.
     def unary_magic_impl(self):
+        self = promote(self)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self))
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        self = promote(self)
+        other = promote(other)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self), other)
         if is_constant(other):
@@ -1073,6 +1095,8 @@ def _make_user_magic(method, user_type):
         return get_constant(ret) if is_constant(ret) else ret
 
     def rbinary_magic_impl(self, other):
+        self = promote(self)
+        other = promote(other)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self), other)
         if is_constant(other):
@@ -1112,7 +1136,7 @@ for method, func in magic_methods.items():  # type: ignore[assignment]
     if method in only_bool_magic_methods:
         _make_user_magic(method, SymBool)
         continue
-    if method in also_bool_magic_methods:
+    if method in also_bool_magic_methods or method in bool_becomes_int_magic_methods:
         _make_user_magic(method, SymBool)
     _make_user_magic(method, SymInt)
     _make_user_magic(method, SymFloat)
