@@ -803,10 +803,11 @@ TEST_F(RNNTest, CheckErrorInfos) {
 // https://github.com/pytorch/pytorch/issues/115027
 TEST_F(RNNTest, CheckPadPackedSequenceWithCudaTensors_CUDA) {
   // Create input on the GPU, sample 5x5
-  auto input = torch::randn({ 5, 5 }).to(at::ScalarType::Float).cuda();
-  auto lengths = torch::full({ 5 }, 5);
+  auto input = torch::randn({5, 5}).to(at::ScalarType::Float).cuda();
+  auto lengths = torch::full({5}, 5);
 
-  auto packed = torch::nn::utils::rnn::pack_padded_sequence(input, lengths, false, false);
+  auto packed =
+    torch::nn::utils::rnn::pack_padded_sequence(input, lengths, false, false);
 
   auto error = torch::nn::utils::rnn::pad_packed_sequence(packed);
 }
