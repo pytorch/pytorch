@@ -242,7 +242,7 @@ class CachingAutotuner(KernelInterface):
                     #
                     if (
                         nreg
-                        <= device_prop.regsPerMultiprocessor
+                        <= device_prop.regs_per_multiprocessor
                         // device_prop.max_threads_per_multi_processor
                     ):
                         continue
@@ -252,15 +252,15 @@ class CachingAutotuner(KernelInterface):
 
                     # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
                     # The formula below is a tighter upper bound since we have the assumption that
-                    #   nreg > device_prop.regsPerMultiprocessor // device_prop.max_threads_per_multi_processor
+                    #   nreg > device_prop.regs_per_multiprocessor // device_prop.max_threads_per_multi_processor
                     # due to the if condition above and:
-                    #   regsPerMultiprocessor / nreg_per_block
-                    #   = regsPerMultiprocessor / (nreg * 32 * num_warps)
-                    #   < regsPerMultiprocessor / ((regsPerMultiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
+                    #   regs_per_multiprocessor / nreg_per_block
+                    #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
+                    #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
                     #   = max_threads_per_multi_processor / (32 * num_warps)
                     # Using a tigher upper bound can reveal more optimization opportunities.
                     max_blocks_per_sm = max(
-                        device_prop.regsPerMultiprocessor // nreg_per_block, 1
+                        device_prop.regs_per_multiprocessor // nreg_per_block, 1
                     )
 
                     if (

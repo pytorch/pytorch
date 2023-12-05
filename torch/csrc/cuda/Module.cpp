@@ -895,7 +895,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #if !USE_ROCM
       // NVIDA only property
       .def_readonly(
-          "regsPerMultiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
+          "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
 #endif // USE_ROCM
       // HIP-only property; reuse name attribute for CUDA builds
       .def_readonly(
