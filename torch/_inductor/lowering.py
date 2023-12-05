@@ -1866,10 +1866,91 @@ make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
-make_fallback(aten._scaled_dot_product_efficient_attention)
-make_fallback(aten._scaled_dot_product_efficient_attention_backward)
-make_fallback(aten._scaled_dot_product_flash_attention)
-make_fallback(aten._scaled_dot_product_flash_attention_backward)
+
+
+def sdpa_constraint(fx_node, *args, **kwargs):
+    # sdpa requires dense last dimension
+    def apply_constraint(arg, fx_arg):
+        if not isinstance(arg, ir.IRNode):
+            return arg
+
+        meta_val = fx_arg.meta["val"]
+        if not meta_val.is_cuda:
+            return arg
+
+        stride_order = ir.get_stride_order(meta_val.stride())
+        if stride_order and stride_order[-1] != 0:
+            # contiguous stride order
+            stride_order = list(reversed(range(len(arg.get_size()))))
+
+        # This is the minimum alignment required by SDPA kernels for attention_bias.
+        # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
+        ALIGNMENT = 8
+
+        is_backward = fx_node.target in (
+            aten._scaled_dot_product_efficient_attention_backward.default,
+            aten._scaled_dot_product_flash_attention_backward.default,
+        )
+
+        def is_aligned(x):
+            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
+
+        assert isinstance(arg, TensorBox)
+
+        # This correctly handles the forward case:
+        if isinstance(arg.data, (ir.SliceView, ir.ExpandView)):
+            if not is_aligned(arg):
+                # input is padded, requiring_stride_order will unwrap the view and unpad.
+                # Would be nice to be able to require certain padding from inductor ir, nyi
+                if is_aligned(arg.unwrap_view()):
+                    return arg
+
+        def is_aligned_backward(x):
+            aligned_strides = all(
+                (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
+                for i in range(len(x.get_stride()) - 1)
+            )
+            return (
+                V.graph.sizevars.size_hint(x.get_stride()[-1])
+            ) == 1 and aligned_strides
+
+        if (
+            isinstance(arg.data, ir.StorageBox)
+            and arg.data.is_input_buffer()
+            and is_backward
+        ):
+            if len(arg.data.get_size()) == 4 and is_aligned_backward(arg):
+                return arg
+
+        return ir.ExternKernel.require_stride_order(arg, stride_order)
+
+    args = tuple(
+        apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
+    )
+    kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
+    return args, kwargs
+
+
+make_fallback(
+    aten._scaled_dot_product_efficient_attention,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_efficient_attention_backward,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention_backward,
+    sdpa_constraint,
+    warn=False,
+)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
