@@ -178,7 +178,7 @@ test_failures = {
     "test_new_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_ones_dynamic_shapes": TestFailure(("cpu",)),
     "test_permute2_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_randn_generator_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_randn_generator_dynamic_shapes": TestFailure(("cpu",)),
     "test_randn_like_empty_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_single_elem_dynamic_shapes": TestFailure(("cpu",)),
     "test_single_elem_indirect_dynamic_shapes": TestFailure(("cpu",)),
@@ -206,6 +206,8 @@ test_failures = {
     "test_cat_of_loops_and_extern_kernel_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
+    # need to enable CL with dynamic shapes
+    "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda"),
     "test_scaled_dot_product_efficient_attention_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
@@ -265,6 +267,7 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_sdpa_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_sdpa_unaligned_mask_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     #
     # The following tests do not support dynamic shapes yet:
     #

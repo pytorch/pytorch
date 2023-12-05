@@ -974,6 +974,7 @@ coverage_ignore_functions = [
     "parallel_and",
     "parallel_or",
     "sym_eq",
+    "canonicalize_bool_expr",
     # torch.fx.experimental.unification.core
     "reify",
     # torch.fx.experimental.unification.match
@@ -1925,7 +1926,6 @@ coverage_ignore_functions = [
     "bundle_randn",
     # torch.utils.checkpoint
     "check_backward_validity",
-    "context_fn_gen",
     "detach_variable",
     "get_device_states",
     "noop_context_fn",
@@ -2866,7 +2866,9 @@ coverage_ignore_classes = [
     "ShapeGuardPrinter",
     "StrictMinMaxConstraint",
     "SymDispatchMode",
-    "CreateSymbolicPolicy",
+    "SymbolicContext",
+    "StatelessSymbolicContext",
+    "StatefulSymbolicContext",
     # torch.fx.experimental.unification.match
     "Dispatcher",
     "VarDispatcher",
