@@ -635,6 +635,12 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: not isinstance(sample.kwargs.get("weight"), int),
         reason="ONNX SoftmaxCrossEntropyLoss op only accept argument[weight] is int type",
     ),
+    xfail(
+        "nn.functional.embedding",
+        matcher=lambda sample: sample.kwargs.get("max_norm") is not None,
+        torchmodeltype=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="https://github.com/pytorch/pytorch/issues/115106",
+    ),
     skip_torchlib_forward_compatibility(
         "nn.functional.embedding_bag",
         matcher=lambda sample: sample.kwargs.get("padding_idx") is not None or True,
@@ -714,6 +720,9 @@ def _should_skip_xfail_test_sample(
                     "Either Matcher or torchmodeltype must be defined in sub xfail and skip."
                 )
             if decorator_meta.matcher is not None and decorator_meta.matcher(sample):
+                return decorator_meta.test_behavior, decorator_meta.reason
+            elif decorator_meta.matcher is None:
+                # xfail/skip the whole test of the model type without matcher
                 return decorator_meta.test_behavior, decorator_meta.reason
     return None, None
 
