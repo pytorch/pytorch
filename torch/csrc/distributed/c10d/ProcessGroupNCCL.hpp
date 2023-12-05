@@ -3,6 +3,7 @@
 #ifdef USE_C10D_NCCL
 
 #include <chrono>
+#include <future>
 #include <iostream>
 #include <list>
 #include <mutex>
@@ -64,6 +65,9 @@ static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
 
 static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
     "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"};
+
+static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
+    "TORCH_NCCL_TRACE_BUFFER_SIZE"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
@@ -663,7 +667,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // In the timeout case and we will dump debug info such as the NCCL flight
   // recorder to storage. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
-  void dumpDebuggingInfo();
+  bool dumpDebuggingInfo();
 
   // Desync debug helper
   void logWorkStart(WorkNCCL& work);
@@ -682,10 +686,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // gets terminated.
   virtual void terminateProcess(std::string errMsg);
 
+  // Helper for kicking off a future/promise
+  std::future<bool> launchAsyncDebugDump();
+
   // Check the writeDebugInfo_ flag and if it is true, we do nothing.
   // If not, we first set the flag to be true and return a thread which will
   // get and write the debug info into storage.
-  c10::optional<std::thread> tryWriteDebugInfo();
+  std::future<bool>& tryWriteDebugInfo();
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
@@ -760,6 +767,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
+
+  // Size of ring buffer where we store NCCL Traces for debugging.
+  int ncclTraceBufferSize_;
 
   // We gate the heartbeat monitor thread so that we can roll it out gradually.
   std::atomic<bool> monitorThreadEnabled_;
