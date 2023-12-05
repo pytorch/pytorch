@@ -1991,6 +1991,7 @@ class BenchmarkRunner:
         else:
             mod.zero_grad(True)
 
+    @torch._disable_dynamo(recursive=True)
     def optimizer_step(self):
         if self.optimizer is not None:
             self.optimizer.step()

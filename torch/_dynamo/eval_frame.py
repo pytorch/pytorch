@@ -1549,7 +1549,6 @@ class TorchPatcher:
             adamax,
             radam,  # data-dependent control flow
             sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
-            adam,
         }
 
         for opt_mod in optimizer_modules:
@@ -1582,7 +1581,6 @@ class TorchPatcher:
             torch.optim.SparseAdam,
             torch.optim.RAdam,
             torch.optim.LBFGS,
-            torch.optim.Adam,
         }
         for opt in optimizer_classes:
             if opt in excluded_optimizer_classes:
