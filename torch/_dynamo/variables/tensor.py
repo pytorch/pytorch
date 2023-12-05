@@ -290,11 +290,13 @@ class TensorVariable(VariableTracker):
                 if type(static_attr) != types.GetSetDescriptorType:
                     return None
 
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
-                    source=AttrSource(self.source, name),
-                )
+                proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
+                if self.source is not None:
+                    return wrap_fx_proxy(
+                        tx=tx, proxy=proxy, source=AttrSource(self.source, name)
+                    )
+                else:
+                    return wrap_fx_proxy(tx=tx, proxy=proxy)
 
             result = try_generic_attr_handling()
 
