@@ -42,6 +42,7 @@ ignored_ctx_manager_class_names = {
     "torch._C._InferenceMode",
     "torch._C._RestorePythonTLSSnapshot",
     "torch._C._SetExcludeDispatchKeyGuard",
+    "torch._decomp.decompositions_for_rng.PhiloxStateTracker",
     "torch.ao.nn.sparse.quantized.utils.LinearBlockSparsePattern",
     "torch.autograd.anomaly_mode.detect_anomaly",
     "torch.autograd.anomaly_mode.set_detect_anomaly",
@@ -62,6 +63,9 @@ ignored_ctx_manager_class_names = {
     "torch.cuda.device",
     "torch.cuda.device_of",
     "torch.cuda.graphs.graph",
+    "torch.distributed._device_mesh.DeviceMesh",
+    "torch.distributed.autograd.context",
+    "torch.distributed.rpc.server_process_global_profiler._server_process_global_profile",
     "torch.device",  # constant folding
     "torch.sparse.check_sparse_tensor_invariants",
 }
@@ -73,6 +77,13 @@ ignored_c_binding_in_graph_function_names = {
     # Ignored and go through rules defined at `skipfiles.check`.
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
 }
+
+if torch.distributed.is_available():
+    ignored_c_binding_in_graph_function_names |= {
+        # Distributed stuff
+        "torch.distributed.get_debug_level",
+    }
+
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {
         "torch._C._te.set_llvm_aot_workflow",
