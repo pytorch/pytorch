@@ -83,6 +83,8 @@ class FSDPParam:
     _unsharded_param: nn.Parameter
     _cpu_sharded_grad: torch.Tensor  # pinned memory
     unsharded_accumulated_grad: Optional[torch.Tensor]
+    padded_unsharded_numel: int
+    padded_unsharded_bytes: int
     # DTensor attributes (only defined for DTensor `param`):
     _tp_spec: DTensorSpec
     _tp_global_size: torch.Size
@@ -348,6 +350,11 @@ class FSDPParam:
         # Unsharded accumulated gradient used for gradient accumulation without
         # reduce-scatter when `reduce_dtype` is specified
         self.unsharded_accumulated_grad = None
+        # Precompute these (used for foreach all-gather) to reduce overhead
+        self.padded_unsharded_numel = self._padded_unsharded_size.numel()
+        self.padded_unsharded_bytes = (
+            self.padded_unsharded_numel * self.unsharded_param_data_dtype.itemsize
+        )
         unsafe_free_storage(self._unsharded_param_data)
         setattr(self._unsharded_param, FSDP_SHARDED, True)
 

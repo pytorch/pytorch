@@ -252,7 +252,7 @@ class FSDPParamGroup:
         if (work := self._all_gather_result.all_gather_work) is not None:  # async
             work.wait()
         foreach_all_gather_copy_out(
-            self._all_gather_result.flat_tensor_shards,
+            self._all_gather_result.all_gather_output,
             self.fsdp_params,
             self._all_gather_process_group,
             self._use_uint8_all_gather,

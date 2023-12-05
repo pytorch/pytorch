@@ -2,7 +2,7 @@ from typing import List, NamedTuple, Optional
 
 import torch
 import torch.distributed as dist
-from torch.autograd.grad_mode import _unsafe_preserve_version_counter
+from torch.utils._contextlib import _DecoratorContextManager
 
 from ._fsdp_common import chunk_with_empty, print_and_raise_internal, to_dtype_if_needed
 from ._fsdp_param import FSDPParam, ShardedState
@@ -26,7 +26,7 @@ the approach that we take.
 
 
 class AllGatherResult(NamedTuple):
-    flat_tensor_shards: List[torch.Tensor]
+    all_gather_output: torch.Tensor
     all_gather_event: Optional[torch.cuda.Event]
     all_gather_work: Optional[dist.distributed_c10d.Work]
 
@@ -49,10 +49,11 @@ def foreach_all_gather(
             for the all-gather.
 
     Returns:
-        Optional[AllGatherResult]: The all-gathered interleaved parameter
-        shards (``flat_tensor_shards``) to be copied out and a CUDA event
-        recording the end of the all-gather collective. If there are no
-        parameters that need to be all-gathered, returns ``None``.
+        Optional[AllGatherResult]: The all-gathered output to be copied out, a
+        CUDA event recording the end of the all-gather collective, and
+        optionally an all-gather work object if this all-gather is run as an
+        async op (for explicit prefetching). If there are no parameters that
+        need to be all-gathered, then returns ``None``.
     """
     fsdp_params = [
         fsdp_param
@@ -68,95 +69,79 @@ def foreach_all_gather(
     group_rank = group.rank()
     if use_uint8:
         total_padded_unsharded_numel = sum(
-            fsdp_param._padded_unsharded_size.numel()
-            # Multiply by the dtype size to convert to uint8 numel
-            * fsdp_param.unsharded_param_data_dtype.itemsize
-            for fsdp_param in fsdp_params
+            fsdp_param.padded_unsharded_bytes for fsdp_param in fsdp_params
         )
     else:
         total_padded_unsharded_numel = sum(
-            fsdp_param._padded_unsharded_size.numel() for fsdp_param in fsdp_params
+            fsdp_param.padded_unsharded_numel for fsdp_param in fsdp_params
         )
     total_sharded_numel = total_padded_unsharded_numel // world_size
     with torch.cuda.stream(all_gather_copy_in_stream):
         # - Copy in
-        flat_tensor = torch.empty(
+        all_gather_output = torch.empty(
             (total_padded_unsharded_numel,), dtype=dtype, device=device
         )
-        flat_tensor_shards = [
-            flat_tensor.narrow(0, total_sharded_numel * rank, total_sharded_numel)
-            for rank in range(world_size)
-        ]
-        input_flat_tensor_shard = flat_tensor_shards[group_rank]
+        all_gather_input = all_gather_output.narrow(
+            0, total_sharded_numel * group_rank, total_sharded_numel
+        )
         shards_to_cat = [fsdp_param.all_gather_input for fsdp_param in fsdp_params]
         if use_uint8:
             shards_to_cat = [t.view(torch.uint8) for t in shards_to_cat]
-        # This cat implicitly casts to `flat_tensor_shard.dtype` (if needed)
-        torch.cat(shards_to_cat, out=input_flat_tensor_shard)
+        # TODO: If foreach copy supports different src/dst dtypes, then we
+        # should use that for the mixed precision case for fusion.
+        torch.cat(shards_to_cat, out=all_gather_input)
         all_gather_copy_in_event = torch.cuda.Event()
         all_gather_copy_in_event.record()
     all_gather_stream.wait_event(all_gather_copy_in_event)
     with torch.cuda.stream(all_gather_stream):
         # - All-gather
         all_gather_work = dist.all_gather_into_tensor(
-            output_tensor=flat_tensor,
-            input_tensor=input_flat_tensor_shard,
+            output_tensor=all_gather_output,
+            input_tensor=all_gather_input,
             group=group,
             async_op=async_op,
         )
         all_gather_event = torch.cuda.Event()
         all_gather_event.record()
-        return AllGatherResult(flat_tensor_shards, all_gather_event, all_gather_work)
+        return AllGatherResult(all_gather_output, all_gather_event, all_gather_work)
 
 
 def foreach_all_gather_copy_out(
-    flat_tensor_shards: List[torch.Tensor],
+    all_gather_output: torch.Tensor,  # 1D
     fsdp_params: List[FSDPParam],
     group: dist.ProcessGroup,
     use_uint8: bool,
 ) -> None:
     world_size = group.size()
-    flat_tensor_offset = 0  # [0, total_sharded_numel - 1]
-    for fsdp_param in fsdp_params:
-        param_shards: List[torch.Tensor] = []
-        padded_sharded_numel = fsdp_param.all_gather_input_numel
-        dtype_size = fsdp_param.unsharded_param_data_dtype.itemsize
-        for rank in range(world_size):
-            param_shard_start = rank * padded_sharded_numel
-            numel_in_shard = min(
-                fsdp_param._unsharded_size.numel() - param_shard_start,
-                padded_sharded_numel,
-            )
-            if use_uint8:
-                # Multiply by the dtype size to convert to uint8 numel
-                numel_in_shard *= dtype_size
-            if numel_in_shard > 0:
-                param_shard = flat_tensor_shards[rank].narrow(
-                    0, flat_tensor_offset, numel_in_shard
-                )
-                if use_uint8:
-                    # View back to the expected dtype before the cat
-                    param_shard = param_shard.view(
-                        fsdp_param.unsharded_param_data_dtype
-                    )
-                param_shards.append(param_shard)
-        offset_increment = padded_sharded_numel
-        if use_uint8:
-            offset_increment *= dtype_size
-        flat_tensor_offset += offset_increment
+    if use_uint8:
+        split_sizes_per_rank = [
+            fsdp_param.all_gather_input_numel
+            * fsdp_param.unsharded_param_data_dtype.itemsize
+            for fsdp_param in fsdp_params
+        ]
+    else:
+        split_sizes_per_rank = [
+            fsdp_param.all_gather_input_numel for fsdp_param in fsdp_params
+        ]
+    split_sizes = split_sizes_per_rank * world_size
+    splits = torch.split(all_gather_output, split_sizes, dim=0)
+    num_fsdp_params = len(fsdp_params)
+    all_param_shards: List[List[torch.Tensor]] = []
+    outs: List[torch.Tensor] = []
+    for fsdp_param_idx, fsdp_param in enumerate(fsdp_params):
+        param_shards: List[torch.Tensor] = [
+            splits[fsdp_param_idx + rank * num_fsdp_params]
+            for rank in range(world_size)
+        ]
         fsdp_param.alloc_unsharded_param()
-        # See [Note: ``.data`` Usage in Per-Parameter Sharding]
-        out = fsdp_param._unsharded_param_data[: fsdp_param._unsharded_size.numel()]
-        if fsdp_param.unsharded_param_data_dtype == torch.float8_e4m3fn:
-            # HACK: While `aten::cat` is not supported, view as uint8
-            param_shards = [t.view(torch.uint8) for t in param_shards]
-            torch.cat(param_shards, out=out.data.view(torch.uint8))
-            continue
-        with _unsafe_preserve_version_counter(out):
-            torch.cat(
-                param_shards,
-                out=out,
-            )
+        out = fsdp_param._unsharded_param_data
+        if use_uint8:
+            out = out.view(torch.uint8)
+        all_param_shards.append(param_shards)
+        outs.append(out)
+    with _unsafe_preserve_version_counters(outs):
+        for param_shards, out in zip(all_param_shards, outs):
+            torch.cat(param_shards, out=out)
 
 
 @torch.no_grad()
@@ -192,7 +177,7 @@ def foreach_reduce_scatter(
     reduce_dtype = reduce_dtype or grad_dtype
     world_size = group.size()
     total_padded_unsharded_numel = sum(
-        fsdp_param._padded_unsharded_size.numel() for fsdp_param in fsdp_params
+        fsdp_param.padded_unsharded_numel for fsdp_param in fsdp_params
     )
     total_sharded_numel = total_padded_unsharded_numel // world_size
     current_stream = torch.cuda.current_stream()
@@ -298,3 +283,18 @@ def foreach_reduce_scatter(
 def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
     if div_factor > 1:
         tensor.div_(div_factor)
+
+
+class _unsafe_preserve_version_counters(_DecoratorContextManager):
+    # Same as `_unsafe_preserve_version_counter` but only entering/exiting the
+    # context manager once for a list of tensors to reduce CPU overhead
+    def __init__(self, tensors: List[torch.Tensor]) -> None:
+        self.tensors = tensors
+        self.prev_versions = [t._version for t in tensors]
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, *args) -> None:
+        for tensor, prev_version in zip(self.tensors, self.prev_versions):
+            torch._C._autograd._unsafe_set_version_counter(tensor, prev_version)
