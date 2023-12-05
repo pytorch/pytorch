@@ -615,6 +615,7 @@ class AOTConfig:
     aot_autograd_arg_pos_to_source: Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
+    pre_dispatch: bool = False
 
 
 SubclassTracingInfo = collections.namedtuple(

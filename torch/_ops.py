@@ -313,8 +313,11 @@ class HigherOrderOperator(OperatorBase):
         if functionality_key == torch._C.DispatchKey.PreDispatch:
             from torch.utils._python_dispatch import _pop_mode_temporarily
 
-            if _len_torch_dispatch_stack_pre_dispatch() > 0 and not torch._C._dispatch_tls_is_dispatch_key_excluded(
-                DispatchKey.Python
+            if (
+                _len_torch_dispatch_stack_pre_dispatch() > 0
+                and not torch._C._dispatch_tls_is_dispatch_key_excluded(
+                    DispatchKey.Python
+                )
             ):
                 curr_mode = _get_current_dispatch_mode_pre_dispatch()
                 assert (
@@ -662,9 +665,6 @@ class OpOverload(OperatorBase):
 
     # This implements the pre-computation logic for the Python dispatcher.
     def _get_dispatch(self, key):
-        # print("HIT DISPATCH", self, key, torch._C._dispatch_tls_local_include_set(), torch._C._dispatch_tls_local_exclude_set())
-        # for i in range(0, torch._C._len_torch_dispatch_stack()):
-        #     print("AVAILABLE MODES: ", torch._C._get_dispatch_stack_at(i))
         # This is only called upon a cache miss
         assert key not in self._dispatch_cache, f"{self} {key}"
 

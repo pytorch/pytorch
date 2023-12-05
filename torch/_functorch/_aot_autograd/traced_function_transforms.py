@@ -350,7 +350,7 @@ def create_functionalized_fn(
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
-        with disable_above, FunctionalTensorMode():
+        with disable_above, FunctionalTensorMode(aot_config.pre_dispatch):
             # Run the joint
             f_outs = fn(*f_args)
 

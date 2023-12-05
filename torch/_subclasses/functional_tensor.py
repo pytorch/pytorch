@@ -146,7 +146,7 @@ class FunctionalTensor(torch.Tensor):
         # - If we use the default tensor.__new__(), we have another problem: it returns inner_tensor.alias(),
         #   which causes every subclass created above autograd to have autograd view metadata
         #   (in addition to also being a FunctionalTensorWrapper).
-        #breakpoint()
+        # breakpoint()
         raise RuntimeError(
             "Attempting to use FunctionalTensor on its own. Instead, please use it with a corresponding FunctionalTensorMode()"
         )
@@ -295,18 +295,23 @@ class FunctionalTensorMode(TorchDispatchMode):
             try:
                 # By default for python functionalization (for AOTAutograd), we reapply views.
                 old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
-                from torch._ops import mode_stack_per_key
 
                 # Sometimes these functions cannot be directly dispatched to functionalize key
                 # because args are sometimes not functional tensors for some reason?
                 if func in FunctionalTensor.metadata_fns:
                     outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
-                    outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
+                    outs_wrapped = pytree.tree_map_only(
+                        torch.Tensor, wrap, outs_unwrapped
+                    )
                 else:
                     outs_unwrapped = func._op_dk(
-                        torch._C.DispatchKey.Functionalize, *args_unwrapped, **kwargs_unwrapped
+                        torch._C.DispatchKey.Functionalize,
+                        *args_unwrapped,
+                        **kwargs_unwrapped,
                     )
-                    outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
+                    outs_wrapped = pytree.tree_map_only(
+                        torch.Tensor, wrap, outs_unwrapped
+                    )
             finally:
                 torch._disable_functionalization()
                 torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]

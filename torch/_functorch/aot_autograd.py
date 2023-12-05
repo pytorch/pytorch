@@ -524,6 +524,7 @@ def create_aot_dispatcher_function(
                             flat_fn,
                             keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
                             is_train=needs_autograd,
+                            pre_dispatch=aot_config.pre_dispatch,
                         )(*fake_flat_args)
                     else:
                         fw_metadata = ViewAndMutationMeta(
@@ -916,6 +917,7 @@ def aot_export_module(
     # If trace_joint is True, we expect your module to return a scalar loss.
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
+    pre_dispatch: bool = False,
 ) -> Tuple[torch.fx.GraphModule, GraphSignature]:
     """
     This function takes in a module, and returns:
@@ -1024,6 +1026,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             decompositions=decompositions,
             num_params_buffers=params_len,
             no_tangents=True,
+            pre_dispatch=pre_dispatch,
         )
     if trace_joint:
         def flattened_joint(*args):
@@ -1169,6 +1172,7 @@ def _aot_export_function(
     # (requiring it to be a graph input).
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
+    pre_dispatch: bool = False,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     dynamic_shapes = False
     for x in args:
@@ -1198,6 +1202,7 @@ def _aot_export_function(
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
         no_tangents=no_tangents,
+        pre_dispatch=pre_dispatch,
     )
 
     fx_g, meta = create_aot_dispatcher_function(
