@@ -469,7 +469,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            torch.compile(f, backend="aot_eager_decomp_partition")(*compiled_args)
+            torch.compile(f, backend="aot_eager_decomp_partition", fullgraph=True)(
+                *compiled_args
+            )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
@@ -500,7 +502,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             torch.ops.mylib.foo(x)
             assert torch.allclose(x, expected)
 
-            @torch.compile(backend="aot_eager_decomp_partition")
+            @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
             def f(x):
                 x = x.clone()
                 y = x[:]
@@ -541,7 +543,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            torch.compile(f, backend="aot_eager_decomp_partition")(*compiled_args)
+            torch.compile(f, backend="aot_eager_decomp_partition", fullgraph=True)(
+                *compiled_args
+            )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
