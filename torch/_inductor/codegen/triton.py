@@ -10,7 +10,18 @@ import math
 import operator
 import os
 import textwrap
-from typing import Any, Callable, Counter, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Counter,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import sympy
 
