@@ -362,6 +362,8 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(torch.tensor([8], device=device), res[1])
 
 
+        #TODO: correct assertions here
+
 class TestMetaCollectives(TestCase):
     def test_all_reduce(self):
         x = torch.rand((2, 3, 4), device="meta")
@@ -463,9 +465,10 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
     def process_group(self):
         return dist.group.WORLD
 
-    def dist_init(self):
+    def dist_init(self, backend=None):
+        test_backend = backend or BACKEND
         dist.init_process_group(
-            backend=BACKEND,
+            backend=test_backend,
             world_size=self.world_size,
             rank=self.rank,
             init_method=f"file://{self.file_name}",
@@ -605,6 +608,50 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
             store=FakeStore(),
         )
         allreduce(torch.randn(8, device=self.device), pg=dist.group.WORLD)
+
+
+    #@parametrize("device", ["cpu", "cuda"])
+    @with_comms
+    @skip_if_lt_x_gpu(WORLD_SIZE)
+    def test_batch_isend_irecv_cuda(self):
+        self._test_batch_isend_irecv("cuda")
+
+    def test_batch_isend_irecv_gloo(self):
+        self.dist_init("gloo")
+        self._test_batch_isend_irecv("cpu")
+        self.destroy_comms()
+
+    def _test_batch_isend_irecv(self, device):
+        send_tensor = torch.arange(2, dtype=torch.float32,device=device) + 2 * self.rank
+        send_op = dist.P2POp(
+            dist.isend,
+            send_tensor,
+            (self.rank + 1) % self.world_size,
+        )
+        recv_tensor = torch.randn(2, dtype=torch.float32, device=device)
+        recv_op = dist.P2POp(
+            dist.irecv,
+            recv_tensor,
+            (self.rank - 1 + self.world_size) % self.world_size,
+        )
+
+        received_tensors = ft_c.batch_isend_irecv([send_op, recv_op])
+        expected_tensors = [
+            send_tensor,
+            torch.arange(
+                2,
+                dtype=torch.float32,
+                device=device
+            ) + 2 * ((self.rank - 1 + self.world_size) % self.world_size),
+        ]
+
+        for actual, expected in zip(received_tensors, expected_tensors):
+            self.assertEqual(
+                actual,
+                expected,
+                msg=f"Expected {expected_tensor} on {self.rank=} "
+                    f"but received {received_tensors[1]} instead."
+            )
 
 
 class TestOpWaitiness(MultiThreadedTestCase):

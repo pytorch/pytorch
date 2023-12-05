@@ -342,12 +342,46 @@ def _all_to_all_single(
 
     return out_tensor
 
-def _batch_isend_irev(p2p_op_list):
+def _batch_isend_irecv(ops, tags, tensors, peers, expanded_tags, ranksets, group_sizes):
 
-    works = c10d.batch_isend_irecv(p2p_op_list)
+    # repackage params
+    params = [
+        ops,
+        tags,
+        tensors,
+        peers,
+        expanded_tags,
+        ranksets,
+        group_sizes
+    ]
+    s = len(ops)
+    assert all(len(p) == s for p in params)
+
+    # rebuild P2P objects
+    rebuilt_p2p_op_list = []
+    for op, tag, tensor, peer, expanded_tag, rankset, group_size in zip(*params):
+
+        group = c10d._find_or_create_pg_by_ranks_and_tag(expanded_tag, rankset, group_size)
+
+        #TODO: # new_empty for recv? don't clone for send?
+        rebuilt_p2p_op_list.append(
+            dist.P2POp(
+                getattr(c10d, op),
+                tensor.clone(memory_format=torch.contiguous_format),
+                peer,
+                group,
+                tag
+            )
+        )
+
+    works = dist.batch_isend_irecv(rebuilt_p2p_op_list)
+    print(f"{works=} {len(works)=}")
 
     tensors = []
-    for p2p_op, work in zip(p2p_op_list, works):
+    # nccl returns a single work object for all tensors, so we register using the same tensor
+    works = [works] * len(rebuilt_p2p_op_list) if len(works) == 1 else works
+    print(f"{works=} {len(works)=}")
+    for p2p_op, work in zip(rebuilt_p2p_op_list, works):
         _register_tensor_work(p2p_op.tensor, work)
         tensors.append(p2p_op.tensor)
 
