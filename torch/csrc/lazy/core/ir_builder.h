@@ -141,7 +141,7 @@ inline Value GetSymIntValue(c10::SymInt a) {
 inline std::vector<int64_t> GetSymIntArrayRefValue(c10::SymIntArrayRef arr) {
   std::vector<int64_t> r;
   for (const auto& a : arr) {
-    r.emplace_back(a.expect_int());
+    r.emplace_back(a.guard_int(__FILE__, __LINE__));
   }
   return r;
 }
