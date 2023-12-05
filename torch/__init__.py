@@ -635,7 +635,7 @@ def set_default_device(device):
 
     .. note::
 
-        This doesn't affect functions that create tensors that share the same memory as the input, like: 
+        This doesn't affect functions that create tensors that share the same memory as the input, like:
         :func:`torch.from_numpy` and :func:`torch.frombuffer`
 
     Args:
