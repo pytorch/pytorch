@@ -3325,7 +3325,10 @@ class TestNestedTensorSubclass(NestedTestCase):
             self.assertEqual(zeros, nt * 0)
             self.assertEqual(ones, nt * 0 + 1)
             self.assertEqual(full, nt * 0 + 2)
-            self.assertEqual(zeros, empty.zero_(0))
+
+            self.assertEqual(nt.device, empty.device)
+            self.assertEqual(nt.dtype, empty.dtype)
+            self.assertEqual(nt.requires_grad, empty.requires_grad)
 
     @torch._dynamo.config.patch(suppress_errors=True)
     def test_layer_norm_2(self, device):
