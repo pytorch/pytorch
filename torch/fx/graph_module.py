@@ -781,15 +781,17 @@ class {module_name}(torch.nn.Module):
         del dict_without_graph["_graph"]
         return (reduce_graph_module, (dict_without_graph, import_block))
 
+    def _deepcopy_init(self):
+        return GraphModule.__init__
+
     # because __reduce__ is defined for serialization,
     # we need to define deepcopy otherwise it will call __reduce__
     # and cause symbolic tracing to occur every time we try to copy the object
     def __deepcopy__(self, memo):
         res = type(self).__new__(type(self))
         memo[id(self)] = res
-        fake_mod = torch.nn.Module()
-        fake_mod.__dict__ = copy.deepcopy(self.__dict__, memo)
-        GraphModule.__init__(res, fake_mod, fake_mod.__dict__["_graph"])
+        fake_mod = _CodeOnlyModule(copy.deepcopy(self.__dict__, memo))
+        self._deepcopy_init()(res, fake_mod, fake_mod.__dict__["_graph"])
         # hooks are lost during `GraphModule.__init__`, so we need to copy over
         # them explicitly, note right now we are only copying state_dict related
         # hooks, to reduce bc-related issues, we can copy forward/backward related
