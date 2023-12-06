@@ -79,11 +79,19 @@ pattern_matcher = True
 post_grad_custom_pre_pass = None
 post_grad_custom_post_pass = None
 
+# Registers a custom pregrad pass. Note that the pre-grad IR is 1.
+# non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
+# use post-grad passes.
+pre_grad_custom_pass = None
+
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
 efficient_conv_bn_eval_fx_passes = False
+
+# Enable predispatch aten IR for export
+is_predispatch = False
 
 # Deprecated
 group_fusion = False
