@@ -235,7 +235,7 @@ jobs:
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           use-gha: true
-          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.group }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Collect backtraces from coredumps (if any)
         if: always()
@@ -247,7 +247,7 @@ jobs:
         uses: actions/upload-artifact@v3
         if: failure()
         with:
-          name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+          name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.group }}
           retention-days: 14
           if-no-files-found: ignore
           path: ./**/core.[1-9]*
