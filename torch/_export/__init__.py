@@ -385,7 +385,7 @@ def capture_pre_autograd_graph(
             k: v
             for k, v in fake_mode.shape_env.runtime_var_to_range.items()
             if re.match(r"^[if]\d+$", str(k))
-        }
+        } if fake_mode else {}
 
         flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
         range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
@@ -414,7 +414,8 @@ def _convert_input_to_fake(gm, args, kwargs):
     if detected_fake_mode := detect_fake_mode(fake_inps):
         fake_mode = detected_fake_mode
 
-    assert fake_mode is not None, "Cannot find fake_mode attatched to the graph's placeholders."
+    if fake_mode is None:
+        return [], {}, {}, None
 
     count = 0
 

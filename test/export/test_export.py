@@ -1820,5 +1820,21 @@ def forward(self, l_x_):
         ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
         self.assertEqual(ep(t, dim, index, src), output)
 
+    def test_empty_input(self):
+        def g():
+            return torch.zeros(1, 2)
+
+        pre_autograd_graph = torch._export.capture_pre_autograd_graph(g, ())
+        export_graph = torch.export.export(g, ())
+
+    def test_scalar_input(self):
+        def g(x):
+            return torch.zeros(1, x)
+
+        pre_autograd_graph = torch._export.capture_pre_autograd_graph(g, (2, ))
+        # TODO: enable this following test case
+        # export_graph = torch.export.export(g, (2, ))
+
+
 if __name__ == '__main__':
     run_tests()
