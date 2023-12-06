@@ -633,3 +633,27 @@ def reductify_leaf(grad_input, grad_input_bdim, input_bdim, batch_size,
     if input_bdim != grad_input_bdim:
         grad_input = grad_input.movedim(grad_input_bdim, input_bdim)
     return grad_input
+
+
+class AutogradFunctionApply(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("autograd_function_apply")
+
+    def __call__(self, fwd, bwd, *fwd_args):
+        class ApplyTemplate(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, *args):
+                output, saved_tensors, attrs = fwd(None, *args)
+                ctx.save_for_backward(*saved_tensors)
+                for name, value in attrs.items():
+                    setattr(ctx, name, value)
+                return output
+
+            @staticmethod
+            def backward(ctx, grad):
+                return bwd(ctx, grad)
+
+        return ApplyTemplate.apply(*fwd_args)
+
+
+autograd_function_apply = AutogradFunctionApply()

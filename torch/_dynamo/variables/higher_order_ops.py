@@ -1194,6 +1194,53 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+def autograd_speculate(
+    fn,
+    value,
+    tx,
+    args: "List[VariableTracker]",
+    kwargs: "Dict[str, VariableTracker]",
+    tracer,
+    always_restore,
+):
+    checkpoint = tx.copy_graphstate()
+    # TODO(jansel): BUG!!! we aren't copying on the line below, so the post-pre check below is pointless
+    pre_guards = tx.output.guards
+    graph_checkpoint = tx.output.graph
+
+    # TODO: Support kwargs
+    (
+        (body_r, _),
+        body_graph,
+        body_lifted_freevars,
+    ) = speculate_subgraph(
+        tx,
+        fn,
+        [
+            *args,
+        ],
+        {},
+        graph_checkpoint,
+        checkpoint,
+        "the user-defined autograd.Function",
+        source_target=value,
+        # Backwards should never, ever be stored!
+        always_restore=always_restore,
+        restore_side_effects=False,
+        tracer=tracer,
+    )
+    post_guards = tx.output.guards
+    if body_lifted_freevars:
+        unimplemented("NYI - freevars in autograd function.")
+
+    if always_restore:
+        if post_guards - pre_guards:
+            unimplemented("NYI - New guards discovered in a restoring state")
+        # Nothing left to do here
+        return None
+    return body_r, body_graph, body_lifted_freevars
+
+
 class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def __init__(
         self, value, fwd_bwd_tracer=None, source: Optional[Source] = None, **kwargs
@@ -1227,41 +1274,13 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             fn = UserFunctionVariable(self.value, source=self.source)
         else:
             fn = TorchVariable(self.value)
-        checkpoint = tx.copy_graphstate()
-        # TODO(jansel): BUG!!! we aren't copying on the line below, so the post-pre check below is pointless
-        pre_guards = tx.output.guards
-        graph_checkpoint = tx.output.graph
 
-        # TODO: Support kwargs
-        (
-            (body_r, _),
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            fn,
-            [
-                *args,
-            ],
-            {},
-            graph_checkpoint,
-            checkpoint,
-            "the user-defined autograd.Function",
-            source_target=self.value,
-            # Backwards should never, ever be stored!
-            always_restore=always_restore,
-            restore_side_effects=False,
-            tracer=tracer,
+        speculation = autograd_speculate(
+            fn, self.value, tx, args, kwargs, tracer, always_restore
         )
-        post_guards = tx.output.guards
-        if body_lifted_freevars:
-            unimplemented("NYI - freevars in autograd function.")
-
-        if always_restore:
-            if post_guards - pre_guards:
-                unimplemented("NYI - New guards discovered in a restoring state")
-            # Nothing left to do here
+        if speculation is None:
             return None
+        body_r, _, body_lifted_freevars = speculation
 
         p_args = (
             *(arg.as_proxy() for arg in args),
@@ -1484,3 +1503,117 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
         assert isinstance(grad, TensorVariable)
 
         return fn.call_function(tx, args, {})
+
+
+class AutogradFunctionApplyVariable(VariableTracker):
+    def __init__(self, fwd_graph, bwd_graph, **kwargs):
+        super().__init__(**kwargs)
+        self.fwd_graph = fwd_graph
+        self.bwd_graph = bwd_graph
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from . import (
+            AutogradFunctionContextVariable,
+            TupleVariable,
+            UserFunctionVariable,
+        )
+        from .builder import wrap_fx_proxy
+
+        tracer = torch._dynamo.output_graph.SubgraphTracer(
+            tx.output,
+            parent=tx.output.current_tracer,
+            source_target="autograd.Function",
+        )
+
+        fn = UserFunctionVariable(self.fwd_graph, source=self.source)
+        ctx = AutogradFunctionContextVariable.create(tx)
+        speculation = autograd_speculate(
+            fn,
+            self.fwd_graph,
+            tx,
+            [ctx, *args],
+            kwargs,
+            tracer=tracer,
+            always_restore=False,
+        )
+        if speculation is None:
+            return None
+        fwd_body, fwd_graph, _ = speculation
+
+        saved_tensors = (
+            list(ctx.saved_tensors.tensors) if ctx.saved_tensors is not None else []
+        )
+        saved_attrs = dict(
+            tx.output.side_effects.store_attr_mutations[ctx.mutable_local]
+        )
+
+        # TODO(oulgen): Add an API to fx graph to return output node
+        maybe_output_node = list(fwd_graph.nodes)[-1]
+        if maybe_output_node.op == "output":
+            fwd_graph.erase_node(maybe_output_node)
+
+        new_output = TupleVariable(
+            [
+                fwd_body,
+                TupleVariable(saved_tensors),
+                ConstDictVariable(saved_attrs, dict),
+            ]
+        )
+        fwd_graph.output(tx.output.current_tracer.create_arg(new_output.as_proxy()))
+
+        fwd_nn_modules = tx.copy_graphstate().output.nn_modules
+        fwd_name = add_subgraph(
+            tx,
+            self.source,
+            "fwd_body",
+            torch.fx.GraphModule(fwd_nn_modules.nn_modules, fwd_graph),
+        )
+
+        fwd_node = make_attr(tx, fwd_name)
+
+        fn = UserFunctionVariable(self.bwd_graph, source=self.source)
+        speculation = autograd_speculate(
+            fn,
+            self.bwd_graph,
+            tx,
+            [ctx, fwd_body],
+            {},
+            tracer=tracer,
+            always_restore=False,
+        )
+        if speculation is None:
+            return None
+        _, bwd_graph, _ = speculation
+
+        bwd_nn_modules = tx.copy_graphstate().output.nn_modules
+        bwd_name = add_subgraph(
+            tx,
+            self.source,
+            "bwd_body",
+            torch.fx.GraphModule(bwd_nn_modules.nn_modules, bwd_graph),
+        )
+
+        bwd_node = make_attr(tx, bwd_name)
+
+        p_args = (fwd_node, bwd_node, *(arg.as_proxy() for arg in args))
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            fwd_body.as_proxy(),
+        )
+
+        # Store the invocation as a call
+        from torch._functorch.autograd_function import autograd_function_apply
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                autograd_function_apply,
+                args=p_args,
+                kwargs={},
+            ),
+            example_value=example_value,
+        )
