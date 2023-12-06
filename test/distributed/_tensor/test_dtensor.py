@@ -743,6 +743,18 @@ class DTensorMeshTest(DTensorTestBase):
             mesh.mesh, torch.ones(4, 3), torch.tensor([]), sharded_again.to_local()
         )
 
+    @with_comms
+    def test_implicit_replication(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        local_tensor1 = torch.ones(4, 3)
+        sharded_dtensor = DTensor.from_local(local_tensor1, mesh, [Shard(0)])
+
+        from torch.distributed._tensor.experimental import implicit_replication
+
+        with implicit_replication():
+            out_dt = sharded_dtensor + torch.randn(3, device=self.device_type)
+            self.assertEqual(out_dt.placements, [Shard(0)])
+
 
 class TestDTensorPlacementTypes(DTensorTestBase):
     @property
