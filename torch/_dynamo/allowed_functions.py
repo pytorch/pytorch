@@ -171,7 +171,7 @@ class AllowedObjects:
     name_rule_map: Dict[str, Any]
 
 
-def gen_allowed_objs_and_ids() -> AllowedObjects:
+def gen_allowed_objs_and_ids(record=False) -> AllowedObjects:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
@@ -327,10 +327,12 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
-                    heuristic_record_if_ctx_manager(obj, module, name)
+                    if record:
+                        heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
-                    heuristic_record_if_ctx_manager(obj, module, name)
+                    if record:
+                        heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)

@@ -95,7 +95,7 @@ def gen_get_func_inlinelist(dummy_func_inlinelist):
 # allowed objects include:
 # - Torch context manager classes.
 def generate_allowed_object_set():
-    return gen_allowed_objs_and_ids().objects
+    return gen_allowed_objs_and_ids(record=True).objects
 
 
 class TraceRuleTests(torch._dynamo.test_case.TestCase):
