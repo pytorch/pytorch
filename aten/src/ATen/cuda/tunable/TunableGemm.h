@@ -190,7 +190,7 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
 
   void PostTuning(const GemmParams<T>* params) override {
     if (!IsZero(params->beta)) {
-      c10::hip::HIPCachingAllocator::raw_delete(params->c);
+      c10::cuda::CUDACachingAllocator::raw_delete(params->c);
       delete params;
     }
   }
