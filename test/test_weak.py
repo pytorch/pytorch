@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-from torch.utils.weak import WeakIdKeyDictionary, WeakScriptObjectRef
+from torch.utils.weak import WeakIdKeyDictionary, _WeakHashRef
 
 
 def C():
@@ -582,7 +582,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
 
     def _empty_mapping(self):
         """Return an empty mapping object"""
-        return WeakIdKeyDictionary(ref_type=WeakScriptObjectRef)
+        return WeakIdKeyDictionary(ref_type=_WeakHashRef)
 
     def _full_mapping(self, data):
         """Return a mapping object with the value contained in data

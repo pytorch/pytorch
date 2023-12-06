@@ -3487,7 +3487,6 @@ coverage_ignore_classes = [
     "WeakIdKeyDictionary",
     "WeakIdRef",
     "WeakTensorKeyDictionary",
-    "WeakScriptObjectRef",
 ]
 
 # The suffix(es) of source filenames.

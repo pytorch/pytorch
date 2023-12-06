@@ -11,7 +11,7 @@ import collections.abc as _collections_abc
 WeakRef = ref
 
 
-__all__ = ['TensorWeakRef', 'WeakIdRef', 'WeakIdKeyDictionary', 'WeakTensorKeyDictionary', 'WeakScriptObjectRef']
+__all__ = ['TensorWeakRef', 'WeakIdRef', 'WeakIdKeyDictionary', 'WeakTensorKeyDictionary', '_WeakHashRef']
 
 
 # This file defines a variant of WeakKeyDictionary that overrides the hashing
@@ -80,10 +80,9 @@ class WeakIdRef(weakref.ref):
             return a is b
         return self is other
 
-# ScriptObjects are wrappers over IValues which contain a torchbind class. For
-# the purpose of this class, we treat two different ScriptObjects that wrap the
-# same IValue as the equal.
-class WeakScriptObjectRef(weakref.ref):
+# This is the same as WeakIdRef but equality is checked using hash() rather than id.
+# This will be equivalent to the one above except for classes where hash is not their id.
+class _WeakHashRef(weakref.ref):
     __slots__ = ['_id']
 
     def __init__(self, key, callback=None):
@@ -92,9 +91,15 @@ class WeakScriptObjectRef(weakref.ref):
         # time the user attempts to hash the weakref, we can eagerly
         # cache the id of the key as we know this is definitely the hash
         # method
-        assert isinstance(key, ScriptObject)
         self._id = hash(key)
         super().__init__(key, callback)  # type: ignore[call-arg]
+
+    def __call__(self):
+        r = super().__call__()
+        # Special logic for Tensor PyObject resurrection
+        if hasattr(r, '_fix_weakref'):
+            r._fix_weakref()  # type: ignore[union-attr]
+        return r
 
     def __hash__(self):
         return self._id
