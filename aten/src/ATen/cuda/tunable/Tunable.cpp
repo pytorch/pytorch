@@ -287,9 +287,9 @@ TuningContext::TuningContext() :
     enable_{false},
     tuning_enable_{false},
     max_tuning_duration_ms_{0},
-    max_tuning_iterations_{0};
-    max_warmup_duration_ms_{0};
-    max_warmup_iterations_{0};
+    max_tuning_iterations_{0},
+    max_warmup_duration_ms_{0},
+    max_warmup_iterations_{0},
     filename_{},
     results_count_from_input_file_{0}
 {
@@ -360,7 +360,7 @@ int TuningContext::GetMaxTuningDurationMs() const {
 }
 
 void TuningContext::SetMaxTuningIterations(int max_iter) {
-  max_tuning_iterations_ = iter;
+  max_tuning_iterations_ = max_iter;
 }
 
 int TuningContext::GetMaxTuningIterations() const {
@@ -384,7 +384,7 @@ int TuningContext::GetMaxWarmupDurationMs() const {
 }
 
 void TuningContext::SetMaxWarmupIterations(int max_iter) {
-  max_warmup_iterations_ = iter;
+  max_warmup_iterations_ = max_iter;
 }
 
 int TuningContext::GetMaxWarmupIterations() const {

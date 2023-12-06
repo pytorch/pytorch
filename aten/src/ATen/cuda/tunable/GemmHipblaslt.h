@@ -157,7 +157,7 @@ static size_t GetHipblasltWorkspaceSize() {
   size_t workspace_size = 2*128*1024*1024; // default 256MB
   if (env) {
     try {
-      workspace_size = std::stoi(val);
+      workspace_size = std::stoi(env);
     } catch(std::invalid_argument const& e) {
       TORCH_WARN("invalid HIPBLASLT_WORKSPACE_SIZE,",
                  " using default workspace size of ", workspace_size, " bytes.");
