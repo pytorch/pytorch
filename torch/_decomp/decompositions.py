@@ -4032,7 +4032,7 @@ def upsample_bicubic2d_vec(
 def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
     def idx(left, middle, right):
         dim_idx = torch.arange(-left, middle + right, device=a.device)
-        return middle - (middle - dim_idx.abs()).abs()
+        return middle - 1 - (middle - 1 - dim_idx.abs()).abs()
 
     return _reflection_or_replication_pad(
         a,
@@ -4123,7 +4123,7 @@ def _reflection_pad_backward(
 
     result = grad_output
     for i in range(dim):
-        middle_idx: List[Any] = [slice(s) for s in result.shape]
+        middle_idx: List[Any] = [None] * result.dim()
         middle_idx[i + nc_dim] = torch.arange(
             max(padding_left[i], 0),
             max(padding_left[i], 0) + inp_shape[i],
@@ -4133,23 +4133,26 @@ def _reflection_pad_backward(
         middle = zero_pad(
             result, i + nc_dim, max(-padding_left[i], 0), max(-padding_right[i], 0)
         )
-        middle = middle[middle_idx]
+        middle = aten._unsafe_index(middle, middle_idx)
 
         if padding_left[i] < 0:
             left = 0
         else:
-            left_idx: List[Any] = [slice(s) for s in result.shape]
+            left_idx: List[Any] = [None] * result.dim()
             left_idx[i + nc_dim] = torch.arange(
                 padding_left[i] - 1, -1, step=-1, device=a.device
             )
             left = zero_pad(
-                result[left_idx], i + nc_dim, 1, inp_shape[i] - padding_left[i] - 1
+                aten._unsafe_index(result, left_idx),
+                i + nc_dim,
+                1,
+                inp_shape[i] - padding_left[i] - 1,
             )
 
         if padding_right[i] < 0:
             right = 0
         else:
-            right_idx: List[Any] = [slice(s) for s in result.shape]
+            right_idx: List[Any] = [None] * result.dim()
             right_idx[i + nc_dim] = torch.arange(
                 result.shape[i + nc_dim] - 1,
                 result.shape[i + nc_dim] - padding_right[i] - 1,
@@ -4157,7 +4160,10 @@ def _reflection_pad_backward(
                 device=a.device,
             )
             right = zero_pad(
-                result[right_idx], i + nc_dim, inp_shape[i] - padding_right[i] - 1, 1
+                aten._unsafe_index(result, right_idx),
+                i + nc_dim,
+                inp_shape[i] - padding_right[i] - 1,
+                1,
             )
 
         result = middle + left + right
