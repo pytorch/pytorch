@@ -16378,13 +16378,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_take,
-           # eager gather() does not support negative indices but compiled
-           # gather does.
-           skips=(
-               DecorateInfo(unittest.expectedFailure, "TestDecomp", "test_comprehensive"),
-               DecorateInfo(unittest.expectedFailure, "TestDecomp", "test_quick"),
-               DecorateInfo(unittest.expectedFailure, "TestDecomp", "test_quick_core_backward"),
-            ),
            error_inputs_func=error_inputs_take),
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),

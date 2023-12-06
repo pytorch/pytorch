@@ -4348,10 +4348,7 @@ def _weight_norm_interface(x, y, dim):
 @out_wrapper()
 def take(self, index):
     flattened = self.reshape(-1)
-    # Note: eager gather() does not support negative indices
-    # (https://github.com/pytorch/pytorch/issues/55143), but torch.compile
-    # gather() does.
-    return flattened.gather(dim=0, index=index)
+    return flattened[index]
 
 
 register_inplace(aten.addbmm_, aten.addbmm)
