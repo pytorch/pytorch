@@ -149,6 +149,26 @@ static hipblasOperation_t MapLayoutToHipBlasLt(BlasOp layout) {
   return HIPBLAS_OP_T;
 }
 
+static size_t GetHipblasltWorkspaceSize() {
+  static const char * env = getenv("HIPBLASLT_WORKSPACE_SIZE");
+  // 256MB is max workspace size allowed for hipblaslt
+  // hipblaslt-bench uses 32MB
+  // recommendation from hipblaslt author was 76MB
+  size_t workspace_size = 2*128*1024*1024; // default 256MB
+  if (env) {
+    try {
+      workspace_size = std::stoi(val);
+    } catch(std::invalid_argument const& e) {
+      TORCH_WARN("invalid HIPBLASLT_WORKSPACE_SIZE,",
+                 " using default workspace size of ", workspace_size, " bytes.");
+    } catch(std::out_of_range const& e) {
+      TORCH_WARN("HIPBLASLT_WORKSPACE_SIZE out of range,",
+                 " using default workspace size of ", workspace_size, " bytes.");
+    }
+  }
+  return workspace_size;
+}
+
 template <typename T, BlasOp ALayout, BlasOp BLayout, typename ParamsT>
 auto GetHipBlasLtTypeStringAndOps(ActivationType activation_type = ActivationType::NONE) {
   std::vector<std::pair<std::string, Callable<ParamsT>>> ret;
@@ -243,7 +263,7 @@ auto GetHipBlasLtTypeStringAndOps(ActivationType activation_type = ActivationTyp
       }
 #endif
 
-      size_t workspace_size = 2*128*1024*1024;
+      size_t workspace_size = GetHipblasltWorkspaceSize();
 
       hipblasLtHandle_t op_handle;
       TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&op_handle));
