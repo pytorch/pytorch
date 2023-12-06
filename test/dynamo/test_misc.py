@@ -31,6 +31,8 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
+
+import torch.utils._pytree as pytree
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
@@ -44,7 +46,6 @@ from torch._dynamo.testing import (
     skipIfNotPy311,
     unsupported,
 )
-
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
@@ -297,7 +298,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 lib=lib,
                 tags=(torch.Tag.pt2_compliant_tag,),
             )
-            torch.library.impl("mylib::bar", "CompositeImplicitAutograd", torch.sin)
+            torch.library.impl(
+                "mylib::bar", "CompositeImplicitAutograd", torch.sin, lib=lib
+            )
             assert torch.Tag.pt2_compliant_tag in torch.ops.mylib.bar.default.tags
 
             def f(x):
@@ -324,8 +327,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_non_pt2_compliant_ops_graph_break(self):
         lib = torch.library.Library("mylib", "FRAGMENT")
         try:
-            torch.library.define("mylib::bar2", "(Tensor x) -> Tensor")
-            torch.library.impl("mylib::bar2", "CompositeImplicitAutograd", torch.sin)
+            torch.library.define("mylib::bar2", "(Tensor x) -> Tensor", lib=lib)
+            torch.library.impl(
+                "mylib::bar2", "CompositeImplicitAutograd", torch.sin, lib=lib
+            )
             assert torch.Tag.pt2_compliant_tag not in torch.ops.mylib.bar2.default.tags
 
             def f(x):
@@ -362,14 +367,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 "mylib::bar3.tensor",
                 "(Tensor x) -> Tensor",
                 tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
             )
-            torch.library.define("mylib::bar3.int", "(Tensor x, int dim) -> Tensor")
+            torch.library.define(
+                "mylib::bar3.int", "(Tensor x, int dim) -> Tensor", lib=lib
+            )
 
             torch.library.impl(
-                "mylib::bar3.tensor", "CompositeImplicitAutograd", torch.sin
+                "mylib::bar3.tensor",
+                "CompositeImplicitAutograd",
+                torch.sin,
+                lib=lib,
             )
             torch.library.impl(
-                "mylib::bar3.int", "CompositeImplicitAutograd", torch.sum
+                "mylib::bar3.int", "CompositeImplicitAutograd", torch.sum, lib=lib
             )
 
             def f(x):
@@ -402,6 +413,234 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         finally:
             del torch.ops.mylib.bar3
+            del lib
+
+    def test_generate_trivial_abstract_impl(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor x, Tensor[] y, Tensor(a!)? z, SymInt w) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y, z, w):
+                x + y[0] + w
+                return
+
+            def f(x, y, z, w):
+                return torch.ops.mylib.foo(x, y, z, 2)
+
+            x = torch.randn(3)
+            y = (torch.randn(3), torch.randn(3))
+            z = torch.randn(3)
+            w = torch.randn(3)
+            args = (x, y, z, w)
+
+            output = torch.compile(f, backend="eager", fullgraph=True)(*args)
+            self.assertEqual(output, None)
+        finally:
+            del torch.ops.mylib.foo
+            del lib
+
+    def test_can_auto_functionalize(self):
+        from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
+
+        expected_true = [
+            "(Tensor(a!) x) -> ()",
+            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> ()",
+            "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> ()",
+            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> Tensor",
+            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> (Tensor, Tensor)",
+        ]
+        expected_false = [
+            "(Tensor x) -> ()",
+            "(Tensor(a) x) -> Tensor(a)",
+            "(Tensor(a!) x) -> Tensor(a!)",
+            "(Tensor(a!) x, Tensor y, Tensor(b!)[] z, SymInt w) -> ()",
+            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> Tensor(a)",
+            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> (Tensor, Tensor(a))",
+            "(Tensor(a) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> (Tensor, Tensor(a))",
+            "(Tensor(a!) x, Tensor y, Tensor(b!) z, SymInt w, Tensor(c!)? n) -> (Tensor, Tensor[])",
+        ]
+        for schema in expected_true:
+            try:
+                lib = torch.library.Library("mylib", "FRAGMENT")
+                torch.library.define("mylib::a", schema, lib=lib)
+                self.assertTrue(
+                    can_auto_functionalize(torch.ops.mylib.a.default), msg=schema
+                )
+                self.assertFalse(can_auto_functionalize(torch.ops.mylib.a))
+            finally:
+                del torch.ops.mylib.a
+                del lib
+        for schema in expected_false:
+            try:
+                lib = torch.library.Library("mylib", "FRAGMENT")
+                torch.library.define("mylib::a", schema, lib=lib)
+                self.assertFalse(
+                    can_auto_functionalize(torch.ops.mylib.a.default), msg=schema
+                )
+                self.assertFalse(can_auto_functionalize(torch.ops.mylib.a))
+            finally:
+                del torch.ops.mylib.a
+                del lib
+
+    def test_auto_functionalize(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y, z, w, n):
+                x.add_(y[0] + w)
+                z.add_(y[1] + n)
+
+            def f(x, y, z, n):
+                torch.ops.mylib.foo(x, y, z, 2, n)
+
+            x = torch.randn(3)
+            y = (torch.randn(3), torch.randn(3))
+            z = torch.randn(3)
+            n = torch.randn(3)
+            orig_args = (x, y, z, n)
+
+            compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            torch.compile(f, backend="aot_eager_decomp_partition", fullgraph=True)(
+                *compiled_args
+            )
+
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            f(*eager_args)
+            self.assertEqual(compiled_args, eager_args)
+        finally:
+            del torch.ops.mylib.foo
+            del lib
+
+    def test_auto_functionalize_with_returns(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> (Tensor, Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y, z, w, n):
+                x.add_(y[0] + w)
+                z.add_(y[1] + n)
+                return y[0] + w, y[1] + n
+
+            @torch.library.impl_abstract("mylib::foo", lib=lib)
+            def foo_abstract(x, y, z, w, n):
+                return y[0] + w, y[1] + n
+
+            def f(x, y, z, n):
+                return torch.ops.mylib.foo(x, y, z, 2, n)
+
+            x = torch.randn(3)
+            y = (torch.randn(3), torch.randn(3))
+            z = torch.randn(3)
+            n = torch.randn(3)
+            orig_args = (x, y, z, n)
+
+            compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            compiled_out = torch.compile(
+                f, backend="aot_eager_decomp_partition", fullgraph=True
+            )(*compiled_args)
+
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            eager_out = f(*eager_args)
+            self.assertEqual(compiled_args, eager_args)
+            self.assertEqual(compiled_out, eager_out)
+        finally:
+            del torch.ops.mylib.foo
+            del lib
+
+    def test_auto_functionalize_on_view(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!) x) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x):
+                x_np = x.detach().numpy()  # view
+                np.sin(x_np, out=x_np)
+                return
+
+            x = torch.randn(3)
+            expected = x.sin()
+            torch.ops.mylib.foo(x)
+            assert torch.allclose(x, expected)
+
+            @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
+            def f(x):
+                x = x.clone()
+                y = x[:]
+                torch.ops.mylib.foo(y)
+                return x
+
+            y = f(x)
+            self.assertEqual(y, x.sin())
+        finally:
+            del lib
+            del torch.ops.mylib.foo
+
+    def test_auto_functionalize_optional(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor(a!)? x, Tensor[] y, Tensor(b!)? z, SymInt w, Tensor n) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def foo_impl(x, y, z, w, n):
+                if x is not None:
+                    x.add_(y[0] + w)
+                if z is not None:
+                    z.add_(y[1] + n)
+
+            def f(x, y, z, n):
+                torch.ops.mylib.foo(x, y, z, 2, n)
+
+            x = None
+            y = (torch.randn(3), torch.randn(3))
+            z = torch.randn(3)
+            n = torch.randn(3)
+            orig_args = (x, y, z, n)
+
+            compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            torch.compile(f, backend="aot_eager_decomp_partition", fullgraph=True)(
+                *compiled_args
+            )
+
+            eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
+            f(*eager_args)
+            self.assertEqual(compiled_args, eager_args)
+        finally:
+            del torch.ops.mylib.foo
             del lib
 
     def test_shape_int_inplace_binops(self):
@@ -1533,6 +1772,11 @@ utils_device.CURRENT_DEVICE == None""".split(
             )
             assert not other_fields_are_none
 
+            if not hasattr(obj, "a"):
+                return -1
+            if hasattr(obj, "z"):
+                return -2
+
             total = getattr(obj, class_fields[0].name)
             for field in class_fields[1:]:
                 v = getattr(obj, field.name)
@@ -1558,6 +1802,35 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(opt_fn(obj2), correct2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+        # guard failure
+        obj2.z = True
+        self.assertEqual(opt_fn(obj2), -2)
+
+    def test_dataclass_local_hasattr(self):
+        cnt = CompileCounter()
+        x = torch.randn(10)
+
+        @dataclasses.dataclass
+        class MyDataClass:
+            a: torch.Tensor
+            b: torch.Tensor
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn():
+            obj = MyDataClass(x + 1, x - 1)
+            if not hasattr(obj, "a"):
+                return -1
+            if hasattr(obj, "z"):
+                return -2
+            return obj
+
+        result = fn()
+        self.assertIsInstance(result, MyDataClass)
+        self.assertEqual(result.a, x + 1)
+        self.assertEqual(result.b, x - 1)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
 
     def test_tensor_build_list_unpack(self):
         def fn(x):
@@ -7149,8 +7422,6 @@ def ___make_guard_fn():
         opt()
 
     def test_tracing_py_tree(self):
-        import torch.utils._pytree as pytree
-
         def fn(xs):
             flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
@@ -7244,6 +7515,32 @@ def ___make_guard_fn():
         self.assertEqual(comp_out, real_out)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 18)
+
+    def test_any_all_symnode(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def fn(x):
+            t = x.size(0) >= 10
+            f = x.size(0) >= 100
+            if any([]) or any([f]) or any([f, f]):
+                return x - 1
+            if all([f]) or all([t, f]) or all([f, t]) or all([f, f]):
+                return x - 2
+            if not (all([]) and all([t]) and all([t, t])):
+                return x - 3
+            if not (any([t]) and any([t, f]) and any([f, t])):
+                return x - 4
+            return x + 1
+
+        y1 = torch.randn(16)
+        y2 = torch.randn(18)
+        self.assertEqual(fn(y1), y1 + 1)
+        self.assertEqual(fn(y2), y2 + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        y3 = torch.randn(5)
+        self.assertEqual(fn(y3), y3 - 3)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_tracing_py_tree_tensor_subclass(self):
         import torch.utils._pytree as pytree
@@ -7445,6 +7742,62 @@ def ___make_guard_fn():
         foo(g3, g2, g4)
         # assert no recompile
         self.assertEqual(counter.frame_count, 6)
+
+    def test_str_format_return1(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(img):
+            x = torch.sin(img)
+            y = f"shape {img.shape[-2:]} batch size {img.shape[0]}"
+            return img + x, y
+
+        img1 = torch.randn(1, 1, 8, 8)
+        res, msg = fn(img1)
+        self.assertEqual(msg, "shape torch.Size([8, 8]) batch size 1")
+        self.assertEqual(res, img1 + torch.sin(img1))
+
+    def test_str_format_return2(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(img):
+            x = torch.sin(img)
+            y = "shape {} batch size {y:.2f}".format(img.shape[-2:], y=img.shape[0])
+            return img + x, y
+
+        img1 = torch.randn(1, 1, 8, 8)
+        res, msg = fn(img1)
+        self.assertEqual(msg, "shape torch.Size([8, 8]) batch size 1.00")
+        self.assertEqual(res, img1 + torch.sin(img1))
+
+    def test_str_format_assert1(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(img):
+            x = torch.sin(img)
+            val = x.shape[-2:]
+            torch._assert(len(val) == 2, f"shape {img.shape}")
+            return img + x
+
+        img1 = torch.randn(1, 1, 8, 8)
+        res = fn(img1)
+        self.assertEqual(res, img1 + torch.sin(img1))
+
+    def test_str_format_assert2(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(img):
+            x = torch.sin(img)
+            torch._assert(
+                img.shape[-2] == 8 and img.shape[-1] == 16, f"shape {img.shape}"
+            )
+            return img + x
+
+        img1 = torch.randn(1, 3, 8, 16)
+        res = fn(img1)
+        self.assertEqual(res, img1 + torch.sin(img1))
+        self.assertEqual(cnt.frame_count, 1)
+
+        # trigger a recompile and graph break
+        img2 = torch.randn(1, 3, 8, 15)
+        self.assertRaises(AssertionError, lambda: fn(img2))
 
     def test_tolist_scalar(self):
         def fn(x):

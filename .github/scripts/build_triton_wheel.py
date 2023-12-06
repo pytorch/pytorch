@@ -29,6 +29,19 @@ def check_and_replace(inp: str, src: str, dst: str) -> str:
     return inp.replace(src, dst)
 
 
+def patch_setup_py(path: Path, *, version: str, name: str = "triton") -> None:
+    with open(path) as f:
+        orig = f.read()
+    # Replace name
+    orig = check_and_replace(orig, 'name="triton",', f'name="{name}",')
+    # Replace version
+    orig = check_and_replace(
+        orig, f'version="{read_triton_version()}",', f'version="{version}",'
+    )
+    with open(path, "w") as f:
+        f.write(orig)
+
+
 def patch_init_py(path: Path, *, version: str) -> None:
     with open(path) as f:
         orig = f.read()
@@ -130,6 +143,12 @@ def build_triton(
         )
 
         if build_rocm:
+            # TODO: Remove me when ROCM triton is updated
+            patch_setup_py(
+                triton_pythondir / "setup.py",
+                name=triton_pkg_name,
+                version=f"{version}",
+            )
             check_call("scripts/amd/setup_rocm_libs.sh", cwd=triton_basedir, shell=True)
             print("ROCm libraries setup for triton installation...")
 
