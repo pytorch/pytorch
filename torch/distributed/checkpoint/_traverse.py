@@ -1,8 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import torch
-
 from typing import (
     Callable,
+    cast,
     Collection,
     List,
     Mapping,
@@ -11,13 +10,12 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
-    cast,
 )
-from torch.distributed.checkpoint.metadata import (
-    STATE_DICT_TYPE,
-)
+
+import torch
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._tensor import DTensor
+from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
 PATH_ITEM = Union[str, int]
 OBJ_PATH = Tuple[PATH_ITEM, ...]
