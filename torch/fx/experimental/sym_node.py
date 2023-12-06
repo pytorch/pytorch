@@ -217,6 +217,9 @@ class SymNode:
     def abs(self) -> "SymNode":
         return self._abs()  # type: ignore[attr-defined]
 
+    def round(self, ndigits=None) -> "SymNode":
+        return self._round(ndigits)  # type: ignore[attr-defined]
+
     def add(self, other) -> "SymNode":
         return self._add(other)  # type: ignore[attr-defined]
 
@@ -421,6 +424,7 @@ METHOD_TO_OPERATOR = {
     "neg": operator.neg,
     "or": operator.or_,
     "pow": operator.pow,
+    "round": builtins.round,
     "rshift": operator.rshift,
     "sub": operator.sub,
     "sym_float": sym_float,
@@ -630,6 +634,15 @@ def _sympy_abs(a):
     return sympy.Abs(a)
 
 
+def _sympy_round(number, ndigits=None):
+    from torch.utils._sympy.functions import Round
+
+    # FIXME: sympy doesn't allow passing None
+    args = [ndigits] if ndigits is not None else []
+
+    return Round(number, *args)
+
+
 def _sympy_sym_float(a):
     # Cannot use sympy.Float(a) here, coz it expects python literals
     # Multiply by 1.0 to cast to float. This is needed when the input
@@ -656,6 +669,7 @@ magic_methods = {
     "sym_ite": _sympy_ite,
     "sym_sqrt": _sympy_sqrt,
     "abs": _sympy_abs,
+    "round": _sympy_round,
 }
 
 
@@ -937,6 +951,32 @@ def _make_node_magic(method, func):
             )
 
         setattr(SymNode, f"_{method_attr}", sym_ite_impl)
+    elif method == "round":
+        def round_impl(self, ndigits=None):
+            from torch.fx.experimental.symbolic_shapes import safe_expand
+
+            op = builtins.round
+            if sym_function_mode():
+                return to_node(self, handle_sym_dispatch(op, (wrap_node(self), ndigits), {}))
+
+            expr = self.expr
+            try:
+                out = func(expr)
+            except Exception:
+                log.warning("failed to eval %s(%s, ndigits=%s)", method, expr, ndigits)
+                raise
+            out = safe_expand(out)
+
+            pytype = int if ndigits is None else self.pytype
+
+            out_hint = None
+            if self.hint is not None:
+                out_hint = op(self.hint, ndigits)
+
+            fx_node, _ = self.shape_env.create_fx_call_function(op, (self.fx_node, ndigits))
+            return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
+
+        setattr(SymNode, f"_{method_attr}", round_impl)
     else:
         setattr(SymNode, f"_{method_attr}", binary_magic_impl)
 
@@ -1106,6 +1146,14 @@ def _make_user_magic(method, user_type):
             return get_constant(ret) if ret.node.is_constant() else ret
 
         setattr(user_type, f"__{method}__", sym_ite_magic_impl)
+    elif method == "round":
+        def round_magic_impl(self, ndigits=None):
+            if is_constant(self):
+                return builtins.round(self, ndigits)
+
+            return wrap_node(getattr(self.node, method)(ndigits))
+
+        setattr(user_type, f"__{method}__", round_magic_impl)
     else:
         setattr(user_type, f"__{method}__", binary_magic_impl)
         if method in reflectable_magic_methods:

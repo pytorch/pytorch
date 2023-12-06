@@ -385,6 +385,9 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) >= 2
         return f"min({', '.join(map(self._print, expr.args))})"
 
+    def _print_Round(self, expr):
+        return f"round{expr.args}"
+
 
 class OpOverrides:
     def __init__(self, parent):

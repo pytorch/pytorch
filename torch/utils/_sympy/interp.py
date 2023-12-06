@@ -23,6 +23,7 @@ from .functions import (
     Pow,
     TrueDiv,
     Where,
+    Round,
 )
 
 
@@ -67,6 +68,7 @@ def handlers():
         sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
         sympy.Piecewise: "piecewise",
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
+        Round: "round",
     }
     return HANDLERS
 

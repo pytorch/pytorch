@@ -398,6 +398,16 @@ class CppPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"std::abs({self._print(expr.args[0])})"
 
+    def _print_Round(self, expr):
+        number, *ndigits = expr.args
+        number = self._print(number)
+        ndigits = ndigits[0] if ndigits else None
+
+        if ndigits is None:
+            return f"std::lrint({number})"
+        else:
+            return f"static_cast<double>(std::nearbyint(1e{ndigits} * ({number})) * 1e-{ndigits})"
+
 
 # A function to print, useful for printing sympy symbols.
 cexpr = CppPrinter().doprint

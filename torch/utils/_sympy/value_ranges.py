@@ -443,6 +443,10 @@ class SymPyValueRangeAnalysis:
     def ceil(cls, x):
         return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.ceiling)
 
+    @classmethod
+    def round(cls, number, ndigits=None):
+        return ValueRanges(sympy.floor(number.lower), sympy.ceiling(number.upper))
+
     # It's used in some models on symints
     @staticmethod
     def sqrt(x):

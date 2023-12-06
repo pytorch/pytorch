@@ -651,14 +651,6 @@ class BuiltinVariable(VariableTracker):
                 ),
             )
 
-        if self.fn is round:
-            if len(args) > 0 and isinstance(args[0], SymNodeVariable):
-                raise UserError(
-                    UserErrorType.STANDARD_LIBRARY,
-                    "Calling round() on symbolic value is not supported. "
-                    "You can use floor() to implement this functionality",
-                    case_name="dynamic_shape_round",
-                )
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, *args):
@@ -772,6 +764,13 @@ class BuiltinVariable(VariableTracker):
             tx, [arg, ConstantVariable.create("__abs__")], {}
         )
         return abs_method.call_function(tx, [], {})
+
+    def call_round(self, tx, arg, *args, **kwargs):
+        # Call arg.__round__()
+        round_method = BuiltinVariable(getattr).call_function(
+            tx, [arg, ConstantVariable.create("__round__")], {}
+        )
+        return round_method.call_function(tx, args, kwargs)
 
     def call_range(self, tx, *args):
         if self.unspec_python_args(*args) or self.constant_args(*args):

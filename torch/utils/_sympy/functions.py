@@ -4,7 +4,7 @@ from sympy.core.logic import fuzzy_and, fuzzy_not, fuzzy_or
 
 __all__ = [
     "FloorDiv", "ModularIndexing", "CleanDiv", "CeilDiv", "Pow", "TrueDiv",
-    "LShift", "RShift", "IsNonOverlappingAndDenseIndicator",
+    "LShift", "RShift", "IsNonOverlappingAndDenseIndicator", "Round",
 ]
 
 
@@ -310,3 +310,10 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
                 [int(a) for a in stride_args]
             )
         return None
+
+
+class Round(sympy.Function):
+    @classmethod
+    def eval(cls, number, ndigits=None):
+        if number.is_integer:
+            return number
