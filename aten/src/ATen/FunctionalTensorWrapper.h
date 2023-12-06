@@ -165,6 +165,10 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // See Note[resize_() in functionalization pass]
   void maybe_replace_storage(const Tensor& other);
 
+  // Replaces the storage with a new functional storage,
+  // and clears the view_metas_ stack.
+  void reset_storage();
+
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override;

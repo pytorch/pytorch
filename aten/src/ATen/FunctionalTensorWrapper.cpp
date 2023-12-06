@@ -149,6 +149,7 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
   storage_ = base->storage_; // alias this tensor's storage with the base tensor's
 }
 
+
 functionalization::FunctionalStorageImpl* FunctionalTensorWrapper::functional_storage_impl() const {
   return static_cast<functionalization::FunctionalStorageImpl*>(storage_.unsafeGetStorageImpl());
 }
@@ -309,6 +310,11 @@ void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   has_metadata_mutation_ = true;
 }
 
+void FunctionalTensorWrapper::reset_storage() {
+  storage_ = c10::Storage(c10::make_intrusive<functionalization::FunctionalStorageImpl>(value_));
+  generation_ = 0;
+  view_metas_.clear();
+}
 
 void FunctionalTensorWrapper::sync_() {
   if (is_up_to_date()) {
