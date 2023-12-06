@@ -623,7 +623,7 @@ def _annotate_add_relu(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
     fused_partitions = find_sequential_partitions(
-        gm, [torch.add, torch.nn.ReLU], filter_fn
+        gm, [torch.add, torch.nn.ReLU], filter_fn=filter_fn
     )
     annotated_partitions = []
     for fused_partition in fused_partitions:
@@ -706,7 +706,7 @@ def _annotate_mul_relu(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
     fused_partitions = find_sequential_partitions(
-        gm, [torch.mul, torch.nn.ReLU], filter_fn
+        gm, [torch.mul, torch.nn.ReLU], filter_fn=filter_fn
     )
     annotated_partitions = []
     for fused_partition in fused_partitions:
