@@ -181,6 +181,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif variables.DataClassVariable.is_matching_cls(self.value):
             options = {"mutable_local": MutableLocal()}
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
+        elif (
+            variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
+            and self.source
+        ):
+            return variables.RestrictedListSubclassVariable(
+                variables.BuiltinVariable(list).call_function(tx, args, kwargs).items,
+                user_cls=self.value,
+                user_cls_source=self.source,
+                mutable_local=MutableLocal(),
+            )
 
         return super().call_function(tx, args, kwargs)
 

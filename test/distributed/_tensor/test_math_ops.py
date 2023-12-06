@@ -187,6 +187,12 @@ class DistMathOpsTest(DTensorTestBase):
                 device_mesh, placements=[Replicate()]
             )
 
+            from torch.distributed._tensor.placement_types import TensorMeta
+
+            dtensor_meta = y_dist._spec.tensor_meta
+            assert isinstance(dtensor_meta, TensorMeta)
+            # make sure the right shape in sharding prop
+            self.assertEqual(y_local.shape, dtensor_meta.shape)
             self.assertEqual(y_local, y_dist.to_local())
 
 
