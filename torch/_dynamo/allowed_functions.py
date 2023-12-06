@@ -246,7 +246,6 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
             "torch._utils",
             "torch._utils_internal",
             "torch._vmap_internals",
-            "torch.ao",
             "torch.compiler",
             "torch.distributed",
             "torch.export",

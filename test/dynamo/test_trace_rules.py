@@ -41,6 +41,8 @@ ignored_torch_name_rule_set = {
     "torch._C._InferenceMode",
     "torch._C._RestorePythonTLSSnapshot",
     "torch._C._SetExcludeDispatchKeyGuard",
+    "torch._decomp.decompositions_for_rng.PhiloxStateTracker",
+    "torch.ao.nn.sparse.quantized.utils.LinearBlockSparsePattern",
     "torch.autograd.anomaly_mode.detect_anomaly",
     "torch.autograd.anomaly_mode.set_detect_anomaly",
     "torch.autograd.forward_ad._set_fwd_grad_enabled",
@@ -61,16 +63,6 @@ ignored_torch_name_rule_set = {
     "torch.cuda.device_of",
     "torch.cuda.graphs.graph",
     "torch.device",  # as constant folding function
-    "torch.distributed.autograd.context",
-    "torch.hub._Faketqdm",
-    "torch.jit._ir_utils._InsertPoint",
-    "torch.jit._script.RecursiveScriptClass",
-    "torch.jit.strict_fusion",
-    "torch.onnx._internal.diagnostics.infra.context.DiagnosticContext",
-    "torch.onnx._internal.fx.patcher.ONNXTorchPatcher",
-    "torch.overrides.TorchFunctionMode",
-    "torch.package.package_exporter.PackageExporter",
-    "torch.serialization._opener",
     "torch.sparse.check_sparse_tensor_invariants",
 }
 
