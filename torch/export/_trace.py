@@ -76,9 +76,8 @@ def _convert_input_to_fake(gm, args, kwargs):
     if detected_fake_mode := detect_fake_mode(fake_inps):
         fake_mode = detected_fake_mode
 
-    assert (
-        fake_mode is not None
-    ), "Cannot find fake_mode attatched to the graph's placeholders."
+    if fake_mode is None:
+        return [], {}, {}, None
 
     count = 0
 

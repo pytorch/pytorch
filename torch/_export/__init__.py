@@ -205,7 +205,7 @@ def capture_pre_autograd_graph(
             k: v
             for k, v in fake_mode.shape_env.runtime_var_to_range.items()
             if re.match(r"^[if]\d+$", str(k))
-        }
+        } if fake_mode else {}
 
         flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
         range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
