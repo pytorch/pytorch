@@ -370,19 +370,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 }
 
 const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  IntArrayRef batch1_sizes = batch1.sizes();
-
-  // handle pathological cases that blas may not like
-  if (result.numel() == 0) {
-    return result;
-  } else if (batch1_sizes[2] == 0) {
-    if (beta.to<c10::complex<double>>() == 0.0) {
-      return result.zero_();
-    } else {
-      return result.mul_(beta);
-    }
-  }
-
   // If batch is 1 call addmm_out_cuda_impl (and squeeze is essentially noop)
   if (result.size(0) == 1) {
     auto result_s = native::_unsafe_view(result, {result.size(1), result.size(2)});
@@ -391,6 +378,18 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
     auto mat2 = native::_unsafe_view(batch2, {batch2.size(1), batch2.size(2)});
     addmm_out_cuda_impl(result_s, self_s, mat1, mat2, beta, alpha);
     return result;
+  }
+
+
+  // handle pathological cases that blas may not like
+  if (result.numel() == 0) {
+    return result;
+  } else if (batch1.size(2) == 0) {
+    if (beta.to<c10::complex<double>>() == 0.0) {
+      return result.zero_();
+    } else {
+      return result.mul_(beta);
+    }
   }
 
   bool transpose_result = false;
