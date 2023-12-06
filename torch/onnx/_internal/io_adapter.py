@@ -550,3 +550,39 @@ class PrependParamsAndBuffersAotAutogradInputStep(InputAdaptStep):
         if model_kwargs:
             return MergeKwargsIntoArgsInputStep().apply(updated_args, model_kwargs)
         return updated_args, {}
+
+
+class PrependParamsAndBuffersAotAutogradOutputStep(OutputAdaptStep):
+    """Prepend model's mutated buffers to the user output.
+
+    :func:`torch.export.export` lifts model's mutated buffers as outputs, thus, they
+    must be added to the user output after the model is executed.
+
+    Args:
+        model: The PyTorch model with mutated buffers.
+    """
+
+    def __init__(self, model: torch_export.ExportedProgram):
+        assert isinstance(
+            model, torch_export.ExportedProgram
+        ), "'model' must be a torch.export.ExportedProgram."
+        self.model = model
+
+    def apply(self, model_outputs: Any) -> Sequence[Any]:
+        """Flatten the model outputs and validate the `SpecTree` output.
+
+        Args:
+            model_outputs: The model outputs to flatten.
+
+        Returns:
+            flattened_outputs: The flattened model outputs.
+        """
+
+        ordered_buffers = tuple(
+            self.model.state_dict[name]
+            for name in self.model.graph_signature.buffers_to_mutate.values()
+        )
+
+        # NOTE: calling convention is first mutated buffers, then outputs args as model returned them.
+        updated_outputs = (*ordered_buffers, *model_outputs)
+        return updated_outputs

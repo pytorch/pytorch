@@ -127,8 +127,8 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
     def tearDown(self):
         super().tearDown()
 
-    @unittest.skipIf(IS_WINDOWS, "torch.compile not support on windows")
-    def test_mlp_contiguous_relu_compile(self):
+    @staticmethod
+    def _test_mlp_contiguous_relu_compile(backend, dense_input_shape):
         """
         Test nn.Linear + .contiguous() + nn.ReLU with SparseSemiStructuredTensor + torch.compile
         We expect:
@@ -146,28 +146,46 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
                 x = x.contiguous()
                 return torch.nn.functional.relu(x)
 
-        def _test_mlp_contiguous_relu_compile(backend, dense_input_shape):
-            SparseSemiStructuredTensor._FORCE_CUTLASS = backend == "cutlass"
-            input = torch.rand(dense_input_shape, device="cuda").half()
+        SparseSemiStructuredTensor._FORCE_CUTLASS = backend == "cutlass"
 
-            model = Model().eval().cuda().half()
-            mod_linear = model.linear
-            m, n = mod_linear.weight.shape
-            mask = torch.Tensor([1, 0, 0, 1]).tile((m, n // 4)).bool().cuda()
-            # set masked weight
-            mod_linear.weight = nn.Parameter(mod_linear.weight * mask)
+        input = torch.rand(dense_input_shape, device="cuda").half()
+        model = Model().eval().cuda().half()
+        mod_linear = model.linear
+        m, n = mod_linear.weight.shape
+        mask = torch.Tensor([1, 0, 0, 1]).tile((m, n // 4)).bool().cuda()
+        # set masked weight
+        mod_linear.weight = nn.Parameter(mod_linear.weight * mask)
 
-            dense_result = model(input)
-            mod_linear.weight = nn.Parameter(to_sparse_semi_structured(mod_linear.weight))
+        dense_result = model(input)
+        mod_linear.weight = nn.Parameter(to_sparse_semi_structured(mod_linear.weight))
+        sparse_result = model(input)
 
-            model = torch.compile(model)
-            sparse_result = model(input)
+        model = torch.compile(model, backend="inductor", fullgraph=True)
+        sparse_compile_result = model(input)
 
-            assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
+        # test that sparse_compile_result and dense_result are numerically close
+        assert torch.allclose(dense_result, sparse_compile_result, rtol=1e-3, atol=1e-3)
+        # assert sparse and sparse_compile have the same strides,
+        # as meta registrations may return contiguous tensors when the output is transposed
+        # https://github.com/pytorch/pytorch/pull/114477
+        assert sparse_result.stride() == sparse_compile_result.stride()
 
-            for backend in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
-                for dense_input_shape in [(1, 128), (64, 128), (128, 128), (64, 128, 128)]:
-                    _test_mlp_contiguous_relu_compile(backend, dense_input_shape)
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not support on windows")
+    @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cusparselt not supported on this machine")
+    def test_mlp_contiguous_relu_compile_cusparselt(self):
+        """
+        test for cuSPASRELt meta registrations (_cslt_sparse_mm) + torch.compile
+        """
+        for dense_input_shape in [(1, 128), (64, 128), (128, 128), (64, 128, 128)]:
+            SparseSemiStructuredTensorCompileTest._test_mlp_contiguous_relu_compile("cusparselt", dense_input_shape)
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not support on windows")
+    def test_mlp_contiguous_relu_compile_cutlass(self):
+        """
+        test for CUTLASS meta registrations (_sparse_semi_structured_linear) + torch.compile
+        """
+        for dense_input_shape in [(1, 128), (64, 128), (128, 128), (64, 128, 128)]:
+            SparseSemiStructuredTensorCompileTest._test_mlp_contiguous_relu_compile("cutlass", dense_input_shape)
 
 class TestSparseSemiStructured(TestCase):
 
@@ -321,20 +339,51 @@ class TestSparseSemiStructured(TestCase):
             sparse_result = torch.mm(A, B_sparse)
 
     @parametrize("dense_input_shape", [(128, 128)])
+    @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cuSPARSELT is not enabled")
     def test_cslt_sparse_mm_int8_in_fp16_out(self, dense_input_shape, device):
-        """
-        This test is only needed for cuSPARSELt
-        """
-        if "cusparselt" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
-            SparseSemiStructuredTensor._FORCE_CUTLASS = False
-            A = rand_sparse_semi_structured_mask(128, 128, dtype=torch.int8)
-            A_sparse = to_sparse_semi_structured(A)
+        SparseSemiStructuredTensor._FORCE_CUTLASS = False
+        A = rand_sparse_semi_structured_mask(128, 128, dtype=torch.int8)
+        A_sparse = to_sparse_semi_structured(A)
 
-            B = torch.rand(dense_input_shape, device=A_sparse.device).to(torch.int8)
+        B = torch.rand(dense_input_shape, device=A_sparse.device).to(torch.int8)
 
-            dense_result = torch.mm(A.cpu().to(torch.int64), B.t().cpu().to(torch.int64)).to(device, dtype=torch.float16)
-            sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.float16)
-            assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
+        dense_result = torch.mm(A.cpu().to(torch.int64), B.t().cpu().to(torch.int64)).to(device, dtype=torch.float16)
+        sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.float16)
+        assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cuSPARSELT is not enabled")
+    def test_cslt_sparse_mm_alpha(self, dtype, device):
+        A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(dtype).cuda()
+        B = torch.ones((256, 128), device=device).to(dtype)
+        alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
+
+        A_compressed = torch._cslt_compress(A)
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B, alpha=alpha)
+
+        alpha_scaled = torch.stack([alpha] * 128).t()
+        dense_result = alpha_scaled * torch.mm(A.to(torch.float32), B.to(torch.float32))
+        dense_result = dense_result.to(dtype)
+
+        assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
+
+    @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cuSPARSELT is not enabled")
+    def test_cslt_sparse_mm_alpha_int8_in_f16_out(self, device):
+        torch.set_printoptions(edgeitems=8)
+        A = torch.Tensor([0, 0, 10, 10]).tile((128, 64)).to(torch.int8).cuda()
+        B = torch.ones((128, 256), device=device).to(torch.int8).t()
+        alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
+
+        A_compressed = torch._cslt_compress(A)
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B, alpha=alpha, out_dtype=torch.float16).cpu()
+
+
+        alpha_scaled = torch.stack([alpha] * 128).t()
+        dense_result = alpha_scaled.cpu() * torch.mm(A.to(torch.int32).cpu(), B.to(torch.int32).cpu())
+        dense_result = dense_result.to(torch.float16)
+
+
+        assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
     @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128), (64, 128, 128)])
     @parametrize("inference_mode", [subtest(True), subtest(False)])

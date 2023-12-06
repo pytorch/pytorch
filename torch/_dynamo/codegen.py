@@ -59,6 +59,15 @@ class PyCodegen:
         self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
+        self.mutable_side_effects_from_source = False
+
+    def restore_stack(self, stack_values):
+        prior = self.mutable_side_effects_from_source
+        self.mutable_side_effects_from_source = True
+        try:
+            self.foreach(stack_values)
+        finally:
+            self.mutable_side_effects_from_source = prior
 
     def graph_output_vars(self):
         return [x.variable for x in self.graph_outputs.values()]
@@ -77,6 +86,17 @@ class PyCodegen:
         if self.top_of_stack is value:
             output.append(create_dup_top())
             return
+
+        if self.mutable_side_effects_from_source:
+            # this is needed to get aliasing relationships right
+            # value.mutable_local.source will get mutated to hold `value`
+            # mutable_side_effects_from_source=False is used to codegen the mutation
+            # mutable_side_effects_from_source=True is used to codegen a reference
+            from .side_effects import MutableSideEffects
+
+            if isinstance(value.mutable_local, MutableSideEffects):
+                self(value.mutable_local.source)
+                return
 
         if allow_cache:
             if value.mutable_local and value.mutable_local in self.tempvars:

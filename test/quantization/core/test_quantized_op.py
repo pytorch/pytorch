@@ -22,7 +22,7 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2, IS_SANDCASTLE
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
@@ -326,6 +326,23 @@ class TestQuantizedOps(TestCase):
                 'output_is_observed': True,
             }
         ]
+        self._test_activation_function(X, 'sigmoid', sigmoid_test_configs)
+
+    @skipIfNoFBGEMM
+    def test_sigmoid_dequantize_rounding_error(self):
+        # issue #107030
+        sigmoid_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.ops.quantized.sigmoid
+                ],
+                'reference_fn': torch.sigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True,
+                'output_is_observed': True,
+            }
+        ]
+        X = (np.full(64, 514., dtype=np.float32), (1028.02, 255, torch.quint8))
         self._test_activation_function(X, 'sigmoid', sigmoid_test_configs)
 
     """Tests the correctness of the quantized::hardsigmoid op."""
@@ -2557,15 +2574,18 @@ class TestQuantizedOps(TestCase):
         combined = [shape_list, torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
         test_cases_product = itertools.product(*combined)
         test_cases = list(test_cases_product)
-        # add just one test case to test overflow
-        test_cases.append([
-            [1, 4, 224, 224, 160],  # shape,
-            torch.qint8,  # torch_type
-            0.1,  # scale
-            0,  # zero_point
-            False,   # channels_last
-            True,  # affine
-        ])
+        # NB: Add just one test case to test overflow, but this case is too slow to run
+        # internally in @fbcode//mode/dev, the long pole is the 4x calls to torch.sort
+        # inside torch.unique current implementation
+        if not IS_SANDCASTLE:
+            test_cases.append([
+                [1, 4, 224, 224, 160],  # shape,
+                torch.qint8,  # torch_type
+                0.1,  # scale
+                0,  # zero_point
+                False,   # channels_last
+                True,  # affine
+            ])
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
@@ -4166,18 +4186,19 @@ class TestQuantizedLinear(TestCase):
         w_scale, w_zp = 0.8, 0
         y_scale, y_zp = 4.7, 2
         post_op_args = []
+        input_dim_list = [2, 3]
         cases = itertools.product(
             in_channels_list, out_channels_list, use_bias_list,
-            supported_post_ops, weight_quant_per_channel_list, output_dtype_list)
+            supported_post_ops, weight_quant_per_channel_list, output_dtype_list, input_dim_list)
         with override_quantized_engine('onednn'):
-            for ic, oc, use_bias, post_op, weight_quant_per_channel, output_dtype in cases:
+            for ic, oc, use_bias, post_op, weight_quant_per_channel, output_dtype, input_dim in cases:
                 used_y_scale = y_scale
                 used_y_zp = y_zp
                 fp32_out = output_dtype == torch.float32
                 bfloat16_out = output_dtype == torch.bfloat16
                 if fp32_out or bfloat16_out:
                     used_y_scale, used_y_zp = 1.0, 0
-                x = torch.rand(batch_size, ic) * 10
+                x = torch.rand(batch_size, (ic + 1), ic) * 10 if input_dim == 3 else torch.rand(batch_size, ic) * 10
                 w = torch.rand(oc, ic) * 10
                 qx = torch.quantize_per_tensor(x, x_scale, x_zp, torch.quint8)
                 if weight_quant_per_channel:
@@ -4212,6 +4233,8 @@ class TestQuantizedLinear(TestCase):
                         used_y_scale,
                         used_y_zp, dtype=torch.quint8
                     ).int_repr()
+
+                self.assertEqual(x.dim(), qy_cpu.dim())
 
                 np.testing.assert_array_almost_equal(
                     qy_ref.int_repr().cpu().numpy(),
@@ -6532,6 +6555,11 @@ class TestQuantizedConv(TestCase):
             assert not use_transpose, "Cannot fuse ReLU with ConvTranspose"
             relu = torch.nn.ReLU()
             result_ref = relu(result_ref)
+        elif post_op.unary_attr == "hardtanh":
+            assert not use_transpose, "Cannot fuse hardtanh with ConvTranspose"
+            assert len(post_op.scalars) == 2, "For post op hardtanh, expect 2 parameters passed in"
+            hardtanh = torch.nn.Hardtanh(min_val=post_op.scalars[0], max_val=post_op.scalars[1])
+            result_ref = hardtanh(result_ref)
 
         # Quantize reference results for comparison
         result_ref_q = torch.quantize_per_tensor(
@@ -6854,6 +6882,56 @@ class TestQuantizedConv(TestCase):
                 groups,
             )
             pointwise_post_op = PointwisePostOp(unary_attr="relu")
+            self._test_qconv_impl_cpu_tensor(
+                qconv,
+                qconv_prepack,
+                conv_op,
+                input_channels_per_group=input_channels_per_group,
+                input_feature_map_shape=input_feature_map_shape,
+                output_channels_per_group=output_channels_per_group,
+                groups=groups,
+                kernels=kernels,
+                strides=strides,
+                pads=pads,
+                dilations=dilations,
+                W_scale=W_scale,
+                W_zero_point=W_zero_point,
+                use_bias=use_bias,
+                post_op=pointwise_post_op,
+                use_channelwise=use_channelwise,
+                qconv_output_dtype=output_dtype,
+            )
+
+    # Test qconv with post op hardtanh
+    @skipIfNoONEDNN
+    def test_qconv2d_hardtanh_pt2e(self):
+        input_channels_per_group = 2
+        output_channels_per_group = 2
+        groups_list = [1, 10]
+        input_feature_map_shape = (10, 10)
+        kernels = (3, 3)
+        strides = (2, 2)
+        pads = (1, 1)
+        dilations = (1, 1)
+        W_scale = [1.5]
+        W_zero_point = [0]
+        use_bias_list = [False, True]
+        use_channelwise_list = [False, True]
+        output_dtype_list = [None, torch.float32, torch.bfloat16]
+        options = itertools.product(groups_list, use_bias_list, use_channelwise_list, output_dtype_list)
+        for groups, use_bias, use_channelwise, output_dtype in options:
+            qconv = torch.ops.onednn.qconv2d_pointwise
+            qconv_prepack = torch.ops.onednn.qconv_prepack
+            conv_op = torch.nn.Conv2d(
+                input_channels_per_group * groups,
+                output_channels_per_group * groups,
+                kernels,
+                strides,
+                pads,
+                dilations,
+                groups,
+            )
+            pointwise_post_op = PointwisePostOp(unary_attr="hardtanh", scalars=[0.0, 6.0])
             self._test_qconv_impl_cpu_tensor(
                 qconv,
                 qconv_prepack,
