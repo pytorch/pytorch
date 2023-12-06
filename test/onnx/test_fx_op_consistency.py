@@ -855,7 +855,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 # TODO(titaiwang): refactor this
 # https://github.com/pytorch/pytorch/issues/105338
 for opset in onnx_test_common.FX_TESTED_OPSETS:
-    for model_type in [onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM]:
+    for model_type in onnx_test_common.TorchModelType:
         # The name needs to match the parameterized_class name.
         test_class_name = f"TestOnnxModelOutputConsistency_opset_version_{opset}_model_type_TorchModelType.{model_type.name}"
         onnx_test_common.add_decorate_info(
