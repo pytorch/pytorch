@@ -417,6 +417,7 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
     # Check if it's a valid Conv Binary Pattern:
     # * qconv2d_pointwise should only has one users
     # * Extra input of binary node comes from dequant pattern
+    # * the two inputs of binary node should have the same shape
     def fn(match):
         qconv2d_node_after_weight_prepack = filter_nodes(
             match.nodes, torch.ops.onednn.qconv2d_pointwise
@@ -428,6 +429,8 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
                 iter(qconv2d_node_after_weight_prepack.users)
             ).args
             assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
+            if binary_node_inputs[0].meta["val"].size() != binary_node_inputs[1].meta["val"].size():
+                return False
             extra_input_node = None
             for arg in binary_node_inputs:
                 if arg != qconv2d_node_after_weight_prepack:
