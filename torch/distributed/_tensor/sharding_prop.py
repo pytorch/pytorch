@@ -178,7 +178,11 @@ class ShardingPropagator:
         def spec_to_strategy(spec: object) -> object:
             if isinstance(spec, DTensorSpec):
                 return OpStrategy([PlacementStrategy(spec)])
-            elif isinstance(spec, (list, tuple)) and isinstance(spec[0], DTensorSpec):
+            elif (
+                isinstance(spec, (list, tuple))
+                and len(spec) > 0
+                and isinstance(spec[0], DTensorSpec)
+            ):
                 # tensor list create tuple strategy
                 tuple_strategy = [spec_to_strategy(s) for s in spec]
                 tuple_strategy = cast(Sequence[StrategyType], tuple_strategy)
