@@ -5,6 +5,8 @@ import errno
 from pathlib import Path
 import shlex
 import subprocess
+import re
+import torch
 
 # Windows need setup a temp dir to store .obj files.
 _BUILD_TEMP_DIR = "CxxBuild"
@@ -51,6 +53,13 @@ def run_command_line(cmd_line, cwd=None):
     
     return status
 
+def is_gcc(cpp_compiler) -> bool:
+    return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
+
+
+def is_clang(cpp_compiler) -> bool:
+    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
+
 class BuildOptionsBase(object):
     '''
     This is the Base class for store cxx build options, as a template.
@@ -93,6 +102,12 @@ class BuildOptionsBase(object):
     def get_passthough_args(self) -> List[str]:
         return self._passthough_args
 
+def get_warning_all_flag(warning_all: bool = False) -> List[str]:
+    if not _IS_WINDOWS:
+        return ["Wall"] if warning_all else []
+    else:
+        return []
+
 class CxxOptions(BuildOptionsBase):
     '''
     This class is inherited from BuildOptionsBase, and as cxx build options.
@@ -115,7 +130,11 @@ class CxxOptions(BuildOptionsBase):
         self._compiler = _get_cxx_compiler()
         _nonduplicate_append(self._cflags, ["O2"])
         _nonduplicate_append(self._cflags, self._get_shared_cflag())
+        _nonduplicate_append(self._cflags, get_warning_all_flag())
     
+def get_glibcxx_abi_build_flags() ->  List[str]:
+    return ["-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
+
 class CxxTorchOptions(CxxOptions):
     '''
     This class is inherited from CxxTorchOptions, which automatic contains
@@ -129,7 +148,10 @@ class CxxTorchOptions(CxxOptions):
     '''
     def __init__(self) -> None:
         super().__init__()
-        #_nonduplicate_append(self._cflags, ["DTORCH"])
+
+        if not _IS_WINDOWS:
+            # glibcxx is not available in Windows.
+            _nonduplicate_append(self._passthough_args, get_glibcxx_abi_build_flags())
     
 class CxxTorchCudaOptions(CxxTorchOptions):
     '''
@@ -236,6 +258,7 @@ class CxxBuilder(object):
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
+        print("!!! build_cmd: ", build_cmd)
         status = run_command_line(build_cmd, cwd=_build_tmp_dir)
 
         _remove_dir(_build_tmp_dir)
