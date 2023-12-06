@@ -150,8 +150,11 @@ class CxxOptions(BuildOptionsBase):
 
         _nonduplicate_append(self._cflags, get_linux_cpp_cflags(self._compiler))
     
-def get_glibcxx_abi_build_flags() ->  List[str]:
+def get_glibcxx_abi_build_flags() -> List[str]:
     return ["-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
+
+def get_torch_cpp_wrapper_defination() -> List[str]:
+    return ["TORCH_INDUCTOR_CPP_WRAPPER"]
 
 class CxxTorchOptions(CxxOptions):
     '''
@@ -166,6 +169,7 @@ class CxxTorchOptions(CxxOptions):
     '''
     def __init__(self) -> None:
         super().__init__()
+        _nonduplicate_append(self._definations, get_torch_cpp_wrapper_defination())
 
         if not _IS_WINDOWS:
             # glibcxx is not available in Windows.
