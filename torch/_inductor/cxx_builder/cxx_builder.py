@@ -107,6 +107,21 @@ def get_warning_all_flag(warning_all: bool = False) -> List[str]:
         return ["Wall"] if warning_all else []
     else:
         return []
+    
+def get_cxx_std(std_num: str = "c++17") -> List[str]:
+    if _IS_WINDOWS:
+        return [f"std:{std_num}"]
+    else:
+        return [f"std={std_num}"]
+
+def get_linux_cpp_cflags(cpp_compiler) -> List[str]:
+    if not _IS_WINDOWS:
+        cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
+        if is_clang(cpp_compiler):
+            cflags.append("Werror=ignored-optimization-argument")
+        return cflags
+    else:
+        return []
 
 class CxxOptions(BuildOptionsBase):
     '''
@@ -131,6 +146,9 @@ class CxxOptions(BuildOptionsBase):
         _nonduplicate_append(self._cflags, ["O2"])
         _nonduplicate_append(self._cflags, self._get_shared_cflag())
         _nonduplicate_append(self._cflags, get_warning_all_flag())
+        _nonduplicate_append(self._cflags, get_cxx_std())
+
+        _nonduplicate_append(self._cflags, get_linux_cpp_cflags(self._compiler))
     
 def get_glibcxx_abi_build_flags() ->  List[str]:
     return ["-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
