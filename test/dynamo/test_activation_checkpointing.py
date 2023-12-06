@@ -15,7 +15,7 @@ from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_CUDA
-from torch.utils.checkpoint import checkpoint, context_fn_gen
+from torch.utils.checkpoint import _pt2_selective_checkpoint_context_fn_gen, checkpoint
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
@@ -423,7 +423,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             no_recompute_list = [
                 torch.ops.aten.mm.default,
             ]
-            return context_fn_gen(
+            return _pt2_selective_checkpoint_context_fn_gen(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
             )
 
@@ -488,7 +488,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def selective_checkpointing_context_fn():
             meta = {}
-            return context_fn_gen(_get_custom_policy(meta))
+            return _pt2_selective_checkpoint_context_fn_gen(_get_custom_policy(meta))
 
         def gn(x, y):
             return torch.sigmoid(
@@ -538,7 +538,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
             ]
-            return context_fn_gen(
+            return _pt2_selective_checkpoint_context_fn_gen(
                 _get_custom_policy(no_recompute_list=no_recompute_list),
             )
 
@@ -588,7 +588,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
             ]
-            return context_fn_gen(
+            return _pt2_selective_checkpoint_context_fn_gen(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
             )
 
@@ -636,7 +636,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 torch.ops.aten.mm.default,
                 torch.ops.aten.sigmoid.default,
             ]
-            return context_fn_gen(
+            return _pt2_selective_checkpoint_context_fn_gen(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
             )
 

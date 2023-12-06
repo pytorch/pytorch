@@ -61,12 +61,12 @@ def raise_hard_error_if_graph_break(reason):
 
 
 @contextlib.contextmanager
-def dynamo_enable_grad(tx):
+def dynamo_enable_grad(tx, enable=True):
     from . import GradModeVariable
 
     org_value = torch.is_grad_enabled()
     try:
-        GradModeVariable.create(tx, True, initialized=True)
+        GradModeVariable.create(tx, enable, initialized=True)
         yield
     finally:
         GradModeVariable.create(tx, org_value, initialized=True)
@@ -107,71 +107,56 @@ def _assert_tensors_nonaliasing(inputs, outputs):
 
 
 def validate_args_and_maybe_create_graph_inputs(
-    sub_args, tracer, tx, manually_set_subgraph_inputs
+    sub_args,
+    tracer,
+    tx,
+    manually_set_subgraph_inputs,
+    description,
 ):
-    from . import (
-        AutogradFunctionContextVariable,
-        ConstantVariable,
-        SymNodeVariable,
-        TensorVariable,
-    )
-    from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
+    from . import AutogradFunctionContextVariable, ConstantVariable
+    from .builder import wrap_fx_proxy_cls
 
     assert tracer.parent is not None
 
     args = []
     for a in sub_args:
         assert isinstance(a, VariableTracker)
+        if not manually_set_subgraph_inputs:
+            args.append(a)
+            continue
 
         if isinstance(a, ConstantVariable):
-            if manually_set_subgraph_inputs:
-                # This arg is not used in the body of the higher order op.
-                # Currently, this new input is added to make the calls
-                # happy, which expect a fixed number of arguments. In
-                # future, we can clean this up.
-                tracer.create_graph_input("const")
+            # This arg is not used in the body of the higher order op.
+            # Currently, this new input is added to make the calls
+            # happy, which expect a fixed number of arguments. In
+            # future, we can clean this up.
+            tracer.create_graph_input("const")
             new_arg = a
-        elif isinstance(a, TensorVariable):
-            if manually_set_subgraph_inputs:
-                new_proxy = tracer.create_graph_input(a.as_proxy().node.name)
-                example_value = a.as_proxy().node.meta["example_value"]
-                new_arg = wrap_fx_proxy(
-                    tx=tx, proxy=new_proxy, example_value=example_value
-                )
-            else:
-                new_arg = a
-        elif isinstance(a, SymNodeVariable):
-            if manually_set_subgraph_inputs:
-                new_proxy = tracer.create_graph_input(str(a.sym_num.node.expr))
-                new_arg = wrap_fx_proxy_cls(
-                    target_cls=SymNodeVariable,
-                    tx=tx,
-                    proxy=new_proxy,
-                    example_value=a.sym_num,
-                )
-            else:
-                new_arg = a
+        # Weird special case, we probably want to delete it or fold it
+        # into the next case (of `a` being placeable into a graph)
         elif isinstance(a, AutogradFunctionContextVariable):
-            if manually_set_subgraph_inputs:
-                tracer.create_graph_input(a.as_proxy().node.name)
+            tracer.create_graph_input(a.as_proxy().node.name)
             new_arg = a
+        # If `a` can be put into a graph
+        elif a.maybe_fx_node() is not None:
+            node = a.maybe_fx_node()
+            new_proxy = tracer.create_graph_input(node.name)
+            example_value = (
+                node.meta["example_value"] if "example_value" in node.meta else None
+            )
+            new_arg = wrap_fx_proxy_cls(
+                target_cls=type(a),
+                tx=tx,
+                proxy=new_proxy,
+                example_value=example_value,
+            )
+        # If `a` cannot be put into a graph
         else:
-            if manually_set_subgraph_inputs:
-                raise unimplemented(
-                    f"HigherOrderOperator with body that accepts non-Tensors as input. "
-                    f"Got: {a.python_type()}"
-                )
-            else:
-                # leverage tracer's lifting mechanism to lift these args.
-                if only_consist_of(
-                    a, (ConstantVariable, SymNodeVariable, TensorVariable)
-                ):
-                    new_arg = a
-                else:
-                    unimplemented(
-                        "HigherOrderOperator with body that accepts non-Tensors as input that can't be lifted by tracer."
-                    )
-
+            # HOPs work much better if they use speculate_subgraph(manually_set_subgraph_inputs=False).
+            raise unimplemented(
+                f"{description} with body that accepts non-Tensors as input. "
+                f"Got: {a.python_type()}"
+            )
         args.append(new_arg)
     return args
 
@@ -190,7 +175,7 @@ def speculate_subgraph(
     # target of the proxy that we created for the higherOrderOperator.
     source_target=None,
     always_restore=False,
-    enable_grad=False,
+    enable_grad=None,
     # NOTE [Temporary argument `manually_set_subgraph_inputs`]
     # If manually_set_subgraph_inputs=True, then we manually add
     # the `sub_args` to `subgraph`, if False then we rely
@@ -222,15 +207,21 @@ def speculate_subgraph(
         )
         with tx.output.subtracer(source_target, tracer) as subtracer:
             args = validate_args_and_maybe_create_graph_inputs(
-                sub_args, subtracer, tx, manually_set_subgraph_inputs
+                sub_args, subtracer, tx, manually_set_subgraph_inputs, description
             )
 
             validate_args_and_maybe_create_graph_inputs(
-                sub_kwargs.values(), subtracer, tx, manually_set_subgraph_inputs=False
+                sub_kwargs.values(),
+                subtracer,
+                tx,
+                manually_set_subgraph_inputs=False,
+                description=description,
             )
 
             autograd_ctx = (
-                dynamo_enable_grad(tx) if enable_grad else contextlib.nullcontext()
+                dynamo_enable_grad(tx, enable_grad)
+                if enable_grad is not None
+                else contextlib.nullcontext()
             )
 
             if restore_side_effects:
@@ -1231,6 +1222,13 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         # TODO(jansel): BUG!!! we aren't copying on the line below, so the post-pre check below is pointless
         pre_guards = tx.output.guards
         graph_checkpoint = tx.output.graph
+        # In eager-mode PyTorch, if we only compute first-order gradients,
+        # then the grad_mode is False during the backward pass.
+        # torch.compile assumes that we only compute first-order gradients,
+        # so we want to speculate the backward pass with the grad mode disabled.
+        enable_grad = (
+            False if self.value.__name__ == "trampoline_autograd_bwd" else None
+        )
 
         # TODO: Support kwargs
         (
@@ -1252,6 +1250,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             always_restore=always_restore,
             restore_side_effects=False,
             tracer=tracer,
+            enable_grad=enable_grad,
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
