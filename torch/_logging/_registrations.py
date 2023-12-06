@@ -5,7 +5,7 @@ DYNAMIC = ["torch.fx.experimental.symbolic_shapes", "torch.fx.experimental.sym_n
 DISTRIBUTED = ["torch.distributed", "torch._dynamo.backends.distributed"]
 
 register_log("dynamo", ["torch._dynamo", *DYNAMIC])
-register_log("aot", "torch._functorch.aot_autograd")
+register_log("aot", ["torch._functorch.aot_autograd", "torch._functorch._aot_autograd"])
 register_log("inductor", "torch._inductor")
 register_log("dynamic", DYNAMIC)
 register_log("torch", "torch")
