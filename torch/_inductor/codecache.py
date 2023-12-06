@@ -1141,33 +1141,39 @@ def x86_isa_checker() -> list:
     cpp_code = get_x86_isa_detect_code()
 
     key, input_path = write(cpp_code, "cpp")
-    output_dir = input_path[:-4]
 
-    print(f"{key}, {input_path}, {output_dir}")
+    from filelock import FileLock
 
-    x86_isa_help_builder = CxxBuilder(key, [input_path], cxx_build_options, output_dir)
-    status, target_file = x86_isa_help_builder.build()
+    lock_dir = get_lock_dir()
+    lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+    with lock:
+        output_dir = os.path.dirname(input_path)
 
-    # 1. open the shared library
-    isa_help_lib = ctypes.CDLL(target_file)
+        print(f"{key}, {input_path}, {output_dir}")
 
-    # 2. tell Python the argument and result types of function
-    isa_help_lib.check_avx2_feature.restype = ctypes.c_bool
-    isa_help_lib.check_avx2_feature.argtypes = []
+        x86_isa_help_builder = CxxBuilder(key, [input_path], cxx_build_options, output_dir)
+        status, target_file = x86_isa_help_builder.build()
 
-    isa_help_lib.check_avx512_feature.restype = ctypes.c_bool
-    isa_help_lib.check_avx512_feature.argtypes = []
+        # 1. open the shared library
+        isa_help_lib = ctypes.CDLL(target_file)
 
-    # 3. call cpp backend and get result
-    avx2 = isa_help_lib.check_avx2_feature()
-    avx512 = isa_help_lib.check_avx512_feature()
+        # 2. tell Python the argument and result types of function
+        isa_help_lib.check_avx2_feature.restype = ctypes.c_bool
+        isa_help_lib.check_avx2_feature.argtypes = []
 
-    _check_and_append_supported_isa(supported_isa, avx2, "avx2")
-    _check_and_append_supported_isa(supported_isa, avx512, "avx512")
+        isa_help_lib.check_avx512_feature.restype = ctypes.c_bool
+        isa_help_lib.check_avx512_feature.argtypes = []
 
-    print("!!! x86 isa --> avx2: {}, avx512: {}".format(avx2, avx512))
+        # 3. call cpp backend and get result
+        avx2 = isa_help_lib.check_avx2_feature()
+        avx512 = isa_help_lib.check_avx512_feature()
 
-    return supported_isa
+        _check_and_append_supported_isa(supported_isa, avx2, "avx2")
+        _check_and_append_supported_isa(supported_isa, avx512, "avx512")
+
+        print("!!! x86 isa --> avx2: {}, avx512: {}".format(avx2, avx512))
+
+        return supported_isa
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
 # might have too much redundant content that is useless for ISA check. Hence,
