@@ -15,7 +15,7 @@ from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
-from ..utils import global_key_name, istensor, iter_contains
+from ..utils import global_key_name, istensor, istype, iter_contains
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
@@ -458,6 +458,28 @@ def _is_matching_diffusers_cls(cls) -> bool:
     return mod is not None and issubclass(cls, mod.BaseOutput)
 
 
+def _call_hasattr_customobj(self, tx, name: str) -> "VariableTracker":
+    """Shared method between DataClassVariable and CustomizedDictVariable where items are attrs"""
+    if name in self.items or hasattr(self.user_cls, name):
+        return ConstantVariable(True)
+    elif istype(self.mutable_local, MutableLocal) and self.source is None:
+        # Something created locally can't have any extra fields on it
+        return ConstantVariable(False)
+    elif self.mutable_local is None and self.source:
+        # Maybe add a guard
+        try:
+            example = tx.output.root_tx.get_example_value(self.source)
+            install_guard(
+                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+            )
+            return ConstantVariable(hasattr(example, name))
+        except KeyError:
+            pass
+    unimplemented(
+        f"hasattr({self.__class__.__name__}, {name}) {self.mutable_local} {self.source}"
+    )
+
+
 class DataClassVariable(ConstDictVariable):
     """
     This is a bit of a hack to deal with
@@ -595,6 +617,8 @@ class DataClassVariable(ConstDictVariable):
                 return variables.ConstantVariable.create(defaults[name])
         super().var_getattr(tx, name)
 
+    call_hasattr = _call_hasattr_customobj
+
 
 class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
@@ -709,6 +733,8 @@ class CustomizedDictVariable(ConstDictVariable):
                 tx, "__getitem__", [variables.ConstantVariable.create(name)], {}
             )
         super().var_getattr(tx, name)
+
+    call_hasattr = _call_hasattr_customobj
 
 
 @functools.lru_cache(None)
