@@ -1118,7 +1118,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qlinear_gelu_cpu(self):
+    def test_qlinear_gelu_cpu(self, int8_mixed_bf16=False):
         r"""
         This testcase will quantize a Linear->GELU pattern.
         """
@@ -1153,7 +1153,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(
                 mod,
                 (v,),
-                check_autocast=False,
+                check_autocast=int8_mixed_bf16,
                 check_quantization=True,
                 matcher_check_fn=matcher_check_fn,
             )
