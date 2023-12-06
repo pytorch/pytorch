@@ -697,7 +697,7 @@ namespace {
                   done = true;
                 } else {
                   TORCH_WARN_ONCE("Requested shmem_size exceeds sharedMemPerBlock limit! Reducing max_threads...");
-                  max_threads /= 2; 
+                  max_threads /= 2;
                 }
               }
             );
