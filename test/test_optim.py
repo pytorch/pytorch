@@ -314,6 +314,52 @@ class TestOptimRenewed(TestCase):
             optimizer.step()
 
 
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_is_noop_for_empty_grads(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func()
+        param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
+        old_param = param.clone().detach()
+
+        def closure():
+            return torch.tensor([1], device=device, dtype=dtype)
+
+        for optim_input in optim_inputs:
+            kwargs = optim_input.kwargs
+
+            # params will decay even if grads are empty if weight_decay != 0,
+            # and capturable doesn't work for CPU tensors
+            if (kwargs.get("weight_decay", 0) != 0
+               or kwargs.get("capturable", False) and device == 'cpu'):
+                continue
+
+            # AdamW params will be updated regardless of grads due to lr, so make lr smaller
+            if optim_cls.__name__ == "AdamW":
+                kwargs["lr"] = torch.tensor(1e-4) if isinstance(kwargs.get("lr", 1e-4), torch.Tensor) else 1e-4
+
+            flags = [None]
+            if str(device) == "cuda":
+                if "foreach" in optim_info.supported_impls:
+                    flags.append("foreach")
+                if "fused" in optim_info.supported_impls:
+                    flags.append("fused")
+            for flag in flags:
+                if flag is not None:
+                    kwargs[flag] = True
+                optimizer = optim_cls([param], **optim_input.kwargs)
+                if optim_cls.__name__ == "SparseAdam":
+                    # Intentionally construct a multidimensional empty v for the sparse grad
+                    # Single dim v passes the test while multidim correctly repros the issue
+                    # https://github.com/pytorch/pytorch/issues/82486
+                    i = torch.empty((1, 0), device=device, dtype=dtype)
+                    v = torch.empty((0, 1), device=device, dtype=dtype)
+                    param.grad = torch.sparse_coo_tensor(i, v, (5, 1), device=device, dtype=dtype)
+                else:
+                    param.grad = torch.zeros_like(param)
+                optimizer.step(closure)
+                self.assertEqual(old_param, param)
+
+
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 
 
