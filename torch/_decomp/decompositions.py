@@ -4032,7 +4032,7 @@ def upsample_bicubic2d_vec(
 def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
     def idx(left, middle, right):
         dim_idx = torch.arange(-left, middle + right, device=a.device)
-        return middle - (middle - dim_idx.abs()).abs()
+        return middle - 1 - (middle - 1 - dim_idx.abs()).abs()
 
     return _reflection_or_replication_pad(
         a,
