@@ -127,6 +127,10 @@ def run_functionalized_fw_and_collect_metadata(
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
+            if mutates_metadata and is_traceable_wrapper_subclass(arg):
+                raise RuntimeError(
+                    "Metadata mutations are currently not allowed on tensor subclasses"
+                )
             mutates_storage_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=True
             )
