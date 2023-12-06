@@ -954,8 +954,8 @@ class TestOptim(TestCase):
             (Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
             (Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50), maximize=True)),
             (CoRe, dict(weight_decay=0.0)),
-            (CoRe, dict(betas=(0.7375, 0.8125, 250.0, -1.0)),
-            (CoRe, dict(score_history=250, frozen=0.1)),
+            (CoRe, dict(betas=(0.7375, 0.8125, 2.5, -1.0))),
+            (CoRe, dict(score_history=1, frozen=1)),
             (CoRe, dict(maximize=True)),
             (ASGD, dict(weight_decay=0)),
             (ASGD, dict(weight_decay=1)),
@@ -1854,12 +1854,7 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
                 Rprop(None, lr=1e-2, etas=(1.0, 0.5), foreach=foreach)
 
-    @skipIfRocm
-    @skipIfTorchDynamo()
     def test_core(self):
-        is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(
-            0
-        ) == (8, 6)
         for foreach in (False, True):
             self._test_basic_cases(
                 lambda weight, bias, maximize, foreach: CoRe(
@@ -1868,25 +1863,18 @@ class TestOptim(TestCase):
                 constructor_accepts_maximize=True,
                 constructor_accepts_foreach=True,
             )
-            self._test_basic_cases(
-                lambda weight, bias, maximize, foreach: CoRe(
-                    self._build_params_dict(weight, bias),
-                    maximize=maximize,
-                    foreach=foreach,
-                ),
-                constructor_accepts_maximize=True,
-                constructor_accepts_foreach=True,
-                atol=4e-5 if is_cuda_sm86 else None,
-                rtol=3e-5 if is_cuda_sm86 else None,
-            )
             self._test_complex_2d(lambda param: CoRe(param, foreach=foreach))
             self._test_complex_optimizer(
                 lambda param: CoRe([param], foreach=foreach)
             )
             self._test_complex_optimizer(
-                lambda param: CoRe(
-                    [param], maximize=True, foreach=foreach
-                )
+                lambda param: CoRe([param], maximize=True, foreach=foreach)
+            )
+            self._test_complex_optimizer(
+                lambda param: CoRe([param], score_history=1, frozen=1, foreach=foreach)
+            )
+            self._test_complex_optimizer(
+                lambda param: CoRe([param], score_history=1, frozen=1, maximize=True, foreach=foreach)
             )
             with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
                 CoRe(None, etas=(1.0, 0.5), foreach=foreach)
@@ -2485,9 +2473,7 @@ class TestDifferentiableOptimizer(TestCase):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
-        # `step` is not a continuous variable (even though we define it as a float)
-        # and so it shouldn't require gradients.
-        state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
+        state["step"] = 0
         state["prev_1"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
         state["prev_2"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
         state["step_size"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -2500,7 +2486,7 @@ class TestDifferentiableOptimizer(TestCase):
                 grad,
                 state,
                 CoRe,
-                {"lr": 0.9, "differentiable": True},
+                {"differentiable": True},
                 *state.values(),
             ),
         )

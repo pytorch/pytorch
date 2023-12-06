@@ -1,4 +1,5 @@
 from typing import List, Optional, Union, Tuple
+from math import exp
 
 import torch
 from torch import Tensor
@@ -364,10 +365,6 @@ def _single_tensor_core(params: List[Tensor],
         score = scores[i]
         step = steps[i]
 
-        # for maximization invert gradient signs
-        if maximize:
-            grad = -grad
-
         # handle complex params
         if torch.is_complex(param):
             param = torch.view_as_real(param)
@@ -377,6 +374,10 @@ def _single_tensor_core(params: List[Tensor],
             step_size = torch.view_as_real(step_size)
             score = torch.view_as_real(score)
 
+        # for maximization invert gradient signs
+        if maximize:
+            grad = -grad
+
         # exponential moving average of squared gradients
         if beta_2 >= 0:
             prev_2.mul_(beta_2)
@@ -384,11 +385,11 @@ def _single_tensor_core(params: List[Tensor],
 
         # adjust fractions of previous gradient information in current gradients
         beta_1 = (beta_1_final + (beta_1_initial - beta_1_final)
-                  * torch.exp(-(torch.tensor(step, dtype=torch.float) / beta_1_step)**2))
+                  * exp(-(step / beta_1_step)**2))
 
         # exponential moving average of gradients
-        grad.mul_(1.0 - beta_1)
-        grad.add_(prev_1, alpha=float(beta_1))
+        grad = grad.clone(memory_format=torch.preserve_format)
+        grad.lerp_(prev_1, beta_1)
 
         # stability-plasticity balance
         if score_history > 0:
@@ -401,7 +402,10 @@ def _single_tensor_core(params: List[Tensor],
                     score.mul_(1.0 - 1.0 / score_history)
 
         # determine step size updates
-        step_size_update = grad.mul(prev_1)
+        if differentiable:
+            step_size_update = grad.mul(prev_1.clone())
+        else:
+            step_size_update = grad.mul(prev_1)
         if score_history > 0:
             step_size_update.mul_(plasticity)
         step_size_update[step_size_update.gt(0)] = eta_plus
@@ -424,7 +428,10 @@ def _single_tensor_core(params: List[Tensor],
             score.addcmul_(grad, param_update, value=1.0 / score_history)
 
         # weight decay
-        param.add_(-weight_decay[i % n_weight_decay] * param_update.abs() * param)
+        if differentiable:
+            param.add_(-weight_decay[i % n_weight_decay] * param_update.abs() * param.clone())
+        else:
+            param.add_(-weight_decay[i % n_weight_decay] * param_update.abs() * param)
 
         # update parameters
         param.add_(param_update, alpha=-1.0)
@@ -472,6 +479,7 @@ def _multi_tensor_core(params: List[Tensor],
         grouped_step_sizes,
         grouped_scores
     ), _) in grouped_tensors.values():
+
         # handle complex params
         if has_complex:
             _view_as_real(grouped_params,
@@ -482,6 +490,8 @@ def _multi_tensor_core(params: List[Tensor],
                           grouped_scores)
 
         # for maximization invert gradient signs
+        for i in range(len(grouped_grads)):
+            grouped_grads[i] = grouped_grads[i].clone(memory_format=torch.preserve_format)
         if maximize:
             torch._foreach_neg_(grouped_grads)
 
@@ -491,12 +501,12 @@ def _multi_tensor_core(params: List[Tensor],
             torch._foreach_addcmul_(grouped_prevs_2, grouped_grads, grouped_grads, value=1.0 - beta_2)
 
         # adjust fractions of previous gradient information in current gradients
-        betas_1 = (beta_1_final + (beta_1_initial - beta_1_final)
-                   * torch.exp(-(torch.tensor(steps, dtype=torch.float) / beta_1_step)**2))
+        betas_1 = [grouped_grads[i].new().resize_as_(grouped_grads[i]).fill_(
+            beta_1_final + (beta_1_initial - beta_1_final)
+            * exp(-(steps[i] / beta_1_step)**2)) for i in range(len(steps))]
 
         # exponential moving average of gradients
-        torch._foreach_mul_(grouped_grads, list(1.0 - betas_1))
-        torch._foreach_addcmul_(grouped_grads, grouped_prevs_1, list(betas_1))
+        torch._foreach_lerp_(grouped_grads, grouped_prevs_1, betas_1)
 
         # stability-plasticity balance
         if score_history > 0:
