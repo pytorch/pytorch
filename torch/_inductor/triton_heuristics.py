@@ -209,6 +209,8 @@ class CachingAutotuner(KernelInterface):
                 config.dynamic_scale_rblock
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
+                # Disable for AMDGPU as Triton is not ready to return n_regs for a compiled_binary.
+                and torch.version.hip is None
                 # TODO not enable for H100 yet since we haven't got a chance to test this
                 # on H100. Will remove this check once we test on H100
                 and device_prop.major == 8
@@ -238,8 +240,11 @@ class CachingAutotuner(KernelInterface):
                     # from PLBartForCausalLM, latency improve from
                     # 7.795ms to 4.883ms.
                     #
-                    # Note both A100 and H100 have 65536 32-bit registers per SM.
-                    if nreg <= 65536 // device_prop.max_threads_per_multi_processor:
+                    if (
+                        nreg
+                        <= device_prop.regs_per_multiprocessor
+                        // device_prop.max_threads_per_multi_processor
+                    ):
                         continue
 
                     nreg_per_warp = nreg * 32
@@ -247,14 +252,16 @@ class CachingAutotuner(KernelInterface):
 
                     # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
                     # The formula below is a tighter upper bound since we have the assumption that
-                    #   nreg > 65536 // device_prop.max_threads_per_multi_processor
+                    #   nreg > device_prop.regs_per_multiprocessor // device_prop.max_threads_per_multi_processor
                     # due to the if condition above and:
-                    #   65536 / nreg_per_block
-                    #   = 65536 / (nreg * 32 * num_warps)
-                    #   < 65536 / ((65536 / max_threads_per_multi_processor) * 32 * num_warps)
+                    #   regs_per_multiprocessor / nreg_per_block
+                    #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
+                    #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
                     #   = max_threads_per_multi_processor / (32 * num_warps)
                     # Using a tigher upper bound can reveal more optimization opportunities.
-                    max_blocks_per_sm = max(65536 // nreg_per_block, 1)
+                    max_blocks_per_sm = max(
+                        device_prop.regs_per_multiprocessor // nreg_per_block, 1
+                    )
 
                     if (
                         total_block
