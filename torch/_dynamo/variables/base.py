@@ -273,24 +273,48 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def as_proxy(self):
         raise NotImplementedError(str(self))
 
+    def maybe_fx_node(self):
+        try:
+            proxy = self.as_proxy()
+            import torch.fx
+
+            if isinstance(proxy, torch.fx.Proxy):
+                return proxy.node
+            return None
+        except NotImplementedError:
+            return None
+
     def reconstruct(self, codegen):
         raise NotImplementedError()
 
-    def unpack_var_sequence(self, tx):
+    def can_reconstruct(self, tx):
+        """If it is possible to reconstruct the Python object this
+        VariableTracker represents."""
+        assert tx is tx.output.root_tx, "Only root tx can reconstruct"
+        try:
+            from ..codegen import PyCodegen
+
+            cg = PyCodegen(tx)
+            self.reconstruct(cg)
+            return True
+        except NotImplementedError:
+            return False
+
+    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
         raise NotImplementedError()
 
-    def has_unpack_var_sequence(self, tx):
+    def has_unpack_var_sequence(self, tx) -> bool:
         try:
             self.unpack_var_sequence(tx)
             return True
         except NotImplementedError:
             return False
 
-    def num_parameters(self):
-        unimplemented(f"num_parameters: {self}")
+    def inspect_parameter_names(self) -> List[str]:
+        unimplemented(f"inspect_parameter_names: {self}")
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        unimplemented(f"hasattr: {repr(self)}")
+        unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"

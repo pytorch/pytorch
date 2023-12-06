@@ -2,7 +2,7 @@
 import hashlib
 import torch
 import torch.fx
-from typing import Dict, Any, TYPE_CHECKING
+from typing import Any, Dict, Optional, TYPE_CHECKING
 from torch.fx.node import _get_qualified_name, _format_arg
 from torch.fx.graph import _parse_stack_trace
 from torch.fx.passes.shape_prop import TensorMetadata
@@ -44,7 +44,6 @@ _HASH_COLOR_MAP = [
 ]
 
 _WEIGHT_TEMPLATE = {
-    "shape": "record",
     "fillcolor": "Salmon",
     "style": '"filled,rounded"',
     "fontcolor": "#000000",
@@ -68,8 +67,14 @@ if HAS_PYDOT:
             ignore_parameters_and_buffers: bool = False,
             skip_node_names_in_args: bool = True,
             parse_stack_trace: bool = False,
+            dot_graph_shape: Optional[str] = None,
         ):
             self._name = name
+            self.dot_graph_shape = (
+                dot_graph_shape if dot_graph_shape is not None else "record"
+            )
+            _WEIGHT_TEMPLATE["shape"] = self.dot_graph_shape
+
             self._dot_graphs = {
                 name: self._to_dot(
                     graph_module, name, ignore_getattr, ignore_parameters_and_buffers, skip_node_names_in_args, parse_stack_trace
@@ -133,8 +138,9 @@ if HAS_PYDOT:
             return self._dot_graphs
 
         def _get_node_style(self, node: torch.fx.Node) -> Dict[str, str]:
+
             template = {
-                "shape": "record",
+                "shape": self.dot_graph_shape,
                 "fillcolor": "#CAFFE3",
                 "style": '"filled,rounded"',
                 "fontcolor": "#000000",
@@ -384,6 +390,8 @@ if HAS_PYDOT:
                         get_module_params_or_buffers()
 
             for subgraph in buf_name_to_subgraph.values():
+                subgraph.set('color', 'royalblue')
+                subgraph.set('penwidth', '2')
                 dot_graph.add_subgraph(subgraph)
 
             for node in graph_module.graph.nodes:

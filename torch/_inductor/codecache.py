@@ -126,6 +126,10 @@ def cpp_wrapper_cache_dir(name: str) -> str:
     return cpp_wrapper_build_directory
 
 
+def get_cpp_wrapper_cubin_path_name():
+    return "cubin_path" if torch.version.hip is None else "hsaco_path"
+
+
 class CacheBase:
     @staticmethod
     @functools.lru_cache(None)
@@ -202,22 +206,22 @@ class CacheBase:
 
 
 class LocalCache(CacheBase):
-    def lookup(self, *keys: Tuple[str]) -> Optional[Dict[str, Any]]:
+    def lookup(self, *keys: str) -> Optional[Dict[str, Any]]:
         cache = self.get_local_cache()
 
         sub_cache = cache
         for key in keys:
             if key in cache:
-                sub_cache = cache[key]  # type: ignore[index]
+                sub_cache = cache[key]
             else:
                 return None
 
         return sub_cache
 
-    def set_value(self, *keys: List[str], value: Any) -> None:
+    def set_value(self, *keys: str, value: Any) -> None:
         cache = self.get_local_cache()
 
-        sub_cache: Dict = cache  # type: ignore[type-arg]
+        sub_cache = cache
         for key in keys[0:-1]:
             sub_cache.setdefault(key, {})
             sub_cache = sub_cache[key]
@@ -346,7 +350,7 @@ def get_path(
 def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
     if hash_type == "code":
         return code_hash(content, extra)
-    if hash_type == "cubin":
+    if hash_type in ["cubin", "hsaco"]:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
 
@@ -358,7 +362,10 @@ def write(
     hash_type: str = "code",
     specified_dir: str = "",
 ) -> Tuple[str, str]:
-    key: str = get_hash(content, extra, hash_type)
+    # use striped content to compute hash so we don't end up with different
+    # hashes just because the content begins/ends with differnet number of
+    # spaces.
+    key: str = get_hash(content.strip(), extra, hash_type)
     basename, subdir, path = get_path(key, extension, specified_dir)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -1025,6 +1032,9 @@ cdll.LoadLibrary("__lib_path__")
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
+        if config.is_fbcode():
+            return True
+
         key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
 
@@ -1183,6 +1193,8 @@ def cpp_wrapper_flags() -> str:
 def optimization_flags() -> str:
     base_flags = "-O0 -g" if config.aot_inductor.debug_compile else "-O3 -DNDEBUG"
     base_flags += " -ffast-math -fno-finite-math-only"
+    if not config.cpp.enable_unsafe_math_opt_flag:
+        base_flags += " -fno-unsafe-math-optimizations"
 
     if config.is_fbcode():
         # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
@@ -1336,10 +1348,13 @@ def get_include_and_linking_paths(
             macros += " -D USE_CUDA"
 
         if cuda:
-            if config.is_fbcode():
-                libs += ["cuda"]
+            if torch.version.hip is not None:
+                libs += ["c10_hip", "torch_hip"]
             else:
-                libs += ["c10_cuda", "cuda", "torch_cuda"]
+                if config.is_fbcode():
+                    libs += ["cuda"]
+                else:
+                    libs += ["c10_cuda", "cuda", "torch_cuda"]
         build_arch_flags = vec_isa.build_arch_flags()
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
@@ -1502,15 +1517,18 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key: str, params: Dict[str, str], cubin: str) -> None:
+        bin_type = "cubin" if torch.version.hip is None else "hsaco"
         _, path = write(
             cubin,
-            "cubin",
-            hash_type="cubin",
+            bin_type,
+            hash_type=bin_type,
             specified_dir=split_aot_inductor_output_path(
                 config.aot_inductor.output_path
             )[0],
         )
-        params["cubin_path"] = path
+
+        params[get_cpp_wrapper_cubin_path_name()] = path
+
         cls.cache[key] = params
 
     @classmethod
@@ -1607,6 +1625,9 @@ class AotCodeCache:
                         # This serializes the tensor's untyped_storage to bytes by accessing
                         # the raw data of the underlying structure.
                         import ctypes
+
+                        if t.numel() == 0:
+                            return b""
 
                         t_cpu = t.untyped_storage().cpu()
                         raw_array = ctypes.cast(
@@ -2272,6 +2293,8 @@ def _load_kernel(kernel_name: str, source_code: str) -> ModuleType:
 
 
 class TritonFuture:
+    kernel: ModuleType
+
     def __init__(
         self,
         kernel_name: str,
@@ -2286,7 +2309,7 @@ class TritonFuture:
     def result(self) -> ModuleType:
         t0 = time()
         if hasattr(self, "kernel"):
-            return self.kernel  # type: ignore[has-type]
+            return self.kernel
         # If the worker failed this will throw an exception.
         self.future.result()
         kernel = self.kernel = _load_kernel(self.kernel_name, self.source_code)
