@@ -8065,7 +8065,7 @@ def ___make_guard_fn():
             if "my_weight" in it:
                 return x
             return x + 1
-        
+
         x = torch.arange(1, 3)
         compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
 
