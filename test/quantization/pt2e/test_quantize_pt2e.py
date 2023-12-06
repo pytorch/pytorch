@@ -1716,3 +1716,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.checkGraphModuleNodes(
             m, expected_node_occurrence=node_occurrence, expected_node_list=node_list
         )
+
+    def test_groupwise_per_channel_quant(self):
+        m = TestHelperModules.GroupwiseConv2d()
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        example_inputs = m.example_inputs()
+        m = self._quantize(m, quantizer, example_inputs)
+        # make sure it runs
+        m(*example_inputs)
