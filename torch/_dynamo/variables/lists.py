@@ -677,7 +677,7 @@ class ListIteratorVariable(VariableTracker):
         if name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return iter_contains(self.items[self.index:], args[0], tx)
+            return iter_contains(self.items[self.index :], args[0], tx)
 
         return super().call_method(tx, name, args, kwargs)
 
