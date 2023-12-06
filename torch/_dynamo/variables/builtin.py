@@ -72,6 +72,19 @@ IN_PLACE_DESUGARING_MAP = {
 }
 
 
+def _polyfill_call_impl(name):
+    """Create a BuiltinVariable.call_{name} method that inlines through polyfill.{name}"""
+
+    def call_fn(self, tx, *args, **kwargs):
+        return tx.inline_user_function_return(
+            variables.UserFunctionVariable(fn), args, kwargs
+        )
+
+    fn = getattr(polyfill, name)
+    call_fn.__name__ = f"call_{name}"
+    return call_fn
+
+
 class BuiltinVariable(VariableTracker):
     @staticmethod
     @functools.lru_cache(None)
@@ -1105,7 +1118,6 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
-            TorchInGraphFunctionVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1214,10 +1226,6 @@ class BuiltinVariable(VariableTracker):
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
-        elif isinstance(obj, TorchInGraphFunctionVariable):
-            member = getattr(obj.value, name)
-            if trace_rules.lookup(member) is not None:
-                return trace_rules.lookup(member)(member, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
             if is_utils_checkpoint(member):
@@ -1454,6 +1462,9 @@ class BuiltinVariable(VariableTracker):
         else:
             unimplemented(f"call_id with args {args}")
 
+    def call_deepcopy(self, tx, x):
+        unimplemented(f"copy.deepcopy {repr(x)}")
+
     def _comparison(self, tx, left, right):
         """
         Used to implement comparison operators for different types.
@@ -1646,12 +1657,8 @@ class BuiltinVariable(VariableTracker):
     call_is_ = _comparison
     call_is_not = _comparison
 
-    def call_all(self, tx, *args, **kwargs):
-        from .builder import SourcelessBuilder
-
-        return tx.inline_user_function_return(
-            SourcelessBuilder()(tx, polyfill.all), args, kwargs
-        )
+    call_all = _polyfill_call_impl("all")
+    call_any = _polyfill_call_impl("any")
 
 
 @contextlib.contextmanager

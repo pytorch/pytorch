@@ -37,6 +37,7 @@ from .lists import (
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
+    RestrictedListSubclassVariable,
     SliceVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -65,11 +66,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import (
-    TorchCtxManagerClassVariable,
-    TorchInGraphFunctionVariable,
-    TorchVariable,
-)
+from .torch import TorchCtxManagerClassVariable, TorchVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
@@ -81,7 +78,9 @@ __all__ = [
     "ConstantVariable",
     "ConstDictVariable",
     "ContextWrappingVariable",
+    "CountIteratorVariable",
     "CustomizedDictVariable",
+    "CycleIteratorVariable",
     "DataClassVariable",
     "DefaultDictVariable",
     "DeletedVariable",
@@ -92,9 +91,6 @@ __all__ = [
     "GradModeVariable",
     "InspectSignatureVariable",
     "IteratorVariable",
-    "RepeatIteratorVariable",
-    "CountIteratorVariable",
-    "CycleIteratorVariable",
     "LambdaVariable",
     "LazyVariableTracker",
     "ListIteratorVariable",
@@ -108,12 +104,13 @@ __all__ = [
     "NumpyVariable",
     "PythonModuleVariable",
     "RangeVariable",
-    "SliceVariable",
+    "RepeatIteratorVariable",
+    "RestrictedListSubclassVariable",
     "SkipFilesVariable",
+    "SliceVariable",
     "SuperVariable",
     "TensorVariable",
     "TorchCtxManagerClassVariable",
-    "TorchInGraphFunctionVariable",
     "TorchVariable",
     "TupleVariable",
     "UnknownVariable",
