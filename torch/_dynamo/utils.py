@@ -580,6 +580,7 @@ class CompilationMetrics:
     backend_compile_time_s: Optional[float]
     fail_reason: Optional[str]
     non_compliant_ops: Set[str]
+    compliant_custom_ops: Set[str]
 
 
 @dataclasses.dataclass
