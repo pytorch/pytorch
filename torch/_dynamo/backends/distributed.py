@@ -6,8 +6,6 @@ from typing import Any, List, Optional
 import torch
 from torch import fx
 from torch._dynamo.output_graph import GraphCompileReason
-from torch._dynamo.utils import detect_fake_mode
-from torch._subclasses.fake_tensor import is_fake
 from torch.fx.node import Node
 
 # Regular log messages should go through 'log'.
@@ -217,11 +215,6 @@ class DDPOptimizer:
         to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
         and returns its callable.
         """
-
-        fake_mode = detect_fake_mode(example_inputs)
-        if fake_mode is None:
-            fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-
         if has_higher_order_op(gm):
             # This indicates presence of a higher order op. For now, we
             # have no way to break the higher order op into two buckets.
@@ -339,21 +332,9 @@ class DDPOptimizer:
 
                     def forward(self, *args):
                         if not self.compiled:
-                            assert (
-                                fake_mode
-                            ), "fake mode must have been available when creating lazy submod"
-                            fake_args = []
-                            for arg in args:
-                                if isinstance(arg, torch.Tensor) and not is_fake(arg):
-                                    fake_args.append(
-                                        torch._dynamo.utils.to_fake_tensor(
-                                            arg, fake_mode
-                                        )
-                                    )
-                                else:
-                                    fake_args.append(arg)
-                            # First trace with fake args
-                            new_submod = self.compiler(self.submod, tuple(fake_args))
+                            # First compile with args as example_inputs
+                            # These args will be fakeified if using Inductor/AOTAutograd
+                            new_submod = self.compiler(self.submod, args)
                             del self.submod
                             self.submod = new_submod
                             self.compiled = True
