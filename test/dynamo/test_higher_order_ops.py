@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import enum
 import functools
 import pprint
 import re
@@ -114,6 +115,8 @@ def default_args_generator(seed_value):
                 new_val = val + 1 * i
             elif isinstance(val, float):
                 new_val = val + 0.1 * i
+            elif isinstance(val, enum.Enum):
+                new_val = val
             else:
                 raise AssertionError("unexpected arg type")
 
@@ -205,6 +208,22 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         self._test_wrap_simple(f, default_args_generator((x,)), 2)
+
+    def test_enum_arg(self):
+        class SomeEnum(enum.Enum):
+            A = 0
+            B = 1
+
+        def g(x, val):
+            if val == SomeEnum.A:
+                return torch.sin(x)
+            return torch.cos(x)
+
+        def f(x, val):
+            return wrap(g, x, val)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(f, default_args_generator((x, SomeEnum.A)), 2)
 
     def test_return_captured_var(self):
         freevar = torch.randn(3)
@@ -407,7 +426,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.tensor(1.2)
         y = MyClass(torch.tensor(3.4))
-        self._assert_wrap_fallback(f, (x, y))
+        self._test_wrap_simple(f, [(x, y)], 3)
 
     def test_capture_constants(self):
         x = torch.randn(3, 3)
@@ -2335,12 +2354,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3, 3)
 
-        # Graph break because dynamo is unable to get source `fn` and
-        # functools.wraps in `grad` leads to graph-break
-        # There are two graphs, first for generating `y` and
-        # second for application of `grad`.
-        # We are interested in the second graph.
-        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False, graph_idx=1)
+        wrapped_gm = self._compile_check(wrapper_fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -2351,20 +2365,21 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+    def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
-        l_y_ = L_y_
+
+        y = torch.randn(3)
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
+        call = grad_proxy.__call__(l_x_, y);  grad_proxy = l_x_ = None
         contiguous = call.contiguous();  call = None
-        return (contiguous,)
+        return (y, contiguous)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, l_y_):
+        def forward(self, l_x_, y):
             sin = l_x_.sin();  l_x_ = None
-            add = sin + l_y_;  sin = l_y_ = None
+            add = sin + y;  sin = y = None
             sum_1 = add.sum();  add = None
             return sum_1
 """,
@@ -2694,7 +2709,7 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
+            {".*torch.func.grad with body that accepts non-Tensors as input": 2},
         )
         self.assertEqual(actual, expected)
 
@@ -3229,7 +3244,7 @@ class GraphModule(torch.nn.Module):
             self,
             dict(counters["graph_break"]),
             {
-                ".*HigherOrderOperator with body that accepts non-Tensors as input": 2,
+                ".*torch.vmap with body that accepts non-Tensors as input": 2,
                 "Unsupported: meta converter nyi with fake tensor propagation.": 1,
             },
         )
