@@ -952,12 +952,15 @@ def _make_node_magic(method, func):
 
         setattr(SymNode, f"_{method_attr}", sym_ite_impl)
     elif method == "round":
+
         def round_impl(self, ndigits=None):
             from torch.fx.experimental.symbolic_shapes import safe_expand
 
             op = builtins.round
             if sym_function_mode():
-                return to_node(self, handle_sym_dispatch(op, (wrap_node(self), ndigits), {}))
+                return to_node(
+                    self, handle_sym_dispatch(op, (wrap_node(self), ndigits), {})
+                )
 
             expr = self.expr
             try:
@@ -973,7 +976,9 @@ def _make_node_magic(method, func):
             if self.hint is not None:
                 out_hint = op(self.hint, ndigits)
 
-            fx_node, _ = self.shape_env.create_fx_call_function(op, (self.fx_node, ndigits))
+            fx_node, _ = self.shape_env.create_fx_call_function(
+                op, (self.fx_node, ndigits)
+            )
             return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
         setattr(SymNode, f"_{method_attr}", round_impl)
@@ -1147,6 +1152,7 @@ def _make_user_magic(method, user_type):
 
         setattr(user_type, f"__{method}__", sym_ite_magic_impl)
     elif method == "round":
+
         def round_magic_impl(self, ndigits=None):
             if is_constant(self):
                 return builtins.round(self, ndigits)

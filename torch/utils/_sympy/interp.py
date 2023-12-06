@@ -21,9 +21,9 @@ from .functions import (
     Mod,
     ModularIndexing,
     Pow,
+    Round,
     TrueDiv,
     Where,
-    Round,
 )
 
 
