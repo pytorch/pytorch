@@ -373,6 +373,7 @@ class FakeTensorConverter:
         if maybe_memo is not None:
             return maybe_memo
         out = FakeTensor(fake_mode, t, device)
+        breakpoint()
         self.set_tensor_memo(t, out)
         return out
 
