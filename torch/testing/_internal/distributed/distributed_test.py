@@ -24,6 +24,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
+from torch.autograd import DeviceType
 from torch.cuda.amp import GradScaler, autocast
 
 from torch.distributed.algorithms.ddp_comm_hooks import (
@@ -186,15 +187,17 @@ DEFAULT_TIMEOUT = 300
 CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
 
 
-def get_profiling_event(event_name, profiler):
+def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
     event_list = (
         profiler.events()
         if isinstance(profiler, torch.profiler.profile)
         else profiler.function_events
     )
     return [
-        event for event in event_list if (
-            event.name.endswith(event_name) or event.name.startswith(event_name)
+        event for event in event_list
+        if (
+            (event.name.endswith(event_name) or event.name.startswith(event_name))
+            and (not dedup_gpu_user_annotation or event.device_type != DeviceType.CUDA)
         )
     ]
 
@@ -1570,7 +1573,7 @@ class DistributedTest:
                 backend = dist.get_backend()
                 if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                     for event_name in [f"{backend}:send", f"{backend}:recv"]:
-                        events = get_profiling_event(event_name, prof)
+                        events = get_profiling_event(event_name, prof, dedup_gpu_user_annotation=True)
                         self.assertTrue(events)
                         # Event order is not deterministic, so simply assert their shape
                         # is found in the following list.
@@ -6877,7 +6880,7 @@ class DistributedTest:
                     loss.backward()
 
             all_reduce_event_name = f"{dist.get_backend()}:all_reduce"
-            events = get_profiling_event(all_reduce_event_name, prof)
+            events = get_profiling_event(all_reduce_event_name, prof, dedup_gpu_user_annotation=True)
             event_count = sum(e.count for e in events)
             self.assertEqual(event_count, num_iters)
             for event in events:
@@ -6885,7 +6888,7 @@ class DistributedTest:
                 self.assertEqual(event.name, all_reduce_event_name)
 
             broadcast_event_name = f"{dist.get_backend()}:broadcast"
-            broadcast_events = get_profiling_event(broadcast_event_name, prof)
+            broadcast_events = get_profiling_event(broadcast_event_name, prof, dedup_gpu_user_annotation=True)
             event_count = sum(e.count for e in broadcast_events)
             # Broadcast is called during rebuild_buckets
             self.assertGreaterEqual(event_count, 1)
@@ -6908,7 +6911,7 @@ class DistributedTest:
                 loss = net(inp).sum()
                 loss.backward()
 
-            events = get_profiling_event(all_reduce_event_name, prof)
+            events = get_profiling_event(all_reduce_event_name, prof, dedup_gpu_user_annotation=True)
             self.assertGreaterEqual(len(events), 1)
             self.assertGreaterEqual(events[0].count, 1)
             self.assertEqual(events[0].name, all_reduce_event_name)
