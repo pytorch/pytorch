@@ -242,7 +242,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
             cpu_kernel_vec(
                 iter,
                 [=](scalar_t a) -> scalar_t {
-                  return c10::div_floor_floating(static_cast<opmath_t>(a), b);
+                  return div_floor_floating(static_cast<opmath_t>(a), b);
                 },
                 [=](Vectorized<scalar_t> a) {
                   return binary_op_scalar(
