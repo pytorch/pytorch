@@ -3438,8 +3438,13 @@ class ConcatKernel(NopKernel):
             else:
                 input_unwrapped = inputs[i].data
 
-            if (
+            is_foreach_eligible = (
                 input_unwrapped.is_input_buffer()
+                or isinstance(input_unwrapped, ConstantBuffer)
+                or len(inputs) >= 10 and not isinstance(input_unwrapped, Loops)
+            )
+            if (
+                is_foreach_eligible
                 and inputs[i].get_device().type == "cuda"
                 and not is_dynamic(input_buffer)
             ):

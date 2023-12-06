@@ -549,6 +549,40 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda()
+    def test_fuse_concat_extern_kernels(self):
+        def fn(x, w, nmatrices):
+            ms = [torch.bmm(x + i, w + i) for i in range(nmatrices)]
+            return torch.concat(ms)
+
+        x = torch.ones(2, 5, 2, device="cuda:0")
+        w = torch.ones(2, 2, 3, device="cuda:0")
+
+        # Case: num-operands < 10, don't create a foreach.
+        self.check_model_cuda(fn, (x, w, 4))
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 6)
+
+        # Case: num-operands ≥ 10, create a foreach node.
+        self.check_model_cuda(fn, (x, w, 10))
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+
+    @requires_cuda()
+    def test_fuse_concat_non_input_views(self):
+        def fn(x, slice_sz):
+            x = x + 1  # Ignore views of input buffers
+            views = torch.ops.aten.split.Tensor(x, slice_sz, dim=0)
+            return torch.ops.aten.cat(views)
+
+        x = torch.ones(10, device="cuda:0")
+
+        # Case: num-operands < 10, don't create a foreach.
+        self.check_model_cuda(fn, (x, 2))
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+
+        # Case: num-operands ≥ 10, create a foreach node.
+        self.check_model_cuda(fn, (x, 10))
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
     def test_zero_elems(self):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
