@@ -167,7 +167,10 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
 
   // Replaces the storage with a new functional storage,
   // and clears the view_metas_ stack.
-  void reset_storage();
+  // WARNING: Calling this function will sever the aliasing relationship between
+  // the current FunctionalTensorWrapper and any of its outstanding aliases.
+  // Please only call if you know what you're doing.
+  void _unsafe_reset_storage();
 
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
@@ -279,7 +282,7 @@ TORCH_API void replace_(
 TORCH_API void commit_update(const Tensor& functional_tensor);
 TORCH_API void commit_update(ITensorListRef functional_tensor);
 
-TORCH_API void reset_storage(const Tensor& functional_tensor);
+TORCH_API void unsafe_reset_storage(const Tensor& functional_tensor);
 
 TORCH_API void mark_mutation_hidden_from_autograd(
     const Tensor& functional_tensor);

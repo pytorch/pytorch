@@ -310,9 +310,12 @@ void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   has_metadata_mutation_ = true;
 }
 
-void FunctionalTensorWrapper::reset_storage() {
+void FunctionalTensorWrapper::_unsafe_reset_storage() {
+  // Reset the storage with the current value_ tensor as the base
   storage_ = c10::Storage(c10::make_intrusive<functionalization::FunctionalStorageImpl>(value_));
+  // Reset the generation so that it matches the new storage
   generation_ = 0;
+  // Clear any pre-existing view metas so that base and value_ are semantically the same
   view_metas_.clear();
 }
 
@@ -574,9 +577,9 @@ void commit_update(ITensorListRef functional_tensor) {
   }
 }
 
-void reset_storage(const Tensor& functional_tensor) {
+void unsafe_reset_storage(const Tensor& functional_tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
-  unsafeGetFunctionalWrapper(functional_tensor)->reset_storage();
+  unsafeGetFunctionalWrapper(functional_tensor)->_unsafe_reset_storage();
 }
 
 void mark_mutation_hidden_from_autograd(const Tensor& functional_tensor) {

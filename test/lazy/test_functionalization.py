@@ -3,7 +3,7 @@
 import torch
 import torch._lazy.metrics as metrics
 import torch._lazy.ts_backend
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 torch._lazy.ts_backend.init()
 
@@ -29,7 +29,7 @@ class LazyFuncionalizationTest(TestCase):
 
                 if device == "lazy":
                     if reset_storage:
-                        torch._C._reset_storage(model.fc1.weight)
+                        torch._C._unsafe_reset_storage(model.fc1.weight)
 
                     torch._lazy.mark_step()
 
