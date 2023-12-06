@@ -24,6 +24,8 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
+    dynamo_strict_counter,
+    dynamo_total_counter,
     FILE_SCHEMA,
     get_report_path,
     IS_CI,
@@ -34,7 +36,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
-    emit_dynamo_test_metric
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -101,6 +102,13 @@ def strtobool(s):
 
 def parse_test_module(test):
     return test.split(".")[0]
+
+
+def emit_dynamo_test_metric():
+    emit_metric(
+        "dynamo_strict_stats",
+        {"strict": dynamo_strict_counter, "total": dynamo_total_counter},
+    )
 
 
 class TestChoices(list):

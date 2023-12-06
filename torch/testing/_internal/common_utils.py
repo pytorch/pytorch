@@ -94,7 +94,6 @@ from torch.testing._internal.common_dtype import get_all_dtypes
 import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
-from tools.stats.upload_metrics import emit_metric
 
 # Class to keep track of test flags configurable by environment variables.
 # Flags set here are intended to be read-only and should not be modified after
@@ -2485,11 +2484,6 @@ def count_dynamo_test_run(strict=False):
     if strict:
         dynamo_strict_counter = dynamo_strict_counter + 1
 
-def emit_dynamo_test_metric():
-    emit_metric("dynamo_strict_stats", {
-        "strict": dynamo_total_counter,
-        "total": dynamo_total_counter
-    })
 
 class NoTest:
     # causes pytest to not recognize this class as a test
