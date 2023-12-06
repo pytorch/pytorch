@@ -66,6 +66,8 @@ tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
 needs_realized_inputs = set()
 foreach_ops = set()
+inplace_foreach_ops = set()
+inplaceable_foreach_ops = dict()
 
 
 def assert_nyi(cond, msg):
@@ -443,7 +445,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 device = None
                 for t in args:
                     if isinstance(t, TensorBox):
-                        device = t.data.get_device()  # type: ignore[attr-defined]
+                        device = t.data.get_device()
                         break
                 assert (
                     device is not None
@@ -451,10 +453,13 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 out[(device, use_foreach)].append((i, args))
             return out
 
-        realize_outputs = False
+        realize_outputs = (
+            len(V.graph.current_node.users) == 0
+            or V.graph.current_node.target in inplace_foreach_ops
+        )
         for node in V.graph.current_node.users:
             for user in node.users:
-                if not (user.op == "call_function" and user.target in foreach_ops):
+                if not (user.op == "call_function" and (user.target in foreach_ops)):
                     realize_outputs = True
 
         a_list_input = None
@@ -2013,12 +2018,8 @@ make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
-make_fallback(aten.cumsum, require_dense, warn=False)
-make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
-make_fallback(aten._flash_attention_forward)
-make_fallback(aten._flash_attention_backward)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
@@ -2040,21 +2041,44 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
 
-        ALIGNMENT = 16
+        # This is the minimum alignment required by SDPA kernels for attention_bias.
+        # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
+        ALIGNMENT = 8
+
+        is_backward = fx_node.target in (
+            aten._scaled_dot_product_efficient_attention_backward.default,
+            aten._scaled_dot_product_flash_attention_backward.default,
+        )
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
 
         assert isinstance(arg, TensorBox)
-        unaligned_input_shape = isinstance(arg.data, ir.SliceView) and not is_aligned(
-            arg
-        )
-        aligned_input_view = unaligned_input_shape and is_aligned(arg.unwrap_view())
 
-        # input is padded, requiring_stride_order will unwrap the view and unpad.
-        # Would be nice to be able to require certain padding from inductor ir, nyi
-        if aligned_input_view:
-            return arg
+        # This correctly handles the forward case:
+        if isinstance(arg.data, (ir.SliceView, ir.ExpandView)):
+            if not is_aligned(arg):
+                # input is padded, requiring_stride_order will unwrap the view and unpad.
+                # Would be nice to be able to require certain padding from inductor ir, nyi
+                if is_aligned(arg.unwrap_view()):
+                    return arg
+
+        def is_aligned_backward(x):
+            aligned_strides = all(
+                (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
+                for i in range(len(x.get_stride()) - 1)
+            )
+            return (
+                V.graph.sizevars.size_hint(x.get_stride()[-1])
+            ) == 1 and aligned_strides
+
+        if (
+            isinstance(arg.data, ir.StorageBox)
+            and arg.data.is_input_buffer()
+            and is_backward
+        ):
+            if len(arg.data.get_size()) == 4 and is_aligned_backward(arg):
+                return arg
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
@@ -2085,8 +2109,10 @@ make_fallback(
     sdpa_constraint,
     warn=False,
 )
-make_fallback(torch.ops.aten._efficient_attention_forward.default)
-make_fallback(torch.ops.aten._efficient_attention_backward.default)
+make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
+make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
+make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
+make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
@@ -2115,7 +2141,6 @@ make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
-make_fallback(aten.cumprod, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -2207,6 +2232,7 @@ make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten._pdist_backward)
 make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
+make_fallback(aten.replication_pad2d_backward)
 make_fallback(aten.soft_margin_loss_backward, warn=False)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten.segment_reduce.default)
@@ -2972,7 +2998,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
     x_size = self.get_size()
     x_ndim = len(x_size)
 
-    if needs_fallback_due_to_atomic_add_limitations(self.get_dtype()):
+    if accumulate and needs_fallback_due_to_atomic_add_limitations(self.get_dtype()):
         # self is an scalar Tensor
         if x_ndim == 0:
             self = view(self, [1])
@@ -4521,6 +4547,21 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
     return inner
 
 
+def _make_scan_inner(x, *, axis, dtype):
+    if dtype is not None:
+        x = to_dtype(x, dtype)
+    size = x.get_size()
+    axis = _validate_reduction_axis(x, axis)[0]
+
+    return dict(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=x.make_loader(),
+        size=x.get_size(),
+        axis=axis,
+    )
+
+
 @register_lowering(aten.mean)
 def mean(x, axis=None, keepdim=False, *, dtype=None):
     if dtype is not None:
@@ -4605,7 +4646,7 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     rnumel = sympy_product(size[i] for i in axis)
 
     def get_constant_or_index_expr(x, dtype):
-        if isinstance(x, sympy.Expr) and not x.is_constant():
+        if isinstance(x, sympy.Expr) and not x.is_number:
             return ops.to_dtype(ops.index_expr(x, torch.int64), dtype)
         return ops.constant(x, dtype)
 
@@ -4724,7 +4765,7 @@ def pow(a, b):
     return pow_native(a, b)
 
 
-def mutate_to(changed, val):
+def mutate_to(changed, val, unsafe_alias=False):
     if isinstance(changed, TensorBox):
         changed_data = changed.data
     else:
@@ -4750,7 +4791,7 @@ def mutate_to(changed, val):
         changed_data.data = val.data
         return changed
 
-    ir.MutationLayout.realize_into(val, changed_data)
+    ir.MutationLayout.realize_into(val, changed_data, unsafe_alias=unsafe_alias)
     return changed
 
 
@@ -4863,6 +4904,38 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
     fn = make_reduction("sum", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
+
+
+fallback_cumsum = fallback_handler(aten.cumsum.default)
+fallback_cumprod = fallback_handler(aten.cumprod.default)
+
+
+@register_lowering(aten.cumsum)
+def cumsum(x, axis=None, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    result = ir.Scan.create(**kwargs, scan_op="sum")
+    if result is None:
+        return fallback_cumsum(x, dim=axis, dtype=dtype)
+    return result
+
+
+@register_lowering(aten.cumprod)
+def cumprod(x, axis=None, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    result = ir.Scan.create(**kwargs, scan_op="prod")
+    if result is None:
+        return fallback_cumprod(x, dim=axis, dtype=dtype)
+    return result
 
 
 @register_lowering(aten.prod)
@@ -5022,19 +5095,23 @@ register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
-register_foreach_pointwise(aten._foreach_add.List, add, allow_alpha=True)
-register_foreach_pointwise(aten._foreach_add.Scalar, add, allow_alpha=True)
+foreach_add_list = register_foreach_pointwise(
+    aten._foreach_add.List, add, allow_alpha=True
+)
+foreach_add_scalar = register_foreach_pointwise(
+    aten._foreach_add.Scalar, add, allow_alpha=True
+)
 register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
-register_foreach_pointwise(aten._foreach_mul.List, mul)
-register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
+foreach_mul_list = register_foreach_pointwise(aten._foreach_mul.List, mul)
+foreach_mul_scalar = register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
 register_foreach_pointwise(aten._foreach_sub.List, sub)
 register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
 register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
-register_foreach_pointwise(aten._foreach_div.List, div)
-register_foreach_pointwise(aten._foreach_div.Scalar, div)
+foreach_div_list = register_foreach_pointwise(aten._foreach_div.List, div)
+foreach_div_scalar = register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
 register_foreach_pointwise(aten._foreach_maximum.List, maximum)
 register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
@@ -5047,6 +5124,44 @@ register_foreach_pointwise(aten._foreach_clamp_max.Scalar, minimum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
 register_foreach_pointwise(aten._foreach_copy, copy)
+
+
+# these are only encountered as outputs of the graph
+# reinplacing epilogue copies improves compile time
+# by removing extra buffers sent to the scheduler.
+def register_foreach_inplace(aten_op, outplace_aten_op, outplace_op):
+    inplaceable_foreach_ops[outplace_aten_op] = aten_op
+    inplace_foreach_ops.add(aten_op)
+
+    def fn(*args, **kwargs):
+        results = outplace_op(*args, **kwargs)
+        mut_results = []
+        for arg, result in zip(args[0], results):
+            mut_results.append(mutate_to(arg, result, unsafe_alias=True))
+
+        return mut_results
+
+    _register_foreach_lowering(aten_op, fn)
+
+
+register_foreach_inplace(
+    aten._foreach_add_.List, aten._foreach_add.List, foreach_add_list
+)
+register_foreach_inplace(
+    aten._foreach_add_.Scalar, aten._foreach_add.Scalar, foreach_add_scalar
+)
+register_foreach_inplace(
+    aten._foreach_mul_.List, aten._foreach_mul.List, foreach_mul_list
+)
+register_foreach_inplace(
+    aten._foreach_mul_.Scalar, aten._foreach_mul.Scalar, foreach_mul_scalar
+)
+register_foreach_inplace(
+    aten._foreach_div_.List, aten._foreach_div.List, foreach_div_list
+)
+register_foreach_inplace(
+    aten._foreach_div_.Scalar, aten._foreach_div.Scalar, foreach_div_scalar
+)
 
 
 def register_inplace(aten_op, outplace_op):
