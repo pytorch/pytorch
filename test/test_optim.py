@@ -12,6 +12,14 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 class TestOptimRenewed(TestCase):
 
     @onlyCPU
+    @optims(optim_db)
+    def test_optim_infos_do_not_specify_global_cliquey_kwargs(self, device, dtype, optim_info):
+        global_cliquey_flags = ["foreach", "fused", "differentiable"]
+        for optim_input in optim_info.optim_inputs_func():
+            self.assertFalse(any(f for f in global_cliquey_flags if f in optim_input.kwargs))
+
+
+    @onlyCPU
     @optims([optim for optim in optim_db if optim.optim_error_inputs_func is not None])
     def test_errors(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
@@ -83,7 +91,7 @@ class TestOptimRenewed(TestCase):
                     loss.backward()
 
                     # Test that step behaves as expected (a no-op) when grads are set to None
-                    if i == 0:
+                    if i == 3:
                         optimizer.zero_grad(set_to_none=True)
 
                     optimizer.step()
@@ -108,7 +116,7 @@ class TestOptimRenewed(TestCase):
 
 
     @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float64])
-    def test_foreach(self, device, dtype, optim_info):
+    def test_foreach_matches_forloop(self, device, dtype, optim_info):
         self._test_derived_optimizers(device, dtype, optim_info, "foreach")
 
 
