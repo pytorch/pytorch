@@ -4,7 +4,7 @@ from sympy.core.logic import fuzzy_and, fuzzy_not, fuzzy_or
 
 __all__ = [
     "FloorDiv", "ModularIndexing", "CleanDiv", "CeilDiv", "Pow", "TrueDiv",
-    "LShift", "RShift", "IsNonOverlappingAndDenseIndicator", "Round",
+    "LShift", "RShift", "IsNonOverlappingAndDenseIndicator", "Round", "RoundDecimal",
 ]
 
 
