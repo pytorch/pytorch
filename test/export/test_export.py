@@ -113,6 +113,24 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
+    def test_external_call_non_strict_real_tensor(self):
+        class ExternalMethod:
+            def add(self, x):
+                return x + x
+
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.external_add = ExternalMethod().add
+
+            def forward(self, x):
+                return self.external_add(x)
+
+        f = Basic()
+        args = (torch.randn(1, 3), )
+        ep = export(f, args, strict=False)
+        self.assertEqual(ep(*args), f(*args))
+
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self):
