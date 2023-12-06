@@ -299,7 +299,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.2
         with:
           docker-image: pytorch/manylinux-builder:rocm5.6-main
       - name: Test Pytorch binary
@@ -404,7 +404,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.2
         with:
           docker-image: pytorch/manylinux-builder:rocm5.7-main
       - name: Test Pytorch binary
