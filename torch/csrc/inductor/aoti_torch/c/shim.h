@@ -233,6 +233,23 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle* ret0,
     AtenTensorHandle* ret1);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
+    AtenTensorHandle input,
+    AtenTensorHandle weight,
+    AtenTensorHandle bias, // optional argument
+    int64_t* stride_ptr,
+    int64_t stride_size,
+    int64_t* padding_ptr,
+    int64_t padding_size,
+    int64_t* dilation_ptr,
+    int64_t dilation_size,
+    int transposed,
+    int64_t* output_padding_ptr,
+    int64_t output_padding_size,
+    int64_t groups,
+    AtenTensorHandle* ret // returns new reference
+);
+
 // This function will create a new uninitialized tensor object
 // and its pointer is returned through *ret.
 AOTI_TORCH_EXPORT AOTITorchError
