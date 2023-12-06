@@ -550,11 +550,11 @@ API Reference
 
 .. automodule:: torch.export
 .. autofunction:: export
-.. autofunction:: dynamic_dim
+.. autofunction:: torch.export.dynamic_shapes.dynamic_dim
 .. autofunction:: save
 .. autofunction:: load
 .. autofunction:: register_dataclass
-.. autofunction:: Dim
+.. autofunction:: torch.export.dynamic_shapes.Dim
 .. autofunction:: dims
 .. autoclass:: Constraint
 .. autoclass:: ExportedProgram
@@ -580,3 +580,5 @@ API Reference
 .. autoclass:: ExportGraphSignature
 
     .. automethod:: replace_all_uses
+
+.. py:module:: torch.export.dynamic_shapes

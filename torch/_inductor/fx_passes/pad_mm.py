@@ -134,13 +134,14 @@ def pad_addmm(
     elif m_padded_length != 0:
         mat1 = pad_dim(mat1, m_padded_length, 0)
 
+    # the add broadcasts, so we only pad if the dimension != 1
     if input is not None and k_padded_length == 0:
         if n_padded_length != 0:
-            if input.dim() == 2:
+            if input.dim() == 2 and input.shape[1] != 1:
                 input = pad_dim(input, n_padded_length, 1)
-            elif input.dim() == 1:
+            elif input.dim() == 1 and input.shape[0] != 1:
                 input = pad_dim(input, n_padded_length, 0)
-        elif m_padded_length != 0 and input.dim() == 2:
+        elif m_padded_length != 0 and input.dim() == 2 and input.shape[0] != 1:
             input = pad_dim(input, m_padded_length, 0)
 
     if k_padded_length != 0:
