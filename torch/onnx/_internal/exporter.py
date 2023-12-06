@@ -872,7 +872,7 @@ class ONNXProgram:
             ...     return x + y1 + y2 + y3
             >>> x_dict = {"a": torch.tensor(1.)}
             >>> y_tuple = (torch.tensor(2.), (torch.tensor(3.), torch.tensor(4.)))
-            >>> onnx_program = torch.onnx.dynamo_export(func_with_nested_input_structure, x_dict, y_tuple)
+            >>> onnx_program = torch.onnx.dynamo_export(x_dict, y_tuple, model_with_state_dict=func_with_nested_input_structure)
             >>> print(x_dict, y_tuple)
             {'a': tensor(1.)} (tensor(2.), (tensor(3.), tensor(4.)))
             >>> print(onnx_program.adapt_torch_inputs_to_onnx(x_dict, y_tuple, model=func_with_nested_input_structure))
@@ -937,7 +937,7 @@ class ONNXProgram:
             >>> pt_output = func_returning_tuples(x, y, z)
             >>> print(pt_output)
             (tensor(3.), (tensor(5.), tensor(8.)))
-            >>> print(onnx_program.adapt_torch_outputs_to_onnx(func_returning_tuples, pt_output))
+            >>> print(onnx_program.adapt_torch_outputs_to_onnx(pt_output, model_with_state_dict=func_returning_tuples))
             [tensor(3.), tensor(5.), tensor(8.)]
 
         .. warning::
