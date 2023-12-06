@@ -4489,7 +4489,7 @@ Examples::
                 # Use slow decomp whose backward will be in terms of index_put.
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
-                return importlib.import_module('torch._decomp.decompositions').replication_pad2d(
+                return importlib.import_module('torch._decomp.decompositions')._replication_pad(
                     input, pad
                 )
     return torch._C._nn.pad(input, pad, mode, value)
