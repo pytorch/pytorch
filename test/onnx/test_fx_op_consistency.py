@@ -17,7 +17,11 @@ Usage:
 
 Note:
 
-    When new ops are supported, please scroll down to modify the EXPECTED_SKIPS_OR_FAILS and
+    1. Please make sure pytest-subtests is installed. Otherwise, the sub-tests will be ignored.
+
+    2. Install pytest-xdist to run tests in parallel if runng all tests is the goal.
+
+    3. When new ops are supported, please scroll down to modify the EXPECTED_SKIPS_OR_FAILS and
     TESTED_OPS lists. See "Modify this section"
 
 """
@@ -578,10 +582,12 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
             "https://github.com/pytorch/pytorch/issues/101150"
         ),
     ),
-    skip(
+    xfail(
         "native_batch_norm",
+        matcher=lambda sample: sample.args[-3] is True
+        and any(arg is not None for arg in sample.args[2:4]),
         model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason="Flaky failure: https://github.com/pytorch/pytorch/issues/115106",
+        reason="https://github.com/pytorch/pytorch/issues/115106",
     ),
     xfail(
         "nn.functional.avg_pool1d",
@@ -615,8 +621,10 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         or (sample.kwargs.get("divisor_override") is not None),
         reason="ONNX doesn't support divisor_override argument",
     ),
-    skip(
+    xfail(
         "nn.functional.batch_norm",
+        matcher=lambda sample: sample.kwargs.get("training") is True
+        and any(arg is not None for arg in sample.args[2:4]),
         model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="Flaky failure: https://github.com/pytorch/pytorch/issues/115106",
     ),
@@ -661,6 +669,15 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: len(sample.input.shape) == 0
         and sample.kwargs.get("as_tuple", False) is False,
         reason="Output 'shape' do not match: torch.Size([0, 1]) != torch.Size([0, 0]).",
+        model_type=onnx_test_common.TorchModelType.TORCH_NN_MODULE,
+    ),
+    xfail(
+        "nonzero",
+        model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason=onnx_test_common.reason_onnx_script_does_not_support(
+            "aten::_assert_async.msg",
+            "https://github.com/pytorch/pytorch/issues/112443",
+        ),
     ),
     xfail(
         "scatter_add",
