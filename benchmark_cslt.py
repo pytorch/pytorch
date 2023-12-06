@@ -1,8 +1,10 @@
-import torch
 import time
-import torch.nn.functional as F
+
+import torch
+
 # import xformers.ops as xops
 # import xformers.ops.sp24_fairinternal as sp24
+
 
 def benchmark_fn(name, fn, *args, **kwargs):
     g = torch.cuda.CUDAGraph()
@@ -15,12 +17,13 @@ def benchmark_fn(name, fn, *args, **kwargs):
     for _ in range(reps):
         g.replay()
     torch.cuda.synchronize()
-    dt = (time.time() - begin)
+    dt = time.time() - begin
     dt_us = int(dt * 1000000) / reps
     print(f"{name}:", dt_us, "us")
     return dt_us
 
-print(f"CuSparseLt v0.5.0")
+
+print("CuSparseLt v0.5.0")
 total_sp24 = 0
 total_dense = 0
 for count, input_shape, weight_shape in [
@@ -37,9 +40,20 @@ for count, input_shape, weight_shape in [
     input = torch.randn(input_shape, device="cuda", dtype=torch.float16)
     weight = torch.randn(weight_shape, device="cuda", dtype=torch.float16)
     weight_sp24 = torch._cslt_compress(weight)
-    optimal_alg_id = torch._cslt_sparse_mm_search(weight_sp24, input.T, transpose_result=True)
-    print(f"input: {list(input.shape)} | weight: {list(weight.shape)} | optimal_alg_id: {optimal_alg_id}")
-    total_sp24  += count * benchmark_fn("  gemm@sp24", torch._cslt_sparse_mm, weight_sp24, input.T, transpose_result=True, alg_id=optimal_alg_id)
+    optimal_alg_id = torch._cslt_sparse_mm_search(
+        weight_sp24, input.T, transpose_result=True
+    )
+    print(
+        f"input: {list(input.shape)} | weight: {list(weight.shape)} | optimal_alg_id: {optimal_alg_id}"
+    )
+    total_sp24 += count * benchmark_fn(
+        "  gemm@sp24",
+        torch._cslt_sparse_mm,
+        weight_sp24,
+        input.T,
+        transpose_result=True,
+        alg_id=optimal_alg_id,
+    )
     total_dense += count * benchmark_fn("  gemm     ", torch.mm, weight, input.T)
 
 print("Total time:")
