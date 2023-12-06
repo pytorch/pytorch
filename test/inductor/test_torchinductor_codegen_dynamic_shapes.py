@@ -178,7 +178,7 @@ test_failures = {
     "test_new_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_ones_dynamic_shapes": TestFailure(("cpu",)),
     "test_permute2_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_randn_generator_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_randn_generator_dynamic_shapes": TestFailure(("cpu",)),
     "test_randn_like_empty_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_single_elem_dynamic_shapes": TestFailure(("cpu",)),
     "test_single_elem_indirect_dynamic_shapes": TestFailure(("cpu",)),
