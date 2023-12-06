@@ -661,13 +661,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Watchdog's inside loop.
   // Takes care of cleaning up completed work, and aborting upon failure or
   // timeout.
-  void watchdogLoopHandler();
+  void workCleanupLoop();
 
   void runHookLoop();
-
-  bool shouldAutoDumpWorkTimeOut(WorkNCCL& work);
-
-  void checkAndSetStore();
 
   // In the timeout case and we will dump debug info such as the NCCL flight
   // recorder to storage. Down the road, if we have more complicated or blocking

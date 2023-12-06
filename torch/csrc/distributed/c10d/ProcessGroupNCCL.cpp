@@ -912,7 +912,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   //    completedWorkList_ before it finishes.
   // 3. We have three threads and two locks.
   //      a. main thread (this function) grabs two locks atomically
-  //      b. watchdog thread (watchdogLoopHandler function) always grabs
+  //      b. watchdog thread (workCleanupLoop function) always grabs
   //      workMetaListMutex_
   //         first and then grabs completedWorkListMutex_.
   //      c. hook thread (runHookLoop function) only grabs
@@ -1161,7 +1161,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
       ncclHeartbeatMonitorThread_ =
           std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
     }
-    watchdogLoopHandler();
+    workCleanupLoop();
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
@@ -1173,7 +1173,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
           << " (Watchdog caught exception: " << e.what();
 
     } else {
-      // Append error message reported from watchdogLoopHandler
+      // Append error message reported from workCleanupLoop
       const auto exitMsg = c10::str(
           "[Rank ",
           rank_,
@@ -1227,22 +1227,11 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
   return retrieveDesyncReport(store_, "NCCL", rank_, size_);
 }
 
-bool ProcessGroupNCCL::shouldAutoDumpWorkTimeOut(WorkNCCL& work) {
-  if (!dumpOnTimeout_)
-    return false;
-  auto timeout = std::chrono::milliseconds(heartbeatTimeoutInSec_ * 1000);
-  return work.checkTimeout(c10::optional<std::chrono::milliseconds>(timeout));
-}
-
-void ProcessGroupNCCL::checkAndSetStore() {
-  if (!store_->check({std::string(TIMEOUT_DUMP)})) {
-    std::vector<uint8_t> vec(1);
-    store_->set(std::string(TIMEOUT_DUMP), vec);
-  }
-}
-
-void ProcessGroupNCCL::watchdogLoopHandler() {
+void ProcessGroupNCCL::workCleanupLoop() {
   bool done = false;
+  auto lastTimeEraseWorkList = std::chrono::steady_clock::now();
+  auto lastTimePollStore = std::chrono::steady_clock::now();
+  c10::optional<std::thread> dumpingDebugInfo;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
   while (!done || !terminateProcessGroup_.load()) {
@@ -1256,18 +1245,29 @@ void ProcessGroupNCCL::watchdogLoopHandler() {
     // Bump up heart beat by one.
     heartbeat_++;
 
+    // poll store to see if some ranks have flagged a timeout when
+    // we haven't polled for `heartbeat_timeout` seconds and there haven't
+    // any work added or removed for `watchdog_timeout` seconds.
+    if (dumpOnTimeout_) {
+      auto currentTimepoint = std::chrono::steady_clock::now();
+      if (std::chrono::duration_cast<std::chrono::milliseconds>(
+              currentTimepoint - lastTimeEraseWorkList) >=
+              std::chrono::milliseconds(kWatchdogThreadSleepMillis) &&
+          std::chrono::duration_cast<std::chrono::seconds>(
+              currentTimepoint - lastTimePollStore) >=
+              std::chrono::seconds(heartbeatTimeoutInSec_)) {
+        lastTimePollStore = currentTimepoint;
+        if (store_->check({std::string(TIMEOUT_DUMP)})) {
+          dumpingDebugInfo = tryWriteDebugInfo();
+        }
+      }
+    }
+
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
       auto& work = *it;
       work.checkAndSetException();
       bool timedOut = work.checkTimeout();
-      c10::optional<std::thread> dumpingDebugInfo;
-
-      if (shouldAutoDumpWorkTimeOut(work)) {
-        checkAndSetStore();
-        // Store debug info to storage. (By default to local disk)
-        dumpingDebugInfo = tryWriteDebugInfo();
-      }
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
@@ -1286,6 +1286,8 @@ void ProcessGroupNCCL::watchdogLoopHandler() {
               // Set shutdown mode, so the heartbeat monitor thread will not
               // abort process immediately.
               collectiveDebugInfoMode_.store(true);
+              std::vector<uint8_t> vec(1);
+              store_->set(std::string(TIMEOUT_DUMP), vec);
             }
 
             if (dumpOnTimeout_) {
@@ -1348,6 +1350,7 @@ void ProcessGroupNCCL::watchdogLoopHandler() {
           completedWorkListCV_.notify_one();
         } else {
           it = workMetaList_.erase(it);
+          lastTimeEraseWorkList = std::chrono::steady_clock::now();
         }
         at::cuda::CUDAGraph::dec_pending_event_queries();
       } else {
