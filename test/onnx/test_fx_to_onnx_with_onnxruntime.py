@@ -149,6 +149,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.skip_dynamic_fx_test(
         "sympy operation tests don't need dynamic shape"
     )
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "torch._export.pass_base.ExportPassBaseError: Unsupported target type: <built-in function ceil>"
+        "github: https://github.com/pytorch/pytorch/issues/115209"
+    )
     def test_sympy_operatons_return_numeric(self):
         def func(x, y):
             # TODO: add boolean tests when SymBool is supported
@@ -546,7 +550,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((x2,),)],
         )
 
-    @pytorch_test_common.xfail(
+    @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
         "RuntimeError: at::functionalization::impl::isFunctionalTensor(self_) INTERNAL ASSERT FAILED "
         "at '/path/to/pytorch/torch/csrc/autograd/python_torch_functions_manual.cpp':514, please report a bug to PyTorch."
     )
@@ -1110,11 +1114,15 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model_type=self.model_type,
         )
 
-    @pytorch_test_common.xfail(
+    @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
         "[ONNXRuntimeError] : 1 : FAIL : Type Error: Data in initializer 'h_0_attn_bias' "
         "has element type tensor(uint8) but usage of initializer in graph expects tensor(bool)"
         "https://github.com/huggingface/transformers/issues/21013"
         "This can be addressed by using GPT2Config, but it is not now supported by FakeTensor exporting."
+    )
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "AssertionError: Dynamic shape check failed for graph inputs",
+        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
