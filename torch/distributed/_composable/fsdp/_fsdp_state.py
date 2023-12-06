@@ -36,9 +36,6 @@ class FSDPState(_State):
 
     NOTE: An instance of this class can manage *no* parameter group; this
     typically is only true of the root module's state.
-
-    NOTE: With respect to managing state, this is analogous to the
-    ``FullyShardedDataParallel`` module wrapper.
     """
 
     _default_stream: torch.cuda.Stream
@@ -61,7 +58,7 @@ class FSDPState(_State):
         # Attributes only used on the root state:
         self._root_post_backward_final_callback_queued: Optional[bool] = None
         self._all_state_refs: List[weakref.ReferenceType[FSDPState]] = []
-        self._wait_for_grad_sync = True
+        self._wait_for_grad_sync: bool = True
 
     def _root_pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
@@ -240,7 +237,7 @@ class FSDPState(_State):
             if tensor.requires_grad:
                 tensor.register_hook(self._pre_backward)
                 if self._fsdp_param_group:
-                    self._fsdp_param_group.needs_pre_backward_unshard = True
+                    self._fsdp_param_group.expected_backward_unshard_count += 1
             return tensor
 
         return _apply_to_tensors(_register_hook, output)

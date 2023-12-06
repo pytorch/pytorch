@@ -117,7 +117,7 @@ class FSDPParamGroup:
         self._prefetched: bool = False
         # Used to avoid mistargeted backward prefetches in the case that some
         # module is used in forward but not in backward
-        self.needs_pre_backward_unshard: bool = False
+        self.expected_backward_unshard_count: int = 0
         # Used to ensure that we only run the pre-backward hook once per
         # (pre-backward, post-backward) interval in case there are multiple
         # forward output tensors that require gradient
@@ -265,7 +265,7 @@ class FSDPParamGroup:
         all_gather_copy_out_event.record()
         self.all_gather_copy_in_stream.wait_event(all_gather_copy_out_event)
         self.all_gather_stream.wait_event(all_gather_copy_out_event)
-        self._all_gather_result = None  # free flat tensor shards
+        self._all_gather_result = None  # free all-gather output
 
     def _reshard(self):
         log.info("_reshard for %s", self._module_fqn)
@@ -323,7 +323,7 @@ class FSDPParamGroup:
                 self._unshard()
             self._wait_for_unshard()
             self._prefetch_unshard()
-            self.needs_pre_backward_unshard = False
+            self.expected_backward_unshard_count -= 1
             self.ran_pre_backward = True
 
     def _post_backward(self, *unused: Any):
@@ -393,8 +393,7 @@ class FSDPParamGroup:
             self._reduce_scatter_view_out_event = None
         self._training_state = TrainingState.IDLE
         self._post_forward_index = None
-        self.ran_pre_backward = False
-        self.needs_pre_backward_unshard = False
+        self.expected_backward_unshard_count = 0
 
     def _prefetch_unshard(self):
         if self._training_state in (
@@ -409,7 +408,7 @@ class FSDPParamGroup:
             target_fsdp_param_group = self.post_forward_order[target_index]()
             assert target_fsdp_param_group is not None, "Weakref deallocated"
             if (
-                target_fsdp_param_group.needs_pre_backward_unshard
+                target_fsdp_param_group.expected_backward_unshard_count > 0
                 and not target_fsdp_param_group._prefetched
             ):
                 with torch.profiler.record_function("FSDP::backward_prefetch"):
@@ -525,14 +524,6 @@ class FSDPParamGroup:
         )
 
     @property
-    def in_forward(self) -> bool:
-        return self._training_state == TrainingState.FORWARD
-
-    @property
-    def in_pre_backward(self) -> bool:
-        return self._training_state == TrainingState.PRE_BACKWARD
-
-    @property
     def _sharded_state(self) -> ShardedState:
         state = self.fsdp_params[0].state
         for fsdp_param in self.fsdp_params[1:]:
@@ -578,23 +569,21 @@ class FSDPParamGroup:
 
     @property
     def _use_all_gather_stream(self) -> bool:
-        return self.in_forward or self.in_pre_backward
+        return self._training_state in (
+            TrainingState.FORWARD, TrainingState.PRE_BACKWARD
+        )
 
     @property
     def _all_gather_copy_in_stream_for_unshard(self) -> torch.cuda.Stream:
-        return (
-            self.all_gather_copy_in_stream
-            if self._use_all_gather_stream
-            else self.default_stream
-        )
+        if self._use_all_gather_stream:
+            return self.all_gather_copy_in_stream
+        return self.default_stream
 
     @property
     def _all_gather_stream_for_unshard(self) -> torch.cuda.Stream:
-        return (
-            self.all_gather_stream
-            if self._use_all_gather_stream
-            else self.default_stream
-        )
+        if self._use_all_gather_stream:
+            return self.all_gather_stream
+        return self.default_stream
 
 
 class RegisterPostBackwardHook(torch.autograd.Function):
