@@ -6,8 +6,10 @@ torch.nn.attention.bias
 
 .. currentmodule:: torch.nn.attention.bias
 
-Attention Biases
-----------------------------------
+CausalBias
+==========
+
+.. autoclass:: CausalBias
 
 .. autosummary::
     :toctree: generated
@@ -16,9 +18,3 @@ Attention Biases
     causal_lower_right
     causal_upper_left
     CausalVariant
-
-CausalBias
-==========
-
-.. autoclass:: CausalBias
-    :members:

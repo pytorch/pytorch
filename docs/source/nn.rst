@@ -5,7 +5,6 @@ torch.nn
 ===================================
 .. automodule:: torch.nn
 .. automodule:: torch.nn.modules
-.. automodule:: torch.nn.attention.bias
 
 These are the basic building blocks for graphs:
 
@@ -526,6 +525,7 @@ Lazy Modules Initialization
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
+.. py:module:: torch.nn.attention
 .. py:module:: torch.nn.backends
 .. py:module:: torch.nn.utils.stateless
 .. py:module:: torch.nn.backends.thnn
