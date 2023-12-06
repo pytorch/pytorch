@@ -639,7 +639,7 @@ namespace {
               {sizeC*isizeH*isizeW, 1, isizeW*sizeC, sizeC});
         }
 
-        const int max_threads = std::min<int>(
+        int max_threads = std::min<int>(
             at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
         int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
         int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
@@ -696,14 +696,14 @@ namespace {
                   C10_CUDA_KERNEL_LAUNCH_CHECK();
                   done = true;
                 } else {
-                  TORCH_WARN("Requested shmem_size exceeds sharedMemPerBlock limit! Reducing max_threads...");
+                  TORCH_WARN_ONCE("Requested shmem_size exceeds sharedMemPerBlock limit! Reducing max_threads...");
                   max_threads /= 2; 
                 }
               }
             );
         } while (!done && max_threads);
         if (!done) {
-          TORCH_INTERNAL(false, "Couldn't reduce launch bounds to accomodate shaedMemPerBlock limit");
+          TORCH_INTERNAL_ASSERT(false, "Couldn't reduce launch bounds to accomodate shaedMemPerBlock limit");
         }
         break;
       }
