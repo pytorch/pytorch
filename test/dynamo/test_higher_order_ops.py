@@ -2232,9 +2232,8 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def run(self, result=None):
-        # capture_func_transform will be set to False (for 2.1) till we
-        # support all transforms, so manually patch it to `True`` for
-        # testing on release branch.
+        # capture_func_transform is set to False by default. We're planning
+        # on going with a different approach.
         with config.patch(capture_func_transforms=True):
             super().run(result)
 
