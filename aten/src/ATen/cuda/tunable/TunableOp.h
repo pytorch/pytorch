@@ -15,6 +15,8 @@
 #include <cxxabi.h>
 #endif
 
+#include <chrono>
+#include <thread>
 #include <type_traits>
 
 namespace at::cuda::tunable {
