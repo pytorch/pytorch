@@ -1943,8 +1943,6 @@ class BenchmarkRunner:
             raise RuntimeError("Eager run failed") from e
 
     def maybe_cast(self, model, example_inputs):
-        model = self.deepcopy_model(model)
-        example_inputs = clone_inputs(example_inputs)
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
         return model, example_inputs
 
