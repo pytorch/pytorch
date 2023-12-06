@@ -3425,6 +3425,17 @@ class TestNestedTensorSubclass(NestedTestCase):
         self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
 
+    def test_noncontiguous_pointwise(self, device):
+        a = torch.randn(2, 3, 4, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, 4, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, 4, requires_grad=True, dtype=torch.float64, device=device)
+        nt, _ = jagged_from_list([a, b, c], None)
+        # transpose ragged dim
+        transposed = nt.transpose(1, 2)
+        # pointwise ops are not supported on ragged dim transposed jagged layout NTs
+        with self.assertRaisesRegex(ValueError, "expected .* to be a contiguous jagged layout"):
+            clone = transposed.clone()
+
     # Note 1: CPU Fused kernels do not support nested, Math is missing ops to work with NT jagged
     # Note 2: Unless running on newer GPUs, only mem-effn or math are available, and mem-effn
     # will fail with gradients and math has ops that aren't implemented. Therefore, in
