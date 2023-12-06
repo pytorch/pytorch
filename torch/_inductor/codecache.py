@@ -52,7 +52,7 @@ from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
-from torch._inductor.cxx_builder.cxx_builder import cxx_build_options, CxxBuilder
+from torch._inductor.cxx_builder.cxx_builder import CxxOptions, CxxTorchOptions, CxxTorchCudaOptions, CxxBuilder
 from torch._inductor.cxx_builder.isa_help_code_store import get_x86_isa_detect_code
 
 if TYPE_CHECKING:
@@ -1151,7 +1151,7 @@ def x86_isa_checker() -> list:
 
         print(f"{key}, {input_path}, {output_dir}")
 
-        x86_isa_help_builder = CxxBuilder(key, [input_path], cxx_build_options, output_dir)
+        x86_isa_help_builder = CxxBuilder(key, [input_path], CxxOptions(), output_dir)
         status, target_file = x86_isa_help_builder.build()
 
         # 1. open the shared library

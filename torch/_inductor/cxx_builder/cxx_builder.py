@@ -264,7 +264,3 @@ class CxxBuilder(object):
         _remove_dir(_build_tmp_dir)
         return status, self._target_file
 
-
-cxx_build_options = CxxOptions()
-torch_build_options = CxxTorchOptions()
-cuda_build_options = CxxTorchCudaOptions()
