@@ -5,7 +5,6 @@ from typing import Any, Callable, cast, Dict, List, Optional, Sequence, TypeVar,
 
 import torch
 import torch.distributed as dist
-
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharded_tensor.shard import Shard
 from torch.distributed._tensor import DTensor
@@ -16,7 +15,6 @@ from .api import (
     CheckpointException,
     WRAPPED_EXCEPTION,
 )
-
 from .metadata import MetadataIndex, STATE_DICT_TYPE
 
 __all__ = ["find_tensor_shard", "find_state_dict_object"]

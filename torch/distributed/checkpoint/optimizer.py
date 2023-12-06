@@ -5,17 +5,13 @@ from typing import cast, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.distributed as dist
-
 import torch.distributed.checkpoint as dist_cp
-
 from torch._utils import _get_device_module
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed._shard.sharded_tensor.shard import Shard
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
-
 from torch.distributed._tensor import DTensor
-
 from torch.distributed.checkpoint._nested_dict import unflatten_state_dict
 from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.metadata import (

@@ -1,12 +1,10 @@
 import abc
 import io
 from dataclasses import dataclass
-
 from enum import auto, Enum
 from typing import Any, List, Optional, Tuple, Union
 
 import torch
-
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 
 from .metadata import ChunkStorageMetadata, Metadata, MetadataIndex, STATE_DICT_TYPE

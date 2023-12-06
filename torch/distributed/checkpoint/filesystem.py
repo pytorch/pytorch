@@ -6,7 +6,6 @@ import pickle
 import queue
 import threading
 from abc import ABC, abstractmethod
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast, Dict, List, Union
@@ -14,12 +13,10 @@ from typing import cast, Dict, List, Union
 import torch
 from torch import Tensor
 from torch._utils import _get_device_module
-
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.futures import Future
 
 from .metadata import Metadata, MetadataIndex
-
 from .planner import (
     LoadItemType,
     LoadPlan,
@@ -31,7 +28,6 @@ from .planner import (
     WriteItemType,
 )
 from .storage import StorageReader, StorageWriter, WriteResult
-
 from .utils import _create_file_view
 
 __all__ = [

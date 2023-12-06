@@ -6,10 +6,8 @@ import torch.distributed as dist
 from torch.distributed.checkpoint.stateful import Stateful
 
 from .default_planner import DefaultSavePlanner
-
 from .metadata import Metadata, STATE_DICT_TYPE
 from .planner import SavePlanner
-
 from .storage import StorageWriter
 from .utils import _DistWrapper
 
@@ -131,7 +129,6 @@ def _save_state_dict(
     no_dist: bool = False,
     planner: Optional[SavePlanner] = None,
 ) -> Metadata:
-
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)

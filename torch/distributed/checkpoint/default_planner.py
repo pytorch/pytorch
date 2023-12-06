@@ -9,18 +9,15 @@ from functools import reduce
 from typing import Any, cast, Dict, List, Tuple, Union
 
 import torch
-
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
-
 from torch.distributed.checkpoint._nested_dict import (
     FLATTEN_MAPPING,
     flatten_state_dict,
 )
 from torch.distributed.checkpoint._sharded_tensor_utils import _flatten_sharded_tensors
 from torch.distributed.checkpoint._traverse import set_element
-
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
@@ -30,7 +27,6 @@ from torch.distributed.checkpoint.metadata import (
     STORAGE_TYPES,
     TensorStorageMetadata,
 )
-
 from torch.distributed.checkpoint.planner import (
     LoadPlan,
     LoadPlanner,
@@ -40,7 +36,6 @@ from torch.distributed.checkpoint.planner import (
     WriteItem,
     WriteItemType,
 )
-
 from torch.distributed.checkpoint.planner_helpers import (
     _create_default_metadata_only_plan,
     _create_read_items,

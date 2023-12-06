@@ -8,21 +8,18 @@ import os
 import pickle
 import queue
 import threading
+import fsspec
 from abc import ABC, abstractmethod
-
 from dataclasses import dataclass
 from typing import Callable, cast, Dict, List, Optional, Union
-
-import fsspec
-import torch
 from fsspec import AbstractFileSystem
 from fsspec.core import url_to_fs
+
+import torch
 from torch import Tensor
 from torch._utils import _get_device_module
-
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex
-
 from torch.distributed.checkpoint.planner import (
     LoadItemType,
     LoadPlan,

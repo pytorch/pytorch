@@ -7,9 +7,7 @@ from torch.distributed.checkpoint.stateful import Stateful
 
 from .default_planner import DefaultLoadPlanner
 from .planner import LoadPlanner
-
 from .storage import StorageReader
-
 from .utils import _all_gather_keys, _DistWrapper
 
 __all__ = ["load_state_dict", "load"]
@@ -144,7 +142,6 @@ def _load_state_dict(
     no_dist: bool = False,
     planner: Optional[LoadPlanner] = None,
 ) -> None:
-
     torch._C._log_api_usage_once("torch.distributed.checkpoint.load_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
