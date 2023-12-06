@@ -478,6 +478,28 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(expect, actual)
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
 
+    def test_addmm_broadcasting_bias(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.functional.linear
+                self.linear_weight = torch.randn(4, 4).cuda()
+                self.bias = torch.randn(1, 4).cuda()
+
+            def forward(self, x):
+                x = self.linear(x, self.linear_weight, self.bias)
+                return x
+
+        input_tensor = torch.randn(1, 3, 4).cuda()
+
+        func = Model().cuda()
+
+        res1 = func(input_tensor)
+        jit_func = torch.compile(func)
+        res2 = jit_func(input_tensor)
+
+        self.assertEqual(res1, res2)
+
     def test_cat_mm(self):
         def fn(a, b, c):
             return torch.cat(
