@@ -8,10 +8,11 @@ import os
 import pickle
 import queue
 import threading
-import fsspec
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable, cast, Dict, List, Optional, Union
+
+import fsspec
 from fsspec import AbstractFileSystem
 from fsspec.core import url_to_fs
 
