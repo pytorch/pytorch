@@ -7,7 +7,32 @@ import shlex
 import subprocess
 import re
 import torch
+import platform
+from torch._inductor import config, exc
 
+if config.is_fbcode():
+    from triton.fb.build import _run_build_command
+
+    from torch._inductor.fb.utils import (
+        log_global_cache_errors,
+        log_global_cache_stats,
+        log_global_cache_vals,
+        use_global_cache,
+    )
+else:
+
+    def log_global_cache_errors(*args, **kwargs):
+        pass
+
+    def log_global_cache_stats(*args, **kwargs):
+        pass
+
+    def log_global_cache_vals(*args, **kwargs):
+        pass
+
+    def use_global_cache() -> bool:
+        return False
+    
 # Windows need setup a temp dir to store .obj files.
 _BUILD_TEMP_DIR = "CxxBuild"
 
@@ -122,6 +147,39 @@ def get_linux_cpp_cflags(cpp_compiler) -> List[str]:
         return cflags
     else:
         return []
+    
+def optimization_cflags() -> List[str]:
+    if _IS_WINDOWS:
+        return ["O2"]
+    else:
+        cflags = ["O0", "g"] if config.aot_inductor.debug_compile else ["O3", "DNDEBUG"]
+        cflags.append("ffast-math")
+        cflags.append("fno-finite-math-only")
+
+        if not config.cpp.enable_unsafe_math_opt_flag:
+            cflags.append("fno-unsafe-math-optimizations")
+
+        if config.is_fbcode():
+            # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
+            # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
+            # We will fix it later by exposing the lib path.
+            return cflags
+        
+        if sys.platform == "darwin":
+            # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
+            # Also, `-march=native` is unrecognized option on M1
+            cflags.append("Xclang")
+        else:
+            if platform.machine() == "ppc64le":
+                cflags.append("mcpu=native")
+            else:
+                cflags.append("march=native")
+
+        # Internal cannot find libgomp.so
+        if not config.is_fbcode():
+            cflags.append("fopenmp")
+
+        return cflags
 
 class CxxOptions(BuildOptionsBase):
     '''
@@ -143,8 +201,9 @@ class CxxOptions(BuildOptionsBase):
     def __init__(self) -> None:
         super().__init__()
         self._compiler = _get_cxx_compiler()
-        _nonduplicate_append(self._cflags, ["O2"])
         _nonduplicate_append(self._cflags, self._get_shared_cflag())
+
+        _nonduplicate_append(self._cflags, optimization_cflags())
         _nonduplicate_append(self._cflags, get_warning_all_flag())
         _nonduplicate_append(self._cflags, get_cxx_std())
 
@@ -155,6 +214,35 @@ def get_glibcxx_abi_build_flags() -> List[str]:
 
 def get_torch_cpp_wrapper_defination() -> List[str]:
     return ["TORCH_INDUCTOR_CPP_WRAPPER"]
+
+def use_custom_generated_macros() -> List[str]:
+    return [" C10_USING_CUSTOM_GENERATED_MACROS"]
+
+def use_fb_internal_macros() -> List[str]:
+    if not _IS_WINDOWS:
+        if config.is_fbcode():
+            openmp_lib = build_paths.openmp_lib()
+            preprocessor_flags = " ".join(
+                (
+                    "-D C10_USE_GLOG",
+                    "-D C10_USE_MINIMAL_GLOG",
+                    "-D C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
+                )
+            )
+            return [f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"]
+        else:
+            return []
+    else:
+        return []
+    
+def use_standard_sys_dir_headers() -> List[str]:
+    if _IS_WINDOWS:
+        return []
+    
+    if config.is_fbcode():
+        return ["nostdinc"]
+    else:
+        return []
 
 class CxxTorchOptions(CxxOptions):
     '''
@@ -170,10 +258,14 @@ class CxxTorchOptions(CxxOptions):
     def __init__(self) -> None:
         super().__init__()
         _nonduplicate_append(self._definations, get_torch_cpp_wrapper_defination())
+        _nonduplicate_append(self._definations, use_custom_generated_macros())
+
+        _nonduplicate_append(self._cflags, use_standard_sys_dir_headers())
 
         if not _IS_WINDOWS:
             # glibcxx is not available in Windows.
             _nonduplicate_append(self._passthough_args, get_glibcxx_abi_build_flags())
+            _nonduplicate_append(self._passthough_args, use_fb_internal_macros())
     
 class CxxTorchCudaOptions(CxxTorchOptions):
     '''
