@@ -1036,6 +1036,9 @@ def should_allow_numbers_as_tensors(func: OpOverload):
 class FakeTensorConfig:
     debug = os.environ.get("TORCH_FAKE_TENSOR_DEBUG", "0") == "1"
     cache = os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE", "1") == "1"
+    cache_crosscheck = (
+        os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE_CROSSCHECK", "0") == "1"
+    )
 
 
 class FakeTensor(torch.Tensor):
@@ -1367,7 +1370,7 @@ class _DispatchCacheKey(list):
     _HashedSeq from the functools.lru_cache implementation.
     """
 
-    __slots__ = "hashvalue"
+    __slots__ = "hashvalue"  # noqa: PLC0205
 
     def __init__(self, tup, hash=hash):
         self[:] = tup
@@ -1392,7 +1395,7 @@ class _DispatchCacheEntry:
 @dataclass(frozen=True)
 class _BypassDispatchCache(Exception):
     """
-    Signals when a dispatch arg prevents FakeTensor caching.
+    Signals cases that should skip FakeTensor caching.
     """
 
     reason: str
@@ -1425,6 +1428,7 @@ class FakeTensorMode(TorchDispatchMode):
     cache_misses: int = 0
     cache_bypasses = defaultdict(int)
     cache_enabled: bool = FakeTensorConfig.cache
+    cache_crosscheck: bool = FakeTensorConfig.cache_crosscheck
 
     def __init__(
         self,
@@ -1541,16 +1545,16 @@ class FakeTensorMode(TorchDispatchMode):
         """
         Clear the dispatch cache.
         """
-        cls.hits = 0
-        cls.misses = 0
+        cls.cache_hits = 0
+        cls.cache_misses = 0
         cls.cache_bypasses.clear()
         cls.cache.clear()
 
     def _cached_dispatch_impl(
         self,
         func: OpOverload,
-        types: Tuple[Any],
-        args: Tuple[Any],
+        types: Tuple[Any, ...],
+        args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
     ):
         """
@@ -1567,11 +1571,15 @@ class FakeTensorMode(TorchDispatchMode):
         if entry is not None:
             FakeTensorMode.cache_hits += 1
             output = self._output_from_cache_entry(entry, func, args)
+            if FakeTensorMode.cache_crosscheck:
+                self._crosscheck_cache_hit(
+                    output, key, entry, func, types, args, kwargs
+                )
         else:
-            FakeTensorMode.cache_misses += 1
             output = self._dispatch_impl(func, types, args, kwargs)
             try:
-                self._create_cache_entry(key, args, output)
+                FakeTensorMode.cache[key] = self._make_cache_entry(key, args, output)
+                FakeTensorMode.cache_misses += 1
             except _BypassDispatchCache as e:
                 FakeTensorMode.cache_bypasses[e.reason] += 1
 
@@ -1581,7 +1589,7 @@ class FakeTensorMode(TorchDispatchMode):
         self, func: OpOverload, args: Tuple[Any], kwargs: Dict[str, Any]
     ) -> _DispatchCacheKey:
         """
-        Create a cache key given the dispatch args. Raise _BypassDispatchCache
+        Create a cache key given the dispatch args. Raises _BypassDispatchCache
         for any situation that precludes caching.
         """
         # Avoid caching for any ops that would require a more sophisticated
@@ -1657,11 +1665,13 @@ class FakeTensorMode(TorchDispatchMode):
             # output tensor.
             return (type(arg), arg)
 
-    def _create_cache_entry(
+    def _make_cache_entry(
         self, key: _DispatchCacheKey, args: Tuple[Any], output: FakeTensor
     ) -> _DispatchCacheEntry:
         """
-        Create an entry in the cache for the given 'output' Tensor.
+        Make a cache entry object for the given 'output' Tensor. Raises
+        _BypassDispatchCache if the output tensor has characteristics that
+        prevent caching it.
         """
         # Some ops return tuples of Tensors, but it's rare, so avoid
         # the complexity of caching other types.
@@ -1678,17 +1688,12 @@ class FakeTensorMode(TorchDispatchMode):
             raise _BypassDispatchCache("sparse output")
 
         # If this is an in-place op, we just record which input arg is aliased.
-        entry = None
         for idx in range(len(args)):
             if id(args[idx]) == id(output):
-                entry = _DispatchCacheEntry(None, idx)
-                break
+                return _DispatchCacheEntry(None, idx)
 
         # Otherwise, record the output tensor's metadata.
-        if not entry:
-            entry = _DispatchCacheEntry(extract_tensor_metadata(output), None)
-
-        FakeTensorMode.cache[key] = entry
+        return _DispatchCacheEntry(extract_tensor_metadata(output), None)
 
     def _output_from_cache_entry(
         self, entry: _DispatchCacheEntry, func: OpOverload, args: Tuple[Any]
@@ -1702,7 +1707,6 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Create a new empty FakeTensor with the cached metadata.
         metadata = entry.metadata
-        assert not metadata.is_quantized
         assert not metadata.is_sparse
 
         with torch.inference_mode(metadata.is_inference):
@@ -1732,6 +1736,40 @@ class FakeTensorMode(TorchDispatchMode):
                 )
 
         return FakeTensor(self, empty, metadata.device)
+
+    def _crosscheck_cache_hit(
+        self,
+        output: FakeTensor,
+        key: _DispatchCacheKey,
+        entry: _DispatchCacheEntry,
+        func: OpOverload,
+        types: Tuple[Any, ...],
+        args: Tuple[Any, ...],
+        kwargs: Dict[str, Any],
+    ):
+        """
+        For debugging: cross-check the entry we pulled from the cache
+        with the one that would be created without caching.
+        """
+        # Normal dispatch should not raise an exception. Otherwise, a cache
+        # hit would be wrong.
+        try:
+            expected_output = self._dispatch_impl(func, types, args, kwargs)
+            expected_entry = self._make_cache_entry(key, args, expected_output)
+        except Exception as e:
+            raise RuntimeError(
+                f"FakeTensor cache crosscheck failure: func={func}, "
+                f"args={args}, kwargs={kwargs}: Dispatch raised={e}"
+            ) from e
+
+        # The metadata and aliasing info should match.
+        with in_kernel_invocation_manager(self):
+            if entry != expected_entry:
+                raise RuntimeError(
+                    f"FakeTensor cache crosscheck failure: func={func}, "
+                    f"args={args}, kwargs={kwargs}: Expected={expected_entry}. "
+                    f"Observed={entry}"
+                )
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}

@@ -9,12 +9,14 @@ import itertools
 import numpy as np
 from torch.testing._internal.jit_utils import RUN_CUDA
 from torch._subclasses.fake_tensor import (
+    extract_tensor_metadata,
     FakeTensor,
     FakeTensorMode,
     FakeTensorConverter,
     DynamicOutputShapeException,
     UnsupportedOperatorException,
 )
+from torch._subclasses.fake_utils import outputs_alias_inputs
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic, free_symbols, StatelessSymbolicContext
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import ops
@@ -36,6 +38,8 @@ from torch import distributed as dist
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 import torch.utils._pytree as pytree
+
+aten = torch.ops.aten
 
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):
@@ -1241,6 +1245,219 @@ class FakeTensorPropTest(TestCase):
             another_optional_value = torch.randn(5, 4)
             graph_model = torch.fx.symbolic_trace(model, (value, None, another_optional_value))
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
+
+
+class FakeTensorDispatchCache(TestCase):
+    def _test_cache_key(self, fm, x, y, z):
+        """
+        Helper for all test_cache_key_* tests below. Assert that the
+        cache keys for inputs x and y are the same, but z is different.
+        """
+        func = aten.add.Tensor
+        key_x = fm._cache_key(func, [x], {})
+        key_y = fm._cache_key(func, [y], {})
+        key_z = fm._cache_key(func, [z], {})
+
+        self.assertEqual(key_x, key_y)
+        self.assertNotEqual(key_x, key_z)
+
+    def test_cache_key_dtype(self):
+        with FakeTensorMode() as fm:
+            x = torch.randn(4, 3, dtype=torch.float16)
+            y = torch.randn(4, 3, dtype=torch.float16)
+            z = x.to(dtype=torch.float32)
+            self._test_cache_key(fm, x, y, z)
+
+    def test_cache_key_shape(self):
+        with FakeTensorMode() as fm:
+            x = torch.randn(4, 3)
+            y = torch.randn(4, 3)
+            z = torch.randn(4, 2)
+            self._test_cache_key(fm, x, y, z)
+
+    def test_cache_key_stride(self):
+        with FakeTensorMode() as fm:
+            x = torch.randn(4, 2)
+            y = torch.randn(4, 2)
+            z = x.as_strided((4, 2), (1, 2))
+            self._test_cache_key(fm, x, y, z)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cache_key_device(self):
+        with FakeTensorMode() as fm:
+            x = torch.randn(4, 3)
+            y = torch.randn(4, 3)
+            z = x.to(device="cuda")
+            self._test_cache_key(fm, x, y, z)
+
+    def test_cache_key_memory_format(self):
+        with FakeTensorMode() as fm:
+            x = torch.randn(1, 2, 3, 4)
+            y = torch.randn(1, 2, 3, 4)
+            z = x.to(memory_format=torch.channels_last)
+            self._test_cache_key(fm, x, y, z)
+
+    def test_cache_key_storage_offset(self):
+        with FakeTensorMode() as fm:
+            x = torch.randn(3)[1:]
+            y = torch.randn(3)[1:]
+            z = torch.randn(2)
+            self._test_cache_key(fm, x, y, z)
+
+    def test_cache_key_requires_grad(self):
+        with FakeTensorMode() as fm:
+            x = torch.randn(4, 3)
+            y = torch.randn(4, 3)
+            z = torch.randn(4, 3, requires_grad=True)
+            self._test_cache_key(fm, x, y, z)
+
+    def test_cache_key_is_conj(self):
+        with FakeTensorMode() as fm:
+            x = torch.randn(4, 3, dtype=torch.complex64)
+            y = torch.randn(4, 3, dtype=torch.complex64)
+            z = torch.randn(4, 3, dtype=torch.complex64)
+            torch._C._set_conj(z, not z.is_conj())
+            self._test_cache_key(fm, x, y, z)
+
+    def test_cache_key_is_neg(self):
+        with FakeTensorMode() as fm:
+            x = torch.randn(4, 3, dtype=torch.complex64)
+            y = torch.randn(4, 3, dtype=torch.complex64)
+            z = torch.randn(4, 3, dtype=torch.complex64)
+            torch._C._set_neg(z, not z.is_neg())
+            self._test_cache_key(fm, x, y, z)
+
+    def test_cache_key_is_inference(self):
+        with torch.inference_mode(True):
+            t = torch.randn(4, 3)
+        with FakeTensorMode() as fm:
+            x = torch.randn(4, 3)
+            y = torch.randn(4, 3)
+            z = fm.from_tensor(t)
+            self._test_cache_key(fm, x, y, z)
+
+    def test_cache_key_constants(self):
+        with FakeTensorMode() as fm:
+            # Python hashes 1.0 to the same value as 1. Make sure the
+            # cache key calculation differentiates them.
+            self._test_cache_key(fm, 1.0, 1.0, 1)
+            self._test_cache_key(fm, 0.0, 0.0, 0)
+
+    def assertHitsMisses(self, hits, misses):
+        """
+        Helper to assert on the number of recorded hits and misses.
+        """
+        info = FakeTensorMode.cache_info()
+        self.assertEqual(info.hits, hits)
+        self.assertEqual(info.misses, misses)
+
+    def test_cache_hit(self):
+        with FakeTensorMode():
+            x = torch.randn(4, 3)
+            y = torch.randn(4, 3)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+            res1 = x + y
+            self.assertHitsMisses(0, 1)
+            res2 = x + y
+            self.assertHitsMisses(1, 1)
+
+            self.assertEqual(
+                extract_tensor_metadata(res1),
+                extract_tensor_metadata(res2),
+            )
+
+    def test_cache_bypass(self):
+        with FakeTensorMode():
+            x = torch.randn(1, 2)
+
+            FakeTensorMode.cache_clear()
+            info = FakeTensorMode.cache_info()
+            self.assertFalse("inplace view" in info.bypasses)
+
+            x.unsqueeze_(0)
+            info = FakeTensorMode.cache_info()
+            self.assertEqual(info.misses, 0)
+            self.assertTrue("inplace view" in info.bypasses)
+
+    def test_cache_default_dtype(self):
+        with FakeTensorMode():
+            x = torch.tensor([1, 2], dtype=torch.int32)
+            torch.set_default_dtype(torch.float32)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            y = x + 1.0
+            self.assertEqual(y.dtype, torch.float32)
+            self.assertHitsMisses(0, 1)
+
+            torch.set_default_dtype(torch.float16)
+            y = x + 1.0
+            self.assertEqual(y.dtype, torch.float16)
+            self.assertHitsMisses(0, 2)
+
+            torch.set_default_dtype(torch.float32)
+            y = x + 1.0
+            self.assertEqual(y.dtype, torch.float32)
+            self.assertHitsMisses(1, 2)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cache_default_device(self):
+        with FakeTensorMode():
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            torch.set_default_device("cpu")
+            x = torch.tensor([1, 2])
+            y = x + 1.0
+            self.assertEqual(y.device.type, "cpu")
+            self.assertHitsMisses(0, 1)
+
+            torch.set_default_device("cuda")
+            x = torch.tensor([1, 2])
+            y = x + 1.0
+            self.assertEqual(y.device.type, "cuda")
+            self.assertHitsMisses(0, 2)
+
+            torch.set_default_device("cpu")
+            x = torch.tensor([1, 2])
+            y = x + 1.0
+            self.assertEqual(y.device.type, "cpu")
+            self.assertHitsMisses(1, 2)
+
+    def test_cache_inplace_op(self):
+        with FakeTensorMode():
+            x = torch.randn(1, 2)
+            y = torch.randn(1, 2)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            z = x.add_(y)
+            self.assertHitsMisses(0, 1)
+            self.assertEqual(id(x), id(z))
+
+            w = x.add_(y)
+            self.assertHitsMisses(1, 1)
+            self.assertEqual(id(x), id(w))
+
+    def test_cache_view_op(self):
+        with FakeTensorMode():
+            x = torch.rand(25)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            y = x.view(5, 5)
+            self.assertHitsMisses(0, 1)
+            self.assertTrue(outputs_alias_inputs(x, y))
+
+            z = x.view(5, 5)
+            self.assertHitsMisses(1, 1)
+            self.assertTrue(outputs_alias_inputs(x, z))
+
 
 instantiate_parametrized_tests(FakeTensorTest)
 

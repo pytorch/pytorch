@@ -867,6 +867,86 @@ command = [
 ]
 
 [[linter]]
+code = 'TEST_HAS_MAIN'
+include_patterns = [
+    'test/**/test_*.py',
+]
+exclude_patterns = [
+    'test/run_test.py',
+    '**/fb/**',
+    'test/quantization/**',  # should be run through test/test_quantization.py
+    'test/jit/**',  # should be run through test/test_jit.py
+    'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
+    'test/fx/**',  # should be run through test/test_fx.py
+    'test/bottleneck_test/test_args.py',
+    'test/bottleneck_test/test_cuda.py',
+    'test/distributed/_shard/test_sharder.py',
+    'test/distributed/_tensor/experimental/test_tp_transform.py',
+    'test/distributed/_tensor/test_optimizers.py',
+    'test/distributed/argparse_util_test.py',
+    'test/distributed/bin/test_script.py',
+    'test/distributed/checkpoint/e2e/test_pipeline.py',
+    'test/distributed/elastic/agent/server/test/local_elastic_agent_test.py',
+    'test/distributed/elastic/multiprocessing/bin/test_script.py',
+    'test/distributed/elastic/multiprocessing/bin/zombie_test.py',
+    'test/distributed/elastic/multiprocessing/errors/api_test.py',
+    'test/distributed/elastic/multiprocessing/errors/error_handler_test.py',
+    'test/distributed/elastic/multiprocessing/redirects_test.py',
+    'test/distributed/elastic/multiprocessing/tail_log_test.py',
+    'test/distributed/elastic/rendezvous/api_test.py',
+    'test/distributed/elastic/rendezvous/c10d_rendezvous_backend_test.py',
+    'test/distributed/elastic/rendezvous/dynamic_rendezvous_test.py',
+    'test/distributed/elastic/rendezvous/etcd_rendezvous_backend_test.py',
+    'test/distributed/elastic/rendezvous/etcd_rendezvous_test.py',
+    'test/distributed/elastic/rendezvous/etcd_server_test.py',
+    'test/distributed/elastic/rendezvous/rendezvous_backend_test.py',
+    'test/distributed/elastic/rendezvous/static_rendezvous_test.py',
+    'test/distributed/elastic/rendezvous/utils_test.py',
+    'test/distributed/elastic/timer/api_test.py',
+    'test/distributed/elastic/utils/data/cycling_iterator_test.py',
+    'test/distributed/launcher/api_test.py',
+    'test/distributed/launcher/bin/test_script.py',
+    'test/distributed/launcher/bin/test_script_init_method.py',
+    'test/distributed/launcher/bin/test_script_is_torchelastic_launched.py',
+    'test/distributed/launcher/bin/test_script_local_rank.py',
+    'test/distributed/launcher/launch_test.py',
+    'test/distributed/launcher/run_test.py',
+    'test/distributed/optim/test_apply_optimizer_in_backward.py',
+    'test/distributed/optim/test_named_optimizer.py',
+    'test/distributed/test_c10d_spawn.py',
+    'test/distributed/test_collective_utils.py',
+    'test/distributions/test_distributions.py',
+    'test/dynamo/test_compile.py',
+    'test/dynamo/test_sources.py',
+    'test/functorch/test_logging.py',
+    'test/lazy/test_bindings.py',
+    'test/lazy/test_extract_compiled_graph.py',
+    'test/lazy/test_meta_kernel.py',
+    'test/nn/test_init.py',
+    'test/onnx/model_defs/op_test.py',
+    'test/onnx/test_models_quantized_onnxruntime.py',
+    'test/onnx/test_onnxscript_no_runtime.py',
+    'test/onnx_caffe2/test_caffe2_common.py',
+    'test/optim/test_lrscheduler.py',
+    'test/optim/test_optim.py',
+    'test/optim/test_swa_utils.py',
+    'test/package/package_a/test_all_leaf_modules_tracer.py',
+    'test/package/package_a/test_module.py',
+    'test/package/package_a/test_nn_module.py',
+    'test/package/package_c/test_module.py',
+    'test/run_test.py',
+    'test/test_bundled_images.py',
+    'test/test_cuda_expandable_segments.py',
+    'test/test_hub.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/test_has_main_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+
+[[linter]]
 code = 'CALL_ONCE'
 include_patterns = [
     'c10/**',
