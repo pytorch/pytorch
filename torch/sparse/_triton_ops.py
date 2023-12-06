@@ -77,12 +77,19 @@ def check_blocksize(f_name, blocksize):
 
 
 def make_triton_contiguous(t):
-    # TODO: Why do we need "triton contiguity" that is not defined by
-    # triton itself? It looks like it is required until
-    # openai/triton#1291 fixed a bug in processing triton kernel
-    # arguments. Unless triton comntiguity is required for
-    # performance, remove this function.
-    if (t.stride(-2) > 1 or t.dtype is torch.float32) and t.stride(-1) > 1:
+    """Return input as a triton-contiguous tensor.
+
+    A triton-contiguous tensor is defined as a tensor that has strides
+    with minimal value equal to 1.
+
+    While triton kernels support triton-non-contiguous tensors (all
+    strides being greater than 1 or having 0 strides) arguments, a
+    considerable slow-down occurs because tensor data is copied
+    element-wise rather than chunk-wise.
+    """
+    if min(t.stride()) != 1:
+        # TODO: investigate if contiguity along other axes than the
+        # last one can be beneficial for performance
         return t.contiguous()
     else:
         return t
@@ -162,16 +169,12 @@ def launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks=None):
         kernel(grid, *sliced_tensors)
 
 
-def prepare_inputs(bsr, *dense_tensors, require_view=False):
+def prepare_inputs(bsr, *dense_tensors):
     # Introduce fake batch dimension if not present for convenience.
     crow_indices = bsr.crow_indices().unsqueeze(0)
     col_indices = bsr.col_indices().unsqueeze(0)
-    if require_view:
-        values = bsr.values().unsqueeze(0)
-        tensors = [t.unsqueeze(0) for t in dense_tensors]
-    else:
-        values = make_triton_contiguous(bsr.values().unsqueeze(0))
-        tensors = [make_triton_contiguous(t.unsqueeze(0)) for t in dense_tensors]
+    values = make_triton_contiguous(bsr.values().unsqueeze(0))
+    tensors = [make_triton_contiguous(t.unsqueeze(0)) for t in dense_tensors]
 
     # Compute broadcasted batch dimension
     batch_dims_broadcasted = torch.broadcast_shapes(values.shape[:-3], *(t.shape[:-2] for t in tensors))
@@ -848,7 +851,7 @@ def bsr_dense_addmm(
 
     out_backup = out
 
-    crow_indices, col_indices, values, input, dense, out = prepare_inputs(bsr, input, dense, out, require_view=True)
+    crow_indices, col_indices, values, input, dense, out = prepare_inputs(bsr, input, dense, out)
 
     BM, BK = blocksize
     SPLIT_N = meta.get('SPLIT_N', N // BM)
@@ -856,11 +859,8 @@ def bsr_dense_addmm(
 
     dense = tile_to_blocksize(dense, (BK, BN))
     input = tile_to_blocksize(input, (BM, BN))
+    out_untiled = out
     out = tile_to_blocksize(out, (BM, BN))
-
-    # out and out_backup may have different shapes/strides/offsets
-    # but they must share storage:
-    assert out.data_ptr() == out_backup.data_ptr()
 
     dot_out_dtype = {torch.float16: tl.float32,
                      torch.bfloat16: tl.float32,
@@ -903,6 +903,11 @@ def bsr_dense_addmm(
             **meta)
 
     launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
+
+    if out.data_ptr() != out_backup.data_ptr():
+        # prepare_inputs has made a copy of out, copy its content back
+        # to out_backup:
+        out_backup.copy_(out_untiled.view(out_backup.shape))
 
     return out_backup
 
@@ -1408,7 +1413,7 @@ if has_triton():
         out_backup = out
 
         # prepare inputs by reshaping them to be kernel-compatible.
-        crow_indices, col_indices, values, dense, out = prepare_inputs(bsr, dense, out, require_view=True)
+        crow_indices, col_indices, values, dense, out = prepare_inputs(bsr, dense, out)
 
         # "Blockify" the row dimension of dense with blocksize[1]
         # since dense is on the rhs of matmul
@@ -1420,14 +1425,16 @@ if has_triton():
         # so it could be any value in [1, dense.shape[-1]).
         # We need to probably use the largest possible blocksize
         # so that it fits into SRAM.
+        out_untiled = out
         out = tile_to_blocksize(out, (blocksize[0], blocksize[0]))
-
-        # out and out_backup may have different shapes/strides/offsets
-        # but they must share storage:
-        assert out.data_ptr() == out_backup.data_ptr()
 
         # Launch kernel
         _run_dense_rowspace_kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid, meta)
+
+        if out.data_ptr() != out_backup.data_ptr():
+            # prepare_inputs has made a copy of out, copy its content
+            # back to out_backup:
+            out_backup.copy_(out_untiled.view(out_backup.shape))
 
         return out_backup
 
