@@ -4,6 +4,13 @@
 #include <mutex>
 #include <sstream>
 
+#if defined(__linux__)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 #ifdef USE_C10D_NCCL
 
 #include <exception>
@@ -1227,10 +1234,62 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
   return retrieveDesyncReport(store_, "NCCL", rank_, size_);
 }
 
+#if defined(__linux__)
+struct DumpPipe {
+  DumpPipe(bool enabled, int rank) {
+    if (!enabled) {
+      return;
+    }
+    std::string fileStem = getCvarString(
+        {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
+    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_TEMP_FILE is empty");
+    std::string filename = c10::str(fileStem, rank, ".pipe");
+    TORCH_CHECK(
+        unlink(filename.c_str()) != -1 || errno == ENOENT,
+        "Error removing existing named pipe ",
+        filename);
+    TORCH_CHECK(
+        mkfifo(filename.c_str(), 0666) != -1,
+        "Error creating named pipe ",
+        filename);
+    fd_ = open(filename.c_str(), O_RDONLY | O_NONBLOCK);
+    TORCH_CHECK(fd_ != -1, "Error opening named pipe ", filename);
+  }
+  bool shouldDump() {
+    if (fd_ == -1) {
+      return false;
+    }
+    char buf[128];
+    // non-blocking from O_NONBLOCK above.
+    // Ignore EINTR because we already will poll this
+    // again later.
+    ssize_t bytesRead = read(fd_, &buf, 128);
+    return bytesRead > 0;
+  }
+  ~DumpPipe() {
+    if (fd_ != -1) {
+      close(fd_);
+    }
+  }
+
+ private:
+  int fd_ = -1;
+};
+#else
+struct DumpPipe {
+  DumpPipe(bool enabled, int rank) {}
+  bool shouldDump() {
+    return false;
+  }
+};
+#endif
+
 void ProcessGroupNCCL::workCleanupLoop() {
   bool done = false;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
+
+  DumpPipe dumpPipe(dumpOnTimeout_, rank_);
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
@@ -1336,7 +1395,11 @@ void ProcessGroupNCCL::workCleanupLoop() {
         ++it;
       }
     }
-
+    // process a request to dump the trace
+    if (dumpPipe.shouldDump()) {
+      std::thread dump_thread(&ProcessGroupNCCL::dumpDebuggingInfo, this);
+      dump_thread.detach();
+    }
     done = workMetaList_.empty();
   }
 }
