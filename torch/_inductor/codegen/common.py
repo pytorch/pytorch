@@ -387,13 +387,14 @@ class PythonPrinter(ExprPrinter):
 
     def _print_Round(self, expr):
         assert len(expr.args) == 1
-        number, = expr.args
-        return f"round({self._print(number)})"
+        return f"round({self.paren(self._print(expr.args[0]))})"
 
     def _print_RoundDecimal(self, expr):
         assert len(expr.args) == 2
         number, ndigits = expr.args
-        return f"round({self._print(number)}, {ndigits})"
+        number = self.paren(self._print(number))
+        assert isinstance(ndigits, sympy.Integer)
+        return f"round({number}, {ndigits})"
 
 
 class OpOverrides:

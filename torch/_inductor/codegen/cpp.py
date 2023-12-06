@@ -400,13 +400,14 @@ class CppPrinter(ExprPrinter):
 
     def _print_Round(self, expr):
         assert len(expr.args) == 1
-        number, = expr.args
-        return f"std::lrint({self._print(number)})"
+        return f"std::lrint({self.paren(self._print(expr.args[0]))})"
 
     def _print_RoundDecimal(self, expr):
         assert len(expr.args) == 2
         number, ndigits = expr.args
-        return f"static_cast<double>(std::nearbyint(1e{ndigits} * ({self._print(number)})) * 1e-{ndigits})"
+        number = self.paren(self._print(number))
+        assert isinstance(ndigits, sympy.Integer)
+        return f"static_cast<double>(std::nearbyint(1e{ndigits} * ({number})) * 1e-{ndigits})"
 
 
 # A function to print, useful for printing sympy symbols.
