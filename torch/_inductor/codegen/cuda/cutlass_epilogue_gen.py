@@ -1,5 +1,5 @@
 import math
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from unittest.mock import patch
 
 import sympy
@@ -238,15 +238,25 @@ class CutlassEVTEpilogueTypeFormatter:
         assert (
             node is not None
         ), f"Input buffer with name {name} not found in current graph"
-        aux_load_descriptor = create_cutlass_aux_load_descriptor(
+        aux_load_descriptor, strides_mnl = create_cutlass_aux_load_descriptor(
             node, index_expr, self.accumulator_index_expr, self.gemm_output_layout
         )
         ALD = f"{name}AuxLoadDesc"
         self.output.writeline(f"using {ALD} = {aux_load_descriptor};")
-        aux_load_template_args = f"{ALD}::Stages, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride, typename {ALD}::SmemLayoutAtom, typename {ALD}::CopyOpS2R"
+        if strides_mnl == (0, 1, 0):
+            # Special case: row broadcast
+            aux_load_op = "Sm90RowBroadcast"
+            aux_load_template_args = f"{ALD}::Stages, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride"
+        elif strides_mnl == (1, 0, 0):
+            # Special case: col broadcast
+            aux_load_op = "Sm90ColBroadcast"
+            aux_load_template_args = f"{ALD}::Stages, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride"
+        else:
+            aux_load_op = "Sm90AuxLoad"
+            aux_load_template_args = f"{ALD}::Stages, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride, typename {ALD}::SmemLayoutAtom, typename {ALD}::CopyOpS2R"
         return f"""cutlass::epilogue::fusion::Sm90EVT<
                                         cutlass::epilogue::fusion::Sm90Compute<identity_op,ElementAcc, typename {ALD}::Element, RoundStyle >,
-                                        cutlass::epilogue::fusion::Sm90AuxLoad<{aux_load_template_args}>> /* :={name} as aux operand, cast to accumulator dtype */"""
+                                        cutlass::epilogue::fusion::{aux_load_op}<{aux_load_template_args}>> /* :={name} as aux operand, cast to accumulator dtype */"""
 
     def _op_load(self, name, index_expr):
         # Load an input to an operation. Might be the output of the matmul, the result
@@ -597,13 +607,15 @@ def cute_stride_decl(strides, stride_dtype: str = "int64_t"):
 
 def cute_stride_mnl_decl(strides):
     if len(strides) >= 3:
-        return cute_stride_decl([strides[-2], strides[-1]] + list(strides[:-2][::-1]))
-    return cute_stride_decl([strides[-2], strides[-1]] + [0])
+        mnl_strides = [strides[-2], strides[-1]] + list(strides[:-2][::-1])
+    else:
+        mnl_strides = [strides[-2], strides[-1]] + [0]
+    return cute_stride_decl(mnl_strides), tuple(mnl_strides)
 
 
 def create_cutlass_aux_load_descriptor(
     node: IRNode, index_expr, accumulator_index_expr, gemm_output_layout
-) -> str:
+) -> Tuple[str, Tuple[int, int, int]]:
     """
     Creates a Cutlass auxiliary descriptor for the given node.
     This is used to pass auxiliary inputs to the kernel.
@@ -624,5 +636,8 @@ def create_cutlass_aux_load_descriptor(
         raise CUTLASSEVTOpNotImplementedError(
             f"Unsupported number of strides: {len(strides)} for aux input for node {node.get_name()} with layout {node.get_layout()} - accessed using index expr {index_expr}. Accumulator index expr={accumulator_index_expr}"
         )
-    layout_stride_decl = cute_stride_mnl_decl(strides)
-    return f"""cutlass::epilogue::collective::detail::AuxLoadDescriptor<EpilogueDescriptor, {layout_stride_decl}, {cutlass_dtype}>"""
+    layout_stride_decl, mnl_strides = cute_stride_mnl_decl(strides)
+    return (
+        f"""cutlass::epilogue::collective::detail::AuxLoadDescriptor<EpilogueDescriptor, {layout_stride_decl}, {cutlass_dtype}>""",
+        mnl_strides,
+    )
