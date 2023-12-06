@@ -48,5 +48,5 @@ def swap_tensors(t1, t2):
     # Swap the dynamic attributes
     swap_attr("__dict__")
 
-    # Swap the at::Tensorr they point to
+    # Swap the at::Tensor they point to
     torch._C._swap_tensor_impl(t1, t2)
