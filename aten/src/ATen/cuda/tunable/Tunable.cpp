@@ -367,7 +367,7 @@ void TuningContext::DisableTunableOpAndTuning() {
 }
 
 TuningResultsManager& TuningContext::GetTuningResultsManager() {
-  std::call_once(manager_init_once_, [this]() {
+  c10::call_once(manager_init_once_, [this]() {
     if (!GetFilename().empty()) {
       ReadFile(GetFilename());
     }

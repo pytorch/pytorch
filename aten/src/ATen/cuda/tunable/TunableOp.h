@@ -123,7 +123,7 @@ class TunableOp {
       // > object under construction or destruction, typeid yields the std::type_info object representing the constructor
       // > or destructor’s class.
       // So delay the op signature generation.
-      std::call_once(signature_init_once_, [this]() { signature_ = CreateSignature(); });
+      c10::call_once(signature_init_once_, [this]() { signature_ = CreateSignature(); });
       return signature_;
     }
 
@@ -228,7 +228,7 @@ class TunableOp {
 #endif
     }
 
-    mutable std::once_flag signature_init_once_;
+    mutable c10::once_flag signature_init_once_;
     std::string signature_;
 
     // the default impl to use when tuning is disabled

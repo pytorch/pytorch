@@ -32,14 +32,12 @@ enum ActivationType {
 #ifdef HIPBLASLT_HAS_GETINDEXFROMALGO
 #define GETINDEXFROMALGO(algo) hipblaslt_ext::getIndexFromAlgo(algo)
 #else
-static int getIndexFromAlgo(hipblasLtMatmulAlgo_t& algo)
-{
-	int* algo_ptr = (int*)algo.data;
-	if(*algo_ptr < 0)
-	{
-		return -1;
-	}
-	return *algo_ptr;
+static int getIndexFromAlgo(hipblasLtMatmulAlgo_t& algo) {
+    int* algo_ptr = (int*)algo.data;
+    if(*algo_ptr < 0) {
+        return -1;
+    }
+    return *algo_ptr;
 }
 #define GETINDEXFROMALGO(algo) getIndexFromAlgo(algo)
 #endif

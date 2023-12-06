@@ -150,7 +150,7 @@ class TuningContext {
     bool tuning_enable_;
     int max_tuning_duration_ms_;
     mutable TuningResultsManager manager_;
-    mutable std::once_flag manager_init_once_;
+    mutable c10::once_flag manager_init_once_;
     TuningResultsValidator validator_;
     std::string filename_;
     size_t results_count_from_input_file_;
