@@ -61,9 +61,8 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv, GuardOnDataDependent
 
 USE_TORCHVISION = False
 try:
-    #import torchvision
-    #USE_TORCHVISION = True
-    USE_TORCHVISION = False
+    import torchvision
+    USE_TORCHVISION = True
 except ImportError:
     warnings.warn("Couldn't import torchvision. Some of our tests use it, try "
                   "to install it with commands from pytorch.org, post-fixed with "
