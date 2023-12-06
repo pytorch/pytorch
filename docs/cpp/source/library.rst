@@ -1,8 +1,7 @@
 Torch Library API
 =================
 
-The PyTorch C++ API provides capabilities for extending PyTorch's core library
-of operators with user defined operators and data types.  Extensions implemented
+The PyTorch C++ API allows users to add custom operators and data types to PyTorch's core library of operators. Extensions implemented
 using the Torch Library API are made available for use in both the PyTorch eager
 API as well as in TorchScript.
 
