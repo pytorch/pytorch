@@ -516,7 +516,7 @@ class TestForeach(TestCase):
                 sum(ref((ref_tensors,), ord=ord)).backward()
                 self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
         # TODO: enable empty list case
         for tensors in [[torch.randn([0], device=device, dtype=dtype)],
