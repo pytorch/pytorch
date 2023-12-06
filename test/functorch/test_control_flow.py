@@ -1744,6 +1744,22 @@ def forward(self, arg0_1):
         else:
             self.assertEqual(res, (a + 1, a - 1))
 
+    def test_vmap_vmap(self):
+        def fn(x):
+            return torch.cond(
+                pred=torch.tensor([True]),
+                true_fn=lambda x: x + 1,
+                false_fn=lambda x: x - 1,
+                operands=(x,)
+            )
+
+        def wrapper(x):
+            return torch.vmap(fn)(x)
+
+        a = torch.ones((3, 4, 5))
+        res = torch.vmap(wrapper)(a)
+        print(res)
+
 instantiate_parametrized_tests(TestControlFlowTraced)
 
 if __name__ == '__main__':
