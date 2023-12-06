@@ -3787,38 +3787,12 @@ class RandomSeeds(ExternKernelOut):
 
 
 class ExternKernelAlloc(ExternKernel):
-    # Generate abi-compatible kernel names for shim kernels.
-    # Each individual shim kernel may have its own versioning rule.
-    # However, we don't expect we would end up with too many of such rules.
-    def _get_abi_compatible_kernel(self):
-        if not V.graph.cpp_wrapper:
-            return self.kernel
-
-        def sdpa_ver_fn():
-            # For sdpa, we need the v2 version only if any optional
-            # kwarg is missing.
-            if any(
-                self.get_kwargs_value(arg_name) is None
-                for arg_name in self.ordered_kwargs_for_cpp_kernel
-            ):
-                return f"{self.cpp_kernel}_v2"
-            else:
-                return self.cpp_kernel
-
-        kernel_to_ver = {"at::_scaled_dot_product_flash_attention": sdpa_ver_fn}
-        if (ver_fn := kernel_to_ver.get(self.cpp_kernel, None)) is not None:
-            return ver_fn()
-        return self.cpp_kernel
-
     def codegen_kernel_name(self):
         return self.cpp_kernel if V.graph.cpp_wrapper else self.kernel
 
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs()]
-        # Now we setup abi_compatible_kernel after self.kernel
-        # and kwargs are adjusted appropriately.
-        self.abi_compatible_kernel = self._get_abi_compatible_kernel()
         V.graph.wrapper_code.generate_extern_kernel_alloc(self, args)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -3839,7 +3813,6 @@ class ExternKernelAlloc(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.kernel = kernel
         self.cpp_kernel = cpp_kernel
-        self.abi_compatible_kernel = None
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
 
     def should_allocate(self):
@@ -4294,6 +4267,7 @@ class FallbackKernel(ExternKernelAlloc):
         # output through the abi-compatible interface.
         self.outputs: Sequence[Any] = []
         self.use_runtime_dispatch = False
+        self.abi_compatible_kernel = None
 
         assert isinstance(
             kernel,
@@ -4351,6 +4325,29 @@ class FallbackKernel(ExternKernelAlloc):
         ), f"expected the index {pos} to be smaller than len(self.args_default_value): {len(self.args_default_value)}"
         return self.args_default_value[pos]["value"]
 
+    # Generate abi-compatible kernel names for shim kernels.
+    # Each individual shim kernel may have its own versioning rule.
+    # However, we don't expect we would end up with too many of such rules.
+    def _get_abi_compatible_kernel(self):
+        if not V.graph.cpp_wrapper:
+            return self.kernel
+
+        def sdpa_ver_fn():
+            # For sdpa, we need the v2 version only if any optional
+            # kwarg is missing.
+            if any(
+                self.get_kwargs_value(arg_name) is None
+                for arg_name in self.ordered_kwargs_for_cpp_kernel
+            ):
+                return f"{self.cpp_kernel}_v2"
+            else:
+                return self.cpp_kernel
+
+        kernel_to_ver = {"at::_scaled_dot_product_flash_attention": sdpa_ver_fn}
+        if (ver_fn := kernel_to_ver.get(self.cpp_kernel, None)) is not None:
+            return ver_fn()
+        return self.cpp_kernel
+
     def codegen_args(self):
         @dataclasses.dataclass
         class Shim:
@@ -4361,6 +4358,9 @@ class FallbackKernel(ExternKernelAlloc):
 
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
+        # Now we setup abi_compatible_kernel after self.kernel
+        # and kwargs are adjusted appropriately.
+        self.abi_compatible_kernel = self._get_abi_compatible_kernel()
 
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = [
@@ -4579,7 +4579,11 @@ class FallbackKernel(ExternKernelAlloc):
                 self.outputs,
             )
         else:
-            super().codegen(wrapper)
+            self.codegen_comment(wrapper)
+            args = [*self.codegen_args(), *self.codegen_kwargs()]
+            V.graph.wrapper_code.generate_fallback_kernel(self, args)
+            if isinstance(self.layout, Layout):
+                self.codegen_size_asserts(wrapper)
 
     @staticmethod
     def tensor_to_layout(output: torch.Tensor):

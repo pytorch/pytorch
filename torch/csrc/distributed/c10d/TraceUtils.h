@@ -10,7 +10,6 @@
 #include <sys/types.h>
 
 #include <cstdlib>
-#include <fstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -269,17 +268,6 @@ inline std::string retrieveDesyncReport(
  * wasn't done that way, so isn't expected to be fully general at the moment) */
 
 #ifdef USE_C10D_NCCL
-
-// Write NCCL debug info to local disk or any storage users define.
-class TORCH_API DebugInfoWriter {
- public:
-  DebugInfoWriter(int rank);
-  virtual ~DebugInfoWriter();
-  virtual void write(const std::string& ncclTrace);
-
- protected:
-  std::string filename_;
-};
 
 DebugInfoWriter::DebugInfoWriter(int rank) {
   std::string fileName = getCvarString(
