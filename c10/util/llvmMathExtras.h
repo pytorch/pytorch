@@ -609,6 +609,7 @@ inline uint64_t GreatestCommonDivisor64(uint64_t A, uint64_t B) {
 
 /// This function takes a 64-bit integer and returns the bit equivalent double.
 inline double BitsToDouble(uint64_t Bits) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double D;
   static_assert(sizeof(uint64_t) == sizeof(double), "Unexpected type sizes");
   memcpy(&D, &Bits, sizeof(Bits));
@@ -625,6 +626,7 @@ inline float BitsToFloat(uint32_t Bits) {
 /// Note that copying doubles around changes the bits of NaNs on some hosts,
 /// notably x86, so this routine cannot be used if these bits are needed.
 inline uint64_t DoubleToBits(double Double) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint64_t Bits;
   static_assert(sizeof(uint64_t) == sizeof(double), "Unexpected type sizes");
   memcpy(&Bits, &Double, sizeof(Double));
@@ -635,6 +637,7 @@ inline uint64_t DoubleToBits(double Double) {
 /// Note that copying floats around changes the bits of NaNs on some hosts,
 /// notably x86, so this routine cannot be used if these bits are needed.
 inline uint32_t FloatToBits(float Float) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint32_t Bits;
   static_assert(sizeof(uint32_t) == sizeof(float), "Unexpected type sizes");
   memcpy(&Bits, &Float, sizeof(Float));
@@ -818,6 +821,7 @@ typename std::enable_if<std::is_unsigned<T>::value, T>::type SaturatingAdd(
     T X,
     T Y,
     bool* ResultOverflowed = nullptr) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool Dummy;
   bool& Overflowed = ResultOverflowed ? *ResultOverflowed : Dummy;
   // Hacker's Delight, p. 29
@@ -837,6 +841,7 @@ typename std::enable_if<std::is_unsigned<T>::value, T>::type SaturatingMultiply(
     T X,
     T Y,
     bool* ResultOverflowed = nullptr) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool Dummy;
   bool& Overflowed = ResultOverflowed ? *ResultOverflowed : Dummy;
 
@@ -883,6 +888,7 @@ typename std::enable_if<std::is_unsigned<T>::value, T>::type SaturatingMultiply(
 template <typename T>
 typename std::enable_if<std::is_unsigned<T>::value, T>::type
 SaturatingMultiplyAdd(T X, T Y, T A, bool* ResultOverflowed = nullptr) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool Dummy;
   bool& Overflowed = ResultOverflowed ? *ResultOverflowed : Dummy;
 
