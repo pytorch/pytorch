@@ -4133,27 +4133,11 @@ def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
 
     result = a
     for i in range(dim):
-        middle = torch.arange(0, inp_shape[i], step=1, device=a.device)
-        if padding_left[i] < 0:
-            middle = middle[-padding_left[i] :]
-            to_cat = [middle]
-        else:
-            left = torch.arange(padding_left[i], 0, step=-1, device=a.device)
-            to_cat = [left, middle]
-
-        if padding_right[i] < 0:
-            middle = middle[: -padding_right[i]]
-        else:
-            right = torch.arange(
-                inp_shape[i] - 2,
-                inp_shape[i] - 2 - padding_right[i],
-                step=-1,
-                device=a.device,
-            )
-            to_cat.append(right)
-        idx: List[Any] = [slice(s) for s in result.shape]
-        idx[i + nc_dim] = torch.cat(tuple(to_cat))
-        result = result[idx]
+        dim_idx = torch.arange(-padding_left[i], inp_shape[i] + padding_right[i])
+        dim_idx = inp_shape[i] - (inp_shape[i] - dim_idx.abs()).abs()
+        idx: List[Any] = [None] * result.dim()
+        idx[i + nc_dim] = dim_idx
+        result = aten._unsafe_index(result, idx)
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(result)
