@@ -1032,6 +1032,9 @@ cdll.LoadLibrary("__lib_path__")
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
+        if config.is_fbcode():
+            return True
+
         key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
 
