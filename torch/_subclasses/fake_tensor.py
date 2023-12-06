@@ -1684,11 +1684,7 @@ class FakeTensorMode(TorchDispatchMode):
             # We infer the meta of a custom ops that return None to just
             # return None. custom ops are not allowed to mutate metadata
             # of their inputs, so this is safe.
-            from torch._higher_order_ops.auto_functionalize import (
-                can_auto_functionalize,
-            )
-
-            if can_auto_functionalize(func):
+            if can_generate_trivial_abstract_impl(func):
                 return None
             # no meta kernel registered, fallback to kernel for the device
             if has_symbolic_sizes or not can_run_unsafe_fallback(func):
@@ -1960,6 +1956,22 @@ def run_fallback_kernel(
             return e
 
     return pytree.tree_map(map_out, r)
+
+
+def can_generate_trivial_abstract_impl(op: torch._ops.OpOverload) -> bool:
+    assert isinstance(op, torch._ops.OpOverload)
+    if torch._library.utils.is_builtin(op):
+        # We control the built-ins. These may (in rare cases)
+        # do input metadata mutation (which we have banned on custom ops)
+        return False
+    schema = op._schema
+    # It's suspicious if the op is not mutable but returns nothing, so we return False out of an abundance of caution
+    if not schema.is_mutable:
+        return False
+    if len(schema.returns) > 0:
+        return False
+    # If the op returns nothing, then it has a trivial abstract impl.
+    return True
 
 
 # Just for use to allow copying a module to fake tensors,
