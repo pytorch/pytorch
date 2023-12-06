@@ -228,8 +228,11 @@ class CxxBuilder(object):
         return command_line
     
     def build(self):
+        '''
+        It is must need a temperary directory to store object files in Windows.
+        '''
         _create_if_dir_not_exist(self._output_dir)
-        _build_tmp_dir = os.path.join(self._output_dir, _BUILD_TEMP_DIR)
+        _build_tmp_dir = os.path.join(self._output_dir, f"{self._name}_{_BUILD_TEMP_DIR}")
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
