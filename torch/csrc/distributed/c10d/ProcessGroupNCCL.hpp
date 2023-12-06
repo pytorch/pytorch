@@ -70,6 +70,8 @@ static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
+constexpr const char* TIMEOUT_DUMP = "timeout_dump";
+
 constexpr auto kProcessGroupNCCLDefaultTimeout =
     std::chrono::milliseconds(10 * 60 * 1000);
 
@@ -659,9 +661,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Watchdog's inside loop.
   // Takes care of cleaning up completed work, and aborting upon failure or
   // timeout.
-  void workCleanupLoop();
+  void watchdogLoopHandler();
 
   void runHookLoop();
+
+  bool shouldAutoDumpWorkTimeOut(WorkNCCL& work);
+
+  void checkAndSetStore();
 
   // In the timeout case and we will dump debug info such as the NCCL flight
   // recorder to storage. Down the road, if we have more complicated or blocking

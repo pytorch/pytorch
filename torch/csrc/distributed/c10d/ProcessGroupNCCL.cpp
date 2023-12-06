@@ -912,7 +912,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   //    completedWorkList_ before it finishes.
   // 3. We have three threads and two locks.
   //      a. main thread (this function) grabs two locks atomically
-  //      b. watchdog thread (workCleanupLoop function) always grabs
+  //      b. watchdog thread (watchdogLoopHandler function) always grabs
   //      workMetaListMutex_
   //         first and then grabs completedWorkListMutex_.
   //      c. hook thread (runHookLoop function) only grabs
@@ -1161,7 +1161,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
       ncclHeartbeatMonitorThread_ =
           std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
     }
-    workCleanupLoop();
+    watchdogLoopHandler();
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
@@ -1173,7 +1173,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
           << " (Watchdog caught exception: " << e.what();
 
     } else {
-      // Append error message reported from workCleanupLoop
+      // Append error message reported from watchdogLoopHandler
       const auto exitMsg = c10::str(
           "[Rank ",
           rank_,
@@ -1227,7 +1227,21 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
   return retrieveDesyncReport(store_, "NCCL", rank_, size_);
 }
 
-void ProcessGroupNCCL::workCleanupLoop() {
+bool ProcessGroupNCCL::shouldAutoDumpWorkTimeOut(WorkNCCL& work) {
+  if (!dumpOnTimeout_)
+    return false;
+  auto timeout = std::chrono::milliseconds(heartbeatTimeoutInSec_ * 1000);
+  return work.checkTimeout(c10::optional<std::chrono::milliseconds>(timeout));
+}
+
+void ProcessGroupNCCL::checkAndSetStore() {
+  if (!store_->check({std::string(TIMEOUT_DUMP)})) {
+    std::vector<uint8_t> vec(1);
+    store_->set(std::string(TIMEOUT_DUMP), vec);
+  }
+}
+
+void ProcessGroupNCCL::watchdogLoopHandler() {
   bool done = false;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
@@ -1247,6 +1261,13 @@ void ProcessGroupNCCL::workCleanupLoop() {
       auto& work = *it;
       work.checkAndSetException();
       bool timedOut = work.checkTimeout();
+      c10::optional<std::thread> dumpingDebugInfo;
+
+      if (shouldAutoDumpWorkTimeOut(work)) {
+        checkAndSetStore();
+        // Store debug info to storage. (By default to local disk)
+        dumpingDebugInfo = tryWriteDebugInfo();
+      }
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
@@ -1267,7 +1288,6 @@ void ProcessGroupNCCL::workCleanupLoop() {
               collectiveDebugInfoMode_.store(true);
             }
 
-            c10::optional<std::thread> dumpingDebugInfo;
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
               dumpingDebugInfo = tryWriteDebugInfo();
