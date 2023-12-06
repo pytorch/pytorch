@@ -152,3 +152,4 @@
 [submodule "third_party/triton-mathaot"]
 	path = third_party/triton-mathaot
 	url = https://github.com/ROCmSoftwarePlatform/triton.git
+	shallow = true
