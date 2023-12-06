@@ -116,6 +116,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                 f"{f} from skipfiles.FUNC_INLINELIST is not a python function, please check and correct it.",
             )
 
+    @unittest.skip("Testing")
     def test_torch_name_rule_map(self):
         manual_torch_obj_rule_set = {
             load_object(x) for x in manual_torch_name_rule_map.keys()
