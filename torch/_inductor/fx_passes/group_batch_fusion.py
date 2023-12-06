@@ -763,23 +763,6 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
     fusions: List[GroupBatchFusionBase] = []
     # we keep all current pre grad fusions to keep
     # current implementation, will remove this later
-    # TODO: deperate batch_fusion and group_fusion flags
-    if config.batch_fusion:
-        config.pre_grad_fusion_options = {
-            "batch_linear": {},
-            "batch_linear_lhs": {},
-            "batch_layernorm": {},
-            "batch_tanh": {},
-            "batch_relu": {},
-            "batch_sigmoid": {},
-        }
-        # config.post_grad_fusion_options = {
-        #     "batch_linear_post_grad": {},
-        # }
-    if config.group_fusion:
-        config.post_grad_fusion_options = {
-            "group_linear": {"require_fbgemm": True},
-        }
     if pre_grad:
         fusions += generate_fusion_from_config(
             config.pre_grad_fusion_options, pre_grad=True

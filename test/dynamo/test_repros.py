@@ -490,6 +490,20 @@ def apply_chunking_to_forward(forward_fn, *input_tensors):
     return forward_fn(*input_tensors)
 
 
+def _validate_model_kwargs(fn, model_kwargs):
+    # simplified from transformers.generation.utils._validate_model_kwargs
+    unused_model_args = []
+    model_args = set(inspect.signature(fn).parameters)
+    for key, value in model_kwargs.items():
+        if value is not None and key not in model_args:
+            unused_model_args.append(key)
+    if unused_model_args:
+        raise ValueError(
+            f"The following `model_kwargs` are not used by the model: {unused_model_args} (note: typos in the"
+            " generate arguments will also show up in this list)"
+        )
+
+
 class FakeMamlInner(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -742,6 +756,25 @@ def _get_sorted_bucket_idx_and_undo_sorted_bucket_idx(buckets):
         undo_sorted_bucket_idx.scatter_(-1, sorted_bucket_idx, indices)
 
     return sorted_bucket_idx, undo_sorted_bucket_idx
+
+
+class CustomList(list):
+    def __call__(self, x):
+        for processor in self:
+            x = processor(x)
+        return x
+
+
+def _merge_criteria_processor_list(default_list, custom_list):
+    # simplified transformers/generation/utils.py
+    if len(custom_list) == 0:
+        return default_list
+    for default in default_list:
+        for custom in custom_list:
+            if type(custom) is type(default):
+                raise ValueError()
+    default_list.extend(custom_list)
+    return default_list
 
 
 class FeedForwardLayer(nn.Module):
@@ -2417,6 +2450,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(f(x, x), opt_f(x, x))
             self.assertEqual(f(x, y), opt_f(x, y))
 
+    def test_validate_model_kwargs(self):
+        cnt = CompileCounter()
+
+        def f1(a, b):
+            return torch.sin(a) + torch.cos(b)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f2(**kwargs):
+            _validate_model_kwargs(f1, kwargs)
+            return f1(**kwargs)
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        self.assertEqual(f2(a=x, b=y), f1(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 3)
+
     def test_swin_base_tensor_attr(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2611,6 +2662,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             _generator_type = type(_ for _ in ())
 
         self.assertNoUnraisable(f)
+
+    def test_merge_criteria_processor_list(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x, left, right):
+            combined = _merge_criteria_processor_list(left, right)
+            return combined(x)
+
+        l1 = CustomList([torch.nn.ReLU(), torch.nn.Sigmoid()])
+        l2 = CustomList([])
+        input = torch.randn(16)
+        result = f(input, l1, l2)
+        self.assertEqual(result, l1(input))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
+
+        cnt.clear()
+        l3 = CustomList([torch.nn.SiLU()])
+        expected = l3(l1(input))
+        result = f(input, l1, l3)
+        self.assertEqual(len(l1), 3)
+        self.assertEqual(result, expected)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 3)
 
     def test_rewrite_assert_with_msg(self):
         def f(x):
