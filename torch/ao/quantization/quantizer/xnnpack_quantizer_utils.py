@@ -616,6 +616,18 @@ def _annotate_adaptive_avg_pool2d(
     return annotated_partitions
 
 
+def _is_input_large_scalar(node: Node, gm: torch.fx.GraphModule):
+    """Check if input is a large scalar value. So that we can skip quantization for the node
+    since histc op (in HistogramObserver) only works for values up to certain upper bound
+    """
+    if node.op == "get_attr":
+        tensor = getattr(gm, node.target)  # type: ignore[arg-type]
+        # torch.histc works until this upper bound
+        HISTC_UPPER_BOUND = 3.4028235e15
+        return tensor.numel() == 1 and abs(tensor.item()) > HISTC_UPPER_BOUND
+    return False
+
+
 @register_annotator("add_relu")
 def _annotate_add_relu(
     gm: torch.fx.GraphModule,
@@ -645,10 +657,14 @@ def _annotate_add_relu(
         input_qspec_map = {}
         input_act0 = add_node.args[0]
         if isinstance(input_act0, Node):
+            if _is_input_large_scalar(input_act0, gm):
+                continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = add_node.args[1]
         if isinstance(input_act1, Node):
+            if _is_input_large_scalar(input_act1, gm):
+                continue
             input_qspec_map[input_act1] = input_act_qspec
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -685,10 +701,14 @@ def _annotate_add(
         input_qspec_map = {}
         input_act0 = add_node.args[0]
         if isinstance(input_act0, Node):
+            if _is_input_large_scalar(input_act0, gm):
+                continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = add_node.args[1]
         if isinstance(input_act1, Node):
+            if _is_input_large_scalar(input_act1, gm):
+                continue
             input_qspec_map[input_act1] = input_act_qspec
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -728,10 +748,14 @@ def _annotate_mul_relu(
         input_qspec_map = {}
         input_act0 = mul_node.args[0]
         if isinstance(input_act0, Node):
+            if _is_input_large_scalar(input_act0, gm):
+                continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = mul_node.args[1]
         if isinstance(input_act1, Node):
+            if _is_input_large_scalar(input_act1, gm):
+                continue
             input_qspec_map[input_act1] = input_act_qspec
 
         mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -768,10 +792,14 @@ def _annotate_mul(
         input_qspec_map = {}
         input_act0 = mul_node.args[0]
         if isinstance(input_act0, Node):
+            if _is_input_large_scalar(input_act0, gm):
+                continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = mul_node.args[1]
         if isinstance(input_act1, Node):
+            if _is_input_large_scalar(input_act1, gm):
+                continue
             input_qspec_map[input_act1] = input_act_qspec
 
         mul_node.meta["quantization_annotation"] = QuantizationAnnotation(

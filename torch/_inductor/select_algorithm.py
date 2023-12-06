@@ -106,6 +106,9 @@ class TritonTemplateKernel(TritonKernel):
         self.epilogue_fn = epilogue_fn
         self.render_hooks = dict()
 
+    def need_numel_args(self):
+        return False
+
     def jit_line(self):
         if self.use_jit:
             return "@triton.jit"
