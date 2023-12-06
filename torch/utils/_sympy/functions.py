@@ -313,7 +313,8 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
 
 
 class Round(sympy.Function):
-    @classmethod
-    def eval(cls, number, ndigits=None):
-        if number.is_integer:
-            return number
+    is_integer = True
+
+
+class RoundDecimal(sympy.Function):
+    pass

@@ -635,12 +635,12 @@ def _sympy_abs(a):
 
 
 def _sympy_round(number, ndigits=None):
-    from torch.utils._sympy.functions import Round
+    from torch.utils._sympy.functions import Round, RoundDecimal
 
-    # FIXME: sympy doesn't allow passing None
-    args = [ndigits] if ndigits is not None else []
-
-    return Round(number, *args)
+    if ndigits is None:
+        return Round(number)
+    else:
+        return RoundDecimal(number, ndigits)
 
 
 def _sympy_sym_float(a):
@@ -1155,7 +1155,7 @@ def _make_user_magic(method, user_type):
 
         def round_magic_impl(self, ndigits=None):
             if is_constant(self):
-                return builtins.round(self, ndigits)
+                return builtins.round(get_constant(self), ndigits)
 
             return wrap_node(getattr(self.node, method)(ndigits))
 

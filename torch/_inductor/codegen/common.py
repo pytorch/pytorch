@@ -386,7 +386,14 @@ class PythonPrinter(ExprPrinter):
         return f"min({', '.join(map(self._print, expr.args))})"
 
     def _print_Round(self, expr):
-        return f"round{expr.args}"
+        assert len(expr.args) == 1
+        number, = expr.args
+        return f"round({self._print(number)})"
+
+    def _print_RoundDecimal(self, expr):
+        assert len(expr.args) == 2
+        number, ndigits = expr.args
+        return f"round({self._print(number)}, {ndigits})"
 
 
 class OpOverrides:

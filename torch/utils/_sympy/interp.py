@@ -22,6 +22,7 @@ from .functions import (
     ModularIndexing,
     Pow,
     Round,
+    RoundDecimal,
     TrueDiv,
     Where,
 )
@@ -69,6 +70,7 @@ def handlers():
         sympy.Piecewise: "piecewise",
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
         Round: "round",
+        RoundDecimal: "round",
     }
     return HANDLERS
 
