@@ -1514,6 +1514,37 @@ else:
             'upsample_bilinear2d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
+    @skipIfTorchInductor("aot-autograd issue")
+    def test_deterministic_replication_pad2d(self, device):
+        test_cases = [
+            # size, padding
+            [(1, 2, 4, 4), (0, 0, 0, 0)],
+            [(1, 2, 4, 4), (3, 4, 5, 6)],
+            [(3, 8, 7), (0, 0, 0, 0)],
+            [(3, 8, 7), (4, 3, 2, 7)],
+        ]
+
+        if torch.device(device).type != 'xla':
+            test_cases += [
+                [(4, 3, 5, 10), (-9, 4, 5, 6)],
+                [(3, 8, 7), (-4, -2, -2, -3)],
+            ]
+
+        for size, padding in test_cases:
+            input = torch.randn(*size, device=device, requires_grad=True)
+            grad = None
+            with DeterministicGuard(True):
+                res = torch.nn.functional.pad(
+                    input,
+                    padding,
+                    mode='replicate')
+                res.backward(torch.ones_like(res))
+                if grad is None:
+                    grad = input.grad
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                input.grad = None
+
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_deterministic_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
@@ -1622,10 +1653,24 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
+        # Nondeterministic alert should only be raised if the forward call was
+        # nondeterministic
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
             'replication_pad2d_backward_cuda',
             torch.device(device).type == 'cuda')
+
+        with DeterministicGuard(True):
+            res = module(input)
+
+        grad = torch.ones_like(res)
+
+        # If the forward call was deterministic, nondeterministic alert should
+        # not be raised
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'replication_pad2d_backward_cuda',
+            False)
 
     @skipIfMps
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
@@ -4997,34 +5042,70 @@ else:
             t = torch.tensor((), device=device)
             self.assertEqual(t.dtype, t.storage().dtype)
 
-    # Tests `torch._lazy_clone` which creates a COW (copy-on-write) tensor
+    # Note [lazy_clone_ tests with inductor enabled]
+    # These `lazy_clone_` tests are written in a way that makes them pass in
+    # both eager mode and compiled mode (`PYTORCH_TEST_WITH_INDUCTOR=1`). There
+    # are cases where COW tensors can materialize at different times and in
+    # different ways in compiled mode versus eager mode, and those cases need to
+    # be avoided. There are two main wrinkles the be aware of.
+    #
+    # The first wrinkle is that these tests have to check the internal
+    # properties of tensors to make sure they materialize in the expected way,
+    # and those checks cause dynamo graph breaks. Depending on the situation, a
+    # graph break in-between two compiled graphs that operate on the same COW
+    # tensor can make the tensor materialize when it would not materialize in
+    # eager mode, causing the checks to fail. The strategy for avoiding this is
+    # to make all the operations on COW tensors get compiled into the same
+    # graph, by not doing any checks between the operations, and just do all the
+    # checks at the end of the test. If we really do want to perform checks
+    # between two operations, `op1` and `op2`, the solution is to create two
+    # different tests. One test performs just `op1` and then checks. The other
+    # test performs `op1` followed immediately by `op2` and then checks.
+    #
+    # The second wrinkle is that in eager mode, if we perform writes on two COW
+    # tensors where one is a lazy clone of the other, the first tensor to be
+    # written will be materialized with a new data pointer, and the second
+    # tensor will just reuse the original data pointer when it is materialized.
+    # But in compiled mode, if these writes happen in the same graph, the order
+    # in which the tensors materialize can be different than in eager mode. So
+    # in this case the strategy is to purposefully cause a graph break to happen
+    # in-between the two write operations, by adding checks between them, so
+    # that they have to materialize in the expected order.
     @skipXLA
-    @skipIfTorchInductor("Test fails if run individually, but running multiple can fail silently")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_lazy_clone(self, device, dtype):
         t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
         t_orig_storage_addr = torch._C._storage_address(t)
         orig_data_ptr = torch._C._data_address(t)
+        clone = t._lazy_clone()
 
         # Lazy cloning a tensor should cause both it and its clone to become COW
         # tensors. They should have different storages, but the same data
         # pointer.
-        clone = t._lazy_clone()
 
         self.assertTrue(torch._C._is_cow_tensor(clone))
         self.assertTrue(torch._C._is_cow_tensor(t))
 
-        lazy_clone_orig_storage_addr = torch._C._storage_address(clone)
         self.assertTrue(torch._C._storage_address(t) == t_orig_storage_addr)
-        self.assertTrue(lazy_clone_orig_storage_addr != t_orig_storage_addr)
+        self.assertTrue(torch._C._storage_address(clone) != t_orig_storage_addr)
 
         self.assertTrue(torch._C._data_address(t) == orig_data_ptr)
         self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
 
-        # Viewing `t` should not cause a copy to happen. All the tensors should
-        # still be COW and have the same data pointer. `view` and `t` should
-        # have the same storage.
+    # See Note [lazy_clone_ tests with inductor enabled]
+    @skipXLA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_lazy_clone_view(self, device, dtype):
+        t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
+        t_orig_storage_addr = torch._C._storage_address(t)
+        orig_data_ptr = torch._C._data_address(t)
+        clone = t._lazy_clone()
         view = t.view([4])
+
+        # Viewing `t` should not cause a copy (materialize) to happen. All the
+        # tensors should still be COW and have the same data pointer. `view` and
+        # `t` should have the same storage, and `clone` should have a different
+        # storage.
 
         self.assertTrue(torch._C._is_cow_tensor(t))
         self.assertTrue(torch._C._is_cow_tensor(view))
@@ -5032,41 +5113,54 @@ else:
 
         self.assertTrue(torch._C._storage_address(t) == t_orig_storage_addr)
         self.assertTrue(torch._C._storage_address(view) == t_orig_storage_addr)
-        self.assertTrue(torch._C._storage_address(clone) == lazy_clone_orig_storage_addr)
+        self.assertTrue(torch._C._storage_address(clone) != t_orig_storage_addr)
 
         self.assertTrue(torch._C._data_address(t) == orig_data_ptr)
         self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
         self.assertTrue(torch._C._data_address(view) == orig_data_ptr)
 
-        # Writing to `t` should cause the storage under `t` and `view` to be
-        # copied, but should not affect `clone`
+    # See Note [lazy_clone_ tests with inductor enabled]
+    @skipXLA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_lazy_clone_view_materialize(self, device, dtype):
+        t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
+        t_orig_storage_addr = torch._C._storage_address(t)
+        orig_data_ptr = torch._C._data_address(t)
+        clone = t._lazy_clone()
+        view = t.view([4])
         view += torch.ones(1, device=device, dtype=dtype)
+
+        # Writing to `t` should cause the storage under `t` and `view` to be
+        # copied (materialized), but should not affect `clone`.
 
         self.assertFalse(torch._C._is_cow_tensor(t))
         self.assertFalse(torch._C._is_cow_tensor(view))
         self.assertTrue(torch._C._is_cow_tensor(clone))
 
-        t_new_data_addr = torch._C._data_address(t)
         self.assertTrue(torch._C._storage_address(t) == t_orig_storage_addr)
         self.assertTrue(torch._C._storage_address(view) == t_orig_storage_addr)
-        self.assertTrue(torch._C._storage_address(clone) == lazy_clone_orig_storage_addr)
+        self.assertTrue(torch._C._storage_address(clone) != t_orig_storage_addr)
 
+        t_new_data_addr = torch._C._data_address(t)
         self.assertTrue(t_new_data_addr != orig_data_ptr)
         self.assertTrue(torch._C._data_address(view) == t_new_data_addr)
         self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
 
-        # Since `clone`'s storage is the only COW storage left that holds a
-        # reference to its data pointer, writing to `clone` now should not cause
-        # a copy, so its storage and data pointer should not change. But `clone`
-        # should no longer be COW
         clone += torch.ones(1, device=device, dtype=dtype)
+
+        # Writing to `clone` should materialize it, so it should no longer
+        # be COW. However, since `clone`'s storage is the only COW storage
+        # left that holds a reference to the original data pointer, this
+        # materialization should not actually cause a copy--it should
+        # just reuse the original data pointer.
+
         self.assertFalse(torch._C._is_cow_tensor(t))
         self.assertFalse(torch._C._is_cow_tensor(view))
         self.assertFalse(torch._C._is_cow_tensor(clone))
 
         self.assertTrue(torch._C._storage_address(t) == t_orig_storage_addr)
         self.assertTrue(torch._C._storage_address(view) == t_orig_storage_addr)
-        self.assertTrue(torch._C._storage_address(clone) == lazy_clone_orig_storage_addr)
+        self.assertTrue(torch._C._storage_address(clone) != t_orig_storage_addr)
 
         self.assertTrue(torch._C._data_address(t) == t_new_data_addr)
         self.assertTrue(torch._C._data_address(view) == t_new_data_addr)

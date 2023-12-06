@@ -276,9 +276,26 @@ class InspectSignatureVariable(VariableTracker):
             unimplemented(f"inspect.signature with {kwargs}")
         return InspectSignatureVariable(callable)
 
-    def __init__(self, inspected, **kwargs):
+    def __init__(self, inspected: VariableTracker, **kwargs):
         super().__init__(**kwargs)
         self.inspected = inspected
+
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        if name == "parameters":
+            return variables.ConstDictVariable(
+                {
+                    name: InspectParameterVariable()
+                    for name in self.inspected.inspect_parameter_names()
+                },
+                user_cls=dict,
+            )
+        return super().var_getattr(tx, name)
+
+
+class InspectParameterVariable(VariableTracker):
+    """This is not implemented, if used will graph break."""
+
+    pass
 
 
 def produce_trampoline_autograd_fwd(fn_cls):
@@ -642,23 +659,6 @@ class GetAttrVariable(VariableTracker):
     ) -> "VariableTracker":
         return self.obj.call_method(tx, self.name, args, kwargs)
 
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if (
-            name == "__len__"
-            and isinstance(self.obj, InspectSignatureVariable)
-            and self.name == "parameters"
-        ):
-            return variables.ConstantVariable.create(
-                self.obj.inspected.num_parameters(),
-            )
-        return super().call_method(tx, name, args, kwargs)
-
 
 class MethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper, **kwargs):
@@ -848,16 +848,76 @@ class SkipFilesVariable(VariableTracker):
             for item in itertools.combinations(iterable, r):
                 items.append(variables.TupleVariable(list(item)))
             return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
+        elif self.value is itertools.groupby:
+            if any(kw != "key" for kw in kwargs.keys()):
+                unimplemented(
+                    "Unsupported kwargs for itertools.groupby: "
+                    f"{','.join(set(kwargs.keys()) - {'key'})}"
+                )
+
+            def retrieve_const_key(key):
+                if isinstance(key, variables.SymNodeVariable):
+                    return key.evaluate_expr()
+                elif isinstance(key, variables.ConstantVariable):
+                    return key.as_python_constant()
+                else:
+                    raise unimplemented(
+                        "Unsupported key type for itertools.groupby: " + str(type(key))
+                    )
+
+            if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+                seq = args[0].unpack_var_sequence(tx)
+                keyfunc = (
+                    (
+                        lambda x: (
+                            retrieve_const_key(
+                                kwargs.get("key").call_function(tx, [x], {})
+                            )
+                        )
+                    )
+                    if "key" in kwargs
+                    else None
+                )
+            else:
+                unimplemented("Unsupported arguments for itertools.groupby")
+
+            result = []
+            try:
+                for k, v in itertools.groupby(seq, key=keyfunc):
+                    result.append(
+                        variables.TupleVariable(
+                            [
+                                variables.ConstantVariable.create(k)
+                                if variables.ConstantVariable.is_literal(k)
+                                else k,
+                                variables.ListIteratorVariable(
+                                    list(v), mutable_local=MutableLocal()
+                                ),
+                            ],
+                            mutable_local=MutableLocal(),
+                        )
+                    )
+            except Exception:
+                raise unimplemented(  # noqa: TRY200
+                    "Unexpected failure when calling itertools.groupby"
+                )
+            return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
         elif (
             self.value is functools.wraps
             and not kwargs
             and len(args) == 1
-            and args[0].source
+            and (
+                args[0].source is not None or args[0].can_reconstruct(tx.output.root_tx)
+            )
         ):
 
             def wraps(fn):
                 if isinstance(fn, variables.NestedUserFunctionVariable):
-                    return fn.clone(wraps_source=args[0].source)
+                    if args[0].source:
+                        reconstructible = args[0].source
+                    else:
+                        reconstructible = args[0]
+                    return fn.clone(wrapped_reconstructible=reconstructible)
                 unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps)
@@ -903,6 +963,24 @@ class SkipFilesVariable(VariableTracker):
             unimplemented(
                 f"'call_function {self.value.__qualname__} in skip_files {path}, {self.reason}'"
             )
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if (
+            self.value in {collections.OrderedDict, collections.defaultdict}
+            and name == "fromkeys"
+        ):
+            from .builtin import BuiltinVariable
+
+            return BuiltinVariable.call_custom_dict_fromkeys(
+                tx, self.value, *args, **kwargs
+            )
+        return super().call_method(tx, name, args, kwargs)
 
 
 class TypingVariable(VariableTracker):
@@ -1044,3 +1122,51 @@ class NullVariable(VariableTracker):
 
 class DeletedVariable(VariableTracker):
     """Marker used to implement delattr()"""
+
+
+class StringFormatVariable(VariableTracker):
+    """
+    Represents a call to str.format(), we delay calling format until after the graph.
+    """
+
+    _nonvar_fields = {"format_string", *VariableTracker._nonvar_fields}
+
+    @classmethod
+    def create(cls, format_string, sym_args, sym_kwargs):
+        if all(
+            x.is_python_constant()
+            for x in itertools.chain(sym_args, sym_kwargs.values())
+        ):
+            return variables.ConstantVariable.create(
+                format_string.format(
+                    *[v.as_python_constant() for v in sym_args],
+                    **{k: v.as_python_constant() for k, v in sym_kwargs.items()},
+                )
+            )
+        return cls(format_string, list(sym_args), dict(sym_kwargs))
+
+    def __init__(self, format_string, sym_args, sym_kwargs, **kwargs):
+        super().__init__(**kwargs)
+        assert isinstance(format_string, str)
+        self.format_string = format_string
+        self.sym_args = sym_args
+        self.sym_kwargs = sym_kwargs
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.format_string!r}, {self.sym_args!r}, {self.sym_kwargs!r})"
+
+    def reconstruct(self, codegen):
+        if sys.version_info >= (3, 11):
+            codegen.append_output(create_instruction("PUSH_NULL"))
+        codegen.append_output(codegen.create_load_const(self.format_string))
+        codegen.append_output(codegen.create_load_attr("format"))
+        codegen.extend_output(
+            variables.TupleVariable(self.sym_args).reconstruct(codegen)
+        )
+        codegen.extend_output(
+            variables.ConstDictVariable(self.sym_kwargs, user_cls=dict).reconstruct(
+                codegen
+            )
+        )
+        codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
+        return []
