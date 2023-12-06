@@ -84,10 +84,10 @@ class TestFullyShardMemory(FSDPTest):
         mem_mb = self._get_peak_active_memory_mb()
         buffer_mb = 32  # 8.1 MiB cuBLAS workspaces, fragmentation, activations
         if reshard_after_forward:
-            # 2x max unsharded block parameters (all-gather + copy-out),
-            # non-block parameters, and other
+            # 3x max unsharded block parameters (current all-gather + copy-out
+            # and next all-gather), non-block parameters, and other
             expected_mem_mb = (
-                2 * max_unsharded_numel + non_block_numel
+                3 * max_unsharded_numel + non_block_numel
             ) * 4 / 1e6 + buffer_mb
             if not use_cpu_offload:
                 # Sharded parameters

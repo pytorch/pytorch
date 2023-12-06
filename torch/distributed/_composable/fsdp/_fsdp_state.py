@@ -13,6 +13,7 @@ from torch.utils._pytree import tree_map
 from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import MixedPrecisionPolicy
+from ._fsdp_collectives import AllGatherStateHolder
 from ._fsdp_common import (
     _cast_floating_point_tensor,
     FSDP_ENABLE_LOGGING,
@@ -42,6 +43,8 @@ class FSDPState(_State):
     _all_gather_copy_in_stream: torch.cuda.Stream
     _all_gather_stream: torch.cuda.Stream
     _reduce_scatter_stream: torch.cuda.Stream
+    # For overlapping current copy-out and next all-gather in forward
+    _all_gather_state: AllGatherStateHolder
 
     def __init__(self):
         self._module: nn.Module = nn.ModuleList()  # for typing
@@ -113,6 +116,7 @@ class FSDPState(_State):
         self._all_gather_copy_in_stream = torch.cuda.Stream(priority=high_priority)
         self._all_gather_stream = torch.cuda.Stream(priority=high_priority)
         self._reduce_scatter_stream = torch.cuda.Stream(priority=high_priority)
+        self._all_gather_state = AllGatherStateHolder()
         for state_ref in self._all_state_refs:
             state = state_ref()
             assert state is not None, "FSDPState deallocated"
@@ -125,6 +129,7 @@ class FSDPState(_State):
                 state._fsdp_param_group.reduce_scatter_stream = (
                     self._reduce_scatter_stream
                 )
+                state._fsdp_param_group.all_gather_state = self._all_gather_state
                 state._fsdp_param_group.post_forward_order = self._post_forward_order
 
     def _init_fqns(self) -> None:
@@ -179,6 +184,10 @@ class FSDPState(_State):
             output = self._fsdp_param_group.post_forward(module, input, output)
         self._training_state = TrainingState.IDLE
         output = self._register_pre_backward_hook(output)
+        if self._is_root and (all_gather_state := self._all_gather_state.pop()):
+            self._all_gather_copy_in_stream.wait_event(all_gather_state.event)
+            self._all_gather_stream.wait_event(all_gather_state.event)
+            del all_gather_state  # free
         if self._mp_policy.output_dtype is not None:
             with torch.profiler.record_function("FSDP::cast_forward_outputs"):
                 output = tree_map(

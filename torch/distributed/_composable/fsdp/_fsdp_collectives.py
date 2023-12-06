@@ -31,6 +31,25 @@ class AllGatherResult(NamedTuple):
     all_gather_work: Optional[dist.distributed_c10d.Work]
 
 
+class AllGatherState(NamedTuple):
+    all_gather_result: AllGatherResult
+    event: torch.cuda.Event  # copy-out
+
+
+class AllGatherStateHolder:
+    def __init__(self):
+        self._state: Optional[AllGatherState] = None
+
+    def put(self, state: AllGatherState) -> None:
+        assert self._state is None, "Expects to hold only one all-gather state"
+        self._state = state
+
+    def pop(self) -> Optional[AllGatherState]:
+        state = self._state
+        self._state = None
+        return state
+
+
 @torch.no_grad()
 def foreach_all_gather(
     fsdp_params: List[FSDPParam],

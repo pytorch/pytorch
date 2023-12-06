@@ -16,6 +16,8 @@ from torch.utils.hooks import RemovableHandle
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
+    AllGatherState,
+    AllGatherStateHolder,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce_scatter,
@@ -112,6 +114,7 @@ class FSDPParamGroup:
         self.all_gather_copy_in_stream: torch.cuda.Stream = current_stream
         self.all_gather_stream: torch.cuda.Stream = current_stream
         self.reduce_scatter_stream: torch.cuda.Stream = current_stream
+        self.all_gather_state = AllGatherStateHolder()
         self.post_forward_order: List[weakref.ref[FSDPParamGroup]] = []
         self._post_forward_index: Optional[int] = None
         self._prefetched: bool = False
@@ -245,12 +248,23 @@ class FSDPParamGroup:
         )
 
     def _wait_for_unshard(self):
+        """
+        1. In forward with implict prefetching, to overlap the current copy-out
+        with the next all-gather, we save a reference to the current all-gather
+        result to free after the next copy-out.
+        2. Otherwise (explicit prefetching or in backward), we free the
+        all-gather result immediately after the current copy-out.
+        """
         if not self._all_gather_result:
             return  # no preceding `_unshard()`
         if (event := self._all_gather_result.all_gather_event) is not None:  # sync
             torch.cuda.current_stream().wait_event(event)
         if (work := self._all_gather_result.all_gather_work) is not None:  # async
             work.wait()
+        if self._training_state == TrainingState.FORWARD:  # implicit prefetch
+            if prev_all_gather_state := self.all_gather_state.pop():
+                self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
+                del prev_all_gather_state  # free
         foreach_all_gather_copy_out(
             self._all_gather_result.all_gather_output,
             self.fsdp_params,
@@ -259,13 +273,19 @@ class FSDPParamGroup:
         )
         for fsdp_param in self.fsdp_params:
             fsdp_param.to_unsharded()
-        # The next all-gather should wait for this copy-out to finish to
-        # avoid reusing the all-gather buffer memory early
         all_gather_copy_out_event = torch.cuda.Event()
         all_gather_copy_out_event.record()
-        self.all_gather_copy_in_stream.wait_event(all_gather_copy_out_event)
-        self.all_gather_stream.wait_event(all_gather_copy_out_event)
-        self._all_gather_result = None  # free all-gather output
+        if self._training_state == TrainingState.FORWARD:
+            self.all_gather_state.put(
+                AllGatherState(self._all_gather_result, all_gather_copy_out_event)
+            )
+        else:
+            self._wait_all_gather_streams_on_event(all_gather_copy_out_event)
+        self._all_gather_result = None  # free unless saved in `all_gather_state`
+
+    def _wait_all_gather_streams_on_event(self, event: torch.cuda.Event):
+        self.all_gather_copy_in_stream.wait_event(event)
+        self.all_gather_stream.wait_event(event)
 
     def _reshard(self):
         log.info("_reshard for %s", self._module_fqn)
@@ -570,7 +590,8 @@ class FSDPParamGroup:
     @property
     def _use_all_gather_stream(self) -> bool:
         return self._training_state in (
-            TrainingState.FORWARD, TrainingState.PRE_BACKWARD
+            TrainingState.FORWARD,
+            TrainingState.PRE_BACKWARD,
         )
 
     @property
