@@ -4030,13 +4030,14 @@ def upsample_bicubic2d_vec(
 @pw_cast_for_opmath
 @out_wrapper()
 def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
+    def idx(left, middle, right):
+        dim_idx = torch.arange(-left, middle + right, device=a.device)
+        return middle - (middle - dim_idx.abs()).abs()
+
     return _reflection_or_replication_pad(
         a,
         padding,
-        lambda pad: torch.arange(pad, 0, step=-1, device=a.device),
-        lambda pad, length: torch.arange(
-            length - 2, length - 2 - pad, step=-1, device=a.device
-        ),
+        idx,
     )
 
 
@@ -4046,20 +4047,21 @@ def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
 @pw_cast_for_opmath
 @out_wrapper()
 def _replication_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
+    def idx(left, middle, right):
+        dim_idx = torch.arange(-left, middle + right, device=a.device)
+        return torch.clamp(dim_idx, 0, middle - 1)
+
     return _reflection_or_replication_pad(
         a,
         padding,
-        lambda pad: torch.zeros(pad, device=a.device, dtype=torch.int64),
-        lambda pad, length: torch.ones(pad, device=a.device, dtype=torch.int64)
-        * (length - 1),
+        idx,
     )
 
 
 def _reflection_or_replication_pad(
     a: Tensor,
     padding: Tuple[int, ...],
-    left_fn: Callable[[int], Tensor],
-    right_fn: Callable[[int, int], Tensor],
+    idx_fn: Callable[[int, int, int], Tensor],
 ) -> Tensor:
     dim = len(padding) // 2
     torch._check(
@@ -4074,115 +4076,9 @@ def _reflection_or_replication_pad(
 
     result = a
     for i in range(dim):
-        middle = torch.arange(0, inp_shape[i], step=1, device=a.device)
-        if padding_left[i] < 0:
-            middle = middle[-padding_left[i] :]
-            to_cat = [middle]
-        else:
-            left = left_fn(padding_left[i])
-            to_cat = [left, middle]
-
-        if padding_right[i] < 0:
-            middle = middle[: -padding_right[i]]
-        else:
-            right = right_fn(padding_right[i], inp_shape[i])
-            to_cat.append(right)
-
-        idx: List[Any] = [slice(s) for s in result.shape]
-        idx[i + nc_dim] = torch.cat(tuple(to_cat))
-        result = result[idx]
-
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(result)
-    result = result.contiguous(memory_format=memory_format)
-    return result
-
-
-@register_decomposition(aten.reflection_pad1d_backward)
-@register_decomposition(aten.reflection_pad2d_backward)
-@register_decomposition(aten.reflection_pad3d_backward)
-@pw_cast_for_opmath
-@out_wrapper("grad_input")
-def _reflection_pad_backward(
-    grad_output: Tensor, a: Tensor, padding: Tuple[int, ...]
-) -> Tensor:
-    dim = len(padding) // 2
-    torch._check(
-        a.dim() in (dim + 1, dim + 2),
-        lambda: f"reflection_pad{dim}d_backward requires {dim + 1}D or {dim + 2}D input",
-    )
-    inp_shape = a.shape[-dim:]
-    nc_dim = a.dim() - dim
-
-    def zero_pad(a, d, left, right):
-        left_shape = list(a.shape)
-        left_shape[d] = left
-
-        right_shape = list(a.shape)
-        right_shape[d] = right
-
-        return torch.cat(
-            (
-                torch.zeros(left_shape, device=a.device),
-                a,
-                torch.zeros(right_shape, device=a.device),
-            ),
-            dim=d,
-        )
-
-    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
-    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
-
-    result = grad_output
-    for i in range(dim):
-        middle_idx: List[Any] = [slice(s) for s in result.shape]
-        if padding_left[i] < 0:
-            left = 0
-            middle = zero_pad(result, i + nc_dim, -padding_left[i], 0)
-            if padding_right[i] > 0:
-                middle_idx[i + nc_dim] = torch.arange(
-                    0, inp_shape[i], step=1, device=a.device
-                )
-                middle = middle[middle_idx]
-            else:
-                right = 0
-                middle = zero_pad(middle, i + nc_dim, 0, -padding_right[i])
-        else:
-            left_idx: List[Any] = [slice(s) for s in result.shape]
-            left_idx[i + nc_dim] = torch.arange(
-                padding_left[i] - 1, -1, step=-1, device=a.device
-            )
-            left = zero_pad(
-                result[left_idx], i + nc_dim, 1, inp_shape[i] - padding_left[i] - 1
-            )
-
-            if padding_right[i] > 0:
-                middle_idx[i + nc_dim] = torch.arange(
-                    padding_left[i], padding_left[i] + inp_shape[i], step=1, device=a.device
-                )
-                middle = result[middle_idx]
-            else:
-                middle_idx[i + nc_dim] = torch.arange(
-                    padding_left[i], padding_left[i] + inp_shape[i] + padding_right[i], step=1, device=a.device
-                )
-                middle = zero_pad(result[middle_idx], i + nc_dim, 0, -padding_right[i])
-                right = 0
-
-        if padding_right[i] > 0:
-            right_idx: List[Any] = [slice(s) for s in result.shape]
-            right_idx[i + nc_dim] = torch.arange(
-                result.shape[i + nc_dim] - 1,
-                result.shape[i + nc_dim] - padding_right[i] - 1,
-                step=-1,
-                device=a.device,
-            )
-            right = zero_pad(
-                result[right_idx], i + nc_dim, inp_shape[i] - padding_right[i] - 1, 1
-            )
-
-        result = middle + left + right
-
-    assert result.shape == a.shape
+        idx: List[Any] = [None] * result.dim()
+        idx[i + nc_dim] = idx_fn(padding_left[i], inp_shape[i], padding_right[i])
+        result = aten._unsafe_index(result, idx)
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(result)
