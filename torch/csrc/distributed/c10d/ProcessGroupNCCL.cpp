@@ -946,15 +946,23 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
 }
 
-c10::optional<std::thread> ProcessGroupNCCL::tryWriteDebugInfo() {
-  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
-  if (writeDebugInfo_) {
-    return c10::nullopt;
-  }
-  // If we have not dumped the debugInfo return true and set the flag
-  writeDebugInfo_ = true;
-  return c10::optional<std::thread>(
-      std::thread(&ProcessGroupNCCL::dumpDebuggingInfo, this));
+std::future<bool> ProcessGroupNCCL::launchAsyncDebugDump() {
+  std::promise<bool> resultPromise;
+  std::future<bool> resultFuture = resultPromise.get_future();
+
+  std::thread workerThread(
+      [promise = std::move(resultPromise), this]() mutable {
+        try {
+          promise.set_value(dumpDebuggingInfo());
+        } catch (...) {
+          promise.set_exception(std::current_exception());
+        }
+      });
+
+  // Detach the thread to allow it to run independently
+  workerThread.detach();
+
+  return resultFuture;
 }
 
 void abortCommsFromMap(
@@ -1059,7 +1067,11 @@ void ProcessGroupNCCL::registerDebugInfoWriter(
   debugInfoWriter_ = std::move(writer);
 }
 
-void ProcessGroupNCCL::dumpDebuggingInfo() {
+bool ProcessGroupNCCL::dumpDebuggingInfo() {
+  // Serialize all calls to this function to avoid corrupting data, but allow
+  // multiple calls in one runtime. User is responsible for preserving the
+  // output file from an earlier call before a later call overwrites it.
+  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
   LOG(ERROR) << "ProcessGroupNCCL preparing to dump debug info.";
   if (ncclTraceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
@@ -1073,7 +1085,9 @@ void ProcessGroupNCCL::dumpDebuggingInfo() {
       registerDebugInfoWriter(std::move(debugInfoWriterPtr));
     }
     debugInfoWriter_->write(ncclTrace);
+    return true;
   }
+  return false;
 }
 
 void ProcessGroupNCCL::terminateProcess(std::string errMsg) {
@@ -1110,7 +1124,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
-  auto maybeWriteDebugInfo = tryWriteDebugInfo();
+  std::future<bool> asyncDebugDump = launchAsyncDebugDump();
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
@@ -1130,8 +1144,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Case two: desync might be slow or get stuck. Or we get stuck in
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
-  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
-       (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable())) &&
+  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave another two mins for desync report generation or process group
     // destroy.
@@ -1143,9 +1156,11 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // thread, so We mark the thread detach and the dump of debug info becomes
   // "best effort". If the process exit normally, marking it detach also makes
   // sense because we don't really care about dumping the debug info.
-  if (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable()) {
-    maybeWriteDebugInfo->detach();
-  }
+
+  // We already log completion inside the thread, so it may not be necessary to
+  // check the return value here.  We mainly use a future so we can exit early
+  // if done.
+  asyncDebugDump.wait_for(std::chrono::seconds(heartbeatTimeoutInSec_));
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     const auto logMsg = c10::str(
@@ -1326,10 +1341,10 @@ void ProcessGroupNCCL::workCleanupLoop() {
               collectiveDebugInfoMode_.store(true);
             }
 
-            c10::optional<std::thread> dumpingDebugInfo;
+            c10::optional<std::future<bool>> optAsyncDebugDump;
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
-              dumpingDebugInfo = tryWriteDebugInfo();
+              optAsyncDebugDump = launchAsyncDebugDump();
             }
 
             if (desyncDebug_) {
@@ -1339,15 +1354,8 @@ void ProcessGroupNCCL::workCleanupLoop() {
 
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
-              if (dumpingDebugInfo && dumpingDebugInfo->joinable()) {
-                std::this_thread::sleep_for(
-                    std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
-                // At this point, we either have already waited for
-                // `kWatchdogThreadSleepMillis * 30` or the thread has finished
-                // so that we mark the thread detach and the dump of debug info
-                // becomes "best effort".
-                dumpingDebugInfo->detach();
-              }
+              optAsyncDebugDump->wait_for(
+                  std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
             }
 
           } catch (const std::exception& e) {
