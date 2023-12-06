@@ -13,7 +13,6 @@ import os
 import copy
 import gc
 import threading
-from numpy.testing import assert_allclose
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
