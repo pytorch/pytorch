@@ -444,25 +444,16 @@ class TorchVariable(VariableTracker):
                 unimplemented("torch.from_numpy. config.trace_numpy is False")
             if not np:
                 unimplemented("torch.from_numpy. NumPy is not available")
-            assert len(args) == 1, f"Got arguments {args}"
-            assert not kwargs
-            t = args[0]
-            from .tensor import NumpyNdarrayVariable
-
-            if isinstance(t, NumpyNdarrayVariable):
-                # TODO: mark the tensor as non-resizable
-                return wrap_fx_proxy_cls(
-                    target_cls=TensorVariable,
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        torch.detach,
-                        *proxy_args_kwargs(args, {}),
-                    ),
-                    example_value=None,
-                )
-            else:
-                unimplemented(f"torch.from_numpy(<{type(t)}>)")
+            return wrap_fx_proxy_cls(
+                target_cls=TensorVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.as_tensor,
+                    *proxy_args_kwargs(args, {}),
+                ),
+                example_value=None,
+            )
         elif can_dispatch_torch_function(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
         elif self.value is torch.autograd._profiler_enabled:
@@ -687,6 +678,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     *proxy_args_kwargs(args, kwargs),
                 ),
             )
+
+            if (
+                isinstance(tensor_variable, TensorVariable)
+                and "requires_grad" in kwargs
+                and kwargs["requires_grad"].as_python_constant()
+            ):
+                unimplemented(
+                    """factory functions that return tensors that require grad are not supported.
+Either create the tensor outside the compiled region, or do not set the tensor to require_grad"""
+                )
 
             if "out" in kwargs and not (
                 isinstance(kwargs["out"], variables.ConstantVariable)

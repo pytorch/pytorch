@@ -9,7 +9,8 @@ import logging
 import math
 import operator
 import os
-from typing import Any, Counter, Dict, Iterable, List, Optional, Set, Tuple
+import textwrap
+from typing import Any, Counter, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -19,13 +20,14 @@ import torch._logging
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
+
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path, PyCodeCache
 from ..dependencies import MemoryDep, StarDep
 from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
-from ..scheduler import BaseScheduling
+from ..scheduler import BaseScheduling, WhyNoFuse
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
     do_bench,
@@ -811,8 +813,8 @@ class TritonKernel(Kernel):
     def __init__(
         self,
         *groups,
-        index_dtype,
-        mutations=None,
+        index_dtype: str,
+        mutations: Optional[Set[str]] = None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
@@ -821,21 +823,21 @@ class TritonKernel(Kernel):
             pid_cache = {}
         super().__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
-        self.mutations = mutations
+        self.mutations: Set[str] = mutations if mutations is not None else set()
         self.range_trees: List[IterationRangesRoot] = []
-        self.range_tree_nodes = {}
+        self.range_tree_nodes: Dict[sympy.Symbol, IterationRangesEntry] = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
-        self.outside_loop_vars = set()
+        self.outside_loop_vars: Set[Any] = set()
         self.reduction_hint = reduction_hint
-        self.index_dtype = index_dtype
+        self.index_dtype: str = index_dtype
         self.min_elem_per_thread = min_elem_per_thread
-        self.last_usage = set()
+        self.last_usage: Set[str] = set()
 
-        self.persistent_reduction = self.should_use_persistent_reduction()
+        self.persistent_reduction: bool = self.should_use_persistent_reduction()
         self.no_x_dim = (
             self.reduction_hint == ReductionHint.INNER
             and self.persistent_reduction
@@ -857,7 +859,17 @@ class TritonKernel(Kernel):
 
         self.simplify_indexing = simplify_indexing
 
-    def should_use_persistent_reduction(self):
+    def need_numel_args(self):
+        r"""
+        Indicate whether we need provide numel as arguments for the generated
+        kernel calls in the benchmark.
+
+        Should be true for pointwise/reduction kernels but false for triton
+        matmul kernels.
+        """
+        return True
+
+    def should_use_persistent_reduction(self) -> bool:
         """
         Heuristic to set self.persistent_reduction and add guards
         if needed.
@@ -1057,6 +1069,7 @@ class TritonKernel(Kernel):
                 # Non-iterated variables, e.g. strides
                 continue
             entry = self.range_tree_nodes[symbol]
+            assert isinstance(entry.parent, IterationRangesRoot)
             index_numels[entry.parent.index] *= entry.length
 
         # If the index variables only iterate over a subset of the kernel
@@ -1142,7 +1155,7 @@ class TritonKernel(Kernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
-            elif var.name.startswith(("s", "ps")):
+            elif var.name.startswith(("s", "ps", "i")):
                 pass
             else:
                 # var is one of xN, yN or rN
@@ -1267,7 +1280,7 @@ class TritonKernel(Kernel):
         return mask
 
     @property
-    def assert_function(self):
+    def assert_function(self) -> str:
         return "tl.device_assert"
 
     def get_strides_of_load(self, index: sympy.Expr):
@@ -1473,8 +1486,6 @@ class TritonKernel(Kernel):
         if self._load_mask:
             masks.append(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix
-        reduction_sizes = ["None" for _ in self.range_trees]
-        reduction_sizes[-1] = ":"
 
         # Say we have
         #     tmp0 = ops.constant(1, torch.int64)
@@ -1489,6 +1500,9 @@ class TritonKernel(Kernel):
             ),
             value,
         )
+
+        dim: int
+        root_op: str
 
         def final_reduction(value):
             use_helper = reduction_type in {"any", "max", "min", "prod"}
@@ -1532,9 +1546,11 @@ class TritonKernel(Kernel):
                 masked_value = _mask_value(value, default)
 
             if reduction_type in {"argmax", "argmin"}:
-                accumulator_index = self.cse.generate(
-                    self.compute,
-                    f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
+                accumulator_index = str(
+                    self.cse.generate(
+                        self.compute,
+                        f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
+                    )
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
                 final_argreduce(
@@ -1578,7 +1594,7 @@ class TritonKernel(Kernel):
                 )
 
             if reduction_type in {"argmax", "argmin"}:
-                accumulator_index = f"_{result_var}_index"  # type: ignore[assignment]
+                accumulator_index = f"_{result_var}_index"
                 long_max = torch.iinfo(torch.int64).max
                 self.body.writeline(
                     f"{accumulator_index} = tl.full({self.dense_size_str()}, {long_max}, tl.int64)"
@@ -1696,6 +1712,65 @@ class TritonKernel(Kernel):
             DeferredLine(name, f"tl.store({var} + ({index}), {value}, {mask})")
         )
 
+    def scan(self, dtype, scan_op, value):
+        assert self.inside_reduction
+        masks = {f"{tree.prefix}mask" for tree in self.range_trees}
+        self.filter_masks(masks)
+        masks = sorted(masks)
+        if self._load_mask:
+            masks.append(self._load_mask)
+        reduction_range_prefix = self.range_trees[-1].prefix
+
+        value = self.cse.generate(
+            self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
+        )
+
+        default = triton_constant(ir.Reduction.default_value(scan_op, dtype))
+        default_tensor = self.cse.generate(
+            self.body,
+            f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
+        )
+
+        dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
+        acc_type = triton_acc_type(dtype)
+        cond = " & ".join(masks)
+
+        if self.persistent_reduction:
+            masked_value = self.cse.generate(
+                self.compute, f"tl.where({cond}, {value}, {default_tensor})"
+            )
+            result_var = self.cse.generate(
+                self.compute, f"tl.cum{scan_op}({masked_value}, {dim})"
+            )
+        else:
+            accumulator = self.cse.newvar()
+            reduced_size = self.dense_size_list()
+            reduced_size[-1] = "1"
+            reduced_size = f"[{', '.join(reduced_size)}]"
+
+            self.body.writeline(
+                f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
+            )
+
+            masked_value = self.cse.generate(
+                self.compute, f"tl.where({cond}, {value}, {default_tensor})"
+            )
+            combine_fn = ir.get_reduction_combine_fn(scan_op, dtype)
+            partial_reduce = self.cse.generate(
+                self.compute, self.reduction_resize(f"tl.{scan_op}({value}, {dim})")
+            )
+            acc_next = combine_fn(accumulator, partial_reduce)
+            partial_scan = self.cse.generate(
+                self.compute, f"tl.cum{scan_op}({masked_value}, {dim})"
+            )
+            result_var = self.cse.generate(
+                self.compute, combine_fn(accumulator, partial_scan)
+            )
+            self.compute.writeline(f"{accumulator} = {acc_next}")
+
+        result_var.mask_vars = masks  # type: ignore[attr-defined]
+        return result_var
+
     def codegen_body(self):
         """
         Concat output code from index_code, loads, compute, stores,
@@ -1797,7 +1872,12 @@ class TritonKernel(Kernel):
 
                 stream_name = f"stream{index}"
                 result.writeline(f"{stream_name} = get_cuda_stream({index})")
-                extra_args_str = ", ".join(map(str, extra_args)) + ", "
+
+                if self.need_numel_args():
+                    extra_args_str = ", ".join(map(str, extra_args)) + ", "
+                else:
+                    extra_args_str = ""
+
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
                 )
@@ -1834,6 +1914,16 @@ class TritonKernel(Kernel):
             )
 
         return result
+
+    def imports_for_benchmark_kernel(self):
+        return textwrap.dedent(
+            """
+            from torch._dynamo.testing import rand_strided
+            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+            import torch
+            from torch._inductor.triton_heuristics import grid
+        """
+        )
 
     def codegen_kernel(self, name=None):
         from triton import next_power_of_2
@@ -1881,14 +1971,7 @@ class TritonKernel(Kernel):
                 """
             )
             if config.benchmark_kernel:
-                code.splice(
-                    """
-                        from torch._dynamo.testing import rand_strided
-                        from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-                        import torch
-                        from torch._inductor.triton_heuristics import grid
-                    """
-                )
+                code.splice(self.imports_for_benchmark_kernel())
 
         argdefs, _, signature = self.args.python_argdefs()
         # maps actual expression to SizeArg if its in sizevars replacements
@@ -1915,8 +1998,11 @@ class TritonKernel(Kernel):
                 mutated_args.add(self.args.output_buffers[mutation])
         mutated_args = sorted(mutated_args)
 
+        triton_meta_signature = signature_to_meta(
+            signature, size_dtype=self.index_dtype
+        )
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
+            "signature": triton_meta_signature,
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
@@ -1932,7 +2018,7 @@ class TritonKernel(Kernel):
             if tree.prefix != "r" or self.inside_reduction:
                 sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
                 signature.append(sizearg)
-                triton_meta["signature"][len(argdefs)] = signature_of(
+                triton_meta_signature[len(argdefs)] = signature_of(
                     sizearg, size_dtype=self.index_dtype
                 )
                 argdefs.append(f"{tree.prefix}numel")
@@ -2047,7 +2133,7 @@ class TritonKernel(Kernel):
             sizes[idx] = ":"
         return f"[{', '.join(sizes)}]"
 
-    def dense_size_str(self):
+    def dense_size_list(self) -> List[str]:
         sizes = []
         for tree in self.range_trees:
             if self.no_x_dim and tree.prefix == "x":
@@ -2063,6 +2149,10 @@ class TritonKernel(Kernel):
         if sizes[0:2] == ["YBLOCK", "XBLOCK"]:
             sizes[0:2] = reversed(sizes[0:2])
 
+        return sizes
+
+    def dense_size_str(self):
+        sizes = self.dense_size_list()
         return f"[{', '.join(sizes)}]"
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
@@ -2197,12 +2287,13 @@ class TritonScheduling(BaseScheduling):
 
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
+        why = WhyNoFuse(node1, node2)
 
         if node1.is_reduction() and node2.is_reduction():
             reduction_can_fuse = numel1 == numel2 and rnumel1 == rnumel2
             if not reduction_can_fuse:
-                fusion_log.debug(
-                    "cannot fuse (triton:1): numel/rnumel mismatch (reduce) (%s, %s), (%s, %s)",
+                why(
+                    "numel/rnumel mismatch (reduce) (%s, %s), (%s, %s)",
                     numel1,
                     numel2,
                     rnumel1,
@@ -2212,8 +2303,8 @@ class TritonScheduling(BaseScheduling):
 
         if not node1.is_reduction() and not node2.is_reduction():
             if not (numel1 == numel2 and rnumel1 == rnumel2):
-                fusion_log.debug(
-                    "cannot fuse (triton:2): numel/rnumel mismatch (non-reduce) (%s, %s), (%s, %s)",
+                why(
+                    "numel/rnumel mismatch (non-reduce) (%s, %s), (%s, %s)",
                     numel1,
                     numel2,
                     rnumel1,
@@ -2226,10 +2317,7 @@ class TritonScheduling(BaseScheduling):
                 # Fusion for CUDATemplates are not supported.
                 is_triton_template = isinstance(node1.node, TritonTemplateBuffer)
                 if not is_triton_template:
-                    fusion_log.debug(
-                        "cannot fuse (triton:3): is not TritonTemplateBuffer %s",
-                        node1,
-                    )
+                    why("node1 is not TritonTemplateBuffer")
                 return is_triton_template
 
             # check for a bad combined tiling
@@ -2248,13 +2336,13 @@ class TritonScheduling(BaseScheduling):
                 elif len(tiling2) > 2:
                     cond = tiling2 == tiling3
                 if not cond:
-                    fusion_log.debug(
-                        "cannot fuse (triton:4): tiling mismatch (%s, %s, %s)",
+                    why(
+                        "tiling mismatch (%s, %s, %s)",
                         tiling1,
                         tiling2,
                         tiling3,
                     )
-                    return cond
+                    return False
 
             return True
 
@@ -2265,9 +2353,7 @@ class TritonScheduling(BaseScheduling):
                     TritonKernel.is_compatible((numel2, rnumel2), n.get_ranges())
                     for n in node1.get_nodes()
                 ):
-                    fusion_log.debug(
-                        "cannot fuse (triton:5): nodes numel/rnumel incompatibility"
-                    )
+                    why("nodes numel/rnumel incompatibility")
                     return False
                 if (
                     config.triton.tiling_prevents_reduction_fusion
@@ -2280,12 +2366,12 @@ class TritonScheduling(BaseScheduling):
                         (numel2, rnumel2, 1),
                     )
                     if not is_reduction_tiling_valid:
-                        fusion_log.debug(
-                            "cannot fuse (triton:6): invalid tiling for reduction"
-                        )
+                        why("invalid tiling for reduction")
                     return is_reduction_tiling_valid
                 return True
 
+            if numel1 != numel2:
+                why("nodes numel incompatibility")
             return numel1 == numel2
 
         assert node1.is_reduction() and not node2.is_reduction()
@@ -2298,7 +2384,11 @@ class TritonScheduling(BaseScheduling):
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule: List[Any] = []
         current_loop_writes: Set[str] = set()
-        is_current_reductions = set()
+
+        # Writes with a reduced shape, meaning they are only present once the
+        # reduction loop has ended
+        current_loop_reduced_writes = set()
+        current_loop_has_writes = False
         done = set()
 
         def fits_in_main_body(n):
@@ -2311,20 +2401,33 @@ class TritonScheduling(BaseScheduling):
             _, (node_numel, node_rnumel) = n.group
             return node_numel == numel and node_rnumel == 1 and rnumel != 1
 
+        def schedule_node_in_loop(n):
+            nonlocal current_loop_has_writes
+            done.add(n)
+            node_schedule.append(n)
+            current_loop_has_writes = True
+            # A scan is modelled as a reduction in the scheduler but has a
+            # full sized output that can be used inside the loop body
+            if (
+                n.is_reduction()
+                and isinstance(n, scheduler.SchedulerNode)
+                and isinstance(n.node, ir.ComputedBuffer)
+                and not isinstance(n.node.data, ir.Scan)
+            ):
+                current_loop_reduced_writes.add(n.get_name())
+
         @contextlib.contextmanager
         def end_current_reduction_loop():
-            if current_loop_writes:
+            nonlocal current_loop_has_writes
+            if current_loop_has_writes:
                 # flush out any other runnable nodes to reduce number of loops
                 for other_node in nodes[index + 1 :]:
                     if (
                         node not in done
                         and fits_in_main_body(other_node)
-                        and not (current_loop_writes & other_node.ancestors)
+                        and not (current_loop_reduced_writes & other_node.ancestors)
                     ):
-                        done.add(node)
-                        current_loop_writes.add(node.get_name())
-                        is_current_reductions.add(node.is_reduction())
-                        node_schedule.append(node)
+                        schedule_node_in_loop(node)
 
             if node_schedule and node_schedule[-1] is EnableReduction:
                 node_schedule.pop()
@@ -2332,8 +2435,8 @@ class TritonScheduling(BaseScheduling):
                 node_schedule.append(DisableReduction)
             yield
             node_schedule.append(EnableReduction)
-            current_loop_writes.clear()
-            is_current_reductions.clear()
+            current_loop_reduced_writes.clear()
+            current_loop_has_writes = False
 
         for index, node in enumerate(nodes):
             if node in done:
@@ -2343,20 +2446,19 @@ class TritonScheduling(BaseScheduling):
             def requires_closing_previous_reduction(node, node_schedule):
                 if rnumel == 1:
                     return False
-                if not current_loop_writes & node.ancestors:
+                if not current_loop_reduced_writes & node.ancestors:
                     return False
                 assert node_schedule and not isinstance(
                     node_schedule[-1], (EnableReduction, DisableReduction)
                 )
-                return True in is_current_reductions
+                return bool(current_loop_reduced_writes)
 
             if fits_in_main_body(node):
                 if requires_closing_previous_reduction(node, node_schedule):
                     with end_current_reduction_loop():
                         pass  # need to start a new reduction loop
-                current_loop_writes.add(node.get_name())
-                is_current_reductions.add(node.is_reduction())
-                node_schedule.append(node)
+
+                schedule_node_in_loop(node)
             elif fits_outside_reduction(node):
                 with end_current_reduction_loop():
                     node_schedule.append(node)
@@ -2391,7 +2493,9 @@ class TritonScheduling(BaseScheduling):
             return node.node.data.reduction_hint
 
     @staticmethod
-    def can_use_32bit_indexing(numel: sympy.Expr, buffers: Iterable[ir.Buffer]) -> bool:
+    def can_use_32bit_indexing(
+        numel: sympy.Expr, buffers: Iterable[Union[ir.Buffer, ir.TensorBox]]
+    ) -> bool:
         int_max = torch.iinfo(torch.int32).max
         size_hint = V.graph.sizevars.size_hint
         has_hint = V.graph.sizevars.shape_env.has_hint
@@ -2437,7 +2541,7 @@ class TritonScheduling(BaseScheduling):
             buffer_names.update(node.used_buffer_names())
 
         # Get buffers objects
-        def _get_buffer(name: str) -> ir.Buffer:
+        def _get_buffer(name: str) -> Union[ir.Buffer, ir.TensorBox]:
             if name in V.graph.name_to_buffer:
                 return V.graph.name_to_buffer[name]
             elif name in V.graph.graph_inputs:
@@ -2530,7 +2634,7 @@ class TritonScheduling(BaseScheduling):
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
-        with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
+        with V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
 
             for node in node_schedule:
@@ -2621,7 +2725,7 @@ class TritonScheduling(BaseScheduling):
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
 
-            basename, _, kernel_path = get_path(code_hash(src_code), "py")
+            basename, _, kernel_path = get_path(code_hash(src_code.strip()), "py")
 
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
@@ -2651,7 +2755,7 @@ class TritonScheduling(BaseScheduling):
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         # finalize must be called after adding epilogue above
-        with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
+        with V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
             src_code = (
                 partial_code
@@ -2659,6 +2763,10 @@ class TritonScheduling(BaseScheduling):
                 else partial_code.finalize()
             )
             node_schedule = [template_node, *epilogue_nodes]
+
+            if config.benchmark_kernel:
+                src_code = f"{kernel.imports_for_benchmark_kernel()}\n{src_code}\n{kernel.codegen_kernel_benchmark().getvalue()}"
+
             kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name, template_node.node)
@@ -2696,7 +2804,7 @@ class TritonScheduling(BaseScheduling):
                     subkernel,
                 )
 
-                with V.set_kernel_handler(subkernel):  # type: ignore[call-arg]
+                with V.set_kernel_handler(subkernel):
                     for node in node_schedule:
                         if node not in (EnableReduction, DisableReduction):
                             node.mark_run()
@@ -2850,6 +2958,9 @@ class TritonScheduling(BaseScheduling):
     def flush(self):
         pass
 
+    def ready_to_flush(self) -> bool:
+        return False
+
     def benchmark_fused_nodes(self, nodes):
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
@@ -2877,7 +2988,8 @@ class TritonScheduling(BaseScheduling):
         mod = PyCodeCache.load(src_code)
 
         def cache_file_path():
-            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"  # type: ignore[type-var,operator]
+            assert mod.__file__ is not None
+            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
 
         def load_cache():
             path = cache_file_path()

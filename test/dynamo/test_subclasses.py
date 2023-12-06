@@ -13,7 +13,11 @@ import torch.utils.checkpoint
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
 
-from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    DimDynamic,
+    ShapeEnv,
+    StatelessSymbolicContext,
+)
 from torch.nested._internal.nested_tensor import (
     jagged_from_list,
     jagged_from_tensor_and_lengths,
@@ -59,6 +63,52 @@ class SigmoidToExpSubclass(torch.Tensor):
         return super().__torch_function__(func, types, args, kwargs)
 
 
+# Wrapper subclass with two inner tensors: data and scale
+# data has same shape as outer, and scale has single dim size
+class ScaledTensor(torch.Tensor):
+    def __new__(
+        cls,
+        data: torch.Tensor,
+        scale: torch.Tensor,
+    ):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.size(),
+            strides=data.stride(),
+            storage_offset=data.storage_offset(),
+            dtype=data.dtype,
+            layout=data.layout,
+            requires_grad=data.requires_grad,
+            device=data.device,
+        )
+
+    def __init__(self, data: torch.Tensor, scale: torch.Tensor):
+        self._data = data
+        self._scale = scale
+
+    def __tensor_flatten__(self):
+        ctx = {}
+        return ["_data", "_scale"], ctx
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+        assert len(inner_tensors) == 2
+        return ScaledTensor(inner_tensors["_data"], inner_tensors["_scale"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        scaled_tensor = args[0]
+        out = func(scaled_tensor._data, *args[1:], **kwargs)
+        return ScaledTensor(out, scaled_tensor._scale)
+
+    def __repr__(self):
+        return f"{self._data.__repr__()}\n{self._scale.__repr__()}"
+
+
+def func(a):
+    return a.sin()
+
+
 class EagerRecordGraphAndInputs:
     def __init__(self):
         self.graphs = []
@@ -71,6 +121,21 @@ class EagerRecordGraphAndInputs:
 
 
 GLOBAL_TEST_SUBCLASSES = {MockSubclass, DummyNDim, SigmoidToExpSubclass}
+
+
+# Returns True if the function recompiles between inputs1 and inputs2 with the
+# specified dynamic setting.
+def _recompiles_for_inputs(fn, inputs1, inputs2, dynamic=True):
+    compile_count = [0]
+
+    def counter(gm, example_inputs):
+        compile_count[0] += 1
+        return gm
+
+    compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=dynamic)
+    compiled_f(*inputs1)
+    compiled_f(*inputs2)
+    return compile_count[0] > 1
 
 
 class SubclassTests(torch._dynamo.test_case.TestCase):
@@ -196,17 +261,17 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             def sigmoid(self):
                 return None
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            x.sigmoid()
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                x.sigmoid()
 
         msg = (
             "Accessing overridden method/attribute sigmoid on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
-        with torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
@@ -220,17 +285,17 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
             ndim = 10
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            return x.ndim
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                return x.ndim
 
         msg = (
             "Accessing overridden method/attribute ndim on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
-        with torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
@@ -253,17 +318,17 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             def ndim(self, value):
                 self._ndim = value
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            return x.ndim
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                return x.ndim
 
         msg = (
             "Accessing overridden method/attribute ndim on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
-        with torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
@@ -332,10 +397,16 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 shape_env=shape_env
             ) as fake_mode:
                 x_fake = fake_mode.from_tensor(
-                    x, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                    x,
+                    symbolic_context=StatelessSymbolicContext(
+                        dynamic_sizes=[dim_dynamic for i in range(x.dim())]
+                    ),
                 )
                 x1_fake = fake_mode.from_tensor(
-                    x1, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                    x1,
+                    symbolic_context=StatelessSymbolicContext(
+                        dynamic_sizes=[dim_dynamic for i in range(x.dim())]
+                    ),
                 )
                 opt_f(x_fake)
                 opt_f(x1_fake)
@@ -362,7 +433,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             ) as fake_mode:
                 for inp in inps:
                     fake_inp = fake_mode.from_tensor(
-                        inp, dynamic_dims=[dim_dynamic for i in range(x.dim())]
+                        inp,
+                        symbolic_context=StatelessSymbolicContext(
+                            [dim_dynamic for i in range(x.dim())]
+                        ),
                     )
                     opt_f(fake_inp)
             self.assertEqual(cnt.frame_count, exp_frame_count)
@@ -595,7 +669,7 @@ class GraphModule(torch.nn.Module):
                 return ["inner_elem"], None
 
             @staticmethod
-            def __tensor_unflatten__(inner_tensors, _):
+            def __tensor_unflatten__(inner_tensors, _, outer_size, outer_stride):
                 return DoubleSizeMaybeAddGeThreeTensor(inner_tensors["inner_elem"])
 
             def __repr__(self):
@@ -675,6 +749,42 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(lower_bound_str, expected_lower_bound)
         self.assertEqual(upper_bound_str, expected_upper_bound)
 
+    def test_wrapper_subclass_with_same_sized_inner_tensor(self):
+        # shouldn't recompile for different sizes when dynamic=True
+        sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(6))
+        sub2 = ScaledTensor(torch.randn(3, 5), torch.randn(7))
+        self.assertFalse(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=True))
+
+        # should recompile for different data size when dynamic=False
+        sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(6))
+        sub2 = ScaledTensor(torch.randn(3, 5), torch.randn(6))
+        self.assertTrue(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
+
+        # avoid recompile using manual mark_dynamic() for different data size
+        sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(6))
+        # NB: mark_dynamic() on outer tensor should translate to inner tensors of the same size
+        torch._dynamo.mark_dynamic(sub1, 0)
+        torch._dynamo.mark_dynamic(sub1, 1)
+        sub2 = ScaledTensor(torch.randn(3, 5), torch.randn(6))
+        self.assertFalse(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
+
+    # Broken because we don't guard properly on inner tensors yet.
+    # TODO: Enable this when we do
+    @unittest.expectedFailure
+    def test_wrapper_subclass_with_differently_sized_inner_tensor(self):
+        # should recompile for different scale size when dynamic=False
+        sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(3))
+        sub2 = ScaledTensor(torch.randn(2, 4), torch.randn(5))
+        self.assertTrue(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
+
+        # still recompiles using manual mark_dynamic() on outer for different scale size
+        sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(3))
+        # NB: mark_dynamic() on outer tensor doesn't translate to inner tensors of different size
+        torch._dynamo.mark_dynamic(sub1, 0)
+        torch._dynamo.mark_dynamic(sub1, 1)
+        sub2 = ScaledTensor(torch.randn(2, 4), torch.randn(5))
+        self.assertTrue(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
+
     def test_recompile_with_symbool_inputs(self):
         def f(pred: bool):
             if pred:
@@ -694,7 +804,10 @@ class GraphModule(torch.nn.Module):
                 shape_env=shape_env
             ) as fake_mode:
                 fake_inp = fake_mode.from_tensor(
-                    x, dynamic_dims=[DimDynamic.DYNAMIC for i in range(x.dim())]
+                    x,
+                    symbolic_context=StatelessSymbolicContext(
+                        dynamic_sizes=[DimDynamic.DYNAMIC for i in range(x.dim())]
+                    ),
                 )
                 for i, size in enumerate(sizes):
                     pred = fake_inp.size(0) == size
@@ -816,18 +929,9 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         )
         return jagged_from_tensor_and_lengths(values_tensor, starts, lengths)
 
-    def _check_recompiles(self, fn, inputs1, inputs2, recompiles):
-        compile_count = [0]
-
-        def counter(gm, example_inputs):
-            compile_count[0] += 1
-            return gm
-
-        compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=True)
-        out = compiled_f(*inputs1)
-        self.assertEqual(compile_count[0], 1)
-        out = compiled_f(*inputs2)
-        self.assertEqual(compile_count[0], 2 if recompiles else 1)
+    def _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles):
+        actual_recompiles = _recompiles_for_inputs(fn, inputs1, inputs2)
+        self.assertEqual(actual_recompiles, expected_recompiles)
 
     def test_unary_does_not_recompile(self):
         nt1, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
@@ -841,9 +945,11 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             else:
                 return nt1.sin()
 
-        # Basic binary
-        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
+        # NB: If we have shape e.g. (3, j0, 3), duck sizing will give us (s0, s1, s0).
+        # This causes a recompile later on when it realizes the batch and last dim
+        # should not always be equal. To avoid that, we use (3, j0, 5) here.
+        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), offsets)
         nt3, offsets = self._get_jagged_tensor(((3, 4, 5), 4), None)
         nt4, _ = self._get_jagged_tensor(((3, 4, 5), 4), offsets)
         self._check_recompiles(binary, (nt1, nt2), (nt3, nt4), False)
@@ -856,9 +962,9 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
                 return nt1.sin()
 
         # Binary recompiles because singleton ints no longer match
-        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
-        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
-        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), offsets)
+        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
 
     # TODO: cannot parametrize this test class with device for some reason
@@ -893,7 +999,10 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self._test_autograd("inductor")
 
     def test_unbind(self):
-        nt, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        # NB: If we have shape e.g. (3, j0, 3), duck sizing will give us (s0, s1, s0).
+        # This causes a recompile later on when it realizes the batch and last dim
+        # should not always be equal. To avoid that, we use (3, j0, 5) here.
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
         nt2, _ = self._get_jagged_tensor(((2, 3, 5), 2), None)
         nt3, _ = self._get_jagged_tensor(((2, 3, 4, 5), 3), None)
 

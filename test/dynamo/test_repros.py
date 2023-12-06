@@ -490,6 +490,20 @@ def apply_chunking_to_forward(forward_fn, *input_tensors):
     return forward_fn(*input_tensors)
 
 
+def _validate_model_kwargs(fn, model_kwargs):
+    # simplified from transformers.generation.utils._validate_model_kwargs
+    unused_model_args = []
+    model_args = set(inspect.signature(fn).parameters)
+    for key, value in model_kwargs.items():
+        if value is not None and key not in model_args:
+            unused_model_args.append(key)
+    if unused_model_args:
+        raise ValueError(
+            f"The following `model_kwargs` are not used by the model: {unused_model_args} (note: typos in the"
+            " generate arguments will also show up in this list)"
+        )
+
+
 class FakeMamlInner(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -744,6 +758,41 @@ def _get_sorted_bucket_idx_and_undo_sorted_bucket_idx(buckets):
     return sorted_bucket_idx, undo_sorted_bucket_idx
 
 
+class CustomList1(list):
+    def __call__(self, x):
+        for processor in self:
+            x = processor(x)
+        return x
+
+    def clear(self):
+        pass  # this prevents RestrictedListSubclassVariable from kicking in
+
+
+class CustomList2(list):
+    def __call__(self, x):
+        for processor in self:
+            x = processor(x)
+        return x
+
+    def length_times_10(self):
+        return len(self) * 10
+
+    def append_twice(self, x):
+        self.extend([x, x])
+
+
+def _merge_criteria_processor_list(default_list, custom_list):
+    # simplified transformers/generation/utils.py
+    if len(custom_list) == 0:
+        return default_list
+    for default in default_list:
+        for custom in custom_list:
+            if type(custom) is type(default):
+                raise ValueError()
+    default_list.extend(custom_list)
+    return default_list
+
+
 class FeedForwardLayer(nn.Module):
     def __init__(self, d_model, dim_feedforward, activation, dropout) -> None:
         super().__init__()
@@ -950,6 +999,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         out_ref = f(x2)
         out_test = f_compiled(x2)
         self.assertEqual(out_ref, out_test)
+
+    # https://github.com/pytorch/pytorch/issues/90552
+    def test_intermediate_leaf_requires_grad(self):
+        def f(x):
+            leaf = torch.ones(2, requires_grad=True)
+            return leaf, leaf * 2
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+        x = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+
+        leaf, out = f(x)
+        leaf_test, out_test = f_compiled(x)
+        out.sum().backward()
+        out_test.sum().backward()
+        self.assertEqual(leaf.grad, leaf_test.grad)
 
     # See https://github.com/pytorch/pytorch/issues/97745
     def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
@@ -2402,6 +2466,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(f(x, x), opt_f(x, x))
             self.assertEqual(f(x, y), opt_f(x, y))
 
+    def test_validate_model_kwargs(self):
+        cnt = CompileCounter()
+
+        def f1(a, b):
+            return torch.sin(a) + torch.cos(b)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f2(**kwargs):
+            _validate_model_kwargs(f1, kwargs)
+            return f1(**kwargs)
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        self.assertEqual(f2(a=x, b=y), f1(x, y))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 3)
+
     def test_swin_base_tensor_attr(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2597,6 +2679,96 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertNoUnraisable(f)
 
+    def common_merge_criteria_processor_list(self, list_cls, fullgraph):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=fullgraph)
+        def f(x, left, right):
+            combined = _merge_criteria_processor_list(left, right)
+            return combined(x)
+
+        l1 = list_cls([torch.nn.ReLU(), torch.nn.Sigmoid()])
+        l2 = list_cls([])
+        input = torch.randn(16)
+        result = f(input, l1, l2)
+        self.assertEqual(result, l1(input))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
+
+        cnt.clear()
+        l3 = list_cls([torch.nn.SiLU()])
+        expected = l3(l1(input))
+        result = f(input, l1, l3)
+        self.assertEqual(len(l1), 3)
+        self.assertEqual(result, expected)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 3)
+
+    def test_merge_criteria_processor_list1(self):
+        self.common_merge_criteria_processor_list(CustomList1, False)
+
+    def test_merge_criteria_processor_list2(self):
+        self.common_merge_criteria_processor_list(CustomList2, True)
+
+    def test_restricted_list_subclass1(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            l = CustomList2()
+            l.extend([True])
+            l.append(a)
+            l.extend([b])
+            l.pop(0)
+            l.append(l.length_times_10())
+            return sum(l)
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+        self.assertEqual(fn(x, y), x + y + 20)
+        self.assertEqual(cnt.op_count, 3)
+
+    def test_restricted_list_subclass2(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            l1 = CustomList2([a + 1])
+            l2 = CustomList2([b + 2])
+            l1.extend(l2)
+            return l1
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+        z = fn(x, y)
+        self.assertEqual(type(z), CustomList2)
+        self.assertEqual(len(z), 2)
+        self.assertEqual(z.length_times_10(), 20)
+        self.assertEqual(list(z), [x + 1, y + 2])
+
+    def test_restricted_list_subclass3(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a: CustomList2, b: CustomList2):
+            a.extend(b)
+            a.append_twice(b[2] + 1)
+            a.append(b[3] + 2)
+            return b
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+        l = CustomList2([x, y])
+        self.assertIs(fn(l, l), l)
+        self.assertEqual(len(l), 7)
+        self.assertIs(l[0], x)
+        self.assertIs(l[1], y)
+        self.assertIs(l[2], x)
+        self.assertIs(l[3], y)
+        self.assertEqual(l[4], x + 1)
+        self.assertIs(l[5], l[4])
+        self.assertEqual(l[6], y + 2)
+
     def test_rewrite_assert_with_msg(self):
         def f(x):
             b = x.sin()
@@ -2613,6 +2785,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
+
+    def test_list_aliasing(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a):
+            a.append(torch.sin(a[0]))
+            return a
+
+        x = torch.randn(10)
+        l = [x]
+        self.assertIs(fn(l), l)
+        self.assertEqual(len(l), 2)
+        self.assertIs(l[0], x)
+        self.assertEqual(l[1], torch.sin(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
 
     def test_not_rewrite_assert_for_other_errors(self):
         def f(x):
@@ -2886,10 +3075,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(fn(torch.ones(4)), torch.ones(4).sin() + 15))
 
+    @torch._dynamo.config.patch(verbose=True)
     def test_graph_break_unsupported_fake(self):
         counter = torch._dynamo.testing.CompileCounter()
-
-        torch._dynamo.config.verbose = True
 
         @torch._dynamo.optimize(counter)
         def f(x):
@@ -3516,6 +3704,35 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             compiled_fn(inp, other, alpha=alpha, out=compile_out)
             self.assertTrue(same(out, compile_out))
 
+    def test_negative_shape_guard(self):
+        def fn(x):
+            if x.size() != (5, 1, 2, 3):
+                return x.cos()
+            return x.sin()
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, dynamic=True)
+
+        x = torch.ones(5, 1, 3, 4)
+        x2 = torch.ones(5, 1, 2, 3)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x2), opt_fn(x2))
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_deferred_runtime_asserts(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch._check_is_size(y)
+            if y >= 0:
+                return x * 2
+            else:
+                return x * 3
+
+        f(torch.tensor([3]))
+        self.assertRaises(RuntimeError, lambda: f(torch.tensor([-2])))
+
     def test_addr_alpha_beta_out(self):
         inp = torch.randn(2, 3)
         vec1 = torch.randn(2)
@@ -3558,6 +3775,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             if isinstance(backend, CompileCounter):
                 self.assertEqual(backend.frame_count, 2)  # graph breaks
 
+    def test_dynamic_shapes_double_not_equal(self):
+        # https://github.com/pytorch/pytorch/issues/113393
+        def fn(x):
+            if x.size() != (5, 1, 2, 3):
+                return x.cos()
+            return x.sin()
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        x = torch.ones(5, 1, 2, 3)
+        x2 = torch.ones(5, 1, 3, 4)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x2), opt_fn(x2))
+
     def test_inductor_no_recursionerror_on_for_loops(self):
         def forward(x):
             for _ in range(1000):
@@ -3567,6 +3798,32 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             same(torch.compile(forward)(torch.tensor([1.0])), torch.tensor([1.0]))
         )
+
+    def test_user_defined_object_callable(self):
+        # https://github.com/pytorch/pytorch/issues/114019
+        class MyCallable:
+            def __call__(self, x):
+                return x + 1
+
+        def fn(x):
+            # Create in graph - will not have source
+            return MyCallable()(x)
+
+        fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn_opt(torch.zeros(1)), fn(torch.zeros(1)))
+
+    def test_numpy_tobytes_no_error(self):
+        def fn(x):
+            x += 1
+            z = x.tobytes()
+            x += 1
+            return z
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_arg, arg = np.array([1, 2]), np.array([1, 2])
+        self.assertEqual(opt_fn(opt_arg), fn(arg))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_numpy_not_ndarray_recompiles(self):
         import torch
@@ -3593,6 +3850,62 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(opt_fn("10"), fn("10"))
         self.assertEqual(cnt.frame_count, 4)
+
+    def test_tensor_set_data(self):
+        # https://github.com/pytorch/pytorch/issues/113030
+        def func1(x, y):
+            x.data = y
+            x.add_(1)
+            return x
+
+        def func2(x, y):
+            x.data = y
+            y.data = torch.zeros([0])
+            return x
+
+        def func3(x, y):
+            z = x
+            x.data = y
+            y.data = torch.zeros([0])
+            return x is z
+
+        for backend in ["eager", "aot_eager", "inductor"]:
+            for func in [func1, func2, func3]:
+                if backend != "eager" and func is func1:
+                    # add_ not working w/ aot_autograd?
+                    continue
+                torch._dynamo.reset()
+                cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+
+                compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
+                requires_grad = func is not func1
+                for i in range(0, 5):
+                    # Inputs
+                    eager_a = torch.ones([6], requires_grad=requires_grad)
+                    compiled_a = torch.ones([6], requires_grad=requires_grad)
+
+                    eager_b = torch.ones([6], requires_grad=requires_grad)
+                    compiled_b = torch.ones([6], requires_grad=requires_grad)
+
+                    # Eager
+                    out_eager = func(eager_a, eager_b)
+                    # Compiled
+                    out_compiled = compiled_fn(compiled_a, compiled_b)
+                    self.assertEqual(eager_a, compiled_a)
+                    self.assertEqual(eager_b, compiled_b)
+                    self.assertEqual(out_eager, out_compiled)
+
+                    # func1 hits a leaf Variable that requires grad is being used in an in-place operation
+                    if requires_grad:
+                        bwd_inp_eager = torch.randn([6])
+                        bwd_inp_compiled = torch.clone(bwd_inp_eager)
+                        eager_a.backward(bwd_inp_eager)
+                        compiled_a.backward(bwd_inp_compiled)
+                        self.assertEqual(eager_a.grad, compiled_a.grad)
+
+                # Prove guarding works - we run the compiled_fn 5 times
+                # frame_count should stay at 1.
+                self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":

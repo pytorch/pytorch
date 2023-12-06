@@ -376,7 +376,7 @@ def setup_log_file():
     exitstack = contextlib.ExitStack()
     if config.log_file_name is not None:
         log_file_handler = logging.FileHandler(config.log_file_name)
-        for logger in logging.get_loggers():
+        for logger in torch._logging._internal.get_loggers():
             logger.addHandler(log_file_handler)
             exitstack.callback(lambda: logger.removeHandler(log_file_handler))
         return exitstack
@@ -400,7 +400,7 @@ def write_record_to_file(filename, exec_record):
             with open(filename, "wb") as f:
                 exec_record.dump(f)
     except Exception:
-        log.error("Unable to write execution record %s", filename, exc_info=True)
+        log.exception("Unable to write execution record %s", filename)
 
 
 def count_calls(g: fx.Graph):
@@ -580,6 +580,7 @@ class CompilationMetrics:
     backend_compile_time_s: Optional[float]
     fail_reason: Optional[str]
     non_compliant_ops: Set[str]
+    compliant_custom_ops: Set[str]
 
 
 @dataclasses.dataclass
@@ -636,7 +637,7 @@ def clone_input(x, *, dtype=None):
         if x.is_leaf and x.grad is not None:
             y.grad = clone_input(x.grad, dtype=dtype)
         if hasattr(x, "_dynamo_dynamic_indices"):
-            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
+            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
         return y
 
     with torch.no_grad():
@@ -669,7 +670,7 @@ def clone_input(x, *, dtype=None):
             # performing the operation.
             return torch_clone(x)
         if hasattr(x, "_dynamo_dynamic_indices"):
-            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
+            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
         return result
 
 
@@ -1445,6 +1446,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         If `True`, you must be prepared to deal with such return values, ideally
         by further wrapping them as this graph's fakes.
     """
+    from torch.utils._sympy.value_ranges import ValueRangeError
     from .exc import (
         TorchRuntimeError,
         unimplemented,
@@ -1518,7 +1520,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                 f"constrain_as_value OR constrain_as_size APIs.  {cause}",
                 case_name="constrain_as_size_example",
             )
-        elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
+        elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
@@ -1933,6 +1935,8 @@ class numpy_operator_wrapper:
 def defake(x):
     if not isinstance(x, FakeTensor):
         return x
+    size: "torch._prims_common.ShapeType"
+    stride: "torch._prims_common.StrideType"
     if x._has_symbolic_sizes_strides:
         size = [
             s.node.shape_env.size_hint(s.node.expr)
@@ -2255,10 +2259,6 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
     return result
 
 
-def is_guard_failure_reporting_enabled():
-    return torch._logging._internal.log_state.is_artifact_enabled("recompiles")
-
-
 def get_static_address_type(t):
     if isinstance(t, torch.Tensor):
         return getattr(t, "_dynamo_static_input_type", None)
@@ -2295,4 +2295,18 @@ def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bo
     return isinstance(vt, TensorWithTFOverrideVariable) or (
         isinstance(vt, UserDefinedObjectVariable)
         and hasattr(vt.value, "__torch_function__")
+    )
+
+
+# see note [Tensor Fakification and Symbol Caching]
+def to_fake_tensor(t, fake_mode):
+    symbolic_context = None
+    source = None
+    if tracing_context := torch._guards.TracingContext.try_get():
+        if t in tracing_context.tensor_to_context:
+            symbolic_context = tracing_context.tensor_to_context[t]
+            source = symbolic_context.tensor_source
+
+    return fake_mode.from_tensor(
+        t, static_shapes=False, symbolic_context=symbolic_context, source=source
     )

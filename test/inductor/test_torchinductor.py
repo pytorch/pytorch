@@ -46,6 +46,7 @@ from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     TEST_CUDNN,
     with_tf32_off,
@@ -62,6 +63,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     skipIfRocm,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 from torch.utils import _pytree as pytree
@@ -598,7 +600,8 @@ class CommonTemplate:
         def fn(a):
             return (a + 1, torch.add(a, 1, alpha=2))
 
-        self.common(fn, (torch.randn(32),))
+        for dtype in [torch.float32, torch.int32, torch.int64]:
+            self.common(fn, (torch.arange(32, dtype=dtype),))
 
     def test_add_const_float(self):
         def fn(a):
@@ -686,9 +689,9 @@ class CommonTemplate:
 
     def test_randn_generator(self):
         def fn(a, generator):
-            torch.randn([20, 20], generator=generator, device=a.device)
+            return torch.randn([20, 20], generator=generator, device=a.device)
 
-        self.common(fn, (torch.linspace(-10, 10, 41), None))
+        self.common(fn, (torch.linspace(-10, 10, 41), None), assert_equal=False)
 
         # generator not yet supported in dynamo
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Generator"):
@@ -1052,7 +1055,7 @@ class CommonTemplate:
             # make sure things also work if they aren't unrolled
             self.common(fn, (torch.randn(8, 3),))
 
-    def test_multilayer_low_prec(self):
+    def test_multilayer_sum_low_prec(self):
         # fp16 nyi for cpu
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -1161,6 +1164,17 @@ class CommonTemplate:
             return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
 
         self.common(fn, (torch.ones(32, 32) * 70,))
+
+    def test_cumsum(self):
+        def fn(x):
+            return x.cumsum(0), x.cumsum(1)
+
+        # Persistent reductions
+        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
+
+        # Non-persistent reduction
+        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
 
     def test_clamp(self):
         def fn(a, b):
@@ -1944,29 +1958,31 @@ class CommonTemplate:
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
-            self.common(
-                fn,
-                (
-                    torch.randn(8, 8),
-                    torch.randint(-128, 127, (8, 8), dtype=torch.int8),
-                ),
-                check_lowp=True,
-            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8),
+                torch.randint(-128, 127, (8, 8), dtype=torch.int8),
+            ),
+            check_lowp=True,
+        )
 
     @config.patch(force_mixed_mm=True)
     def test_mixed_mm2(self):
         def fn(a, b, scale, bias):
             return torch.mm(a, b.to(a.dtype)) * scale + bias
-            self.common(
-                fn,
-                (
-                    torch.randn(8, 8),
-                    torch.randint(-128, 127, (8, 8), dtype=torch.int8),
-                    torch.randn(8),
-                    torch.randn(8),
-                ),
-                check_lowp=True,
-            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8),
+                torch.randint(-128, 127, (8, 8), dtype=torch.int8),
+                torch.randn(8),
+                torch.randn(8),
+            ),
+            check_lowp=True,
+        )
 
     @config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
@@ -1987,6 +2003,43 @@ class CommonTemplate:
                 ),
                 check_lowp=True,
             )
+
+    def test_mm_mixed_dtype(self):
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        t1 = torch.arange(6, dtype=torch.float, device=self.device).view(2, 3)
+        t2 = torch.arange(9, dtype=torch.int64, device=self.device).view(3, 3)
+
+        msg = "expected .* and .* to have the same dtype, but got: .* != .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn)(t1, t2)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(t1, t2)
+
+    def test_linear_mixed_dtype(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()  # noqa: UP008
+                self.fc1 = nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.fc1(x.permute(1, 2, 0))
+                return x
+
+        fn = Net().to(self.device)
+        t = torch.arange(27, device=self.device).view(3, 3, 3)
+
+        msg = "expected .* and .* to have the same dtype, but got: .* != .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(t)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            with torch.no_grad():
+                torch.compile(fn)(t)
+        # TODO: Autograd internal assertion
+        msg = "Failed running call_module .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn)(t)
 
     def test_scalar_input(self):
         def fn(x, y):
@@ -2157,6 +2210,47 @@ class CommonTemplate:
                 mod,
                 (v,),
             )
+
+    @skipIfRocm
+    def test_conv_inference_heuristics(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("cuda only test")
+
+        in_channels = 6
+        out_channels = 6
+        kernel_size = 3
+        groups = 3
+
+        grouped_conv = nn.Conv2d(
+            in_channels, out_channels, kernel_size, groups=groups
+        ).to(self.device)
+
+        input_tensor = torch.randn(1, in_channels, 10, 10).to(self.device)
+
+        # Perform the forward pass
+        @torch.compile()
+        def foo(m, inp):
+            return m(inp)
+
+        with torch.no_grad():
+            _, code = run_and_get_code(foo, grouped_conv, input_tensor)
+            # no to channels last permuting before kernel
+            FileCheck().check_not(".run(").check(".convolution(").run(code[0])
+
+        # in out should do channels last in inference
+        in_channels = 8
+        out_channels = 4
+        kernel_size = 3
+
+        # Create the convolution layer
+        conv_layer = nn.Conv2d(in_channels, out_channels, kernel_size).to(self.device)
+
+        input_tensor = torch.randn(1, in_channels, 10, 10).to(self.device)
+
+        with torch.no_grad():
+            _, code = run_and_get_code(foo, conv_layer, input_tensor)
+            # should be channels last permuting before kernel
+            FileCheck().check(".run(").check(".convolution(").run(code[0])
 
     def test_upsample_cat_conv(self):
         if self.device == "cuda":
@@ -2511,6 +2605,20 @@ class CommonTemplate:
             (torch.randn([2, 5, 16, 16]),),
             atol=6e-5,
             rtol=0.001,
+        )
+
+    @skipIfRocm
+    def test_convolution4(self):
+        def fn(x, w):
+            x = F.conv2d(x, w, groups=w.shape[0])
+            return x.sum()
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3, 16, 20]),
+                torch.randn([3, 1, 5, 5]),
+            ),
         )
 
     def test_conv2d_channels_last(self):
@@ -3028,8 +3136,8 @@ class CommonTemplate:
             # Mismatched elements: 127 / 746496 (0.0%)
             # Greatest absolute difference: 0.0009765625 at index (1, 62, 7, 16) (up to 1e-05 allowed)
             # Greatest relative difference: 0.05187467899332306 at index (14, 18, 11, 0) (up to 0.001 allowed)
-            atol=1e-3,
-            rtol=0.001,
+            atol=3e-3,
+            rtol=2,
         )
 
     def test_elu(self):
@@ -3711,13 +3819,12 @@ class CommonTemplate:
         )
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    # Constant folding was explicitly turned off due to issue #108388
+    # Turn it back on for test
+    @torch._inductor.config.patch(joint_graph_constant_folding=True)
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
-
-        # Constant folding was explicitly turned off due to issue #108388
-        # Turn it back on for test
-        torch._inductor.config.joint_graph_constant_folding = True
 
         foo_opt = torch.compile(matmul_with_op)
 
@@ -4789,9 +4896,8 @@ class CommonTemplate:
         for ref, test in zip(refs, tests):
             torch.testing.assert_close(ref, test)
 
+    @torch._dynamo.config.patch(cache_size_limit=10)
     def test_tensor_index_put_slice(self):
-        torch._dynamo.config.cache_size_limit = 10
-
         def fn(a, version):
             x = torch.tensor([1, 2], device=self.device, dtype=torch.int32)
             y = torch.tensor([2, 3], device=self.device, dtype=torch.int32)
@@ -5315,6 +5421,30 @@ class CommonTemplate:
             [
                 torch.randn([8, 197, 384]),
                 torch.randn([8, 197, 384]),
+            ],
+        )
+
+    def test_slice_scatter3(self):
+        def fn(a, b):
+            return aten.slice_scatter.default(a, b, 1, 1, 9223372036854775807, 2)
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 4]),
+                torch.randn([1, 2]),
+            ],
+        )
+
+    def test_slice_scatter4(self):
+        def fn(a, b):
+            return aten.slice_scatter.default(a, b, 1, 2, 9223372036854775807, 3)
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 9]),
+                torch.randn([1, 3]),
             ],
         )
 
@@ -6807,7 +6937,6 @@ class CommonTemplate:
         def fn(a, b):
             r = 1 / math.sqrt(a.size(1))
             return torch.bmm(a, b) / r
-            return (r,)
 
         self.common(
             fn,
@@ -6896,10 +7025,9 @@ class CommonTemplate:
         # If assume_static_by_default is set, the calls above will trigger
         # 3 function compilation:
         #   1. assuming 'n' is static (equals 2)
-        #   2. making 'n' dynamic, but with the guard 'end < x.shape[0]'
+        #   2. making 'n' dynamic, but with the guard 'end <= x.shape[0]'
         #      (from: torch._inductor.ir.SliceView.create)
-        #   3. when 'n' equals 6 (the above guard is violated)
-        frame_count = 3 if torch._dynamo.config.assume_static_by_default else 2
+        frame_count = 2 if torch._dynamo.config.assume_static_by_default else 1
         self.assertEqual(cnts.frame_count, frame_count)
 
         # Negative index triggers new compilation.
@@ -7070,6 +7198,52 @@ class CommonTemplate:
         self.common(
             foo,
             (query, key, value, bias, weights),
+            atol=0.02,
+            rtol=1e4,
+        )
+
+    @requires_cuda()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    @skipIfRocm
+    def test_sdpa_unaligned_mask(self):
+        def foo(
+            arg0_1: "f32[8, 8, 16, 16]",
+            arg1_1: "f32[8, 8, 15, 16]",
+            arg2_1: "f32[8, 8, 15, 16]",
+            arg3_1: "f32[1, 1, 16, 15]",
+        ):
+            constant_pad_nd: "f32[1, 1, 16, 16]" = (
+                torch.ops.aten.constant_pad_nd.default(arg3_1, [0, 1], 0.0)
+            )
+            arg3_1 = None
+            slice_1: "f32[1, 1, 16, 15]" = torch.ops.aten.slice.Tensor(
+                constant_pad_nd, -1, 0, 15
+            )
+            constant_pad_nd = None
+            expand: "f32[8, 8, 16, 15]" = torch.ops.aten.expand.default(
+                slice_1, [8, 8, 16, 15]
+            )
+            slice_1 = None
+            _scaled_dot_product_efficient_attention = (
+                torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                    arg0_1, arg1_1, arg2_1, expand, False
+                )
+            )
+            arg0_1 = arg1_1 = arg2_1 = expand = None
+            getitem: "f32[8, 8, 16, 16]" = _scaled_dot_product_efficient_attention[0]
+            _scaled_dot_product_efficient_attention = None
+            return (getitem,)
+
+        query = torch.rand(8, 8, 16, 16, device="cuda")
+        key = torch.rand(8, 8, 15, 16, device="cuda")
+        value = torch.rand(8, 8, 15, 16, device="cuda")
+        bias = torch.rand(1, 1, 16, 15, device="cuda")
+        self.common(
+            foo,
+            (query, key, value, bias),
             atol=0.02,
             rtol=1e4,
         )
@@ -7691,6 +7865,24 @@ class CommonTemplate:
         b = torch.randn(65, 2**24, device=self.device)
         fn(a, b)
 
+    def test_fuse_large_params(self):
+        def pt2_optimizer_step(optimizer):
+            @torch.compile()
+            def f():
+                optimizer.step()
+
+            f()
+
+        params = [
+            torch.rand(10, 10, dtype=torch.float32, device=self.device)
+            for _ in range(194)
+        ]
+        for p in params:
+            p.grad = torch.rand_like(p)
+
+        o = torch.optim.AdamW(params)
+        pt2_optimizer_step(o)
+
     def test_adaptive_avg_pool1d_argmax(self):
         # https://github.com/pytorch/pytorch/issues/113013
         def fn(x):
@@ -7786,9 +7978,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 Instead, it transforms the fx graph so that its functions are
                 aten operations. It then saves this graph.
                 """
-                from torch._functorch.aot_autograd import Interpreter
                 from torch._inductor.decomposition import select_decomp_table
                 from torch._subclasses import FakeTensorMode
+                from torch.fx import Interpreter
 
                 fake_mode = FakeTensorMode()
 
@@ -8063,6 +8255,44 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertIn("tl.sin", code)
             self.assertEqual(type(r), np.ndarray)
             self.assertEqual(r, np.sin(x))
+
+        def test_numpy_autograd(self):
+            def my_torch(x):
+                y = torch.cat([torch.sin(x) ** 2, torch.max(x)[None]])
+                return y.sum()
+
+            def my_np(x):
+                y = np.concatenate([np.sin(x) ** 2, np.max(x)[None]])
+                return np.sum(y)
+
+            @torch.compile
+            def wrapper(x):
+                x = x.numpy()
+                y = my_np(x)
+                return torch.as_tensor(y)
+
+            @torch.compile
+            def wrapper2(x):
+                x = x.numpy()
+                y = my_np(x)
+                return torch.from_numpy(y)
+
+            x_np = torch.arange(8, dtype=torch.float32, requires_grad=True)
+            x = torch.arange(8, dtype=torch.float32, requires_grad=True)
+            out_np = wrapper(x_np)
+            out = my_torch(x)
+            self.assertEqual(out, out_np)
+
+            x2_np = torch.arange(8, dtype=torch.float32, requires_grad=True)
+            out2_np = wrapper2(x2_np)
+            self.assertEqual(out, out2_np)
+
+            out_np.backward()
+            out.backward()
+            self.assertEqual(x.grad, x_np.grad)
+
+            out2_np.backward()
+            self.assertEqual(x.grad, x2_np.grad)
 
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
