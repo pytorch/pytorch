@@ -9,6 +9,8 @@
 //
 #pragma once
 
+#include <c10/util/CallOnce.h>
+
 #include <functional>
 #include <iostream>
 #include <memory>
