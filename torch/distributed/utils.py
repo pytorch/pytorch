@@ -1,329 +1,375 @@
-import dataclasses
-import traceback
-from typing import Any, Callable, Container, Dict, List, Optional, OrderedDict, Tuple, TypeVar, overload
+import io
+import itertools
+import os
+from typing import Any, Callable, cast, Dict, List, Optional, Sequence, TypeVar, Union
 
 import torch
 import torch.distributed as dist
-from torch import nn
-from torch.nn.parallel._functions import _get_stream
-from torch.nn.parallel.scatter_gather import _is_namedtuple
-from torch.nn.utils.rnn import PackedSequence
 
-__all__ = []  # type: ignore[var-annotated]
+from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed._shard.sharded_tensor.shard import Shard
+from torch.distributed._tensor import DTensor
+
+from .api import (
+    _is_wrapped_exception,
+    _wrap_exception,
+    CheckpointException,
+    WRAPPED_EXCEPTION,
+)
+
+from .metadata import MetadataIndex, STATE_DICT_TYPE
+
+__all__ = ["find_tensor_shard", "find_state_dict_object"]
+
+T = TypeVar("T")
+R = TypeVar("R")
 
 
-def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str, ...]]:
+def _get_failure_dict(
+    results: List[Union[T, WRAPPED_EXCEPTION]]
+) -> Dict[int, WRAPPED_EXCEPTION]:
+    return cast(
+        Dict[int, WRAPPED_EXCEPTION],
+        {i: err for i, err in enumerate(results) if _is_wrapped_exception(err)},
+    )
+
+
+def _all_gather_keys(local_dict: Dict[Any, Any]) -> List[Any]:
+    """Gathers all keys, and returns them sorted."""
+    keys = list(local_dict.keys())
+    gathered_keys: List[List[Any]] = [None] * dist.get_world_size()  # type: ignore[list-item]
+
+    dist.all_gather_object(gathered_keys, keys)
+    return sorted(set(itertools.chain.from_iterable(gathered_keys)))
+
+
+class _DistWrapper:
     """
-    Turn argument list into separate key list and value list (unpack_kwargs does the opposite).
+    This is a wrapper around PG that provides a series of features around object collectives.
 
-    Inspiration: https://github.com/facebookresearch/fairscale/blob/eeb6684/fairscale/internal/containers.py#L70
-    Usage::
+    It works without distributed initialized, where most collectives turns into nops.
 
-        kwarg_keys, flat_args = pack_kwargs(1, 2, a=3, b=4)
-        assert kwarg_keys == ("a", "b")
-        assert flat_args == (1, 2, 3, 4)
-        args, kwargs = unpack_kwargs(kwarg_keys, flat_args)
-        assert args == (1, 2)
-        assert kwargs == {"a": 3, "b": 4}
-    Returns:
-        Tuple[Tuple[Any, ...], Tuple[str, ...]]: The first tuple element gives
-        gives both positional args and kwarg values, where the positional args
-        proceed kwarg values and kwarg values are ordered consistently with the
-        kwarg keys. The second tuple element gives the kwarg keys.
-        The second tuple element's length is at most the first tuple element's length.
+    All variants that take functions are exception robust, meaning that if one or more
+    ranks raise errors, all ranks will observe those.
     """
-    kwarg_keys: List[str] = []
-    flat_args: List[Any] = list(args)
-    for k, v in kwargs.items():
-        kwarg_keys.append(k)
-        flat_args.append(v)
 
-    return tuple(flat_args), tuple(kwarg_keys)
-
-def _cast_forward_inputs(
-    dtype: Optional[torch.dtype],
-    *args: Any,
-    **kwargs: Any,
-) -> Tuple[Any, Any]:
-    """
-    Cast floating point tensors in ``args`` and ``kwargs`` to ``input_dtype``.
-
-    This respects the existing ``requires_grad`` on the tensors.
-    """
-    if dtype is None:
-        return args, kwargs
-
-    def cast_fn(x: torch.Tensor) -> torch.Tensor:
-        if not torch.is_floating_point(x) or x.dtype == dtype:
-            return x
-        return x.to(dtype)
-
-    return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
-
-def _unpack_kwargs(flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
-    """See _pack_kwargs."""
-    assert len(kwarg_keys) <= len(
-        flat_args
-    ), f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
-    if len(kwarg_keys) == 0:
-        return flat_args, {}
-    args = flat_args[: -len(kwarg_keys)]
-    kwargs = dict(zip(kwarg_keys, flat_args[-len(kwarg_keys) :]))
-    return args, kwargs
-
-
-S = TypeVar("S", dict, list, tuple)
-T = TypeVar("T", torch.Tensor, PackedSequence)
-
-
-@overload
-def _recursive_to(inputs: S, target_device: torch.device, use_side_stream_for_tensor_copies: bool) -> List[S]:
-    ...
-
-
-@overload
-def _recursive_to(inputs: T, target_device: torch.device, use_side_stream_for_tensor_copies: bool) -> Tuple[T]:
-    ...
-
-
-def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
-    r"""Recursively moves input to the target_device."""
-
-    def to_map(obj):
-        if isinstance(obj, (torch.Tensor, PackedSequence)):
-            device = obj.data.device if isinstance(obj, PackedSequence) else obj.device
-            if device == target_device:
-                return (obj,)
-            if not use_side_stream_for_tensor_copies:
-                return (obj.to(target_device),)
-            else:
-                # If the custom module is not registered to torch, stream is not used for acceleration
-                device_mod = getattr(torch, device.type, None)
-                if device.type == "cpu" or device_mod is None:
-                    return (obj.to(target_device),)
-                # Perform CPU -> target_device copies in a background stream. This code is
-                # motivated from similar logic in torch/nn/parallel/_functions.py
-                stream = _get_stream(target_device)
-                with device_mod.stream(stream):
-                    output = obj.to(target_device)
-                # synchronize with the copy stream
-                with device_mod.device(target_device.index):
-                    current_stream = device_mod.current_stream()
-                    # Sync the current stream with the copy stream
-                    current_stream.wait_stream(stream)
-                    # Ensure tensor memory is not reused until work on
-                    # main stream is complete
-                    if isinstance(obj, PackedSequence):
-                        output.data.record_stream(current_stream)  # type: ignore[arg-type]
-                    else:
-                        assert isinstance(output, torch.Tensor)
-                        output.record_stream(current_stream)  # type: ignore[arg-type]
-                return (output,)
-        if _is_namedtuple(obj):
-            return [type(obj)(*args) for args in zip(*map(to_map, obj))]
-        if isinstance(obj, tuple) and len(obj) > 0:
-            return list(zip(*map(to_map, obj)))
-        if isinstance(obj, list) and len(obj) > 0:
-            return [list(i) for i in zip(*map(to_map, obj))]
-        if isinstance(obj, dict) and len(obj) > 0:
-            return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
-        return [obj]
-
-    # Avoid reference cycle
-    try:
-        res = to_map(inputs)
-    finally:
-        to_map = None  # type: ignore[assignment]
-    return res
-
-
-def _p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
-    """Alternate to ``assert`` when in the backward context to print the error message ``s`` since otherwise, it is swallowed."""
-    if not cond:
-        print(s)
-        traceback.print_stack()
-        if raise_assertion_error:
-            raise AssertionError(s)
-
-
-def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
-    """
-    Allocate storage for ``tensor`` with the given size.
-
-    Returns:
-        bool: ``True`` if this method allocated storage and ``False`` if the
-        storage was already allocated.
-    """
-    with torch.no_grad():
-        already_allocated = tensor._typed_storage()._size() == size.numel()
-        if not already_allocated:
-            tensor_storage_size = tensor._typed_storage()._size()
-            _p_assert(
-                tensor_storage_size == 0,
-                f"Tensor storage should have been resized to be 0 but got {tensor_storage_size}",
-            )
-            tensor._typed_storage()._resize_(size.numel())
-
-
-
-def _free_storage(tensor: torch.Tensor) -> None:
-    """
-    Frees the underlying storage of ``tensor``.
-
-    Returns:
-        bool: ``True`` if the method freed the storage and ``False`` if the
-        storage was already freed.
-    """
-    with torch.no_grad():
-        already_freed = tensor._typed_storage()._size() == 0
-        if not already_freed:
-            _p_assert(
-                tensor.storage_offset() == 0,
-                "Freeing a tensor's storage is unsafe when it is not the sole occupant\n"
-                f"storage offset: {tensor.storage_offset()}\n"
-                f"storage size: {tensor._typed_storage()._size()}\n"
-                f"tensor shape: {tensor.shape}",
-            )
-            tensor._typed_storage()._resize_(0)
-
-
-Q = TypeVar("Q")
-R = TypeVar("R", dict, list, tuple, set, OrderedDict, PackedSequence, Any)
-
-
-@overload
-def _apply_to_tensors(fn: Callable[[torch.Tensor], Q], container: torch.Tensor) -> Q:
-    ...
-
-
-@overload
-def _apply_to_tensors(fn: Callable[[torch.Tensor], Any], container: R) -> R:
-    ...
-
-
-def _apply_to_tensors(fn, container):
-    """Recursively apply to all tensor in different kinds of container types."""
-
-    def apply(x):
-        if isinstance(x, torch.Tensor):
-            return fn(x)
-        elif hasattr(x, "__dataclass_fields__"):
-            dc = dataclasses.replace(x)
-            for f in dataclasses.fields(dc):
-                name = f.name
-                setattr(dc, name, apply(getattr(dc, name)))
-            return dc
-        elif isinstance(x, OrderedDict):
-            od = x.__class__()
-            for key, value in x.items():
-                od[key] = apply(value)
-            return od
-        elif isinstance(x, PackedSequence):
-            apply(x.data)
-            return x
-        elif isinstance(x, dict):
-            return {key: apply(value) for key, value in x.items()}
-        elif _is_namedtuple(x):
-            res = (apply(el) for el in x)
-            return type(x)(*res)
-        elif isinstance(x, (list, tuple, set)):
-            return type(x)(apply(el) for el in x)
+    def __init__(
+        self,
+        group: Optional[dist.ProcessGroup],
+        use_dist: bool,
+        coordinator_rank: int,
+    ):
+        self.group = group
+        self.use_dist = use_dist
+        self.coordinator_rank = coordinator_rank
+        if self.use_dist:
+            self.rank = dist.get_rank(group)
+            self.is_coordinator = self.rank == coordinator_rank
         else:
-            return x
+            self.rank = 0
+            self.is_coordinator = True
 
-    return apply(container)
+    def get_rank(self) -> int:
+        return self.rank
+
+    def get_world_size(self) -> int:
+        if self.use_dist:
+            return dist.get_world_size(self.group)
+        return 1
+
+    def broadcast_object(self, object: Optional[T]) -> T:
+        """Implement functionality similar to c10d::broadcast_object_list but without distributed enabled."""
+        object_list = [object]
+        if self.use_dist:
+            dist.broadcast_object_list(
+                object_list=object_list,
+                group=self.group,
+                src=self.coordinator_rank,
+            )
+        return cast(T, object_list[0])
+
+    def gather_object(self, object: T) -> Optional[List[T]]:
+        """Implement functionality similar to c10d::gather_object but without distributed enabled."""
+        if self.use_dist:
+            gather_objs = (
+                cast(List[T], [None] * dist.get_world_size(self.group))
+                if self.is_coordinator
+                else None
+            )
+
+            dist.gather_object(
+                obj=object,
+                object_gather_list=gather_objs if self.is_coordinator else None,
+                dst=self.coordinator_rank,
+                group=self.group,
+            )
+            result = gather_objs
+        else:
+            result = [object]
+        return result
+
+    def all_gather_object(self, object: T) -> List[T]:
+        """Implement functionality similar to c10d::all_gather_object but without distributed enabled."""
+        if self.use_dist:
+            gather_objs = cast(List[T], [None] * dist.get_world_size(self.group))
+
+            dist.all_gather_object(
+                object_list=gather_objs, obj=object, group=self.group
+            )
+        else:
+            gather_objs = [object]
+        return gather_objs
+
+    def scatter_object(self, object_list: Optional[List[T]]) -> T:
+        """Implement functionality similar to c10d::scatter_object but without distributed enabled."""
+        if self.use_dist:
+            gather_result = cast(List[T], [None])
+            dist.scatter_object_list(
+                scatter_object_output_list=gather_result,
+                scatter_object_input_list=object_list if self.is_coordinator else None,
+                src=self.coordinator_rank,
+                group=self.group,
+            )
+
+            local_reply = gather_result[0]
+        else:
+            assert object_list is not None
+            local_reply = object_list[0]
+        return local_reply
+
+    def reduce_scatter(
+        self,
+        step: str,
+        map_fun: Callable[[], T],
+        reduce_fun: Callable[[List[T]], List[R]],
+    ) -> R:
+        """
+        Compute a value on each rank, then do centralized reduce on a single rank, followed by a scatter.
+
+        This method operates in the following way:
+            Run ``map_fun`` on all ranks
+            Gather results on rank 0
+            Call ``reduce_fun`` on all those values
+            Scatter to each rank part of the result.
+        """
+        local_data: Union[WRAPPED_EXCEPTION, T]
+        try:
+            local_data = map_fun()
+        except BaseException as e:
+            local_data = _wrap_exception(e)
+
+        all_data = self.gather_object(local_data)
+        all_results: Optional[List[Union[R, CheckpointException]]] = None
+        if self.is_coordinator:
+            assert all_data is not None
+            node_failures = _get_failure_dict(all_data)
+
+            if len(node_failures) == 0:
+                try:
+                    # N.B. why can't mypy cast List[R] to List[Union[R, WRAPPED_EXCEPTION]]?
+                    all_results = cast(
+                        List[Union[R, CheckpointException]],
+                        reduce_fun(cast(List[T], all_data)),
+                    )
+                except BaseException as e:
+                    node_failures[self.rank] = _wrap_exception(e)
+
+            if len(node_failures) > 0:
+                all_results = [
+                    CheckpointException(step, node_failures)
+                ] * self.get_world_size()
+
+        result = self.scatter_object(all_results)
+        if isinstance(result, CheckpointException):
+            raise result
+        return result
+
+    def all_reduce(
+        self,
+        step: str,
+        map_fun: Callable[[], T],
+        reduce_fun: Callable[[List[T]], R],
+    ) -> R:
+        """
+        Compute a value on each rank, then do centralized reduce on a single rank, followed by a broadcast.
+
+        This method operates in the following way:
+            Run ``map_fun`` on all ranks
+            Gather results on rank 0
+            Call ``reduce_fun`` on all those values
+            Broadcast the reduced value to all ranks.
+        """
+        local_data: Union[T, WRAPPED_EXCEPTION]
+        try:
+            local_data = map_fun()
+        except BaseException as e:
+            local_data = _wrap_exception(e)
+
+        all_data = self.gather_object(local_data)
+        result: Optional[Union[R, CheckpointException]] = None
+        if self.is_coordinator:
+            assert all_data is not None
+            node_failures = _get_failure_dict(all_data)
+            if len(node_failures) == 0:
+                try:
+                    result = reduce_fun(cast(List[T], all_data))
+                except BaseException as e:
+                    node_failures[self.rank] = _wrap_exception(e)
+
+            if len(node_failures) > 0:
+                result = CheckpointException(step, node_failures)
+
+        final_result = self.broadcast_object(result)
+        if isinstance(final_result, CheckpointException):
+            raise final_result
+        return cast(R, final_result)
+
+    def all_gather(
+        self,
+        step: str,
+        map_fun: Callable[[], T],
+    ) -> List[T]:
+        """
+        Compute a value on each rank, then all_gather them.
+
+        This method operates in the following way:
+            Run ``map_cp`` on all ranks
+            all_gather the values to all ranks
+        """
+        result: Union[T, WRAPPED_EXCEPTION]
+        try:
+            result = map_fun()
+        except BaseException as e:
+            result = _wrap_exception(e)
+
+        all_results = self.all_gather_object(result)
+
+        node_failures = _get_failure_dict(all_results)
+        if len(node_failures) > 0:
+            raise CheckpointException(step, node_failures)
+        return cast(List[T], all_results)
+
+    def broadcast(
+        self,
+        step: str,
+        map_fun: Callable[[], T],
+    ) -> T:
+        """
+        Compute a value on rank 0 and broadcast it.
+
+        This method operates in the following way:
+            Run ``map_cp`` on rank 0
+            broadcast the value
+        """
+        result: Optional[Union[T, CheckpointException]] = None
+        if self.is_coordinator:
+            try:
+                result = map_fun()
+            except BaseException as e:
+                result = CheckpointException(step, {self.rank: _wrap_exception(e)})
+        final_result = self.broadcast_object(result)
+        if isinstance(final_result, CheckpointException):
+            raise final_result
+        return cast(T, final_result)
 
 
-def _to_kwargs(
-    inputs: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]],
-    target_device: torch.device,
-    use_side_stream_for_tensor_copies: bool,
-) -> Tuple[Tuple[Any, ...], Tuple[Dict[str, Any], ...]]:
-    moved_inputs = (
-        _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies)
-        if inputs
-        else []
-    )
-    moved_kwargs = (
-        _recursive_to(kwargs, target_device, use_side_stream_for_tensor_copies)
-        if kwargs
-        else []
-    )
-    if len(moved_inputs) < len(moved_kwargs):
-        moved_inputs.extend([() for _ in range(len(moved_kwargs) - len(inputs))])
-    elif len(moved_kwargs) < len(moved_inputs):
-        moved_kwargs.extend([{} for _ in range(len(moved_inputs) - len(moved_kwargs))])
-    return tuple(moved_inputs), tuple(moved_kwargs)
-
-
-def _verify_param_shape_across_processes(
-    process_group: dist.ProcessGroup, tensors: List[torch.Tensor], logger: Optional[dist.Logger] = None
-):
-    return dist._verify_params_across_processes(process_group, tensors, logger)
-
-
-def _sync_module_states(
-    module: nn.Module,
-    process_group: dist.ProcessGroup,
-    broadcast_bucket_size: int,
-    src: int,
-    params_and_buffers_to_ignore: Container[str],
-    broadcast_buffers: bool = True,
-) -> None:
-    """
-    Sync ``module``'s parameters and buffers state.
-
-    Syncs ``module``'s parameters and buffers state so that all ranks contain
-    the same module state across all ranks. Note that this API assumes that all
-    parameter shapes are consistent before running the synchronization. This can
-    be checked with ``_verify_param_shape_across_processes``.
-    """
-    module_states: List[torch.Tensor] = []
-    for name, param in module.named_parameters():
-        if name not in params_and_buffers_to_ignore:
-            module_states.append(param.detach())
-
-    if broadcast_buffers:
-        for name, buffer in module.named_buffers():
-            if name not in params_and_buffers_to_ignore:
-                module_states.append(buffer.detach())
-
-    _sync_params_and_buffers(process_group, module_states, broadcast_bucket_size, src)
-
-
-def _sync_params_and_buffers(
-    process_group: dist.ProcessGroup,
-    module_states: List[torch.Tensor],
-    broadcast_bucket_size: int,
-    src: int,
-) -> None:
-    """Synchronize ``module_states`` (list of tensors) across all processes by broadcasting them from rank 0."""
-    if len(module_states) > 0:
-        dist._broadcast_coalesced(
-            process_group, module_states, broadcast_bucket_size, src
+def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
+    if index.offset is None:
+        raise ValueError(
+            f"Cannot lookup {index.fqn} since its a ShardedTensor and no offset was provided"
         )
 
+    shards = tensor.local_shards()
+    # index fast path
+    if index.index is not None:
+        if (
+            len(shards) > index.index
+            and torch.Size(shards[index.index].metadata.shard_offsets) == index.offset
+        ):
+            return shards[index.index]
 
-def _replace_by_prefix(
-    state_dict: Dict[str, Any],
-    old_prefix: str,
-    new_prefix: str,
-) -> None:
-    """
-    Replace all keys that match a given old_prefix with a new_prefix (in-place).
+    for shard in shards:
+        if torch.Size(shard.metadata.shard_offsets) == index.offset:
+            return shard
+    raise ValueError(f"Could not find shard at '{index.offset}' for FQN: '{index.fqn}'")
 
-    Usage::
 
-        state_dict = {"layer.xyz": torch.tensor(1)}
-        replace_by_prefix_(state_dict, "layer.", "module.layer.")
-        assert state_dict == {"module.layer.xyz": torch.tensor(1)}
-    """
-    if old_prefix == new_prefix:
-        raise ValueError("old_prefix and new_prefix must be distinct")
-    for key in list(state_dict.keys()):
-        if not key.startswith(old_prefix):
-            continue
-        new_key = new_prefix + key[len(old_prefix) :]
-        state_dict[new_key] = state_dict[key]
-        del state_dict[key]
+def find_tensor_shard(tensor: torch.Tensor, index: MetadataIndex) -> torch.Tensor:
+    if isinstance(tensor, DTensor):
+        return tensor.to_local()
+    if isinstance(tensor, ShardedTensor):
+        return _find_shard(tensor, index).tensor
+    if index.offset is not None:
+        # special case looking up a tensor by origin
+        if index.offset == torch.Size([0] * len(tensor.size())):
+            return tensor
+        raise ValueError(
+            f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'"
+        )
+    return tensor
+
+
+def find_state_dict_object(state_dict: STATE_DICT_TYPE, index: MetadataIndex) -> Any:
+    if index.fqn not in state_dict:
+        raise ValueError(f"Could not find FQN: '{index.fqn}'")
+    obj = state_dict[index.fqn]
+
+    if isinstance(obj, torch.Tensor):
+        return find_tensor_shard(obj, index)
+    elif index.offset is not None:
+        raise ValueError(
+            f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'"
+        )
+    return obj
+
+
+def _element_wise_add(a: Sequence[int], b: Sequence[int]) -> List[int]:
+    return [i_a + i_b for i_a, i_b in zip(a, b)]
+
+
+def _element_wise_sub(a: Sequence[int], b: Sequence[int]) -> List[int]:
+    return [i_a - i_b for i_a, i_b in zip(a, b)]
+
+
+class _ReaderView(io.IOBase):
+    def __init__(self, base_stream: io.IOBase, offset: int, len: int):
+        super().__init__()
+        self.offset = offset
+        self.len = len
+        self.base_stream = base_stream
+        self.seek(0)
+
+    def seek(self, __offset: int, __whence: int = os.SEEK_SET) -> int:
+        if __whence == os.SEEK_SET:
+            __offset = self.offset + __offset
+        elif __whence == os.SEEK_END:
+            __whence = os.SEEK_SET
+            __offset = (self.offset + self.len) - __offset
+        return self.base_stream.seek(__offset, __whence)
+
+    def tell(self) -> int:
+        return self.base_stream.tell() - self.offset
+
+    def readable(self) -> bool:
+        return self.base_stream.readable()
+
+    def seekable(self) -> bool:
+        return self.base_stream.seekable()
+
+    def readinto(self, b):
+        return self.base_stream.readinto(b)  # type: ignore[attr-defined]
+
+    def read(self, size=-1):
+        return self.base_stream.read(size)
+
+
+def _create_file_view(file: io.IOBase, offset: int, length: int) -> io.IOBase:
+    # FIXME (kumpera) torch.load fails if we wrap with io.BufferedReader
+    return _ReaderView(file, offset, length)
+
+
+def _normalize_device_info(device_type: str, device_id: int) -> str:
+    """Device info normalization."""
+    if device_type == "cpu":
+        return "cpu"
+    return f"{device_type}:{device_id}"

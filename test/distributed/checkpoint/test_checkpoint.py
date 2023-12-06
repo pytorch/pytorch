@@ -1,28 +1,27 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from typing import Optional, List, cast
-from torch.distributed.checkpoint.storage import WriteResult
-
-from torch.distributed.checkpoint import (
-    StorageReader,
-    StorageWriter,
-    CheckpointException,
-    load_state_dict,
-    save_state_dict,
-)
+from typing import cast, List, Optional
 
 import torch
 import torch.distributed as dist
-import torch.nn
 import torch.futures
-from torch.futures import Future
+import torch.nn
 
 from torch.distributed._shard import sharded_tensor
 
-from torch.distributed.checkpoint.default_planner import (
-    _create_default_local_metadata,
+from torch.distributed._shard.sharded_tensor import ShardedTensor, state_dict_hook
+from torch.distributed._shard.sharding_spec import ChunkShardingSpec
+
+from torch.distributed.checkpoint import (
+    CheckpointException,
+    load_state_dict,
+    save_state_dict,
+    StorageReader,
+    StorageWriter,
 )
+
+from torch.distributed.checkpoint.default_planner import _create_default_local_metadata
 
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
@@ -31,29 +30,19 @@ from torch.distributed.checkpoint.metadata import (
 )
 
 from torch.distributed.checkpoint.planner import (
-    SavePlan,
-    SavePlanner,
     LoadPlan,
     LoadPlanner,
+    SavePlan,
+    SavePlanner,
 )
+from torch.distributed.checkpoint.storage import WriteResult
+from torch.futures import Future
+from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
 
-from torch.distributed._shard.sharded_tensor import (
-    state_dict_hook,
-    ShardedTensor,
-)
-from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.testing._internal.common_distributed import (
-    requires_nccl,
-    skip_if_lt_x_gpu,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
-)
-
-from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
-    run_tests,
 )
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -175,9 +164,7 @@ class TestStorageBase:
         ranks = self._get_ranks(name)
         fut = Future()
         if ranks is not None and self.rank in ranks:
-            fut.set_exception(
-                ValueError(f"async rank fail {self.rank} for {name}")
-            )
+            fut.set_exception(ValueError(f"async rank fail {self.rank} for {name}"))
         else:
             fut.set_result(result)
         return fut
@@ -204,9 +191,7 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
         self._fail_rank("fail_write_data")
         return self._fail_rank_async("fail_write_data_async", [])
 
-    def finish(
-        self, metadata: Metadata, results: List[List[WriteResult]]
-    ) -> None:
+    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
         self._fail_rank("fail_finish")
 
 
@@ -239,9 +224,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
     def get_spec(self):
         return ChunkShardingSpec(
             dim=0,
-            placements=[
-                f"rank:{r}/cuda:{r}" for r in range(dist.get_world_size())
-            ],
+            placements=[f"rank:{r}/cuda:{r}" for r in range(dist.get_world_size())],
         )
 
     @with_comms(init_rpc=False)
