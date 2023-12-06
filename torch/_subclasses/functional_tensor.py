@@ -444,7 +444,7 @@ class BaseFunctionalizeAPI(ABC):
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
     def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         return torch.utils._pytree.tree_map_only(
-            FunctionalTensor, FunctionalTensor.to_functional, args
+            torch.Tensor, FunctionalTensor.to_functional, args
         )
 
     def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
