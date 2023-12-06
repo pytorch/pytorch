@@ -279,6 +279,8 @@ TORCH_API void replace_(
 TORCH_API void commit_update(const Tensor& functional_tensor);
 TORCH_API void commit_update(ITensorListRef functional_tensor);
 
+TORCH_API void reset_storage(const Tensor& functional_tensor);
+
 TORCH_API void mark_mutation_hidden_from_autograd(
     const Tensor& functional_tensor);
 

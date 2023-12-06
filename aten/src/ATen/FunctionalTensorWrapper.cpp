@@ -574,6 +574,11 @@ void commit_update(ITensorListRef functional_tensor) {
   }
 }
 
+void reset_storage(const Tensor& functional_tensor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
+  unsafeGetFunctionalWrapper(functional_tensor)->reset_storage();
+}
+
 void mark_mutation_hidden_from_autograd(const Tensor& functional_tensor) {
   TORCH_CHECK(isFunctionalTensor(functional_tensor));
   unsafeGetFunctionalWrapper(functional_tensor)->mark_mutation_hidden_from_autograd();
