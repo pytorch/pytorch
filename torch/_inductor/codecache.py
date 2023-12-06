@@ -26,6 +26,7 @@ import tempfile
 import threading
 import warnings
 import weakref
+import ctypes
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from copy import copy
@@ -51,6 +52,8 @@ from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
+from torch._inductor.cxx_builder.cxx_builder import cxx_build_options, CxxBuilder
+from torch._inductor.cxx_builder.isa_help import get_x86_isa_detect_code
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
@@ -1122,6 +1125,49 @@ class InvalidVecISA(VecISA):
 invalid_vec_isa = InvalidVecISA()
 supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 
+def x86_isa_checker() -> list:
+    supported_isa = []
+    def _check_and_append_supported_isa(dest: list, isa: bool, isa_name: str):
+        if isa is True:
+            dest.append(isa_name)
+
+    Arch = platform.machine()
+    '''
+    Arch value is x86_64 on Linux, and the value is AMD64 on Windows.
+    '''
+    if Arch !=  "x86_64" and Arch != "AMD64":
+        return supported_isa
+    
+    cpp_code = get_x86_isa_detect_code()
+
+    key, input_path = write(cpp_code, "cpp")
+    output_dir = input_path[:-4]
+
+    print(f"{key}, {input_path}, {output_dir}")
+
+    x86_isa_help_builder = CxxBuilder(key, [input_path], cxx_build_options, output_dir)
+    status, target_file = x86_isa_help_builder.build()
+
+    # 1. open the shared library
+    isa_help_lib = ctypes.CDLL(target_file)
+
+    # 2. tell Python the argument and result types of function
+    isa_help_lib.check_avx2_feature.restype = ctypes.c_bool
+    isa_help_lib.check_avx2_feature.argtypes = []
+
+    isa_help_lib.check_avx512_feature.restype = ctypes.c_bool
+    isa_help_lib.check_avx512_feature.argtypes = []
+
+    # 3. call cpp backend and get result
+    avx2 = isa_help_lib.check_avx2_feature()
+    avx512 = isa_help_lib.check_avx512_feature()
+
+    _check_and_append_supported_isa(supported_isa, avx2, "avx2")
+    _check_and_append_supported_isa(supported_isa, avx512, "avx512")
+
+    print("!!! x86 isa --> avx2: {}, avx512: {}".format(avx2, avx512))
+
+    return supported_isa
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
 # might have too much redundant content that is useless for ISA check. Hence,
@@ -1136,7 +1182,7 @@ def valid_vec_isa_list() -> List[VecISA]:
 
     isa_list = []
     with open("/proc/cpuinfo") as _cpu_info:
-        _cpu_info_content = _cpu_info.read()
+        _cpu_info_content = x86_isa_checker()
         for isa in supported_vec_isa_list:
             if str(isa) in _cpu_info_content and isa:
                 isa_list.append(isa)
