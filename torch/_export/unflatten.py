@@ -77,10 +77,21 @@ class _UnflattenedModule(torch.fx.GraphModule):
                 name,
                 is_parameter=False,
             )
+        for fqn in self.graph_signature.inputs_to_lifted_tensor_constants.values():
+            constant = export_module.tensor_constants[fqn]
+            if isinstance(constant, torch.Tensor):
+                constant = constant.clone()
+            _assign_attr(
+                constant,
+                self,
+                fqn,
+                is_parameter=False,
+            )
 
         inputs_to_state: Dict[str, str] = {
             **self.graph_signature.inputs_to_parameters,
             **self.graph_signature.inputs_to_buffers,
+            **self.graph_signature.inputs_to_lifted_tensor_constants,
         }
 
         _sink_params(self, inputs_to_state, [])
@@ -581,7 +592,7 @@ def _sink_params(
     inputs_to_state: Dict[str, str],
     scope: List[str],
 ):
-    """Sink params and buffers from graph inputs into get_attr nodes.
+    """Sink params, buffers, and constants from graph inputs into get_attr nodes.
 
     Exported modules are purely functional, so they pass their parameters and
     buffers in as inputs to the graph.

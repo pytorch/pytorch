@@ -284,6 +284,27 @@ class TestUnflatten(TestCase):
         with self.assertRaisesRegex(RuntimeError, ".shape\[1\] is specialized at 3"):
             unflattened(torch.randn(6, 6))
 
+    def test_unflatten_constant_tensor(self):
+        class SubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.initializer = 0.1
+
+            def forward(self, x):
+                return x + torch.tensor(self.initializer)
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = SubMod()
+
+            def forward(self, x):
+                return x + self.submod(x)
+
+        export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
+        unflattened = export_module.module(flat=False)
+
+        self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
 
 if __name__ == '__main__':
     run_tests()

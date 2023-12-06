@@ -39,12 +39,12 @@ def lift_constant_tensor_pass(gm, graph_signature) -> Dict[str, torch.Tensor]:
             if not isinstance(constant_tensor, torch.Tensor):
                 continue
 
-            constant_tensor_fqn = f"_lifted_tensor_constant{num_tensor_constants}"
+            constant_tensor_name = f"_lifted_tensor_constant{num_tensor_constants}"
             num_tensor_constants += 1
 
             with gm.graph.inserting_before(first_user_input):
                 # Insert the constant node before the first user input
-                const_placeholder_node = gm.graph.placeholder(constant_tensor_fqn)
+                const_placeholder_node = gm.graph.placeholder(constant_tensor_name)
                 for k, v in node.meta.items():
                     const_placeholder_node.meta[k] = v
                 const_placeholder_node.meta["val"] = fake_mode.from_tensor(
@@ -53,6 +53,14 @@ def lift_constant_tensor_pass(gm, graph_signature) -> Dict[str, torch.Tensor]:
                 const_placeholder_node.meta["val"].constant = constant_tensor
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
+
+                # The FQN of the constant tensor in the state dict should
+                # correspond to the module where the constant tensor was
+                # originally used.
+                parent_fqn = list(
+                    const_placeholder_node.meta["nn_module_stack"].values()
+                )[-1][0]
+                constant_tensor_fqn = f"{parent_fqn}.{constant_tensor_name}"
 
                 # Add the constant as a buffer to the graph signature
                 graph_signature.input_specs.insert(
