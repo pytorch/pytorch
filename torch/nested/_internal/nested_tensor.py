@@ -130,6 +130,10 @@ class NestedTensor(torch.Tensor):
             )
         )
 
+        # collapsed ragged dim must always be dynamic
+        torch._dynamo.mark_dynamic(self, self._ragged_idx)
+        torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
+
     def values(self):
         return self._values
 
@@ -164,7 +168,6 @@ class NestedTensor(torch.Tensor):
     def __tensor_flatten__(self):
         ctx = {
             "requires_grad": self.requires_grad,
-            "ragged_size": self._size[self._ragged_idx],
             "max_seqlen": self._max_seqlen,
             "min_seqlen": self._min_seqlen,
             "ragged_idx": self._ragged_idx,
@@ -175,37 +178,13 @@ class NestedTensor(torch.Tensor):
         return inner_tensors, ctx
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors: Dict, meta):
+    def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
         assert len(inner_tensors) >= 2 and len(inner_tensors) <= 3
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
         lengths = inner_tensors.get("_lengths", None)
+        ragged_idx = meta["ragged_idx"]
 
-        # NOTE [ Storing symbolic values as plain attributes on subclasses ]
-        #
-        # When a subclass like NestedTensor stores a "size-like" value (which
-        # can either be Symintified or not) into meta, it's responsible for:
-        #
-        #   (1) Propagating that symint during torch dispatch when performing
-        #       operations, i.e. torch dispatch plays the role of a meta kernel.
-        #
-        #   (2) Facilitating the behavior around symbolic -> non-symbolic
-        #       conversions and vice versa, see below.
-        #
-        # [ non-symbolic -> symbolic (fakification in meta_utils) ]
-        #
-        # __tensor_unflatten__ is passed symbolic dense tensors and meta from
-        # non-symbolic subclasses. In this case, the subclass is responsible for
-        # intercepting meta["ragged_size"] for example and replacing it with the
-        # symintified version.
-        #
-        # [ symbolic -> non-symbolic ]
-        #
-        # __tensor_unflatten__ is passed non-symbolic dense tensors and with
-        # meta extracted from fake subclasses. In this case the subclass gets
-        # propagated the meta["ragged_size"] which is still a symint and the
-        # subclass is responsible for making sure that the symint doesn't leak.
-        #
         # Note that we cannot simply check if is_fake(values) because
         # during aot autograd, FunctionalTensors are not fake but hold
         # symbolic sizes.
@@ -213,7 +192,8 @@ class NestedTensor(torch.Tensor):
         if has_free_symbols(ragged_source) or has_free_symbols(values):
             # Associate offsets or lengths (possibly fake, possibly functionalized)
             # with the ragged_size.
-            _tensor_symint_registry[ragged_source] = meta["ragged_size"]
+            ragged_size = outer_size[ragged_idx]
+            _tensor_symint_registry[ragged_source] = ragged_size
 
         return NestedTensor(
             values,
@@ -222,7 +202,7 @@ class NestedTensor(torch.Tensor):
             requires_grad=meta["requires_grad"],
             _max_seqlen=meta["max_seqlen"],
             _min_seqlen=meta["min_seqlen"],
-            _ragged_idx=meta["ragged_idx"],
+            _ragged_idx=ragged_idx,
         )
 
     @classmethod

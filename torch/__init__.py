@@ -80,6 +80,12 @@ if sys.platform == 'win32':
 
     dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path]))
 
+    if all(not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths):
+        nvtoolsext_dll_path = os.path.join(
+            os.getenv('NVTOOLSEXT_PATH', os.path.join(pfiles_path, 'NVIDIA Corporation', 'NvToolsExt')), 'bin', 'x64')
+    else:
+        nvtoolsext_dll_path = ''
+
     from .version import cuda as cuda_version
     import glob
     if cuda_version and all(not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths):
@@ -90,7 +96,7 @@ if sys.platform == 'win32':
     else:
         cuda_path = ''
 
-    dll_paths.extend(filter(os.path.exists, [cuda_path]))
+    dll_paths.extend(filter(os.path.exists, [nvtoolsext_dll_path, cuda_path]))
 
     kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
     with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
@@ -182,6 +188,7 @@ def _load_global_deps() -> None:
             'cusolver': 'libcusolver.so.*[0-9]',
             'cusparse': 'libcusparse.so.*[0-9]',
             'nccl': 'libnccl.so.*[0-9]',
+            'nvtx': 'libnvToolsExt.so.*[0-9]',
         }
         is_cuda_lib_err = [lib for lib in cuda_libs.values() if(lib.split('.')[0] in err.args[0])]
         if not is_cuda_lib_err:
@@ -625,6 +632,11 @@ def set_default_device(device):
         call to the torch API (not just factory functions).  If this
         is causing problems for you, please comment on
         https://github.com/pytorch/pytorch/issues/92701
+
+    .. note::
+
+        This doesn't affect functions that create tensors that share the same memory as the input, like:
+        :func:`torch.from_numpy` and :func:`torch.frombuffer`
 
     Args:
         device (device or string): the device to set as default

@@ -1465,6 +1465,20 @@ class AOTInductorTestsTemplate:
         inputs = (torch.rand(4, 4, 4, 4, device=self.device),)
         self.check_model(Model(4), inputs)
 
+    def test_no_args(self):
+        class Model(torch.nn.Module):
+            def __init__(self, m, n):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    torch.randn(m, n),
+                )
+                self.alpha = torch.nn.Parameter(torch.randn(m, n))
+
+            def forward(self):
+                return self.weight * self.alpha
+
+        self.check_model(Model(6, 4), ())
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1476,35 +1490,44 @@ class AOTInductorTestABICompatibleCpu(TestCase):
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
 
 
+def fail_with_and_without_stack_allocation(is_skip=False):
+    return TestFailure(
+        ("abi_compatible_cpu", "abi_compatible_cpu_with_stack_allocation"),
+        is_skip=is_skip,
+    )
+
+
+# test_failures, xfail by default, set is_skip=True to skip
+CPU_TEST_FAILURES = {
+    "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
+    "test_dynamic_cat": fail_with_and_without_stack_allocation(),
+    "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
+    "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
+    #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
+    "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    # FIXME: failed with Segfault while exiting the Python runtime
+    "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_normal_functional": fail_with_and_without_stack_allocation(),
+    "test_poi_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    # There is a double-free issue which will be fixed in another PR
+    "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
+    # the test segfaults
+    "test_scatter_fallback": fail_with_and_without_stack_allocation(is_skip=True),
+    # error: could not find s0
+    "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
+    "test_simple_dynamic": fail_with_and_without_stack_allocation(),
+}
+
 copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleCpu,
     "abi_compatible_cpu",
-    # test_failures, xfail by default, set is_skip=True to skip
-    {
-        "test_addmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        "test_bmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        "test_dynamic_cat": TestFailure(("abi_compatible_cpu",)),
-        "test_dynamic_smem_above_default_limit": TestFailure(("abi_compatible_cpu",)),
-        "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cpu",)),
-        "test_foreach_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
-        #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
-        "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
-        # FIXME: failed with Segfault while exiting the Python runtime
-        "test_missing_cubin": TestFailure(("abi_compatible_cpu",), is_skip=True),
-        "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
-        "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        # There is a double-free issue which will be fixed in another PR
-        "test_repeat_output": TestFailure(("abi_compatible_cpu",), is_skip=True),
-        "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        # error: could not find s0
-        "test_shifted_constraint_ranges": TestFailure(
-            ("abi_compatible_cpu",), is_skip=True
-        ),
-        # the test segfaults
-        "test_scatter_fallback": TestFailure(("abi_compatible_cpu",), is_skip=True),
-    },
+    CPU_TEST_FAILURES,
 )
 
 

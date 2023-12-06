@@ -4,7 +4,6 @@ import collections
 import functools
 import inspect
 import itertools
-import math
 import operator
 import sys
 import unittest
@@ -1175,20 +1174,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #             return x * param
     #         case {"b": param}:
     #             return x / param
-
-    def test_math_radians(self):
-        def func(x, a):
-            return x + math.radians(a)
-
-        cnt = torch._dynamo.testing.CompileCounter()
-        cfunc = torch._dynamo.optimize_assert(cnt)(func)
-
-        assert cnt.frame_count == 0
-        x = torch.rand(10)
-        expected = func(x, 12)
-        output = cfunc(x, 12)
-        self.assertTrue(same(output, expected))
-        assert cnt.frame_count == 1
 
     @make_test
     def test_numpy_meshgrid(x, y):
