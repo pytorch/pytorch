@@ -79,7 +79,16 @@ def create_runtime_wrapper(
             for idx in indices_of_inps_to_detach:
                 if isinstance(args_[idx], torch.Tensor):
                     args_[idx] = args_[idx].detach()
-            with torch.autograd._force_original_view_tracking(True):
+            # Note [nested enable_grad inside of no_grad]
+            # See https://github.com/pytorch/pytorch/issues/114338
+            # If the user code was run under a no_grad, it is still possible
+            # for the compiled code to return some outputs that require grad, if e.g.
+            # some of the outputs were computed in a nested enable_grad region.
+            # We need to run our compiled autograd.Function under enable_grad to preserve
+            # this behavior, and detach() any outputs that were supposed to not require grad.
+            with torch.autograd._force_original_view_tracking(
+                True
+            ), torch.enable_grad():
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn,
                     args_,
@@ -259,6 +268,9 @@ def create_runtime_wrapper(
                     t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
         if runtime_metadata.grad_enabled_mutation is not None:
             torch.set_grad_enabled(runtime_metadata.grad_enabled_mutation)
+        # Note [nested enable_grad inside of no_grad]
+        for idx in runtime_metadata.indices_of_outs_to_detach:
+            ret_outs[idx] = ret_outs[idx].detach()
         return ret_outs
 
     return runtime_wrapper

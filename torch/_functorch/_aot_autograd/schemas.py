@@ -267,6 +267,11 @@ class ViewAndMutationMeta:
         ]
         self.mutated_graph_handled_indices = mutated_graph_handled_indices
         self.num_mutated_graph_handled_indices = len(self.mutated_graph_handled_indices)
+        self.indices_of_outs_to_detach = [
+            i
+            for i, o in enumerate(self.output_info)
+            if issubclass(o.raw_type, torch.Tensor) and not o.requires_grad
+        ]
 
         aliased_out_indices = [
             i

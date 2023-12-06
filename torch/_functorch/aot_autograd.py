@@ -495,9 +495,17 @@ def create_aot_dispatcher_function(
 
         fake_flat_args = process_inputs(flat_args)
 
+        # Suppose we have inputs that require grad, but our compiled function
+        # is wrapped in no_grad. What will happen?
+        # (1) If we determine that all outputs of the graph don't require grad,
+        #     then further down we will flip needs_autograd to false
+        #     and create an inference graph
+        # (2) If at least one output of the graph does require grad,
+        #     we will keep needs_autograd set to True and create a training graph.
+        #     This can happen if there is an enable_grad() region
+        #     inside our graph.
         needs_autograd = (
             any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
-            and torch.is_grad_enabled()
         )
 
         with enable_python_dispatcher():
