@@ -1591,8 +1591,8 @@ def _automatic_dynamic(
 ) -> SymbolicContext:
     name = source.name()
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
-    source_to_symbol_cache = (
-        prior_policy.source_to_symbol_cache if prior_policy else None
+    shape_env_to_source_to_symbol_cache = (
+        prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
     )
 
     if is_traceable_wrapper_subclass(e) and not outer_only:
@@ -1616,7 +1616,7 @@ def _automatic_dynamic(
             dynamic_sizes=outer_context.dynamic_sizes,
             constraint_sizes=outer_context.constraint_sizes,
             tensor_source=outer_context.tensor_source,
-            source_to_symbol_cache=outer_context.source_to_symbol_cache,
+            shape_env_to_source_to_symbol_cache=outer_context.shape_env_to_source_to_symbol_cache,
             inner_contexts=inner_contexts,
         )
 
@@ -1625,7 +1625,7 @@ def _automatic_dynamic(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             constraint_sizes=[None] * e.dim(),
             tensor_source=source,
-            source_to_symbol_cache=source_to_symbol_cache,
+            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         )
 
     # We preserve the dynamism of inputs. For example, when users call
@@ -1640,7 +1640,7 @@ def _automatic_dynamic(
             ],
             constraint_sizes=[None] * e.dim(),
             tensor_source=source,
-            source_to_symbol_cache=source_to_symbol_cache,
+            shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         )
 
     # Prep for automatic dynamic
@@ -1780,7 +1780,7 @@ def _automatic_dynamic(
         dynamic_sizes=dynamic_dims,
         constraint_sizes=constraint_dims,
         tensor_source=source,
-        source_to_symbol_cache=source_to_symbol_cache,
+        shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
     )
 
 
