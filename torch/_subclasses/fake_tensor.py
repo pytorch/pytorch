@@ -1681,6 +1681,15 @@ class FakeTensorMode(TorchDispatchMode):
             )
 
         def maybe_run_unsafe_fallback(error=None):
+            # We infer the meta of a custom ops that return None to just
+            # return None. custom ops are not allowed to mutate metadata
+            # of their inputs, so this is safe.
+            from torch._higher_order_ops.auto_functionalize import (
+                can_auto_functionalize,
+            )
+
+            if can_auto_functionalize(func):
+                return None
             # no meta kernel registered, fallback to kernel for the device
             if has_symbolic_sizes or not can_run_unsafe_fallback(func):
                 raise UnsupportedOperatorException(func)
