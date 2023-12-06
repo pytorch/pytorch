@@ -1,5 +1,7 @@
 """
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_backward_simple_no_segment
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_split_module_based_on_segment_info
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_compile_fx_with_segment_info
 """
 
 import torch
@@ -7,15 +9,14 @@ import torch.utils._pytree as pytree
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
 from torch._dynamo import disable
 import functools
-from torch._inductor.compile_fx import compile_fx
 import itertools
-from typing import Optional, Dict, Callable
+from typing import Optional, Dict, Callable, List
 from torch._subclasses.fake_tensor import FakeTensorMode
 from collections import defaultdict, OrderedDict
 import weakref
 import threading
-from torch._inductor.compile_fx import compile_fx_inner
 from torch.utils._python_dispatch import return_and_correct_aliasing
+from torch._dynamo.backends.common import aot_autograd
 
 fake_mode = FakeTensorMode()
 
@@ -164,7 +165,48 @@ class AsyncFuncHandle:
     return scheduler
 
 
-class LazyGraphModule(torch.nn.Module):
+# NOTE: this is only for threading outputs through multiple submodules when doing module splitting above AOTAutograd.
+# This is different from LazySchedulerGraphModule where the decision to run is given to the LazyScheduler.
+# TODO: consider whether we can merge LazilyCompiledModule and LazySchedulerGraphModule
+class _LazilyCompiledModule(torch.nn.Module):
+  def __init__(self, submod, compiler):
+    super().__init__()
+    self.submod = submod
+    self.compiler = compiler
+    self.compiled = False
+
+  def __call__(self, *args):
+    if not self.compiled:
+      new_submod = self.compiler(self.submod, args)
+      del self.submod
+      self.submod = new_submod
+      self.compiled = True
+      self.compiler = None
+    x = self.submod(*args)
+    return x
+
+
+def split_module_based_on_segment_info(gm: torch.fx.GraphModule):
+  known_segments = []
+  for node in gm.graph.nodes:
+    if len(known_segments) == 0 or node.meta["segment"] != known_segments[-1]:
+      known_segments.append(node.meta["segment"])
+
+  def split_callback(node):
+    return known_segments.index(node.meta["segment"])
+
+  qualname_map = {}
+  gm_after_split = torch.fx.passes.split_module.split_module(
+    m=gm,
+    root_m=None,
+    split_callback=split_callback,
+    qualname_map=qualname_map,
+    keep_original_order=True,
+  )
+  return gm_after_split
+
+
+class LazySchedulerGraphModule(torch.nn.Module):
   """
   This module wraps around a GraphModule.
   Its __call__ method doesn't execute the graph module immediately.
@@ -190,6 +232,37 @@ class LazyScheduler:
     self._gm_to_handle_map = OrderedDict()
     self._handle_to_gm_map = OrderedDict()
 
+  def _compile_fx_with_segment_info(
+    self,
+    # NOTE: matches positional args in compile_fx signature
+    gm: torch.fx.GraphModule,
+    example_inputs: List[torch.Tensor],
+    segment_assignment_fn=None,
+    **kwargs,
+  ):
+    if segment_assignment_fn is not None:
+      segment_assignment_fn(gm)
+    # Assumes `gm` already has segment info in each of its nodes
+    gm_after_split = split_module_based_on_segment_info(gm)
+    for name, sub_gm in gm_after_split.named_children():
+      lazy_sub_gm = _LazilyCompiledModule(
+        self,
+        sub_gm,
+        functools.partial(torch._inductor.compile_fx.compile_fx, **kwargs)
+      )
+      setattr(gm_after_split, name, lazy_sub_gm)
+    # Trigger compile_fx in all submodules
+    return gm_after_split(example_inputs)
+
+  def compile_fx(
+    self,
+    # NOTE: matches positional args in compile_fx signature
+    gm: torch.fx.GraphModule,
+    example_inputs: List[torch.Tensor],
+    **kwargs,
+  ):
+    return _compile_fx_with_segment_info(gm, example_inputs, segment_assignment_fn=set_segment_info, **kwargs)
+
   def compile_fx_inner(
     self,
     # NOTE: assumes first arg is GraphModule in compile_fx_inner signature
@@ -199,11 +272,11 @@ class LazyScheduler:
   ):
     """
     Compiles a graph module using Inductor compile_fx_inner,
-    and wraps the output compiled_fn in a LazyGraphModule to be called later.
+    and wraps the output compiled_fn in a LazySchedulerGraphModule to be called later.
     """
     assert isinstance(gm, torch.fx.GraphModule)
-    compiled_fn = compile_fx_inner(gm, *args, **kwargs)
-    lazy_gm = LazyGraphModule(
+    compiled_fn = torch._inductor.compile_fx.compile_fx_inner(gm, *args, **kwargs)
+    lazy_gm = LazySchedulerGraphModule(
       self,
       gm,
       compiled_fn,
@@ -318,10 +391,72 @@ class TestLazyScheduler(TestCase):
     lazy_scheduler = LazyScheduler()
     self._validate(
       m,
+      # TODO: change this to use the new "split-subgraph-above-AOTAutograd" design
       functools.partial(compile_fx, inner_compile=lazy_scheduler.compile_fx_inner),
       x,
       y,
     )
+
+  def test_split_module_based_on_segment_info(self):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    m = TestModule()
+    m = m.to(device)
+    x = torch.randn(4, 4, requires_grad=True, device=device)
+    y = torch.randn(4, 4, requires_grad=True, device=device)
+
+    def check_num_submods(gm, *args):
+      num_call_fns = len([node for node in gm.graph.nodes if node.op == "call_function"])
+      for i, node in enumerate(gm.graph.nodes):
+        if node.op == "placeholder":
+          node.meta["segment"] = "placeholder"
+        elif node.op == "output":
+          node.meta["segment"] = "output"
+        elif node.op == "call_function":
+          # Tag each call_function node with its own unique segment index
+          node.meta["segment"] = i
+      gm_after_split = split_module_based_on_segment_info(gm)
+      self.assertEqual(len(list(gm_after_split.named_children())), num_call_fns)
+      return gm_after_split
+
+    compiled_m = torch.compile(m, backend=aot_autograd(fw_compiler=check_num_submods, bw_compiler=check_num_submods))
+    out = compiled_m(x, y)
+    out.sum().backward()
+
+  def test_compile_fx_with_segment_info(self):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    m = TestModule()
+    m = m.to(device)
+    x = torch.randn(4, 4, requires_grad=True, device=device)
+    y = torch.randn(4, 4, requires_grad=True, device=device)
+
+    num_call_fns = None
+
+    def segment_assignment_fn(gm):
+      num_call_fns = len([node for node in gm.graph.nodes if node.op == "call_function"])
+      for i, node in enumerate(gm.graph.nodes):
+        if node.op == "placeholder":
+          node.meta["segment"] = "placeholder"
+        elif node.op == "output":
+          node.meta["segment"] = "output"
+        elif node.op == "call_function":
+          # Tag each call_function node with its own unique segment index
+          node.meta["segment"] = i
+
+    def check_num_submods(gm, *args):
+      self.assertEqual(len(list(gm.named_children())), num_call_fns)
+      return gm
+
+    lazy_scheduler = LazyScheduler()
+    compiled_m = torch.compile(
+      m,
+      backend=functools.partial(
+        functools.partial(lazy_scheduler._compile_fx_with_segment_info, segment_assignment_fn=segment_assignment_fn),
+        inner_compile=check_num_submods
+      ),
+      fullgraph=False
+    )
+    out = compiled_m(x, y)
+    out.sum().backward()
 
   def DISABLED_test_segment_tagging(self):
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -349,7 +484,7 @@ class TestLazyScheduler(TestCase):
     lazy_scheduler = LazyScheduler()
     compiled_m_ls = torch.compile(
       m,
-      backend=functools.partial(compile_fx, inner_compile=compile_then_check_segment_info),
+      backend=functools.partial(lazy_scheduler.compile_fx, inner_compile=compile_then_check_segment_info),
       fullgraph=False
     )
 
