@@ -101,7 +101,6 @@ class FrontendWorker(mp.Process):
             self.batch_size, 3, 250, 250, requires_grad=False, pin_memory=True
         )
         self.request_queue.put((fake_data, time.time()))
-        print("Sent the 0th request")
         self.warmup_event.wait()
 
         # Send fake data
