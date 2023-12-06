@@ -31,7 +31,7 @@ class OneTensor(torch.Tensor):
         return ["a"], None
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors, meta):
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
         assert meta is None
         a = inner_tensors["a"]
         return OneTensor(a)
