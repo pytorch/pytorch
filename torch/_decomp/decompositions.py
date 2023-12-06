@@ -4343,6 +4343,14 @@ def _weight_norm_interface(x, y, dim):
     norm = x.norm(2, keep_dim, keepdim=True)
     return x * (y / norm), norm
 
+@register_decomposition(aten.put)
+def put(self, index, source, accumulate=False):
+    flattened = self.flatten().clone()
+    if accumulate:
+        flattened[index] += source
+    else:
+        flattened[index] = source
+    return flattened.reshape(self.shape)
 
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
@@ -4362,6 +4370,7 @@ register_inplace(aten.__irshift__, aten.__rshift__)
 register_inplace(aten.__ixor__, aten.__xor__)
 register_inplace(aten.leaky_relu_, aten.leaky_relu)
 register_inplace(aten.logit_, aten.logit)
+register_inplace(aten.put_, aten.put)
 register_inplace(aten.relu_, aten.relu)
 register_inplace(aten.renorm_, aten.renorm)
 register_inplace(aten.round_, aten.round)
