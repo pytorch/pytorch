@@ -10,7 +10,14 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
+from torch.export import (
+    Constraint,
+    Dim,
+    dynamic_dim,
+    export,
+)
+from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch._export import capture_pre_autograd_graph
 from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
     get_buffer,
@@ -1287,7 +1294,7 @@ class TestExport(TestCase):
     def test_constraint_directly_construct(self):
         with self.assertRaisesRegex(
             TypeError,
-            "torch.export.Constraint has no public constructor. Please use torch.export.dynamic_dim"
+            "Constraint has no public constructor. Please use torch.export.dynamic_dim"
         ):
             _ = Constraint()
 
@@ -1797,6 +1804,28 @@ def forward(self, l_x_):
         self.assertEqual(ep(*inputs_export), model(*inputs_model))
         self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
         self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
+
+    def test_check_specialized_int(self):
+        class SingleOp(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.op = torch.ops.aten.scatter_add
+
+            def forward(self, t, dim, index, src, **kwargs):
+                return self.op(t, dim, index, src, **kwargs)
+
+
+        t = torch.randn(10, 5)
+        dim = -1
+        index = torch.tensor([[2, 4, 3, 1, 0],[0, 2, 1, 4, 3],[3, 1, 4, 2, 0],[4, 0, 3, 1, 2],[3, 0, 4, 1, 2]])
+        src = torch.randn(5, 5)
+
+        model = SingleOp()
+        output = model(t, dim, index, src)
+
+        ep = torch.export.export(model, args=(t, dim, index, src))
+        ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
+        self.assertEqual(ep(t, dim, index, src), output)
 
 if __name__ == '__main__':
     run_tests()

@@ -359,6 +359,47 @@ AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
       ret8);
 }
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
+    AtenTensorHandle input,
+    AtenTensorHandle weight,
+    AtenTensorHandle bias, // optional argument
+    int64_t* stride_ptr,
+    int64_t stride_size,
+    int64_t* padding_ptr,
+    int64_t padding_size,
+    int64_t* dilation_ptr,
+    int64_t dilation_size,
+    int transposed,
+    int64_t* output_padding_ptr,
+    int64_t output_padding_size,
+    int64_t groups,
+    AtenTensorHandle* out // returns new reference
+) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* input_tensor = tensor_handle_to_tensor_pointer(input);
+    at::Tensor* weight_tensor = tensor_handle_to_tensor_pointer(weight);
+    at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
+    auto optional_bias = pointer_to_optional(bias_tensor);
+    c10::IntArrayRef stride(stride_ptr, stride_size);
+    c10::IntArrayRef padding(padding_ptr, padding_size);
+    c10::IntArrayRef dilation(dilation_ptr, dilation_size);
+    c10::IntArrayRef output_padding(output_padding_ptr, output_padding_size);
+
+    at::Tensor out_tensor = at::convolution(
+        *input_tensor,
+        *weight_tensor,
+        optional_bias,
+        stride,
+        padding,
+        dilation,
+        static_cast<bool>(transposed),
+        output_padding,
+        groups);
+    at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
+    *out = tensor_pointer_to_tensor_handle(out_tensor_ptr);
+  });
+}
+
 AOTITorchError aoti_torch_new_uninitialized_tensor(AtenTensorHandle* ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* out_tensor = new at::Tensor();

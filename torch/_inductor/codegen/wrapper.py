@@ -497,6 +497,9 @@ class WrapperCodeGen(CodeGen):
     def generate_end(self, result):
         return
 
+    def generate_fallback_kernel(self, fallback_kernel, args):
+        self.generate_extern_kernel_alloc(fallback_kernel, args)
+
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         ending = self.ending
         if config.memory_planning and "view_as_complex" in str(extern_kernel.kernel):
@@ -1459,12 +1462,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     if config.aot_inductor.abi_compatible:
                         self.prefix.writeline(
-                            f"""auto {constants_key} = constants_.at({idx});"""
+                            f"""auto {constants_key} = constants_->at({idx});"""
                         )
                     else:
                         self.prefix.writeline(
                             f"auto {constants_key} = *tensor_handle_to_tensor_pointer("
-                            + f"""constants_.at({idx}));"""
+                            + f"""constants_->at({idx}));"""
                         )
                 else:
                     # Append constants as inputs to the graph
@@ -1537,7 +1540,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         num_constants = len(V.graph.constants)
         self.prefix.splice(
             f"""
-            AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map, std::optional<std::string> cubin_dir)
+            AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
+                                               std::shared_ptr<std::vector<AtenTensorHandle>> constants_array,
+                                               std::optional<std::string> cubin_dir)
                 : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, cubin_dir) {{
             """
         )
@@ -1571,6 +1576,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
 
             self.prefix.writeline("update_constants_map(std::move(constants_map));")
+            self.prefix.writeline("update_constants_array(std::move(constants_array));")
 
             def escape_string(x):
                 return (
@@ -1730,11 +1736,28 @@ class CppWrapperCodeGen(WrapperCodeGen):
         shim_fn = f"aoti_torch_{kernel_suffix}"
         self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));")
 
-    def generate_c_shim_extern_kernel_alloc_call(self, extern_kernel, args):
+    def generate_c_shim_extern_kernel_alloc(self, extern_kernel, args):
+        # registered output buffer name
+        name = extern_kernel.name
+        output_handle_name = f"{name}_handle"
+        self.writeline(f"AtenTensorHandle {output_handle_name};")
+        output_arg = f"&{output_handle_name}"
+        self.generate_c_shim_extern_kernel_call(
+            extern_kernel.codegen_kernel_name(), args + [output_arg]
+        )
+        self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
+
+    def generate_extern_kernel_alloc(self, extern_kernel, args):
+        if V.graph.aot_mode and config.aot_inductor.abi_compatible:
+            self.generate_c_shim_extern_kernel_alloc(extern_kernel, args)
+        else:
+            super().generate_extern_kernel_alloc(extern_kernel, args)
+
+    def generate_c_shim_fallback_kernel(self, fallback_kernel, args):
         output_args = []
         output_raii_handles = []
-        output_name_base = extern_kernel.get_name()
-        for idx, output in enumerate(extern_kernel.outputs):
+        output_name_base = fallback_kernel.get_name()
+        for idx, output in enumerate(fallback_kernel.outputs):
             if isinstance(output, ir.MultiOutput):
                 name = f"{output.get_name()}"
                 output_handle_name = f"{name}_handle"
@@ -1757,19 +1780,19 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 raise NotImplementedError("unsupported type of {output=}")
         args = args + output_args
         assert (
-            extern_kernel.abi_compatible_kernel is not None
-        ), f"abi_compatible_kernel is None for {extern_kernel.kernel=}"
+            fallback_kernel.abi_compatible_kernel is not None
+        ), f"abi_compatible_kernel is None for {fallback_kernel.kernel=}"
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.abi_compatible_kernel, args
+            fallback_kernel.abi_compatible_kernel, args
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
-    def generate_extern_kernel_alloc(self, extern_kernel, args):
+    def generate_fallback_kernel(self, fallback_kernel, args):
         if V.graph.aot_mode and config.aot_inductor.abi_compatible:
-            self.generate_c_shim_extern_kernel_alloc_call(extern_kernel, args)
+            self.generate_c_shim_fallback_kernel(fallback_kernel, args)
         else:
-            super().generate_extern_kernel_alloc(extern_kernel, args)
+            super().generate_fallback_kernel(fallback_kernel, args)
 
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
