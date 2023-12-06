@@ -53,7 +53,7 @@ from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch._inductor.cxx_builder.cxx_builder import cxx_build_options, CxxBuilder
-from torch._inductor.cxx_builder.isa_help import get_x86_isa_detect_code
+from torch._inductor.cxx_builder.isa_help_code_store import get_x86_isa_detect_code
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
@@ -1187,12 +1187,11 @@ def valid_vec_isa_list() -> List[VecISA]:
         return [VecZVECTOR()]
 
     isa_list = []
-    with open("/proc/cpuinfo") as _cpu_info:
-        _cpu_info_content = x86_isa_checker()
-        for isa in supported_vec_isa_list:
-            if str(isa) in _cpu_info_content and isa:
-                isa_list.append(isa)
-        return isa_list
+    _cpu_info_content = x86_isa_checker()
+    for isa in supported_vec_isa_list:
+        if str(isa) in _cpu_info_content and isa:
+            isa_list.append(isa)
+    return isa_list
 
 
 def pick_vec_isa() -> VecISA:
