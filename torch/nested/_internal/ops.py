@@ -58,17 +58,20 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
     num_optional_args = sum([x.endswith("?") for x in named_arg_types])
     min_args = len(named_arg_types) - num_optional_args
 
-    if not (len(args) >= min_args and len(args) <= len(named_arg_types)):
-        raise ValueError(
-            f"NestedTensor {func.__name__}({schema_str}): expected at least {min_args} "
-            f"arguments and at most {len(named_arg_types)} arguments, but got: "
-            f"{len(args)} arguments"
-        )
+    # special case: ellipses allows for any number of unchecked args at the end
+    if named_arg_types[-1] != "...":
+        if not (len(args) >= min_args and len(args) <= len(named_arg_types)):
+            raise ValueError(
+                f"NestedTensor {func.__name__}({schema_str}): expected at least {min_args} "
+                f"arguments and at most {len(named_arg_types)} arguments, but got: "
+                f"{len(args)} arguments"
+            )
 
     arg_type_check_fns = {
         "t": lambda x: isinstance(x, torch.Tensor) and not isinstance(x, NestedTensor),
         "jt": lambda x: isinstance(x, NestedTensor)
-        and x._lengths is None and x._ragged_idx == 1,  # ops with "jt" require contiguous JT only
+        and x._lengths is None
+        and x._ragged_idx == 1,  # ops with "jt" require contiguous JT only
         "jt_all": lambda x: isinstance(
             x, NestedTensor
         ),  # ops with "jt_all" can accept all kinds of JT
@@ -181,7 +184,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum([isinstance(x, torch.Tensor) for x in args])
         if num_tensor_args == 1:
-            check_schema("self: jt", func, *args, **kwargs)
+            check_schema("self: jt, ...", func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
         elif num_tensor_args == 2:
             check_schema("lhs: any, rhs: any", func, *args, **kwargs)
