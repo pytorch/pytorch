@@ -938,8 +938,6 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
 }
 
-// TODO this launcher should be generalized, maybe stuck as a general 'c10'
-// helper
 std::future<bool> ProcessGroupNCCL::launchAsyncDebugDump() {
   std::promise<bool> resultPromise;
   std::future<bool> resultFuture = resultPromise.get_future();
@@ -957,14 +955,6 @@ std::future<bool> ProcessGroupNCCL::launchAsyncDebugDump() {
   workerThread.detach();
 
   return resultFuture;
-}
-
-std::future<bool>& ProcessGroupNCCL::tryWriteDebugInfo() {
-  // TODO do we need the mutex or is static init thread safe?
-  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
-  // TODO should we support multiple dumps per runtime?
-  static std::future<bool> dumpFuture = launchAsyncDebugDump();
-  return dumpFuture;
 }
 
 void abortCommsFromMap(
@@ -1070,6 +1060,10 @@ void ProcessGroupNCCL::registerDebugInfoWriter(
 }
 
 bool ProcessGroupNCCL::dumpDebuggingInfo() {
+  // Serialize all calls to this function to avoid corrupting data, but allow
+  // multiple calls in one runtime. User is responsible for preserving the
+  // output file from an earlier call before a later call overwrites it.
+  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
   LOG(ERROR) << "ProcessGroupNCCL preparing to dump debug info.";
   // TODO(whc) after rebase, make sure default bufsize is >0 for on-by-default
   if (ncclTraceBufferSize_ > 0) {
@@ -1123,7 +1117,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
-  auto& maybeWriteDebugInfo = tryWriteDebugInfo();
+  std::future<bool> asyncDebugDump = launchAsyncDebugDump();
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
@@ -1159,7 +1153,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // We already log completion inside the thread, so it may not be necessary to
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
-  maybeWriteDebugInfo.wait_for(std::chrono::seconds(heartbeatTimeoutInSec_));
+  asyncDebugDump.wait_for(std::chrono::seconds(heartbeatTimeoutInSec_));
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     const auto logMsg = c10::str(
@@ -1288,9 +1282,10 @@ void ProcessGroupNCCL::workCleanupLoop() {
               collectiveDebugInfoMode_.store(true);
             }
 
+            c10::optional<std::future<bool>> optAsyncDebugDump;
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
-              tryWriteDebugInfo();
+              optAsyncDebugDump = launchAsyncDebugDump();
             }
 
             if (desyncDebug_) {
@@ -1300,8 +1295,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
 
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
-              auto& dumpingDebugInfo = tryWriteDebugInfo();
-              dumpingDebugInfo.wait_for(
+              optAsyncDebugDump->wait_for(
                   std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
             }
 
