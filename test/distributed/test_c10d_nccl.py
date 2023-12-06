@@ -3497,7 +3497,8 @@ class SparseCollective(MultiProcessTestCase):
                 # Rethrow the exception if it's a different error
                 raise
 
-class NCCLTraceTest(MultiProcessTestCase):
+
+class NCCLTraceTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '10'
@@ -3556,6 +3557,8 @@ class NCCLTraceTest(MultiProcessTestCase):
     def rank_to_GPU(self):
         # return rank to GPU map
         return init_multigpu_helper(self.world_size, "nccl")
+
+class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -3701,7 +3704,7 @@ class NCCLTraceTest(MultiProcessTestCase):
                 pg.allreduce(a).wait()
             torch.cuda.synchronize(device=device)
 
-class NCCLTraceTestDumpOnTimeout(NCCLTraceTest):
+class NCCLTraceTestDumpOnTimeout(NCCLTraceTestBase):
     timeout_sec = 1
 
     def setUp(self):
