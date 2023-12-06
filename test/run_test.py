@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
+    emit_dynamo_test_metric
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -1856,6 +1857,9 @@ def main():
         all_failures = [failure for batch in test_batches for failure in batch.failures]
 
         if IS_CI:
+            print_to_stderr("Emiting dynamo_strict_stats")
+            emit_dynamo_test_metric()
+
             num_tests = len(selected_tests)
             for test, _ in all_failures:
                 test_stats = aggregated_heuristics.get_test_stats(test)
