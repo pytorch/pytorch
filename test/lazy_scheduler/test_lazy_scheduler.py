@@ -258,7 +258,7 @@ class TestLazyScheduler(TestCase):
   def _validate(self, fn, backend, *args, skip_check=False):
     cloned_args = []
     for arg in args:
-        cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
+      cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
 
     # Eager, 1st iter
     torch.manual_seed(0)
@@ -284,16 +284,16 @@ class TestLazyScheduler(TestCase):
 
     if not skip_check:
       self.assertEqual(
-          result,
-          expected,
-          msg="Output mismatch between torch.compile and eager versions",
+        result,
+        expected,
+        msg="Output mismatch between torch.compile and eager versions",
       )
       for arg, cloned_arg in zip(args, cloned_args):
-          self.assertEqual(
-              arg.grad,
-              cloned_arg.grad,
-              msg="Gradient mismatch between torch.compile and eager versions",
-          )
+        self.assertEqual(
+          arg.grad,
+          cloned_arg.grad,
+          msg="Gradient mismatch between torch.compile and eager versions",
+        )
 
   def test_backward_simple_no_segment(self):
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -348,5 +348,5 @@ TODO:
 """
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-    run_tests()
+  from torch._dynamo.test_case import run_tests
+  run_tests()
