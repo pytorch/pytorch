@@ -9,8 +9,14 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import map, cond
 from torch import Tensor
-from torch.export import Constraint, Dim, export
-from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
+from torch.export import (
+    Constraint,
+    Dim,
+    dynamic_dim,
+    export,
+)
+from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch._export import capture_pre_autograd_graph
 from torch._export.utils import (
     get_buffer,
     get_param,
