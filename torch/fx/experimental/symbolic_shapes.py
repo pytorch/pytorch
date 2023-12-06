@@ -858,13 +858,13 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     w/r/t different shape_envs, clearing, etc.
     """
     tensor_source: Source = None
-    source_to_symbol_cache : Dict["TensorPropertySource", "sympy.Expr"] = None
+    shape_env_to_source_to_symbol_cache : Dict[int, Dict["TensorPropertySource", "sympy.Expr"]] = None
 
     def __post_init__(self):
         # The None default is annoying, but required because of dataclass limitations
         assert self.tensor_source is not None
-        if not self.source_to_symbol_cache:
-            object.__setattr__(self, 'source_to_symbol_cache', {})
+        if not self.shape_env_to_source_to_symbol_cache:
+            object.__setattr__(self, 'shape_env_to_source_to_symbol_cache', {})
 
 
 @dataclass(frozen=True)
@@ -2385,9 +2385,13 @@ class ShapeEnv:
     ) -> "sympy.Expr":
         # see note [Tensor Fakification and Symbol Caching]
         source_name = source.name()
-        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
-            if source_name in symbolic_context.source_to_symbol_cache:
-                return symbolic_context.source_to_symbol_cache[source_name]
+        cache = None
+        if isinstance(symbolic_context, StatefulSymbolicContext) and id(self) not in symbolic_context.shape_env_to_source_to_symbol_cache:
+            symbolic_context.shape_env_to_source_to_symbol_cache[id(self)] = {}
+            cache = symbolic_context.shape_env_to_source_to_symbol_cache[id(self)]
+
+        if cache and source_name and source_name in cache:
+            return cache[source_name]
 
         if do_not_specialize_zero_one:
             specialize_zero_one = False
@@ -2404,8 +2408,8 @@ class ShapeEnv:
 
         if dynamic_dim is DimDynamic.STATIC:
             out = sympy.Integer(val)
-            if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
-                symbolic_context.source_to_symbol_cache[source_name] = out
+            if cache and source_name:
+                cache[source_name] = out
             return out
 
         elif dynamic_dim is DimDynamic.DUCK:
@@ -2483,8 +2487,8 @@ class ShapeEnv:
         if isinstance(r, sympy.Symbol):
             self.var_to_sources[r].append(source)
 
-        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
-            symbolic_context.source_to_symbol_cache[source_name] = r
+        if cache and source_name:
+            cache[source_name] = r
         return r
 
     def debug_name(self, source):
