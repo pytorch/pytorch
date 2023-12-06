@@ -1193,8 +1193,8 @@ def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
-    getitem_3 = map_impl[0];  map_impl = None
-    return (getitem_3,)""",
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
         )
 
     def test_cond_subgraph_name_is_valid(self):
