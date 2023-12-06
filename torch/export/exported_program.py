@@ -1,7 +1,6 @@
 import copy
 import dataclasses
 import functools
-import math
 from typing import (
     Any,
     Callable,
@@ -27,7 +26,6 @@ if TYPE_CHECKING:
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
-from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 
@@ -566,14 +564,7 @@ class ExportedProgram:
         return transformed_ep
 
     def _check_input_constraints(self, *args):
-        def check(cond, msg):
-            if not cond:
-                # TODO(avik): maybe add more context, e.g., graph signature
-                raise RuntimeError(msg)
-
-        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            _convert_range_to_int,
-        )
+        from torch._export.utils import _check_input_constraints_for_graph
 
         placeholders = [p for p in self.graph.nodes if p.op == "placeholder"]
         input_placeholders = [
@@ -581,67 +572,9 @@ class ExportedProgram:
             for p, s in zip(placeholders, self.graph_signature.input_specs)
             if s.kind == InputKind.USER_INPUT
         ]
-        check(
-            len(args) == len(input_placeholders),
-            "Unexpected number of inputs "
-            f"(expected {len(input_placeholders)}, got {len(args)})",
+        _check_input_constraints_for_graph(
+            input_placeholders, args, self.range_constraints
         )
-        # NOTE: export already guarantees that the same symbol is used in metadata
-        # for all InputDims related by equality constraints, so we can just unify
-        # symbols with given input dimension values to check equality constraints.
-        unification_map: "Dict[sympy.Symbol, Any]" = {}
-        for arg, node in zip(args, input_placeholders):
-            node_val = node.meta["val"]
-            if isinstance(node_val, FakeTensor):
-                check(
-                    isinstance(arg, torch.Tensor),
-                    f"Expected input {node.name} to be a tensor, but got {type(arg)}",
-                )
-                check(
-                    len(node_val.shape) == len(arg.shape),
-                    f"Unexpected number of dimensions in input {node.name}.shape "
-                    f"(expected {node_val.shape}, got {arg.shape})",
-                )
-                for j, (arg_dim, node_dim) in enumerate(zip(arg.shape, node_val.shape)):
-                    if isinstance(node_dim, torch.SymInt):
-                        if node_dim.node.expr in unification_map:
-                            existing_dim = unification_map[node_dim.node.expr]
-                            check(
-                                arg_dim == existing_dim,
-                                f"Expected input {node.name}.shape[{j}] to be equal to "
-                                f"{existing_dim}, but got {arg_dim}",
-                            )
-                        else:
-                            unification_map[node_dim.node.expr] = arg_dim
-
-                        if node_dim.node.expr in self.range_constraints:
-                            min_val, max_val = _convert_range_to_int(
-                                self.range_constraints[node_dim.node.expr]
-                            )
-                            # NOTE: we allow dimensions to be 0/1 at runtime
-                            if min_val > 2:
-                                check(
-                                    arg_dim >= min_val,
-                                    f"Expected input {node.name}.shape[{j}] to be >= "
-                                    f"{min_val}, but got {arg_dim}",
-                                )
-                            if max_val < math.inf:
-                                check(
-                                    arg_dim <= max_val,
-                                    f"Expected input {node.name}.shape[{j}] to be <= "
-                                    f"{max_val}, but got {arg_dim}",
-                                )
-                    else:
-                        check(
-                            arg_dim == node_dim,
-                            f"Expected input {node.name}.shape[{j}] to be equal to "
-                            f"{node_dim}, but got {arg_dim}",
-                        )
-            elif isinstance(node_val, (int, float, str)):
-                check(
-                    type(arg) == type(node_val) and arg == node_val,
-                    f"Expected input {node.name} to be equal to {node_val}, but got {arg}",
-                )
 
     def _validate(self):
         self.verifier().check(self)

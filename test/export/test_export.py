@@ -1246,7 +1246,7 @@ class TestExport(TestCase):
         # can't retrace with invalid inputs with respect to the original ExportedProgram
         dim0_x_v2 = torch.export.Dim("dim0_x_v2", min=3)
         exported_v2 = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x_v2}})
-        with self.assertRaisesRegex(RuntimeError, "shape\[1\] is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be >= 3, but got 2"):
             torch.export.export(exported_v2, (torch.randn(2, 2),))
 
     def test_retrace_graph_level_meta_preservation(self):
@@ -1616,10 +1616,10 @@ def forward(self, l_x_):
         inp = torch.randn(4, 4)
         gm = capture_pre_autograd_graph(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3])
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "Expected input arg0_1.shape\[0\] to be >= 3, but got 2"):
             gm(torch.randn(2, 2))
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "Expected input arg0_1.shape\[0\] to be >= 3, but got 2"):
             torch.export.export(gm, (torch.randn(2, 2),))
 
         ep = torch.export.export(gm, (torch.randn(5, 4),), dynamic_shapes=({0: torch.export.Dim("dim", min=3)},))
