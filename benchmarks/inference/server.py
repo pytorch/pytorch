@@ -42,7 +42,6 @@ class FrontendWorker(mp.Process):
 
         for i in range(self.num_iters + 1):
             response, request_time = self.response_queue.get()
-            print(f"Got {i}")
             if warmup_response_time is None:
                 self.warmup_event.set()
                 warmup_response_time = time.time() - request_time
