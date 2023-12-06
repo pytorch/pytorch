@@ -1076,14 +1076,12 @@ def cat(inputs, dim=0):
 
         return False
 
-    if (
-        len(inputs) <= config.max_pointwise_cat_inputs
-        and inputs[0].get_device().type != "cpu"
-    ):
+    if len(inputs) <= config.max_pointwise_cat_inputs:
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
-        all_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
+        all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
+        any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
 
-        if all_pointwise_inputs and pointwise_uses:
+        if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
             return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
@@ -4636,7 +4634,7 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     rnumel = sympy_product(size[i] for i in axis)
 
     def get_constant_or_index_expr(x, dtype):
-        if isinstance(x, sympy.Expr) and not x.is_constant():
+        if isinstance(x, sympy.Expr) and not x.is_number:
             return ops.to_dtype(ops.index_expr(x, torch.int64), dtype)
         return ops.constant(x, dtype)
 
