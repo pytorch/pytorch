@@ -259,6 +259,8 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const c10::optional<Tensor>& save_var_t_opt,
     double epsilon,
     const Tensor& reserveSpace) {
+  printf("ANDREW calling cudnn_batch_norm_backward\n");
+
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& save_mean_t =
       c10::value_or_else(save_mean_t_opt, [] { return Tensor(); });

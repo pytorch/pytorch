@@ -21,9 +21,11 @@
 #include <ATen/ops/batch_norm_stats_native.h>
 #include <ATen/ops/batch_norm_update_stats_native.h>
 #include <ATen/ops/cudnn_batch_norm.h>
+#include <ATen/ops/cudnn_batch_norm_backward.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/miopen_batch_norm.h>
+#include <ATen/ops/miopen_batch_norm_backward.h>
 #include <ATen/ops/native_batch_norm_backward_native.h>
 #include <ATen/ops/native_batch_norm_native.h>
 #include <ATen/ops/scalar_tensor.h>
@@ -92,13 +94,14 @@ inline Impl batch_norm_choose_impl(const Tensor& in1, const Tensor& in2) {
 }
 
 // TODO(andrew): merge this with _batch_norm_impl_index
-bool _use_cudnn(const Tensor& input, const Tensor& weight, const Tensor& bias, const Tensor& running_mean, const Tensor& running_var, bool train, bool epsilon) {
+bool _use_cudnn(const Tensor& input, const Tensor& weight, const Tensor& bias, const Tensor& running_mean, const Tensor& running_var, bool train, bool epsilon, bool backward) {
   return (
       input.is_cuda()
       && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
       && (input.scalar_type() != at::kHalf
         || weight.scalar_type() == at::kFloat)
-      && weight.defined() && bias.defined()
+      && weight.defined()
+      && (bias.defined() || backward)
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && train))
       && (input.dim() >= 3)
@@ -112,14 +115,15 @@ bool _use_cudnn(const Tensor& input, const Tensor& weight, const Tensor& bias, c
 }
 
 // TODO(andrew): merge this with _batch_norm_impl_index
-bool _use_miopen(const Tensor& input, const Tensor& weight, const Tensor& bias, const Tensor& running_mean, const Tensor& running_var, bool train) {
+bool _use_miopen(const Tensor& input, const Tensor& weight, const Tensor& bias, const Tensor& running_mean, const Tensor& running_var, bool train, bool backward) {
   return (
       input.is_cuda()
       && input.dim() <= MIOPEN_DIM_MAX
       && input.scalar_type() != at::kDouble
       && input.scalar_type() != at::kBFloat16
       && (weight.scalar_type() != at::kHalf)
-      && weight.defined() && bias.defined()
+      && weight.defined()
+      && (bias.defined() || backward)
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && train))
       && at::detail::getCUDAHooks().compiledWithMIOpen()
@@ -502,9 +506,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
-  // TODO(andrew): do this dispatching for the backward pass too
-  const bool use_cudnn = _use_cudnn(self, weight, bias, running_mean, running_var, train, epsilon);
-  const bool use_miopen = _use_miopen(self, weight, bias, running_mean, running_var, train);
+  const bool use_cudnn = _use_cudnn(self, weight, bias, running_mean, running_var, train, epsilon, /*backward*/false);
+  const bool use_miopen = _use_miopen(self, weight, bias, running_mean, running_var, train, /*backward*/false);
   printf("ANDREW in batch_norm_cuda, use_cudnn = %d, use_miopen = %d\n", use_cudnn, use_miopen);
   if (use_cudnn or use_miopen) {
     auto weight_c = weight.contiguous();
@@ -569,6 +572,20 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   c10::MaybeOwned<Tensor> save_invstd = at::borrow_from_optional_tensor(save_invstd_opt);
   c10::MaybeOwned<Tensor> running_mean = at::borrow_from_optional_tensor(running_mean_opt);
   c10::MaybeOwned<Tensor> running_var = at::borrow_from_optional_tensor(running_var_opt);
+
+  const Tensor& dummy_bias = Tensor();
+  const bool use_cudnn = _use_cudnn(input, *weight, dummy_bias, *running_mean, *running_var, train, epsilon, /*backward*/true);
+  const bool use_miopen = _use_miopen(input, *weight, dummy_bias, *running_mean, *running_var, train, /*backward*/true);
+  printf("ANDREW in batch_norm_cuda_backward, use_cudnn = %d, use_miopen = %d\n", use_cudnn, use_miopen);
+  if (use_cudnn) {
+    // TODO(andrew): Figure out where to get the reserved tensor
+    // Right now this causes 'RuntimeError: Cannot access data pointer of Tensor that doesn't have storage'
+    // const Tensor& reserved_space = Tensor();
+    // return at::cudnn_batch_norm_backward(input, grad_out, *weight, *running_mean, *running_var, *save_mean, *save_invstd, epsilon, reserved_space);
+  }
+  if (use_miopen) {
+    return at::miopen_batch_norm_backward(input, grad_out, *weight, *running_mean, *running_var, *save_mean, *save_invstd, epsilon);
+  }
 
   const bool needs_reduction = train || grad_input_mask[1] || grad_input_mask[2];
 
