@@ -4,6 +4,7 @@
 torch.nn.attention.bias
 ========================
 
+.. automodule:: torch.nn.attention.bias
 .. currentmodule:: torch.nn.attention.bias
 
 CausalBias
