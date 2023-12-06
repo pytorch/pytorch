@@ -238,13 +238,20 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     env: Dict[torch.fx.Node, torch.fx.Node] = {}
     # Pop nodes from the queue, and add nodes that have had all their
     # dependencies fulfilled
+    output = None
     while len(queue) > 0:
         cur = queue.popleft()
+        if cur.op == "output":
+            output = cur
+            continue
         env[cur] = new_graph.node_copy(cur, lambda x: env[x])
         for user in cur.users:
             indeg[user] -= 1
             if indeg[user] == 0:
                 queue.append(user)
+    # Append output node the last
+    if output is not None:
+        env[output] = new_graph.node_copy(output, lambda x: env[x])
     # If the new graph's size is not as large as the old one, then there must be
     # a cycle (i.e. some node's dependencies were not satisfied.)
     if len(new_graph.nodes) < len(gm.graph.nodes):
