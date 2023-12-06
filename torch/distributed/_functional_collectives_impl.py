@@ -200,6 +200,15 @@ def _broadcast(self, src, tag, ranks, group_size):
 
     return inplace_tensor
 
+def _scatter(self, scatter_list, src, tag, ranks, group_size):
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
+    assert group is not None
+
+    inplace_tensor = self.clone(memory_format=torch.contiguous_format)
+    work = dist.scatter(inplace_tensor, scatter_list, src, group=group, async_op=True)
+    _register_tensor_work(inplace_tensor, work)
+
+    return inplace_tensor
 
 # TODO assert if ranks has duplicated entries
 def _all_reduce(self, reduceOp, tag, ranks, group_size):

@@ -165,6 +165,18 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
         )
     return _maybe_wrap_tensor(tensor)
 
+def scatter(self: torch.Tensor, scatter_list: List[torch.Tensor], src: int, group: RANK_TYPES, tag: str = ""):
+    """
+    Scatters the list of data tensor to all processes in the given process group.
+
+    Args:
+        src (int): Source rank
+        group (ProcessGroup or List[int]): The process group to work on.
+        tag (str, optional): A unique identifier for the collective. Default: empty string
+    """
+    tag, rankset, group_size = _expand_group(group, tag)
+    tensor = torch.ops.c10d_functional.scatter(self, scatter_list, src, tag, rankset, group_size)
+    return _maybe_wrap_tensor(tensor)
 
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
     """
@@ -795,6 +807,8 @@ def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
 def _broadcast_meta(self, *args):
     return torch.empty_like(self)
 
+def _scatter_meta(self, *args):
+    return torch.empty_like(self)
 
 def _all_reduce_meta(self, *args):
     return torch.empty_like(self)
@@ -891,6 +905,7 @@ def _reduce_scatter_tensor_coalesced_native_meta(
 def _register_ops():
     ops_defs = [
         "broadcast(Tensor self, int src, str tag, int[] ranks, int group_size) -> Tensor",
+        "scatter(Tensor self, List[Tensor] scatter_list, int src, str tag, int[] ranks, int group_size) -> Tensor",
         "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
         "all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
         "wait_tensor(Tensor self) -> Tensor",

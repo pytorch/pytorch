@@ -253,6 +253,34 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(res, torch.ones([4], device=device))
 
     @parametrize("device", ["cpu", "cuda"])
+    def test_scatter(self, device):
+        if device == "cuda":
+            if torch.cuda.device_count() < self.world_size:
+                self.skipTest("Not enough CUDA devices")
+            torch.cuda.set_device(dist.get_rank())
+
+        # Assuming a world size of 2
+        tensor_size = 2
+        t_ones = torch.ones(tensor_size)
+        t_fives = torch.ones(tensor_size) * 5
+        output_tensor = torch.zeros(tensor_size)
+        if dist.get_rank() == 0:
+            # Only tensors, all of which must be the same size.
+            scatter_list = [t_ones, t_fives]
+        else:
+            scatter_list = None
+
+        mesh = dt.DeviceMesh(device, torch.arange(2))
+        ft_c.scatter(output_tensor, scatter_list, 0, mesh)
+
+        if dist.get_rank() == 0:
+            self.assertEqual(output_tensor, torch.ones([2], device=device))
+        elif dist.get_rank() == 1:
+            self.assertEqual(output_tensor, torch.ones([2], device=device) * 5)
+        else:
+            raise ValueError("Unknown device")
+
+    @parametrize("device", ["cpu", "cuda"])
     @run_with_both_funcol_impls
     def test_all_reduce_eager(self, device):
         if device == "cuda":
