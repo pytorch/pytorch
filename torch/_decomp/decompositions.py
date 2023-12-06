@@ -1095,6 +1095,10 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
     if train and p != 0:
         if p == 1:
             return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
+        if not input.dtype.is_floating_point:
+            raise RuntimeError(
+                "result type Float can't be cast to the desired output type Long"
+            )
         bool_mask = torch.rand_like(input) > p
         res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)
@@ -4140,12 +4144,10 @@ def _reflection_pad_backward(
                     0, inp_shape[i], step=1, device=a.device
                 )
                 middle = middle[middle_idx]
+            else:
+                right = 0
+                middle = zero_pad(middle, i + nc_dim, 0, -padding_right[i])
         else:
-            middle_idx[i + nc_dim] = torch.arange(
-                padding_left[i], padding_left[i] + inp_shape[i], step=1, device=a.device
-            )
-            middle = result[middle_idx]
-
             left_idx: List[Any] = [slice(s) for s in result.shape]
             left_idx[i + nc_dim] = torch.arange(
                 padding_left[i] - 1, -1, step=-1, device=a.device
@@ -4154,10 +4156,19 @@ def _reflection_pad_backward(
                 result[left_idx], i + nc_dim, 1, inp_shape[i] - padding_left[i] - 1
             )
 
-        if padding_right[i] < 0:
-            right = 0
-            middle = zero_pad(middle, i + nc_dim, 0, -padding_right[i])
-        else:
+            if padding_right[i] > 0:
+                middle_idx[i + nc_dim] = torch.arange(
+                    padding_left[i], padding_left[i] + inp_shape[i], step=1, device=a.device
+                )
+                middle = result[middle_idx]
+            else:
+                middle_idx[i + nc_dim] = torch.arange(
+                    padding_left[i], padding_left[i] + inp_shape[i] + padding_right[i], step=1, device=a.device
+                )
+                middle = zero_pad(result[middle_idx], i + nc_dim, 0, -padding_right[i])
+                right = 0
+
+        if padding_right[i] > 0:
             right_idx: List[Any] = [slice(s) for s in result.shape]
             right_idx[i + nc_dim] = torch.arange(
                 result.shape[i + nc_dim] - 1,
