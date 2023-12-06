@@ -200,7 +200,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
     std::vector<op_input_t> out;
     auto push_value = [&out, io_type](const Tag& tag, op_input_t input) {
       if (io_type == tagToIOType(tag)) {
-        out.push_back(std::move(input));
+        out.emplace_back(std::move(input));
       } else {
         out.emplace_back(c10::nullopt);
       }
