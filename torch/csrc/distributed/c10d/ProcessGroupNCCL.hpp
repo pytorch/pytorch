@@ -815,6 +815,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Vector to Store WorkNCCL pointers
   std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;
 
+  std::chrono::time_point<std::chrono::steady_clock> lastWorkListUpdateTime_;
+
   // Mutex to Guard workMetaList_
   std::mutex completedWorkListMutex_;
 
