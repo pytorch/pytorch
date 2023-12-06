@@ -9,13 +9,16 @@ using the following methods:
 
 Default: False
 """
+
 _overwrite_module_params_on_conversion = False
 
 
 def set_overwrite_module_params_on_conversion(value):
+    """Overwrite the set module parameter on conversion."""
     global _overwrite_module_params_on_conversion
     _overwrite_module_params_on_conversion = value
 
 
 def get_overwrite_module_params_on_conversion():
+    """Overwrite the get module parameter on conversion."""
     return _overwrite_module_params_on_conversion

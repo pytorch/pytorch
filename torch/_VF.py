@@ -20,10 +20,25 @@ class VFModule(types.ModuleType):
     vf: types.ModuleType
 
     def __init__(self, name):
+        """
+        Initialize a VFModule object.
+
+        Args:
+            name (str): The name of the module.
+        """
         super().__init__(name)
         self.vf = torch._C._VariableFunctions
 
     def __getattr__(self, attr):
+        """
+        Retrieve the attribute from the vf module.
+
+        Args:
+            attr (str): The name of the attribute to retrieve.
+
+        Returns:
+            The attribute from the vf module.
+        """
         return getattr(self.vf, attr)
 
 

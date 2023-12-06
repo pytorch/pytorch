@@ -498,7 +498,8 @@ class AppDirs(object):
 
 
 def _get_win_folder_from_registry(csidl_name):
-    """This is a fallback technique at best. I'm not sure if using the
+    """
+    This is a fallback technique at best. I'm not sure if using the
     registry for this guarantees us the correct answer for all CSIDL_*
     names.
     """

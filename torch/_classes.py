@@ -32,7 +32,7 @@ class _Classes(types.ModuleType):
 
     def load_library(self, path):
         """
-        Loads a shared library from the given path into the current process.
+        Load a shared library from the given path into the current process.
 
         The library being loaded may run global initialization code to register
         custom classes with the PyTorch JIT runtime. This allows dynamically

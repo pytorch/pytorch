@@ -1,4 +1,4 @@
-"""Adds docstrings to Storage functions"""
+"""Adds docstrings to Storage functions."""
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
@@ -10,6 +10,7 @@ storage_classes = [
 
 
 def add_docstr_all(method, docstr):
+    """Add docstring to all storage classes for a given method."""
     for cls_name in storage_classes:
         cls = getattr(torch._C, cls_name)
         try:

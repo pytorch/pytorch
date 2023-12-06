@@ -1,5 +1,4 @@
-"""Locally Optimal Block Preconditioned Conjugate Gradient methods.
-"""
+"""Locally Optimal Block Preconditioned Conjugate Gradient methods."""
 # Author: Pearu Peterson
 # Created: February 2020
 
@@ -95,7 +94,6 @@ def _polynomial_value(poly, x, zero_power, transition):
                              whether it is a vector, a matrix, or something else, so this
                              functionality is delegated to the user.
     """
-
     res = zero_power.clone()
     for k in range(poly.size(-1) - 2, -1, -1):
         res = transition(res, x, poly[..., k])
@@ -104,7 +102,7 @@ def _polynomial_value(poly, x, zero_power, transition):
 
 def _matrix_polynomial_value(poly, x, zero_power=None):
     """
-    Evaluates `poly(x)` for the (batched) matrix input `x`.
+    Evaluate `poly(x)` for the (batched) matrix input `x`.
     Check out `_polynomial_value` function for more details.
     """
 
@@ -477,7 +475,6 @@ def lobpcg(
                  `method="ortho"`.
 
     Returns:
-
       E (Tensor): tensor of eigenvalues of size :math:`(*, k)`
 
       X (Tensor): tensor of eigenvectors of size :math:`(*, m, k)`
@@ -847,9 +844,7 @@ class LOBPCG:
     # Internal methods
 
     def _update_basic(self):
-        """
-        Update or initialize iteration variables when `method == "basic"`.
-        """
+        """Update or initialize iteration variables when `method == "basic"`."""
         mm = torch.matmul
         ns = self.ivars["converged_end"]
         nc = self.ivars["converged_count"]
@@ -890,9 +885,7 @@ class LOBPCG:
             self.S[:, n + np : ns] = W
 
     def _update_ortho(self):
-        """
-        Update or initialize iteration variables when `method == "ortho"`.
-        """
+        """Update or initialize iteration variables when `method == "ortho"`."""
         mm = torch.matmul
         ns = self.ivars["converged_end"]
         nc = self.ivars["converged_count"]
@@ -1014,7 +1007,6 @@ class LOBPCG:
           tau (float) : positive tolerance
 
         Returns:
-
           U (Tensor) : B-orthonormal columns (:math:`U^T B U = I`), size
                        is (m, n1), where `n1 = n` if `drop` is `False,
                        otherwise `n1 <= n`.
@@ -1078,7 +1070,6 @@ class LOBPCG:
           V (Tensor) : B-orthogonal external basis, size is (m, k)
 
         Returns:
-
           U (Tensor) : B-orthonormal columns (:math:`U^T B U = I`)
                        such that :math:`V^T B U=0`, size is (m, n1),
                        where `n1 = n` if `drop` is `False, otherwise

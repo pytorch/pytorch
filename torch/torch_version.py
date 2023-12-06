@@ -6,7 +6,8 @@ __all__ = ['TorchVersion']
 
 
 class TorchVersion(str):
-    """A string with magic powers to compare to both Version and iterables!
+    """A string with magic powers to compare to both Version and iterable.
+    
     Prior to 1.10.0 torch.__version__ was stored as a str and so many did
     comparisons against torch.__version__ as if it were a str. In order to not
     break them we have TorchVersion which masquerades as a str while also

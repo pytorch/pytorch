@@ -1,5 +1,4 @@
-"""Implement various linear algebra algorithms for low rank matrices.
-"""
+"""Implement various linear algebra algorithms for low rank matrices."""
 
 __all__ = ["svd_lowrank", "pca_lowrank"]
 
@@ -55,7 +54,6 @@ def get_approximate_basis(
           arXiv:0909.4061 [math.NA; math.PR], 2009 (available at
           `arXiv <http://arxiv.org/abs/0909.4061>`_).
     """
-
     niter = 2 if niter is None else niter
     m, n = A.shape[-2:]
     dtype = _utils.get_floating_dtype(A)
@@ -250,7 +248,6 @@ def pca_lowrank(
           `arXiv <http://arxiv.org/abs/0909.4061>`_).
 
     """
-
     if not torch.jit.is_scripting():
         if type(A) is not torch.Tensor and has_torch_function((A,)):
             return handle_torch_function(

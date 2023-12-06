@@ -1,6 +1,4 @@
-"""Various linear algebra utility methods for internal use.
-
-"""
+"""Various linear algebra utility methods for internal use."""
 
 from typing import Optional, Tuple
 
@@ -9,7 +7,7 @@ from torch import Tensor
 
 
 def is_sparse(A):
-    """Check if tensor A is a sparse tensor"""
+    """Check if tensor A is a sparse tensor."""
     if isinstance(A, torch.Tensor):
         return A.layout == torch.sparse_coo
 

@@ -16,14 +16,16 @@ def check_serializing_named_tensor(tensor):
 
 
 def build_dim_map(tensor):
-    """Returns a map of { dim: dim_name } where dim is a name if the dim is named
-    and the dim index otherwise."""
+    """Return a map of { dim: dim_name } where dim is a name if the dim is named
+    and the dim index otherwise.
+    """
     return OrderedDict(
         [(idx if name is None else name, name) for idx, name in enumerate(tensor.names)]
     )
 
 
 def unzip_namedshape(namedshape):
+    """Return a tuple of (names, shape) from a namedshape."""
     if isinstance(namedshape, OrderedDict):
         namedshape = namedshape.items()
     if not hasattr(namedshape, "__iter__") and not isinstance(namedshape, tuple):
@@ -36,6 +38,7 @@ def unzip_namedshape(namedshape):
 
 
 def namer_api_name(inplace):
+    """Return the name of the namer API function."""
     if inplace:
         return "rename_"
     else:
@@ -90,6 +93,7 @@ def update_names_with_list(tensor, names, inplace):
 
 
 def update_names_with_mapping(tensor, rename_map, inplace):
+    """Return a new Tensor with renamed dims as specified in the mapping `rename_map`."""
     dim_map = build_dim_map(tensor)
     for old_dim in rename_map.keys():
         new_dim = rename_map[old_dim]
@@ -104,7 +108,7 @@ def update_names_with_mapping(tensor, rename_map, inplace):
 
 
 def update_names(tensor, names, rename_map, inplace):
-    """There are two usages:
+    """There are two usages.
 
     tensor.rename(*names) returns a view on tensor with named dims `names`.
     `names` must be of length `tensor.dim()`; otherwise, if '...' is in `names`,
