@@ -661,16 +661,17 @@ def set_default_device(device):
 
 
 def set_default_tensor_type(t):
-    r"""Sets the default ``torch.Tensor`` type to floating point tensor type
-    ``t``. This type will also be used as default floating point type for
-    type inference in :func:`torch.tensor`.
-
-    The default floating point tensor type is initially ``torch.FloatTensor``.
-
+    r"""
     .. warning::
 
         This function is deprecated as of PyTorch 2.1, please use :func:`torch.set_default_dtype()` and
         :func:`torch.set_default_device()` as alternatives.
+
+    Sets the default ``torch.Tensor`` type to floating point tensor type
+    ``t``. This type will also be used as default floating point type for
+    type inference in :func:`torch.tensor`.
+
+    The default floating point tensor type is initially ``torch.FloatTensor``.
 
     Args:
         t (type or string): the floating point tensor type or its name
