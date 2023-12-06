@@ -86,8 +86,8 @@ class OptimizerInfo:
         # Function to generate optimizer inputs EXCLUDING params. We delegate params responsibility
         # to the test using the OptimizerInfo. OptimizerInput.params is likely None.
         optim_inputs_func,
-        # Implementation specific kwargs the optimizer supports, e.g., fused, foreach, differentiable
-        # We consider capturable to be a base constructor flag since it is implemented across the board.
+        # A subset of the global-cliquey flags (fused, foreach, differentiable) the optimizer
+        # supports. See NOTE: [optimizer kwarg categories] for what global-cliquey means.
         supported_impls: Tuple[str] = ("foreach", "differentiable"),
         # the devices on which the optim supports sparse tensors for params and grads, see SGD
         supports_sparse_on: Tuple[str] = (),
@@ -184,10 +184,30 @@ class optims(_TestParametrizer):
                 raise ex
 
 
-# ----------------------------------------------------------------------------------------------------------------
-# NOTE: The following optim_inputs_func_* sampling functions only return constructor combinations of NON-IMPLEMENTATION
-# -CHANGING flags, i.e., flags that are not foreach, fused, or differentiable. The idea is that
-# OptimizerInput.kwargs is editable, and these implementation flags can be added to kwargs during testing.
+# ------------------------------------------------------------------------------------------
+# NOTE: [optimizer kwarg categories]
+# We categorize optimizer kwargs as 3 types:
+#  1. optimizer-specific flags are like amsgrad or rho or beta, flags that are specific to
+#     algorithms and thus only show up for certain optimizers. There are many of these, so I
+#     do not bother gathering them all and listing them here. The converse to these would be
+#     global flags that every optimizer ideally _should_ support. We break global flags into
+#     2 further categories and list them all below.
+#  2. global-friendly = ["lr", "weight_decay", "maximize", "capturable"]
+#     global-friendly flags are global flags who play nicely with all other global flags,
+#     i.e., are mutually exclusive in function. This means that any pair of the following
+#     flags can be toggled at once (e.g., maximize and weight_decay). Furthermore, any of the
+#     following flags theoretically can be enabled with ANY other global flag, including the
+#     cliquey ones (e.g, capturable and foreach).
+#  3. global-cliquey = ["foreach", "fused", "differentiable"]
+#     global-cliquey flags are global flags that do NOT coexist with other cliquey flags,
+#     usually because they contradict each other in function. For example, one should not flip
+#     both foreach AND fused to True, because they are two differing performance optimizations
+#     in which you can only opt into one.
+#
+# The following optim_inputs_func_* sampling functions only return constructor combinations of
+# optimizer-specific and global-friendly flags. This is because we are confident they would mesh
+# well with additional kwargs. On the flip side of the same coin, we reserve setting the
+# global-cliquey flags to individual tests and fully expect tests to edit OptimizerInput.kwargs.
 
 
 def optim_inputs_func_adadelta():
