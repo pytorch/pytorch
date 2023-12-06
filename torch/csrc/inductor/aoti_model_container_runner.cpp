@@ -21,6 +21,13 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
       model_so_->sym("AOTInductorModelContainerGetNumOutputs"));
   run_func_ = reinterpret_cast<decltype(run_func_)>(
       model_so_->sym("AOTInductorModelContainerRun"));
+  update_inactive_constant_buffer_func_ =
+      reinterpret_cast<decltype(update_inactive_constant_buffer_func_)>(
+          model_so_->sym(
+              "AOTInductorModelContainerUpdateInactiveConstantBuffer"));
+  swap_constant_buffer_func_ =
+      reinterpret_cast<decltype(swap_constant_buffer_func_)>(
+          model_so_->sym("AOTInductorModelContainerSwapConstantBuffer"));
   get_call_spec_func_ = reinterpret_cast<decltype(get_call_spec_func_)>(
       model_so_->sym("AOTInductorModelContainerGetCallSpec"));
 
@@ -59,6 +66,16 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run(
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
       output_handles.data(), output_handles.size());
+}
+
+void AOTIModelContainerRunner::update_inactive_constant_buffer(
+    const TensorConstantMap& const_map) {
+  AOTI_RUNTIME_ERROR_CODE_CHECK(update_inactive_constant_buffer_func_(
+      container_handle_, (AOTInductorConstantMapHandle)&const_map));
+}
+
+void AOTIModelContainerRunner::swap_constant_buffer() {
+  AOTI_RUNTIME_ERROR_CODE_CHECK(swap_constant_buffer_func_(container_handle_));
 }
 
 std::vector<const char*> AOTIModelContainerRunner::get_call_spec() {
