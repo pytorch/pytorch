@@ -127,6 +127,15 @@ class TuningContext {
     void SetMaxTuningDurationMs(int max_duration_ms);
     int GetMaxTuningDurationMs() const;
 
+    void SetMaxTuningIterations(int max_iter);
+    int GetMaxTuningIterations() const;
+
+    void SetMaxWarmupDurationMs(int max_duration_ms);
+    int GetMaxWarmupDurationMs() const;
+
+    void SetMaxWarmupIterations(int max_iter);
+    int GetMaxWarmupIterations() const;
+
     void EnableTunableOpAndTuning();
     void DisableTunableOpAndTuning();
 
@@ -149,6 +158,9 @@ class TuningContext {
     bool enable_;
     bool tuning_enable_;
     int max_tuning_duration_ms_;
+    int max_tuning_iterations_;
+    int max_warmup_duration_ms_;
+    int max_warmup_iterations_;
     mutable TuningResultsManager manager_;
     mutable c10::once_flag manager_init_once_;
     TuningResultsValidator validator_;

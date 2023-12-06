@@ -146,8 +146,7 @@ class TunableOp {
     }
 
   private:
-    static void WarmUp(Callable<ParamsT>& op, const ParamsT* param) {
-      constexpr const int num_iter = 1;
+    static void WarmUp(Callable<ParamsT>& op, const ParamsT* param, int num_iter) {
       for (int i = 0; i < num_iter; i++) {
         TORCH_CHECK(op(param) == OK);
       }
@@ -177,13 +176,10 @@ class TunableOp {
       TuningContext* ctx = getTuningContext();
       auto op_sig = Signature();
       auto params_sig = params->Signature();
-      TUNABLE_LOG("finding fastest for ", op_sig, '(', params_sig, ')');
+      TUNABLE_LOG("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", candidates.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       int id = -1;
       std::string id_name = "";
-
-      constexpr const int max_tuning_iter = 100;
-      constexpr const int approx_num_iter = 3;
 
       for (size_t i = 0; i < candidates.size(); i++) {
         auto& candidate = const_cast<Callable<ParamsT>&>(candidates[i]);
@@ -193,18 +189,63 @@ class TunableOp {
           continue;
         }
 
-        WarmUp(candidate, params);
-
+        // do 1 initial tuning in case there is overhead
+        WarmUp(candidate, params, 1);
+        // collect a small profile
+        constexpr const int approx_num_iter = 3;
         auto approx_duration = Profile(candidate, params, approx_num_iter);
-        if (approx_duration > 2 * min_duration_ms) {
+        // bail if too slow
+        if (approx_duration > 3 * min_duration_ms) {
           TUNABLE_LOG("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
         }
-        int tuning_iter = std::max(1, int(std::min(double(max_tuning_iter), ctx->GetMaxTuningDurationMs() / approx_duration)));
 
+        // for warmup does user set max duration, max iters, or both?
+        double max_warmup_duration = ctx->GetMaxWarmupDurationMs();
+        int max_warmup_iter = ctx->GetMaxWarmupIterations();
+        int warmup_iter = 1; // default
+        if (max_warmup_duration > 0) {
+          int duration_iters = max_warmup_duration / approx_duration;
+          if (max_warmup_iter > 0) {
+            warmup_iter = std::min(max_warmup_iter, duration_iters);
+          }
+          else {
+            warmup_iter = duration_iters;
+          }
+        }
+        else if (max_warmup_iter > 0) {
+          warmup_iter = max_warmup_iter;
+        }
+
+        // for tuning does user set max duration, max iters, or both?
+        double max_tuning_duration = ctx->GetMaxTuningDurationMs();
+        int max_tuning_iter = ctx->GetMaxTuningIterations();
+        int tuning_iter = 100; // default
+        if (max_tuning_duration > 0) {
+          int duration_iters = max_tuning_duration / approx_duration;
+          if (max_tuning_iter > 0) {
+            tuning_iter = std::min(max_tuning_iter, duration_iters);
+          }
+          else {
+            tuning_iter = duration_iters;
+          }
+        }
+        else if (max_tuning_iter > 0) {
+          tuning_iter = max_tuning_iter;
+        }
+
+        // do the full warmup followed by tuning
+        double warmup_ms = warmup_iter * approx_duration;
+        double tuning_ms = tuning_iter * approx_duration;
+        TUNABLE_LOG("├──tuning using "
+            "warmup iters ", warmup_iter, " [", warmup_ms, " ms] "
+            "and tuning iters ", tuning_iter, " [", tuning_ms, " ms] ",
+            "instance id=", i, ", ", op_sig, "(", params_sig, ") ", op_names_[i]);
+        WarmUp(candidate, params, warmup_iter);
         auto duration_ms = Profile(candidate, params, tuning_iter);
         if (duration_ms < min_duration_ms) {
-          TUNABLE_LOG("├──found better instance, new best id=", i, ", old id=", id, ". " , duration_ms, "ms, ", tuning_iter, " iters. ", op_names_[i]);
+          TUNABLE_LOG("├──found better instance, ",
+              "new best id=", i, ", old id=", id, ". " , duration_ms, "ms. ", op_names_[i]);
           min_duration_ms = duration_ms;
           id = static_cast<int>(i);
           id_name = op_names_[i];

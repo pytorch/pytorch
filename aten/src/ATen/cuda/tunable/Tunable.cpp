@@ -286,7 +286,10 @@ TuningStatus TuningResultsValidator::ValidatePyTorchVersion(const std::string& v
 TuningContext::TuningContext() :
     enable_{false},
     tuning_enable_{false},
-    max_tuning_duration_ms_{},
+    max_tuning_duration_ms_{0},
+    max_tuning_iterations_{0};
+    max_warmup_duration_ms_{0};
+    max_warmup_iterations_{0};
     filename_{},
     results_count_from_input_file_{0}
 {
@@ -354,6 +357,42 @@ int TuningContext::GetMaxTuningDurationMs() const {
     return atoi(env);
   }
   return max_tuning_duration_ms_;
+}
+
+void TuningContext::SetMaxTuningIterations(int max_iter) {
+  max_tuning_iterations_ = iter;
+}
+
+int TuningContext::GetMaxTuningIterations() const {
+  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS");
+  if (env != nullptr) {
+    return atoi(env);
+  }
+  return max_tuning_iterations_;
+}
+
+void TuningContext::SetMaxWarmupDurationMs(int max_duration_ms) {
+  max_warmup_duration_ms_ = max_duration_ms;
+}
+
+int TuningContext::GetMaxWarmupDurationMs() const {
+  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_WARMUP_DURATION_MS");
+  if (env != nullptr) {
+    return atoi(env);
+  }
+  return max_warmup_duration_ms_;
+}
+
+void TuningContext::SetMaxWarmupIterations(int max_iter) {
+  max_warmup_iterations_ = iter;
+}
+
+int TuningContext::GetMaxWarmupIterations() const {
+  static const char *env = std::getenv("PYTORCH_TUNABLEOP_MAX_WARMUP_ITERATIONS");
+  if (env != nullptr) {
+    return atoi(env);
+  }
+  return max_warmup_iterations_;
 }
 
 void TuningContext::EnableTunableOpAndTuning() {
