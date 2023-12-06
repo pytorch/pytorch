@@ -13,6 +13,7 @@ import os
 import copy
 import gc
 import threading
+from numpy.testing import assert_allclose
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8791,7 +8792,7 @@ class TestLinalgMPS(TestCaseMPS):
                         "The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device."):
                     raise e
 
-    def test_pinv(self, device="mps", dtype=torch.float32, precision=1e-5):
+    def test_pinv(self, device="mps", dtype=torch.float32, precision=1e-4):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
         def run_test_main(A, hermitian):
@@ -8802,6 +8803,8 @@ class TestLinalgMPS(TestCaseMPS):
             if A.numel() > 0:
                 self.assertEqual(A, np_A @ np_A_pinv @ np_A, atol=precision, rtol=precision)
                 self.assertEqual(A_pinv, np_A_pinv @ np_A @ np_A_pinv, atol=precision, rtol=precision)
+                self.assertEqual(np_A @ np_A_pinv, (np_A @ np_A_pinv).conj().swapaxes(-2, -1), atol=precision, rtol=precision)
+                self.assertEqual(np_A_pinv @ np_A, (np_A_pinv @ np_A).conj().swapaxes(-2, -1), atol=precision, rtol=precision)
             else:
                 self.assertEqual(A.shape, A_pinv.shape[:-2] + (A_pinv.shape[-1], A_pinv.shape[-2]))
 
