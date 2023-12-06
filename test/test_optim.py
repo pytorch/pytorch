@@ -315,6 +315,38 @@ class TestOptimRenewed(TestCase):
 
 
     @optims(optim_db, dtypes=[torch.float32])
+    def test_step_is_noop_when_params_have_no_grad(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func()
+        params = [
+            torch.randn(2, 3, requires_grad=False, device=device, dtype=dtype)
+            for _ in range(2)]
+        old_params = [p.clone().detach() for p in params]
+
+        def closure():
+            return torch.tensor([1], device=device, dtype=dtype)
+
+        for optim_input in optim_inputs:
+            kwargs = optim_input.kwargs
+            if kwargs.get("capturable", False) and device == 'cpu':
+                # capturable is not supported on CPU
+                continue
+
+            flags = [None]
+            if str(device) == "cuda":
+                if "foreach" in optim_info.supported_impls:
+                    flags.append("foreach")
+                if "fused" in optim_info.supported_impls:
+                    flags.append("fused")
+            for flag in flags:
+                if flag is not None:
+                    kwargs[flag] = True
+                optimizer = optim_cls(params, **optim_input.kwargs)
+                optimizer.step(closure)
+                self.assertEqual(old_params, params)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
     def test_step_is_noop_for_empty_grads(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
         optim_inputs = optim_info.optim_inputs_func()

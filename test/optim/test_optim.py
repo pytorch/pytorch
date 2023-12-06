@@ -1451,32 +1451,6 @@ class TestOptim(TestCase):
             lambda: Adadelta([{'params': param}, {'params': param}])
         )
 
-    def test_step_is_noop_when_params_have_no_grad(self):
-        params = [torch.randn(2, 3, requires_grad=False) for _ in range(2)]
-        old_params = [p.clone().detach() for p in params]
-
-        def closure():
-            return torch.tensor([1])
-
-        optimizer_list = [
-            Adadelta,
-            AdamW,
-            Adam,
-            RAdam,
-            NAdam,
-            Adagrad,
-            Adamax,
-            RMSprop,
-            SGD,
-            SparseAdam,
-            ASGD,
-            LBFGS
-        ]
-        for optim_ctr in optimizer_list:
-            opt = optim_ctr(params, lr=0.1)
-            opt.step(closure)
-        self.assertEqual(old_params, params)
-
 
     def test_fused_optimizer_does_not_step_if_foundinf(self):
         if not torch.cuda.is_available():
