@@ -858,13 +858,13 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     w/r/t different shape_envs, clearing, etc.
     """
     tensor_source: Source = None
-    source_to_symint_node_cache : Dict["TensorPropertySource", SymInt] = None
+    source_to_symbol_cache : Dict["TensorPropertySource", "sympy.Expr"] = None
 
     def __post_init__(self):
         # The None default is annoying, but required because of dataclass limitations
         assert self.tensor_source is not None
-        if not self.source_to_symint_node_cache:
-            object.__setattr__(self, 'source_to_symint_node_cache', {})
+        if not self.source_to_symbol_cache:
+            object.__setattr__(self, 'source_to_symbol_cache', {})
 
 
 @dataclass(frozen=True)
@@ -2070,7 +2070,7 @@ class ShapeEnv:
         size = []
         for i, val in enumerate(tensor_size):
             size.append(self.create_symbol(
-                val, TensorPropertySource(source, TensorProperty.SIZE, i), dynamic_dims[i], constraint_dims[i]
+                val, TensorPropertySource(source, TensorProperty.SIZE, i), dynamic_dims[i], constraint_dims[i], symbolic_context=symbolic_context
             ))
         return size
 
@@ -2229,6 +2229,7 @@ class ShapeEnv:
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
                     dynamic_dim=dynamic_strides_offset,
                     constraint_dim=None,
+                    symbolic_context=symbolic_context,
                 )
         assert all(x is not None for x in stride)
 
@@ -2255,6 +2256,7 @@ class ShapeEnv:
                 TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
                 dynamic_dim=dynamic_strides_offset,
                 constraint_dim=None,
+                symbolic_context=symbolic_context,
             ),
             hint=ex_storage_offset,
             source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), symbolic_context=symbolic_context)
@@ -2287,19 +2289,12 @@ class ShapeEnv:
         else:
             fx_node = None
 
-        # see note [Tensor Fakification and Symbol Caching]
-        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
-            if source_name in symbolic_context.source_to_symint_node_cache:
-                return symbolic_context.source_to_symint_node_cache[source_name]
-
         if isinstance(sym, sympy.Integer):
             if hint is not None:
                 assert int(sym) == hint
             out = int(sym)
         else:
             out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
-        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
-            symbolic_context.source_to_symint_node_cache[source_name] = out
         return out
 
     @record_shapeenv_event()
@@ -2375,7 +2370,7 @@ class ShapeEnv:
 
         # We don't want to specialize zero one val for unspecified symbol
         # so that we can always get a new symbol despite val.
-        return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None, do_not_specialize_zero_one=True)
+        return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None, do_not_specialize_zero_one=True, symbolic_context=None)
 
     @record_shapeenv_event()
     def create_symbol(
@@ -2386,7 +2381,14 @@ class ShapeEnv:
         constraint_dim: DimConstraint = None,  # NB: includes None
         positive: Optional[bool] = True,
         do_not_specialize_zero_one: bool = False,
+        symbolic_context=None,
     ) -> "sympy.Expr":
+        # see note [Tensor Fakification and Symbol Caching]
+        source_name = source.name()
+        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
+            if source_name in symbolic_context.source_to_symbol_cache:
+                return symbolic_context.source_to_symbol_cache[source_name]
+
         if do_not_specialize_zero_one:
             specialize_zero_one = False
         else:
@@ -2401,7 +2403,10 @@ class ShapeEnv:
             dynamic_dim = DimDynamic.DYNAMIC
 
         if dynamic_dim is DimDynamic.STATIC:
-            return sympy.Integer(val)
+            out = sympy.Integer(val)
+            if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
+                symbolic_context.source_to_symbol_cache[source_name] = out
+            return out
 
         elif dynamic_dim is DimDynamic.DUCK:
             # duck_shape can be used to globally turn off duck shaping, even
@@ -2478,6 +2483,8 @@ class ShapeEnv:
         if isinstance(r, sympy.Symbol):
             self.var_to_sources[r].append(source)
 
+        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
+            symbolic_context.source_to_symbol_cache[source_name] = r
         return r
 
     def debug_name(self, source):
