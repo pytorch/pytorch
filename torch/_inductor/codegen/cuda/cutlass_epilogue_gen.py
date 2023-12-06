@@ -494,7 +494,7 @@ class CutlassEVTEpilogueArgumentFormatter:
             from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateKernel
 
             assert isinstance(kernel, CUDATemplateKernel)
-            aux_arg_name = "aux_" + name
+            aux_arg_name = kernel.args.input_buffers[name]
             assert (
                 aux_arg_name in kernel.named_nodes
             ), f"Auxiliary argument {aux_arg_name} not found in kernel"
