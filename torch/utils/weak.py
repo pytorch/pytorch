@@ -11,7 +11,7 @@ import collections.abc as _collections_abc
 WeakRef = ref
 
 
-__all__ = ['TensorWeakRef', 'WeakIdRef', 'WeakIdKeyDictionary', 'WeakTensorKeyDictionary', '_WeakHashRef']
+__all__ = ['TensorWeakRef', 'WeakIdRef', 'WeakIdKeyDictionary', 'WeakTensorKeyDictionary']
 
 
 # This file defines a variant of WeakKeyDictionary that overrides the hashing
