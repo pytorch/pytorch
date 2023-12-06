@@ -758,6 +758,25 @@ def _get_sorted_bucket_idx_and_undo_sorted_bucket_idx(buckets):
     return sorted_bucket_idx, undo_sorted_bucket_idx
 
 
+class CustomList(list):
+    def __call__(self, x):
+        for processor in self:
+            x = processor(x)
+        return x
+
+
+def _merge_criteria_processor_list(default_list, custom_list):
+    # simplified transformers/generation/utils.py
+    if len(custom_list) == 0:
+        return default_list
+    for default in default_list:
+        for custom in custom_list:
+            if type(custom) is type(default):
+                raise ValueError()
+    default_list.extend(custom_list)
+    return default_list
+
+
 class FeedForwardLayer(nn.Module):
     def __init__(self, d_model, dim_feedforward, activation, dropout) -> None:
         super().__init__()
@@ -2643,6 +2662,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             _generator_type = type(_ for _ in ())
 
         self.assertNoUnraisable(f)
+
+    def test_merge_criteria_processor_list(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x, left, right):
+            combined = _merge_criteria_processor_list(left, right)
+            return combined(x)
+
+        l1 = CustomList([torch.nn.ReLU(), torch.nn.Sigmoid()])
+        l2 = CustomList([])
+        input = torch.randn(16)
+        result = f(input, l1, l2)
+        self.assertEqual(result, l1(input))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
+
+        cnt.clear()
+        l3 = CustomList([torch.nn.SiLU()])
+        expected = l3(l1(input))
+        result = f(input, l1, l3)
+        self.assertEqual(len(l1), 3)
+        self.assertEqual(result, expected)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 3)
 
     def test_rewrite_assert_with_msg(self):
         def f(x):

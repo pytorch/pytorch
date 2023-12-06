@@ -689,6 +689,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_dict_ops(a, b):
         tmp = {"a": a + 1, "b": b + 2}
+        assert tmp.get("zzz") is None
         v = tmp.pop("b") + tmp.get("a") + tmp.get("missing", 3) + tmp.pop("missing", 4)
         tmp.update({"d": 3})
         tmp["c"] = v + tmp["d"]
