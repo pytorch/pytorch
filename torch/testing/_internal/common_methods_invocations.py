@@ -16381,7 +16381,9 @@ op_db: List[OpInfo] = [
            # eager gather() does not support negative indices but compiled
            # gather does.
            skips=(
-               DecorateInfo(unittest.expectedFailure),
+               DecorateInfo(unittest.expectedFailure, "TestDecomp", "test_comprehensive"),
+               DecorateInfo(unittest.expectedFailure, "TestDecomp", "test_quick"),
+               DecorateInfo(unittest.expectedFailure, "TestDecomp", "test_quick_core_backward"),
             ),
            error_inputs_func=error_inputs_take),
     OpInfo('scatter',
