@@ -2070,7 +2070,11 @@ class ShapeEnv:
         size = []
         for i, val in enumerate(tensor_size):
             size.append(self.create_symbol(
-                val, TensorPropertySource(source, TensorProperty.SIZE, i), dynamic_dims[i], constraint_dims[i], symbolic_context=symbolic_context
+                val,
+                TensorPropertySource(source, TensorProperty.SIZE, i),
+                dynamic_dims[i],
+                constraint_dims[i],
+                symbolic_context=symbolic_context
             ))
         return size
 
@@ -2238,7 +2242,6 @@ class ShapeEnv:
                 sym,
                 hint=hint,
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
-                symbolic_context=symbolic_context
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
         ]
@@ -2248,18 +2251,17 @@ class ShapeEnv:
             # we computed
             assert stride_expr is not None
             sym_stride.append(self.create_symintnode(
-                stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i),
-                symbolic_context=symbolic_context))
+                stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i)))
         sym_storage_offset = self.create_symintnode(
             self.create_symbol(
                 ex_storage_offset,
                 TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
                 dynamic_dim=dynamic_strides_offset,
                 constraint_dim=None,
-                symbolic_context=symbolic_context,
+                symbolic_context=symbolic_context
             ),
             hint=ex_storage_offset,
-            source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), symbolic_context=symbolic_context)
+            source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
@@ -2272,7 +2274,6 @@ class ShapeEnv:
             *,
             hint: Optional[int],
             source: Optional[Source] = None,
-            symbolic_context: Optional[SymbolicContext] = None,
     ):
         source_name = source.name() if source else None
 
@@ -2370,7 +2371,14 @@ class ShapeEnv:
 
         # We don't want to specialize zero one val for unspecified symbol
         # so that we can always get a new symbol despite val.
-        return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None, do_not_specialize_zero_one=True, symbolic_context=None)
+        return self.create_symbol(
+            val,
+            source,
+            dynamic_dim,
+            constraint_dim,
+            positive=None,
+            do_not_specialize_zero_one=True,
+            symbolic_context=None)
 
     @record_shapeenv_event()
     def create_symbol(
@@ -2385,10 +2393,13 @@ class ShapeEnv:
     ) -> "sympy.Expr":
         # see note [Tensor Fakification and Symbol Caching]
         source_name = source.name()
-        if isinstance(symbolic_context, StatefulSymbolicContext) and id(self) not in symbolic_context.shape_env_to_source_to_symbol_cache:
+        if (isinstance(symbolic_context, StatefulSymbolicContext)
+                and id(self) not in symbolic_context.shape_env_to_source_to_symbol_cache):
             symbolic_context.shape_env_to_source_to_symbol_cache[id(self)] = {}
 
-        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name and source_name in symbolic_context.shape_env_to_source_to_symbol_cache[id(self)]:
+        if (isinstance(symbolic_context, StatefulSymbolicContext)
+                and source_name
+                and (source_name in symbolic_context.shape_env_to_source_to_symbol_cache[id(self)])):
             return symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name]
 
         if do_not_specialize_zero_one:
