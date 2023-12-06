@@ -64,6 +64,17 @@ ignored_torch_name_rule_set = {
     "torch.cuda.graphs.graph",
     "torch.device",  # as constant folding function
     "torch.sparse.check_sparse_tensor_invariants",
+    "torch.onnx._internal.fx.patcher.ONNXTorchPatcher",
+    "torch.jit.strict_fusion",
+    "torch.overrides.BaseTorchFunctionMode",
+    "torch.jit._script.RecursiveScriptClass",
+    "torch._jit_internal._IgnoreContextManager",
+    "torch.distributed.rpc.server_process_global_profiler._server_process_global_profile",
+    "torch.overrides.TorchFunctionMode",
+    "torch.jit._ir_utils._InsertPoint",
+    "torch.onnx._internal.diagnostics.infra.context.DiagnosticContext",
+    "torch.distributed._device_mesh.DeviceMesh",
+    "torch.distributed.autograd.context",
 }
 
 

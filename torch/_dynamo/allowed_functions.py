@@ -232,7 +232,7 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
             "torch._functorch.fx_minifier",
             "torch.autograd.profiler_util",
             "torch.autograd.profiler",
-            "torch._jit_internal",
+            # "torch._jit_internal",
             "torch._library",
             "torch._lobpcg",
             "torch._logging",
@@ -243,14 +243,22 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
             "torch._subclasses",
             "torch._tensor",
             "torch._tensor_str",
-            "torch._utils",
+            # "torch._utils",
             "torch._utils_internal",
             "torch._vmap_internals",
             "torch.compiler",
-            "torch.distributed",
+            "torch.distributed.fsdp.",
+            "torch.distributed._tensor.",
+            # Inline through the ActivationWrapper in
+            # torch.distributed.algorithms._checkpoint.checkpoint_wrapper. This
+            # nn module calls torch.utils.checkpoint internally. If Dynamo does
+            # not trace this, AOT Autograd will try to trace this and can cause
+            # issues observed in
+            # https://github.com/pytorch/pytorch/issues/108269
+            "torch.distributed.algorithms.",
             "torch.export",
             "torch.hub",
-            "torch.jit",
+            # "torch.jit",
             "torch.library",
             "torch.masked.maskedtensor",
             "torch.nn.init",
@@ -258,8 +266,8 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
             "torch.nn.parallel",
             "torch.nn.utils",
             "torch.multiprocessing",
-            "torch.onnx",
-            "torch.overrides",
+            # "torch.onnx",
+            # "torch.overrides",
             "torch.package",
             "torch.profiler",
             "torch.serialization",
