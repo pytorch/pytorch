@@ -18,7 +18,7 @@ def get_disabled_issues() -> List[str]:
     return issue_numbers
 
 
-SLOW_TESTS_FILE = ".pytorch-slow-tests.json"
+SLOW_TESTS_FILE = ".pytorch-slow-tests.json?versionId=_HvSWCz2re8BPLN3IA5V8WFfzuVhz1bd"
 DISABLED_TESTS_FILE = ".pytorch-disabled-tests.json"
 ADDITIONAL_CI_FILES_FOLDER = pathlib.Path(".additional_ci_files")
 TEST_TIMES_FILE = "test-times.json"
@@ -76,7 +76,7 @@ def fetch_and_cache(
 def get_slow_tests(
     dirpath: str, filename: str = SLOW_TESTS_FILE
 ) -> Optional[Dict[str, float]]:
-    url = "https://ossci-metrics.s3.amazonaws.com/slow-tests.json"
+    url = "https://ossci-metrics.s3.amazonaws.com/slow-tests.json?versionId=_HvSWCz2re8BPLN3IA5V8WFfzuVhz1bd"
     try:
         return fetch_and_cache(dirpath, filename, url, lambda x: x)
     except Exception:
@@ -116,7 +116,7 @@ def get_disabled_tests(
         return disabled_test_from_issues
 
     try:
-        url = "https://ossci-metrics.s3.amazonaws.com/disabled-tests-condensed.json"
+        url = "https://ossci-metrics.s3.amazonaws.com/disabled-tests-condensed.json?versionId=aS7jZ.B9XsFXjl9jJitF67RK.omIxSbr"
         return fetch_and_cache(dirpath, filename, url, process_disabled_test)
     except Exception:
         print("Couldn't download test skip set, leaving all tests enabled...")
