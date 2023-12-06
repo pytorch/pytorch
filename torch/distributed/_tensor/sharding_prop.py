@@ -41,6 +41,9 @@ class ShardingPropagator:
         # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
         self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
         self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding_non_cached)  # type: ignore[method-assign]
+        self._implicit_dynamic_shape_ops = {
+            aten.native_layer_norm.default,
+        }
 
     def register_sharding_prop_rule(
         self,
@@ -157,7 +160,14 @@ class ShardingPropagator:
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
         # and tracing does not need to be as fast as eagermode DTensor usages.
-        if op_info.schema.has_symints:
+        # One exception is implicit dynamic shape ops like native_layer_norm. When weight
+        # and bias are not None, the dynamic shape characteristic can be captured; when
+        # weight and bias are None, the dynamic shape characteristic cannot be captured
+        # because the not-None input args only have static shape.
+        if (
+            op_info.schema.has_symints
+            or op_info.schema.op in self._implicit_dynamic_shape_ops
+        ):
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
             output_sharding = self.propagate_op_sharding(op_info.schema)
