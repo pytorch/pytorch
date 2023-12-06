@@ -218,7 +218,15 @@ class TestPoitwiseOps(torch.nn.Module):
 
 @requires_cuda()
 @torch._inductor.config.patch(
-    post_grad_fusion_options={"group_linear": {"require_fbgemm": True}}
+    pre_grad_fusion_options={
+        "batch_linear": {},
+        "batch_linear_lhs": {},
+        "batch_layernorm": {},
+        "batch_tanh": {},
+        "batch_relu": {},
+        "batch_sigmoid": {},
+    },
+    post_grad_fusion_options={"group_linear": {"require_fbgemm": True}},
 )
 class TestGroupBatchFusion(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
@@ -434,7 +442,7 @@ class TestBMMFusionModule(torch.nn.Module):
 
 @requires_cuda()
 @torch._inductor.config.patch(
-    post_grad_fusion_options={"batch_linear": {"require_fbgemm": False}}
+    post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
 )
 class TestPostGradBatchLinearFusion(TestCase):
     def test_batch_linear_post_grad_fusion(self):
