@@ -4,6 +4,7 @@ with test_functionalization_with_native_python_assertion)
 """
 
 # Owner(s): ["module: dynamo"]
+import math
 import unittest
 from typing import List, Set
 import operator
@@ -13,12 +14,11 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch.export import export
-from torch._export.passes import (
-    ReplaceViewOpsWithViewCopyOpsPass,
-)
+from torch._export.pass_base import _ExportPassBase
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     is_view_op,
     get_view_copy_of_view_op,
+    ReplaceViewOpsWithViewCopyOpsPass,
 )
 from torch._export.passes.functionalize_side_effectful_ops_pass import (
     _FunctionalizeSideEffectfulOpsPass,
@@ -338,6 +338,17 @@ class TestPasses(TestCase):
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
         ).run(gm.code)
+
+    def test_math_ops(self):
+        def func(x):
+            return (
+                torch.tensor([math.ceil(x.item())]),
+                torch.tensor([math.floor(x.item())]),
+            )
+
+        x = torch.randn(1, dtype=torch.float32)
+        ep = torch.export.export(func, args=(x,))
+        _ExportPassBase()(ep.graph_module)
 
 
 if __name__ == '__main__':
