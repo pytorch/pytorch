@@ -232,6 +232,12 @@ extern "C" int run_standalone(uint64_t seed) {
     std::cout << "Calling Kernel as {{test_call_statement}};" << std::endl;
     workspace_size_ptr = nullptr;
     {{test_call_statement}};
+    cudaError_t result = cudaDeviceSynchronize();
+    if (result != cudaSuccess) {
+      std::cerr << "Device synchronize failed with error "
+        << cudaGetErrorString(result) << std::endl;
+      return result;
+    }
     return 0;
 }
 
