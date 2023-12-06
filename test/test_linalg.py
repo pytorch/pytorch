@@ -41,7 +41,6 @@ if TEST_SCIPY:
     import scipy
 
 
-@unittest.skipIf(IS_ARM64, "Issue with numpy version on arm")
 class TestLinalg(TestCase):
     def setUp(self):
         super(self.__class__, self).setUp()
