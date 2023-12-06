@@ -68,7 +68,7 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
     arg_type_check_fns = {
         "t": lambda x: isinstance(x, torch.Tensor) and not isinstance(x, NestedTensor),
         "jt": lambda x: isinstance(x, NestedTensor)
-        and x._lengths is None,  # ops with "jt" require contiguous JT only
+        and x._lengths is None and x._ragged_idx == 1,  # ops with "jt" require contiguous JT only
         "jt_all": lambda x: isinstance(
             x, NestedTensor
         ),  # ops with "jt_all" can accept all kinds of JT
@@ -90,9 +90,16 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
             continue
 
         if not arg_type_check_fns[normalized_arg_type](args[i]):
+            type_to_desc = {
+                "t": "tensor",
+                "jt": "contiguous jagged layout NestedTensor",
+                "jt_all": "jagged layout NestedTensor",
+                "any": "<any type>",
+            }
+
             raise ValueError(
-                f"NestedTensor {func.__name__}({schema_str}): {name} should be of "
-                f"type {arg_type}, but got: {type(args[i])}"
+                f"NestedTensor {func.__name__}({schema_str}): expected {name} to be a "
+                f"{type_to_desc[arg_type]}"
             )
 
 
@@ -174,6 +181,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum([isinstance(x, torch.Tensor) for x in args])
         if num_tensor_args == 1:
+            check_schema("self: jt", func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
         elif num_tensor_args == 2:
             check_schema("lhs: any, rhs: any", func, *args, **kwargs)
@@ -263,16 +271,6 @@ def jagged_torch_function(func, *args, **kwargs):
     # Dispatch to the correct implementation here
     if func is torch._C._nn.scaled_dot_product_attention:
         return jagged_scaled_dot_product_attention(*args, **kwargs)
-
-    # Handle contiguous() here because it's CompositeImplicit.
-    if func.__name__ == "contiguous":
-        if args[0]._ragged_idx != 1:
-            raise RuntimeError(
-                "contiguous(): not supported on a jagged layout nested tensor with "
-                "transposed ragged dim"
-            )
-
-        # purposefully fall-through to NotImplemented
 
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
