@@ -143,8 +143,8 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
           "ROCBLAS_VERSION",
           [rocblas_version]() { return rocblas_version; },
           [rocblas_version](auto&& k) { return rocblas_version == k ? OK : FAIL; });
-#endif
     }
+#endif
 
 #if defined(USE_ROCM) && ROCM_VERSION >= 50700
     // disallow tuning of hipblaslt with c10::complex
@@ -166,8 +166,8 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
           "HIPBLASLT_VERSION",
           [hipblaslt_version]() { return hipblaslt_version; },
           [hipblaslt_version](auto&& k) { return hipblaslt_version == k ? OK : FAIL; });
-#endif
     }
+#endif
   }
 
   const GemmParams<T>* PreTuning(const GemmParams<T>* params) override {
