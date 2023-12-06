@@ -8411,6 +8411,19 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_list_iterator_contains(self):
+        def fn(x):
+            it = iter(["my_weight", "not_my_weight"])
+            next(it)
+            if "my_weight" in it:
+                return x + 2
+            return x + 1
+
+        x = torch.zeros(3)
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+
+        self.assertEqual(fn(x), compiled_fn(x))
+
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
 
