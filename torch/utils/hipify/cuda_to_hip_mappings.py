@@ -4,7 +4,7 @@ import os
 from .constants import (API_BLAS, API_C10, API_CAFFE2, API_DRIVER, API_FFT,
                         API_PYTORCH, API_RAND, API_ROCTX, API_RTC, API_RUNTIME,
                         API_SPECIAL, API_ROCMSMI, CONV_CACHE, CONV_CONTEXT, CONV_D3D9,
-                        CONV_D3D10, CONV_D3D11, CONV_DEF, CONV_DEVICE,
+                        API_PYT_EXT, CONV_D3D10, CONV_D3D11, CONV_DEF, CONV_DEVICE,
                         CONV_DEVICE_FUNC, CONV_EGL, CONV_ERROR, CONV_EVENT,
                         CONV_EXEC, CONV_GL, CONV_GRAPHICS, CONV_INCLUDE,
                         CONV_INCLUDE_CUDA_MAIN_H, CONV_INIT, CONV_JIT,
@@ -631,6 +631,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("nvtx3/nvtx3.hpp", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
         ("nvToolsExt.h", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
         ("nvml.h", ("rocm_smi/rocm_smi.h", CONV_INCLUDE, API_ROCMSMI)),
+        ("tensorpipe/tensorpipe_cuda.h", ("tensorpipe/tensorpipe_hip.h", CONV_INCLUDE, API_PYT_EXT)),
     ]
 )
 
