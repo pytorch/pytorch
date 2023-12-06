@@ -10,6 +10,8 @@ import pandas as pd
 import torch
 import torch.multiprocessing as mp
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 class FrontendWorker(mp.Process):
     """
@@ -40,6 +42,7 @@ class FrontendWorker(mp.Process):
 
         for i in range(self.num_iters + 1):
             response, request_time = self.response_queue.get()
+            print(f"Got {i}")
             if warmup_response_time is None:
                 self.warmup_event.set()
                 warmup_response_time = time.time() - request_time
@@ -59,7 +62,7 @@ class FrontendWorker(mp.Process):
 
     def _run_gpu_utilization(self):
         """
-        This function will poll nvidi-smi for GPU utilization every 100ms to
+        This function will poll nvidia-smi for GPU utilization every 100ms to
         record the average GPU utilization.
         """
 
@@ -98,6 +101,7 @@ class FrontendWorker(mp.Process):
             self.batch_size, 3, 250, 250, requires_grad=False, pin_memory=True
         )
         self.request_queue.put((fake_data, time.time()))
+        print("Sent the 0th request")
         self.warmup_event.wait()
 
         # Send fake data
@@ -123,7 +127,7 @@ class FrontendWorker(mp.Process):
         gpu_utilization_thread.join()
 
 
-class BackendWorker(mp.Process):
+class BackendWorker:
     """
     This worker will take tensors from the request queue, do some computation,
     and then return the result back in the response queue.
@@ -174,7 +178,15 @@ class BackendWorker(mp.Process):
             self.metrics_dict["m_compile_time"] = end_compile_time - start_compile_time
         return m
 
-    def run(self):
+    def model_predict(self, model, data, request_time):
+        with torch.no_grad():
+            data = data.to(self.device, non_blocking=True)
+            out = model(data)
+        self.response_queue.put((out, request_time))
+
+    async def run(self):
+        pool = ThreadPoolExecutor(max_workers=1)
+
         while True:
             try:
                 data, request_time = self.request_queue.get(timeout=10)
@@ -185,10 +197,7 @@ class BackendWorker(mp.Process):
                 model = self._setup()
                 self._setup_complete = True
 
-            with torch.no_grad():
-                data = data.to(self.device, non_blocking=True)
-                out = model(data)
-            self.response_queue.put((out, request_time))
+            asyncio.get_running_loop().run_in_executor(pool, self.model_predict, model, data, request_time)
 
 
 if __name__ == "__main__":
@@ -237,10 +246,9 @@ if __name__ == "__main__":
         )
 
         frontend.start()
-        backend.start()
+        asyncio.run(backend.run())
 
         frontend.join()
-        backend.join()
 
         metrics_dict = {k: [v] for k, v in metrics_dict._getvalue().items()}
         output = pd.DataFrame.from_dict(metrics_dict, orient="columns")
