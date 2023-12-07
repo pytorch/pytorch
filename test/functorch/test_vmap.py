@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
     markDynamoStrictTest,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
@@ -5082,7 +5083,7 @@ class TestRandomness(TestCase):
 
 @markDynamoStrictTest
 class TestTransformFailure(TestCase):
-    @xfailIfTorchDynamo
+    @skipIfTorchDynamo
     @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
     def test_fails_with_autograd_function(self, device, transform):
         if (device == 'cpu' and transform in ['grad', 'vmap'] and
