@@ -196,11 +196,11 @@ class SpeculationLog:
             and entry.lineno == lineno
         ), textwrap.dedent(
             f"""
-                {self.__class__.__name__} diverged at {self.index} of {len(self.entries)}:
-                - Run1: {entry.filename}:{entry.lineno} (ip={entry.instruction_pointer})
-                - Run2: {filename}:{lineno} (ip={instruction_pointer})
-                Please submit a bug report.
-                """
+            SpecuationLog diverged at {self.index} of {len(self.entries)}:
+            - Run1: {entry.filename}:{entry.lineno} (ip={entry.instruction_pointer})
+            - Run2: {filename}:{lineno} (ip={instruction_pointer})
+            Please submit a bug report.
+            """
         )
         return entry
 
