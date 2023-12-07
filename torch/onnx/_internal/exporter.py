@@ -681,13 +681,18 @@ class ONNXProgram:
         self._export_exception = export_exception
 
     def __call__(
-        self, *args: Any, options: Optional[ONNXRuntimeOptions] = None, **kwargs: Any
+        self,
+        *args: Any,
+        model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],
+        options: Optional[ONNXRuntimeOptions] = None,
+        **kwargs: Any,
     ) -> Any:
         """Runs the ONNX model using ONNX Runtime
 
         Args:
             args: The positional inputs to the model.
             kwargs: The keyword inputs to the model.
+            model: The PyTorch model to fetch state from.
             options: The options to use for running the model with ONNX Runtime.
 
         Returns:
@@ -695,7 +700,7 @@ class ONNXProgram:
         """
         import onnxruntime  # type: ignore[import]
 
-        onnx_input = self.adapt_torch_inputs_to_onnx(*args, **kwargs)
+        onnx_input = self.adapt_torch_inputs_to_onnx(*args, model=model, **kwargs)
         options = options or ONNXRuntimeOptions()
         providers = options.execution_providers or onnxruntime.get_available_providers()
         onnx_model = self.model_proto.SerializeToString()
@@ -804,6 +809,9 @@ class ONNXProgram:
     def adapt_torch_inputs_to_onnx(
         self,
         *model_args,
+        model: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,
         **model_kwargs,
     ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
@@ -820,6 +828,7 @@ class ONNXProgram:
         This method replays the adapting steps recorded during export.
 
         Args:
+            model: The PyTorch model to get extra state from. If not specified, the model used during export is used.
             model_args: The PyTorch model inputs.
             model_kwargs: The PyTorch model keyword inputs.
 
@@ -851,18 +860,20 @@ class ONNXProgram:
             >>> onnx_program = torch.onnx.dynamo_export(func_with_nested_input_structure, x_dict, y_tuple)
             >>> print(x_dict, y_tuple)
             {'a': tensor(1.)} (tensor(2.), (tensor(3.), tensor(4.)))
-            >>> print(onnx_program.adapt_torch_inputs_to_onnx(x_dict, y_tuple))
+            >>> print(onnx_program.adapt_torch_inputs_to_onnx(x_dict, y_tuple, model=func_with_nested_input_structure))
             (tensor(1.), tensor(2.), tensor(3.), tensor(4.))
 
         .. warning::
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._input_adapter.apply(*model_args, **model_kwargs)
+        return self._input_adapter.apply(*model_args, model=model, **model_kwargs)
 
     @_beartype.beartype
     def adapt_torch_outputs_to_onnx(
-        self, model_outputs: Any
+        self,
+        model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],
+        model_outputs: Any,
     ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
@@ -878,6 +889,7 @@ class ONNXProgram:
         This method replays the adapting steps recorded during export.
 
         Args:
+            model: The PyTorch model to get extra state from.
             model_outputs: The PyTorch model outputs.
 
         Returns:
@@ -900,14 +912,14 @@ class ONNXProgram:
             >>> pt_output = func_returning_tuples(x, y, z)
             >>> print(pt_output)
             (tensor(3.), (tensor(5.), tensor(8.)))
-            >>> print(onnx_program.adapt_torch_outputs_to_onnx(pt_output))
+            >>> print(onnx_program.adapt_torch_outputs_to_onnx(func_returning_tuples, pt_output))
             [tensor(3.), tensor(5.), tensor(8.)]
 
         .. warning::
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._output_adapter.apply(model_outputs)
+        return self._output_adapter.apply(model, model_outputs)
 
     @_beartype.beartype
     def save(
