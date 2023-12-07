@@ -9,7 +9,7 @@ from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_optimizers import optim_db, optims, OptimizerErrorEnum
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA)
+    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS)
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestOptimRenewed(TestCase):
@@ -118,6 +118,9 @@ class TestOptimRenewed(TestCase):
                     self.assertEqual(og_p_state[k], new_p_state[k], **assert_eq_kwargs)
 
 
+<<<<<<< HEAD
+    @skipMPS  # MPS doesn't support torch.float64, see https://github.com/pytorch/pytorch/issues/115350
+=======
     def _test_derived_optimizers_mixed_device_dtype(self, device, dtype, optim_info, flag):
         """
         Similar in essence to _test_derived_optimizers above. The main difference is that
@@ -190,6 +193,7 @@ class TestOptimRenewed(TestCase):
                     self.assertEqual(og_p_state[k], actual, rtol=rtol, atol=atol)
 
 
+>>>>>>> 4c5a1413aca (Move tests depending on listed configs to OptimizerInfo)
     @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float64])
     def test_foreach_matches_forloop(self, device, dtype, optim_info):
         self._test_derived_optimizers(device, dtype, optim_info, "foreach")
