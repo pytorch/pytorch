@@ -45,6 +45,10 @@ TuningContext* getTuningContext() {
   return &tuning_context;
 }
 
+std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry) {
+  return stream << entry.id << "," << entry.time << "," << entry.doc;
+}
+
 // TuningResultsManager
 
 KernelMap TuningResultsManager::Lookup(const std::string& op_signature) {
@@ -56,40 +60,41 @@ KernelMap TuningResultsManager::Lookup(const std::string& op_signature) {
   return it->second;  // copied
 }
 
-int TuningResultsManager::Lookup(const std::string& op_signature, const std::string& params_signature) {
+ResultEntry TuningResultsManager::Lookup(const std::string& op_signature, const std::string& params_signature) {
+  static ResultEntry null_result_entry{-1,0,"null_reslt"};
   std::scoped_lock l{lock_};
   auto kernel_map_it = results_.find(op_signature);
   if (kernel_map_it == results_.cend()) {
-    return -1;
+    return null_result_entry;
   }
 
   const auto& km = kernel_map_it->second;
   auto it = km.find(params_signature);
   if (it == km.cend()) {
-    return -1;
+    return null_result_entry;
   }
   return it->second;
 }
 
 inline void TuningResultsManager::AddImpl(const std::string& op_signature,
     const std::string& params_signature,
-    int best_id,
+    ResultEntry best,
     KernelMap& kernel_map) {
   auto it = kernel_map.find(params_signature);
   if (it != kernel_map.end()) {
-    if (it->second != best_id) {
+    if (it->second.id != best.id) {
       TUNABLE_LOG(op_signature, "(", params_signature, ") already has a best kernel ",
-          "id=", it->second, " selected, want to add a different best kernel id=",best_id,
+          "id=", it->second, " selected, want to add a different best kernel ", best,
           ", the new kernel id will be ignored.");
     }
     return;
   }
 
-  TUNABLE_LOG(op_signature, "(", params_signature, ") -> ", best_id);
-  kernel_map[params_signature] = best_id;
+  TUNABLE_LOG(op_signature, "(", params_signature, ") -> ", best);
+  kernel_map[params_signature] = best;
 }
 
-void TuningResultsManager::Add(const std::string& op_signature, const std::string& params_signature, int best_id) {
+void TuningResultsManager::Add(const std::string& op_signature, const std::string& params_signature, ResultEntry best) {
   std::scoped_lock l{lock_};
 
   auto it = results_.find(op_signature);
@@ -97,7 +102,7 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
     it = results_.insert({op_signature, {}}).first;
   }
 
-  AddImpl(op_signature, params_signature, best_id, it->second);
+  AddImpl(op_signature, params_signature, best, it->second);
 }
 
 void TuningResultsManager::Delete(const std::string& op_signature, const std::string& params_signature) {
@@ -130,8 +135,8 @@ inline void TuningResultsManager::DisjointMergeImpl(
     return;
   }
 
-  for (const auto& [params_signature, best_id] : kernel_map) {
-    AddImpl(op_signature, params_signature, best_id, it->second);
+  for (const auto& [params_signature, best] : kernel_map) {
+    AddImpl(op_signature, params_signature, best, it->second);
   }
 }
 
@@ -143,7 +148,7 @@ void TuningResultsManager::Load(const std::unordered_map<std::string, KernelMap>
   }
 }
 
-std::unordered_map<std::string, KernelMap> TuningResultsManager::Dump() {
+ResultsMap TuningResultsManager::Dump() {
   std::scoped_lock l{lock_};
   return results_;
 }
@@ -456,14 +461,12 @@ void TuningContext::ReadFile(const std::string& filename) {
     while (std::getline(line_as_stream, part, ',')) {
       parts.push_back(part);
     }
-    if (parts.size() >= 3) {
-      if (parts[0] == "Validator") {
-        validators[parts[1]] = parts[2];
-        TUNABLE_LOG("Validator ", parts[1], "=", parts[2]);
-      }
-      else {
-        results[parts[0]][parts[1]] = atoi(parts[2].c_str());
-      }
+    if (parts[0] == "Validator" && parts.size() >= 3) {
+      validators[parts[1]] = parts[2];
+      TUNABLE_LOG("Validator ", parts[1], "=", parts[2]);
+    }
+    else if (parts.size() >= 5) {
+      results[parts[0]][parts[1]] = {atoi(parts[2].c_str()), atof(parts[3].c_str()), parts[4]};
     }
   }
   if (GetTuningResultsValidator().ValidateAll(validators) != FAIL) {
@@ -484,8 +487,8 @@ void TuningContext::WriteFile(const std::string& filename) {
   }
   auto results = GetTuningResultsManager().Dump();
   for (const auto& [op_sig, kernelmap] : results) {
-    for (const auto& [param_sig, index] : kernelmap) {
-      file << op_sig << "," << param_sig << "," << index << std::endl;
+    for (const auto& [param_sig, result] : kernelmap) {
+      file << op_sig << "," << param_sig << "," << result << std::endl;
     }
   }
   file.close();

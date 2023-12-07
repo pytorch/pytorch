@@ -89,9 +89,9 @@ class TunableOp {
         auto params_sig = params->Signature();
 
         // Usage is enabled, then we are free to use previous tuning result.
-        id = mgr.Lookup(op_sig, params_sig);
-        if (id > static_cast<int>(ops_.size())) {
-          TUNABLE_LOG("Invalid TunableOp kernel id for ", op_sig, ", id:", id, ", registered op:", ops_.size());
+        auto result = mgr.Lookup(op_sig, params_sig);
+        if (result.id > static_cast<int>(ops_.size())) {
+          TUNABLE_LOG("Invalid TunableOp kernel id for ", op_sig, ", id:", result.id, ", registered op:", ops_.size());
           mgr.Delete(op_sig, params_sig);
           id = -1;
         }
@@ -99,9 +99,10 @@ class TunableOp {
         // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
         if (id < 0 && ctx->IsTuningEnabled()) {
           auto maybe_proxy_params = PreTuning(params);
-          id = FindFastest(maybe_proxy_params);
+          auto result = FindFastest(maybe_proxy_params);
           PostTuning(maybe_proxy_params);
-          mgr.Add(op_sig, params_sig, id);
+          mgr.Add(op_sig, params_sig, result);
+          id = result.id;
         }
       }
       return (ops_[id < 0 ? default_id_ : id](params));
@@ -168,11 +169,11 @@ class TunableOp {
     }
 
   protected:
-    virtual int FindFastest(const ParamsT* params) {
+    virtual ResultEntry FindFastest(const ParamsT* params) {
       return FindFastestImpl(params, ops_);
     }
 
-    int FindFastestImpl(const ParamsT* params, const std::vector<Callable<ParamsT>>& candidates) {
+    ResultEntry FindFastestImpl(const ParamsT* params, const std::vector<Callable<ParamsT>>& candidates) {
       TuningContext* ctx = getTuningContext();
       auto op_sig = Signature();
       auto params_sig = params->Signature();
@@ -195,7 +196,7 @@ class TunableOp {
         constexpr const int approx_num_iter = 3;
         auto approx_duration = Profile(candidate, params, approx_num_iter);
         // bail if too slow
-        if (approx_duration > 3 * min_duration_ms) {
+        if (approx_duration > 2 * min_duration_ms) {
           TUNABLE_LOG("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
         }
@@ -253,8 +254,8 @@ class TunableOp {
       }
       TORCH_CHECK(id >= 0, "Could not find viable op");
       TUNABLE_LOG("└──found fastest with id=", id, " for ", op_sig, '(', params_sig, ") ", id_name);
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-      return id;
+      //std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      return {id, min_duration_ms, id_name};
     }
 
   private:

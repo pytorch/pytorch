@@ -38,7 +38,15 @@ enum TuningStatus {
 };
 
 // Mapping from params signature to kernel id
-typedef std::unordered_map<std::string, int> KernelMap;
+struct ResultEntry{
+  int id;
+  double time;
+  std::string doc;
+};
+
+std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry);
+
+typedef std::unordered_map<std::string, ResultEntry> KernelMap;
 typedef std::unordered_map<std::string, KernelMap> ResultsMap;
 
 struct TuningResults {
@@ -56,14 +64,16 @@ class TuningResultsManager {
 
     KernelMap Lookup(const std::string& op_signature);
 
-    int Lookup(const std::string& op_signature, const std::string& params_signature);
+    ResultEntry Lookup(const std::string& op_signature, const std::string& params_signature);
 
     inline void AddImpl(const std::string& op_signature,
         const std::string& params_signature,
-        int best_id,
+        ResultEntry best,
         KernelMap& kernel_map);
 
-    void Add(const std::string& op_signature, const std::string& params_signature, int best_id);
+    void Add(const std::string& op_signature,
+        const std::string& params_signature,
+        ResultEntry best);
 
     void Delete(const std::string& op_signature, const std::string& params_signature);
 
