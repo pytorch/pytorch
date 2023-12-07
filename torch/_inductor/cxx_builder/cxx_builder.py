@@ -281,9 +281,15 @@ def get_build_args_of_chosen_isa():
     cap = str(chosen_isa).upper()
     macros = [f"CPU_CAPABILITY={cap}", f"CPU_CAPABILITY_{cap}", f"HAVE_{cap}_CPU_DEFINITION"]
     # Add Windows support later.
-    build_flags = chosen_isa.build_arch_flags()
+    build_flags = [chosen_isa.build_arch_flags()]
 
     return macros, build_flags
+
+def get_torch_related_args():
+    from torch.utils.cpp_extension import TORCH_LIB_PATH, _TORCH_PATH 
+    libraries_dirs = [TORCH_LIB_PATH]
+    include_dirs = [os.path.join(_TORCH_PATH, 'include')]
+    return include_dirs, libraries_dirs
 
 class CxxTorchOptions(CxxOptions):
     """
@@ -307,6 +313,13 @@ class CxxTorchOptions(CxxOptions):
         macros, build_flags = get_build_args_of_chosen_isa()
         _nonduplicate_append(self._definations, macros)
         _nonduplicate_append(self._passthough_args, build_flags)
+
+        include_dirs, libraries_dirs = get_torch_related_args()
+        _nonduplicate_append(self._include_dirs, include_dirs)
+        _nonduplicate_append(self._libraries_dirs, libraries_dirs)
+
+        # cpp_prefix_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
+        # _nonduplicate_append(self._include_dirs, cpp_prefix_dir)
 
         if not _IS_WINDOWS:
             # glibcxx is not available in Windows.
@@ -403,7 +416,7 @@ class CxxBuilder:
                 self._libraries_args += f"-l{lib} "
 
         for passthough_arg in BuildOption.get_passthough_args():
-            self._passthough_parameters_args += f"{passthough_arg}"
+            self._passthough_parameters_args += f"{passthough_arg} "
 
     def get_command_line(self) -> str:
         def format_build_command(
@@ -424,7 +437,7 @@ class CxxBuilder:
                 cmd = f"{compiler} {include_dirs_args} {definations_args} {cflags_args} {sources} {ldflags_args} {libraries_args} {libraries_dirs_args} {passthougn_args} /LD /Fe{target_file}"
                 cmd = cmd.replace("\\", "\\\\")
             else:
-                cmd = f"{compiler} {include_dirs_args} {sources} {definations_args} {cflags_args} {ldflags_args} {libraries_args} {libraries_dirs_args} {passthougn_args} -o {target_file}"
+                cmd = f"{compiler} {sources} {include_dirs_args} {definations_args} {cflags_args} {ldflags_args} {libraries_args} {libraries_dirs_args} {passthougn_args} -o {target_file}"
             return cmd
 
         command_line = format_build_command(
