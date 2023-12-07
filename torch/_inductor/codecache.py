@@ -49,7 +49,7 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.cxx_builder.cxx_builder import CxxBuilder, CxxOptions
+from torch._inductor.cxx_builder.cxx_builder import CxxBuilder, CxxOptions, CxxTorchOptions
 from torch._inductor.cxx_builder.isa_help_code_store import get_x86_isa_detect_code
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
@@ -1044,20 +1044,29 @@ cdll.LoadLibrary("__lib_path__")
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
+            output_dir = os.path.dirname(input_path)
+
+            print(f"{key}, {input_path}, {output_dir}")
+
+            x86_isa_help_builder = CxxBuilder(key, [input_path], CxxTorchOptions(), output_dir)
+
+            '''
             output_path = input_path[:-3] + "so"
             build_cmd = shlex.split(
                 cpp_compile_command(
                     input_path, output_path, warning_all=False, vec_isa=self
                 )
-            )
+            )            
+            '''
             try:
                 # Check build result
-                compile_file(input_path, output_path, build_cmd)
+                # compile_file(input_path, output_path, build_cmd)
+                status, target_file = x86_isa_help_builder.build()
                 subprocess.check_call(
                     [
                         sys.executable,
                         "-c",
-                        VecISA._avx_py_load.replace("__lib_path__", output_path),
+                        VecISA._avx_py_load.replace("__lib_path__", target_file),
                     ],
                     stderr=subprocess.DEVNULL,
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
@@ -1216,6 +1225,13 @@ def pick_vec_isa() -> VecISA:
 
     return invalid_vec_isa
 
+def get_chosen_isa() -> VecISA:
+    from torch._inductor.codecache import pick_vec_isa
+    vec_isa = pick_vec_isa()
+    print("!!!! debug vec_isa: ", vec_isa)
+    return vec_isa
+
+chosen_isa = get_chosen_isa()
 
 def get_compile_only(compile_only: bool = True) -> str:
     return "-c" if compile_only else ""
@@ -1546,14 +1562,6 @@ def cpp_compile_command(
             -o {out_name}
         """,
     ).strip()
-
-def get_vec_args():
-    from torch._inductor.codecache import pick_vec_isa
-    vec_isa = pick_vec_isa()
-    print("!!!! debug vec_isa: ", vec_isa)
-    return vec_isa
-
-chosen_isa = get_vec_args()
 
 def run_command_and_check(cmd: str):
     cmd = shlex.split(cmd)

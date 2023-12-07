@@ -281,7 +281,7 @@ def get_build_args_of_chosen_isa():
     cap = str(chosen_isa).upper()
     macros = [f"CPU_CAPABILITY={cap}", f"CPU_CAPABILITY_{cap}", f"HAVE_{cap}_CPU_DEFINITION"]
     # Add Windows support later.
-    build_flags = cap.build_arch_flags()
+    build_flags = chosen_isa.build_arch_flags()
 
     return macros, build_flags
 
