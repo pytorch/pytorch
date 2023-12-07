@@ -35,7 +35,7 @@ from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.export import _create_constraint, _Dim, Constraint
+from torch.export import config, _create_constraint, _Dim, Constraint
 from torch.export.exported_program import (
     ExportedProgram,
     ModuleCallEntry,
@@ -233,7 +233,7 @@ def export__RC__(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
-    strict: bool = True,
+    strict: bool = config.strict_mode_default,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
@@ -542,7 +542,7 @@ def export(
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
     *,
-    strict: bool = True,
+    strict: bool = config.strict_mode_default,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
 
@@ -735,7 +735,7 @@ def _export(
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
     *,
-    strict: bool = True,
+    strict: bool = config.strict_mode_default,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
