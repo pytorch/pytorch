@@ -592,21 +592,25 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
             x[key] = value
         return x
 
-    def __init__(self, *args, **kw):
+    def setUp(self):
         if IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
 
+    def __init__(self, *args, **kw):
+        unittest.TestCase.__init__(self, *args, **kw)
         if IS_SANDCASTLE or IS_FBCODE:
             torch.ops.load_library(
                 "//caffe2/test/cpp/jit:test_custom_class_registrations"
             )
+        elif IS_MACOS:
+            # don't load the library, just skip the tests in setUp
+            return
         else:
             lib_file_path = find_library_location("libtorchbind_test.so")
             if IS_WINDOWS:
                 lib_file_path = find_library_location("torchbind_test.dll")
             torch.ops.load_library(str(lib_file_path))
 
-        unittest.TestCase.__init__(self, *args, **kw)
         self.reference = self._reference().copy()
 
         # A (key, value) pair not in the mapping
