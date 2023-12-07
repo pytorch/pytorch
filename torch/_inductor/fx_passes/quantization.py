@@ -96,27 +96,6 @@ dequantize_per_channel_to_bf16_clone_weight_pattern = CallFunction(
     memory_format=KeywordArg("memory_format"),
 )
 
-dequantize_qconv_pt2e_pattern = CallFunction(
-    torch.ops.onednn.qconv2d_pointwise.default,
-    KeywordArg("x"),
-    KeywordArg("x_scale"),  # x_scale
-    KeywordArg("x_zp"),  # x_zp
-    KeywordArg("packed_weight"),  # packed_weight
-    KeywordArg("w_scale"),  # w_scale
-    KeywordArg("w_zp"),  # w_zp
-    KeywordArg("b"),  # bias
-    KeywordArg("stride"),
-    KeywordArg("padding"),
-    KeywordArg("dilation"),
-    KeywordArg("groups"),
-    KeywordArg("inv_output_scale"),  # inv_output_scale = 1.0
-    KeywordArg("output_zero_point"),  # output_zero_point = 0
-    KeywordArg("output_dtype"),  # output_dtype = None
-    KeywordArg("attr"),  # attr = "none"
-    Arg(),  # scalars
-    Arg(),  # algorithm
-)
-
 
 def get_dequantize(users=1):
     return CallFunction(
@@ -552,15 +531,15 @@ def _register_quantization_unary_fusion():
         # For example: pattern1 is qconv_fp32 -> relu, pattern2 is qconv_fp32 -> relu -> quant
         conv_unary_replace_patterns = {
             UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
-                dequantize_qconv_pt2e_pattern,
+                get_dequantize(1),
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(dequantize_qconv_pt2e_pattern, aten.relu.default),
+                generate_pattern_with_unary(get_dequantize(1), aten.relu.default),
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("hardtanh", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(dequantize_qconv_pt2e_pattern, aten.hardtanh.default),
+                generate_pattern_with_unary(get_dequantize(1), aten.hardtanh.default),
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("hardswish", [], ""): generate_pattern_with_output_quant(
@@ -583,10 +562,10 @@ def _register_quantization_unary_fusion():
         # Priority 2 to match: QConv2d Unary pattern with fp32/bfloat16 output
         conv_unary_replace_float_out_patterns = {
             UnaryAttr("relu", [], ""): generate_pattern_with_unary(
-                dequantize_qconv_pt2e_pattern, aten.relu.default
+                get_dequantize(1), aten.relu.default
             ),
             UnaryAttr("hardtanh", [], ""): generate_pattern_with_unary(
-                dequantize_qconv_pt2e_pattern, aten.hardtanh.default
+                get_dequantize(1), aten.hardtanh.default
             ),
             UnaryAttr("hardswish", [], ""): generate_pattern_with_unary(
                 get_dequantize(2), aten.hardswish.default
@@ -669,7 +648,7 @@ def _register_quantization_binary_fusion():
             ): generate_pattern_with_output_quant(
                 generate_pattern_with_binary(
                     aten.add.Tensor,
-                    dequantize_qconv_pt2e_pattern,
+                    get_dequantize(1),
                     dequantize_accum_pattern,
                     int8_mixed_bf16_with_inplace_add,
                 ),
@@ -683,7 +662,7 @@ def _register_quantization_binary_fusion():
                 generate_pattern_with_unary(
                     generate_pattern_with_binary(
                         aten.add.Tensor,
-                        dequantize_qconv_pt2e_pattern,
+                        get_dequantize(1),
                         dequantize_accum_pattern,
                         int8_mixed_bf16_with_inplace_add,
                     ),
@@ -709,7 +688,7 @@ def _register_quantization_binary_fusion():
             BinaryUnaryAttr("add", 1.0, "relu", [], ""): generate_pattern_with_unary(
                 generate_pattern_with_binary(
                     aten.add.Tensor,
-                    dequantize_qconv_pt2e_pattern,
+                    get_dequantize(1),
                     KeywordArg("accum_after_dequant"),
                     int8_mixed_bf16_with_inplace_add,
                 ),
@@ -746,7 +725,7 @@ def _register_quantization_binary_fusion():
         binary_replace_float_out_patterns = {
             BinaryUnaryAttr("add", 1.0, "none", [], ""): generate_pattern_with_binary(
                 aten.add.Tensor,
-                dequantize_qconv_pt2e_pattern,
+                get_dequantize(1),
                 KeywordArg("accum_after_dequant"),
                 int8_mixed_bf16_with_inplace_add,
             ),
