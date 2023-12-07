@@ -91,7 +91,7 @@ def _train(model, optim, train_steps=1):
 
 
 class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
-    def _create_model(self, compile, model_type, train_steps=2):
+    def _create_model(self, compile, model_type):
         dummy_model = TestDummyModel().cuda()
 
         assert model_type in ModelType, f"{model_type} is not supported."

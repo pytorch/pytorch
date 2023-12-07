@@ -58,8 +58,7 @@ class Checkpointer:
         self,
         state_dict: STATE_DICT_TYPE,
     ):
-        """Calls :py:meth: `torch.distributed.state_dict_saver.save`. Utilizing values passed during initialization.
-        """
+        """Calls :py:meth: `torch.distributed.state_dict_saver.save`. Utilizing values passed during initialization."""
         saver.save(
             state_dict,
             self.storage_writer,
@@ -69,12 +68,8 @@ class Checkpointer:
             planner=self.save_planner,
         )
 
-    def load(
-        self,
-        state_dict: Dict[str, Any]
-    ):
-        """Calls :py:meth: `torch.distributed.state_dict_loader.load`. Utilizing values passed during initialization.
-        """
+    def load(self, state_dict: Dict[str, Any]):
+        """Calls :py:meth: `torch.distributed.state_dict_loader.load`. Utilizing values passed during initialization."""
         loader.load(
             state_dict,
             storage_reader=self.storage_reader,
