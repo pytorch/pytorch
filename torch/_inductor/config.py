@@ -608,10 +608,22 @@ class cuda:
     # If set to True, it will ensure that only GEMM ops capable of
     # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
     # are enabled for the CUTLASS backend.
-    cutlass_only_evt_capable_ops: bool = False
+    cutlass_prefer_evt_capable_ops: bool = False
 
     # Minimum of M*N*N to consider the CUTLASS backend for GEMM ops.
     cutlass_backend_min_gemm_size: int = 1
+
+    # enable generation of inline standalone runner in CUDA CPP generated code
+    # which allows to compile the generated code into a standalone executable.
+    generate_test_runner = (
+        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "1") == "1"
+    )
+
+    # Enable additional tuning step after fusion pass, to determine optimal Kernel config
+    # for the fused kernel.
+    retune_after_fusion = (
+        os.environ.get("INDUCTOR_CUDA_BACKEND_RE_TUNE_AFTER_FUSION", "1") == "1"
+    )
 
 
 # create a directory containing lots of debug information

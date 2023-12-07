@@ -2122,13 +2122,17 @@ def cuda_compile_command(
     src_files: List[str],
     dst_file: str,
     dst_file_ext: str,
+    extra_args : Optional[List[str]]=None
 ) -> str:
+    if extra_args is None:
+        extra_args = []
     include_paths = _cutlass_include_paths()
     cuda_lib_options = _cuda_lib_options()
     nvcc_host_compiler_options = _nvcc_host_compiler_options()
     nvcc_compiler_options = _nvcc_compiler_options()
     options = (
         nvcc_compiler_options
+        + extra_args
         + [
             f"-Xcompiler {opt}" if "=" in opt else f"-Xcompiler={opt}"
             for opt in nvcc_host_compiler_options
@@ -2142,6 +2146,8 @@ def cuda_compile_command(
         res = f"{_cuda_compiler()} {' '.join(options)} -c -o {dst_file} {src_file}"
     elif dst_file_ext == "so":
         options.append("-shared")
+        res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
+    elif dst_file_ext == "exe":
         res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
@@ -2236,12 +2242,11 @@ class CUDACodeCache:
         return key, input_path
 
     @classmethod
-    def compile(cls, source_code, dst_file_ext) -> Tuple[str, str, str]:
+    def compile(cls, source_code, dst_file_ext, extra_args : Optional[List[str]]=None) -> Tuple[str, str, str]:
         """
         Compiles CUDA source_code into a file with dst_file_ext extension.
         Returns a tuple of dst_file_path, hash_key, source_code_path
         """
-
         key, input_path = cls.write(source_code, dst_file_ext)
         if key not in cls.cache:
             from filelock import FileLock
@@ -2252,8 +2257,9 @@ class CUDACodeCache:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 if not os.path.exists(output_path):
                     cmd = cuda_compile_command(
-                        [input_path], output_path, dst_file_ext
-                    ).split(" ")
+                        [input_path], output_path, dst_file_ext, extra_args
+                    )
+                    cmd = cmd.split(" ")
                     try:
                         subprocess.check_output(
                             cmd, stderr=subprocess.STDOUT, env=os.environ
