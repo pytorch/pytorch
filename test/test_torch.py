@@ -1517,6 +1517,37 @@ else:
             'upsample_bilinear2d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
+    @skipIfTorchInductor("aot-autograd issue")
+    def test_deterministic_replication_pad2d(self, device):
+        test_cases = [
+            # size, padding
+            [(1, 2, 4, 4), (0, 0, 0, 0)],
+            [(1, 2, 4, 4), (3, 4, 5, 6)],
+            [(3, 8, 7), (0, 0, 0, 0)],
+            [(3, 8, 7), (4, 3, 2, 7)],
+        ]
+
+        if torch.device(device).type != 'xla':
+            test_cases += [
+                [(4, 3, 5, 10), (-9, 4, 5, 6)],
+                [(3, 8, 7), (-4, -2, -2, -3)],
+            ]
+
+        for size, padding in test_cases:
+            input = torch.randn(*size, device=device, requires_grad=True)
+            grad = None
+            with DeterministicGuard(True):
+                res = torch.nn.functional.pad(
+                    input,
+                    padding,
+                    mode='replicate')
+                res.backward(torch.ones_like(res))
+                if grad is None:
+                    grad = input.grad
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                input.grad = None
+
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_deterministic_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
@@ -1625,10 +1656,24 @@ else:
         res = module(input)
         grad = torch.ones_like(res)
 
+        # Nondeterministic alert should only be raised if the forward call was
+        # nondeterministic
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
             'replication_pad2d_backward_cuda',
             torch.device(device).type == 'cuda')
+
+        with DeterministicGuard(True):
+            res = module(input)
+
+        grad = torch.ones_like(res)
+
+        # If the forward call was deterministic, nondeterministic alert should
+        # not be raised
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'replication_pad2d_backward_cuda',
+            False)
 
     @skipIfMps
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
@@ -5545,7 +5590,7 @@ else:
     # _run_scaling_case generalizes some single-optimizer test logic to avoid too much copy-pasting below.
     def _run_scaling_case(self, device, run, unskipped, skipped, atol=1e-7, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
         # Ensure scaling can be disabled without changing user control flow.
-        for enabled in True, False:                
+        for enabled in True, False:
             (
                 mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter,
             ) = _create_scaling_case(device=device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
@@ -5640,6 +5685,7 @@ else:
 
     # Make sure that the parameters become nonsense when scaled gradients are finite
     # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
+
     @skipMeta
     @onlyNativeDeviceTypes
     def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device):
@@ -5703,6 +5749,7 @@ else:
     @onlyNativeDeviceTypes
     def test_grad_scaling_clipping(self, device):
         device = torch.device(device)
+
         def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
             for i, (input, target) in enumerate(data):
@@ -5729,6 +5776,7 @@ else:
     @onlyNativeDeviceTypes
     def test_grad_scaling_clipping_separate_unscale(self, device):
         device = torch.device(device)
+
         def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
             for i, (input, target) in enumerate(data):
@@ -5757,6 +5805,7 @@ else:
     @unittest.skipIf(IS_WINDOWS, 'FIXME: fix this test for Windows')
     def test_grad_scaling_penalty(self, device):
         device = torch.device(device)
+
         def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             for i, (input, target) in enumerate(data):
                 optimizer.zero_grad()
@@ -5795,6 +5844,7 @@ else:
     @onlyNativeDeviceTypes
     def test_grad_scaling_accumulation(self, device):
         device = torch.device(device)
+
         def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             iters_to_accumulate = 2
             for i, (input, target) in enumerate(data):

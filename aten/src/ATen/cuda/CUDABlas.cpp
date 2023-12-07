@@ -205,58 +205,6 @@ namespace at::cuda::blas {
 
 /* LEVEL 3 BLAS FUNCTIONS */
 
-#ifndef USE_ROCM
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11020
-#define cublasGemmStridedBatchedExFix cublasGemmStridedBatchedEx
-#else
-// Workaround for https://github.com/pytorch/pytorch/issues/45724
-cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t &handle,
-  cublasOperation_t transa,
-  cublasOperation_t transb,
-  int m,
-  int n,
-  int k,
-  const void    *alpha,
-  const void     *A,
-  cudaDataType Atype,
-  int lda,
-  long long int strideA,
-  const void     *B,
-  cudaDataType Btype,
-  int ldb,
-  long long int strideB,
-  const void    *beta,
-  void           *C,
-  cudaDataType Ctype,
-  int ldc,
-  long long int strideC,
-  int64_t batchCount,
-  cudaDataType computeType,
-  cublasGemmAlgo_t algo)
-{
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  if (prop->major != 7) {
-    return cublasGemmStridedBatchedEx(handle, transa, transb, m, n, k, alpha, A, Atype, lda, strideA, B, Btype, ldb, strideB, beta, C, Ctype, ldc, strideC, batchCount, computeType, algo);
-  }
-  cublasStatus_t result;
-  constexpr int64_t split = 63 * 1024;
-  for(int64_t i = 0; i < batchCount; i += split) {
-    int64_t count = std::min<int64_t>(split, batchCount - i);
-    result = cublasGemmStridedBatchedEx(handle, transa, transb, m, n, k, alpha,
-      (char *)A + i * strideA * 2, Atype, lda, strideA,
-      (char *)B + i * strideB * 2, Btype, ldb, strideB,
-      beta,
-      (char *)C + i * strideC * 2, Ctype, ldc, strideC,
-      (int)count, computeType, algo);
-    TORCH_CUDABLAS_CHECK(result);
-  }
-  return result;
-}
-#endif
-#else // USE_ROCM
-#define cublasGemmStridedBatchedExFix hipblasGemmStridedBatchedEx
-#endif
-
 #define GEMM_CHECK_ARGVALUES(Dtype)           \
   do {                                        \
     CUDABLAS_NONNEGINT_CHECK(gemm<Dtype>, m); \
@@ -362,7 +310,7 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
 #else
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5){
-    TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(
+    TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(
       handle, opa, opb, m, n, k,
       (void*)(&falpha), a, CUDA_R_16F, lda, stridea,
       b, CUDA_R_16F, ldb, strideb, (void*)(&fbeta),
@@ -393,7 +341,7 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   const float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
 
-  TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(handle,
+  TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(handle,
                                   opa, opb, (int)m, (int)n, (int)k,
                                   (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
                                   b, CUDA_R_16BF, (int)ldb, strideb,
