@@ -1096,6 +1096,14 @@ class VariableBuilder:
             )
         )
 
+        # install guards for subclass inner tensors
+        if is_traceable_wrapper_subclass(value):
+            attrs, _ = value.__tensor_flatten__()
+            for attr in attrs:
+                inner_value = getattr(value, attr)
+                inner_source = AttrSource(self.source, attr)
+                VariableBuilder(self.tx, inner_source)(inner_value).recursive_realize()
+
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
@@ -1841,6 +1849,9 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
                         symbolic_context.inner_contexts[attr],
                     )
                 )
+
+                # no need to fake-ify the inner tensors again later on
+                tx.fake_mode.fake_tensor_converter.set_tensor_memo(inner, fake_inner)
 
         for fake, real, source, symbolic_context in tracking_info:
             tx.output.tracing_context.tensor_to_context[real] = symbolic_context
