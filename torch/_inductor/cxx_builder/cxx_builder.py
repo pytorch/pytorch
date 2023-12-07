@@ -276,6 +276,15 @@ def _cpp_prefix_path() -> str:
         )
     return filename
 
+def get_build_args_of_chosen_isa():
+    from torch._inductor.codecache import chosen_isa
+    cap = str(chosen_isa).upper()
+    macros = [f"CPU_CAPABILITY={cap}", f"CPU_CAPABILITY_{cap}", f"HAVE_{cap}_CPU_DEFINITION"]
+    # Add Windows support later.
+    build_flags = cap.build_arch_flags()
+
+    return macros, build_flags
+
 class CxxTorchOptions(CxxOptions):
     """
     This class is inherited from CxxTorchOptions, which automatic contains
@@ -294,6 +303,10 @@ class CxxTorchOptions(CxxOptions):
         _nonduplicate_append(self._definations, use_custom_generated_macros())
 
         _nonduplicate_append(self._cflags, use_standard_sys_dir_headers())
+
+        macros, build_flags = get_build_args_of_chosen_isa()
+        _nonduplicate_append(self._definations, macros)
+        _nonduplicate_append(self._passthough_args, build_flags)
 
         if not _IS_WINDOWS:
             # glibcxx is not available in Windows.

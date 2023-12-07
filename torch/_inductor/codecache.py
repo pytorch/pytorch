@@ -1190,9 +1190,9 @@ def valid_vec_isa_list() -> List[VecISA]:
         return [VecZVECTOR()]
 
     isa_list = []
-    _cpu_info_content = x86_isa_checker()
+    _cpu_supported_isa = x86_isa_checker()
     for isa in supported_vec_isa_list:
-        if str(isa) in _cpu_info_content and isa:
+        if str(isa) in _cpu_supported_isa:
             isa_list.append(isa)
     return isa_list
 
@@ -1547,6 +1547,13 @@ def cpp_compile_command(
         """,
     ).strip()
 
+def get_vec_args():
+    from torch._inductor.codecache import pick_vec_isa
+    vec_isa = pick_vec_isa()
+    print("!!!! debug vec_isa: ", vec_isa)
+    return vec_isa
+
+chosen_isa = get_vec_args()
 
 def run_command_and_check(cmd: str):
     cmd = shlex.split(cmd)
