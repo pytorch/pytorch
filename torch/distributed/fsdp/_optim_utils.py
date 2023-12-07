@@ -1455,7 +1455,7 @@ def _unflatten_orig_param_states(
                 placement_dim = placement.dim  # type: ignore[attr-defined]
                 value_local = value.redistribute(placements=(Replicate(),))
                 reshape_size = list(flat_param._shapes[param_idx])
-                reshape_size[placement_dim] *= 2
+                reshape_size[placement_dim] *= value.device_mesh.size(0)
                 reshape_size = torch.Size(reshape_size)
                 value = value.reshape(reshape_size)
             # If gathered state is a replicate DTensor, we directly reshape it.
