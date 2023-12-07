@@ -146,7 +146,7 @@ RUN rm install_cudnn.sh
 ARG CUSPARSELT_VERSION
 ARG CUDA_VERSION
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
-RUN if [ "${CUSPARSELT_VERSION}" -eq "0.4.0" ]; then bash install_cusparselt.sh; fi
+RUN if [ -n "${CUSPARSELT_VERSION}" ]; then bash install_cusparselt.sh; fi
 RUN rm install_cusparselt.sh
 
 # Delete /usr/local/cuda-11.X/cuda-11.X symlinks
