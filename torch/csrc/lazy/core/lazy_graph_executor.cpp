@@ -602,6 +602,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
       Value ir_value = tensors[i]->CurrentIrValue();
       if (ir_value) {
         if (ShouldSyncTensor(tensors[i])) {
+          TORCH_LAZY_COUNTER("SyncedTensorsWithIR", 1);
           // Add only tensors which need to be synced.
           coll.hash = HashCombine(coll.hash, ir_value.hash());
           coll.indices.push_back(i);
