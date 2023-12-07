@@ -243,6 +243,7 @@ class ModuleFrame:
     def __init__(
         self,
         flat_graph,
+        nodes,
         seen_nodes,
         seen_modules,
         parent,
@@ -252,6 +253,7 @@ class ModuleFrame:
         graph_module=None,
     ):
         self.flat_graph = flat_graph
+        self.nodes = nodes
         self.seen_nodes = seen_nodes
         self.seen_modules = seen_modules
         self.parent = parent
@@ -286,7 +288,6 @@ class ModuleFrame:
             self.cached_graph_module = None
             self.seen_modules[self.module_id] = self.graph_module
 
-        self.nodes = list(self.flat_graph.nodes)
         self.graph = self.graph_module.graph
 
         # Mapping of nodes in the flat graph to nodes in this graph.
@@ -540,6 +541,7 @@ class ModuleFrame:
                 # counter. Once it is complete, continue from that point.
                 node_idx = ModuleFrame(
                     self.flat_graph,
+                    self.nodes,
                     self.seen_nodes,
                     self.seen_modules,
                     self,
@@ -562,6 +564,7 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: torch.fx.GraphM
     seen_modules: Dict[int, torch.nn.Module] = {}
     ModuleFrame(
         orig_graph,
+        tuple(orig_graph.nodes),
         seen_nodes,
         seen_modules,
         None,
