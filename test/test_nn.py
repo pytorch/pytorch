@@ -5312,11 +5312,22 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(bn.state_dict()["num_batches_tracked"], torch.tensor(0))
 
         bn.num_batches_tracked = torch.tensor(10)
+        state_dict = bn.state_dict()
         self.assertEqual(bn.state_dict()["num_batches_tracked"], torch.tensor(10))
 
         empty_dict = OrderedDict()
         bn.load_state_dict(empty_dict, strict=False)
         self.assertEqual(bn.state_dict()["num_batches_tracked"], torch.tensor(10))
+
+        # test that when `num_batches_tracked` is not in loaded state_dict,
+        # meta num_batches_tracked is still replaced with singleton 0 tensor
+        with torch.device('meta'):
+            meta_bn = torch.nn.BatchNorm2d(3)
+        self.assertTrue(meta_bn.num_batches_tracked.device == torch.device('meta'))
+        state_dict.pop("num_batches_tracked")
+        meta_bn.load_state_dict(empty_dict, assign=True, strict=False)
+        self.assertEqual(meta_bn.state_dict()["num_batches_tracked"], torch.tensor(0))
+
 
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
