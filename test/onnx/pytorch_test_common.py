@@ -6,6 +6,7 @@ import os
 import random
 import sys
 import unittest
+from enum import auto, Enum
 from typing import Optional
 
 import numpy as np
@@ -28,6 +29,11 @@ RNN_BATCH_SIZE = 7
 RNN_SEQUENCE_LENGTH = 11
 RNN_INPUT_SIZE = 5
 RNN_HIDDEN_SIZE = 3
+
+
+class TorchModelType(Enum):
+    TORCH_NN_MODULE = auto()
+    TORCH_EXPORT_EXPORTEDPROGRAM = auto()
 
 
 def _skipper(condition, reason):
@@ -188,12 +194,12 @@ def skip_min_ort_version(reason: str, version: str, dynamic_only: bool = False):
     return skip_dec
 
 
-def skip_dynamic_fx_test(reason: str, skip_model_type=None):
+def skip_dynamic_fx_test(reason: str, skip_model_type: TorchModelType = None):
     """Skip dynamic exporting test.
 
     Args:
         reason: The reason for skipping dynamic exporting test.
-        skip_model_type (onnx_test_common.TorchModelType): The model type to skip dynamic exporting test for.
+        skip_model_type (TorchModelType): The model type to skip dynamic exporting test for.
             When None, model type is not used to skip dynamic tests.
 
     Returns:
@@ -344,15 +350,10 @@ def xfail_if_model_type_is_exportedprogram(reason: str):
         A decorator for xfail tests.
     """
 
-    import onnx_test_common
-
     def xfail_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
-            if (
-                self.model_type
-                == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
-            ):
+            if self.model_type == TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM:
                 pytest.xfail(
                     reason=f"Xfail model_type==torch.export.ExportedProgram. {reason}"
                 )
@@ -373,15 +374,10 @@ def xfail_if_model_type_is_not_exportedprogram(reason: str):
         A decorator for xfail tests.
     """
 
-    import onnx_test_common
-
     def xfail_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
-            if (
-                self.model_type
-                != onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
-            ):
+            if self.model_type != TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM:
                 pytest.xfail(
                     reason=f"Xfail model_type!=torch.export.ExportedProgram. {reason}"
                 )
