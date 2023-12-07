@@ -2623,7 +2623,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
 
 
 @_exception_logger
-def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=False):
+def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=False, **kwargs):
     """
     Gather tensors from all ranks and put them in a single output tensor.
 
@@ -2642,6 +2642,7 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
+        kwargs allows to accept any number of keyword arguments.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -2677,6 +2678,7 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
     """
     _check_single_tensor(input_tensor, "input_tensor")
     _check_single_tensor(output_tensor, "output_tensor")
+    
     if _rank_not_in_group(group):
         _warn_not_in_group("all_gather_into_tensor")
         return
@@ -2699,14 +2701,14 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
 
     if group in _world.pg_coalesce_state.keys():
         # We are in coalescing context, do not issue single operation, just append a collective representation
-        coll = _CollOp(all_gather_into_tensor, input_tensor, output_tensor)
+        coll = _CollOp(all_gather_into_tensor, input_tensor, output_tensor, **kwargs)
         _world.pg_coalesce_state[group].append(coll)
         if async_op:
             return _IllegalWork()
         else:
             return None
 
-    work = group._allgather_base(output_tensor, input_tensor, opts)
+    work = group._allgather_base(output_tensor, input_tensor, opts, **kwargs)
 
     if async_op:
         return work

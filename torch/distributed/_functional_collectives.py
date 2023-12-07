@@ -169,6 +169,7 @@ def all_gather_tensor(
     gather_dim: int,
     group: RANK_TYPES,
     tag: str = "",
+    **kwargs  # Additional keyword arguments
 ):
     """
     Gather tensor data across from all machines and concatenate over ``gather_dim``.
@@ -188,12 +189,13 @@ def all_gather_tensor(
     """
     assert self.is_contiguous()
     tag, rankset, group_size = _expand_group(group, tag)
-    tensor = torch.ops.c10d_functional.all_gather_into_tensor(self, tag, rankset, group_size)  # type: ignore[attr-defined]
+    tensor = torch.ops.c10d_functional.all_gather_into_tensor(self, tag, rankset, group_size, **kwargs)  # type: ignore[attr-defined]
     res = _maybe_wrap_tensor(tensor)
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
         res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
     return res
+
 
 def reduce_scatter_tensor(
     self: torch.Tensor,
@@ -677,10 +679,12 @@ def all_gather_tensor_inplace(
     group,  # TODO add a type,
     async_op: bool = False,
     tag: str = "",
-    gather_dim: int = 0
+    gather_dim: int = 0,
+    **kwargs  # Additional keyword arguments
 ):
     assert not async_op, "Can't remap async version of inplace op to functional collective"
-    return output.copy_(all_gather_tensor(input, gather_dim, group, tag))
+    return output.copy_(all_gather_tensor(input, gather_dim, group, tag, **kwargs))
+
 
 def reduce_scatter_tensor_inplace(
     output: torch.Tensor,
