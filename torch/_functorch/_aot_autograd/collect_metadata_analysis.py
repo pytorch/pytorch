@@ -303,6 +303,34 @@ def run_functionalized_fw_and_collect_metadata(
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
         intermediate_bases: List[torch.Tensor] = []
+        # Why do we care if storage changed?
+        # There is a really care class of situations, which basically only happen with something
+        # that looks like:
+        #
+        # def f(x):
+        #     x_storage = x.untyped_storage()
+        #     non_leaf_tensor = torch.ones(4, requires_grad=True).clone()
+        #
+        #     with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(x):
+        #         x.set_(non_leaf_tensor.untyped_storage())
+        #
+        #     out = x.view(-1)
+        #
+        #     with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(x):
+        #         x.set_(x_storage)
+        #
+        #     return out
+        #
+        # Esentially, what his code does is calls set_() with no_grad() - aka, our simulation
+        # of a .data = via ops, and then grabs a view of x (to return later), and then sets
+        # x back to its original storage (again, via the same .data simulation)
+        #
+        # In this case, x and out have different shapes, and point to DIFFERENT
+        # memory addresses. There is no aliasing.
+        # However, the autograd engine is convinced that they alias, aka x is out._base. This
+        # flags the inp/out relationship via output type as alias_of_input, causing us to invoke
+        # gen_alias_from_base - and produce a spurious as_strided() call which will raise later on.
+        storage_changed = torch._functionalize_was_storage_changed(o.elem)  # type: ignore[attr-defined]
         for o in flat_f_outs:
             curr_storage = (
                 None
@@ -338,7 +366,7 @@ def run_functionalized_fw_and_collect_metadata(
             ):
                 output_type = OutputType.custom_function_view
                 base_idx = None
-            elif curr_storage in inp_storage_refs:
+            elif curr_storage in inp_storage_refs and not storage_changed:
                 base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
                 num_aliased_outs = out_tensor_alias_counts[curr_storage]
