@@ -994,7 +994,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         # Create the toy model with real weight.
         real_model = create_model()
-        state_dict = real_model.state_dict()
+        state_dict = real_model.state_dict()  # concrete (non-fake) state_dict
         if model_type == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM:
             real_model = torch.export.export(
                 real_model, args=create_args(), kwargs=create_kwargs()

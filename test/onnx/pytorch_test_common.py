@@ -193,7 +193,7 @@ def skip_dynamic_fx_test(reason: str, skip_model_type=None):
 
     Args:
         reason: The reason for skipping dynamic exporting test.
-        skip_model_type: The model type to skip dynamic exporting test for.
+        skip_model_type (onnx_test_common.TorchModelType): The model type to skip dynamic exporting test for.
             When None, model type is not used to skip dynamic tests.
 
     Returns:

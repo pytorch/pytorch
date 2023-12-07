@@ -1807,6 +1807,10 @@ Arguments:
               "group_name",
               &::c10d::ProcessGroup::getGroupName,
               "(Gets this process group name. It's cluster unique)")
+          .def_property(
+              "bound_device_id",
+              &::c10d::ProcessGroup::getBoundDeviceId,
+              &::c10d::ProcessGroup::setBoundDeviceId)
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
             return torch::jit::toPyObject(c10::IValue(std::move(self)));
           })
@@ -1871,6 +1875,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def("rank", &::c10d::Backend::getRank)
           .def("size", &::c10d::Backend::getSize)
           .def("name", &::c10d::Backend::getBackendName)
+          .def_property_readonly(
+              "supports_splitting",
+              &::c10d::Backend::supportsSplitting,
+              "(test whether the backend supports splitting)")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -2141,6 +2149,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("wait_all_ranks") = false,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "eager_connect_single_device",
+              &::c10d::Backend::eagerConnectSingleDevice)
+          .def(
               "_get_backend_name",
               &::c10d::Backend::getBackendName,
               py::call_guard<py::gil_scoped_release>())
@@ -2300,7 +2311,14 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("timeout_mil_sec"),
               py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
-              "options", &::c10d::ProcessGroupNCCL::getOptions);
+              "options", &::c10d::ProcessGroupNCCL::getOptions)
+          .def_property(
+              "bound_device_id",
+              &::c10d::ProcessGroupNCCL::getBoundDeviceId,
+              &::c10d::ProcessGroupNCCL::setBoundDeviceId)
+          .def(
+              "perform_nocolor_split",
+              &::c10d::ProcessGroupNCCL::performNocolorSplit);
 
 #ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
