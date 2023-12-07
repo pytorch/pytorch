@@ -1802,6 +1802,13 @@ def wrap_to_fake_tensor_and_record(
         if not parent_context:
             symbolic_context = _automatic_dynamic(e, tx, source, static_shapes)
         else:
+            # Parent contexts are passed in when we are recursively creating
+            # fake tensors for subclasses. A better design would be not to create a
+            # parent/child relationship, but to recursively call _automatic_dynamic
+            # as we recursively call wrap_to_fake_tensor_and_record. This runs
+            # into bugs around how meta_utils knows and works to create fake tensors
+            # with tensor subclasses. Ideally, dynamo would drive both the recursive
+            # wrap_to_fake_tensor_and_record and _automatic_dynamic policy creation.
             assert isinstance(source, AttrSource)
             inner_context_name = source.member
             symbolic_context = parent_context.inner_contexts[inner_context_name]
@@ -1820,8 +1827,6 @@ def wrap_to_fake_tensor_and_record(
             )
         )
 
-        # list of (fake_tensor, real_tensor, source, symbolic_context)
-        tracking_info = [(fake_e, e, source, symbolic_context)]
         if is_traceable_wrapper_subclass(fake_e):
             attrs, _ = fake_e.__tensor_flatten__()
             for attr in attrs:
@@ -1836,18 +1841,17 @@ def wrap_to_fake_tensor_and_record(
                     parent_context=symbolic_context,
                 )
 
-        for fake, real, source, symbolic_context in tracking_info:
-            tx.output.tracing_context.tensor_to_context[real] = symbolic_context
-            tx.output.tensor_weakref_to_sizes_strides[real] = {
-                "size": fake.size(),
-                "stride": fake.stride(),
-            }
+        tx.output.tracing_context.tensor_to_context[e] = symbolic_context
+        tx.output.tensor_weakref_to_sizes_strides[e] = {
+            "size": fake_e.size(),
+            "stride": fake_e.stride(),
+        }
 
-            if is_tensor and not (static_shapes and source.is_nn_module()):
-                tx.output.tracked_fakes.append(
-                    TrackedFake(fake, source, symbolic_context)
-                )
-                tx.output.tracked_fakes_id_to_source[id(real)].append(source)
+        if is_tensor and not (static_shapes and source.is_nn_module()):
+            tx.output.tracked_fakes.append(
+                TrackedFake(fake_e, source, symbolic_context)
+            )
+            tx.output.tracked_fakes_id_to_source[id(e)].append(source)
 
         return fake_e
     else:
