@@ -5,7 +5,6 @@ import unittest
 
 import torch
 import torch._dynamo.test_case
-from torch._dynamo.allowed_functions import gen_allowed_objs_and_ids
 from torch._dynamo.skipfiles import (
     FUNC_INLINELIST,
     LEGACY_MOD_INLINELIST,
