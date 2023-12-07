@@ -178,7 +178,16 @@ class CUDACPPScheduling(BaseScheduling):
             log.warning(
                 f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, due to compilation failure, this most likely means that the fused kernel would require too much shared memory."
             )
-        return compilation_result
+            return False
+        try:
+            # If retuning is enabled, let's try to run the Kernel
+            cuda_template_buffer.retune(epilogue_nodes + [additional_node])
+        except NoValidChoicesError:
+            log.warning(
+                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, retuning did not return any viable kernel choices. This can indicate that the shared memory requirement would be too high."
+            )
+            return False
+        return True
 
     @staticmethod
     def _unwrap_epilogue_nodes(fused_node: FusedSchedulerNode) -> List[ir.IRNode]:
@@ -269,6 +278,9 @@ class CUDACPPScheduling(BaseScheduling):
         assert all(
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
+        ctb.retune(
+            epilogue_ir_nodes
+        )  # Retune for the epilogue nodes, if enabled ( cached )
         kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
         with kernel:
             for node in [template_node, *epilogue_nodes]:

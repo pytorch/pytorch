@@ -14,6 +14,7 @@ from inspect import signature
 from typing import (
     Any,
     Callable,
+    cast,
     ClassVar,
     Dict,
     Iterable,
@@ -2921,12 +2922,14 @@ class Buffer(IRNode):
 class InputBuffer(Buffer):
     pass
 
+
 class WorkspaceBuffer(Buffer):
     """Buffer that represents temporary workspace memory for a computation of another node."""
-    user_node : IRNode # the node that uses this workspace buffer
+
+    user_node: IRNode  # the node that uses this workspace buffer
 
     @classmethod
-    def create(cls, workspace_size, user_node : IRNode):
+    def create(cls, workspace_size, user_node: IRNode):
         layout = FixedLayout(
             user_node.get_device(),
             torch.int8,
@@ -2938,6 +2941,7 @@ class WorkspaceBuffer(Buffer):
 
     def should_allocate(self):
         return True
+
 
 class ConstantBuffer(InputBuffer):
     override_device: Optional[torch.device] = None
@@ -3328,10 +3332,9 @@ class CUDATemplateBuffer(TemplateBuffer):
         # Global memory (in bytes) needed for this template.
         self.workspace_size = workspace_size
         self.template = template
+        self._tuned_for_epilogue = None
 
     def get_workspace_size(self):
-        if callable(self.workspace_size):
-            return self.workspace_size()
         return self.workspace_size if self.workspace_size is not None else 0
 
     def get_read_writes(self):
@@ -3345,6 +3348,77 @@ class CUDATemplateBuffer(TemplateBuffer):
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
             self.freeze_layout()
+
+    def get_additional_input_nodes(
+        self,
+        epilogue_nodes: List[ComputedBuffer],
+    ):
+        if epilogue_nodes is None:
+            return []
+        template_buffer_names: Set[str] = self.get_read_names()
+        fused_reading_buffer_names: Set[str] = set(template_buffer_names)
+
+        for epilogue_node in epilogue_nodes:
+            fused_reading_buffer_names.update(epilogue_node.get_read_names())
+
+        # We need to remove all reads which were written as intermediate results
+        fused_written_names = set()
+        fused_written_names.add(self.get_name())
+        for epilogue_node in epilogue_nodes:
+            fused_written_names.add(epilogue_node.get_name())
+        fused_reading_buffer_names -= fused_written_names
+
+        if len(fused_reading_buffer_names) > len(template_buffer_names):
+            # Check that the layout of the additional input is compatible
+            added_names = sorted(fused_reading_buffer_names - template_buffer_names)
+
+            from torch._inductor.virtualized import V
+
+            added_nodes = [V.graph.get_buffer(added_name) for added_name in added_names]
+            return added_nodes
+        return []
+
+    def retune(self, epilogue_nodes: List[IRNode]):
+        """
+        Retune the template buffer for a given list of epilogue nodes
+        if retuning is enabled
+        """
+        if config.cuda.retune_after_fusion and hasattr(
+            self.template, "generate_retune_choices"
+        ):
+            if self._tuned_for_epilogue is not None:
+                if (
+                    epilogue_nodes is None
+                    or len(self._tuned_for_epilogue) == len(epilogue_nodes)
+                    and all(
+                        [
+                            x is y
+                            for x, y in zip(self._tuned_for_epilogue, epilogue_nodes)
+                        ]
+                    )
+                ):
+                    return
+            choices = self.template.generate_retune_choices(self, epilogue_nodes)
+            if choices and len(choices) > 1:
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+                from torch._inductor.select_algorithm import autotune_select_algorithm
+
+                additional_inputs = self.get_additional_input_nodes(epilogue_nodes)
+                choice, timings = autotune_select_algorithm(
+                    "retune",
+                    choices,
+                    self.inputs + additional_inputs,
+                    self.layout,
+                    return_selection_result_details=True,
+                )
+                choice = cast(CUDATemplateCaller, choice)
+                # timings = cast(Dict[CUDATemplateCaller, float], timings)
+                self.make_kernel_render = choice.make_kernel_render
+                self.template = choice.template
+                self.workspace_size = choice.bmreq.workspace_size
+                self._tuned_for_epilogue = list(
+                    epilogue_nodes
+                )  # To prevent repeated retuning on same epilogue
 
 
 @dataclasses.dataclass

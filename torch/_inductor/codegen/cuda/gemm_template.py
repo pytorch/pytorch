@@ -1,12 +1,12 @@
 import copy
 import logging
 import re
-from typing import cast, Dict, List, Optional, Set, Tuple
+from typing import cast, Dict, List, Optional, Sequence, Set, Tuple
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
 from ...ir import Buffer, CUDATemplateBuffer, FixedLayout, IRNode, Layout
-from ..common import IndentedBuffer
+from ..common import ChoiceCaller, IndentedBuffer
 
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
@@ -354,6 +354,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         input_reorder=None,
         fuseable=True,
         non_fuseable=True,
+        **extra_kwargs,
     ):
         non_fuseable = non_fuseable and (
             not inductor_cuda_config.cutlass_prefer_evt_capable_ops
@@ -370,10 +371,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             # This will list only ops capable of EVT fusion
             ops_evt = cutlass_template_evt.gen_ops()
             for op in ops_evt:
-                cutlass_template_evt.maybe_append_choice(
-                    choices,
-                    op=op,
-                )
+                cutlass_template_evt.maybe_append_choice(choices, op=op, **extra_kwargs)
         else:
             ops_evt = []
         if non_fuseable or len(ops_evt) == 0:
@@ -411,6 +409,25 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             len(ops),
             len(ops_evt),
         )
+
+    def generate_retune_choices(
+        self, ctb: CUDATemplateBuffer, epilogue_nodes: List[IRNode]
+    ) -> Sequence[ChoiceCaller]:
+        if not self.supports_evt:
+            return []
+        choices = []
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+            choices,
+            self.layout,
+            self.input_nodes,
+            alpha=self.alpha,
+            beta=self.beta,
+            fuseable=True,
+            non_fuseable=False,
+            epilogue_nodes=epilogue_nodes,
+            template_buffer_node=ctb,
+        )
+        return choices
 
     def header(self) -> IndentedBuffer:
         res = super().header()
@@ -937,39 +954,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         assert isinstance(X.layout, FixedLayout), "X.layout is not fixed"
         assert isinstance(W.layout, FixedLayout), "W.layout is not fixed"
         Y = self.output_node
-        Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
-        aux_input_nodes: List[ir.Buffer] = []
-        if (
-            template_buffer_node is not None
-            and epilogue_nodes is not None
-            and len(epilogue_nodes) > 0
-        ):
-            additional_input_nodes: List[
-                ir.ComputedBuffer
-            ] = self.get_additional_input_nodes(template_buffer_node, epilogue_nodes)
-            aux_input_nodes = additional_input_nodes
-            if Bias is None:
-                # If we want to cast one of the additional inputs as Bias
-                for i in range(len(additional_input_nodes)):
-                    MaybeBias = additional_input_nodes[i]
-                    if len(MaybeBias.get_stride()) < 2:
-                        continue
-                    if not self.are_inputs_layout_compatible(
-                        [X.get_layout(), W.get_layout(), MaybeBias.get_layout()]
-                    ):
-                        continue
-                    aux_input_nodes = (
-                        additional_input_nodes[:i] + additional_input_nodes[i + 1 :]
-                    )
-                    Bias = MaybeBias
-                    break
-            for i, aux_input_node in enumerate(aux_input_nodes):
-                assert (
-                    aux_input_node.get_name() is not None
-                ), f"Auxiliary input node {i} has to have a name"
-                assert self.are_inputs_layout_compatible(
-                    [X.get_layout(), W.get_layout(), aux_input_node.get_layout()]
-                ), f"Input layouts are not compatible with auxiliary input {i}: {aux_input_node}"
+        Bias, aux_input_nodes = self.determine_additional_inputs(
+            epilogue_nodes, template_buffer_node
+        )
 
         # Define Kernel call signature, including potentially auxiliary input nodes
         # required for the fused epilogue nodes
@@ -1062,6 +1049,49 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             ).render(**options)
             res += "\n\n" + test_runner_code
         return res
+
+    def determine_additional_inputs(
+        self, epilogue_nodes=None, template_buffer_node=None, **kwargs
+    ):
+        """Determines Bias and auxiliary input nodes for the fused epilogue nodes
+        based on existing input nodes (including their Layout), presence of a Bias node
+         and additional nodes that are read by the epilogue nodes
+        """
+        X, W = self.input_nodes[:2]
+        Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
+        aux_input_nodes: List[ir.Buffer] = []
+        if (
+            template_buffer_node is not None
+            and epilogue_nodes is not None
+            and len(epilogue_nodes) > 0
+        ):
+            additional_input_nodes: List[
+                ir.ComputedBuffer
+            ] = template_buffer_node.get_additional_input_nodes(epilogue_nodes)
+            aux_input_nodes = additional_input_nodes
+            if Bias is None:
+                # If we want to cast one of the additional inputs as Bias
+                for i in range(len(additional_input_nodes)):
+                    MaybeBias = additional_input_nodes[i]
+                    if len(MaybeBias.get_stride()) < 2:
+                        continue
+                    if not self.are_inputs_layout_compatible(
+                        [X.get_layout(), W.get_layout(), MaybeBias.get_layout()]
+                    ):
+                        continue
+                    aux_input_nodes = (
+                        additional_input_nodes[:i] + additional_input_nodes[i + 1 :]
+                    )
+                    Bias = MaybeBias
+                    break
+            for i, aux_input_node in enumerate(aux_input_nodes):
+                assert (
+                    aux_input_node.get_name() is not None
+                ), f"Auxiliary input node {i} has to have a name"
+                assert self.are_inputs_layout_compatible(
+                    [X.get_layout(), W.get_layout(), aux_input_node.get_layout()]
+                ), f"Input layouts are not compatible with auxiliary input {i}: {aux_input_node}"
+        return Bias, aux_input_nodes
 
     def test_call_statement(
         self,

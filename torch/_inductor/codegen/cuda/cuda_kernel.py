@@ -160,9 +160,8 @@ class CUDATemplateKernel(CUDAKernel):
         # workspace_size should have already been retrieved prior to this call.
         call_args.append("None")
 
-        workspace_node = V.graph.get_workspace_buffer_for(node)
-        if workspace_node is not None:
-            call_args.append(f"c_void_p({workspace_node.get_name()}.data_ptr())")
+        if node.get_workspace_size() > 0:
+            call_args.append(f"c_void_p({node.get_name()}_workspace.data_ptr())")
         else:
             call_args.append("None")
 
@@ -352,6 +351,10 @@ class CUDATemplateCaller(ChoiceCaller):
         """Information returned here is logged to the autotune log file when that is enabled."""
         if self.info_kwargs is not None and "op" in self.info_kwargs:
             op = self.info_kwargs["op"]
+            epilogue_node_names = [
+                getattr(en, "name", "no_name")
+                for en in self.info_kwargs.get("epilogue_nodes", [])
+            ]
             return {
                 "backend": "CUDA",
                 "op_type": type(op).__name__,
@@ -360,6 +363,7 @@ class CUDATemplateCaller(ChoiceCaller):
                 "kernel_schedule": str(op.kernel_schedule),
                 "element_accumulator": str(op.accumulator_type()),
                 "op_name": str(op.procedural_name()),
+                "epilogue_node_names": epilogue_node_names,
                 "instruction_shape": str(
                     op.tile_description.math_instruction.instruction_shape
                 ),
