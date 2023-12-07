@@ -1,4 +1,5 @@
 import errno
+import functools
 import os
 import platform
 import re
@@ -7,7 +8,6 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import List, Tuple
-import functools
 
 import torch
 from torch._inductor import config
@@ -264,9 +264,11 @@ def use_standard_sys_dir_headers() -> List[str]:
     else:
         return []
 
+
 @functools.lru_cache
 def _cpp_prefix_path() -> str:
-    from torch._inductor.codecache import write # TODO
+    from torch._inductor.codecache import write  # TODO
+
     path = Path(Path(__file__).parent).parent / "codegen/cpp_prefix.h"
     with path.open() as f:
         content = f.read()
@@ -276,21 +278,37 @@ def _cpp_prefix_path() -> str:
         )
     return filename
 
+
 def get_build_args_of_chosen_isa():
     from torch._inductor.codecache import chosen_isa
+
     cap = str(chosen_isa).upper()
-    macros = [f"CPU_CAPABILITY={cap}", f"CPU_CAPABILITY_{cap}", f"HAVE_{cap}_CPU_DEFINITION"]
+    macros = [
+        f"CPU_CAPABILITY={cap}",
+        f"CPU_CAPABILITY_{cap}",
+        f"HAVE_{cap}_CPU_DEFINITION",
+    ]
     # Add Windows support later.
     build_flags = [chosen_isa.build_arch_flags()]
 
     return macros, build_flags
 
+
 def get_torch_related_args():
-    from torch.utils.cpp_extension import TORCH_LIB_PATH, _TORCH_PATH 
-    include_dirs = [os.path.join(_TORCH_PATH, 'include')]
+    from torch.utils.cpp_extension import _TORCH_PATH, TORCH_LIB_PATH
+
+    include_dirs = [
+        os.path.join(_TORCH_PATH, "include"),
+        os.path.join(_TORCH_PATH, "include", "torch", "csrc", "api", "include"),
+        # Some internal (old) Torch headers don't properly prefix their includes,
+        # so we need to pass -Itorch/lib/include/TH as well.
+        os.path.join(_TORCH_PATH, "include", "TH"),
+        os.path.join(_TORCH_PATH, "include", "THC"),
+    ]
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = ["torch", "torch_cpu", "c10"]
     return include_dirs, libraries_dirs, libraries
+
 
 class CxxTorchOptions(CxxOptions):
     """
@@ -315,10 +333,14 @@ class CxxTorchOptions(CxxOptions):
         _nonduplicate_append(self._definations, macros)
         _nonduplicate_append(self._passthough_args, build_flags)
 
-        include_dirs, libraries_dirs, libraries = get_torch_related_args()
-        _nonduplicate_append(self._include_dirs, include_dirs)
-        _nonduplicate_append(self._libraries_dirs, libraries_dirs)
-        _nonduplicate_append(self._libraries, libraries)
+        (
+            torch_include_dirs,
+            torch_libraries_dirs,
+            torch_libraries,
+        ) = get_torch_related_args()
+        _nonduplicate_append(self._include_dirs, torch_include_dirs)
+        _nonduplicate_append(self._libraries_dirs, torch_libraries_dirs)
+        _nonduplicate_append(self._libraries, torch_libraries)
 
         # cpp_prefix_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
         # _nonduplicate_append(self._include_dirs, cpp_prefix_dir)
