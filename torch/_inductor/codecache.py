@@ -2094,6 +2094,7 @@ def _nvcc_compiler_options() -> List[str]:
         config.cuda.compile_opt_level,
         "-std=c++17",
         "--expt-relaxed-constexpr",
+        "-DNDEBUG",
     ]
     if config.cuda.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
