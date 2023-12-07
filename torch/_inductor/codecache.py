@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import copyreg
+import ctypes
 import dataclasses
 import functools
 import hashlib
@@ -26,7 +27,6 @@ import tempfile
 import threading
 import warnings
 import weakref
-import ctypes
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from copy import copy
@@ -49,11 +49,11 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
+from torch._inductor.cxx_builder.cxx_builder import CxxBuilder, CxxOptions
+from torch._inductor.cxx_builder.isa_help_code_store import get_x86_isa_detect_code
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
-from torch._inductor.cxx_builder.cxx_builder import CxxOptions, CxxTorchOptions, CxxTorchCudaOptions, CxxBuilder
-from torch._inductor.cxx_builder.isa_help_code_store import get_x86_isa_detect_code
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
@@ -1125,19 +1125,21 @@ class InvalidVecISA(VecISA):
 invalid_vec_isa = InvalidVecISA()
 supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 
+
 def x86_isa_checker() -> list:
     supported_isa = []
+
     def _check_and_append_supported_isa(dest: list, isa: bool, isa_name: str):
         if isa is True:
             dest.append(isa_name)
 
     Arch = platform.machine()
-    '''
+    """
     Arch value is x86_64 on Linux, and the value is AMD64 on Windows.
-    '''
-    if Arch !=  "x86_64" and Arch != "AMD64":
+    """
+    if Arch != "x86_64" and Arch != "AMD64":
         return supported_isa
-    
+
     cpp_code = get_x86_isa_detect_code()
 
     key, input_path = write(cpp_code, "cpp")
@@ -1171,9 +1173,10 @@ def x86_isa_checker() -> list:
         _check_and_append_supported_isa(supported_isa, avx2, "avx2")
         _check_and_append_supported_isa(supported_isa, avx512, "avx512")
 
-        print("!!! x86 isa --> avx2: {}, avx512: {}".format(avx2, avx512))
+        print(f"!!! x86 isa --> avx2: {avx2}, avx512: {avx512}")
 
         return supported_isa
+
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
 # might have too much redundant content that is useless for ISA check. Hence,

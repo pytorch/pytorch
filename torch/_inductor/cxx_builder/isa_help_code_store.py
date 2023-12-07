@@ -59,8 +59,8 @@ __forceinline void read_cpuidex(
 }
 
 
-void check_feature_via_cpuid(bool &bit_fma, 
-  bool &bit_avx2, 
+void check_feature_via_cpuid(bool &bit_fma,
+  bool &bit_avx2,
   bool &bit_avx512_f,
   bool &bit_avx512_vl,
   bool &bit_avx512_bw,
@@ -133,7 +133,7 @@ EXTERN_DLL_EXPORT bool check_avx512_feature()
 
   check_feature_via_cpuid(bit_fma, bit_avx2, bit_avx512_f, bit_avx512_vl, bit_avx512_bw, bit_avx512_dq);
 
-  return (bit_fma && bit_avx512_f && 
+  return (bit_fma && bit_avx512_f &&
   bit_avx512_vl && bit_avx512_bw && bit_avx512_dq);
 }
 """
