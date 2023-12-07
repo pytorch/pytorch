@@ -858,7 +858,7 @@ class ONNXProgram:
             >>> import torch
             >>> import torch.onnx
             >>> from typing import Dict, Tuple
-            >>> def func_with_nested_input_structure(
+            >>> def func_nested_input(
             ...     x_dict: Dict[str, torch.Tensor],
             ...     y_tuple: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
             ... ):
@@ -874,10 +874,10 @@ class ONNXProgram:
             ...     return x + y1 + y2 + y3
             >>> x_dict = {"a": torch.tensor(1.)}
             >>> y_tuple = (torch.tensor(2.), (torch.tensor(3.), torch.tensor(4.)))
-            >>> onnx_program = torch.onnx.dynamo_export(x_dict, y_tuple, model=func_with_nested_input_structure)
+            >>> onnx_program = torch.onnx.dynamo_export(func_nested_input, x_dict, y_tuple)
             >>> print(x_dict, y_tuple)
             {'a': tensor(1.)} (tensor(2.), (tensor(3.), tensor(4.)))
-            >>> print(onnx_program.adapt_torch_inputs_to_onnx(x_dict, y_tuple, model_with_state_dict=func_with_nested_input_structure))
+            >>> print(onnx_program.adapt_torch_inputs_to_onnx(x_dict, y_tuple, model_with_state_dict=func_nested_input))
             (tensor(1.), tensor(2.), tensor(3.), tensor(4.))
 
         .. warning::
