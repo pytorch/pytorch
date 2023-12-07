@@ -4,7 +4,7 @@ import weakref
 from weakref import ref
 from _weakrefset import _IterationGuard  # type: ignore[attr-defined]
 from collections.abc import MutableMapping, Mapping
-from torch import Tensor, ScriptObject
+from torch import Tensor
 import collections.abc as _collections_abc
 
 
