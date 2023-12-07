@@ -105,7 +105,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
                 choices,
                 input_nodes=(mat1, mat2),
                 layout=layout,
-                **mm_options(config, k, layout),
+                **mm_options(config, m, n, k, layout),
             )
     if m * n != 0 and use_cutlass_template(layout, m, n, k):
         from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
@@ -141,7 +141,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 choices,
                 input_nodes=(inp_expanded, mat1, mat2),
                 layout=layout,
-                **mm_options(config, k, layout),
+                **mm_options(config, m, n, k, layout),
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
             )
