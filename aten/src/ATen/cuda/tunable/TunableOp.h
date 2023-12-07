@@ -81,7 +81,7 @@ class TunableOp {
     virtual ~TunableOp() = default;
 
     TuningStatus operator()(const ParamsT* params) {
-      ResultEntry id = ResultEntry::Null();
+      ResultEntry result = ResultEntry::Null();
       TuningContext* ctx = getTuningContext();
       if (ctx->IsTunableOpEnabled()) {
         auto& mgr = ctx->GetTuningResultsManager();
@@ -89,11 +89,11 @@ class TunableOp {
         auto params_sig = params->Signature();
 
         // Usage is enabled, then we are free to use previous tuning result.
-        auto result = mgr.Lookup(op_sig, params_sig);
+        result = mgr.Lookup(op_sig, params_sig);
         if (result > static_cast<int>(ops_.size())) {
-          TUNABLE_LOG("Invalid TunableOp kernel id for ", op_sig, ", id:", result, ", registered op:", ops_.size());
+          TUNABLE_LOG("Invalid TunableOp kernel result for ", op_sig, ", result:", result, ", registered op:", ops_.size());
           mgr.Delete(op_sig, params_sig);
-          id = ResultEntry::Null();
+          result = ResultEntry::Null();
         }
 
         // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
@@ -102,10 +102,12 @@ class TunableOp {
           auto result = FindFastest(maybe_proxy_params);
           PostTuning(maybe_proxy_params);
           mgr.Add(op_sig, params_sig, result);
-          id = result;
         }
       }
-      return (ops_[id < 0 ? default_id_ : id](params));
+      if (result < 0) {
+        TUNABLE_LOG("result < 0, using default_id_; result=", result);
+      }
+      return (ops_[result < 0 ? default_id_ : result](params));
     }
 
     // We might want to do some tricks to the `params`, e.g., some op will use a buffer for input and output at the same
