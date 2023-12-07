@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-from torch.utils.weak import WeakIdKeyDictionary, _WeakHashRef
+from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary
 
 
 def C():
