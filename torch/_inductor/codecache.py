@@ -1141,11 +1141,13 @@ invalid_vec_isa = InvalidVecISA()
 supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 
 
-def x86_isa_checker() -> list:
-    supported_isa = []
+def x86_isa_checker() -> List[str]:
+    supported_isa: List[str] = []
 
-    def _check_and_append_supported_isa(dest: list, isa: bool, isa_name: str):
-        if isa is True:
+    def _check_and_append_supported_isa(
+        dest: List[str], isa_supported: bool, isa_name: str
+    ):
+        if isa_supported is True:
             dest.append(isa_name)
 
     Arch = platform.machine()

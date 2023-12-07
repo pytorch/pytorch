@@ -52,10 +52,10 @@ def _get_cxx_compiler():
     return compiler
 
 
-def _nonduplicate_append(dest_list: list, src_list: list):
-    for i in src_list:
-        if i not in dest_list:
-            dest_list.append(i)
+def _nonduplicate_append(dest_list: List[str], src_list: List[str]):
+    for item in src_list:
+        if item not in dest_list:
+            dest_list.append(item)
 
 
 def _create_if_dir_not_exist(path_dir):
@@ -94,6 +94,12 @@ def is_clang(cpp_compiler) -> bool:
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
+@functools.lru_cache(None)
+def is_apple_clang(cpp_compiler) -> bool:
+    version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
+    return "Apple" in version_string.splitlines()[0]
+
+
 class BuildOptionsBase:
     """
     This is the Base class for store cxx build options, as a template.
@@ -102,13 +108,13 @@ class BuildOptionsBase:
     """
 
     _compiler = ""
-    _definations = []
-    _include_dirs = []
-    _cflags = []
-    _ldlags = []
-    _libraries_dirs = []
-    _libraries = []
-    _passthough_args = []
+    _definations: List[str] = []
+    _include_dirs: List[str] = []
+    _cflags: List[str] = []
+    _ldlags: List[str] = []
+    _libraries_dirs: List[str] = []
+    _libraries: List[str] = []
+    _passthough_args: List[str] = []
 
     def __init__(self) -> None:
         pass
@@ -241,7 +247,7 @@ def use_custom_generated_macros() -> List[str]:
 def use_fb_internal_macros() -> List[str]:
     if not _IS_WINDOWS:
         if config.is_fbcode():
-            openmp_lib = build_paths.openmp_lib()
+            # openmp_lib = build_paths.openmp_lib()
             preprocessor_flags = " ".join(
                 (
                     "-D C10_USE_GLOG",
@@ -249,7 +255,8 @@ def use_fb_internal_macros() -> List[str]:
                     "-D C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
                 )
             )
-            return [f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"]
+            # return [f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"]
+            return [f"{preprocessor_flags}"]
         else:
             return []
     else:
@@ -328,14 +335,71 @@ def get_python_related_args():
     return python_include_dirs, python_lib_path
 
 
+"""
+def get_openmp_args(cpp_compiler):
+    ipaths = []
+    lpaths = []
+    if _IS_MACOS:
+        from torch._inductor.codecache import (
+            homebrew_libomp,
+            is_conda_llvm_openmp_installed,
+        )
+
+        # only Apple builtin compilers (Apple Clang++) require openmp
+        omp_available = not is_apple_clang(cpp_compiler)
+
+        # check the `OMP_PREFIX` environment first
+        if os.getenv("OMP_PREFIX") is not None:
+            header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")
+            valid_env = os.path.exists(header_path)
+            if valid_env:
+                ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
+                lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+            else:
+                warnings.warn("environment variable `OMP_PREFIX` is invalid.")
+            omp_available = omp_available or valid_env
+
+        libs = [] if omp_available else ["omp"]
+
+        # prefer to use openmp from `conda install llvm-openmp`
+        if not omp_available and os.getenv("CONDA_PREFIX") is not None:
+            omp_available = is_conda_llvm_openmp_installed()
+            if omp_available:
+                conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
+                ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
+                lpaths.append(conda_lib_path)
+                # Prefer Intel OpenMP on x86 machine
+                if os.uname().machine == "x86_64" and os.path.exists(
+                    os.path.join(conda_lib_path, "libiomp5.dylib")
+                ):
+                    libs = ["iomp5"]
+
+        # next, try to use openmp from `brew install libomp`
+        if not omp_available:
+            omp_available, libomp_path = homebrew_libomp()
+            if omp_available:
+                ipaths.append(os.path.join(libomp_path, "include"))
+                lpaths.append(os.path.join(libomp_path, "lib"))
+
+        # if openmp is still not available, we let the compiler to have a try,
+        # and raise error together with instructions at compilation error later
+    elif _IS_WINDOWS:
+        todo = 0
+    else:
+        libs = ["omp"] if config.is_fbcode() else ["gomp"]
+
+    return
+"""
+
+
 class CxxTorchOptions(CxxOptions):
     """
     This class is inherited from CxxTorchOptions, which automatic contains
     base cxx build options. And then it will maintains torch related build
     args.
-    1. Torch include directories.
-    2. Torch libraries.
-    3. Torch libraries directories.
+    1. Torch include_directories, libraries, libraries_directories.
+    2. Python include_directories, libraries, libraries_directories.
+    3. OpenMP related.
     4. Torch MACROs.
     5. MISC
     """
@@ -409,7 +473,7 @@ class CxxBuilder:
         name: str,
         sources: List[str],
         BuildOption: BuildOptionsBase,
-        output_dir: str = None,
+        output_dir: str = "",
     ) -> None:
         self._name = name
         self._sources_args = " ".join(sources)
@@ -457,7 +521,7 @@ class CxxBuilder:
 
         for lib in BuildOption.get_libraries():
             if _IS_WINDOWS:
-                self._libraries_args += f"{lib}.lib "
+                self._libraries_args += f"lib{lib}.lib "
             else:
                 self._libraries_args += f"-l{lib} "
 
@@ -480,10 +544,16 @@ class CxxBuilder:
             if _IS_WINDOWS:
                 # https://learn.microsoft.com/en-us/cpp/build/walkthrough-compile-a-c-program-on-the-command-line?view=msvc-1704
                 # https://stackoverflow.com/a/31566153
-                cmd = f"{compiler} {include_dirs_args} {definations_args} {cflags_args} {sources} {ldflags_args} {libraries_args} {libraries_dirs_args} {passthougn_args} /LD /Fe{target_file}"
+                cmd = (
+                    f"{compiler} {include_dirs_args} {definations_args} {cflags_args} {sources} {ldflags_args} "
+                    f"{libraries_args} {libraries_dirs_args} {passthougn_args} /LD /Fe{target_file}"
+                )
                 cmd = cmd.replace("\\", "\\\\")
             else:
-                cmd = f"{compiler} {sources} {include_dirs_args} {definations_args} {cflags_args} {ldflags_args} {libraries_args} {libraries_dirs_args} {passthougn_args} -o {target_file}"
+                cmd = (
+                    f"{compiler} {sources} {include_dirs_args} {definations_args} {cflags_args} {ldflags_args} "
+                    f"{libraries_args} {libraries_dirs_args} {passthougn_args} -o {target_file}"
+                )
             return cmd
 
         command_line = format_build_command(
