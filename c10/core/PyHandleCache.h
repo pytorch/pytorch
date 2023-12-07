@@ -36,7 +36,7 @@ namespace c10 {
 // not be a way to conveniently index based on the object.)
 class PyHandleCache {
  public:
-  PyHandleCache() : pyinterpreter_(nullptr), data_(nullptr) {}
+  PyHandleCache() : pyinterpreter_(nullptr) {}
 
   // Attempt to fetch the pointer from the cache, if the PyInterpreter
   // matches.  If it doesn't exist, or the cache entry is not valid,
@@ -69,7 +69,7 @@ class PyHandleCache {
 
  private:
   mutable std::atomic<impl::PyInterpreter*> pyinterpreter_;
-  mutable PyObject* data_;
+  mutable PyObject* data_{nullptr};
 };
 
 } // namespace c10

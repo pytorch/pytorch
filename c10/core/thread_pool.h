@@ -11,11 +11,6 @@
 #include <c10/util/numa.h>
 #include <c10/util/thread_name.h>
 
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
-#endif
-
 namespace c10 {
 
 class C10_API TaskThreadPoolBase {
@@ -43,7 +38,9 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
  protected:
   struct task_element_t {
     bool run_with_id;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::function<void()> no_id;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::function<void(std::size_t)> with_id;
 
     explicit task_element_t(std::function<void()> f)
@@ -117,5 +114,3 @@ C10_DECLARE_SHARED_REGISTRY(
     bool);
 
 } // namespace c10
-
-C10_CLANG_DIAGNOSTIC_POP()
