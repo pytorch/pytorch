@@ -231,6 +231,20 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res = fn(input)
             self.assertIsInstance(res, LocalSubclass)
 
+    def test_isinstance_check_subclass(self):
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {DummyNDim}):
+
+            def fn(x):
+                if isinstance(x, DummyNDim):
+                    return torch.ones(1, 1)
+                else:
+                    return torch.zeros(2, 2)
+
+            input = torch.ones(2, 2)
+            exp_res = fn(input)
+            act_res = torch.compile(backend="eager", fullgraph=True)(fn)(input)
+            self.assertEqual(exp_res, act_res)
+
     def test_torch_function_call_on_method(self):
         x = torch.ones(2, 2)
         y = torch.ones(2, 2)
