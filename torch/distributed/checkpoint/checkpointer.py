@@ -28,6 +28,7 @@ class Checkpointer:
         self,
         storage_writer: StorageWriter,
         storage_reader: StorageReader,
+        *,
         process_group: Optional[dist.ProcessGroup] = None,
         coordinator_rank: int = 0,
         no_dist: bool = False,
@@ -37,8 +38,7 @@ class Checkpointer:
         """Initializes the Checkpointer instance.
 
         Args:
-            storage_writer:
-                Instance of StorageWrite use to perform writes.
+            storage_writer: Instance of StorageWrite use to perform writes.
             storage_reader: StorageReader used to load data from.
             process_group: ProcessGroup to be used for cross-rank synchronization.
             coordinator_rank: Rank to use to coordinate the checkpoint. rank0 is used by default.
@@ -57,55 +57,29 @@ class Checkpointer:
     def save(
         self,
         state_dict: STATE_DICT_TYPE,
-        *,
-        storage_writer: Optional[StorageWriter] = None,
-        process_group: Optional[dist.ProcessGroup] = None,
-        coordinator_rank: int = 0,
-        no_dist: bool = False,
-        planner: Optional[SavePlanner] = None,
     ):
-        """Calls :py:meth: `torch.distributed.state_dict_saver.save`.
-        This method will default to the values passed during initialization.
+        """Calls :py:meth: `torch.distributed.state_dict_saver.save`. Utilizing values passed during initialization.
         """
-        storage_writer = storage_writer or self.storage_writer
-        process_group = process_group or self.process_group
-        coordinator_rank = coordinator_rank or self.coordinator_rank
-        no_dist = no_dist or self.no_dist
-        planner = planner or self.save_planner
-
         saver.save(
             state_dict,
-            storage_writer,
-            process_group=process_group,
-            coordinator_rank=coordinator_rank,
-            no_dist=no_dist,
-            planner=planner,
+            self.storage_writer,
+            process_group=self.process_group,
+            coordinator_rank=self.coordinator_rank,
+            no_dist=self.no_dist,
+            planner=self.planner,
         )
 
     def load(
         self,
-        state_dict: Dict[str, Any],
-        *,
-        storage_reader: Optional[StorageReader] = None,
-        process_group: Optional[dist.ProcessGroup] = None,
-        coordinator_rank: int = 0,
-        no_dist: bool = False,
-        planner: Optional[LoadPlanner] = None,
+        state_dict: Dict[str, Any]
     ):
-        """Calls :py:meth: `torch.distributed.state_dict_loader.load`.
-        This method will default to the values passed during initialization.
+        """Calls :py:meth: `torch.distributed.state_dict_loader.load`. Utilizing values passed during initialization.
         """
-        storage_reader = storage_reader or self.storage_reader
-        process_group = process_group or self.process_group
-        coordinator_rank = coordinator_rank or self.coordinator_rank
-        no_dist = no_dist or self.no_dist
-        planner = planner or self.load_planner
-
         loader.load(
             state_dict,
-            storage_reader=storage_reader,
-            process_group=process_group,
-            coordinator_rank=coordinator_rank,
-            no_dist=no_dist,
-            planner=planner,
+            storage_reader=self.storage_reader,
+            process_group=self.process_group,
+            coordinator_rank=self.coordinator_rank,
+            no_dist=self.no_dist,
+            planner=self.planner,
         )
