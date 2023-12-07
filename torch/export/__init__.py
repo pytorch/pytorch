@@ -36,6 +36,8 @@ from torch.utils._pytree import (
     UnflattenFunc,
 )
 
+from . import config
+
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
@@ -74,7 +76,7 @@ def export(
     *,
     constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
-    strict: bool = True,
+    strict: bool = config.strict_mode_default,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """

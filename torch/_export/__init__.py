@@ -35,6 +35,7 @@ from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.export import config
 from torch.export.exported_program import (
     ExportedProgram,
     ModuleCallEntry,
@@ -85,7 +86,7 @@ from .passes.replace_view_ops_with_view_copy_ops_pass import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
 from .wrappers import _wrap_submodules
-from torch._inductor import config
+from torch._inductor import config as inductor_config
 
 
 def export__RC__(
@@ -94,7 +95,7 @@ def export__RC__(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
-    strict: bool = True,
+    strict: bool = config.strict_mode_default,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
@@ -245,7 +246,7 @@ def export(
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
     *,
-    strict: bool = True,
+    strict: bool = config.strict_mode_default,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     from torch.export._trace import _export
@@ -358,7 +359,7 @@ def _export(
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
     *,
-    strict: bool = True,
+    strict: bool = config.strict_mode_default,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
@@ -516,7 +517,7 @@ def aot_compile(
     if constraints is None:
         constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
 
-    if config.is_predispatch:
+    if inductor_config.is_predispatch:
         gm = capture_pre_autograd_graph(f, args, kwargs, constraints)
     else:
         # We want to export to Torch IR here to utilize the pre_grad passes in
