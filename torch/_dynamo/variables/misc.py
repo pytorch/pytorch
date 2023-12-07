@@ -434,10 +434,10 @@ class AutogradFunctionVariable(VariableTracker):
                         fwd_bwd_tracer=fwd_bwd_tracer,
                     ).call_function(tx, bwd_args, {})
 
-                speculation.autograd_is_sound_and_restart_analysis()
+                speculation.mark_sound_and_restart_analysis()
             else:
                 # If fwd and backward are sound, we want apply in the graph.
-                # And we don't want backwards for the obvious reasons.
+                # We don't want backward because we are tracing forwards.
                 args = args[1:]
                 return TorchHigherOrderOperatorVariable.make(
                     trampoline_autograd_apply,
