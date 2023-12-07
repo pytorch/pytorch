@@ -85,7 +85,7 @@ def build_triton(
             triton_pkg_name = "pytorch-triton"
         check_call(["git", "clone", triton_repo], cwd=tmpdir)
         if release:
-            ver, rev, patch = version.split('.')
+            ver, rev, patch = version.split(".")
             check_call(["git", "checkout", f"release/{ver}.{rev}.x"], cwd=triton_basedir)
         else:
             check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
