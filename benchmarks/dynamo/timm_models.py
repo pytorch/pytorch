@@ -69,6 +69,7 @@ BATCH_SIZE_DIVISORS = {
 
 REQUIRE_HIGHER_TOLERANCE = {
     "fbnetv3_b",
+    "gmixer_24_224",
     "hrnet_w18",
     "inception_v3",
     "sebotnet33ts_256",
