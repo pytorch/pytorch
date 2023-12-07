@@ -58,17 +58,22 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
     num_optional_args = sum([x.endswith("?") for x in named_arg_types])
     min_args = len(named_arg_types) - num_optional_args
 
-    if not (len(args) >= min_args and len(args) <= len(named_arg_types)):
-        raise ValueError(
-            f"NestedTensor {func.__name__}({schema_str}): expected at least {min_args} "
-            f"arguments and at most {len(named_arg_types)} arguments, but got: "
-            f"{len(args)} arguments"
-        )
+    # special case: ellipses allows for any number of unchecked args at the end
+    if named_arg_types[-1] == "...":
+        named_arg_types = named_arg_types[:-1]
+    else:
+        if not (len(args) >= min_args and len(args) <= len(named_arg_types)):
+            raise ValueError(
+                f"NestedTensor {func.__name__}({schema_str}): expected at least {min_args} "
+                f"arguments and at most {len(named_arg_types)} arguments, but got: "
+                f"{len(args)} arguments"
+            )
 
     arg_type_check_fns = {
         "t": lambda x: isinstance(x, torch.Tensor) and not isinstance(x, NestedTensor),
         "jt": lambda x: isinstance(x, NestedTensor)
-        and x._lengths is None,  # ops with "jt" require contiguous JT only
+        and x._lengths is None
+        and x._ragged_idx == 1,  # ops with "jt" require contiguous JT only
         "jt_all": lambda x: isinstance(
             x, NestedTensor
         ),  # ops with "jt_all" can accept all kinds of JT
@@ -90,9 +95,16 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
             continue
 
         if not arg_type_check_fns[normalized_arg_type](args[i]):
+            type_to_desc = {
+                "t": "tensor",
+                "jt": "contiguous jagged layout NestedTensor",
+                "jt_all": "jagged layout NestedTensor",
+                "any": "<any type>",
+            }
+
             raise ValueError(
-                f"NestedTensor {func.__name__}({schema_str}): {name} should be of "
-                f"type {arg_type}, but got: {type(args[i])}"
+                f"NestedTensor {func.__name__}({schema_str}): expected {name} to be a "
+                f"{type_to_desc[arg_type]}"
             )
 
 
@@ -174,6 +186,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum([isinstance(x, torch.Tensor) for x in args])
         if num_tensor_args == 1:
+            check_schema("self: jt, ...", func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
         elif num_tensor_args == 2:
             check_schema("lhs: any, rhs: any", func, *args, **kwargs)
@@ -710,7 +723,9 @@ def sum_dim_IntList(func, *args, **kwargs):
         return out
 
 
-@register_jagged_func(torch.ops.aten.transpose.int, "self: jt, dim0: any, dim1: any")
+@register_jagged_func(
+    torch.ops.aten.transpose.int, "self: jt_all, dim0: any, dim1: any"
+)
 def transpose_int(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -720,6 +735,11 @@ def transpose_int(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     dim0, dim1 = canonicalize_dims(inp.dim(), (new_kwargs["dim0"], new_kwargs["dim1"]))
+
+    if inp._lengths is not None:
+        raise ValueError(
+            "transpose(): not supported on jagged layout nested tensor with holes"
+        )
 
     # To support the SDPA API, inputs need to have the ragged idx transposed to dim 2
     # instead of 1, although the internal Flash and mem-effn implementations will
