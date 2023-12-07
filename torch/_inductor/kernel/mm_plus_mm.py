@@ -231,7 +231,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
                     choices,
                     input_nodes=(mat1, mat2, mat3, mat4),
                     layout=layout1,
-                    **mm_options(config, k1, layout1),
+                    **mm_options(config, m1, n1, k1, layout1),
                 )
 
     return autotune_select_algorithm(
