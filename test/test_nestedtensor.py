@@ -2,12 +2,14 @@
 
 import io
 import itertools
+from typing import Optional, Tuple
 import unittest
 from functools import partial
 
 import numpy as np
 import torch
 import torch.nn
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -28,6 +30,7 @@ from torch.testing._internal.common_utils import (
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -2907,6 +2910,42 @@ class TestNestedTensorAutograd(NestedTestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+# Found in torch/testing/_comparison.py
+default_atol = {torch.float16: 1e-3, torch.bfloat16: 1e-3, torch.float32: 1e-5}
+default_rtol = {torch.float16: 1e-3, torch.bfloat16: 1.6e-2, torch.float32: 1.3e-6}
+
+def get_rtol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
+    deviation = true_value - computed_value
+    deviation = torch.abs(deviation / true_value)
+    # Fill in the nans with the default rtol
+    torch.nan_to_num_(deviation, nan=default_rtol[computed_value.dtype])
+    return deviation.max().item()
+
+
+def get_atol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
+    deviation = true_value - computed_value
+    atol = torch.abs(deviation).max().item()
+    return atol
+
+
+def get_tolerances(
+    true_value: torch.Tensor,
+    computed_value: torch.Tensor,
+    fudge_factor: Optional[float] = None,
+) -> Tuple[float, float]:
+    """Returns the absolute and relative tolerances for comparing two tensors."""
+    fudge_factor = fudge_factor if fudge_factor is not None else 1.0
+    atol = get_atol(true_value, computed_value)
+    rtol = get_rtol(true_value, computed_value)
+
+    atol = fudge_factor * max(atol, default_atol[computed_value.dtype])
+    rtol = fudge_factor * max(rtol, default_rtol[computed_value.dtype])
+    # torch.isclose() has weird behavior around see:
+    # https://github.com/pytorch/pytorch/issues/102400
+    if rtol > 1e30:
+        rtol = default_rtol[computed_value.dtype]
+    return atol, rtol
+
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
 class TestNestedTensorSubclass(NestedTestCase):
@@ -3210,7 +3249,7 @@ class TestNestedTensorSubclass(NestedTestCase):
         self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
         self.assertEqual(nt.shape[2:], first_t.shape[1:])
 
-    @skipIfTorchDynamo("Dynamo type of torch.SymInt returns int")
+    @torch._dynamo.config.patch(suppress_errors=True)
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
@@ -3233,7 +3272,7 @@ class TestNestedTensorSubclass(NestedTestCase):
                 t = t if isinstance(t, torch.Tensor) else torch.as_tensor(t)
                 self.assertTrue(t.grad is None)
 
-    @skipIfTorchDynamo("Dynamo type of torch.SymInt returns int")
+    @torch._dynamo.config.patch(suppress_errors=True)
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("components_require_grad", [False, True])
     def test_jagged_layout_construction_as_nested_tensor(
@@ -3259,7 +3298,6 @@ class TestNestedTensorSubclass(NestedTestCase):
                     else:
                         self.assertTrue(t.grad is None)
 
-    @skipIfTorchDynamo("Dynamo type of torch.SymInt returns int")
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
     @onlyCUDA
     def test_jagged_layout_construction_with_pinned_memory(self, device):
@@ -3385,6 +3423,144 @@ class TestNestedTensorSubclass(NestedTestCase):
         self.assertTrue(nt_contiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
+
+    # Note 1: CPU Fused kernels do not support nested, Math is missing ops to work with NT jagged
+    # Note 2: Unless running on newer GPUs, only mem-effn or math are available, and mem-effn
+    # will fail with gradients and math has ops that aren't implemented. Therefore, in
+    # order to get some kernel to work with most GPUs, we have to disable gradients in
+    # this more general test
+    # Note 3: ROCm only supports the math kernel, which doesn't work with jagged NTs
+    @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
+    @torch.set_grad_enabled(False)
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
+                 SM80OrLater else [torch.float16, torch.float32])
+    def test_sdpa(self, device, dtype):
+        batch_size = 1
+        emb_dims = 1024
+        n_heads = 8
+        head_dims = emb_dims // n_heads
+
+        sen1 = torch.randn(11, emb_dims, dtype=dtype, device=device)
+        sen2 = torch.randn(13, emb_dims, dtype=dtype, device=device)
+
+        query = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
+        key = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
+        value = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
+
+        # Simplest case: 1 sentence, no batching
+        x_d1 = sen1.unsqueeze(0)
+        x_nt = torch.nested.as_nested_tensor([sen1], layout=torch.jagged)
+
+        q_d1 = query(x_d1).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        k_d1 = key(x_d1).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        v_d1 = value(x_d1).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+
+        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+
+        # High Precision Math Reference
+        q_d1_f32 = q_d1.to(torch.float32)
+        k_d1_f32 = k_d1.to(torch.float32)
+        v_d1_f32 = v_d1.to(torch.float32)
+        out_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1_f32, k_d1_f32, v_d1_f32)[0]
+        # Low Precision Math Reference
+        out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1, k_d1, v_d1)[0]
+        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
+
+        attn_d1 = torch.nn.functional.scaled_dot_product_attention(q_d1, k_d1, v_d1).transpose(1, 2)
+        attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt, k_nt, v_nt).transpose(1, 2)
+
+        self.assertEqual(attn_d1, attn_nt.unbind()[0].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
+
+        # Simple case: 2 sentences, no extra params
+        x_d2 = sen2.unsqueeze(0)
+        x_nt = torch.nested.as_nested_tensor([sen1, sen2], layout=torch.jagged)
+
+        q_d2 = query(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        k_d2 = key(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        v_d2 = value(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+
+        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+
+        attn_d2 = torch.nn.functional.scaled_dot_product_attention(q_d2, k_d2, v_d2).transpose(1, 2)
+        attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt, k_nt, v_nt).transpose(1, 2)
+
+        attn_nts = attn_nt.unbind()
+        self.assertEqual(attn_d1, attn_nts[0].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
+        self.assertEqual(attn_d2, attn_nts[1].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
+
+        # Test dispatcher works by calling only mem-effn and math (as they are safe for all devices)
+        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=True, enable_math=False):
+            attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt, k_nt, v_nt).transpose(1, 2)
+
+            attn_nts = attn_nt.unbind()
+            self.assertEqual(attn_d1, attn_nts[0].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
+            self.assertEqual(attn_d2, attn_nts[1].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
+
+        # Will fail bc unsupported ops
+        # TODO: Add remaining ops, or implement a different math dispatch for jagged
+        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True):
+            with self.assertRaises(RuntimeError):
+                attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt, k_nt, v_nt).transpose(1, 2)
+
+    # This requires NT -> NT views to work in inductor, which is a TODO
+    @unittest.expectedFailure
+    @onlyCUDA
+    @torch.set_grad_enabled(False)
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
+                 SM80OrLater else [torch.float16, torch.float32])
+    def test_sdpa_compile(self, device, dtype):
+        batch_size = 1
+        emb_dims = 1024
+        n_heads = 8
+        head_dims = emb_dims // n_heads
+
+        sen1 = torch.randn(11, emb_dims, dtype=dtype, device=device)
+        sen2 = torch.randn(13, emb_dims, dtype=dtype, device=device)
+
+        query = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
+        key = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
+        value = torch.nn.Linear(emb_dims, emb_dims, bias=False, device=device, dtype=dtype)
+
+        # Simplest case: 1 sentence, no batching
+        x_d1 = sen1.unsqueeze(0)
+        x_d2 = sen2.unsqueeze(0)
+        x_nt = torch.nested.as_nested_tensor([sen1, sen2], layout=torch.jagged)
+
+        q_d1 = query(x_d1).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        k_d1 = key(x_d1).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        v_d1 = value(x_d1).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        q_d2 = query(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        k_d2 = key(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        v_d2 = value(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+
+        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+
+        # High Precision Math Reference
+        q_d1_f32 = q_d1.to(torch.float32)
+        k_d1_f32 = k_d1.to(torch.float32)
+        v_d1_f32 = v_d1.to(torch.float32)
+        out_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1_f32, k_d1_f32, v_d1_f32)[0]
+        # Low Precision Math Reference
+        out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1, k_d1, v_d1)[0]
+        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
+
+        attn_d1 = torch.nn.functional.scaled_dot_product_attention(q_d1, k_d1, v_d1).transpose(1, 2)
+        attn_d2 = torch.nn.functional.scaled_dot_product_attention(q_d2, k_d2, v_d2).transpose(1, 2)
+
+        compiled_sdpa = torch.compile(torch.nn.functional.scaled_dot_product_attention)
+        attn_nt = compiled_sdpa(q_nt, k_nt, v_nt).transpose(1, 2)
+
+        attn_nts = attn_nt.unbind()
+        self.assertEqual(attn_d1, attn_nts[0].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
+        self.assertEqual(attn_d2, attn_nts[1].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
+
 
 
 instantiate_parametrized_tests(TestNestedTensor)
