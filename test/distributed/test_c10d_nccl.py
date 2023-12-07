@@ -3579,6 +3579,10 @@ class NCCLTraceTestBase(MultiProcessTestCase):
     def _trace_name(self, rank):
         return self._trace_basename() + str(rank)
 
+    @property
+    def started_or_scheduled(self):
+        return "scheduled"
+
 class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
@@ -3737,7 +3741,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     self.assertEqual(t[-1]['state'], 'completed')
                 else:
                     self.assertEqual(t[-1]['seq_id'], 2)
-                    self.assertEqual(t[-1]['state'], 'started')
+                    self.assertEqual(t[-1]['state'], self.started_or_scheduled)
                 # this will eventually cause the missing rank 0
                 # to continue which will unblock the non-zero ranks
                 self.parent.send('next')
@@ -3799,7 +3803,7 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestBase):
                 self.assertEqual(t[0]['seq_id'], 1)
                 self.assertEqual(t[0]['state'], 'completed')
                 self.assertEqual(t[1]['seq_id'], 2)
-                self.assertEqual(t[1]['state'], 'started')
+                self.assertEqual(t[1]['state'], self.started_or_scheduled)
 
             self.assertFalse(os.path.exists(self._trace_name(rank=1)))
 
