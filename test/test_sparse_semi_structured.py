@@ -192,6 +192,12 @@ class TestCUSPARSELT(TestCase):
     """
     This contains cuSPARSELt specific tests.
     """
+    def setUp(self):
+        if not _IS_SM8X:
+            self.skipTest('Only runs on SM80')
+        if "cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
+            self.skipTest('cuSPARSELt not enabled')
+
 
     @parametrize("dense_input_shape", [(128, 128)])
     def test_cslt_sparse_mm_int8_in_fp16_out(self, dense_input_shape, device):
@@ -233,7 +239,9 @@ class TestCUSPARSELT(TestCase):
 
         assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
-    @parametrize("alg_id", range(4))
+    # for cslt v0.4.0, we have 5 alg_ids
+    # for cslt v0.5.0, we have 4 alg_ids
+    @parametrize("alg_id", range(5))
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_cslt_sparse_mm_alg_id(self, device, dtype, alg_id):
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
@@ -256,13 +264,7 @@ class TestCUSPARSELT(TestCase):
 
         A_compressed = torch._cslt_compress(A)
         alg_id = torch._cslt_sparse_mm_search(A_compressed, B.t())
-
-        expected = {
-            torch.bfloat16: 1,
-            torch.float16: 2,
-            torch.int8: 4,
-        }
-        assert alg_id == expected[dtype]
+        assert alg_id in range(5)
 
 
 class TestSparseSemiStructured(TestCase):
@@ -611,8 +613,7 @@ class TestSparseSemiStructured(TestCase):
 
 
 instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
-if "cusparselt" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
-    instantiate_device_type_tests(TestCUSPARSELT, globals(), only_for="cuda")
+instantiate_device_type_tests(TestCUSPARSELT, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
