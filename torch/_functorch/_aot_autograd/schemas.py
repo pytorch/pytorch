@@ -6,7 +6,7 @@ input/output types, metadata, config, function signatures etc.
 import collections
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, List, NewType, Optional, Set, Union
+from typing import Any, Callable, Dict, List, NewType, Optional, Set, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -138,9 +138,12 @@ class SubclassCreationMeta:
     #  so holding onto this at runtime shouldn't leak memory)
     original_subclass: torch.Tensor
     # meta and inner_keys are produced by the subclass's __tensor_flatten__.
-    # We need to keep them around to plumb them into __tensor_unflatten__.
+    # We need to keep them around along with outer_size / outer_stride to plumb them
+    # into __tensor_unflatten__.
     meta: Any
     inner_keys: List[Any]
+    outer_size: Tuple[int, ...]
+    outer_stride: Tuple[int, ...]
 
     def creation_fn(self, all_args, *, is_runtime: bool):
         curr_args = all_args[
@@ -149,8 +152,13 @@ class SubclassCreationMeta:
         assert len(curr_args) == len(
             self.inner_keys
         ), f"inner_keys: {str(self.inner_keys)}. len(curr_args): {len(curr_args)}"
+        # NB: Sometimes we have real inner tensors and symbolic metadata.
+        # TODO: Resolve this so we always have matching real / symbolic tensors / metadata.
         out = type(self.original_subclass).__tensor_unflatten__(  # type: ignore[attr-defined]
-            dict(zip(self.inner_keys, curr_args)), self.meta
+            dict(zip(self.inner_keys, curr_args)),
+            self.meta,
+            self.outer_size,
+            self.outer_stride,
         )
         if not is_runtime:
             # After wrapping up the inner dense tensors into a subclass, we need to make sure that our new wrapper

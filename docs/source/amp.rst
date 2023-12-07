@@ -394,4 +394,6 @@ regardless of whether autocast is enabled.
 .. py:module:: torch.cpu.amp.autocast_mode
 .. py:module:: torch.cuda.amp.autocast_mode
 .. py:module:: torch.cuda.amp.common
+.. py:module:: torch.amp.grad_scaler
+.. py:module:: torch.cpu.amp.grad_scaler
 .. py:module:: torch.cuda.amp.grad_scaler
