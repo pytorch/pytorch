@@ -3426,26 +3426,21 @@ class ConcatKernel(NopKernel):
         )
         kernel = StorageBox(concat_kernel)
         buffer_names = []
-        for i in range(len(inputs)):
-            input_buffer = cls.realize_into(
-                inputs[i],
+        for i, input in enumerate(inputs):
+            input_buffer, copy_required = cls.realize_into(
+                input,
                 SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
             )
             concat_kernel.inputs.append(input_buffer)
 
-            if isinstance(inputs[i].data, BaseView):
-                input_unwrapped = inputs[i].data.unwrap_view()
+            if isinstance(input.data, BaseView):
+                input_unwrapped = input.data.unwrap_view()
             else:
-                input_unwrapped = inputs[i].data
+                input_unwrapped = input.data
 
-            is_foreach_eligible = (
-                input_unwrapped.is_input_buffer()
-                or isinstance(input_unwrapped, ConstantBuffer)
-                or len(inputs) >= 10 and not isinstance(input_unwrapped, Loops)
-            )
             if (
-                is_foreach_eligible
-                and inputs[i].get_device().type == "cuda"
+                copy_required and len(inputs) >= 10
+                and input.get_device().type == "cuda"
                 and not is_dynamic(input_buffer)
             ):
                 buffer_names.append(input_buffer.get_name())
@@ -3469,7 +3464,7 @@ class ConcatKernel(NopKernel):
         )
 
     @classmethod
-    def realize_into(cls, src, dst):
+    def realize_into(cls, src, dst, with_copy=False):
         # Attempt to turn this into a ReinterpretView rather than assert.
         # This has concessions around layout, as as_storage_and_layout
         # can cause us to go from flexible to fixed layout.
@@ -3480,14 +3475,14 @@ class ConcatKernel(NopKernel):
         assert isinstance(dst, ReinterpretView), dst
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
-            return cls.realize_into(src.data, dst)
+            return cls.realize_into(src.data, dst, with_copy)
         if isinstance(src, StorageBox):
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             assert hasattr(src.data, "layout")
             if cls.can_realize_into_without_copy(src):
                 src.data.layout = AliasedLayout(dst)
-                return src.data
+                return src.data, with_copy
         # introduce a copy
         pw = Pointwise.create(
             device=src.get_device(),
@@ -3498,7 +3493,7 @@ class ConcatKernel(NopKernel):
                 for a, b in zip(src.get_size(), dst.get_size())
             ],
         )
-        return cls.realize_into(pw, dst)
+        return cls.realize_into(pw, dst, with_copy=True)
 
     def should_allocate(self):
         return True

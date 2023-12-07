@@ -549,6 +549,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda()
+    @torch._inductor.config.patch("max_pointwise_cat_inputs", 0)
     def test_fuse_concat_extern_kernels(self):
         def fn(x, w, nmatrices):
             ms = [torch.bmm(x + i, w + i) for i in range(nmatrices)]
@@ -558,17 +559,18 @@ class ForeachTests(TestCase):
         w = torch.ones(2, 2, 3, device="cuda:0")
 
         # Case: num-operands < 10, don't create a foreach.
-        self.check_model_cuda(fn, (x, w, 4))
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 6)
+        self.check_model_cuda(fn, (x, w, 5))
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 7)
 
         # Case: num-operands ≥ 10, create a foreach node.
         self.check_model_cuda(fn, (x, w, 10))
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
     @requires_cuda()
+    @torch._inductor.config.patch("max_pointwise_cat_inputs", 0)
     def test_fuse_concat_non_input_views(self):
         def fn(x, slice_sz):
-            x = x + 1  # Ignore views of input buffers
+            x = x + 1  # Make it pointwise to avoid views on inputs.
             views = torch.ops.aten.split.Tensor(x, slice_sz, dim=0)
             return torch.ops.aten.cat(views)
 
