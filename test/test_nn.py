@@ -5312,7 +5312,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(bn.state_dict()["num_batches_tracked"], torch.tensor(0))
 
         bn.num_batches_tracked = torch.tensor(10)
-        state_dict = bn.state_dict()
         self.assertEqual(bn.state_dict()["num_batches_tracked"], torch.tensor(10))
 
         empty_dict = OrderedDict()
@@ -5327,7 +5326,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         state_dict.pop("num_batches_tracked")
         meta_bn.load_state_dict(empty_dict, assign=True, strict=False)
         self.assertEqual(meta_bn.state_dict()["num_batches_tracked"], torch.tensor(0))
-
 
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
