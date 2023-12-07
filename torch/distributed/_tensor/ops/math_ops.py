@@ -257,7 +257,7 @@ def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
 
 @register_op_strategy(
     [aten.native_layer_norm.default],
-    schema_info=RuntimeSchemaInfo(),
+    schema_info=RuntimeSchemaInfo(1),
 )
 def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     # args must be: input, normalized_shape, weight, bias, eps
