@@ -331,7 +331,11 @@ def run_functionalized_fw_and_collect_metadata(
         # flags the inp/out relationship via output type as alias_of_input, causing us to invoke
         # gen_alias_from_base - and produce a spurious as_strided() call which will raise later on.
         for o in flat_f_outs:
-            storage_changed = torch._functionalize_was_storage_changed(o.elem)  # type: ignore[attr-defined]
+            functional_tensor_storage_changed = isinstance(
+                o, FunctionalTensor
+            ) and torch._functionalize_was_storage_changed(
+                o.elem
+            )  # type: ignore[attr-defined]
             curr_storage = (
                 None
                 if not isinstance(o, torch.Tensor)
@@ -366,7 +370,10 @@ def run_functionalized_fw_and_collect_metadata(
             ):
                 output_type = OutputType.custom_function_view
                 base_idx = None
-            elif curr_storage in inp_storage_refs and not storage_changed:
+            elif (
+                curr_storage in inp_storage_refs
+                and not functional_tensor_storage_changed
+            ):
                 base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
                 num_aliased_outs = out_tensor_alias_counts[curr_storage]
