@@ -9,7 +9,6 @@ import signal
 import sys
 import tempfile
 import threading
-import uuid
 import pickle
 import time
 import warnings
