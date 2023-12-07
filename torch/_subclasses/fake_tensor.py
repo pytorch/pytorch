@@ -188,6 +188,9 @@ def is_fake(x):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
         return is_fake(unwrapped)
+    elif isinstance(x, torch.Tensor) and torch._C._functorch.is_batchedtensor(x):
+        unwrapped = torch._C._functorch.get_unwrapped(x)
+        return is_fake(unwrapped)
     return False
 
 
@@ -205,6 +208,9 @@ def maybe_get_fake_mode(t):
     elif isinstance(t, torch.Tensor) and torch._is_functional_tensor(t):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
+        return maybe_get_fake_mode(unwrapped)
+    elif isinstance(t, torch.Tensor) and torch._C._functorch.is_batchedtensor(t):
+        unwrapped = torch._C._functorch.get_unwrapped(t)
         return maybe_get_fake_mode(unwrapped)
     return None
 
@@ -1471,17 +1477,6 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 return t
 
-        def maybe_from_batched(t):
-            # Is this correct? Unwrapping the FakeTensor from a BatchedTensor
-            # as the func(*const_args, **const_kwargs) call below may try to get
-            # the storage of the BatchedTensor, which is forbidden.
-            # Suppose bt is a BatchedTensor:
-            # >>> bt.untyped_storage()
-            # NotImplementedError: Cannot access storage of BatchedTensorImpl
-            if isinstance(t, torch.Tensor) and torch._C._functorch.is_batchedtensor(t):
-                return maybe_from_batched(torch._C._functorch.get_unwrapped(t))
-            return t
-
         # To constant propagate through these functions:
         # 1, If this is a lift due to a torch.tensor call,
         #    the input tensor is guaranteed to be a
@@ -1552,12 +1547,7 @@ class FakeTensorMode(TorchDispatchMode):
         # objects on an FX Graph.
 
         # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view
-        has_batched_tensors = any(
-            torch._C._functorch.is_batchedtensor(e) for e in flat_arg_fake_tensors
-        )
-        all_constant = not has_batched_tensors and all(
-            e.constant is not None for e in flat_arg_fake_tensors
-        )
+        all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
         if (
             torch.Tag.nondeterministic_seeded not in func.tags
             and torch.Tag.inplace_view not in func.tags
@@ -1857,12 +1847,7 @@ class FakeTensorMode(TorchDispatchMode):
     def invalidate_written_to_constants(
         self, func, flat_arg_fake_tensors, args, kwargs
     ):
-        has_batched_tensors = any(
-            torch._C._functorch.is_batchedtensor(e) for e in flat_arg_fake_tensors
-        )
-        any_constant = not has_batched_tensors and any(
-            e.constant is not None for e in flat_arg_fake_tensors
-        )
+        any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():
             _, new_kwargs = normalize_function(

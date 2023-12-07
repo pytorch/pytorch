@@ -134,6 +134,10 @@ bool BatchedTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) con
   // BatchedTensors is MemoryFormat::Contiguous, PyTorch just return false for
   // the other ones.
 
+  // TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
+  //     "NYI: querying is_contiguous inside of vmap for memory_format ",
+  //     "other than torch.contiguous_format");
+
   if (memory_format != MemoryFormat::Contiguous) {
     return false;
   }
