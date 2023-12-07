@@ -1602,8 +1602,6 @@ class TestVmapOfGrad(TestCase):
                 # TODO: Check if the rtol is a problem
                 self.assertEqual(result[key], expected[key], atol=0, rtol=1e-3)
 
-    # Some of these pass, some of these don't
-    @skipIfTorchDynamo
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_per_sample_grads_embeddingnet(self, device, mechanism):
         class SampleNet(nn.Module):
