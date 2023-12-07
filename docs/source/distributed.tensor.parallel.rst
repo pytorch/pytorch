@@ -6,7 +6,7 @@ Tensor Parallelism - torch.distributed.tensor.parallel
 
 Tensor Parallelism(TP) is built on top of the PyTorch DistributedTensor
 (`DTensor <https://github.com/pytorch/pytorch/blob/main/torch/distributed/_tensor/README.md>`__)
-and provides several parallelism styles: Rowwise and Colwise Parallelism.
+and provides different parallelism styles: Colwise and Rowwise Parallelism.
 
 .. warning ::
     Tensor Parallelism APIs are experimental and subject to change.
@@ -21,49 +21,28 @@ The entrypoint to parallelize your ``nn.Module`` using Tensor Parallelism is:
 
 Tensor Parallelism supports the following parallel styles:
 
-.. autoclass:: torch.distributed.tensor.parallel.style.RowwiseParallel
+.. autoclass:: torch.distributed.tensor.parallel.ColwiseParallel
   :members:
+  :undoc-members:
 
-.. autoclass:: torch.distributed.tensor.parallel.style.ColwiseParallel
+.. autoclass:: torch.distributed.tensor.parallel.RowwiseParallel
   :members:
+  :undoc-members:
 
-.. warning::
-    We are deprecating the styles below and will remove them soon:
+To simply configure the nn.Module's inputs and outputs with DTensor layouts
+and perform necessary layout redistributions, without distribute the module
+parameters to DTensors, the following classes can be used in
+the ``parallelize_plan``of ``parallelize_module``:
 
-.. autoclass:: torch.distributed.tensor.parallel.style.PairwiseParallel
+.. autoclass:: torch.distributed.tensor.parallel.PrepareModuleInput
   :members:
+  :undoc-members:
 
-.. autoclass:: torch.distributed.tensor.parallel.style.SequenceParallel
+.. autoclass:: torch.distributed.tensor.parallel.PrepareModuleOutput
   :members:
-
-Since Tensor Parallelism is built on top of DTensor, we need to specify the
-DTensor layout of the input and output of the module so it can interact with
-the module parameters and module afterwards. Users can achieve this by specifying
-the ``input_layouts`` and ``output_layouts`` which annotate inputs as DTensors
-and redistribute the outputs, if needed.
-
-If users only want to annotate the DTensor layout for inputs/outputs and no need to
-distribute its parameters, the following classes can be used in the ``parallelize_plan``
-of ``parallelize_module``:
+  :undoc-members:
 
 
-.. currentmodule:: torch.distributed.tensor.parallel.style
-.. autofunction::  PrepareModuleInput
-.. autofunction::  PrepareModuleOutput
-
-.. warning::
-    We are deprecating the methods below and will remove them soon:
-.. autofunction::  make_input_replicate_1d
-.. autofunction::  make_input_reshard_replicate
-.. autofunction::  make_input_shard_1d
-.. autofunction::  make_input_shard_1d_last_dim
-.. autofunction::  make_output_replicate_1d
-.. autofunction::  make_output_reshard_tensor
-.. autofunction::  make_output_shard_1d
-.. autofunction::  make_output_tensor
-
-
-Currently, there are some constraints which makes it hard for the ``MultiheadAttention``
-module to work out of box for Tensor Parallelism, so we recommend users to try ``ColwiseParallel``
-and ``RowwiseParallel`` for each parameter. There might be some code changes needed now
-since we are parallelizing on the head dim of the ``MultiheadAttention`` module.
+For models like Transformer, we recommend users to use ``ColwiseParallel``
+and ``RowwiseParallel`` together in the parallelize_plan for achieve the desired
+sharding for the entire model (i.e. Attention and MLP).
