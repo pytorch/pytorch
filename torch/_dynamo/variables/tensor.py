@@ -798,9 +798,6 @@ class SymNodeVariable(VariableTracker):
         else:
             return type(self.sym_num)
 
-    def unpack_var_sequence(self, tx):
-        super().unpack_var_sequence(tx)
-
     def as_proxy(self):
         return self.proxy
 
@@ -993,3 +990,9 @@ class TensorSubclassVariable(VariableTracker):
             )
 
         return super().call_function(tx, args, kwargs)
+
+    def as_python_constant(self):
+        return self.value
+
+    def python_type(self):
+        return type(self.value)
