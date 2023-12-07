@@ -164,8 +164,7 @@ struct C10_API TensorOptions {
   ///     constructors too.
   template <
       typename... Args,
-      typename =
-          std::enable_if_t<std::is_constructible_v<Device, Args&&...>>>
+      typename = std::enable_if_t<std::is_constructible_v<Device, Args&&...>>>
   /* implicit */ TensorOptions(Args&&... args)
       : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
