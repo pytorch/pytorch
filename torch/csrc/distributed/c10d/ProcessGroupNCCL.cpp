@@ -1443,8 +1443,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
     }
     // process a request to dump the trace
     if (dumpPipe.shouldDump()) {
-      std::thread dump_thread(&ProcessGroupNCCL::dumpDebuggingInfo, this);
-      dump_thread.detach();
+      launchAsyncDebugDump();
     }
     done = workMetaList_.empty();
   }
