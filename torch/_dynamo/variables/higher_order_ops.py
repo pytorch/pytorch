@@ -36,15 +36,6 @@ from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 log = logging.getLogger(__name__)
 
 
-def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
-    # Will raise if not sound
-    try:
-        f.call_function(tx, sub_args, {})
-    finally:
-        tx.output.graph = graph_checkpoint
-        tx.restore_graphstate(checkpoint)
-
-
 def raise_hard_error_if_graph_break(reason):
     def deco(fn):
         @functools.wraps(fn)

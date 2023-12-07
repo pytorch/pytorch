@@ -61,7 +61,11 @@ from .guards import (
 from .hooks import Hooks
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
-from .symbolic_convert import InstructionTranslator, SpeculationLog
+from .symbolic_convert import (
+    AutogradFnSpeculationLog,
+    InstructionTranslator,
+    SpeculationLog,
+)
 from .types import BytecodeHook
 from .utils import (
     CleanupManager,
@@ -501,11 +505,13 @@ def _compile(
     mutated_closure_cell_contents: Set[str] = set()
     fail_reason: Optional[str] = None
     speculation_log = SpeculationLog()
+    autograd_fn_speculation_log = AutogradFnSpeculationLog()
 
     @preserve_global_state
     def transform(instructions, code_options):
         nonlocal output
         speculation_log.restart()
+        autograd_fn_speculation_log.restart()
         tracer = InstructionTranslator(
             instructions,
             code,
@@ -520,6 +526,7 @@ def _compile(
             mutated_closure_cell_contents,
             frame_state=frame_state,
             speculation_log=speculation_log,
+            autograd_fn_speculation_log=autograd_fn_speculation_log,
         )
 
         try:
@@ -527,6 +534,7 @@ def _compile(
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()
+            autograd_fn_speculation_log.clear()
             raise
         except (exc.SpeculationRestartAnalysis, exc.SkipFrame):
             raise
