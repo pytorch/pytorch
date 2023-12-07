@@ -690,7 +690,7 @@ class ONNXProgram:
     def __call__(
         self,
         *args: Any,
-        model: Optional[
+        model_with_state_dict: Optional[
             Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
         ] = None,
         options: Optional[ONNXRuntimeOptions] = None,
@@ -701,7 +701,8 @@ class ONNXProgram:
         Args:
             args: The positional inputs to the model.
             kwargs: The keyword inputs to the model.
-            model: The PyTorch model to fetch state from.
+            model_with_state_dict: The PyTorch model to fetch state from.
+                Required when :func:`enable_fake_mode` is used to extract real initializers as needed by the ONNX graph.
             options: The options to use for running the model with ONNX Runtime.
 
         Returns:
@@ -710,10 +711,10 @@ class ONNXProgram:
         import onnxruntime  # type: ignore[import]
 
         # model specified by the user has precedence, when specified
-        model = model or self._model_torch
+        model_with_state_dict = model_with_state_dict or self._model_torch
 
         onnx_input = self.adapt_torch_inputs_to_onnx(
-            *args, model_with_state_dict=model, **kwargs
+            *args, model_with_state_dict=model_with_state_dict, **kwargs
         )
         options = options or ONNXRuntimeOptions()
         providers = options.execution_providers or onnxruntime.get_available_providers()
@@ -845,6 +846,7 @@ class ONNXProgram:
             model_args: The PyTorch model inputs.
             model_with_state_dict: The PyTorch model to get extra state from.
                 If not specified, the model used during export is used.
+                Required when :func:`enable_fake_mode` is used to extract real initializers as needed by the ONNX graph.
             model_kwargs: The PyTorch model keyword inputs.
 
         Returns:
@@ -916,6 +918,7 @@ class ONNXProgram:
             model_outputs: The PyTorch model outputs.
             model_with_state_dict: The PyTorch model to get extra state from.
                 If not specified, the model used during export is used.
+                Required when :func:`enable_fake_mode` is used to extract real initializers as needed by the ONNX graph.
 
         Returns:
             PyTorch model outputs in exported ONNX model outputs format.
