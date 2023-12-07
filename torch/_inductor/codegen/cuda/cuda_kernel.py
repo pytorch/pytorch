@@ -330,9 +330,8 @@ class CUDATemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(
-            *args, output_tensor=out
-        )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
+        res = self.bmreq.benchmark(*args, output_tensor=out)
+        return res
 
     def __str__(self):
         return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"

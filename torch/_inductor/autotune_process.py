@@ -587,6 +587,8 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         run_method = getattr(self.DLL, self.kernel_name)
         # Retrieve workspace_size and initialize workspace.
         c_workspace_size = c_size_t()
+        workspace_ptr = c_void_p(0)
+
         run_method(
             *args,  # input ptrs and output ptrs
             *self.extra_args,
@@ -596,16 +598,22 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             None,  # null workspace ptr
             stream_ptr,
         )
-        self.workspace_size = c_workspace_size.value
         self._workspace_size_updated = True
-
+        self.workspace_size = c_workspace_size.value
+        if self.workspace_size > 0:
+            self.workspace = torch.zeros(
+                (self.workspace_size + 7) // 8,
+                dtype=torch.float64,
+                device=output_tensor.device,
+            )
+            workspace_ptr = c_void_p(self.workspace.data_ptr())
         # Generate partial function.
         return functools.partial(
             run_method,
             *args,
             *self.extra_args,
             None,  # null workspace size ptr
-            None,  # set workspace ptr, TODO: update it to a real ptr if workspace_size > 0
+            workspace_ptr,  # set workspace ptr,
             stream_ptr,
         )
 

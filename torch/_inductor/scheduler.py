@@ -1588,11 +1588,12 @@ class Scheduler:
         """
         # note self.nodes is topologically sorted
         name_to_ancestors: Dict[str, Set[str]] = {}
+        empty_set = set()
         for node in self.nodes:
             ancestors = set()
             for dep in node.unmet_dependencies:
                 ancestors.add(dep.name)
-                ancestors |= name_to_ancestors[dep.name]
+                ancestors |= name_to_ancestors.get(dep.name, empty_set)
             name_to_ancestors[node.get_name()] = ancestors
             node.ancestors = ancestors
 
