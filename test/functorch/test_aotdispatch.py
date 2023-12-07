@@ -2835,27 +2835,109 @@ def forward(self, arg0_1, arg1_1):
 
     # TODO(tmanlaibaatar) properly support functionalizing HOO in
     # predispatch tracing mode
-    @unittest.expectedFailure
     def test_aot_export_predispatch_with_cond(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.randn(4, 4))
 
             def forward(self, x):
                 def true_fn(x):
-                    self.buffer.add_(5)
-                    return x.cos() + self.buffer.sum()
+                    y = x
+                    y.add_(5)
+                    return y.cos()
 
                 def false_fn(x):
-                    self.buffer.add_(6)
-                    return x.sin() + self.buffer.sum()
+                    z = x
+                    z.add_(6)
+                    return z.sin()
 
                 a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
                 return (a + 3, a + 4)
 
         inp = torch.randn(2, 2)
         gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
+    getitem = conditional[0];  conditional = None
+    add = torch.ops.aten.add.Tensor(getitem, 3)
+    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    return (add, add_1)""")
+        self.assertExpectedInline(str(gm.true_graph_0.code).strip(), """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 5);  arg0_1 = None
+    cos = torch.ops.aten.cos.default(add);  add = None
+    return (cos,)""")
+        self.assertExpectedInline(str(gm.false_graph_0.code).strip(), """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 6);  arg0_1 = None
+    sin = torch.ops.aten.sin.default(add);  add = None
+    return (sin,)""")
+
+
+    def test_aot_export_predispatch_with_cond_nested(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                def true_fn(x):
+                    def true_true_fn(x):
+                        y = x
+                        y.add_(7)
+                        return y.cos()
+                    def true_false_fn(x):
+                        y = x
+                        y.add_(8)
+                        return y.sin()
+                    y = x
+                    y.add_(5)
+
+                    return torch.cond(y.shape[0] > 4, true_true_fn, true_false_fn, [y])
+
+                def false_fn(x):
+                    z = x
+                    z.add_(6)
+                    return z.sin()
+
+                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                return (a + 3, a + 4)
+
+        inp = torch.randn(2, 2)
+        gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
+    getitem = conditional[0];  conditional = None
+    add = torch.ops.aten.add.Tensor(getitem, 3)
+    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    return (add, add_1)""")
+
+        self.assertExpectedInline(str(gm.true_graph_0.code).strip(), """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 5);  arg0_1 = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [add]);  true_graph_0 = false_graph_0 = add = None
+    getitem = conditional[0];  conditional = None
+    return (getitem,)""")
+
+        self.assertExpectedInline(str(gm.true_graph_0.true_graph_0.code).strip(), """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 7);  arg0_1 = None
+    cos = torch.ops.aten.cos.default(add);  add = None
+    return (cos,)""")
+
+        self.assertExpectedInline(str(gm.true_graph_0.false_graph_0.code).strip(), """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 8);  arg0_1 = None
+    sin = torch.ops.aten.sin.default(add);  add = None
+    return (sin,)""")
+
 
 
     def test_aot_export_module_joint(self):

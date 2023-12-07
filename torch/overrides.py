@@ -1923,8 +1923,9 @@ def _push_mode(mode):
 
 
 def _pop_mode():
-    old = _pop_torch_function_stack()
-    return old
+    if _len_torch_function_stack() > 0:
+        old = _pop_torch_function_stack()
+        return old
 
 
 @contextlib.contextmanager

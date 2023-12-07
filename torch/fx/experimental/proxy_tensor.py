@@ -623,6 +623,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
 
     def inner_torch_dispatch(self, func, types, args=(), kwargs=None):
+        if "detach" in str(func):
+            breakpoint()
         if not self.enable_tracing:
             return func(*args, **kwargs)
 
@@ -888,7 +890,8 @@ def get_innermost_proxy_mode():
 
 
 @contextlib.contextmanager
-def disable_proxy_modes_tracing(enable_current=False):
+def disable_proxy_modes_tracing(enable_current=False, pre_dispatch=False):
+    from torch._ops import unset_mode_pre_dispatch, _set_mode_pre_dispatch
     # enable_current=True is now a no-op, since only one proxy mode
     # can live on the stack at a time.
     # We should kill this API in a future PR.
@@ -896,12 +899,12 @@ def disable_proxy_modes_tracing(enable_current=False):
     if not enable_current:
         # Only one proxy_mode can be "active" at a time.
         # So we simply remove our active mode.
-        maybe_old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+        maybe_old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY) if not pre_dispatch else unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
     try:
         yield
     finally:
         if maybe_old is not None:
-            torch._C._set_dispatch_mode(maybe_old)
+            torch._C._set_dispatch_mode(maybe_old) if not pre_dispatch else _set_mode_pre_dispatch(maybe_old)
 
 
 def maybe_handle_decomp(proxy_mode, op, args, kwargs):

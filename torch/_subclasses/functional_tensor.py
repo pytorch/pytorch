@@ -377,13 +377,21 @@ def maybe_disable_functional_mode():
 # TODO: clean up the redundancy here,
 # unify on a single context manager for all mode keys.
 @contextlib.contextmanager
-def unset_functional_temporarily():
-    old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+def unset_functional_temporarily(is_pre_dispatch=False):
+    from torch._ops import _set_mode_pre_dispatch, unset_mode_pre_dispatch
+
+    old = (
+        torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+        if not is_pre_dispatch
+        else unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+    )
     try:
         yield old
     finally:
         if old is not None:
-            torch._C._set_dispatch_mode(old)
+            torch._C._set_dispatch_mode(
+                old
+            ) if not is_pre_dispatch else _set_mode_pre_dispatch(old)
 
 
 # This is similar to torch.func.functionalize, but:
@@ -394,7 +402,7 @@ def unset_functional_temporarily():
 # - Doing so means that it does not automatically compose with other
 #   functorch transforms, since these transforms always run above __torch_dispatch__.
 #   That's why this util lives here, and not in functorch.
-def dispatch_functionalize(func):
+def dispatch_functionalize(func, mode):
     # TODO: pull these from aot autograd
     def to_fun(t):
         if isinstance(t, torch.Tensor):
@@ -414,7 +422,7 @@ def dispatch_functionalize(func):
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
-        with disable_above, FunctionalTensorMode():
+        with disable_above, mode:
             func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
             func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
             func_outputs = func(*func_args, **func_kwargs)
@@ -460,6 +468,10 @@ class BaseFunctionalizeAPI(ABC):
 
 
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
+    def __init__(self, mode):
+        super().__init__()
+        self.mode = mode
+
     def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         return torch.utils._pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.to_functional, args
@@ -471,10 +483,10 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
         )
 
     def functionalize(self, inner_f: Callable) -> Callable:
-        return dispatch_functionalize(inner_f)
+        return dispatch_functionalize(inner_f, self.mode)
 
     def redispatch_to_next(self) -> ContextManager:
-        return unset_functional_temporarily()
+        return unset_functional_temporarily(self.mode.pre_dispatch)
 
     def replace(self, input_tensor, output_tensor) -> None:
         assert isinstance(input_tensor, FunctionalTensor)

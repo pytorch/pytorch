@@ -28,6 +28,7 @@ from typing import (
 
 import torch
 from torch.utils import _pytree as pytree
+from torch.utils._python_dispatch import _temp_pop_torch_function_mode
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -451,8 +452,10 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
             len(self.global_state) == len(self._supported_global_states)
             and set(self.global_state.keys()) == self._supported_global_states
         ), "Global state mismatch"
-        for func, args in self.global_state.values():
-            func(args)
+
+        with _temp_pop_torch_function_mode():
+            for func, args in self.global_state.values():
+                func(args)
 
 
 """
