@@ -10,7 +10,6 @@ import copy
 import csv
 import dataclasses
 import functools
-import gc
 import importlib
 import itertools
 import logging
@@ -2145,7 +2144,7 @@ class BenchmarkRunner:
                 fp64_outputs = None
             finally:
                 del model_fp64, inputs_fp64
-                gc.collect()
+
                 torch.cuda.empty_cache()
 
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
@@ -2175,7 +2174,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
-                gc.collect()
+
                 torch.cuda.empty_cache()
 
             # Rerun native pytorch
@@ -2197,7 +2196,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
-                gc.collect()
+
                 torch.cuda.empty_cache()
 
             # Two eager runs should have exactly same result
@@ -2551,7 +2550,7 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
-        gc.collect()
+
         torch.cuda.empty_cache()
 
         if self.args.timing:
