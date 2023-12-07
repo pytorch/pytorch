@@ -749,8 +749,10 @@ class ErrorFromChoice(RuntimeError):
         super().__init__(msg)
         self.choice = choice
 
+
 class NoValidChoicesError(RuntimeError):
     pass
+
 
 class AlgorithmSelectorCache(PersistentCache):
     def __call__(
@@ -765,13 +767,14 @@ class AlgorithmSelectorCache(PersistentCache):
         # arg, the function will be called instead of
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
+        return_selection_result_details=False,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
         if len(choices) == 0:
-            raise RuntimeError(
+            raise NoValidChoicesError(
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
@@ -779,6 +782,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if len(choices) == 1:
             if not isinstance(choices[0], CUDATemplateCaller):
+                if return_selection_result_details:
+                    return choices[0], {choices[0]: -1.0}
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
@@ -837,8 +842,15 @@ class AlgorithmSelectorCache(PersistentCache):
 
         selected_key = builtins.min(timings, key=timings.__getitem__)
         selected_time = timings[selected_key]
-        if (not isinstance(selected_time, float)) or (selected_time<0.0) or (not math.isfinite(selected_time)) or math.isnan(selected_time):
+        if (
+            (not isinstance(selected_time, float))
+            or (selected_time < 0.0)
+            or (not math.isfinite(selected_time))
+            or math.isnan(selected_time)
+        ):
             raise NoValidChoicesError()
+        if return_selection_result_details:
+            return selected_key, timings
         selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
