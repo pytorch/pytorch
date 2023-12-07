@@ -787,6 +787,9 @@ void initDispatchBindings(PyObject* module) {
   m.def("_commit_update", [](const at::Tensor& a) {
     return at::functionalization::impl::commit_update(a);
   });
+  m.def("_unsafe_reset_storage", [](const at::Tensor& a) {
+    return at::functionalization::impl::unsafe_reset_storage(a);
+  });
 
   m.def("_dispatch_key_for_device", [](const std::string& device_type) {
     auto device = c10::Device(device_type);
