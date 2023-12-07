@@ -671,6 +671,22 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cc.frame_count, 2)
         self.assertIn("""L['c'] is L['d']""", failure_reason)
 
+    def test_alias_inputs(self):
+        def fn():
+            a = torch.tensor([1])
+            a = a[0:1]
+            b = a.squeeze()
+            a[0] = 0
+            if a[0] < 1e5:
+                pass
+            a[0] = 2
+            return b
+
+        ref_output = fn()
+        aot_fn = torch._dynamo.optimize("aot_eager")(fn)
+        actual_output = aot_fn()
+        self.assertEqual(ref_output, actual_output)
+
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     @patch("torch._functorch.config.debug_assert", True)
