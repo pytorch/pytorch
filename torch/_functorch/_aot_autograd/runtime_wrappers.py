@@ -101,7 +101,9 @@ def create_runtime_wrapper(
         num_intermediate_bases = runtime_metadata.num_intermediate_bases
 
         if keep_input_mutations and trace_joint:
-            num_graph_handled = runtime_metadata.num_mutated_graph_handled_indices
+            num_graph_handled = (
+                runtime_metadata.num_mutated_graph_handled_indices_seen_by_autograd
+            )
             # autograd.Function requires us to return the mutated inputs as extra outputs to the autograd.Function.forward
             if num_graph_handled > 0:
                 all_outs = all_outs[:-num_graph_handled]

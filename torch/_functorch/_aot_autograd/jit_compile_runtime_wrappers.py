@@ -392,7 +392,7 @@ def aot_dispatch_autograd(
             args = deduped_flat_tensor_args
 
             marked_dirty_inps = []
-            for i in fw_metadata.mutated_graph_handled_indices:
+            for i in fw_metadata.mutated_graph_handled_indices_seen_by_autograd:
                 ctx.mark_dirty(deduped_flat_tensor_args[i])
                 marked_dirty_inps.append(deduped_flat_tensor_args[i])
 

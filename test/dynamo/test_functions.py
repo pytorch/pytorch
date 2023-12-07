@@ -2376,6 +2376,20 @@ def forward(self, x_1, output_1):
         o6 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, o6, 2, 200), torch_add)
 
+    @requires_cuda()
+    def test_triton_kernel_mutation_not_mark_dirty(self):
+        @torch.compile
+        def f(x):
+            n_elements = x.numel()
+            add_kernel[(n_elements,)](x, x, x, n_elements, 16)
+            return x
+
+        x = torch.randn(5, device="cuda", requires_grad=True)
+        x_cloned = x.clone()
+        out = x_cloned.sin()
+        f(x_cloned)
+        out.sum().backward()
+
     def test_dataclass_factory(self):
         @dataclass
         class Output:
