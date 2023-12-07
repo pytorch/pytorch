@@ -3681,8 +3681,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
-    @parametrize("timing_enabled", [True, False])
-    def test_trace_while_active(self, timing_enabled):
+    def test_trace_while_active(self):
         if self.rank == self.MAIN_PROCESS_RANK:
             for c in self.children_pipes:
                 self.assertEqual(c.recv(), 'next')
@@ -3691,8 +3690,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
             return
 
         pg = self._create_process_group_nccl()
-        if timing_enabled:
-            pg._enable_collectives_timing()
         device = self.local_device
         with torch.cuda.device(device):
             a = torch.full((3, 4), float(self.rank), device=device)
@@ -3709,7 +3706,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertEqual(t[-1]['state'], 'completed')
             else:
                 self.assertEqual(t[-1]['seq_id'], 2)
-                self.assertEqual(t[-1]['state'], self.started_or_scheduled(timing_enabled))
+                self.assertEqual(t[-1]['state'], 'started')
 
             self.parent.send('next')
             self.assertEqual('next', self.parent.recv())
