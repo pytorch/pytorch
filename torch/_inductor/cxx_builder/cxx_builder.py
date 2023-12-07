@@ -6,6 +6,7 @@ import re
 import shlex
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 from typing import List, Tuple
 
@@ -310,6 +311,23 @@ def get_torch_related_args():
     return include_dirs, libraries_dirs, libraries
 
 
+def get_python_related_args():
+    python_include_dirs = []
+    python_include_path = sysconfig.get_path(
+        "include", scheme="nt" if _IS_WINDOWS else "posix_prefix"
+    )
+    if python_include_path is not None:
+        python_include_dirs.append(python_include_path)
+
+    if _IS_WINDOWS:
+        python_path = os.path.dirname(sys.executable)
+        python_lib_path = [os.path.join(python_path, "libs")]
+    else:
+        python_lib_path = [sysconfig.get_config_var("LIBDIR")]
+
+    return python_include_dirs, python_lib_path
+
+
 class CxxTorchOptions(CxxOptions):
     """
     This class is inherited from CxxTorchOptions, which automatic contains
@@ -341,6 +359,10 @@ class CxxTorchOptions(CxxOptions):
         _nonduplicate_append(self._include_dirs, torch_include_dirs)
         _nonduplicate_append(self._libraries_dirs, torch_libraries_dirs)
         _nonduplicate_append(self._libraries, torch_libraries)
+
+        python_include_dirs, python_libraries_dirs = get_python_related_args()
+        _nonduplicate_append(self._include_dirs, python_include_dirs)
+        _nonduplicate_append(self._libraries_dirs, python_libraries_dirs)
 
         # cpp_prefix_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
         # _nonduplicate_append(self._include_dirs, cpp_prefix_dir)
