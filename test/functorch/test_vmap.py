@@ -3534,7 +3534,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # ---------------------------- BUGS ------------------------------------
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug
-        decorate("slogdet", decorator=skipIfTorchDynamo()),
         decorate("frexp", decorator=skipIfTorchDynamo()),
 
         xfail('clamp_min', ''),  # Exception not raised on error input
