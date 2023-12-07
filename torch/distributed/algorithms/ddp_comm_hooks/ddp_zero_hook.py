@@ -99,7 +99,7 @@ def _save_ddp_bucket_info(
 ):
     r"""
     Save :class:`DistributedDataParallel` gradient bucket information for :class:`ZeroRedundancyOptimizer` instance ``zero``.
-    
+
     In particular, this function is meant to be called upon seeing each
     gradient bucket to use when overlapping, meaning it does not save or compute any global
     information.
@@ -131,7 +131,7 @@ def _hook_with_zero_step_setup(
 ):
     r"""
     Encapsulate the setup logic for :func:`hook_with_zero_step` and :func:`hook_with_zero_step_interleaved`.
-    
+
     This means the logic to run in the
     hook before the backward pass and optimizer step can actually be
     overlapped. This is factored out since it is common to both
@@ -174,7 +174,7 @@ def hook_with_zero_step(
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
     Modify ``hook`` to overlap :class:`ZeroRedundancyOptimizer` optimizer step with :class:`DistributedDataParallel` backward pass.
-    
+
     This approach overlaps the optimizer computation and communication with the
     backward communication. In particular, the backward computation proceeds
     contiguously, and the optimizer computation follows, overlapping with
@@ -244,7 +244,7 @@ def hook_with_zero_step(
     ) -> torch.futures.Future[torch.Tensor]:
         r"""
         Return :class:`Future` that performs the equivalent of a :class:`ZeroRedundancyOptimizer` :meth:`step` if ``bucket`` is the last gradient bucket.
-        
+
         The function gives a gradient bucket tensor and
         performs additional computation on the iteration that
         the :class:`DistributedDataParallel` buckets are rebuilt to collect
@@ -417,7 +417,7 @@ def hook_with_zero_step_interleaved(
         def zero_step(fut: torch.futures.Future) -> torch.Tensor:
             r"""
             Perform partial :class:`ZeroRedundancyOptimizer` :meth:`step` using gradients in the :class:`DistributedDataParallel`.
-            
+
             Returns:
                 A :class:`torch.Tensor` representing the contents of the
                 gradient bucket.
