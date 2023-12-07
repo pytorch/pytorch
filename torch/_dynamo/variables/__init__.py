@@ -54,6 +54,7 @@ from .misc import (
     NumpyVariable,
     PythonModuleVariable,
     SkipFilesVariable,
+    StringFormatVariable,
     SuperVariable,
     UnknownVariable,
 )
@@ -107,6 +108,7 @@ __all__ = [
     "RestrictedListSubclassVariable",
     "SkipFilesVariable",
     "SliceVariable",
+    "StringFormatVariable",
     "SuperVariable",
     "TensorVariable",
     "TorchCtxManagerClassVariable",

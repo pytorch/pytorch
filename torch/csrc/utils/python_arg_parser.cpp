@@ -771,69 +771,6 @@ static bool is_float_or_complex_list(PyObject* obj) {
   return true;
 }
 
-static bool is_int_list(
-    PyObject* obj,
-    int broadcast_size,
-    int64_t* failed_idx = nullptr) {
-  if (PyTuple_Check(obj) || PyList_Check(obj)) {
-    auto len = PySequence_Size(obj);
-    if (len == 0) {
-      return true;
-    }
-
-    auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
-    bool int_first = false;
-    if (THPUtils_checkIndex(item.ptr())) {
-      // we still have to check that the rest of items are NOT symint nodes
-      int_first = true;
-    }
-
-    // Make sure none of the later arguments are SymInt
-    // NB: do NOT check that the later arguments are ints, as this is
-    // BC-breaking for FX
-    for (Py_ssize_t i = 1; i < len; i++) {
-      if (torch::is_symint(
-              py::reinterpret_steal<py::object>(PySequence_GetItem(obj, i)))) {
-        if (failed_idx != nullptr) {
-          *failed_idx = i;
-        }
-        return false;
-      }
-    }
-
-    if (int_first) {
-      return true;
-    }
-
-    // in dynamo, FakeTensor is qualified for INT_LIST
-    if (is_dynamo_compiling && THPVariable_Check(item.ptr())) {
-      auto& var = THPVariable_Unpack(item.ptr());
-      if (var.numel() != 1 || !var.sizes().empty() ||
-          !at::isIntegralType(
-              var.dtype().toScalarType(), /*include_bool*/ true)) {
-        if (failed_idx != nullptr) {
-          *failed_idx = 0;
-        }
-        return false;
-      }
-      return true;
-    }
-
-    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
-    // in an intlist argument. Even float or complex scalar tensors.
-    bool r =
-        (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-         THPVariable_Unpack(item.ptr()).sizes().empty());
-    if (!r && failed_idx != nullptr) {
-      *failed_idx = 0;
-    }
-    return r;
-  }
-  // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
-  // int
-  return broadcast_size > 0 && THPUtils_checkLong(obj);
-}
-
 static bool is_int_or_symint(PyObject* obj) {
   // THPUtils_checkIndex may call __index__ or __int__
   // which may have side effects if obj is a symint node
