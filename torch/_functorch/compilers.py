@@ -15,7 +15,8 @@ import torch.nn as nn
 from torch._decomp import get_decompositions
 from torch.fx.experimental.symbolic_shapes import bind_symbols
 
-from .aot_autograd import aot_function, aot_module, make_boxed_compiler
+from .aot_autograd import aot_function, aot_module
+from torch._functorch._aot_autograd.utils import make_boxed_compiler
 from .compile_utils import strip_overloads
 from .partitioners import (
     default_partition,

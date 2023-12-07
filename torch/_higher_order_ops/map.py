@@ -4,7 +4,9 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
+from torch._functorch._aot_autograd.functional_utils import from_fun
+from torch._functorch._aot_autograd.traced_function_transforms import create_joint
+from torch._functorch.aot_autograd import AOTConfig
 
 from torch._higher_order_ops.cond import (
     _has_potential_branch_input_alias,
