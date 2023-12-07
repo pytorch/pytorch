@@ -816,7 +816,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
-  return intra_node_comm::IntraNodeComm::rendezvousViaStore(
+  return intra_node_comm::IntraNodeComm::rendezvous(
       store_, std::to_string(uid_), rank_, size_);
 }
 
@@ -2557,12 +2557,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
 #endif
 }
 
-class DummyWork : public c10d::Work {
-  bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
-    return true;
-  }
-};
-
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
@@ -2594,10 +2588,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   if (intraNodeComm_ != nullptr && tensors.size() == 1) {
+    using namespace intra_node_comm;
     auto algo = intraNodeComm_->selectAllReduceAlgo(tensors[0]);
     if (algo != intra_node_comm::AllReduceAlgo::NONE) {
       intraNodeComm_->allReduce(tensors[0], algo);
-      return c10::make_intrusive<DummyWork>();
+      return c10::make_intrusive<IntraNodeCommWork>();
     }
   }
 

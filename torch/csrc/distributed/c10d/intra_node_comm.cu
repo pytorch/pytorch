@@ -501,7 +501,8 @@ at::Tensor oneShotAllReduce(
     std::array<void*, kMaxDevices> p2pStates,
     std::array<void*, kMaxDevices> buffers,
     size_t rank,
-    size_t worldSize) {
+    size_t worldSize,
+    at::cuda::CUDAStream& stream) {
   checkInput(input, rank);
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
@@ -517,19 +518,19 @@ at::Tensor oneShotAllReduce(
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
-      at::cuda::getCurrentCUDAStream()));
+      stream));
 
-#define X(kWorldSize, kAligned)                                     \
-  if (worldSize == kWorldSize) {                                    \
-    oneShotAllReduceKernel<kWorldSize, kAligned>                    \
-        <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>( \
-            input.data_ptr<at::BFloat16>(),                         \
-            input.numel(),                                          \
-            N_aligned,                                              \
-            castArr<FcP2pState*>(p2pStates),                        \
-            castArr<at::BFloat16*>(buffers),                        \
-            rank);                                                  \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                 \
+#define X(kWorldSize, kAligned)                  \
+  if (worldSize == kWorldSize) {                 \
+    oneShotAllReduceKernel<kWorldSize, kAligned> \
+        <<<blocks, threads, 0, stream>>>(        \
+            input.data_ptr<at::BFloat16>(),      \
+            input.numel(),                       \
+            N_aligned,                           \
+            castArr<FcP2pState*>(p2pStates),     \
+            castArr<at::BFloat16*>(buffers),     \
+            rank);                               \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();              \
   }
 
 #define DISPATCH_ALL_WORLD_SIZES(kAligned) \
@@ -557,7 +558,8 @@ at::Tensor twoShotAllReduce(
     std::array<void*, kMaxDevices> p2pStates,
     std::array<void*, kMaxDevices> buffers,
     size_t rank,
-    size_t worldSize) {
+    size_t worldSize,
+    at::cuda::CUDAStream& stream) {
   checkInput(input, rank);
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
@@ -578,18 +580,17 @@ at::Tensor twoShotAllReduce(
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
-      at::cuda::getCurrentCUDAStream()));
+      stream));
 
-#define X(kWorldSize)                                               \
-  if (worldSize == kWorldSize) {                                    \
-    twoShotAllReduceKernel<kWorldSize>                              \
-        <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>( \
-            output.data_ptr<at::BFloat16>(),                        \
-            N_aligned,                                              \
-            castArr<FcP2pState*>(p2pStates),                        \
-            castArr<at::BFloat16*>(buffers),                        \
-            rank);                                                  \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                 \
+#define X(kWorldSize)                                                   \
+  if (worldSize == kWorldSize) {                                        \
+    twoShotAllReduceKernel<kWorldSize><<<blocks, threads, 0, stream>>>( \
+        output.data_ptr<at::BFloat16>(),                                \
+        N_aligned,                                                      \
+        castArr<FcP2pState*>(p2pStates),                                \
+        castArr<at::BFloat16*>(buffers),                                \
+        rank);                                                          \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                     \
   }
   X(2);
   X(3);
@@ -606,7 +607,7 @@ at::Tensor twoShotAllReduce(
         output.data_ptr(),
         input.numel() * input.element_size(),
         cudaMemcpyDeviceToDevice,
-        at::cuda::getCurrentCUDAStream()));
+        stream));
   }
   return input;
 }
@@ -616,7 +617,8 @@ at::Tensor hybridCubeMeshAllReduce(
     std::array<void*, kMaxDevices> p2pStates,
     std::array<void*, kMaxDevices> buffers,
     size_t rank,
-    size_t worldSize) {
+    size_t worldSize,
+    at::cuda::CUDAStream& stream) {
   checkInput(input, rank);
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
@@ -632,17 +634,16 @@ at::Tensor hybridCubeMeshAllReduce(
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
-      at::cuda::getCurrentCUDAStream()));
+      stream));
 
-#define X(kAligned)                                               \
-  hybridCubeMeshAllReduceKernel<kAligned>                         \
-      <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>( \
-          input.data_ptr<at::BFloat16>(),                         \
-          input.numel(),                                          \
-          N_aligned,                                              \
-          castArr<HcmP2pState*>(p2pStates),                       \
-          castArr<at::BFloat16*>(buffers),                        \
-          rank);                                                  \
+#define X(kAligned)                                                        \
+  hybridCubeMeshAllReduceKernel<kAligned><<<blocks, threads, 0, stream>>>( \
+      input.data_ptr<at::BFloat16>(),                                      \
+      input.numel(),                                                       \
+      N_aligned,                                                           \
+      castArr<HcmP2pState*>(p2pStates),                                    \
+      castArr<at::BFloat16*>(buffers),                                     \
+      rank);                                                               \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   if (N_aligned == static_cast<size_t>(input.numel())) {
@@ -688,15 +689,18 @@ at::Tensor allReduce(
     std::array<void*, kMaxDevices> buffers,
     size_t rank,
     size_t worldSize,
-    AllReduceAlgo algo) {
+    AllReduceAlgo algo,
+    at::cuda::CUDAStream& stream) {
   switch (algo) {
     case AllReduceAlgo::ONE_SHOT:
-      return oneShotAllReduce(input, p2pStates, buffers, rank, worldSize);
+      return oneShotAllReduce(
+          input, p2pStates, buffers, rank, worldSize, stream);
     case AllReduceAlgo::TWO_SHOT:
-      return twoShotAllReduce(input, p2pStates, buffers, rank, worldSize);
+      return twoShotAllReduce(
+          input, p2pStates, buffers, rank, worldSize, stream);
     case AllReduceAlgo::HCM:
       return hybridCubeMeshAllReduce(
-          input, p2pStates, buffers, rank, worldSize);
+          input, p2pStates, buffers, rank, worldSize, stream);
     default:
       C10_THROW_ERROR(ValueError, "IntraNodeComm: invalid algo");
   }

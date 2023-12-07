@@ -28,244 +28,6 @@ static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
     "ENABLE_INTRA_NODE_COMM"};
 
 ////////////////////////////////////////////////////////////////////////////////
-// Rendezvous Utilities
-////////////////////////////////////////////////////////////////////////////////
-
-class SharedMemoryPtrBase {
- public:
-  SharedMemoryPtrBase(
-      const std::string& rdzvId,
-      size_t rank,
-      size_t worldSize,
-      size_t allocSize,
-      std::function<void(void*)> initializer,
-      std::function<void(void*)> destructor);
-
-  ~SharedMemoryPtrBase();
-
- private:
-  std::string shmName_;
-  std::string initSemName_;
-  std::string tearDownSemName_;
-  size_t rank_;
-  size_t worldSize_;
-  size_t allocSize_;
-  std::function<void(void*)> destructor_;
-
-  sem_t* initSem_;
-  sem_t* tearDownSem_;
-  int shmFd_;
-
- protected:
-  void* shared_;
-};
-
-template <typename T>
-class SharedMemoryPtr : public SharedMemoryPtrBase {
- public:
-  template <typename... ConstructorArgs>
-  SharedMemoryPtr(
-      const std::string& rdzvId,
-      size_t rank,
-      size_t worldSize,
-      ConstructorArgs... args)
-      : SharedMemoryPtrBase(
-            rdzvId,
-            rank,
-            worldSize,
-            sizeof(T),
-            [args...](void* ptr) { new (ptr) T(args...); },
-            [](void* ptr) { static_cast<T*>(ptr)->~T(); }) {}
-
-  SharedMemoryPtr(const SharedMemoryPtr&) = delete;
-  SharedMemoryPtr& operator=(const SharedMemoryPtr&) = delete;
-
-  T* operator->() const {
-    return static_cast<T*>(shared_);
-  }
-
-  T& operator*() const {
-    return *static_cast<T*>(shared_);
-  }
-};
-
-class TwoPhaseExchange {
- public:
-  TwoPhaseExchange(size_t worldSize);
-  ~TwoPhaseExchange();
-
-  void run(std::function<void()> writeFn, std::function<void()> gatherFn);
-
- private:
-  size_t worldSize_;
-  size_t barrierCnt_;
-  pthread_mutex_t mutex_;
-  pthread_cond_t cond_;
-};
-
-static sem_t* openSem(const std::string& name) {
-  sem_t* sem = sem_open(name.c_str(), O_CREAT, S_IRUSR | S_IWUSR, 0);
-  TORCH_CHECK(sem != SEM_FAILED, "Failed to open semaphore", name);
-  return sem;
-}
-
-SharedMemoryPtrBase::SharedMemoryPtrBase(
-    const std::string& rdzvId,
-    size_t rank,
-    size_t worldSize,
-    size_t allocSize,
-    std::function<void(void*)> initializer,
-    std::function<void(void*)> destructor)
-    : shmName_(rdzvId + "-shm"),
-      initSemName_(rdzvId + "-initSem"),
-      tearDownSemName_(rdzvId + "-tearDownSem"),
-      rank_(rank),
-      worldSize_(worldSize),
-      allocSize_(allocSize),
-      destructor_(destructor) {
-  initSem_ = openSem(initSemName_);
-  tearDownSem_ = openSem(tearDownSemName_);
-
-  shmFd_ = shm_open(shmName_.c_str(), O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
-  TORCH_CHECK(shmFd_ != -1, "Failed to open shared memory");
-
-  TORCH_CHECK(
-      ftruncate(shmFd_, allocSize) != -1, "Failed to truncate shared memory");
-
-  shared_ =
-      mmap(NULL, allocSize, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd_, 0);
-  TORCH_CHECK(shared_ != MAP_FAILED, "Failed to map shared memory");
-
-  if (rank_ == 0) {
-    initializer(shared_);
-    for (size_t i = 1; i < worldSize_; ++i) {
-      sem_post(initSem_);
-    }
-  } else {
-    sem_wait(initSem_);
-  }
-}
-
-SharedMemoryPtrBase::~SharedMemoryPtrBase() {
-  if (rank_ != 0) {
-    sem_post(tearDownSem_);
-  } else {
-    for (size_t i = 1; i < worldSize_; ++i) {
-      sem_wait(tearDownSem_);
-    }
-    destructor_(shared_);
-  }
-  munmap(shared_, allocSize_);
-  close(shmFd_);
-  sem_close(tearDownSem_);
-  sem_close(initSem_);
-
-  if (rank_ == 0) {
-    shm_unlink(shmName_.c_str());
-    shm_unlink(tearDownSemName_.c_str());
-    sem_unlink(initSemName_.c_str());
-  }
-}
-
-TwoPhaseExchange::TwoPhaseExchange(size_t worldSize)
-    : worldSize_(worldSize), barrierCnt_(0) {
-  pthread_mutexattr_t mutexAttr;
-  pthread_condattr_t condAttr;
-
-  TORCH_CHECK(
-      pthread_mutexattr_init(&mutexAttr) == 0,
-      "Failed to initialize mutex attributes");
-
-  TORCH_CHECK(
-      pthread_mutexattr_setpshared(&mutexAttr, PTHREAD_PROCESS_SHARED) == 0,
-      "Failed to set mutex as shared");
-
-  TORCH_CHECK(
-      pthread_mutex_init(&mutex_, &mutexAttr) == 0,
-      "Failed to initialize mutex");
-
-  TORCH_CHECK(
-      pthread_condattr_init(&condAttr) == 0,
-      "Failed to initialize cond attributes");
-
-  TORCH_CHECK(
-      pthread_condattr_setpshared(&condAttr, PTHREAD_PROCESS_SHARED) == 0,
-      "Failed to set cond as shared");
-
-  TORCH_CHECK(
-      pthread_cond_init(&cond_, &condAttr) == 0, "Failed to initialize cond");
-
-  pthread_mutexattr_destroy(&mutexAttr);
-  pthread_condattr_destroy(&condAttr);
-}
-
-TwoPhaseExchange::~TwoPhaseExchange() {
-  pthread_mutex_destroy(&mutex_);
-  pthread_cond_destroy(&cond_);
-}
-
-void TwoPhaseExchange::run(
-    std::function<void()> writeFn,
-    std::function<void()> gatherFn) {
-  // Phase 1: write
-  pthread_mutex_lock(&mutex_);
-  writeFn();
-  barrierCnt_ += 1;
-  if (barrierCnt_ != worldSize_) {
-    pthread_cond_wait(&cond_, &mutex_);
-  } else {
-    pthread_cond_broadcast(&cond_);
-  }
-  pthread_mutex_unlock(&mutex_);
-
-  // Phase 2: gather
-  pthread_mutex_lock(&mutex_);
-  gatherFn();
-  barrierCnt_ -= 1;
-  if (barrierCnt_ != 0) {
-    pthread_cond_wait(&cond_, &mutex_);
-  } else {
-    pthread_cond_broadcast(&cond_);
-  }
-  pthread_mutex_unlock(&mutex_);
-}
-
-static std::string generateUUID() {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<> dis(0, 15);
-  std::uniform_int_distribution<> dis2(8, 11);
-
-  std::stringstream ss;
-  int i;
-
-  ss << std::hex;
-  for (i = 0; i < 8; i++) {
-    ss << dis(gen);
-  }
-  ss << "-";
-  for (i = 0; i < 4; i++) {
-    ss << dis(gen);
-  }
-  ss << "-4"; // Version 4 : Random
-  for (i = 0; i < 3; i++) {
-    ss << dis(gen);
-  }
-  ss << "-";
-  ss << dis2(gen);
-
-  for (i = 0; i < 3; i++) {
-    ss << dis(gen);
-  }
-  ss << "-";
-  for (i = 0; i < 12; i++) {
-    ss << dis(gen);
-  }
-
-  return ss.str();
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // Topology Detection
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -287,47 +49,41 @@ static std::ostream& operator<<(std::ostream& os, const NvlMesh& nvlMesh) {
 /**
  * Query the nvlink connection among devices.
  */
-static NvlMesh getNvlMesh(size_t worldSize) {
+static NvlMesh getNvlMesh(std::vector<std::string> rankToBusId) {
+#ifndef USE_ROCM
   using namespace c10::cuda;
 
   NvlMesh nvlMesh = {};
-#ifndef USE_ROCM
   auto driverApi = DriverAPI::get();
   if (driverApi == nullptr) {
     return nvlMesh;
   }
 
+  const auto worldSize = rankToBusId.size();
   std::vector<nvmlDevice_t> devices(worldSize, 0);
-  std::unordered_map<std::string, size_t> busIdToIdx;
+  std::unordered_map<std::string, size_t> busIdToRank;
   std::vector<size_t> switchLinkCount(worldSize, 0);
 
-  for (size_t idx = 0; idx < worldSize; ++idx) {
-    cudaDeviceProp prop{};
-    if (cudaGetDeviceProperties(&prop, idx) == cudaErrorInvalidDevice) {
-      continue;
-    }
-    char busId[80];
-    snprintf(
-        busId,
-        sizeof(busId),
-        NVML_DEVICE_PCI_BUS_ID_FMT,
-        prop.pciDomainID,
-        prop.pciBusID,
-        prop.pciDeviceID);
+  for (size_t r = 0; r < worldSize; ++r) {
+    busIdToRank.emplace(std::make_pair(rankToBusId[r], r));
     TORCH_CHECK(
-        driverApi->nvmlDeviceGetHandleByPciBusId_v2_(busId, &devices[idx]) ==
-        NVML_SUCCESS);
-    busIdToIdx.emplace(std::make_pair(busId, idx));
+        driverApi->nvmlDeviceGetHandleByPciBusId_v2_(
+            rankToBusId[r].c_str(), &devices[r]) == NVML_SUCCESS);
   }
 
+  // For each device, loop over devices connected to it via NVLink
   for (size_t idx = 0; idx < worldSize; ++idx) {
     for (size_t link = 0; link < kMaxNvLinks; ++link) {
       nvmlReturn_t ret;
       nvmlIntNvLinkDeviceType_t deviceType;
       ret = driverApi->nvmlDeviceGetNvLinkRemoteDeviceType_(
           devices[idx], link, &deviceType);
-      if (ret != NVML_SUCCESS) {
+      if (ret == NVML_ERROR_INVALID_ARGUMENT) {
+        // We've exhausted NVLinks connected to this device
         break;
+      } else if (ret != NVML_SUCCESS) {
+        // Unexpected error. Return an empty NvlMesh
+        return {};
       }
       // Remote device is GPU
       if (deviceType == NVML_NVLINK_DEVICE_TYPE_GPU) {
@@ -335,10 +91,11 @@ static NvlMesh getNvlMesh(size_t worldSize) {
         ret = driverApi->nvmlDeviceGetNvLinkRemotePciInfo_v2_(
             devices[idx], link, &pciInfo);
         if (ret != NVML_SUCCESS) {
-          break;
+          // Unexpected error. Return an empty NvlMesh
+          return {};
         }
-        auto it = busIdToIdx.find(pciInfo.busId);
-        if (it != busIdToIdx.end()) {
+        auto it = busIdToRank.find(pciInfo.busId);
+        if (it != busIdToRank.end()) {
           if (idx != it->second) {
             nvlMesh[idx][it->second] += 1;
           }
@@ -349,8 +106,8 @@ static NvlMesh getNvlMesh(size_t worldSize) {
       }
     }
   }
-  // Process NVSwitch connections. For simplicity, we assume all NVSwitches
-  // are interconnected.
+  // Process NVSwitch connections. For simplicity, we assume
+  // all NVSwitches are interconnected.
   for (size_t i = 0; i < worldSize; ++i) {
     for (size_t j = 0; j < worldSize; ++j) {
       if (i == j) {
@@ -361,7 +118,7 @@ static NvlMesh getNvlMesh(size_t worldSize) {
   }
   return nvlMesh;
 #else
-  return nvlMesh;
+  return {};
 #endif
 }
 
@@ -379,6 +136,7 @@ static bool isHybridCubeMesh(const NvlMesh nvlMesh) {
     }
   }
   for (size_t i = 0; i < kMaxDevices; ++i) {
+    // TODO: this is insufficent and needs revisit
     if (numNeighbors[i] != 4) {
       return false;
     }
@@ -389,15 +147,11 @@ static bool isHybridCubeMesh(const NvlMesh nvlMesh) {
 /**
  * Detech topology given a NvlMesh.
  */
-static Topology detectTopology(
-    const NvlMesh nvlMesh,
-    std::vector<int> deviceIds) {
-  TORCH_CHECK(deviceIds.size() >= 2);
+static Topology detectTopology(const NvlMesh nvlMesh, size_t worldSize) {
   bool fullyConnected = true;
-  for (size_t i = 0; i < deviceIds.size() - 1; ++i) {
-    for (size_t j = i + 1; j < deviceIds.size(); ++j) {
-      if (nvlMesh[deviceIds[i]][deviceIds[j]] == 0 ||
-          nvlMesh[deviceIds[j]][deviceIds[i]] == 0) {
+  for (size_t i = 0; i < worldSize - 1; ++i) {
+    for (size_t j = i + 1; j < worldSize; ++j) {
+      if (nvlMesh[i][j] == 0 || nvlMesh[j][i] == 0) {
         fullyConnected = false;
       }
     }
@@ -406,7 +160,7 @@ static Topology detectTopology(
     LOG(INFO) << "IntraNodeComm: Topology::FULLY_CONNECTED";
     return Topology::FULLY_CONNECTED;
   }
-  if (deviceIds.size() == kMaxDevices && isHybridCubeMesh(nvlMesh)) {
+  if (worldSize == kMaxDevices && isHybridCubeMesh(nvlMesh)) {
     LOG(INFO) << "IntraNodeComm: Topology::HYBRID_CUBE_MESH";
     return Topology::HYBRID_CUBE_MESH;
   }
@@ -433,7 +187,8 @@ at::Tensor allReduce(
     std::array<void*, kMaxDevices> buffers,
     size_t rank,
     size_t worldSize,
-    AllReduceAlgo algo);
+    AllReduceAlgo algo,
+    at::cuda::CUDAStream& stream);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Rendezvous and Initialization
@@ -452,113 +207,63 @@ IntraNodeComm::IntraNodeComm(
       worldSize_(worldSize) {}
 
 IntraNodeComm::~IntraNodeComm() {
-  // Intentionally releasing resources without synchronizing devices.
+  // Intentionally releasing resources without synchronizing devices. The
+  // teardown logic is safe for propoerly sync'd user program. We don't want
+  // improperly sync'd user program to hang here.
   for (size_t r = 0; r < worldSize_; ++r) {
     if (r == rank_) {
       continue;
     }
-    cudaIpcCloseMemHandle(p2pStates_[r]);
-    cudaIpcCloseMemHandle(buffers_[r]);
+    AT_CUDA_CHECK(cudaIpcCloseMemHandle(p2pStates_[r]));
+    AT_CUDA_CHECK(cudaIpcCloseMemHandle(buffers_[r]));
   }
-  cudaFree(p2pStates_[rank_]);
-  cudaFree(buffers_[rank_]);
+  AT_CUDA_CHECK(cudaFree(p2pStates_[rank_]));
+  AT_CUDA_CHECK(cudaFree(buffers_[rank_]));
+}
+
+/**
+ * Use c10d::Store to perform allgather on a trivially copyable type.
+ */
+template <typename T>
+std::vector<T> storeAllGather(
+    c10::intrusive_ptr<c10d::Store> store,
+    const std::string& prefix,
+    size_t rank,
+    size_t worldSize,
+    T val) {
+  static_assert(std::is_trivially_copyable<T>::value);
+
+  std::vector<std::string> peerKeys;
+  for (size_t r = 0; r < worldSize; ++r) {
+    std::ostringstream oss;
+    oss << prefix << "-" << r;
+    peerKeys.push_back(oss.str());
+  }
+
+  {
+    std::vector<uint8_t> payload(
+        reinterpret_cast<uint8_t*>(&val),
+        reinterpret_cast<uint8_t*>(&val) + sizeof(T));
+    store->set(peerKeys[rank], payload);
+  }
+
+  std::vector<T> peerVals;
+  for (size_t r = 0; r < worldSize; ++r) {
+    if (r == rank) {
+      peerVals.push_back(val);
+      continue;
+    }
+    store->wait({peerKeys[r]});
+    auto payload = store->get(peerKeys[r]);
+    TORCH_CHECK(payload.size() == sizeof(T));
+    T peerVal;
+    std::memcpy(&peerVal, payload.data(), sizeof(T));
+    peerVals.push_back(peerVal);
+  }
+  return peerVals;
 }
 
 c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
-    const std::string& rdzvId,
-    size_t rank,
-    size_t worldSize) {
-#ifndef USE_ROCM
-  if (!isIntraNodeCommSupported() ||
-      !getCvarBool(ENABLE_INTRA_NODE_COMM, false) || worldSize < 2 ||
-      worldSize > kMaxDevices) {
-    return nullptr;
-  }
-  // Data structure for rendezvous
-  struct Shared {
-    std::array<int, kMaxDevices> deviceIds;
-    std::array<cudaIpcMemHandle_t, kMaxDevices> p2pStateHandles;
-    std::array<cudaIpcMemHandle_t, kMaxDevices> bufferHandles;
-    TwoPhaseExchange twoPhaseExchange;
-
-    Shared(size_t worldSize) : twoPhaseExchange(worldSize) {
-      deviceIds.fill(-1);
-    }
-  };
-
-  // Initialize shared memory for rendezvous
-  SharedMemoryPtr<Shared> peerInfo(rdzvId, rank, worldSize, worldSize);
-
-  // Gether peer device Ids
-  std::vector<int> deviceIds;
-  peerInfo->twoPhaseExchange.run(
-      [&]() { peerInfo->deviceIds[rank] = at::cuda::current_device(); },
-      [&]() {
-        for (const auto& deviceId : peerInfo->deviceIds) {
-          if (deviceId != -1) {
-            deviceIds.push_back(deviceId);
-          }
-        }
-      });
-  TORCH_CHECK(
-      deviceIds.size() == worldSize,
-      "More than one rank is using the same device. "
-      "Make sure every rank is assigned with a unique device. ");
-
-  // Query nvlink connection
-  auto nvlMesh = getNvlMesh(worldSize);
-
-  // Detect topology
-  Topology topology = detectTopology(nvlMesh, deviceIds);
-  if (topology == Topology::UNKNOWN) {
-    return nullptr;
-  }
-
-  // Initialize p2p state
-  auto p2pState = initP2pState(topology, nvlMesh, rank);
-
-  // Allocate buffer
-  void* buffer = nullptr;
-  C10_CUDA_CHECK(cudaMalloc(&buffer, kMaxIntraNodeSize * 2));
-
-  // Make p2p state and buffer available for IPC
-  cudaIpcMemHandle_t p2pStateHandle, bufferHandle;
-  AT_CUDA_CHECK(cudaIpcGetMemHandle(&p2pStateHandle, p2pState));
-  AT_CUDA_CHECK(cudaIpcGetMemHandle(&bufferHandle, buffer));
-
-  // Exchange IPC handles for p2p state and buffer
-  std::array<cudaIpcMemHandle_t, kMaxDevices> p2pStateHandles, bufferHandles;
-  peerInfo->twoPhaseExchange.run(
-      [&]() {
-        peerInfo->p2pStateHandles[rank] = p2pStateHandle;
-        peerInfo->bufferHandles[rank] = bufferHandle;
-      },
-      [&]() {
-        p2pStateHandles = peerInfo->p2pStateHandles;
-        bufferHandles = peerInfo->bufferHandles;
-      });
-
-  // Map peer p2p states and buffers to the process address space
-  std::array<void*, kMaxDevices> p2pStates, buffers;
-  for (size_t r = 0; r < worldSize; ++r) {
-    if (r == rank) {
-      p2pStates[r] = p2pState;
-      buffers[r] = buffer;
-    } else {
-      AT_CUDA_CHECK(cudaIpcOpenMemHandle(
-          &p2pStates[r], p2pStateHandles[r], cudaIpcMemLazyEnablePeerAccess));
-      AT_CUDA_CHECK(cudaIpcOpenMemHandle(
-          &buffers[r], bufferHandles[r], cudaIpcMemLazyEnablePeerAccess));
-    }
-  }
-  return c10::make_intrusive<IntraNodeComm>(
-      topology, p2pStates, buffers, rank, worldSize);
-#else
-  return nullptr;
-#endif
-}
-
-c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvousViaStore(
     c10::intrusive_ptr<c10d::Store> store,
     const std::string& prefix,
     size_t rank,
@@ -569,44 +274,113 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvousViaStore(
       worldSize > kMaxDevices) {
     return nullptr;
   }
-  std::array<char, HOST_NAME_MAX + 1> buf = {};
-  gethostname(buf.data(), buf.size());
-  std::string hostname(buf.data());
 
-  std::vector<std::string> hostnameKeys;
-  for (size_t r = 0; r < worldSize; ++r) {
-    std::ostringstream oss;
-    oss << prefix << "-" << rank << "-hostname";
-    hostnameKeys.push_back(oss.str());
-  }
-  store->set(hostnameKeys[rank], hostname);
+  int deviceIdx = at::cuda::current_device();
+  c10::cuda::CUDAGuard guard(deviceIdx);
 
-  std::vector<std::string> hostnames;
-  for (size_t r = 0; r < worldSize; ++r) {
-    if (r == rank) {
-      hostnames.push_back(hostname);
-      continue;
+  // First hand shake: exchange hostname and device bus ID
+  struct DevInfo {
+    char hostname[HOST_NAME_MAX + 1];
+    char busId[80];
+  };
+
+  DevInfo devInfo{};
+  gethostname(devInfo.hostname, sizeof(devInfo.hostname));
+  cudaDeviceProp prop{};
+  AT_CUDA_CHECK(cudaGetDeviceProperties(&prop, deviceIdx));
+  snprintf(
+      devInfo.busId,
+      sizeof(devInfo.busId),
+      NVML_DEVICE_PCI_BUS_ID_FMT,
+      prop.pciDomainID,
+      prop.pciBusID,
+      prop.pciDeviceID);
+
+  auto peerDevInfos = storeAllGather(
+      store, prefix + "-IntraNodeCommHandShake-0", rank, worldSize, devInfo);
+
+  std::vector<std::string> rankToBusId;
+  for (const auto& info : peerDevInfos) {
+    if (strcmp(info.hostname, devInfo.hostname) != 0) {
+      LOG(WARNING) << "Aborting IntraNodeComm::rendezvous because some "
+                      "participants are not on the same host ("
+                   << info.hostname << ", " << devInfo.hostname << ")";
+      return nullptr;
     }
-    store->wait({hostnameKeys[r]});
-    hostnames.push_back(store->get_to_str(hostnameKeys[r]));
+    rankToBusId.emplace_back(info.busId);
   }
 
-  for (const auto& hn : hostnames) {
-    if (hn != hostname) {
+  // Verify unique devices
+  {
+    std::unordered_set uniqueBusIds(rankToBusId.begin(), rankToBusId.end());
+    TORCH_CHECK(
+        uniqueBusIds.size() == worldSize,
+        "IntraNodeComm::rendezvous: detected overlapping devices across ranks. "
+        "Please properly set device via torch.cuda.set_device() before "
+        "initiating rendezvous.");
+  }
+
+  // Query nvlink connection
+  auto nvlMesh = getNvlMesh(rankToBusId);
+
+  // Detect topology
+  Topology topology = detectTopology(nvlMesh, worldSize);
+
+  // Initialize p2p state
+  auto p2pState = initP2pState(topology, nvlMesh, rank);
+
+  // Allocate buffer
+  void* buffer = nullptr;
+  AT_CUDA_CHECK(cudaMalloc(&buffer, kMaxIntraNodeSize * 2));
+
+  // Second handshake: exchange topology and CUDA IPC handles
+  struct IpcInfo {
+    Topology topology;
+    cudaIpcMemHandle_t p2pStateHandle, bufferHandle;
+  };
+
+  // Make p2p state and buffer available for IPC
+  cudaIpcMemHandle_t p2pStateHandle, bufferHandle;
+  AT_CUDA_CHECK(cudaIpcGetMemHandle(&p2pStateHandle, p2pState));
+  AT_CUDA_CHECK(cudaIpcGetMemHandle(&bufferHandle, buffer));
+
+  IpcInfo ipcInfo{
+      .topology = topology,
+      .p2pStateHandle = p2pStateHandle,
+      .bufferHandle = bufferHandle};
+
+  auto peerIpcInfos = storeAllGather(
+      store, prefix + "-IntraNodeCommHandShake-1", rank, worldSize, ipcInfo);
+
+  for (const auto& info : peerIpcInfos) {
+    if (info.topology != topology) {
+      LOG(WARNING) << "Aborting IntraNodeComm::rendezvous because some "
+                      "participants are observing different topologies ("
+                   << int(info.topology) << " and " << int(topology) << ")";
+      AT_CUDA_CHECK(cudaFree(p2pState));
+      AT_CUDA_CHECK(cudaFree(buffer));
       return nullptr;
     }
   }
 
-  std::string uuid;
-  std::string rdzvIdKey = prefix + "-IntraHostCommRdzvId";
-  if (rank == 0) {
-    uuid = generateUUID();
-    store->set(rdzvIdKey, uuid);
-  } else {
-    store->wait({rdzvIdKey});
-    uuid = store->get_to_str(rdzvIdKey);
+  std::array<void*, kMaxDevices> p2pStates = {}, buffers = {};
+  for (size_t r = 0; r < peerIpcInfos.size(); ++r) {
+    if (r == rank) {
+      p2pStates[r] = p2pState;
+      buffers[r] = buffer;
+    } else {
+      AT_CUDA_CHECK(cudaIpcOpenMemHandle(
+          &p2pStates[r],
+          peerIpcInfos[r].p2pStateHandle,
+          cudaIpcMemLazyEnablePeerAccess));
+      AT_CUDA_CHECK(cudaIpcOpenMemHandle(
+          &buffers[r],
+          peerIpcInfos[r].bufferHandle,
+          cudaIpcMemLazyEnablePeerAccess));
+    }
   }
-  return rendezvous(uuid, rank, worldSize);
+  return c10::make_intrusive<IntraNodeComm>(
+      topology, p2pStates, buffers, rank, worldSize);
 #else
   return nullptr;
 #endif
@@ -620,8 +394,11 @@ AllReduceAlgo IntraNodeComm::selectAllReduceAlgo(const at::Tensor& input) {
 at::Tensor IntraNodeComm::allReduce(
     const at::Tensor& input,
     AllReduceAlgo algo) {
+  auto stream = at::cuda::getCurrentCUDAStream();
+  c10::cuda::CUDACachingAllocator::recordStream(
+      input.storage().data_ptr(), stream);
   return c10d::intra_node_comm::allReduce(
-      input, p2pStates_, buffers_, rank_, worldSize_, algo);
+      input, p2pStates_, buffers_, rank_, worldSize_, algo, stream);
 }
 
 } // namespace intra_node_comm
