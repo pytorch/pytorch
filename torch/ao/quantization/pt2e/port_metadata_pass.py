@@ -88,12 +88,11 @@ def _port_metadata_for_input_quant_nodes(
         scale_node = choose_qparam_users.pop()
         dynamic_q_node = next(iter(scale_node.users.keys()))
         dynamic_q_node_users = _filter_sym_size_users(dynamic_q_node)
-        if len(dynamic_q_node_users) > 1:
-            raise InternalError(f"Expecting single user for {dynamic_q_node}")
-        dynamic_dq_node = dynamic_q_node_users.pop()
         _add_metadata(choose_qparams_node, node)
         _add_metadata(dynamic_q_node, node)
-        _add_metadata(dynamic_dq_node, node)
+        # q_node may have multiple users, e.g., in self-attention
+        for dynamic_dq_node in dynamic_q_node_users:
+            _add_metadata(dynamic_dq_node, node)
     else:
         q_node, dq_node = _find_q_dq_node_for_user(input_node, node)
         if q_node is None or dq_node is None:

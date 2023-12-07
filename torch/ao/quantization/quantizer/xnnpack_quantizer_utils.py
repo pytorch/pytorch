@@ -122,7 +122,8 @@ def get_input_act_qspec(quantization_config: Optional[QuantizationConfig]):
     assert quantization_spec.qscheme in [
         torch.per_tensor_affine,
         torch.per_tensor_symmetric,
-    ]
+    ] or quantization_spec.is_dynamic, \
+    "Invalid qscheme for activation in quantization spec"
     return quantization_spec
 
 

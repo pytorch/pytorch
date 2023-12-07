@@ -41,6 +41,7 @@ from torch.fx.passes.utils.source_matcher_utils import (
 __all__ = [
     "X86InductorQuantizer",
     "get_default_x86_inductor_quantization_config",
+    "get_default_x86_inductor_dynamic_quantization_config",
 ]
 
 
@@ -154,6 +155,7 @@ def _get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
     supported_config_and_operators: List[OperatorConfig] = []
     for quantization_config in [
         get_default_x86_inductor_quantization_config(),
+        get_default_x86_inductor_dynamic_quantization_config(),
     ]:
         ops = _supported_quantized_operators()
         for pattern_list in ops.values():
@@ -212,6 +214,42 @@ def get_default_x86_inductor_quantization_config(is_qat: bool = False):
         weight_quantization_spec,
         bias_quantization_spec,
         is_qat,
+    )
+    return quantization_config
+
+
+@functools.lru_cache
+def get_default_x86_inductor_dynamic_quantization_config():
+    act_quantization_spec = QuantizationSpec(
+        dtype=torch.uint8,
+        quant_min=0,
+        quant_max=255,
+        is_dynamic=True,
+        observer_or_fake_quant_ctr=PlaceholderObserver.with_args(is_dynamic=True),
+    )
+
+    extra_args: Dict[str, Any] = {"eps": 2**-12}
+    weight_quantization_spec = QuantizationSpec(
+        dtype=torch.int8,
+        quant_min=-128,
+        quant_max=127,
+        qscheme=torch.per_channel_symmetric,
+        ch_axis=0,  # 0 corresponding to output channel
+        is_dynamic=False,  # Weight is not quantized at runtime but ahead of time
+        observer_or_fake_quant_ctr=PerChannelMinMaxObserver.with_args(**extra_args),
+    )
+    bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
+        PlaceholderObserver
+    )
+    bias_quantization_spec = QuantizationSpec(
+        dtype=torch.float, observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
+    )
+    quantization_config = QuantizationConfig(
+        act_quantization_spec,
+        act_quantization_spec,
+        weight_quantization_spec,
+        bias_quantization_spec,
+        is_qat=False,
     )
     return quantization_config
 
@@ -370,7 +408,10 @@ class X86InductorQuantizer(Quantizer):
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
-        model = self._annotate_for_static_quantization_config(model)
+        if self.global_config and self.global_config.input_activation.is_dynamic:  # type: ignore[union-attr]
+            model = self._annotate_for_dynamic_quantization_config(model)
+        else:
+            model = self._annotate_for_static_quantization_config(model)
         return model
 
     def _annotate_for_static_quantization_config(
@@ -410,6 +451,13 @@ class X86InductorQuantizer(Quantizer):
         for node in model.graph.nodes:
             self._annotate_output_for_int8_in_int8_out_pattern(node, config)
 
+        return model
+
+    def _annotate_for_dynamic_quantization_config(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        config = self.global_config
+        self._annotate_linear(model, config)
         return model
 
     def _annotate_qat_conv2d_fusion_pattern(
