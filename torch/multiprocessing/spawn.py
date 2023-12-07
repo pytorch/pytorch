@@ -136,7 +136,10 @@ class ProcessContext:
         if self.error_queues[error_index].empty():
             exitcode = self.processes[error_index].exitcode
             if exitcode < 0:
-                name = signal.Signals(-exitcode).name
+                try:
+                    name = signal.Signals(-exitcode).name
+                except ValueError:
+                    name = f"<Unknown signal {-exitcode}>"
                 raise ProcessExitedException(
                     "process %d terminated with signal %s" % (error_index, name),
                     error_index=error_index,
