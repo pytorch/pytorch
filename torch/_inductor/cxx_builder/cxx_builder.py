@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import sys
 import sysconfig
+import warnings
 from pathlib import Path
 from typing import List, Tuple
 
@@ -196,8 +197,8 @@ def optimization_cflags() -> List[str]:
                 cflags.append("march=native")
 
         # Internal cannot find libgomp.so
-        if not config.is_fbcode():
-            cflags.append("fopenmp")
+        # if not config.is_fbcode():
+        #     cflags.append("fopenmp")
 
         return cflags
 
@@ -335,10 +336,11 @@ def get_python_related_args():
     return python_include_dirs, python_lib_path
 
 
-"""
 def get_openmp_args(cpp_compiler):
-    ipaths = []
-    lpaths = []
+    cflags: List[str] = []
+    ldflags: List[str] = []
+    include_dir_paths: List[str] = []
+    lib_dir_paths: List[str] = []
     if _IS_MACOS:
         from torch._inductor.codecache import (
             homebrew_libomp,
@@ -349,12 +351,13 @@ def get_openmp_args(cpp_compiler):
         omp_available = not is_apple_clang(cpp_compiler)
 
         # check the `OMP_PREFIX` environment first
-        if os.getenv("OMP_PREFIX") is not None:
-            header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")
+        omp_prefix = os.getenv("OMP_PREFIX")
+        if omp_prefix is not None:
+            header_path = os.path.join(omp_prefix, "include", "omp.h")
             valid_env = os.path.exists(header_path)
             if valid_env:
-                ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
-                lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+                include_dir_paths.append(os.path.join(omp_prefix, "include"))
+                lib_dir_paths.append(os.path.join(omp_prefix, "lib"))
             else:
                 warnings.warn("environment variable `OMP_PREFIX` is invalid.")
             omp_available = omp_available or valid_env
@@ -362,12 +365,13 @@ def get_openmp_args(cpp_compiler):
         libs = [] if omp_available else ["omp"]
 
         # prefer to use openmp from `conda install llvm-openmp`
-        if not omp_available and os.getenv("CONDA_PREFIX") is not None:
+        conda_prefix = os.getenv("CONDA_PREFIX")
+        if not omp_available and conda_prefix is not None:
             omp_available = is_conda_llvm_openmp_installed()
             if omp_available:
-                conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
-                ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
-                lpaths.append(conda_lib_path)
+                conda_lib_path = os.path.join(conda_prefix, "lib")
+                include_dir_paths.append(os.path.join(conda_prefix, "include"))
+                lib_dir_paths.append(conda_lib_path)
                 # Prefer Intel OpenMP on x86 machine
                 if os.uname().machine == "x86_64" and os.path.exists(
                     os.path.join(conda_lib_path, "libiomp5.dylib")
@@ -378,18 +382,25 @@ def get_openmp_args(cpp_compiler):
         if not omp_available:
             omp_available, libomp_path = homebrew_libomp()
             if omp_available:
-                ipaths.append(os.path.join(libomp_path, "include"))
-                lpaths.append(os.path.join(libomp_path, "lib"))
+                include_dir_paths.append(os.path.join(libomp_path, "include"))
+                lib_dir_paths.append(os.path.join(libomp_path, "lib"))
 
         # if openmp is still not available, we let the compiler to have a try,
         # and raise error together with instructions at compilation error later
     elif _IS_WINDOWS:
-        todo = 0
-    else:
-        libs = ["omp"] if config.is_fbcode() else ["gomp"]
+        # /openmp, /openmp:llvm
+        # llvm on Windows, new openmp: https://devblogs.microsoft.com/cppblog/msvc-openmp-update/
+        # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
 
-    return
-"""
+        cflags.append("openmp")
+    else:
+        if config.is_fbcode():
+            libs = ["omp"]
+        else:
+            cflags.append("openmp")
+            libs = ["gomp"]
+
+    return cflags, ldflags, include_dir_paths, lib_dir_paths, libs
 
 
 class CxxTorchOptions(CxxOptions):
@@ -430,6 +441,14 @@ class CxxTorchOptions(CxxOptions):
 
         # cpp_prefix_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
         # _nonduplicate_append(self._include_dirs, cpp_prefix_dir)
+
+        (
+            omp_cflags,
+            omp_ldflags,
+            omp_include_dir_paths,
+            omp_lib_dir_paths,
+            omp_lib,
+        ) = get_openmp_args(self._compiler)
 
         if not _IS_WINDOWS:
             # glibcxx is not available in Windows.
