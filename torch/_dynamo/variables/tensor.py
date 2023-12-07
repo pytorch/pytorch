@@ -990,3 +990,9 @@ class TensorSubclassVariable(VariableTracker):
             )
 
         return super().call_function(tx, args, kwargs)
+
+    def as_python_constant(self):
+        return self.value
+
+    def python_type(self):
+        return type(self.value)
