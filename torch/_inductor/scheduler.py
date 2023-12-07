@@ -132,6 +132,7 @@ class BaseSchedulerNode:
             str
         ] = set()  # buffers that won't be used after this kernel
         self.written = False
+        self.workspace_buffer = V.graph.get_workspace_buffer_for(self.node)
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
@@ -210,10 +211,13 @@ class BaseSchedulerNode:
         return self.read_writes.op_counts
 
     def used_buffer_names(self) -> Set[str]:
-        return {
+        res = {
             dep.name
             for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
         }
+        if self.workspace_buffer is not None:
+            res.add(self.workspace_buffer.name)
+        return res
 
     def used_or_aliased_buffer_names(self) -> Set[str]:
         used_names = set()
@@ -226,6 +230,8 @@ class BaseSchedulerNode:
                 # if there are still uses of aliases ahead
                 if isinstance(layout, ir.AliasedLayout):
                     used_names.add(layout.view.data.get_name())
+        if self.workspace_buffer is not None:
+            used_names.add(self.workspace_buffer.name)
         return used_names
 
     def prune_deps(self):
@@ -399,9 +405,10 @@ class BaseSchedulerNode:
                         break
 
     def allocate(self):
+        if self.workspace_buffer is not None:
+            V.graph.wrapper_code.codegen_allocation(self.workspace_buffer)
         if not self.node.should_allocate():
             return
-
         if isinstance(self, (SchedulerNode,)) and (
             self.node.get_alias_names() or self.node.get_mutation_names()
         ):
@@ -1581,11 +1588,12 @@ class Scheduler:
         """
         # note self.nodes is topologically sorted
         name_to_ancestors: Dict[str, Set[str]] = {}
+        empty_set = set()
         for node in self.nodes:
             ancestors = set()
             for dep in node.unmet_dependencies:
                 ancestors.add(dep.name)
-                ancestors |= name_to_ancestors[dep.name]
+                ancestors |= name_to_ancestors.get(dep.name, empty_set)
             name_to_ancestors[node.get_name()] = ancestors
             node.ancestors = ancestors
 

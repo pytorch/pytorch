@@ -2923,6 +2923,7 @@ class InputBuffer(Buffer):
     pass
 
 
+@dataclasses.dataclass
 class WorkspaceBuffer(Buffer):
     """Buffer that represents temporary workspace memory for a computation of another node."""
 
@@ -2940,6 +2941,12 @@ class WorkspaceBuffer(Buffer):
         return res
 
     def should_allocate(self):
+        return True
+
+    def get_device(self):
+        return self.user_node.get_device()
+
+    def is_no_op(self):
         return True
 
 
@@ -3335,6 +3342,8 @@ class CUDATemplateBuffer(TemplateBuffer):
         self._tuned_for_epilogue = None
 
     def get_workspace_size(self):
+        if callable(self.workspace_size):
+            return self.workspace_size()
         return self.workspace_size if self.workspace_size is not None else 0
 
     def get_read_writes(self):

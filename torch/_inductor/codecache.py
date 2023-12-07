@@ -152,9 +152,6 @@ class CacheBase:
                     "cuda": torch.version.cuda,
                     "triton": triton_version,
                 },
-                "other": {
-                    "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
-                },
             }
         except (AssertionError, RuntimeError):
             # If cuda is not installed, none of the above config is relevant.
@@ -243,7 +240,7 @@ class PersistentCache(CacheBase):
     def lookup(
         self,
         choices: List[ChoiceCaller],
-        name: str,
+        op: str,
         inputs: str,
         benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
     ) -> Dict[ChoiceCaller, float]:
@@ -251,17 +248,20 @@ class PersistentCache(CacheBase):
         Check to see if we have benchmarked the given choice callers. For each
         choice caller:
 
-            1. Check global_cache[name][inputs][choice], return benchmark if cached.
-            2. Check local_cache[name][inputs][choice], return benchmark if cached.
+            1. Check global_cache[op][inputs][choice][precision], return benchmark if cached.
+            2. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
             3.
                 a. `max_autotune_gemm=True`: benchmark the choice, update
-                    local_cache[name][inputs][choice], and return the benchmark.
+                    local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
+        precision = torch.get_float32_matmul_precision()
 
-        log_stats = partial(log_global_cache_stats, self.system, name, inputs)
-        log_vals = partial(log_global_cache_vals, self.system, name, inputs)
-        log_errors = partial(log_global_cache_errors, self.system, name, inputs)
+        log_stats = partial(log_global_cache_stats, self.system, op, inputs, precision)
+        log_vals = partial(log_global_cache_vals, self.system, op, inputs, precision)
+        log_errors = partial(
+            log_global_cache_errors, self.system, op, inputs, precision
+        )
         timings = {}
 
         def check_cache(cache, callback=None) -> bool:
@@ -269,9 +269,9 @@ class PersistentCache(CacheBase):
             hit = True
             for choice in choices:
                 choice_hash = choice.hash_key()
-                if choice_hash in cache.get(name, {}).get(inputs, {}):
+                if choice_hash in cache.get(op, {}).get(inputs, {}).get(precision, {}):
                     # cache hit
-                    timings[choice] = cache[name][inputs][choice_hash]
+                    timings[choice] = cache[op][inputs][precision][choice_hash]
                 else:
                     # cache miss
                     hit = False
@@ -294,18 +294,17 @@ class PersistentCache(CacheBase):
                     # that results are comparable
                     for choice in choices:
                         choice_hash = choice.hash_key()
-                        if choice_hash in local_cache.get(name, {}).get(inputs, {}):
+                        if choice_hash in local_cache.get(op, {}).get(inputs, {}):
                             # cache hit
-                            timings[choice] = local_cache[name][inputs][choice_hash]
+                            timings[choice] = local_cache[op][inputs][choice_hash]
                         else:
                             uncached_choices.append(choice)
                     timings.update(benchmark(uncached_choices))
                     assert all(choice in timings for choice in choices)
-
-                    local_cache.setdefault(name, {})
-                    local_cache[name].setdefault(inputs, {})
+                    local_cache.setdefault(op, {})
+                    local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
                     for choice, timing in timings.items():
-                        local_cache[name][inputs][choice.hash_key()] = timing
+                        local_cache[op][inputs][precision][choice.hash_key()] = timing
                 except RuntimeError as e:
                     # catch and log autotuning failures
                     log_errors(e)
@@ -2095,6 +2094,7 @@ def _nvcc_compiler_options() -> List[str]:
         config.cuda.compile_opt_level,
         "-std=c++17",
         "--expt-relaxed-constexpr",
+        "-DNDEBUG",
     ]
     if config.cuda.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
