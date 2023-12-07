@@ -104,14 +104,13 @@ class TritonPrinter(PythonPrinter):
 
     def _print_Round(self, expr):
         assert len(expr.args) == 1
-        return f"tl.math.llrint({self.paren(self._print(expr.args[0]))})"
+        return f"tl.math.llrint({self._print(expr.args[0])})"
 
     def _print_RoundDecimal(self, expr):
         assert len(expr.args) == 2
         number, ndigits = expr.args
-        number = self.paren(self._print(number))
         assert isinstance(ndigits, sympy.Integer)
-        return f"tl.math.nearbyint(1e{ndigits} * ({number})) * 1e-{ndigits}"
+        return f"tl.math.nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e-{ndigits}"
 
 
 texpr = TritonPrinter().doprint
