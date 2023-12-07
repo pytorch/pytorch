@@ -118,6 +118,16 @@ private:
   std::unique_ptr<T, DescriptorDeleter<T, dtor>> desc_;
 };
 
+class TORCH_CUDA_CPP_API RNNDataDescriptor : public Descriptor<
+					       cudnnRNNDataStruct,
+					       &cudnnCreateRNNDataDescriptor,
+					       &cudnnDestroyRNNDataDescriptor> {
+  void set(const at::Tensor &t, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray);
+  void set(cudnnDataType_t dataType, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray) {
+    AT_CUDNN_CHECK(cudnnSetRNNDataDescriptor(mut_desc(), dataType, layout, maxSeqLength, batchSize, vectorSize, seqLengthArray, NULL));
+  }
+};
+
 class TORCH_CUDA_CPP_API TensorDescriptor : public Descriptor<
                                                cudnnTensorStruct,
                                                &cudnnCreateTensorDescriptor,
