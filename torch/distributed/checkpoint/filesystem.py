@@ -558,9 +558,9 @@ class FileSystemCheckpointer(Checkpointer):
         super().__init__(
             storage_writer,
             storage_reader,
-            process_group,
-            coordinator_rank,
-            no_dist,
-            load_planner,
-            save_planner
+            process_group=process_group,
+            coordinator_rank=coordinator_rank,
+            no_dist=no_dist,
+            load_planner=load_planner,
+            save_planner=save_planner
         )

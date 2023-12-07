@@ -66,7 +66,7 @@ class Checkpointer:
             process_group=self.process_group,
             coordinator_rank=self.coordinator_rank,
             no_dist=self.no_dist,
-            planner=self.planner,
+            planner=self.save_planner,
         )
 
     def load(
@@ -81,5 +81,5 @@ class Checkpointer:
             process_group=self.process_group,
             coordinator_rank=self.coordinator_rank,
             no_dist=self.no_dist,
-            planner=self.planner,
+            planner=self.load_planner,
         )
