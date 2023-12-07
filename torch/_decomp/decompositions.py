@@ -4133,7 +4133,9 @@ def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
 
     result = a
     for i in range(dim):
-        dim_idx = torch.arange(-padding_left[i], inp_shape[i] + padding_right[i])
+        dim_idx = torch.arange(
+            -padding_left[i], inp_shape[i] + padding_right[i], device=a.device
+        )
         dim_idx = inp_shape[i] - 1 - (inp_shape[i] - 1 - dim_idx.abs()).abs()
         idx: List[Any] = [None] * result.dim()
         idx[i + nc_dim] = dim_idx
