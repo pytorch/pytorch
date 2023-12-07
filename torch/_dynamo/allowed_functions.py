@@ -149,51 +149,16 @@ def _disallowed_function_ids() -> Set[int]:
     return {id(x) for x in remove}
 
 
-# Helper function to dump the torch name rule map generated based on
-# the heuristic defined in gen_allowed_objs_and_ids.
-def dump_allowed_torch_name_rule_map() -> None:
-    m = gen_allowed_objs_and_ids().name_rule_map
-    for k, v in m.items():
-        print(f'"{k}": {v.__name__},')
-
-
-@dataclasses.dataclass
-class AllowedObjects:
-    """
-    Track the objects, object id - name pairs, and name - dynamo wrapping rule pairs
-    from the heuristic defined in `gen_allowed_objs_and_ids`.
-    TODO: Remove the overalp/duplication between these fields
-    after allowed_functions refactor is done.
-    """
-
-    object_ids: Dict[int, str]
-    objects: Set[Any]
-    name_rule_map: Dict[str, Any]
-
-
-def gen_allowed_objs_and_ids(record=False) -> AllowedObjects:
+# We are in progress of refactoring and moving the following functions to test_trace_rules.py.
+# If you made any change to the following functions, please also update there as well.
+# If you are not clear of how to update, please contact @yanboliang.
+@FunctionIdSet
+def _allowed_function_ids() -> Dict[int, str]:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
-    from .variables import TorchCtxManagerClassVariable
-
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
-    torch_objects = set()
-    torch_name_rule_map = dict()
-
-    # Add obj to torch_objects set if it's a torch context manager class.
-    # This is used to generate the ctx manager class list based on heuristic.
-    def heuristic_record_if_ctx_manager(obj, module, name):
-        if (
-            issubclass(type(obj), type)
-            and hasattr(obj, "__enter__")
-            and hasattr(obj, "__exit__")
-        ):
-            torch_name_rule_map[
-                f"{module.__name__}.{name}"
-            ] = TorchCtxManagerClassVariable
-            torch_objects.add(obj)
 
     def _is_allowed_module_prefix(obj):
         allowed_modules = ("torch", "math")
@@ -212,6 +177,15 @@ def gen_allowed_objs_and_ids(record=False) -> AllowedObjects:
             "torch._inductor.",
             "torch._C.inductor.",
             "torch.fx.",
+            "torch.distributed.fsdp.",
+            "torch.distributed._tensor.",
+            # Inline through the ActivationWrapper in
+            # torch.distributed.algorithms._checkpoint.checkpoint_wrapper. This
+            # nn module calls torch.utils.checkpoint internally. If Dynamo does
+            # not trace this, AOT Autograd will try to trace this and can cause
+            # issues observed in
+            # https://github.com/pytorch/pytorch/issues/108269
+            "torch.distributed.algorithms.",
         ]
         if config.trace_distributed:
             disallowed_modules.append("torch.distributed.")
@@ -266,12 +240,8 @@ def gen_allowed_objs_and_ids(record=False) -> AllowedObjects:
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
-                    if record:
-                        heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
-                    if record:
-                        heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
@@ -305,12 +275,7 @@ def gen_allowed_objs_and_ids(record=False) -> AllowedObjects:
     for extra in (is_fx_tracing, is_compiling):
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
-    return AllowedObjects(torch_object_ids, torch_objects, torch_name_rule_map)
-
-
-@FunctionIdSet
-def _allowed_function_ids() -> Dict[int, str]:
-    return gen_allowed_objs_and_ids().object_ids
+    return torch_object_ids
 
 
 @FunctionIdSet

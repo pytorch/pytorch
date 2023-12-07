@@ -91,13 +91,6 @@ def gen_get_func_inlinelist(dummy_func_inlinelist):
     return get_func_inlinelist
 
 
-# Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
-# allowed objects include:
-# - Torch context manager classes.
-def generate_allowed_object_set():
-    return gen_allowed_objs_and_ids(record=True).objects
-
-
 class TraceRuleTests(torch._dynamo.test_case.TestCase):
     # We are using python function and module string names for these inlinelist,
     # this unit test is to make sure the functions/modules can be correctly imported
@@ -115,35 +108,6 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                 isinstance(getattr(m, fn_name), types.FunctionType),
                 f"{f} from skipfiles.FUNC_INLINELIST is not a python function, please check and correct it.",
             )
-
-    @unittest.skip("Testing")
-    def test_torch_name_rule_map(self):
-        manual_torch_obj_rule_set = {
-            load_object(x) for x in manual_torch_name_rule_map.keys()
-        }
-        generated_torch_name_rule_set = (
-            generate_allowed_object_set() | manual_torch_obj_rule_set
-        )
-        ignored_torch_obj_rule_set = {
-            load_object(x) for x in ignored_torch_name_rule_set
-        }
-        used_torch_name_rule_set = (
-            set(get_torch_obj_rule_map().keys()) | ignored_torch_obj_rule_set
-        )
-        x = generated_torch_name_rule_set - used_torch_name_rule_set
-        y = used_torch_name_rule_set - generated_torch_name_rule_set
-        msg1 = (
-            f"New torch objects: {x} "
-            "were not added to trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
-            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
-        )
-        msg2 = (
-            f"Existing torch objects: {y} were removed. "
-            "Please remove them from trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "
-            "Refer the instruction in `torch/_dynamo/trace_rules.py` for more details."
-        )
-        self.assertTrue(len(x) == 0, msg1)
-        self.assertTrue(len(y) == 0, msg2)
 
     def test_func_inlinelist_torch_function(self):
         def fn(x):
