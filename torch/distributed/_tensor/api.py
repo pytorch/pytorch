@@ -473,6 +473,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
         .. note:: `full_tensor` is differentiable.
         """
+
+        # TODO: fix issue with full_tensor() for uneven-sharded tensor
+        # https://github.com/pytorch/pytorch/issues/115310
         redist_res = self.redistribute(placements=[Replicate()] * self.device_mesh.ndim)
         return _ToTorchTensor.apply(redist_res, grad_placements, False)
 
