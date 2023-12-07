@@ -2260,6 +2260,37 @@ class TestJac(TestCase):
         expected = torch.autograd.functional.jacobian(partial(f, int_x=3), t)
         self.assertEqual(actual, expected)
 
+    @onlyCUDA
+    def test_lstm_cuda_jacrev(self, device):
+        # Test to verify that `LSTM` works with jacrev(/vmap/vjp) on CUDA.
+        # We test against CPU.
+
+        class LSTMModel(nn.Module):
+            def __init__(self, input_size, lstm_units):
+                super().__init__()
+                self.lstm = nn.LSTM(input_size, lstm_units, batch_first=True)
+
+            def forward(self, x):
+                lstm_out, _ = self.lstm(x)
+                return lstm_out
+
+        input_size = 2
+        lstm_units = 2
+
+        model = LSTMModel(input_size, lstm_units)
+
+        inputs = torch.randn(5, 5, input_size)
+
+        results = []
+        for device in ("cpu", "cuda"):
+            model.to(device)
+            inputs = inputs.to(device)
+            params = dict(model.named_parameters())
+            results.append(jacrev(functional_call, argnums=1)(model, params, (inputs,)))
+
+        self.assertEqual(results[0], results[1])
+
+
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
         def foo(inputs):
