@@ -342,19 +342,19 @@ class ModuleFrame:
                     self.node_to_placeholder[self.seen_nodes[arg.name]] = flat_arg_node
 
             with self.parent.graph.inserting_before(self.parent_call_module):
-                nodes: List[Optional[torch.fx.Node]] = []
+                input_nodes: List[Optional[torch.fx.Node]] = []
                 for input in signature.inputs:
                     if isinstance(input, ConstantArgument) and input.value is None:
-                        nodes.append(None)
+                        input_nodes.append(None)
                     else:
                         assert isinstance(input, (TensorArgument, SymIntArgument))
-                        nodes.append(
+                        input_nodes.append(
                             self.parent.remap_input(self.seen_nodes[input.name])
                         )
 
                 inputs_node = _generate_unflatten(
                     self.parent.graph_module,
-                    nodes,
+                    input_nodes,
                     signature.in_spec,
                 )
 
