@@ -37,10 +37,10 @@ from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import _create_constraint, _Dim, Constraint
 from torch.export.exported_program import (
+    _disable_prexisiting_fake_mode,
     ExportedProgram,
     ModuleCallEntry,
     ModuleCallSignature,
-    _disable_prexisiting_fake_mode,
 )
 from torch.export.graph_signature import (
     _sig_to_specs,
@@ -71,6 +71,7 @@ from .exported_program import (
     _process_constraints,
     CallSpec,
 )
+from .non_strict_utils import make_constraints, make_fake_inputs
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
@@ -764,7 +765,6 @@ def _export(
     if not strict:
         assert isinstance(f, torch.nn.Module)
         assert len(preserve_module_call_signature) == 0
-        assert len(constraints) == 0, "dynamic shape NYI"
         assert len(kwargs) == 0, "keyword arguments NYI"
         out_spec = None
 
@@ -792,15 +792,21 @@ def _export(
                 sig.buffers_to_mutate = pytree.tree_map(strip_root, sig.buffers_to_mutate)
                 return gm, sig
             return _aot_export_non_strict
-        ep_non_strict = _export_non_strict(f, args, {}, f.state_dict(), transform=_tuplify_outputs)
+
+        fake_mode, fake_args, dim_name_to_sources = make_fake_inputs(f, args, constraints)
+        ep_non_strict = _export_non_strict(f, fake_args, {}, f.state_dict(), transform=_tuplify_outputs)
+
+        range_constraints, equality_constraints = make_constraints(fake_mode, dim_name_to_sources, ep_non_strict.gm)
+
+
         assert out_spec is not None
         return ExportedProgram(
             ep_non_strict.gm,
             ep_non_strict.gm.graph,
             ep_non_strict.sig,
             _get_params_buffers(f),
-            {},
-            [],
+            range_constraints,
+            equality_constraints,
             [ModuleCallEntry("", ModuleCallSignature([], [], pytree.tree_flatten((args, {}))[1], out_spec))],
             (args, kwargs),
             tensor_constants=ep_non_strict.tensor_constants,
