@@ -1674,7 +1674,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_ = {};
     set_storage_access_should_throw();
     get_extra_meta().custom_data_ptr_error_msg_ = s;
-    get_extra_meta().custom_storage_error_msg_ = s;
+    get_extra_meta().custom_storage_error_msg_ = std::move(s);
   }
 
  protected:
