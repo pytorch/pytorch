@@ -4343,6 +4343,17 @@ def _weight_norm_interface(x, y, dim):
     norm = x.norm(2, keep_dim, keepdim=True)
     return x * (y / norm), norm
 
+@register_decomposition(aten.isin)
+@out_wrapper()
+def isin(self, test_elements, *, assume_unique=False, invert=False):
+    yndims = len(test_elements.shape)
+    x = self.view(*self.shape, *(1,)*yndims)
+    if not invert:
+        cmp = x == test_elements
+    else:
+        cmp = x != test_elements
+    dim = tuple(range(-1, -yndims-1, -1))
+    return cmp.any(dim=dim)
 
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
