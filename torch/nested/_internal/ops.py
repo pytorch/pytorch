@@ -60,7 +60,9 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
     min_args = len(named_arg_types) - num_optional_args
 
     # special case: ellipses allows for any number of unchecked args at the end
-    if named_arg_types[-1] != "...":
+    if named_arg_types[-1] == "...":
+        named_arg_types = named_arg_types[:-1]
+    else:
         if not (len(args) >= min_args and len(args) <= len(named_arg_types)):
             raise ValueError(
                 f"NestedTensor {func.__name__}({schema_str}): expected at least {min_args} "
@@ -747,7 +749,7 @@ def sum_dim_IntList(func, *args, **kwargs):
         return out
 
 
-@register_jagged_func(torch.ops.aten.transpose.int, "self: jt, dim0: any, dim1: any")
+@register_jagged_func(torch.ops.aten.transpose.int, "self: jt_all, dim0: any, dim1: any")
 def transpose_int(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -757,6 +759,9 @@ def transpose_int(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     dim0, dim1 = canonicalize_dims(inp.dim(), (new_kwargs["dim0"], new_kwargs["dim1"]))
+
+    if inp._lengths is not None:
+        raise ValueError("transpose(): not supported on jagged layout nested tensor with holes")
 
     # To support the SDPA API, inputs need to have the ragged idx transposed to dim 2
     # instead of 1, although the internal Flash and mem-effn implementations will
