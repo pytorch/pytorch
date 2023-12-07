@@ -65,7 +65,9 @@ def _create_if_dir_not_exist(path_dir):
             Path(path_dir).mkdir(parents=True, exist_ok=True)
         except OSError as exc:  # Guard against race condition
             if exc.errno != errno.EEXIST:
-                raise RuntimeError(f"Fail to create path {path_dir}")
+                raise RuntimeError(  # noqa: TRY200 (Use `raise from`)
+                    f"Fail to create path {path_dir}"
+                )
 
 
 def _remove_dir(path_dir):
@@ -112,7 +114,7 @@ class BuildOptionsBase:
     _definations: List[str] = []
     _include_dirs: List[str] = []
     _cflags: List[str] = []
-    _ldlags: List[str] = []
+    _ldflags: List[str] = []
     _libraries_dirs: List[str] = []
     _libraries: List[str] = []
     _passthough_args: List[str] = []
@@ -132,8 +134,8 @@ class BuildOptionsBase:
     def get_cflags(self) -> List[str]:
         return self._cflags
 
-    def get_ldlags(self) -> List[str]:
-        return self._ldlags
+    def get_ldflags(self) -> List[str]:
+        return self._ldflags
 
     def get_libraries_dirs(self) -> List[str]:
         return self._libraries_dirs
@@ -397,7 +399,7 @@ def get_openmp_args(cpp_compiler):
         if config.is_fbcode():
             libs = ["omp"]
         else:
-            cflags.append("openmp")
+            cflags.append("fopenmp")
             libs = ["gomp"]
 
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs
@@ -449,6 +451,11 @@ class CxxTorchOptions(CxxOptions):
             omp_lib_dir_paths,
             omp_lib,
         ) = get_openmp_args(self._compiler)
+        _nonduplicate_append(self._cflags, omp_cflags)
+        _nonduplicate_append(self._ldflags, omp_ldflags)
+        _nonduplicate_append(self._include_dirs, omp_include_dir_paths)
+        _nonduplicate_append(self._libraries_dirs, omp_lib_dir_paths)
+        _nonduplicate_append(self._libraries, omp_lib)
 
         if not _IS_WINDOWS:
             # glibcxx is not available in Windows.
@@ -473,7 +480,7 @@ class CxxBuilder:
     _cflags_args = ""
     _definations_args = ""
     _include_dirs_args = ""
-    _ldlags_args = ""
+    _ldflags_args = ""
     _libraries_dirs_args = ""
     _libraries_args = ""
     _passthough_parameters_args = ""
@@ -526,11 +533,11 @@ class CxxBuilder:
             else:
                 self._include_dirs_args += f"-I{inc_dir} "
 
-        for ldflag in BuildOption.get_ldlags():
+        for ldflag in BuildOption.get_ldflags():
             if _IS_WINDOWS:
-                self._ldlags_args += f"/{ldflag} "
+                self._ldflags_args += f"/{ldflag} "
             else:
-                self._ldlags_args += f"-{ldflag} "
+                self._ldflags_args += f"-{ldflag} "
 
         for lib_dir in BuildOption.get_libraries_dirs():
             if _IS_WINDOWS:
@@ -581,7 +588,7 @@ class CxxBuilder:
             include_dirs_args=self._include_dirs_args,
             definations_args=self._definations_args,
             cflags_args=self._cflags_args,
-            ldflags_args=self._ldlags_args,
+            ldflags_args=self._ldflags_args,
             libraries_args=self._libraries_args,
             libraries_dirs_args=self._libraries_dirs_args,
             passthougn_args=self._passthough_parameters_args,
