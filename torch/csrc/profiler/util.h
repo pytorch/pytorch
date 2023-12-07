@@ -160,11 +160,3 @@ struct HashCombine {
 } // namespace impl
 } // namespace profiler
 } // namespace torch
-
-namespace torch {
-namespace autograd {
-namespace profiler {
-using torch::profiler::impl::computeFlops;
-} // namespace profiler
-} // namespace autograd
-} // namespace torch

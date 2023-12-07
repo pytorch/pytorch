@@ -3,8 +3,8 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.distributed.device_mesh import DeviceMesh
 
 try:
     from torch.utils._cxx_pytree import tree_map_only, TreeSpec
