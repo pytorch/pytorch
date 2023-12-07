@@ -3330,8 +3330,8 @@ class GraphModule(torch.nn.Module):
         # Third invocation of `opt` makes `in_dims` as SymInt.
         actual = opt(x, 0), opt(x, 1), opt(x, 2)
         self.assertEqual(expected, actual)
-        self.assertEqual(cnt.frame_count, 4)
-        self.assertEqual(cnt.op_count, 10)
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.op_count, 9)
 
     def test_vmap_new_tensor_in_body(self):
         def fn(x):

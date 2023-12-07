@@ -1854,7 +1854,8 @@ class TestVmapOperators(Namespace.TestVmapBase):
         result = vmap(Tensor.contiguous, in_dims=2, out_dims=2)(x)
         self.assertTrue(result is x)
 
-        msg = 'NYI: querying is_contiguous inside of vmap for memory_format'
+        msg = ('.* inside vmap is only supported with memory_format '
+               'torch.preserve_format or torch.contiguous_format .*')
         tensor = torch.randn(B0, 3)
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(functools.partial(op, memory_format=torch.channels_last))(tensor)

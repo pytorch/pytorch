@@ -1477,6 +1477,17 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 return t
 
+        def maybe_from_batched(t):
+            # Is this correct? Unwrapping the FakeTensor from a BatchedTensor
+            # as the func(*const_args, **const_kwargs) call below may try to get
+            # the storage of the BatchedTensor, which is forbidden.
+            # Suppose bt is a BatchedTensor:
+            # >>> bt.untyped_storage()
+            # NotImplementedError: Cannot access storage of BatchedTensorImpl
+            if isinstance(t, torch.Tensor) and torch._C._functorch.is_batchedtensor(t):
+                return maybe_from_batched(torch._C._functorch.get_unwrapped(t))
+            return t
+
         # To constant propagate through these functions:
         # 1, If this is a lift due to a torch.tensor call,
         #    the input tensor is guaranteed to be a
@@ -1494,6 +1505,7 @@ class FakeTensorMode(TorchDispatchMode):
                 t.constant is not None for t in flat_arg_fake_tensors
             ), f"{func} should not have fake inputs without constants"
             const_flat_args = [maybe_to_constant(a) for a in flat_args]
+            const_flat_args = [maybe_from_batched(a) for a in const_flat_args]
             const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
             out = func(*const_args, **const_kwargs)
             if type(out) is torch.Tensor and self.may_turn_const(out):
@@ -1547,7 +1559,13 @@ class FakeTensorMode(TorchDispatchMode):
         # objects on an FX Graph.
 
         # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view
-        all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
+        has_batched_tensors = any(
+            torch._C._functorch.is_batchedtensor(e) for e in flat_arg_fake_tensors
+        )
+        all_constant = not has_batched_tensors and all(
+            e.constant is not None for e in flat_arg_fake_tensors
+        )
+        # all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
         if (
             torch.Tag.nondeterministic_seeded not in func.tags
             and torch.Tag.inplace_view not in func.tags
@@ -1847,7 +1865,13 @@ class FakeTensorMode(TorchDispatchMode):
     def invalidate_written_to_constants(
         self, func, flat_arg_fake_tensors, args, kwargs
     ):
-        any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
+        has_batched_tensors = any(
+            torch._C._functorch.is_batchedtensor(e) for e in flat_arg_fake_tensors
+        )
+        any_constant = not has_batched_tensors and any(
+            e.constant is not None for e in flat_arg_fake_tensors
+        )
+        # any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():
             _, new_kwargs = normalize_function(

@@ -148,6 +148,9 @@ def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
             )
             for f_inner_t, inner_t in zip(f_inner_ts, inner_ts)
         )
+    elif torch._C._functorch.is_batchedtensor(arg):
+        # BatchedTensors do not have storage.
+        return False
     else:
         if not isinstance(f_arg, torch.Tensor):
             assert not isinstance(arg, torch.Tensor)

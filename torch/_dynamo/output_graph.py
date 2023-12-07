@@ -1070,6 +1070,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
             backend_fake_mode = torch._subclasses.FakeTensorMode(
                 shape_env=old_fake_mode.shape_env,
+                allow_non_fake_inputs=True,
             )
             # TODO(voz): Ostensibily, this should be scoped and
             # restore back to old_fake_mode, but doing so currently violates

@@ -857,7 +857,7 @@ def merge_view_inputs(
     base_args = []
     other_args = []
     for i, inpt in enumerate(fwd_inputs):
-        if isinstance(inpt, Tensor):
+        if isinstance(inpt, Tensor) and not torch._C._functorch.is_batchedtensor(inpt):
             storage_ref = StorageWeakRef(inpt.untyped_storage())
             storage_ref_to_idx[storage_ref].append(i)
         else:

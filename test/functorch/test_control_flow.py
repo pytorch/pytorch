@@ -1758,7 +1758,7 @@ def forward(self, arg0_1):
 
         a = torch.ones((3, 4, 5))
         res = torch.vmap(wrapper)(a)
-        print(res)
+        self.assertEqual(res, a + 1)
 
 instantiate_parametrized_tests(TestControlFlowTraced)
 
