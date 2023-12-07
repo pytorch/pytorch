@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import enum
 import functools
 import pprint
 import re
@@ -114,6 +115,8 @@ def default_args_generator(seed_value):
                 new_val = val + 1 * i
             elif isinstance(val, float):
                 new_val = val + 0.1 * i
+            elif isinstance(val, enum.Enum):
+                new_val = val
             else:
                 raise AssertionError("unexpected arg type")
 
@@ -205,6 +208,22 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         self._test_wrap_simple(f, default_args_generator((x,)), 2)
+
+    def test_enum_arg(self):
+        class SomeEnum(enum.Enum):
+            A = 0
+            B = 1
+
+        def g(x, val):
+            if val == SomeEnum.A:
+                return torch.sin(x)
+            return torch.cos(x)
+
+        def f(x, val):
+            return wrap(g, x, val)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(f, default_args_generator((x, SomeEnum.A)), 2)
 
     def test_return_captured_var(self):
         freevar = torch.randn(3)
@@ -407,7 +426,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.tensor(1.2)
         y = MyClass(torch.tensor(3.4))
-        self._assert_wrap_fallback(f, (x, y))
+        self._test_wrap_simple(f, [(x, y)], 3)
 
     def test_capture_constants(self):
         x = torch.randn(3, 3)
@@ -1112,7 +1131,25 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         result = f(x)
         self.assertEqual(result, (x.sin(), x.sin()))
-        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_map_pytree_return(self):
+        cnt = CompileCounter()
+
+        def _construct_pytree(a):
+            return (a, [[[a]]], a, (a, (a,), a), {"a": a})
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            def inner_f(xs):
+                return _construct_pytree(xs)
+
+            return control_flow.map(inner_f, x)
+
+        x = torch.randn(3)
+        result = f(x)
+        self.assertEqual(result, _construct_pytree(x))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_map_kwargs(self):
         cnt = CompileCounter()
@@ -1144,7 +1181,40 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(ref, res)
         self.assertEqual(cnt.frame_count, 1)
+
+        # We increase the number of ops to 2 and 3 for top-level graph because of an additional
+        # get_item call created by the flatten/unflatten logic in HOP speculation.
         self.assertEqual(cnt.op_count, ifdynstaticdefault(2, 3))
+
+    def test_map_lowers_to_graph(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        def fn(x, y):
+            def inner(x, y):
+                return torch.sin(x + y)
+
+            return control_flow.map(inner, x, y.size(0))
+
+        x = torch.randn(3, 1)
+        y = torch.randn(3, 1)
+        compiled_fn = torch.compile(fn, backend=backend)(x, y)
+        self.assertEqual(len(backend.graphs), 1)
+        graph = backend.graphs[0]
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        self.assertExpectedInline(
+            graph.code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    map_body_0 = self.map_body_0
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
+        )
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
@@ -2690,7 +2760,7 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
+            {".*torch.func.grad with body that accepts non-Tensors as input": 2},
         )
         self.assertEqual(actual, expected)
 
@@ -3225,7 +3295,7 @@ class GraphModule(torch.nn.Module):
             self,
             dict(counters["graph_break"]),
             {
-                ".*HigherOrderOperator with body that accepts non-Tensors as input": 2,
+                ".*torch.vmap with body that accepts non-Tensors as input": 2,
                 "Unsupported: meta converter nyi with fake tensor propagation.": 1,
             },
         )

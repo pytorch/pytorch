@@ -1462,12 +1462,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     if config.aot_inductor.abi_compatible:
                         self.prefix.writeline(
-                            f"""auto {constants_key} = constants_.at({idx});"""
+                            f"""auto {constants_key} = constants_->at({idx});"""
                         )
                     else:
                         self.prefix.writeline(
                             f"auto {constants_key} = *tensor_handle_to_tensor_pointer("
-                            + f"""constants_.at({idx}));"""
+                            + f"""constants_->at({idx}));"""
                         )
                 else:
                     # Append constants as inputs to the graph
@@ -1540,7 +1540,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         num_constants = len(V.graph.constants)
         self.prefix.splice(
             f"""
-            AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map, std::optional<std::string> cubin_dir)
+            AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
+                                               std::shared_ptr<std::vector<AtenTensorHandle>> constants_array,
+                                               std::optional<std::string> cubin_dir)
                 : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, cubin_dir) {{
             """
         )
@@ -1574,6 +1576,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
 
             self.prefix.writeline("update_constants_map(std::move(constants_map));")
+            self.prefix.writeline("update_constants_array(std::move(constants_array));")
 
             def escape_string(x):
                 return (
