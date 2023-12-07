@@ -563,6 +563,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split(self):
+        assert config.optimize_ddp
         """
         Just ensures that the appropriate number of splits happen (based on
         bucket size and model parameters) - verifies the number of times
@@ -644,6 +645,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
+        assert config.optimize_ddp
         """
         Same as above, but using inductor backend.
         We observed issues with inductor/fx interface in the past.
@@ -657,6 +659,45 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
+
+    @torch._inductor.config.patch({"layout_optimization": True, "keep_output_stride": False})
+    @patch.object(config, "optimize_ddp", True)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_graph_split_inductor_layout_optimizations(self):
+        assert config.optimize_ddp
+        channel_dim = 512
+        # channel dim must be > 64 for inductor to do layout optimization and use NHWC
+
+        class ToyModelConv(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = nn.Sequential(
+                    *[nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
+                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
+                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
+                    + [nn.Conv2d(channel_dim, channel_dim, 1, stride=1, bias=False), nn.ReLU()]
+                )
+
+            def forward(self, inputs):
+                return self.net(inputs)
+
+        def get_model():
+            m = ToyModelConv().to(self.device)
+            m.apply(init_weights)
+            inputs = torch.rand(2, channel_dim, channel_dim, 128).to(self.device)
+            outputs = m(inputs)
+            return m, inputs, outputs
+
+        m, inputs, correct_outputs = get_model()
+        ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
+
+        @torch._dynamo.optimize("inductor")
+        def opt_fn(inputs):
+            return ddp_m(inputs)
+
+        opt_outputs = opt_fn(inputs)
+        self.assertTrue(same(correct_outputs, opt_outputs))
+
 
     @patch.object(config, "optimize_ddp", True)
     def test_no_split(self):
@@ -874,6 +915,52 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 .check(f"""{expected_guard_source} "L['self'].net[0]" ID_MATCH""") \
                 .run(GUARDS_FILE.getvalue())
             self.assertTrue(same(correct_outputs, outputs))
+
+    def test_fsdp_skip_register_attr_or_module(self):
+        """
+        ensure FSDP module is not registered as attrbutes
+        in the fx graph
+        see `not source.guard_source().is_fsdp_module()`
+        before calling `register_attr_or_module`
+        in variables/builder.py
+        """
+        class ToyModel(nn.Module):
+            def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5):
+                super().__init__()
+                self.net = nn.Sequential(
+                    *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
+                    + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+                )
+
+            def forward(self, inputs):
+                out = self.net(inputs)
+                return out
+
+        torch._dynamo.reset()
+
+        device = f"cuda:{self.rank}"
+        m = ToyModel(in_feat=10, hidden_feat=5000, out_feat=5,).to(device)
+        inputs = torch.rand(20, 10).to(device)
+        m.apply(init_weights)
+        correct_outputs = m(inputs)
+        fsdp_m = FSDP(m, use_orig_params=True)
+
+        def debug_compiler(gm, _):
+            for node in gm.graph.nodes:
+                if node.op == "get_attr":
+                    for name in [
+                        "l__self___net_0_weight",
+                        "l__self___net_0_bias",
+                        "l__self___net_2_weight",
+                        "l__self___net_2_bias"
+                    ]:
+                        self.assertFalse(name in node.name, f"FSDP module {name} should not be registered as attributes")
+            return gm
+
+        opt_m = torch._dynamo.optimize(backend=debug_compiler)(fsdp_m)
+        outputs = opt_m(inputs)
+
+        self.assertTrue(same(correct_outputs, outputs))
 
     def test_fsdp_dup_tensors_same_source(self):
         """
