@@ -330,8 +330,8 @@ def run_functionalized_fw_and_collect_metadata(
         # However, the autograd engine is convinced that they alias, aka x is out._base. This
         # flags the inp/out relationship via output type as alias_of_input, causing us to invoke
         # gen_alias_from_base - and produce a spurious as_strided() call which will raise later on.
-        storage_changed = torch._functionalize_was_storage_changed(o.elem)  # type: ignore[attr-defined]
         for o in flat_f_outs:
+            storage_changed = torch._functionalize_was_storage_changed(o.elem)  # type: ignore[attr-defined]
             curr_storage = (
                 None
                 if not isinstance(o, torch.Tensor)

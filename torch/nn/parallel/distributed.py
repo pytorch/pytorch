@@ -1453,7 +1453,7 @@ class DistributedDataParallel(Module, Joinable):
     def _post_forward(self, output):
         if self._delay_all_reduce_all_params:
             self._clear_grad_buffer()
-            return
+            return output
 
         # sync params according to location (before/after forward) user
         # specified as part of hook, if hook was specified.
