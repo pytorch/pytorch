@@ -513,7 +513,9 @@ namespace {
       const Tensor& weight_buf,
       bool include_bias=true
   ) {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < 9000
     auto cudnn_methods = { cudnnGetRNNLinLayerMatrixParams, cudnnGetRNNLinLayerBiasParams };
+#endif
     std::vector<Tensor> params;
     int64_t num_linear_layers = _num_linear_layers(rnn.mode);
     int64_t num_layers = rnn.num_directions() * rnn.num_layers;
@@ -521,6 +523,7 @@ namespace {
     size_t global_layer_params_count = 0;
     for (const auto layer : c10::irange(num_layers)) {
       size_t layer_params_count = 0;
+ #if defined(CUDNN_VERSION) && CUDNN_VERSION < 9000
       for (auto cudnn_method : cudnn_methods) {
         for (const auto linear_id : c10::irange(num_linear_layers)) {
           FilterDescriptor lin_layer_mat_desc;
@@ -582,6 +585,76 @@ namespace {
           cur_offset = offset + mat_numel;
         }
       } // for cudnn_method
+#else
+      std::vector<int> nb_dimss;
+      std::vector<Tensor> bias_params;
+      for (const auto linear_id : c10::irange(num_linear_layers)) {
+        TensorDescriptor lin_layer_mat_desc;
+        void* matrix_pointer;
+        TensorDescriptor lin_layer_bias_desc;
+        void* bias_pointer;
+        AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
+              handle,
+              rnn_desc.desc(),
+              layer,
+              weight_buf.numel() * weight_buf.element_size(),
+              weight_buf.data_ptr(),
+              linear_id,
+              lin_layer_mat_desc.mut_desc(),
+              &matrix_pointer,
+              lin_layer_bias_desc.mut_desc(),
+              &bias_pointer
+              ));
+        // TODO
+        /*
+        cudnnDataType_t data_type;
+        cudnnTensorFormat_t format;
+        int nb_dims;
+        constexpr int min_dim = 3;
+        int filter_dim_a[min_dim];
+        AT_CUDNN_CHECK(cudnnGetFilterNdDescriptor(
+              lin_layer_mat_desc.desc(),
+              min_dim,
+              &data_type,
+              &format,
+              &nb_dims,
+              filter_dim_a
+              ));
+
+        TORCH_INTERNAL_ASSERT(nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
+        auto elem_size = dataSize(getCudnnDataType(weight_buf));
+        auto offset_bytes = (char*)matrix_pointer - (char*)weight_buf.data_ptr();
+        TORCH_INTERNAL_ASSERT(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
+        size_t offset = offset_bytes / elem_size;
+
+        // for all the RNN types provided by CUDNN, all the ih weights
+        // are the same size and are allocated in a contiguous chunk
+        // (same for the hh weights, and the ih and hh biases).
+        // Since we're storing all the weights in a single tensor anyway,
+        // might as well merge the CUDNN ones into a single tensor as well
+        int mat_numel = c10::multiply_integers(filter_dim_a, filter_dim_a + nb_dims);
+        if (linear_id == 0 || linear_id == num_linear_layers / 2) {
+          // We could also exclude bias params by restricting cudnn_methods to just { cudnnGetRNNLinLayerMatrixParams }
+          // at the very top.  However, to do so would throw off the cur_offset account, which is currently a strict
+          // and informative check that all params are laid out the way we think they are.  If include_bias is false,
+          // I'd rather keep full cur_offset checks rather than save some CPU overhead by skipping the cudnn_method =
+          // cudnnGetRNNLinLayerBiasParams iteration.
+          if (include_bias || cudnn_method != cudnnGetRNNLinLayerBiasParams) {
+            // Generate a new parameter tensor which is a view into the weight_buf.
+            std::initializer_list<int64_t> size = {
+              mat_numel * num_linear_layers / 2, 1};
+            Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
+            params.emplace_back(std::move(param));
+            layer_params_count++;
+          }
+        } else {
+          TORCH_INTERNAL_ASSERT(cur_offset == offset, "cur_offset = ", cur_offset, "; offset = ", offset);
+        }
+        cur_offset = offset + mat_numel;
+        */
+      }
+
+#endif
       if (rnn.proj_size != 0) {
         add_projection_weights(handle, rnn_desc, x_desc, w_desc, weight_buf, layer, params);
         layer_params_count++;
@@ -696,9 +769,9 @@ namespace {
         AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
               handle,
               rnn_desc.desc(),
+              layer,
               weight_buf.numel() * weight_buf.element_size(),
               weight_buf.data_ptr(),
-              layer,
               linear_id,
               lin_layer_mat_desc.mut_desc(),
               &matrix_pointer,
