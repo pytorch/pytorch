@@ -4346,7 +4346,7 @@ def _weight_norm_interface(x, y, dim):
 @register_decomposition(aten.put)
 def put(self, index, source, accumulate=False):
     flattened = self.flatten()
-    flattened = torch.index_put(flattened, [index], source, accumulate)
+    flattened = torch.index_put(flattened, [index], source.reshape(index.shape), accumulate)
     return flattened.reshape(self.shape)
 
 register_inplace(aten.addbmm_, aten.addbmm)
