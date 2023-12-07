@@ -53,6 +53,9 @@ struct Foo : torch::CustomClassHolder {
   int64_t combine(c10::intrusive_ptr<Foo> b) {
     return this->info() + b->info();
   }
+  bool eq(c10::intrusive_ptr<Foo> other) {
+    return this->x == other->x && this->y == other->y;
+  }
 };
 
 struct _StaticMethod : torch::CustomClassHolder {
@@ -314,6 +317,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("info", &Foo::info)
       .def("increment", &Foo::increment)
       .def("add", &Foo::add)
+      .def("__eq__", &Foo::eq)
       .def("combine", &Foo::combine);
 
   m.class_<FooGetterSetter>("_FooGetterSetter")
