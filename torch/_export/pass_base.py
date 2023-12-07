@@ -179,7 +179,7 @@ class _ExportPassBase(PassBase):
             if target == operator.getitem:
                 value, key = args
                 return self.callback.call_getitem(value, key, meta)
-            elif getattr(target, "__module__", None) == "_operator":
+            elif getattr(target, "__module__", None) in {"_operator", "math"}:
                 assert callable(target)
                 return self.callback.call_sym(target, args, meta)
             elif isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
