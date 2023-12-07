@@ -1122,3 +1122,51 @@ class NullVariable(VariableTracker):
 
 class DeletedVariable(VariableTracker):
     """Marker used to implement delattr()"""
+
+
+class StringFormatVariable(VariableTracker):
+    """
+    Represents a call to str.format(), we delay calling format until after the graph.
+    """
+
+    _nonvar_fields = {"format_string", *VariableTracker._nonvar_fields}
+
+    @classmethod
+    def create(cls, format_string, sym_args, sym_kwargs):
+        if all(
+            x.is_python_constant()
+            for x in itertools.chain(sym_args, sym_kwargs.values())
+        ):
+            return variables.ConstantVariable.create(
+                format_string.format(
+                    *[v.as_python_constant() for v in sym_args],
+                    **{k: v.as_python_constant() for k, v in sym_kwargs.items()},
+                )
+            )
+        return cls(format_string, list(sym_args), dict(sym_kwargs))
+
+    def __init__(self, format_string, sym_args, sym_kwargs, **kwargs):
+        super().__init__(**kwargs)
+        assert isinstance(format_string, str)
+        self.format_string = format_string
+        self.sym_args = sym_args
+        self.sym_kwargs = sym_kwargs
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.format_string!r}, {self.sym_args!r}, {self.sym_kwargs!r})"
+
+    def reconstruct(self, codegen):
+        if sys.version_info >= (3, 11):
+            codegen.append_output(create_instruction("PUSH_NULL"))
+        codegen.append_output(codegen.create_load_const(self.format_string))
+        codegen.append_output(codegen.create_load_attr("format"))
+        codegen.extend_output(
+            variables.TupleVariable(self.sym_args).reconstruct(codegen)
+        )
+        codegen.extend_output(
+            variables.ConstDictVariable(self.sym_kwargs, user_cls=dict).reconstruct(
+                codegen
+            )
+        )
+        codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
+        return []
