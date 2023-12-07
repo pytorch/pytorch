@@ -1,11 +1,15 @@
+import logging
 import multiprocessing
 import multiprocessing.connection
 import signal
 import sys
+import time
 import warnings
 from typing import Optional
 
 from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
+
+log = logging.getLogger(__name__)
 
 
 class ProcessException(Exception):
@@ -126,9 +130,27 @@ class ProcessContext:
             return len(self.sentinels) == 0
 
         # Assume failure. Terminate processes that are still alive.
+        # Try SIGTERM then SIGKILL if the process isn't going down.
+        # The reason is related to python signal handling is limited
+        # to main thread and if that is in c/c++ land and stuck it won't
+        # to handle it. We have seen processes getting stuck not handling
+        # SIGTERM for the above reason.
+        timeout: int = 30
         for process in self.processes:
             if process.is_alive():
+                log.warning("Terminating process %s via signal SIGTERM", process.pid)
                 process.terminate()
+        end = time.monotonic() + timeout
+        for process in self.processes:
+            time_to_wait = max(0, end - time.monotonic())
+            process.join(time_to_wait)
+        for process in self.processes:
+            if process.is_alive():
+                log.warning(
+                    "Unable to shutdown process %s via SIGTERM , forcefully exiting via SIGKILL",
+                    process.pid,
+                )
+                process.kill()
             process.join()
 
         # There won't be an error on the queue if the process crashed.
