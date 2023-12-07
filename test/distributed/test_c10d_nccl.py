@@ -3621,8 +3621,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
             for c in self.children_pipes:
                 self.assertEqual(c.recv(), 'next')
 
-            pipe_file = f'{os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"]}0.pipe'
-            dump_file = f'{os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"]}0'
+            dump_file = self._trace_name(rank=0)
+            pipe_file = dump_file + ".pipe"
             with open_file_with_timeout(pipe_file, 'w') as f:
                 f.write('1\n')
             with open_file_with_timeout(dump_file, 'rb', timeout=10.0) as f:
