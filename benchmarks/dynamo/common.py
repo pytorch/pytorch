@@ -3145,6 +3145,24 @@ def main(runner, original_dir=None, args=None):
         process_entry(0, runner, original_dir, args)
 
 
+def write_csv_when_exception(name: str, status: str, device=None):
+    print(status)
+    placeholder_batch_size = 0
+    devices = [device] if device is not None else args.devices
+    if args.accuracy:
+        headers = ["dev", "name", "batch_size", "accuracy"]
+        rows = [[device, name, placeholder_batch_size, status] for device in devices]
+    elif args.performance:
+        headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
+        rows = [[device, name, placeholder_batch_size, 0.0, 0.0] for device in devices]
+    else:
+        headers = []
+        rows = [[device, name, placeholder_batch_size, 0.0] for device in devices]
+
+    for row in rows:
+        output_csv(output_filename, headers, row)
+
+
 def run(runner, args, original_dir=None):
     # Pass the parsed args object to benchmark runner object
     runner.args = args
@@ -3500,31 +3518,6 @@ def run(runner, args, original_dir=None):
             # Go back to main branch
             repo.git.checkout(main_branch)
     elif args.only:
-
-        def write_csv_when_exception(name: str, status: str, device=None):
-            print(status)
-            placeholder_batch_size = 0
-            devices = [device] if device is not None else args.devices
-            if args.accuracy:
-                headers = ["dev", "name", "batch_size", "accuracy"]
-                rows = [
-                    [device, name, placeholder_batch_size, status] for device in devices
-                ]
-            elif args.performance:
-                headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
-                rows = [
-                    [device, name, placeholder_batch_size, 0.0, 0.0]
-                    for device in devices
-                ]
-            else:
-                headers = []
-                rows = [
-                    [device, name, placeholder_batch_size, 0.0] for device in devices
-                ]
-
-            for row in rows:
-                output_csv(output_filename, headers, row)
-
         model_name = args.only
         for device in args.devices:
             batch_size = args.batch_size
