@@ -33,9 +33,9 @@ import itertools
 from typing import Any, Callable, Collection, Mapping, Optional, Tuple, Type, Union
 
 import onnx_test_common
-import pytorch_test_common
 
 import parameterized
+import pytorch_test_common
 
 import torch
 from onnx_test_common import skip, xfail
