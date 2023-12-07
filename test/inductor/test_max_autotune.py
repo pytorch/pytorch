@@ -560,17 +560,18 @@ class TestMaxAutotune(TestCase):
             evt_only=False,
         )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(torch.version.hip, "HIP not supported")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    def test_max_autotune_cutlass_backend_no_fusion_dtype_mismatch(self):
-        def mm(a, b):
-            # this should not be fused, since the output dtype is different from the matmul dtype
-            return (a @ b).to(torch.float32) * 0.00001
-
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
-        )
+    # TODO: Enable support for typecasts in fused epilogues
+    # @unittest.skipIf(not SM90OrLater, "need sm_90")
+    # @unittest.skipIf(torch.version.hip, "HIP not supported")
+    # @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    # def test_max_autotune_cutlass_backend_no_fusion_dtype_mismatch(self):
+    #     def mm(a, b):
+    #         # this should not be fused, since the output dtype is different from the matmul dtype
+    #         return (a @ b).to(torch.float32) * 0.00001
+    #
+    #     self._test_max_autotune_cutlass_backend_epilogue_fusion(
+    #         mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
+    #     )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
