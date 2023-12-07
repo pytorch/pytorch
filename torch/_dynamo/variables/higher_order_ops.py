@@ -198,8 +198,6 @@ def speculate_subgraph(
     f,
     sub_args,
     sub_kwargs,
-    graph_checkpoint,
-    checkpoint,
     description,
     *,
     # source_target is the .value of HigherOrderOpVariable and is the
@@ -330,8 +328,6 @@ def speculate_subgraph(
         )
         log.warning(msg)
         log.exception(ex)
-        tx.output.graph = graph_checkpoint
-        tx.restore_graphstate(checkpoint)
         raise Unsupported(
             f"{msg} Scroll up for the stack trace "
             f"of the initial exception. The reason was: {ex.msg}"
@@ -507,8 +503,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # would be difficult to implement, because of the path
         # explosion problem.
 
-        graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
-
         def speculate_branch(branch):
             # NB: 0 is predicate
             ix = 1 if branch else 2
@@ -522,8 +516,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 args[ix],
                 operands,
                 {},
-                graph_checkpoint,
-                checkpoint,
                 "cond",
                 source_target=self.value,
                 manually_set_subgraph_inputs=False,
@@ -539,7 +531,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         (true_r, true_treespec, true_graph, true_lifted_freevars) = speculate_branch(
             True
         )
-        true_nn_modules = tx.copy_graphstate().output.nn_modules
+        true_nn_modules = dict(tx.output.nn_modules)
 
         (
             false_r,
@@ -547,7 +539,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             false_graph,
             false_lifted_freevars,
         ) = speculate_branch(False)
-        false_nn_modules = tx.copy_graphstate().output.nn_modules
+        false_nn_modules = dict(tx.output.nn_modules)
 
         same_treespec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
             true_treespec, false_treespec
@@ -681,13 +673,13 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx,
             self.source,
             "cond_true",
-            torch.fx.GraphModule(true_nn_modules.nn_modules, true_graph),
+            torch.fx.GraphModule(true_nn_modules, true_graph),
         )
         false_name = add_subgraph(
             tx,
             self.source,
             "cond_false",
-            torch.fx.GraphModule(false_nn_modules.nn_modules, false_graph),
+            torch.fx.GraphModule(false_nn_modules, false_graph),
         )
 
         true_node = make_attr(tx, true_name)
@@ -740,7 +732,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "map() operator doesn't support scalar or zero-sized tensors during tracing."
             )
 
-        checkpoint = tx.copy_graphstate()
         # To get the example output from map() we will need to provide at least one sample to
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
@@ -761,20 +752,18 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 *args[2:],
             ],
             {},
-            tx.output.graph,
-            checkpoint,
             "torch.ops.higher_order.map",
             source_target=self.value,
             should_flatten_outputs=True,
         )
 
-        body_nn_modules = tx.copy_graphstate().output.nn_modules
+        body_nn_modules = dict(tx.output.nn_modules)
 
         body_name = add_subgraph(
             tx,
             self.source,
             "map_body",
-            torch.fx.GraphModule(body_nn_modules.nn_modules, body_graph),
+            torch.fx.GraphModule(body_nn_modules, body_graph),
         )
 
         body_node = make_attr(tx, body_name)
@@ -856,8 +845,6 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         #
         #   grad_fn = torch.func.grad(fn, argnums=.., has_aux=..)
         #   grad_output = grad_fn(x)
-        checkpoint = tx.copy_graphstate()
-        graph_checkpoint = tx.output.graph
         grad_args = (args[0], args[1], args[2])
 
         # get arguments
@@ -889,8 +876,6 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             func,
             args[3].items,
             {},
-            graph_checkpoint,
-            checkpoint,
             "torch.func.grad",
             source_target=self.value,
             # See NOTE [HACK: Enable autograd while tracing function]
@@ -1025,9 +1010,6 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "`torch._dynamo.config.capture_func_transforms=True`"
             )
 
-        checkpoint = tx.copy_graphstate()
-        graph_checkpoint = tx.output.graph
-
         # unpack args
         fn = args[0]
         in_dims = args[1]
@@ -1100,8 +1082,6 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ListVariable(unbatched_input_args), arg_spec
                 ).unpack_var_sequence(tx),
                 {},
-                graph_checkpoint,
-                checkpoint,
                 "torch.vmap",
                 source_target=self.value,
             )
@@ -1209,10 +1189,8 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             fn = UserFunctionVariable(self.value, source=self.source)
         else:
             fn = TorchVariable(self.value)
-        checkpoint = tx.copy_graphstate()
         # TODO(jansel): BUG!!! we aren't copying on the line below, so the post-pre check below is pointless
         pre_guards = tx.output.guards
-        graph_checkpoint = tx.output.graph
         # In eager-mode PyTorch, if we only compute first-order gradients,
         # then the grad_mode is False during the backward pass.
         # torch.compile assumes that we only compute first-order gradients,
@@ -1233,8 +1211,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
                 *args,
             ],
             {},
-            graph_checkpoint,
-            checkpoint,
             "the user-defined autograd.Function",
             source_target=self.value,
             # Backwards should never, ever be stored!
@@ -1279,8 +1255,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def create_wrapped_node(self, tx, args, kwargs, description):
         # See NOTE [HigherOrderOperator tracing design] for more details
-        checkpoint = tx.copy_graphstate()
-        graph_checkpoint = tx.output.graph
 
         (
             (body_r, treespec),
@@ -1291,8 +1265,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             args[0],  # function
             [*args[1:]],
             kwargs,
-            graph_checkpoint,
-            checkpoint,
             description,
             source_target=self.value,
             manually_set_subgraph_inputs=False,
