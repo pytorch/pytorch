@@ -3,6 +3,7 @@
 #ifdef USE_C10D_NCCL
 
 #include <chrono>
+#include <future>
 #include <iostream>
 #include <list>
 #include <mutex>
@@ -29,19 +30,19 @@ namespace c10d {
 // which ensures communicators are healthy at the beginning of init.
 static std::vector<std::string> TORCH_ENABLE_NCCL_HEALTH_CHECK = {
     "TORCH_ENABLE_NCCL_HEALTH_CHECK",
-    "TORCH_ENABLE_NCCL_HEALTH_CHECK"};
+    "ENABLE_NCCL_HEALTH_CHECK"};
 
 // Environment variable which controls whether or not wait() is blocking or
 // non-blocking.
 static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
     "TORCH_NCCL_BLOCKING_WAIT",
-    "TORCH_NCCL_BLOCKING_WAIT"};
+    "NCCL_BLOCKING_WAIT"};
 
 // Environment variable which controls whether or not we perform Async Error
 // Handling with NCCL.
 static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
     "TORCH_NCCL_ASYNC_ERROR_HANDLING",
-    "TORCH_NCCL_ASYNC_ERROR_HANDLING"};
+    "NCCL_ASYNC_ERROR_HANDLING"};
 
 // Environment Variable to control whether dumping debug info on watchdog
 // timeout is enabled. This variable must be set together with
@@ -53,11 +54,11 @@ static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
 // This variable must be set together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
 static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
     "TORCH_NCCL_DESYNC_DEBUG",
-    "TORCH_NCCL_DESYNC_DEBUG"};
+    "NCCL_DESYNC_DEBUG"};
 
 static std::vector<std::string> TORCH_NCCL_ENABLE_TIMING = {
     "TORCH_NCCL_ENABLE_TIMING",
-    "TORCH_NCCL_ENABLE_TIMING"};
+    "NCCL_ENABLE_TIMING"};
 
 static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
     "TORCH_NCCL_ENABLE_MONITORING"};
@@ -105,7 +106,7 @@ static std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = {
 // can register/deregister the tensor on all available NCCL communicators.
 static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
     {"TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK",
-     "TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"};
+     "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"};
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -666,7 +667,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // In the timeout case and we will dump debug info such as the NCCL flight
   // recorder to storage. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
-  void dumpDebuggingInfo();
+  bool dumpDebuggingInfo();
 
   // Desync debug helper
   void logWorkStart(WorkNCCL& work);
@@ -685,10 +686,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // gets terminated.
   virtual void terminateProcess(std::string errMsg);
 
-  // Check the writeDebugInfo_ flag and if it is true, we do nothing.
-  // If not, we first set the flag to be true and return a thread which will
-  // get and write the debug info into storage.
-  c10::optional<std::thread> tryWriteDebugInfo();
+  // Create a thread that dumps debug info to the file specified as
+  // ${TORCH_NCCL_DEBUG_INFO_TEMP_FILE}{$RANK}
+  // Serializes all dumping activity, but allows concurrent calls.
+  // Each call returns a future, which can be checked or waited on
+  // for dump completion.
+  std::future<bool> launchAsyncDebugDump();
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
