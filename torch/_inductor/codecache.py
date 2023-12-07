@@ -294,9 +294,9 @@ class PersistentCache(CacheBase):
                     # that results are comparable
                     for choice in choices:
                         choice_hash = choice.hash_key()
-                        if choice_hash in local_cache.get(name, {}).get(inputs, {}):
+                        if choice_hash in local_cache.get(op, {}).get(inputs, {}):
                             # cache hit
-                            timings[choice] = local_cache[name][inputs][choice_hash]
+                            timings[choice] = local_cache[op][inputs][choice_hash]
                         else:
                             uncached_choices.append(choice)
                     timings.update(benchmark(uncached_choices))
