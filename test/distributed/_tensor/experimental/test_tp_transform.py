@@ -11,6 +11,7 @@ from torch.distributed.tensor.parallel.style import (
     ParallelStyle,
     RowwiseParallel,
 )
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -170,3 +171,7 @@ class TensorParallelTest(DTensorTestBase):
                 "c10d_functional.wait_tensor.default": 1,
             },
         )
+
+
+if __name__ == "__main__":
+    run_tests()
