@@ -88,7 +88,7 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.proxy_mode.sym_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
-        self.stack.enter_context(disable_proxy_modes_tracing(enable_current=True))
+        self.stack.enter_context(disable_proxy_modes_tracing())
         return inputs, sizes
 
     def proxy_call_hook(self, hook, *args):

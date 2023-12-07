@@ -104,7 +104,8 @@ def run_functionalized_fw_and_collect_metadata(
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
-        with disable_above, FunctionalTensorMode(pre_dispatch=pre_dispatch):
+        from torch._dispatch.python import enable_pre_dispatch
+        with disable_above, FunctionalTensorMode(pre_dispatch=pre_dispatch), enable_pre_dispatch():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)

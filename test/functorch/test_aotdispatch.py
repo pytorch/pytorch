@@ -2877,7 +2877,7 @@ def forward(self, arg0_1):
     return (sin,)""")
 
 
-    def test_aot_export_predispatch_with_cond_nested(self):
+    def test_aot_export_predispatch_cond_nested(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
