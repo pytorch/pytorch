@@ -149,10 +149,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.skip_dynamic_fx_test(
         "sympy operation tests don't need dynamic shape"
     )
-    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        "torch._export.pass_base.ExportPassBaseError: Unsupported target type: <built-in function ceil>"
-        "github: https://github.com/pytorch/pytorch/issues/115209"
-    )
     def test_sympy_operatons_return_numeric(self):
         def func(x, y):
             # TODO: add boolean tests when SymBool is supported
