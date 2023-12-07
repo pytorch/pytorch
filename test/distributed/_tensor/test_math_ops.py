@@ -161,12 +161,19 @@ class DistMathOpsTest(DTensorTestBase):
         x = torch.rand(batch, sentence_length, embedding_dim, device=self.device_type)
         norm_shape_idx_list = list(range(x.ndim))
         shard_dims = [-1, 0, 1, 2]
-        test_config_list = list(itertools.product(shard_dims, norm_shape_idx_list))
+        elementwise_affine_list = [False, True]
+        test_config_list = list(
+            itertools.product(shard_dims, norm_shape_idx_list, elementwise_affine_list)
+        )
 
         # normalized shape is a torch.Size object
-        for shard_dim, norm_idx in test_config_list:
+        for shard_dim, norm_idx, elementwise_affine in test_config_list:
             normalized_shape = x.shape[norm_idx:]
-            layer_norm = torch.nn.LayerNorm(normalized_shape)
+            layer_norm = torch.nn.LayerNorm(
+                normalized_shape,
+                elementwise_affine=elementwise_affine,
+                device=self.device_type,
+            )
             layer_norm_local = copy.deepcopy(layer_norm).to(self.device_type)
 
             def _replicate_fn(name, module, device_mesh):
