@@ -394,12 +394,17 @@ class AutogradFunctionVariable(VariableTracker):
             # to soundness evaluation, it plus a  GlobalSource makes sure we can produce valid guards,
             # and that we can inline properly here. Inlining is required in order to be able to ensure that the
             # soundness evaluation works as described above.
-            speculation = tx.speculate_autograd_fn()
+            speculation = tx.speculate()
 
-            if not speculation.succeeded:
-                # Don't accumulate speculation history
-                # because we will not take this path if it succeeds
-                # causing a divergence if we ever return here from other restarts
+            if not speculation.is_sound:
+                # NOTE [speculation history]
+                # The way the speculation log is designed is that each step unconditionally
+                # appends an entry in the instruction translator. By the nature of autograd function tracing
+                # we will inevitably diverge histories. This occurs when we first trace through forward + backward
+                # appending additional speculation entries. On success, we restart analysis and the next time we reach this code
+                # we will skip the speculation step since we have verified soundness, so on subsequent instruction translator steps
+                # we will diverge histories because the instruction tranlator expects the steps that occurred from verifying
+                # soundness, erroring out.  To avoid this we disable appending to the speculation log during soundness verification.
                 with tx.speculation_log.disabled():
                     module_source = AttrSource(
                         tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
@@ -429,7 +434,7 @@ class AutogradFunctionVariable(VariableTracker):
                         fwd_bwd_tracer=fwd_bwd_tracer,
                     ).call_function(tx, bwd_args, {})
 
-                speculation.succeed_and_restart_analysis()
+                speculation.autograd_is_sound_and_restart_analysis()
             else:
                 # If fwd and backward are sound, we want apply in the graph.
                 # And we don't want backwards for the obvious reasons.

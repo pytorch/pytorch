@@ -17,20 +17,7 @@ import traceback
 import types
 import typing
 import weakref
-from abc import ABC, abstractmethod
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    TypeVar,
-)
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
@@ -152,6 +139,7 @@ class SpeculationEntry:
     lineno: int
     instruction_pointer: int
     failed: bool = False
+    is_sound: bool = False
     reason: Optional[GraphCompileReason] = None
 
     def fail_and_restart_analysis(self):
@@ -161,27 +149,16 @@ class SpeculationEntry:
         self.failed = True
         raise exc.SpeculationRestartAnalysis()
 
-
-@dataclasses.dataclass
-class AutogradFnSpeculationEntry:
-    filename: str
-    lineno: int
-    instruction_pointer: int
-    succeeded: bool = False
-
-    def succeed_and_restart_analysis(self):
+    def autograd_is_sound_and_restart_analysis(self):
         """
         Start tracing of the current frame over again, and don't run soundness checks here.
         """
-        self.succeeded = True
+        self.is_sound = True
         raise exc.SpeculationRestartAnalysis()
 
 
-T = TypeVar("T", SpeculationEntry, AutogradFnSpeculationEntry)
-
-
 @dataclasses.dataclass
-class SpeculationLogBase(ABC, Generic[T]):
+class SpeculationLog:
     """
     SpeculationLog replaces the prior copy_graphstate/restore_graphstate
     checkpointing.  Rather than saving/restoring state, we restart the
@@ -190,13 +167,9 @@ class SpeculationLogBase(ABC, Generic[T]):
     a graph break.
     """
 
-    entries: List[T] = dataclasses.field(default_factory=list)
+    entries: List[SpeculationEntry] = dataclasses.field(default_factory=list)
     index: int = 0
     _disabled: bool = False
-
-    @abstractmethod
-    def construct_entry(self, filename: str, lineno: int, instruction_pointer) -> T:
-        pass
 
     def restart(self):
         self.index = 0
@@ -205,18 +178,16 @@ class SpeculationLogBase(ABC, Generic[T]):
         self.entries.clear()
         self.index = 0
 
-    def next(self, filename: str, lineno: int, instruction_pointer) -> T:
+    def next(self, filename: str, lineno: int, instruction_pointer) -> SpeculationEntry:
         """
         Lookup or create a SpeculationEntry() that is shared across
         RestartAnalysis calls.  Args are used only for debug checks.
         """
         if self._disabled:
-            return self.construct_entry(filename, lineno, instruction_pointer)
+            return SpeculationEntry(filename, lineno, instruction_pointer)
 
         if len(self.entries) == self.index:
-            self.entries.append(
-                self.construct_entry(filename, lineno, instruction_pointer)
-            )
+            self.entries.append(SpeculationEntry(filename, lineno, instruction_pointer))
         entry = self.entries[self.index]
         self.index += 1
         assert (
@@ -243,20 +214,6 @@ class SpeculationLogBase(ABC, Generic[T]):
             yield
         finally:
             self._disabled = False
-
-
-class SpeculationLog(SpeculationLogBase[SpeculationEntry]):
-    def construct_entry(
-        self, filename: str, lineno: int, instruction_pointer
-    ) -> SpeculationEntry:
-        return SpeculationEntry(filename, lineno, instruction_pointer)
-
-
-class AutogradFnSpeculationLog(SpeculationLogBase[AutogradFnSpeculationEntry]):
-    def construct_entry(
-        self, filename: str, lineno: int, instruction_pointer
-    ) -> AutogradFnSpeculationEntry:
-        return AutogradFnSpeculationEntry(filename, lineno, instruction_pointer)
 
 
 @functools.lru_cache(None)
@@ -2007,11 +1964,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.f_code.co_filename, self.lineno, self.instruction_pointer
         )
 
-    def speculate_autograd_fn(self) -> AutogradFnSpeculationEntry:
-        return self.autograd_fn_speculation_log.next(
-            self.f_code.co_filename, self.lineno, self.instruction_pointer
-        )
-
     def __init__(
         self,
         output: OutputGraph,
@@ -2026,11 +1978,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         export: bool,
         inline_depth: int,
         speculation_log: SpeculationLog,
-        autograd_fn_speculation_log: AutogradFnSpeculationLog,
     ):
         super().__init__()
         self.speculation_log = speculation_log
-        self.autograd_fn_speculation_log = autograd_fn_speculation_log
 
         # Mutable state checkpointed by copy_graphstate()
         self.output = output
@@ -2123,7 +2073,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         mutated_closure_cell_contents: Set[str],
         frame_state,
         speculation_log: SpeculationLog,
-        autograd_fn_speculation_log: AutogradFnSpeculationLog,
     ):
         _step_logger()(
             logging.INFO,
@@ -2153,7 +2102,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             export=export,
             inline_depth=0,
             speculation_log=speculation_log,
-            autograd_fn_speculation_log=autograd_fn_speculation_log,
         )
 
         # as soon as we create the tracing context we should keep it active, so any calls
@@ -2505,7 +2453,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             export=parent.export,
             inline_depth=parent.inline_depth + 1,
             speculation_log=parent.speculation_log,
-            autograd_fn_speculation_log=parent.autograd_fn_speculation_log,
         )
         self.parent = parent
         self.symbolic_result = None
