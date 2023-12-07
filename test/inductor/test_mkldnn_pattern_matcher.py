@@ -689,12 +689,21 @@ class TestPatternMatcher(TestPatternMatcherBase):
             x1 = torch.randn((2, 32, 9, 9))
             x2 = torch.randn((2, 32, 1, 1))
 
+            def matcher_check_fn():
+                # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 1
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 1
+                )
+                # 2. Qconv2d Binary Unary fusion in post-grad fusion pass * 0
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_binary_matcher_count"], 0
+                )
+
             self._test_common(
                 mod,
                 (x1, x2),
-                3,
-                10,
                 check_quantization=True,
+                matcher_check_fn=matcher_check_fn,
             )
 
     @skipIfNoDynamoSupport
