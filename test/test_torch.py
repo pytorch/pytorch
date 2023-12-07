@@ -5426,7 +5426,7 @@ else:
         self._test_multinomial_empty(device, False, 2)
 
     @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.double)
     def test_grad_scaling_unscale(self, device, dtype):
         inv_scale = torch.full((1,), 0.25, dtype=torch.float, device=device)
         found_inf = torch.full((1,), 0.0, dtype=torch.float, device=device)
