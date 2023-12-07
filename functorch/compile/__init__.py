@@ -1,15 +1,16 @@
 from torch._functorch import config
+from torch._functorch._aot_autograd.logging_utils import (
+    get_aot_compilation_context,
+    get_aot_graph_name,
+    get_graph_being_compiled,
+)
+from torch._functorch._aot_autograd.utils import make_boxed_compiler, make_boxed_func
 from torch._functorch.aot_autograd import (
     aot_function,
     aot_module,
     aot_module_simplified,
     compiled_function,
     compiled_module,
-    get_aot_compilation_context,
-    get_aot_graph_name,
-    get_graph_being_compiled,
-    make_boxed_compiler,
-    make_boxed_func,
 )
 from torch._functorch.compilers import (
     debug_compile,

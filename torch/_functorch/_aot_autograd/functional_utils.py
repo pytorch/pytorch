@@ -8,6 +8,8 @@ This file contains utilities related to functionalization in AOTAutograd:
 
 import torch
 from torch import Tensor
+
+from torch._functorch._aot_autograd.schemas import MutationType
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
@@ -16,8 +18,6 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
-
-from .schemas import MutationType
 
 
 def to_fun(t):

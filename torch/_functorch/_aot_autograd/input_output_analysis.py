@@ -15,11 +15,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._logging import getArtifactLogger
-from torch._subclasses.functional_tensor import FunctionalTensor
-from torch.fx.experimental.symbolic_shapes import is_concrete_int
-from .functional_utils import _get_mutation_type
-from .schemas import (
+from torch._functorch._aot_autograd.functional_utils import _get_mutation_type
+from torch._functorch._aot_autograd.schemas import (
     BackwardSignature,
     GraphSignature,
     InputAliasInfo,
@@ -27,7 +24,10 @@ from .schemas import (
     OutputType,
     ViewAndMutationMeta,
 )
-from .utils import strict_zip
+from torch._functorch._aot_autograd.utils import strict_zip
+from torch._logging import getArtifactLogger
+from torch._subclasses.functional_tensor import FunctionalTensor
+from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
 zip = strict_zip
 

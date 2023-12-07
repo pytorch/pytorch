@@ -20,105 +20,41 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
-from . import config
-from .partitioners import default_partition
+from torch._functorch import config
+from torch._functorch.partitioners import default_partition
 
-from ._aot_autograd.utils import (  # noqa: F401
+from torch._functorch._aot_autograd.utils import (
     strict_zip,
-    _get_symint_hints,
-    KNOWN_TYPES,
-    partial_flatten_asdict,
-    normalize_as_list,
-    _get_autocast_states,
     make_boxed_func,
-    make_boxed_compiler,
-    call_func_at_runtime_with_args,
     create_tree_flattened_fn,
-    maybe_to_fresh_input,
 )
-from ._aot_autograd.logging_utils import (  # noqa: F401
-    graph_being_compiled,
-    nth_graph,
-    model_name,
-    set_model_name,
-    get_aot_compilation_context,
-    get_aot_graph_name,
-    get_graph_being_compiled,
-    track_graph_compiling,
-    callback_set,
-    setup_stacktrace_preservation_hooks,
-    describe_input,
-    format_guard_bug_msg,
-)
-from ._aot_autograd.functional_utils import (  # noqa: F401
-    is_fun,
-    to_fun,
-    from_fun,
-    sync_functional_tensor,
-    has_metadata_mutation,
-    has_data_mutation,
-    are_all_mutations_hidden_from_autograd,
-    are_all_mutations_under_no_grad_or_inference_mode,
-    gen_alias_from_base,
-    assert_functional_graph,
-    _get_mutation_type,
-    _check_if_mutation_can_be_in_graph,
-)
-from ._aot_autograd.schemas import (  # noqa: F401
+from torch._functorch._aot_autograd.schemas import (
     OutputType,
-    OutputAliasInfo,
-    MutationType,
-    InputAliasInfo,
-    SubclassCreationMeta,
     ViewAndMutationMeta,
-    SubclassMeta,
-    TensorAlias,
-    BackwardSignature,
-    GraphOutputName,
-    GraphInputName,
-    FQN,
     GraphSignature,
     AOTConfig,
 )
-from ._aot_autograd.subclass_utils import (  # noqa: F401
+from torch._functorch._aot_autograd.subclass_utils import (
     requires_subclass_dispatch,
-    unwrap_tensor_subclasses,
-    wrap_tensor_subclasses,
-    wrap_tensor_subclasses_maybe_joint,
-    create_metadata_for_subclass,
 )
-from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
+from torch._functorch._aot_autograd.collect_metadata_analysis import (
     run_functionalized_fw_and_collect_metadata,
 )
-from ._aot_autograd.input_output_analysis import (  # noqa: F401
-    remove_dupe_metadata,
-    create_synthetic_base_metadata,
-    _tensors_definitely_do_not_overlap,
-    compute_overlapping_inputs,
+from torch._functorch._aot_autograd.input_output_analysis import (
     create_graph_signature,
 )
-from ._aot_autograd.traced_function_transforms import (  # noqa: F401
-    fn_input_mutations_to_outputs,
-    fn_prepped_for_autograd,
-    create_functionalized_fn,
-    create_functionalized_rng_ops_wrapper,
-    aot_dispatch_subclass,
+from torch._functorch._aot_autograd.traced_function_transforms import (
     create_functional_call,
-    create_joint,
 )
-from ._aot_autograd.runtime_wrappers import (  # noqa: F401
-    create_runtime_wrapper,
-    functionalized_rng_runtime_epilogue,
-    aot_dispatch_subclass_wrapper,
+from torch._functorch._aot_autograd.runtime_wrappers import (
     aot_wrapper_dedupe,
     aot_wrapper_synthetic_base,
-    merge_view_inputs,
 )
-from ._aot_autograd.dispatch_and_compile_graph import (  # noqa: F401
+from torch._functorch._aot_autograd.dispatch_and_compile_graph import (
     aot_dispatch_base_graph,
     aot_dispatch_autograd_graph,
 )
-from ._aot_autograd.jit_compile_runtime_wrappers import (  # noqa: F401
+from torch._functorch._aot_autograd.jit_compile_runtime_wrappers import (
     aot_dispatch_base,
     aot_dispatch_autograd,
 )

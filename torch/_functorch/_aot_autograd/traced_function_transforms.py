@@ -20,16 +20,12 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
-from torch._guards import detect_fake_mode
-from torch._prims_common import CUDARngStateHelper
-from torch._subclasses.functional_tensor import FunctionalTensorMode
-from torch.fx import Interpreter
-from torch.fx.experimental.symbolic_shapes import definitely_false, sym_eq
-from torch.nn.utils import stateless
 
-from .. import config
-from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
-from .functional_utils import (
+from torch._functorch import config
+from torch._functorch._aot_autograd.collect_metadata_analysis import (
+    run_functionalized_fw_and_collect_metadata,
+)
+from torch._functorch._aot_autograd.functional_utils import (
     from_fun,
     has_data_mutation,
     has_metadata_mutation,
@@ -37,8 +33,10 @@ from .functional_utils import (
     sync_functional_tensor,
     to_fun,
 )
-from .logging_utils import setup_stacktrace_preservation_hooks
-from .schemas import (
+from torch._functorch._aot_autograd.logging_utils import (
+    setup_stacktrace_preservation_hooks,
+)
+from torch._functorch._aot_autograd.schemas import (
     AOTConfig,
     MutationType,
     OutputType,
@@ -46,13 +44,19 @@ from .schemas import (
     SubclassTracingInfo,
     ViewAndMutationMeta,
 )
-from .subclass_utils import (
+from torch._functorch._aot_autograd.subclass_utils import (
     create_subclass_meta,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
 )
-from .utils import maybe_to_fresh_input
+from torch._functorch._aot_autograd.utils import maybe_to_fresh_input
+from torch._guards import detect_fake_mode
+from torch._prims_common import CUDARngStateHelper
+from torch._subclasses.functional_tensor import FunctionalTensorMode
+from torch.fx import Interpreter
+from torch.fx.experimental.symbolic_shapes import definitely_false, sym_eq
+from torch.nn.utils import stateless
 
 
 # This function returns a new function that returns mutated inputs as outputs.

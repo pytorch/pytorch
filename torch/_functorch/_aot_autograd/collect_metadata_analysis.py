@@ -14,16 +14,7 @@ from typing import Callable, DefaultDict, Dict, List
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._logging import getArtifactLogger
-from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
-from torch._subclasses.meta_utils import safe_is_leaf
-from torch.fx.experimental.symbolic_shapes import is_concrete_int
-from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._python_dispatch import (
-    is_traceable_wrapper_subclass,
-    transform_subclass,
-)
-from .functional_utils import (
+from torch._functorch._aot_autograd.functional_utils import (
     _get_mutation_type,
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
@@ -33,16 +24,29 @@ from .functional_utils import (
     has_same_metadata,
     to_fun,
 )
-from .schemas import (
+from torch._functorch._aot_autograd.schemas import (
     InputAliasInfo,
     MutationType,
     OutputAliasInfo,
     OutputType,
     ViewAndMutationMeta,
 )
-from .subclass_utils import create_subclass_meta
+from torch._functorch._aot_autograd.subclass_utils import create_subclass_meta
 
-from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
+from torch._functorch._aot_autograd.utils import (
+    _get_autocast_states,
+    KNOWN_TYPES,
+    strict_zip,
+)
+from torch._logging import getArtifactLogger
+from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
+from torch._subclasses.meta_utils import safe_is_leaf
+from torch.fx.experimental.symbolic_shapes import is_concrete_int
+from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    transform_subclass,
+)
 
 zip = strict_zip
 

@@ -17,25 +17,23 @@ import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import lazy_format_graph_code
-from torch._guards import detect_fake_mode, tracing, TracingContext
-from torch._logging import getArtifactLogger
-from torch._prims_common import CUDARngStateHelper
-from torch._subclasses import FakeTensor
-from torch.fx.experimental.proxy_tensor import is_sym_node
-from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
-from .. import config
-from .dispatch_and_compile_graph import (
+from torch._functorch import config
+from torch._functorch._aot_autograd.dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
     aot_dispatch_base_graph,
 )
-from .logging_utils import describe_input, format_guard_bug_msg, track_graph_compiling
+from torch._functorch._aot_autograd.logging_utils import (
+    describe_input,
+    format_guard_bug_msg,
+    track_graph_compiling,
+)
 
-from .runtime_wrappers import (
+from torch._functorch._aot_autograd.runtime_wrappers import (
     aot_dispatch_subclass_wrapper,
     create_runtime_wrapper,
     functionalized_rng_runtime_epilogue,
 )
-from .schemas import (
+from torch._functorch._aot_autograd.schemas import (
     AOTConfig,
     MutationType,
     OutputType,
@@ -43,15 +41,24 @@ from .schemas import (
     TensorAlias,
     ViewAndMutationMeta,
 )
-from .subclass_utils import unwrap_tensor_subclasses, wrap_tensor_subclasses
+from torch._functorch._aot_autograd.subclass_utils import (
+    unwrap_tensor_subclasses,
+    wrap_tensor_subclasses,
+)
 
-from .utils import (
+from torch._functorch._aot_autograd.utils import (
     _get_symint_hints,
     call_func_at_runtime_with_args,
     make_boxed_func,
     normalize_as_list,
     strict_zip,
 )
+from torch._guards import detect_fake_mode, tracing, TracingContext
+from torch._logging import getArtifactLogger
+from torch._prims_common import CUDARngStateHelper
+from torch._subclasses import FakeTensor
+from torch.fx.experimental.proxy_tensor import is_sym_node
+from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 
 zip = strict_zip
 

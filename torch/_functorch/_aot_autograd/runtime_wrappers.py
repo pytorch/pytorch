@@ -14,20 +14,22 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._guards import DuplicateInputs, TracingContext
-from torch._prims_common import CUDARngStateHelper
-from torch.multiprocessing.reductions import StorageWeakRef
-from .. import config
-from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
+from torch._functorch import config
+from torch._functorch._aot_autograd.collect_metadata_analysis import (
+    run_functionalized_fw_and_collect_metadata,
+)
 
-from .functional_utils import gen_alias_from_base
-from .input_output_analysis import (
+from torch._functorch._aot_autograd.functional_utils import gen_alias_from_base
+from torch._functorch._aot_autograd.input_output_analysis import (
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
     remove_dupe_metadata,
 )
-from .logging_utils import describe_input, format_guard_bug_msg
-from .schemas import (
+from torch._functorch._aot_autograd.logging_utils import (
+    describe_input,
+    format_guard_bug_msg,
+)
+from torch._functorch._aot_autograd.schemas import (
     AOTConfig,
     InputAliasInfo,
     OutputType,
@@ -35,18 +37,21 @@ from .schemas import (
     TensorAlias,
     ViewAndMutationMeta,
 )
-from .subclass_utils import (
+from torch._functorch._aot_autograd.subclass_utils import (
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
 )
 
-from .utils import (
+from torch._functorch._aot_autograd.utils import (
     call_func_at_runtime_with_args,
     make_boxed_func,
     partial_flatten_asdict,
     strict_zip,
 )
+from torch._guards import DuplicateInputs, TracingContext
+from torch._prims_common import CUDARngStateHelper
+from torch.multiprocessing.reductions import StorageWeakRef
 
 
 zip = strict_zip

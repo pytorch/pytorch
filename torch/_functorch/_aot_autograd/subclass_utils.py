@@ -9,10 +9,13 @@ from typing import Any, List, Optional, Tuple, Union
 import torch.utils._pytree as pytree
 
 from torch import Tensor
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .schemas import SubclassCreationMeta, ViewAndMutationMeta
-from .utils import strict_zip
+from torch._functorch._aot_autograd.schemas import (
+    SubclassCreationMeta,
+    ViewAndMutationMeta,
+)
+from torch._functorch._aot_autograd.utils import strict_zip
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 zip = strict_zip
 
