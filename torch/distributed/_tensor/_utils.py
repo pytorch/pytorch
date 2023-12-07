@@ -23,7 +23,7 @@ def compute_local_shape(
 
     if my_coordinate is None:
         # if rank not in the mesh, return empty shape
-        return ()
+        return (0,)
     else:
         local_shape = list(global_shape)  # start with global shape
         ndim = len(global_shape)
