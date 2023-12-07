@@ -9,6 +9,7 @@ import torch.distributed._tensor.dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
+from torch.distributed._tensor._collective_utils import check_tensor_meta
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed._tensor.placement_types import (
@@ -107,16 +108,6 @@ class _ToTorchTensor(torch.autograd.Function):
             None,
         )
 
-def allgather_metadata(local_tensor):
-    # Prepare local metadata
-    local_metadata = {'dtype': local_tensor.dtype, 'requires_grad': local_tensor.requires_grad}
-
-    # Gather metadata from all ranks
-    gathered_metadata = [None for _ in range(torch.distributed.get_world_size())]
-    torch.distributed.all_gather_object(gathered_metadata, local_metadata)
-
-    return gathered_metadata
-
 class _FromTorchTensor(torch.autograd.Function):
     @staticmethod
     def forward(  # type: ignore[override]
@@ -156,12 +147,8 @@ class _FromTorchTensor(torch.autograd.Function):
             # TODO: See if we need to make this run_check logic
             # have a corresponding backward.
 
-            # Gather and check tensor metadata across ranks
-            metadata_list = allgather_metadata(input)
-
-            # Check if metadata is consistent across ranks
-            if any(meta != metadata_list[0] for meta in metadata_list):
-                raise ValueError("Inconsistent tensor metadata across ranks.")
+            if not check_tensor_meta(input, check_shape_stride=True):
+                    raise ValueError("Inconsistent tensor metadata (including shape and stride) across ranks.")
 
             for idx, placement in enumerate(placements):
                 if placement.is_replicate():
