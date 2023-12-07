@@ -190,6 +190,7 @@ class DispatchKeySet final {
   }
 
   constexpr explicit DispatchKeySet(DispatchKey k) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (k == DispatchKey::Undefined) {
       // Case 1: handle Undefined specifically
       repr_ = 0;
@@ -915,12 +916,12 @@ template <class FuncType>
 using remove_DispatchKeySet_arg_from_func = guts::make_function_traits_t<
     typename guts::infer_function_traits_t<FuncType>::return_type,
     typename std::conditional_t<
-        std::is_same<
+        std::is_same_v<
             DispatchKeySet,
             typename guts::typelist::head_with_default_t<
                 void,
                 typename guts::infer_function_traits_t<
-                    FuncType>::parameter_types>>::value,
+                    FuncType>::parameter_types>>,
         guts::typelist::drop_if_nonempty_t<
             typename guts::infer_function_traits_t<FuncType>::parameter_types,
             1>,
