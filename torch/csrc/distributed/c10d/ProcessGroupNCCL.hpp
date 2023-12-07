@@ -3,7 +3,6 @@
 #ifdef USE_C10D_NCCL
 
 #include <chrono>
-#include <future>
 #include <iostream>
 #include <list>
 #include <mutex>
@@ -667,7 +666,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // In the timeout case and we will dump debug info such as the NCCL flight
   // recorder to storage. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
-  bool dumpDebuggingInfo();
+  void dumpDebuggingInfo();
 
   // Desync debug helper
   void logWorkStart(WorkNCCL& work);
@@ -686,12 +685,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // gets terminated.
   virtual void terminateProcess(std::string errMsg);
 
-  // Create a thread that dumps debug info to the file specified as
-  // ${TORCH_NCCL_DEBUG_INFO_TEMP_FILE}{$RANK}
-  // Serializes all dumping activity, but allows concurrent calls.
-  // Each call returns a future, which can be checked or waited on
-  // for dump completion.
-  std::future<bool> launchAsyncDebugDump();
+  // Check the writeDebugInfo_ flag and if it is true, we do nothing.
+  // If not, we first set the flag to be true and return a thread which will
+  // get and write the debug info into storage.
+  c10::optional<std::thread> tryWriteDebugInfo();
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
