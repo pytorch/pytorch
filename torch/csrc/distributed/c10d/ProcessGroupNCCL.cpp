@@ -4,6 +4,13 @@
 #include <mutex>
 #include <sstream>
 
+#if defined(__linux__)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 #ifdef USE_C10D_NCCL
 
 #include <exception>
@@ -710,8 +717,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 20000);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
-      ncclTraceBufferSize_ > 0);
+      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
 #endif
   avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
@@ -1065,7 +1071,6 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
   // output file from an earlier call before a later call overwrites it.
   std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
   LOG(ERROR) << "ProcessGroupNCCL preparing to dump debug info.";
-  // TODO(whc) after rebase, make sure default bufsize is >0 for on-by-default
   if (ncclTraceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
@@ -1242,10 +1247,62 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
   return retrieveDesyncReport(store_, "NCCL", rank_, size_);
 }
 
+#if defined(__linux__)
+struct DumpPipe {
+  DumpPipe(bool enabled, int rank) {
+    if (!enabled) {
+      return;
+    }
+    std::string fileStem = getCvarString(
+        {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
+    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_TEMP_FILE is empty");
+    std::string filename = c10::str(fileStem, rank, ".pipe");
+    TORCH_CHECK(
+        unlink(filename.c_str()) != -1 || errno == ENOENT,
+        "Error removing existing named pipe ",
+        filename);
+    TORCH_CHECK(
+        mkfifo(filename.c_str(), 0666) != -1,
+        "Error creating named pipe ",
+        filename);
+    fd_ = open(filename.c_str(), O_RDONLY | O_NONBLOCK);
+    TORCH_CHECK(fd_ != -1, "Error opening named pipe ", filename);
+  }
+  bool shouldDump() {
+    if (fd_ == -1) {
+      return false;
+    }
+    char buf[128];
+    // non-blocking from O_NONBLOCK above.
+    // Ignore EINTR because we already will poll this
+    // again later.
+    ssize_t bytesRead = read(fd_, &buf, 128);
+    return bytesRead > 0;
+  }
+  ~DumpPipe() {
+    if (fd_ != -1) {
+      close(fd_);
+    }
+  }
+
+ private:
+  int fd_ = -1;
+};
+#else
+struct DumpPipe {
+  DumpPipe(bool enabled, int rank) {}
+  bool shouldDump() {
+    return false;
+  }
+};
+#endif
+
 void ProcessGroupNCCL::workCleanupLoop() {
   bool done = false;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
+
+  DumpPipe dumpPipe(dumpOnTimeout_, rank_);
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
@@ -1344,7 +1401,11 @@ void ProcessGroupNCCL::workCleanupLoop() {
         ++it;
       }
     }
-
+    // process a request to dump the trace
+    if (dumpPipe.shouldDump()) {
+      std::thread dump_thread(&ProcessGroupNCCL::dumpDebuggingInfo, this);
+      dump_thread.detach();
+    }
     done = workMetaList_.empty();
   }
 }
@@ -1785,12 +1846,23 @@ uint64_t ProcessGroupNCCL::getCommSplitCounter() const {
 namespace {
 
 // Check validity of tensor
-void check_gpu_single_tensor(const at::Tensor& tensor) {
+void check_gpu_single_tensor(
+    const at::Tensor& tensor,
+    const bool p2p = false // whether operation is a P2P operation
+) {
   if (!tensor.is_cuda() || tensor.is_sparse()) {
     C10_THROW_ERROR(ValueError, "Tensors must be CUDA and dense");
   }
+  // Skip the following requirements for P2P operations
   if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
-    C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
+    if (p2p) {
+      TORCH_WARN_ONCE(
+          "Detected non-contiguous tensor in P2P operations. It is user "
+          "responsibility to guarantee that source and destination tensors have "
+          "the same contiguity format.");
+    } else {
+      C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
+    }
   }
 }
 
@@ -1800,7 +1872,9 @@ void check_gpu_single_tensor(const at::Tensor& tensor) {
 // here, ie, that deliberately pass invalid tensors and check the right
 // exception is thrown.
 void check_gpu_tensors_different_devices(
-    const std::vector<at::Tensor>& tensors) {
+    const std::vector<at::Tensor>& tensors,
+    const bool p2p = false // whether operation is a P2P operation
+) {
   if (tensors.size() == 0) {
     C10_THROW_ERROR(ValueError, "Tensor list must be nonempty");
   }
@@ -1829,8 +1903,16 @@ void check_gpu_tensors_different_devices(
     if (t.strides() != first.strides()) {
       C10_THROW_ERROR(ValueError, "Tensors must have identical strides");
     }
+    // Skip the following requirements for P2P operations
     if (!t.is_contiguous(t.suggest_memory_format())) {
-      C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
+      if (p2p) {
+        TORCH_WARN_ONCE(
+            "Detected non-contiguous tensor in P2P operations. It is user "
+            "responsibility to guarantee that source and destination tensors have "
+            "the same contiguity format.");
+      } else {
+        C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
+      }
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;
     if (!inserted) {
@@ -3296,8 +3378,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
     std::vector<int64_t>& outputSplitSizes,
     std::vector<int64_t>& inputSplitSizes,
     const AllToAllOptions& /* unused */) {
-  check_gpu_single_tensor(outputTensor);
-  check_gpu_single_tensor(inputTensor);
+  check_gpu_single_tensor(outputTensor, true);
+  check_gpu_single_tensor(inputTensor, true);
   if (outputSplitSizes.size() == 0 && inputSplitSizes.size() == 0) {
     std::vector<at::Tensor> inputTensors = {inputTensor};
     std::vector<at::Tensor> outputTensors = {outputTensor};
@@ -3410,8 +3492,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
 
   auto device = outputTensors[0].device();
   for (const auto r : c10::irange(outputTensors.size())) {
-    check_gpu_single_tensor(outputTensors[r]);
-    check_gpu_single_tensor(inputTensors[r]);
+    check_gpu_single_tensor(outputTensors[r], true);
+    check_gpu_single_tensor(inputTensors[r], true);
     TORCH_CHECK(
         device == outputTensors[r].device() &&
             device == inputTensors[r].device(),
@@ -3468,7 +3550,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int /* unused */) {
-  check_gpu_tensors_different_devices(tensors);
+  check_gpu_tensors_different_devices(tensors, true);
 
   // @lint-ignore CLANGTIDY
   auto tensor = tensors.back();
@@ -3506,7 +3588,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int /* unused */) {
-  check_gpu_tensors_different_devices(tensors);
+  check_gpu_tensors_different_devices(tensors, true);
 
   // @lint-ignore CLANGTIDY
   auto tensor = tensors.back();
@@ -3633,7 +3715,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
-  check_gpu_tensors_different_devices(inputTensors);
+  check_gpu_tensors_different_devices(inputTensors, true);
   assertSingleElementInput(invalidArgument, inputTensors);
 
   // @lint-ignore CLANGTIDY
@@ -3719,7 +3801,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
-  check_gpu_tensors_different_devices(outputTensors);
+  check_gpu_tensors_different_devices(outputTensors, true);
   assertSingleElementInput(invalidArgument, outputTensors);
 
   // @lint-ignore CLANGTIDY
