@@ -74,6 +74,9 @@ struct Flash_fwd_params : public Qkv_params {
     int * __restrict__ cu_seqlens_q;
     int * __restrict__ cu_seqlens_k;
 
+    // If provided, the actual length of each k sequence.
+    int * __restrict__ seqused_k;
+
     int *__restrict__ blockmask;
 
     // The K_new and V_new matrices.
