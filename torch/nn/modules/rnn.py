@@ -365,7 +365,7 @@ class RNNBase(Module):
 
 
 class RNN(RNNBase):
-    r"""__init__(self,input_size,hidden_size,num_layers=1,nonlinearity='tanh',bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
+    r"""__init__(input_size,hidden_size,num_layers=1,nonlinearity='tanh',bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
 
     Apply a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}`
     non-linearity to an input sequence. For each element in the input sequence,
