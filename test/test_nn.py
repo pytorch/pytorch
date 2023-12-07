@@ -5323,7 +5323,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with torch.device('meta'):
             meta_bn = torch.nn.BatchNorm2d(3)
         self.assertTrue(meta_bn.num_batches_tracked.device == torch.device('meta'))
-        state_dict.pop("num_batches_tracked")
         meta_bn.load_state_dict(empty_dict, assign=True, strict=False)
         self.assertEqual(meta_bn.state_dict()["num_batches_tracked"], torch.tensor(0))
 
