@@ -141,6 +141,7 @@ def _gen_ops_cached(arch, version) -> List[Any]:
 
     # Import cutlass python scripts.
     assert try_import_cutlass()
+    import torch._inductor.codegen.cuda.cutlass_lib_extensions.generator_extended_v322 as cutlass_generator  # type: ignore[import]
     import cutlass_library.manifest as cutlass_manifest  # type: ignore[import]
 
     import torch._inductor.codegen.cuda.cutlass_lib_extensions.generator_extended as cutlass_generator  # type: ignore[import]
