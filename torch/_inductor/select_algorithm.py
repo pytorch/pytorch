@@ -3,13 +3,14 @@ import functools
 import inspect
 import itertools
 import logging
+import math
 import sys
 import textwrap
 import time
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, Type, Union
 from unittest.mock import patch
 
 import sympy
@@ -432,7 +433,7 @@ class TritonTemplate(KernelTemplate):
         suffix_args=0,
         epilogue_fn=identity,
         **kwargs,
-    ):
+    ) -> Generator[ChoiceCaller, None, None]:
         assert self.template, "requires jinja2"
         defines = StringIO()
         for name, val in kwargs.items():
@@ -541,7 +542,7 @@ class TritonTemplate(KernelTemplate):
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
-        return TritonTemplateCaller(
+        yield TritonTemplateCaller(
             kernel_hash_name,
             input_nodes,
             layout,
@@ -749,6 +750,10 @@ class ErrorFromChoice(RuntimeError):
         self.choice = choice
 
 
+class NoValidChoicesError(RuntimeError):
+    pass
+
+
 class AlgorithmSelectorCache(PersistentCache):
     def __call__(
         self,
@@ -762,13 +767,14 @@ class AlgorithmSelectorCache(PersistentCache):
         # arg, the function will be called instead of
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
+        return_selection_result_details=False,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
         if len(choices) == 0:
-            raise RuntimeError(
+            raise NoValidChoicesError(
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
@@ -776,6 +782,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if len(choices) == 1:
             if not isinstance(choices[0], CUDATemplateCaller):
+                if return_selection_result_details:
+                    return choices[0], {choices[0]: -1.0}
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
@@ -831,7 +839,19 @@ class AlgorithmSelectorCache(PersistentCache):
             or log.getEffectiveLevel() == logging.DEBUG
         ):
             self.log_results(name, input_nodes, timings, autotune_elapse)
-        selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
+
+        selected_key = builtins.min(timings, key=timings.__getitem__)
+        selected_time = timings[selected_key]
+        if (
+            (not isinstance(selected_time, float))
+            or (selected_time < 0.0)
+            or (not math.isfinite(selected_time))
+            or math.isnan(selected_time)
+        ):
+            raise NoValidChoicesError()
+        if return_selection_result_details:
+            return selected_key, timings
+        selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
 

@@ -3,7 +3,7 @@ from typing import Callable, Dict, List, Optional, TYPE_CHECKING
 
 from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
-from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout, TensorBox
+from ...ir import Buffer, CUDATemplateBuffer, FlexibleLayout, IRNode, Layout, TensorBox
 from ...select_algorithm import ChoiceCaller
 from ...utils import sympy_product
 from ...virtualized import V
@@ -182,6 +182,21 @@ class CUDATemplateKernel(CUDAKernel):
             return "void"
         return DTYPE_TO_CPP.get(node.get_layout().dtype)
 
+    def cutlass_dtype(self, node: IRNode, default_dtype="void") -> Optional[str]:
+        if node is None:
+            return default_dtype
+        from torch._inductor.codegen.cuda.cuda_template import CUTLASSTemplate
+
+        return CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
+
+    def max_valid_index(self, node: IRNode, default=-1):
+        if node is None:
+            return default
+        max_valid_offset = 0
+        for i in range(len(node.get_size())):
+            max_valid_offset += (node.get_size()[i] - 1) * node.get_stride()[i]
+        return max_valid_offset
+
     def offset(self, node: IRNode) -> str:
         """
         Generates code which represents offset of a given node.
@@ -336,6 +351,10 @@ class CUDATemplateCaller(ChoiceCaller):
         """Information returned here is logged to the autotune log file when that is enabled."""
         if self.info_kwargs is not None and "op" in self.info_kwargs:
             op = self.info_kwargs["op"]
+            epilogue_node_names = [
+                getattr(en, "name", "no_name")
+                for en in self.info_kwargs.get("epilogue_nodes", [])
+            ]
             return {
                 "backend": "CUDA",
                 "op_type": type(op).__name__,
@@ -344,6 +363,7 @@ class CUDATemplateCaller(ChoiceCaller):
                 "kernel_schedule": str(op.kernel_schedule),
                 "element_accumulator": str(op.accumulator_type()),
                 "op_name": str(op.procedural_name()),
+                "epilogue_node_names": epilogue_node_names,
                 "instruction_shape": str(
                     op.tile_description.math_instruction.instruction_shape
                 ),
@@ -352,6 +372,16 @@ class CUDATemplateCaller(ChoiceCaller):
             return {"backend": "CUDA", "op_type": "unknown"}
 
     def output_node(self) -> TensorBox:
+        for i, node in enumerate(self.input_nodes):
+            if (
+                hasattr(node, "freeze_layout_with_same_order")
+                and hasattr(node, "layout")
+                and isinstance(node.layout, FlexibleLayout)
+            ):
+                node.freeze_layout_with_same_order(
+                    self.bmreq.input_tensor_meta[i].strides
+                )
+
         return TensorBox.create(
             CUDATemplateBuffer(
                 layout=self.layout,
