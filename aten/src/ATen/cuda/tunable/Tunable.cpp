@@ -46,7 +46,7 @@ TuningContext* getTuningContext() {
 }
 
 std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry) {
-  return stream << entry.id << "," << entry.time << "," << entry.doc;
+  return stream << entry.id_ << "," << entry.time_ << "," << entry.doc_;
 }
 
 // TuningResultsManager
@@ -61,17 +61,18 @@ KernelMap TuningResultsManager::Lookup(const std::string& op_signature) {
 }
 
 ResultEntry TuningResultsManager::Lookup(const std::string& op_signature, const std::string& params_signature) {
-  static ResultEntry null_result_entry{-1,0,"null_reslt"};
   std::scoped_lock l{lock_};
   auto kernel_map_it = results_.find(op_signature);
   if (kernel_map_it == results_.cend()) {
-    return null_result_entry;
+    TUNABLE_LOG("missing op_signature, returning null ResultEntry");
+    return ResultEntry::Null();
   }
 
   const auto& km = kernel_map_it->second;
   auto it = km.find(params_signature);
   if (it == km.cend()) {
-    return null_result_entry;
+    TUNABLE_LOG("missing params_signature, returning null ResultEntry");
+    return ResultEntry::Null();
   }
   return it->second;
 }
@@ -82,7 +83,7 @@ inline void TuningResultsManager::AddImpl(const std::string& op_signature,
     KernelMap& kernel_map) {
   auto it = kernel_map.find(params_signature);
   if (it != kernel_map.end()) {
-    if (it->second.id != best.id) {
+    if (it->second != best) {
       TUNABLE_LOG(op_signature, "(", params_signature, ") already has a best kernel ",
           "id=", it->second, " selected, want to add a different best kernel ", best,
           ", the new kernel id will be ignored.");
@@ -91,7 +92,7 @@ inline void TuningResultsManager::AddImpl(const std::string& op_signature,
   }
 
   TUNABLE_LOG(op_signature, "(", params_signature, ") -> ", best);
-  kernel_map[params_signature] = best;
+  kernel_map.emplace(params_signature, best);
 }
 
 void TuningResultsManager::Add(const std::string& op_signature, const std::string& params_signature, ResultEntry best) {
@@ -466,7 +467,7 @@ void TuningContext::ReadFile(const std::string& filename) {
       TUNABLE_LOG("Validator ", parts[1], "=", parts[2]);
     }
     else if (parts.size() >= 5) {
-      results[parts[0]][parts[1]] = {atoi(parts[2].c_str()), atof(parts[3].c_str()), parts[4]};
+      results[parts[0]].emplace(parts[1], ResultEntry(atoi(parts[2].c_str()), atof(parts[3].c_str()), parts[4]));
     }
   }
   if (GetTuningResultsValidator().ValidateAll(validators) != FAIL) {

@@ -81,7 +81,7 @@ class TunableOp {
     virtual ~TunableOp() = default;
 
     TuningStatus operator()(const ParamsT* params) {
-      int id = -1;
+      ResultEntry id = ResultEntry::Null();
       TuningContext* ctx = getTuningContext();
       if (ctx->IsTunableOpEnabled()) {
         auto& mgr = ctx->GetTuningResultsManager();
@@ -90,19 +90,19 @@ class TunableOp {
 
         // Usage is enabled, then we are free to use previous tuning result.
         auto result = mgr.Lookup(op_sig, params_sig);
-        if (result.id > static_cast<int>(ops_.size())) {
-          TUNABLE_LOG("Invalid TunableOp kernel id for ", op_sig, ", id:", result.id, ", registered op:", ops_.size());
+        if (result > static_cast<int>(ops_.size())) {
+          TUNABLE_LOG("Invalid TunableOp kernel id for ", op_sig, ", id:", result, ", registered op:", ops_.size());
           mgr.Delete(op_sig, params_sig);
-          id = -1;
+          id = ResultEntry::Null();
         }
 
         // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
-        if (id < 0 && ctx->IsTuningEnabled()) {
+        if (result < 0 && ctx->IsTuningEnabled()) {
           auto maybe_proxy_params = PreTuning(params);
           auto result = FindFastest(maybe_proxy_params);
           PostTuning(maybe_proxy_params);
           mgr.Add(op_sig, params_sig, result);
-          id = result.id;
+          id = result;
         }
       }
       return (ops_[id < 0 ? default_id_ : id](params));
@@ -255,7 +255,7 @@ class TunableOp {
       TORCH_CHECK(id >= 0, "Could not find viable op");
       TUNABLE_LOG("└──found fastest with id=", id, " for ", op_sig, '(', params_sig, ") ", id_name);
       //std::this_thread::sleep_for(std::chrono::milliseconds(50));
-      return {id, min_duration_ms, id_name};
+      return ResultEntry(id, min_duration_ms, id_name);
     }
 
   private:

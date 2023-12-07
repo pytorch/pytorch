@@ -38,13 +38,23 @@ enum TuningStatus {
 };
 
 // Mapping from params signature to kernel id
-struct ResultEntry{
-  int id;
-  double time;
-  std::string doc;
-};
+class ResultEntry {
+  public:
+    explicit ResultEntry(int id, double time, const std::string& doc) : id_(id), time_(time), doc_(doc) {}
+    bool operator<(const ResultEntry& other) { return id_ < other.id_; }
+    bool operator<(int other) { return id_ < other; }
+    bool operator>(int other) { return id_ > other; }
+    operator int() { return id_; }
+    bool operator==(const ResultEntry& other) { return id_ == other.id_; }
+    bool operator!=(const ResultEntry& other) { return id_ != other.id_; }
+    friend std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry);
+    static ResultEntry Null() { return ResultEntry(-1, 0.0f, "null"); }
 
-std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry);
+  private:
+    int id_;
+    double time_;
+    std::string doc_;
+};
 
 typedef std::unordered_map<std::string, ResultEntry> KernelMap;
 typedef std::unordered_map<std::string, KernelMap> ResultsMap;
