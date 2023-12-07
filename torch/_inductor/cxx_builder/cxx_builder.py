@@ -287,9 +287,10 @@ def get_build_args_of_chosen_isa():
 
 def get_torch_related_args():
     from torch.utils.cpp_extension import TORCH_LIB_PATH, _TORCH_PATH 
-    libraries_dirs = [TORCH_LIB_PATH]
     include_dirs = [os.path.join(_TORCH_PATH, 'include')]
-    return include_dirs, libraries_dirs
+    libraries_dirs = [TORCH_LIB_PATH]
+    libraries = ["torch", "torch_cpu", "c10"]
+    return include_dirs, libraries_dirs, libraries
 
 class CxxTorchOptions(CxxOptions):
     """
@@ -314,9 +315,10 @@ class CxxTorchOptions(CxxOptions):
         _nonduplicate_append(self._definations, macros)
         _nonduplicate_append(self._passthough_args, build_flags)
 
-        include_dirs, libraries_dirs = get_torch_related_args()
+        include_dirs, libraries_dirs, libraries = get_torch_related_args()
         _nonduplicate_append(self._include_dirs, include_dirs)
         _nonduplicate_append(self._libraries_dirs, libraries_dirs)
+        _nonduplicate_append(self._libraries, libraries)
 
         # cpp_prefix_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
         # _nonduplicate_append(self._include_dirs, cpp_prefix_dir)
