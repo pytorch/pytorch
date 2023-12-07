@@ -738,7 +738,9 @@ def sum_dim_IntList(func, *args, **kwargs):
         return out
 
 
-@register_jagged_func(torch.ops.aten.transpose.int, "self: jt_all, dim0: any, dim1: any")
+@register_jagged_func(
+    torch.ops.aten.transpose.int, "self: jt_all, dim0: any, dim1: any"
+)
 def transpose_int(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -750,7 +752,9 @@ def transpose_int(func, *args, **kwargs):
     dim0, dim1 = canonicalize_dims(inp.dim(), (new_kwargs["dim0"], new_kwargs["dim1"]))
 
     if inp._lengths is not None:
-        raise ValueError("transpose(): not supported on jagged layout nested tensor with holes")
+        raise ValueError(
+            "transpose(): not supported on jagged layout nested tensor with holes"
+        )
 
     # To support the SDPA API, inputs need to have the ragged idx transposed to dim 2
     # instead of 1, although the internal Flash and mem-effn implementations will
