@@ -6,7 +6,7 @@ from optim.test_optim import TestOptim, TestDifferentiableOptimizer  # noqa: F40
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 from torch.testing._internal.common_optimizers import optim_db, optims, OptimizerErrorEnum
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, skipMPS
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestOptimRenewed(TestCase):
@@ -98,6 +98,7 @@ class TestOptimRenewed(TestCase):
                     self.assertEqual(og_p_state[k], new_p_state[k])
 
 
+    @skipMPS  # MPS doesn't support torch.float64, see https://github.com/pytorch/pytorch/issues/115350
     @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float64])
     def test_foreach_matches_forloop(self, device, dtype, optim_info):
         self._test_derived_optimizers(device, dtype, optim_info, "foreach")
