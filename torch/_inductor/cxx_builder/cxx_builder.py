@@ -6,7 +6,8 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
+import functools
 
 import torch
 from torch._inductor import config
@@ -263,6 +264,17 @@ def use_standard_sys_dir_headers() -> List[str]:
     else:
         return []
 
+@functools.lru_cache
+def _cpp_prefix_path() -> str:
+    from torch._inductor.codecache import write # TODO
+    path = Path(Path(__file__).parent).parent / "codegen/cpp_prefix.h"
+    with path.open() as f:
+        content = f.read()
+        _, filename = write(
+            content,
+            "h",
+        )
+    return filename
 
 class CxxTorchOptions(CxxOptions):
     """
@@ -416,7 +428,7 @@ class CxxBuilder:
         )
         return command_line
 
-    def build(self):
+    def build(self) -> Tuple[int, str]:
         """
         It is must need a temperary directory to store object files in Windows.
         """
