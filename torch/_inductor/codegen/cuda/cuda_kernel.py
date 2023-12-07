@@ -382,7 +382,8 @@ class CUDATemplateCaller(ChoiceCaller):
                 node.freeze_layout_with_same_order(
                     self.bmreq.input_tensor_meta[i].strides
                 )
-
+        # ensure workspace size is correct, even if timing is retrieved from cache
+        self.bmreq.update_workspace_size()
         return TensorBox.create(
             CUDATemplateBuffer(
                 layout=self.layout,

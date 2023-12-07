@@ -555,6 +555,7 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         self.hash_key: str = ""
         self.source_file: str = ""
         self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
+        self._workspace_size_updated = False
 
     def precompile(self):
         # Prepopulate CUDACodeCache
@@ -573,6 +574,7 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             c_void_p(tensor.data_ptr())
             for tensor in list(input_tensors) + [output_tensor]
         ]
+        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
         log.debug(
             "make_run_fn: self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
             self.kernel_name,
@@ -583,8 +585,6 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             self.extra_args,
         )
         run_method = getattr(self.DLL, self.kernel_name)
-        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
-
         # Retrieve workspace_size and initialize workspace.
         c_workspace_size = c_size_t()
         run_method(
@@ -597,6 +597,7 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             stream_ptr,
         )
         self.workspace_size = c_workspace_size.value
+        self._workspace_size_updated = True
 
         # Generate partial function.
         return functools.partial(
@@ -607,6 +608,42 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             None,  # set workspace ptr, TODO: update it to a real ptr if workspace_size > 0
             stream_ptr,
         )
+
+    def update_workspace_size(self) -> None:
+        if self._workspace_size_updated:
+            return
+        self.DLL, self.hash_key, self.source_file = CUDACodeCache.load(
+            self.source_code, "so"
+        )
+        # To retrieve workspace size only, we can pass nullptr's to the Kernel instead of actual pointers to
+        # input / output tensors.
+        args = [c_void_p(0) for _ in range(len(self.input_tensor_meta) + 1)]
+        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
+
+        run_method = getattr(self.DLL, self.kernel_name)
+        # Retrieve workspace_size and initialize workspace.
+        c_workspace_size = c_size_t()
+        run_method(
+            *args,  # input ptrs and output ptrs
+            *self.extra_args,
+            byref(
+                c_workspace_size
+            ),  # set workspace size ptr to retrieve workspace size
+            None,  # null workspace ptr
+            stream_ptr,
+        )
+        self.workspace_size = c_workspace_size.value
+        log.debug(
+            "update_workspace_size called: new workspace size=%d, self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
+            self.workspace_size,
+            self.kernel_name,
+            self.source_file,
+            self.hash_key,
+            self.DLL,
+            args,
+            self.extra_args,
+        )
+        self._workspace_size_updated = True
 
     def cleanup_run_fn(self) -> None:
         if self.DLL is not None:
