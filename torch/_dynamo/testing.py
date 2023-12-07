@@ -331,7 +331,6 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=
             setattr(DummyTestClass, new_name, new_fn)
         # NB: Doesn't handle slots correctly, but whatever
         elif not hasattr(DummyTestClass, name):
-            print(name)
             setattr(DummyTestClass, name, getattr(cls, name))
 
     return DummyTestClass
