@@ -16,4 +16,9 @@ jobs:
     steps:
        - name: Checkout PyTorch
          uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+       - name: Print env
+          env:
+            A: ${{ secrets.AWS_PYTORCH_MOBILE_UPLOADER_ACCESS_KEY_ID }}
+            B: ${{ secrets.AWS_PYTORCH_MOBILE_UPLOADER_SECRET_ACCESS_KEY }}
+          run:  env
 
