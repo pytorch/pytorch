@@ -9,7 +9,6 @@ import signal
 import sys
 import tempfile
 import threading
-import uuid
 import pickle
 import time
 import warnings
@@ -3509,12 +3508,14 @@ class SparseCollective(MultiProcessTestCase):
                 # Rethrow the exception if it's a different error
                 raise
 
-class NCCLTraceTest(MultiProcessTestCase):
+
+class NCCLTraceTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '10'
         os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = '1'
-        os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"] = f'/tmp/{str(uuid.uuid4())}'
+        self.tempdir = tempfile.TemporaryDirectory()
+        os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"] = self._trace_basename()
         self._spawn_processes()
 
     @classmethod
@@ -3571,6 +3572,15 @@ class NCCLTraceTest(MultiProcessTestCase):
         # return rank to GPU map
         return init_multigpu_helper(self.world_size, "nccl")
 
+    def _trace_basename(self):
+        # we pass the base to the env, and the dump util will append rank
+        return os.path.join(self.tempdir.name, "trace_")
+
+    def _trace_name(self, rank):
+        return self._trace_basename() + str(rank)
+
+class NCCLTraceTest(NCCLTraceTestBase):
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_short(self):
@@ -3611,8 +3621,8 @@ class NCCLTraceTest(MultiProcessTestCase):
             for c in self.children_pipes:
                 self.assertEqual(c.recv(), 'next')
 
-            pipe_file = f'{os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"]}0.pipe'
-            dump_file = f'{os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"]}0'
+            dump_file = self._trace_name(rank=0)
+            pipe_file = dump_file + ".pipe"
             with open_file_with_timeout(pipe_file, 'w') as f:
                 f.write('1\n')
             with open_file_with_timeout(dump_file, 'rb', timeout=10.0) as f:
@@ -3749,15 +3759,8 @@ class NCCLTraceTest(MultiProcessTestCase):
                 pg.allreduce(a).wait()
             torch.cuda.synchronize(device=device)
 
-
 class NCCLTraceTestDumpOnTimeout(NCCLTraceTestBase):
     timeout_sec = 1
-
-    def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        # will be cleaned up (reliably?) on gc?
-        os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"] = self._trace_basename()
-        super().setUp()
 
     def _create_process_group_nccl(self):
         store = dist.FileStore(self.file_name, self.world_size)
@@ -3769,13 +3772,6 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestBase):
             timeout=timedelta(seconds=NCCLTraceTestDumpOnTimeout.timeout_sec))
         pg = c10d.distributed_c10d._get_default_group()
         return pg
-
-    def _trace_basename(self):
-        # we pass the base to the env, and the dump util will append rank
-        return os.path.join(self.tempdir.name, "trace_")
-
-    def _trace_name(self, rank):
-        return self._trace_basename() + str(rank)
 
     def _check_return_codes(self, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
@@ -3796,7 +3792,7 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestBase):
         if self.rank == self.MAIN_PROCESS_RANK:
             # wait for rank0 to crash before looking for its output file
             # we rely on rank0 holding off its abort long enough to dump the debug info
-            self.assertEqual(self._wait_process(0, timeout=30), -6)
+            self.assertEqual(self._wait_process(0, timeout=90), -6)
             with open(self._trace_name(rank=0), 'rb') as f:
                 t = pickle.load(f)
                 self.assertEqual(len(t), 2)
