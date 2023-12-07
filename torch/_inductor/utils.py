@@ -1110,17 +1110,30 @@ def blue_text(msg):
 
 @functools.lru_cache(None)
 def get_device_tflops(dtype):
-    from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops, nvsmi
+    from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
-    cur_sm_clock = nvsmi(["clocks.current.sm"])[0]
-    if dtype in (torch.float16, torch.bfloat16):
-        return get_max_tensorcore_tflops(dtype, cur_sm_clock)
 
-    if torch.backends.cuda.matmul.allow_tf32:
-        return get_max_tensorcore_tflops(torch.float32, cur_sm_clock)
+    if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
+        # Triton API change in https://github.com/openai/triton/pull/2293
+        from triton.testing import nvsmi
+
+        cur_sm_clock = nvsmi(["clocks.current.sm"])[0]
+        if dtype in (torch.float16, torch.bfloat16):
+            return get_max_tensorcore_tflops(dtype, cur_sm_clock)
+
+        if torch.backends.cuda.matmul.allow_tf32:
+            return get_max_tensorcore_tflops(torch.float32, cur_sm_clock)
+        else:
+            return get_max_simd_tflops(torch.float32, cur_sm_clock)
     else:
-        return get_max_simd_tflops(torch.float32, cur_sm_clock)
+        if dtype in (torch.float16, torch.bfloat16):
+            return get_max_tensorcore_tflops(dtype)
+
+        if torch.backends.cuda.matmul.allow_tf32:
+            return get_max_tensorcore_tflops(torch.float32)
+        else:
+            return get_max_simd_tflops(torch.float32)
 
 
 @functools.lru_cache(None)
