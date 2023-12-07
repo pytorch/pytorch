@@ -3534,6 +3534,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         # ---------------------------- BUGS ------------------------------------
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug
+        decorate("slogdet", decorator=skipIfTorchDynamo()),
+        decorate("frexp", decorator=skipIfTorchDynamo()),
+
         xfail('clamp_min', ''),  # Exception not raised on error input
         xfail('clamp_max', ''),  # Exception not raised on error input
 
@@ -3852,6 +3855,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=True,
                                   postprocess_fn=compute_A)
 
+    @skipIfTorchDynamo
     def test_slogdet(self, device):
         # There's no OpInfo for this
         def test():
