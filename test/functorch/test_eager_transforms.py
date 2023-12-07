@@ -4311,6 +4311,7 @@ class TestExamplesCorrectness(TestCase):
         self.assertNotEqual(tuple(weight[0] for weight in result_weights),
                             tuple(weight[1] for weight in result_weights))
 
+    @xfailIfTorchDynamo
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     @parametrize('mechanism', ["make_functional", "functional_call"])
