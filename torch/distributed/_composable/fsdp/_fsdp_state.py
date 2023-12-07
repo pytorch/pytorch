@@ -95,8 +95,7 @@ class FSDPState(_State):
         root_module = self._module
         # Each module owns the reference to the state object
         for module in root_module.modules():
-            state = _get_module_fsdp_state(module)
-            if state is not None:
+            if (state := _get_module_fsdp_state(module)) is not None:
                 if module is not root_module:
                     state._is_root = False
                 self._all_state_refs.append(weakref.ref(state))

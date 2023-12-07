@@ -74,13 +74,18 @@ def foreach_all_gather(
         async op (for explicit prefetching). If there are no parameters that
         need to be all-gathered, then returns ``None``.
     """
-    fsdp_params = [
+    unsharded_fsdp_params = [
         fsdp_param
         for fsdp_param in fsdp_params
-        if fsdp_param.state != ShardedState.UNSHARDED
+        if fsdp_param.state == ShardedState.UNSHARDED
     ]
-    if len(fsdp_params) == 0:
-        return None
+    if len(unsharded_fsdp_params) == len(fsdp_params):
+        return None  # already unsharded
+    elif len(unsharded_fsdp_params) != 0:
+        msg = "Expects all parameters to be all sharded or all unsharded but got:\n"
+        for fsdp_param in fsdp_params:
+            msg += f"{fsdp_param._param_fqn}: {fsdp_param.state}\n"
+        print_and_raise_internal(msg)
     # Already checked at construction time for a uniform unsharded parameter
     # dtype if not using uint8
     dtype = torch.uint8 if use_uint8 else fsdp_params[0].unsharded_param_data_dtype
