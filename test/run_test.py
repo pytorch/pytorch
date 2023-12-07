@@ -24,8 +24,6 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
-    dynamo_strict_counter,
-    dynamo_total_counter,
     FILE_SCHEMA,
     get_report_path,
     IS_CI,
@@ -105,6 +103,11 @@ def parse_test_module(test):
 
 
 def emit_dynamo_test_metric():
+    from torch.testing._internal.common_utils import (
+        dynamo_strict_counter,
+        dynamo_total_counter,
+    )
+
     emit_metric(
         "dynamo_strict_stats",
         {"strict": dynamo_strict_counter, "total": dynamo_total_counter},
