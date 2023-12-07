@@ -188,9 +188,6 @@ def is_fake(x):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
         return is_fake(unwrapped)
-    elif isinstance(x, torch.Tensor) and torch._C._functorch.is_batchedtensor(x):
-        unwrapped = torch._C._functorch.get_unwrapped(x)
-        return is_fake(unwrapped)
     return False
 
 
@@ -208,9 +205,6 @@ def maybe_get_fake_mode(t):
     elif isinstance(t, torch.Tensor) and torch._is_functional_tensor(t):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
-        return maybe_get_fake_mode(unwrapped)
-    elif isinstance(t, torch.Tensor) and torch._C._functorch.is_batchedtensor(t):
-        unwrapped = torch._C._functorch.get_unwrapped(t)
         return maybe_get_fake_mode(unwrapped)
     return None
 
@@ -1505,7 +1499,6 @@ class FakeTensorMode(TorchDispatchMode):
                 t.constant is not None for t in flat_arg_fake_tensors
             ), f"{func} should not have fake inputs without constants"
             const_flat_args = [maybe_to_constant(a) for a in flat_args]
-            const_flat_args = [maybe_from_batched(a) for a in const_flat_args]
             const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
             out = func(*const_args, **const_kwargs)
             if type(out) is torch.Tensor and self.may_turn_const(out):
@@ -1565,7 +1558,6 @@ class FakeTensorMode(TorchDispatchMode):
         all_constant = not has_batched_tensors and all(
             e.constant is not None for e in flat_arg_fake_tensors
         )
-        # all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
         if (
             torch.Tag.nondeterministic_seeded not in func.tags
             and torch.Tag.inplace_view not in func.tags
@@ -1871,7 +1863,6 @@ class FakeTensorMode(TorchDispatchMode):
         any_constant = not has_batched_tensors and any(
             e.constant is not None for e in flat_arg_fake_tensors
         )
-        # any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():
             _, new_kwargs = normalize_function(
