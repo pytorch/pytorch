@@ -1838,6 +1838,8 @@ coverage_ignore_functions = [
     "rmsprop",
     # torch.optim.rprop
     "rprop",
+    # torch.optim.core
+    "core",
     # torch.optim.sgd
     "sgd",
     # torch.optim.swa_utils
@@ -3207,6 +3209,8 @@ coverage_ignore_classes = [
     "RMSprop",
     # torch.optim.rprop
     "Rprop",
+    # torch.optim.core
+    "CoRe",
     # torch.optim.sgd
     "SGD",
     # torch.optim.sparse_adam

@@ -1,5 +1,5 @@
-from typing import List, Optional, Union, Tuple
 from math import exp
+from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -557,5 +557,4 @@ def _multi_tensor_core(params: List[Tensor],
         torch._foreach_add_(grouped_params, param_updates, alpha=-1.0)
 
         # update previous gradients
-        for i in range(len(grouped_prevs_1)):
-            grouped_prevs_1[i].copy_(grouped_grads[i])
+        torch._foreach_copy_(grouped_prevs_1, grouped_grads)

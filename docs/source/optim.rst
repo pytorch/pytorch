@@ -127,6 +127,7 @@ Algorithms
     RAdam
     RMSprop
     Rprop
+    CoRe
     SGD
 
 Many of our algorithms have various implementations optimized for performance,
@@ -170,6 +171,7 @@ Below is a table showing the available and default implementations of each algor
     :class:`RAdam`;foreach;yes;no
     :class:`RMSprop`;foreach;yes;no
     :class:`Rprop`;foreach;yes;no
+    :class:`CoRe`;foreach;yes;no
     :class:`SGD`;foreach;yes;no
 
 How to adjust learning rate
@@ -426,6 +428,7 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 .. py:module:: torch.optim.radam
 .. py:module:: torch.optim.rmsprop
 .. py:module:: torch.optim.rprop
+.. py:module:: torch.optim.core
 .. py:module:: torch.optim.sgd
 .. py:module:: torch.optim.sparse_adam
 .. py:module:: torch.optim.swa_utils
