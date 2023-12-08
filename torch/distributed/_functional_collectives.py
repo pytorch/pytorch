@@ -190,6 +190,7 @@ def all_gather_tensor(
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch.ops.c10d_functional.all_gather_into_tensor(self, tag, rankset, group_size)  # type: ignore[attr-defined]
     res = _maybe_wrap_tensor(tensor)
+
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
         res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
@@ -353,57 +354,17 @@ def all_to_all_single(
     return _maybe_wrap_tensor(tensor)
 
 
-def batch_isend_irecv(p2p_op_list: List[c10d.P2POp]) -> List[torch.Tensor]:
-    """
-    Send or Receive a batch of tensors asynchronously and return a list of requests.
+def permute_tensor(self: torch.Tensor, src_dst_pairs: List[Tuple[int, int]], group: RANK_TYPES, tag: str = "") -> torch.Tensor:
+    world_size = dist.get_world_size()
+    output_split_sizes = [0] * world_size
+    input_split_sizes = [0] * world_size
+    for src, dst in src_dst_pairs:
+        if src == dist.get_rank():
+            input_split_sizes[dst] = self.numel()
+        if dst == dist.get_rank():
+            output_split_sizes[src] = self.numel()
 
-    This is the functional implementation of :func:`~torch.distributed.batch_isend_irecv`.
-
-    .. warning:: Gloo backend is not supported.
-
-    Args:
-        p2p_op_list: A list of point-to-point operations(type of each operator is
-            ``torch.distributed.P2POp``). The order of the isend/irecv in the list
-            matters and it needs to match with corresponding isend/irecv on the
-            remote end.
-
-    Returns:
-        A list of Received Tensors
-
-    """
-
-    assert dist.get_backend() != dist.Backend.GLOO, "Gloo backend is not supported for functional `batch_isend_irecv`"
-
-    # we need to deconstruct P2POp objects for dispatcher compatability and to ensure this
-    # method is functional
-    ops = []
-    tags = []
-    tensors = []
-    peers = []
-    expanded_tags = []
-    ranksets = []
-    group_sizes = []
-    for p2p_op in p2p_op_list:
-        ops.append(p2p_op.op.__name__)
-        tags.append(p2p_op.tag)
-        tensors.append(p2p_op.tensor)
-        peers.append(p2p_op.peer)
-
-        # group is not allowed in the dispatcher, and cannot be optional
-        expanded_tag, rankset, group_size = _expand_group(
-            p2p_op.group or c10d._get_default_group()
-        )
-
-        expanded_tags.append(expanded_tag)
-        ranksets.append(rankset)
-        group_sizes.append(group_size)
-
-    tensors = torch.ops.c10d_functional.batch_isend_irecv(
-        ops, tags, tensors, peers, expanded_tags, ranksets, group_sizes
-    )
-    return [_maybe_wrap_tensor(tensor) for tensor in tensors]
-
-
+    return all_to_all_single(self, output_split_sizes, input_split_sizes, group, tag)
 
 
 
@@ -634,18 +595,6 @@ def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_
 
     return [mk_out_tensor(t) for t in inputs]
 
-def _batch_isend_irecv_meta(p2p_op_list, *args):
-    def mk_out_tensor(p2p_op):
-        input = p2p_op[2]
-        group_size = p2p_op[5]
-
-        out_size = list(input.size())
-        out_size[0] //= group_size
-        out_tensor = input.new_empty(out_size)
-        return out_tensor
-
-    return [mk_out_tensor(p2p_op) for p2p_op in p2p_op_list]
-
 # NB: We often say all_to_all has dynamic output size, but this is not
 # technically true: instead, what typically happens is you manually
 # communicate the output_split_sizes ahead of time (which is dynamic),
@@ -694,7 +643,6 @@ def _register_ops():
         "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
         "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
         "all_to_all_single(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
-        "batch_isend_irecv(str[] ops, int[] tags, Tensor[] tensors, int[] peers, str[] expanded_tags, int[][] ranksets, int[] group_sizes) -> Tensor[]",
     ]
 
     my_module = sys.modules[__name__]

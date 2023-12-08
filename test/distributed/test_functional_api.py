@@ -610,43 +610,34 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
     @with_comms
     @requires_nccl()
     @skip_if_lt_x_gpu(WORLD_SIZE)
-    def test_batch_isend_irecv_cuda(self):
-        device = "cuda"
+    def test_permute_tensor(self):
+
         # rank0: [0., 1.], rank1: [2., 3.]
-        send_tensor = torch.arange(2, dtype=torch.float32, device=device) + 2 * self.rank
-        send_op = dist.P2POp(
-            dist.isend,
+        send_tensor = torch.arange(2, dtype=torch.float32, device="cuda") + 2 * self.rank
+
+        recvd_tensor = ft_c.permute_tensor(
             send_tensor,
-            (self.rank + 1) % self.world_size,
+            [
+                (0, 1),
+                (1, 0)
+            ],
+            group=dt.DeviceMesh(device, torch.arange(self.world_size))
         )
-        recv_tensor = torch.randn(2, dtype=torch.float32, device=device)
-        recv_op = dist.P2POp(
-            dist.irecv,
-            recv_tensor,
-            (self.rank - 1 + self.world_size) % self.world_size,
-        )
-
-        recv_clone = recv_tensor.clone()
-        received_tensors = ft_c.batch_isend_irecv([send_op, recv_op])
-
-        # test recv_tensor has not changed
-        self.assertEqual(recv_tensor, recv_clone)
 
         # rank0: [2., 3.], rank1: [2., 3.]
-        expected_tensors = [
-            torch.arange(
-                2,
-                dtype=torch.float32,
-                device=device
-            ) + 2 * ((self.rank - 1 + self.world_size) % self.world_size),
-        ]
-        for actual, expected in zip(received_tensors, expected_tensors):
-            self.assertEqual(
-                actual,
-                expected,
-                msg=f"Expected {expected} on {self.rank=} "
-                    f"but received {actual} instead."
-            )
+        expected = torch.arange(
+            2,
+            dtype=torch.float32,
+            device=device
+        ) + 2 * ((self.rank - 1 + self.world_size) % self.world_size)
+
+
+        self.assertEqual(
+            recv_tensor,
+            expected,
+            msg=f"Expected {expected} on {self.rank=} "
+                f"but received {recv_tensor} instead."
+        )
 
 
 class TestOpWaitiness(MultiThreadedTestCase):
