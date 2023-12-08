@@ -119,18 +119,15 @@ auto PyNode::compiled_apply(variable_list&& inputs, SwapSavedVariables& saved) -
     throw_python_error();
 
   /* START */
-  // this function is only called when tracing
-  // call into python compiled autograd to insert node into graph
-  // does not execute backward yet
-  PyObject* saved_variables = unpack_saved_variables(
-        py_fn, [](const Variable& var) { return THPVariable_Wrap(var); });
+  // PyObject* saved_variables = unpack_saved_variables(
+  //       py_fn, [](const Variable& var) { return THPVariable_Wrap(var); });
   int idx = 0; // do we need support for multiple custom autograd functions in the same graph?
   THPObjectPtr r(PyObject_CallMethod(
     saved.get_py_compiler(),
     "proxy_call_backward",
-    "OOi",
+    "Oi",
     pyInputs.get(),
-    saved_variables,
+    // saved_variables,
     idx));
   /* END */
   if (!r)
@@ -392,9 +389,9 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   // std::cout << "Type of obj: " << ((PyTypeObject*)PyObject_Type(obj))->tp_name << std::endl;
 
   args.add_backward(c10::SafePyObject(backward, getPyInterpreter()));
-  // PyObject* saved_variables = unpack_saved_variables(
-  //       f, [](const Variable& var) { return THPVariable_Wrap(var); });
-  // args.add_backward(c10::SafePyObject(saved_variables, getPyInterpreter()));
+  PyObject* saved_variables = unpack_saved_variables(
+        f, [](const Variable& var) { return THPVariable_Wrap(var); });
+  args.add_backward(c10::SafePyObject(saved_variables, getPyInterpreter()));
 }
 
 variable_list PyNode::apply_with_saved(

@@ -25,7 +25,8 @@ def compiler_fn(gm):
         counters["compiled_autograd"]["compiles"] += 1
         return inductor.compile(gm_, example_inputs_)
 
-    return torch.compile(gm, backend="eager", fullgraph=True, dynamic=True)
+    return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+    # return torch.compile(gm, backend="aot_eager", fullgraph=True)#, dynamic=True)
 
 
 # TODO(jansel): hooks as lambdas creates recompiles in dynamo, we should fix that
@@ -47,9 +48,11 @@ class TestCompiledAutograd(TestCase):
             torch._dynamo.reset()
             counters["compiled_autograd"].clear()
             torch.manual_seed(123)
+            print("=========== running eager")
             expected = list(fn())
             torch.manual_seed(123)
             with compiled_autograd.enable(compiler_fn):
+                print("=========== running compiled")
                 actual = list(fn())
 
             print(f"expected={expected}")
@@ -67,24 +70,27 @@ class TestCompiledAutograd(TestCase):
                 def forward(ctx, x):
                     print("PYTHON FORWARD")
                     ctx.save_for_backward(x)
-                    return x
+                    return torch.sin(x)
 
                 @staticmethod
                 def backward(ctx, gO):
                     (x,) = ctx.saved_tensors
-                    return gO * x + x.shape[0]
+                    return gO * torch.cos(x)
 
-            for i in [10]: # [10, 100, 10]:
-                x = torch.randn((i), requires_grad=True)
+            for i in [10, 100, 10]:
+                x = torch.arange(0.0, i, requires_grad=True)
                 out = MyFn.apply(x)
                 print("PYTHON RUNNING BACKWARD")
-                out.sum().backward()#retain_graph=True)
-                print("PYTHON DONE BACKWARD")
-                breakpoint()
+                loss = out.sum()
+                from torchviz import make_dot
+                print("Printing autograd graph")
+                print(make_dot(loss))
+                loss.backward()
+                # out.sum().backward(retain_graph=True)
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 1)
-        # self.check_output_and_recompiles(fn, 3)
+        # self.check_output_and_recompiles(fn, 1)
+        self.check_output_and_recompiles(fn, 3)
 
     # def test_compiled_autograd_key_attribute_error(self):
     #     def fn():
@@ -123,6 +129,9 @@ class TestCompiledAutograd(TestCase):
             )
             x = torch.randn([2, 4])
             result = model(x).sum()
+            from torchviz import make_dot
+            print("Printing autograd graph")
+            print(make_dot(result))
             result.backward()
             yield model[0].weight.grad
             yield model[0].bias.grad

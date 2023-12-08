@@ -1162,8 +1162,6 @@ def compile_fx(
         with V.set_fake_mode(fake_mode), compiled_autograd.disable():
             return inference_compiler(unlifted_gm, example_inputs_)
 
-    import pdb
-    pdb.set_trace()
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context
     ), compiled_autograd.disable():

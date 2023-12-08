@@ -33,6 +33,7 @@ class FakeContext:
         # this will cache the results of saved_tensors
         # and will no longer call into c++
         self.saved_tensors = saved_tensors
+        # self.a = saved_tensors
 
 def call_backward(backward_fn, saved_tensors, *args):
-    return backward_fn(FakeContext(saved_tensors), *args)
+    return (backward_fn(FakeContext(saved_tensors), *args),) # wrap in tuple, since result is accessed as call_backward[0]
