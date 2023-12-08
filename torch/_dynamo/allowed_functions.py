@@ -203,13 +203,13 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = [
-            "torch.optim",
-            "torch.nn.modules.rnn",
-            "torch._dynamo",
-            "torch._C._dynamo",
-            "torch._inductor",
-            "torch._C.inductor",
-            "torch.fx",
+            "torch.optim.",
+            "torch.nn.modules.rnn.",
+            "torch._dynamo.",
+            "torch._C._dynamo.",
+            "torch._inductor.",
+            "torch._C.inductor.",
+            "torch.fx.",
             "torch._C._autograd",
             "torch._C._cudart",
             "torch._C._distributed_autograd",
