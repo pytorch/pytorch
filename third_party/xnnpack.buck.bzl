@@ -70,6 +70,13 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         "-Wno-error=incompatible-pointer-types-discards-qualifiers",
     ]
 
+    def get_microkernel_config_srcs():
+        XNNPACK_MICROKERNEL_CONFIGS = []
+        for xnnpack_src in XNNPACK_SRCS:
+            if "config.c" in xnnpack_src:
+                XNNPACK_MICROKERNEL_CONFIGS.append(xnnpack_src)
+        return XNNPACK_MICROKERNEL_CONFIGS
+
     fb_xplat_cxx_library(
         name = "interface",
         header_namespace = "",
@@ -90,8 +97,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
 
     fb_xplat_cxx_library(
         name = "operators",
-        # srcs have to include HOT_SRCS to be able to build on ARVR
-        srcs = OPERATOR_SRCS + [
+        srcs = OPERATOR_SRCS + get_microkernel_config_srcs() + [
             "XNNPACK/src/packing.c",
             "XNNPACK/src/cache.c",
             "XNNPACK/src/indirection.c",
@@ -103,6 +109,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         ],
         headers = subdir_glob([
             ("XNNPACK/src", "**/*.h"),
+            ("XNNPACK/include", "**/*.h")
         ]),
         header_namespace = "",
         apple_sdks = (IOS, MACOSX, APPLETVOS),
@@ -118,13 +125,13 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         preprocessor_flags = [
             "-DXNN_LOG_LEVEL=0",
             "-DXNN_ENABLE_GEMM_M_SPECIALIZATION=0",
+            "-DXNN_ENABLE_CPUINFO",
         ],
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
         deps = [
             ":interface",
-            ":ukernels_f16c",
             third_party("cpuinfo"),
             third_party("FP16"),
             third_party("FXdiv"),

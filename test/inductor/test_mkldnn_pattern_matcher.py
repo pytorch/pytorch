@@ -1007,7 +1007,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn=matcher_check_fn,
         )
 
-    def _qlinear_cpu_test_helper(self, inputs, int8_mixed_bf16=False):
+    def _qlinear_cpu_test_helper(self, int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(self, use_bias):
                 super().__init__()
@@ -1020,15 +1020,24 @@ class TestPatternMatcher(TestPatternMatcherBase):
         bias_list = [True, False]
         for bias in bias_list:
             mod = M(bias).eval()
+            v = torch.randn((2, 4))
 
             def matcher_check_fn():
+                # 1. dequant-linear pattern matched in quantization weight prepack
+                #    int8-mixed-fp32: [convert_element_type_1, sub, mul_1, dequantize_per_channel, t, addmm/mm]
+                #    int8-mixed-bf16: [convert_element_type_1, sub, mul_1, optional(convert_element_type_3),
+                #                      dequantize_per_channel, optional(convert_element_type_9), t, addmm/mm]
                 self.assertEqual(
                     counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    16 if int8_mixed_bf16 else 12,
                 )
 
             self._test_common(
                 mod,
-                inputs,
+                (v,),
                 check_autocast=int8_mixed_bf16,
                 check_quantization=True,
                 matcher_check_fn=matcher_check_fn,
@@ -1041,7 +1050,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a single Linear Moduel.
         """
-        self._qlinear_cpu_test_helper((torch.randn((2, 4)),))
+        self._qlinear_cpu_test_helper()
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -1051,28 +1060,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
         """
-        self._qlinear_cpu_test_helper((torch.randn((2, 4)),), int8_mixed_bf16=True)
+        self._qlinear_cpu_test_helper(int8_mixed_bf16=True)
 
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_qlinear_input_dim_exceeds_2(self):
-        r"""
-        This testcase will quantize a single Linear Moduel.
-        """
-        self._qlinear_cpu_test_helper((torch.randn((2, 3, 4)),))
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNNBF16
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2(self):
-        r"""
-        This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
-        """
-        self._qlinear_cpu_test_helper((torch.randn((2, 3, 4)),), int8_mixed_bf16=True)
-
-    def _qlinear_unary_cpu_test_helper(self, inputs, int8_mixed_bf16=False):
+    def _qlinear_unary_cpu_test_helper(self, int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(self, use_bias):
                 super().__init__()
@@ -1088,6 +1078,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         bias_list = [True, False]
         for bias in bias_list:
             mod = M(bias).eval()
+            v = torch.randn((2, 4))
 
             def matcher_check_fn():
                 # 1. dequant-linear pattern matched in quantization weight prepack
@@ -1099,7 +1090,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
             self._test_common(
                 mod,
-                inputs,
+                (v,),
                 check_autocast=int8_mixed_bf16,
                 check_quantization=True,
                 matcher_check_fn=matcher_check_fn,
@@ -1112,7 +1103,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a Linear->ReLU pattern.
         """
-        self._qlinear_unary_cpu_test_helper((torch.randn((2, 4)),))
+        self._qlinear_unary_cpu_test_helper()
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -1122,32 +1113,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a Linear->ReLU pattern with int8_mixed_bf16 quantization.
         """
-        self._qlinear_unary_cpu_test_helper(
-            (torch.randn((2, 4)),), int8_mixed_bf16=True
-        )
+        self._qlinear_unary_cpu_test_helper(int8_mixed_bf16=True)
 
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_qlinear_relu_input_dim_exceeds_2(self):
-        r"""
-        This testcase will quantize a Linear->ReLU pattern.
-        """
-        self._qlinear_unary_cpu_test_helper((torch.randn((2, 3, 4)),))
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNNBF16
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_qlinear_relu_int8_mixed_bf16_input_dim_exceeds_2(self):
-        r"""
-        This testcase will quantize a Linear->ReLU pattern with int8_mixed_bf16 quantization.
-        """
-        self._qlinear_unary_cpu_test_helper(
-            (torch.randn((2, 3, 4)),), int8_mixed_bf16=True
-        )
-
-    def _qlinear_dequant_promotion_cpu_test_helper(self, inputs, int8_mixed_bf16=False):
+    def _qlinear_dequant_promotion_cpu_test_helper(self, int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -1164,6 +1132,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return temp
 
         mod = M().eval()
+        v = torch.rand((2, 4))
 
         def matcher_check_fn():
             # 1. Dequant pattern matcher for dequant promotion * 1
@@ -1177,7 +1146,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         self._test_common(
             mod,
-            inputs,
+            (v,),
             check_autocast=int8_mixed_bf16,
             check_quantization=True,
             matcher_check_fn=matcher_check_fn,
@@ -1199,7 +1168,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                   |
                   Y
         """
-        self._qlinear_dequant_promotion_cpu_test_helper((torch.randn((2, 4)),))
+        self._qlinear_dequant_promotion_cpu_test_helper()
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -1219,49 +1188,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                   |
                   Y
         """
-        self._qlinear_dequant_promotion_cpu_test_helper(
-            (torch.randn((2, 4)),), int8_mixed_bf16=True
-        )
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2(self):
-        r"""
-        This testcase test if dequant node before linear is promoted correctly:
-                  X
-                  |
-               Linear1(X)
-                /   \
-        Linear2(X)   Linear3(X)
-                \   /
-                 Add
-                  |
-                  Y
-        """
-        self._qlinear_dequant_promotion_cpu_test_helper((torch.randn((2, 3, 4)),))
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNNBF16
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_qlinear_dequant_promotion_int8_mixed_bf16_input_dim_exceeds_2(self):
-        r"""
-        Test with int8_mixed_bf16 quantization.
-        This testcase test if dequant node before linear is promoted correctly:
-                  X
-                  |
-               Linear1(X)
-                /   \
-        Linear2(X)   Linear3(X)
-                \   /
-                 Add
-                  |
-                  Y
-        """
-        self._qlinear_dequant_promotion_cpu_test_helper(
-            (torch.randn((2, 3, 4)),), int8_mixed_bf16=True
-        )
+        self._qlinear_dequant_promotion_cpu_test_helper(int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN

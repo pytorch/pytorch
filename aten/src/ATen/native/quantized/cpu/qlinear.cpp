@@ -936,18 +936,10 @@ static at::Tensor linear_int8_with_onednn_weight(
         output_scale == 1.0f && output_zero_point == 0, "onednn qlinear: expect scale=1 and zero point=0 for fp32 output");
   }
 
-  // If the input has more than two dimensions, we will reshape it to a 2-dimensional form
-  // for calculation and subsequently reshape the output back.
-  auto input_contig =
-      dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
-
+  auto input_contig = input.contiguous();
   auto src = at::native::itensor_from_tensor(input_contig);
   auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
   int64_t K = input.size(dim - 1), M = input.numel() / K, N = packed_weight.get_dim(1);
-
-  auto output_size = input.sizes().vec();
-  output_size[dim - 1] = N;
-
   c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
   bool with_bias = bias.has_value();
   at::Tensor bias_val_float;
@@ -1033,7 +1025,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_t});
   }
   primitive.execute(ideep::stream::default_stream(), args);
-  return dim == 2 ? output : output.reshape(output_size);
+  return output;
 }
 #endif // #if AT_MKLDNN_ENABLED()
 
