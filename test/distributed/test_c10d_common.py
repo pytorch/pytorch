@@ -1797,8 +1797,10 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                 self.assertEqual(pg.rank(), self.rank)
                 self.assertEqual(pg.size(), self.world_size)
                 self.assertEqual(pg.name(), str(backend))
-
+                print(f"backend {backend}")
+                print("Calling destroy PG")
                 dist.destroy_process_group()
+                print("after Calling destroy PG")
 
     def _call_collective_with_varying_tensors(self, backend, collective, *args):
         # call collective with varying tensors to ensure that the tensors are

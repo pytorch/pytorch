@@ -1071,7 +1071,9 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   if (ncclCommWatchdogThread_.joinable()) {
+    LOG(INFO) << "Joining ncclCommWatchdogThread_";
     ncclCommWatchdogThread_.join();
+    LOG(INFO) << "after Joining ncclCommWatchdogThread_";
   }
 #endif
 
@@ -1089,7 +1091,9 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   monitorWakeUpCV_.notify_one();
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   if (ncclHeartbeatMonitorThread_.joinable()) {
+    LOG(INFO) << "Joining ncclHeartbeatMonitorThread_";
     ncclHeartbeatMonitorThread_.join();
+    LOG(INFO) << "after Joining ncclHeartbeatMonitorThread_";
   }
 #endif
 }
@@ -1366,6 +1370,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
       if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
           timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
         lastTimePollStore = currentTime;
+        LOG(INFO) << "Checking with store for TIMEOUT_DUMP";
         if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
           optAsyncDebugDump = launchAsyncDebugDump();
           optAsyncDebugDump->wait_for(
@@ -1377,6 +1382,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
           LOG(ERROR) << exitMsg;
           C10_THROW_ERROR(DistBackendError, exitMsg);
         }
+        LOG(INFO) << "Checking with store for TIMEOUT_DUMP";
       }
     }
 
