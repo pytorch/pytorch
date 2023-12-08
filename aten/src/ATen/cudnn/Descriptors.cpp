@@ -31,7 +31,7 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
 
 } // anonymous namespace
 
-void RNNDataDescriptor::set(const at::Tensor &t, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray) {
+void RNNDataDescriptor::set(const at::Tensor &t, const cudnnRNNDataLayout_t layout, const int maxSeqLength, const int batchSize, const int vectorSize, const int* seqLengthArray) {
   set(getDataType(t), layout, maxSeqLength, batchSize, vectorSize, seqLengthArray);
 }
 

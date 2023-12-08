@@ -122,7 +122,9 @@ class TORCH_CUDA_CPP_API RNNDataDescriptor : public Descriptor<
 					       cudnnRNNDataStruct,
 					       &cudnnCreateRNNDataDescriptor,
 					       &cudnnDestroyRNNDataDescriptor> {
+public:
   void set(const at::Tensor &t, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray);
+private:
   void set(cudnnDataType_t dataType, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray) {
     AT_CUDNN_CHECK(cudnnSetRNNDataDescriptor(mut_desc(), dataType, layout, maxSeqLength, batchSize, vectorSize, seqLengthArray, NULL));
   }

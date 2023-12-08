@@ -212,8 +212,18 @@ namespace {
     return descriptors;
   }
 #else
-  auto rnn_descriptor(const Tensor& tensor) {
+  auto rnn_descriptor_sequence(const Tensor& tensor, const int batch_size, const int seq_len, const int vector_size) { // packed case
     RNNDataDescriptor r;
+    std::vector<int> seqLengthArray(batch_size, seq_len);
+    r.set(tensor, CUDNN_RNN_DATA_LAYOUT_SEQ_MAJOR_PACKED, seq_len, batch_size, vector_size, seqLengthArray.data());
+    return r;
+  }
+
+  auto rnn_descriptor(const Tensor& tensor, const bool batch_first, const int batch_size, const int seq_len, const int vector_size) {
+    RNNDataDescriptor r;
+    auto layout = batch_first ? CUDNN_RNN_DATA_LAYOUT_BATCH_MAJOR_UNPACKED : CUDNN_RNN_DATA_LAYOUT_SEQ_MAJOR_UNPACKED;
+    std::vector<int> seqLengthArray(batch_size, seq_len);
+    r.set(tensor, layout, seq_len, batch_size, vector_size, seqLengthArray.data());
     return r;
   }
 #endif
@@ -294,8 +304,15 @@ namespace {
       return batch_sizes.size() != 0;
     }
 
-    void set(IntArrayRef input_sizes, IntArrayRef batch_sizes_, bool batch_first) {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 9000
+    bool batch_first;
+#endif
+
+    void set(IntArrayRef input_sizes, IntArrayRef batch_sizes_, bool batch_first_) {
       batch_sizes = batch_sizes_;
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 9000
+      batch_first = batch_first_;
+#endif
       if (is_input_packed()) {
         seq_length = batch_sizes.size();
         mini_batch = batch_sizes[0];
@@ -328,9 +345,14 @@ namespace {
       }
     }
 #else
-  auto descriptors(Tensor x) const {
-    return rnn_descriptor(x);
-  }
+    auto descriptors(Tensor x) const {
+      auto is_input_packed = batch_sizes.size() != 0;
+      if (is_input_packed) {
+        return rnn_descriptor_sequence(x, mini_batch, seq_length, input_size);
+      } else {
+        return rnn_descriptor(x, batch_first, mini_batch, seq_length, input_size);
+      }
+    }
 #endif
   };
 
