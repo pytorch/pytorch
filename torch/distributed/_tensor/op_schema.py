@@ -135,9 +135,11 @@ class TupleStrategy(StrategyType):
     strategy, then we should return a single OpStrategy instead of a TupleStrategy
     """
 
-    def __init__(self, childs: Sequence[StrategyType]) -> None:
+    def __init__(self, childs: Sequence[StrategyType], op_type=0) -> None:
+        # TODO: change op_type to enum. FOREACH_LIST=0; MULTI_OUTPUT=1;
         super().__init__()
         self.childs: Sequence[StrategyType] = childs
+        self.op_type = op_type
 
     def __str__(self) -> str:
         child_strategies_str = ", ".join(

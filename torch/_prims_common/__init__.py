@@ -58,6 +58,13 @@ Tensor = torch.Tensor
 
 torch_function_passthrough = {
     torch.device,
+    torch.sym_not,
+    torch.sym_float,
+    torch.sym_int,
+    torch.sym_max,
+    torch.sym_min,
+    torch.sym_sqrt,
+    torch.sym_ite,
     torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
     torch.Tensor.numel,

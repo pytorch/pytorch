@@ -20,6 +20,10 @@ from torch.distributed._tensor.placement_types import DTensorSpec, Replicate, Te
 from torch.distributed._tensor.random import is_rng_supported_mesh
 from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
+from torch.distributed._tensor.tp_conv import (
+    convolution_backward_handler,
+    convolution_handler,
+)
 
 try:
     from torch.utils import _cxx_pytree as pytree
@@ -73,10 +77,14 @@ class OpDispatcher:
             aten.randint_like.low_dtype,
             aten.randint_like.low_dtype_out,
             aten.uniform_.default,
+            aten.bernoulli.default,
+            aten.bernoulli_.float,
         }
         self._custom_op_handlers = {
             aten.linear.default: decompose_handler,
             aten.is_same_size.default: is_same_size_handler,
+            aten.convolution.default: convolution_handler,
+            aten.convolution_backward.default: convolution_backward_handler,
         }
 
     def dispatch(
@@ -88,6 +96,9 @@ class OpDispatcher:
         """
         Main dispatching logic
         """
+        #print(f"dispatch op call: {op_call}")
+        #for idx, arg in enumerate(args):
+        #    print(f"idx {idx}, arg = {arg}")
         # operators that does not need to go through sharding propagation
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
@@ -95,9 +106,12 @@ class OpDispatcher:
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
 
+        # print(f"op_info.schema.has_symints = {op_info.schema.has_symints}")
+        # print(f"op = {}, schema before prop = {op_info.schema}")
         self.sharding_propagator.propagate(op_info)
         output_sharding = op_info.output_sharding
         assert output_sharding is not None, "output sharding should not be None"
+        # print(f"op = {}, schema after prop: {output_sharding}")
 
         mesh = op_info.mesh
         if mesh.get_coordinate() is None:
@@ -150,6 +164,7 @@ class OpDispatcher:
             if output_sharding.needs_redistribute:
                 # compute locally with redistribute first if needed
                 assert output_sharding.schema_suggestions is not None
+                print(f"redistribute local args: {output_sharding.schema_suggestions[0]}")
                 self.redistribute_local_args(
                     op_info, output_sharding.schema_suggestions[0]
                 )
@@ -178,7 +193,9 @@ class OpDispatcher:
                 ):
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
+                print(f"args = {local_tensor_args}")
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                print(f"local results = {local_results}")
 
         # communicate the result to all ranks for some operators that return scalar value
         if output_sharding.output_spec is None:

@@ -808,6 +808,19 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # didnt do additional recordings
             self.assertTrue(self.get_manager().new_graph_id().id == 2)
 
+        def test_empty_cpu_tensor(self):
+            def foo(x):
+                return x @ x, torch.tensor([])
+
+            foo_opt = torch.compile(foo)
+            x = torch.rand([4], device="cuda")
+
+            for _ in range(3):
+                out_opt = foo_opt(x)
+                self.assertEqual(foo(x), out_opt)
+
+            self.assertTrue(self.get_manager().new_graph_id().id == 1)
+
         def test_output_alias(self):
             inp = torch.rand([20, 20], device="cuda")
 

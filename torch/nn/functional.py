@@ -4418,8 +4418,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-pad = _add_docstr(
-    torch._C._nn.pad,
+def pad(input: Tensor, pad: List[int], mode: str = "constant", value: Optional[float] = None) -> Tensor:
     r"""
 pad(input, pad, mode="constant", value=None) -> Tensor
 
@@ -4480,7 +4479,21 @@ Examples::
     >>> print(out.size())
     torch.Size([3, 9, 7, 3])
 
-""")
+"""
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            torch.nn.functional.pad, (input,), input, pad, mode=mode, value=value)
+    if not torch.jit.is_scripting():
+        if torch.are_deterministic_algorithms_enabled() and input.is_cuda:
+            if len(pad) == 4 and (input.dim() == 3 or input.dim() == 4) and mode == 'replicate':
+                # Use slow decomp whose backward will be in terms of index_put.
+                # importlib is required because the import cannot be top level
+                # (cycle) and cannot be nested (TS doesn't support)
+                return importlib.import_module('torch._decomp.decompositions').replication_pad2d(
+                    input, pad
+                )
+    return torch._C._nn.pad(input, pad, mode, value)
+
 # TODO: Fix via https://github.com/pytorch/pytorch/issues/75798
 pad.__module__ = "torch.nn.functional"
 
@@ -4958,7 +4971,7 @@ Note:
 
     There are currently three supported implementations of scaled dot product attention:
 
-        - `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
+        - `FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning`_
         - `Memory-Efficient Attention`_
         - A PyTorch implementation defined in C++ matching the above formulation
 
@@ -5022,8 +5035,8 @@ Examples::
     >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
     >>>     F.scaled_dot_product_attention(query,key,value)
 
-.. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
-    https://arxiv.org/abs/2205.14135
+.. _FlashAttention-2\: Faster Attention with Better Parallelism and Work Partitioning:
+    https://arxiv.org/abs/2307.08691
 .. _Memory-Efficient Attention:
     https://github.com/facebookresearch/xformers
 

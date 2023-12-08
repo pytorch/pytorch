@@ -328,6 +328,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return sequence_nr_;
   }
 
+  void set_sequence_nr(uint64_t sequence_nr) {
+    sequence_nr_ = sequence_nr;
+  }
+
   // NOTE [ Topological Number ]
   //
   // topological_nr is used to prune branches in the DAG during autograd
@@ -590,7 +594,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // Sequence number used to correlate backward nodes with forward ops in the
   // profiler and provide determinism in the engine.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const uint64_t sequence_nr_;
+  uint64_t sequence_nr_;
 
   // See NOTE [ Topological Number ]
   uint64_t topological_nr_ = 0;

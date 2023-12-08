@@ -495,13 +495,13 @@ def checkpoint(
             return ret
 
 
-def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwargs):
+def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwargs):
     r"""Checkpoint a sequential model to save memory.
 
     Sequential models execute a list of modules/functions in order
     (sequentially). Therefore, we can divide such a model in various segments
     and checkpoint each segment. All segments except the last will not store
-    the intermediate  activations. The inputs of each checkpointed segment will
+    the intermediate activations. The inputs of each checkpointed segment will
     be saved for re-running the segment in the backward pass.
 
     .. warning::
@@ -539,6 +539,17 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
         >>> model = nn.Sequential(...)
         >>> input_var = checkpoint_sequential(model, chunks, input_var)
     """
+    if use_reentrant is None:
+        warnings.warn(
+            "torch.utils.checkpoint.checkpoint_sequential: please pass in "
+            "use_reentrant=True or use_reentrant=False explicitly. The default "
+            "value of use_reentrant will be updated to be False in the future. "
+            "To maintain current behavior, pass use_reentrant=True. It is "
+            "recommended that you use use_reentrant=False. Refer to docs for "
+            "more details on the differences between the two variants."
+        )
+        use_reentrant = True
+
     # Hack for keyword-only parameter in a python 2.7-compliant way
     preserve = kwargs.pop("preserve_rng_state", True)
     if kwargs:

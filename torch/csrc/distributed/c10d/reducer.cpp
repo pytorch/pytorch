@@ -751,7 +751,7 @@ void Reducer::all_reduce_local_used_map() {
     // local_used_map_
     auto local_used_map_tmp = at::native::empty_like(
         local_used_map_,
-        optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
+        c10::optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
         local_used_map_.options().layout_opt(),
         local_used_map_.options().device_opt(),
         true /* pinned_memory */);
@@ -770,7 +770,7 @@ void Reducer::all_reduce_local_used_map() {
     // the pin memory step.
     auto local_used_map_tmp = at::native::empty_like(
         local_used_map_,
-        optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
+        c10::optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
         local_used_map_.options().layout_opt(),
         local_used_map_.options().device_opt());
     local_used_map_tmp.copy_(local_used_map_);
@@ -2314,11 +2314,20 @@ void Reducer::update_process_group(
   process_group_ = std::move(new_process_group);
 }
 
-void Reducer::force_bucket_rebuild() {
+void Reducer::reset_state() {
   std::lock_guard<std::mutex> lock(mutex_);
+  // Force rebuild of buckets.
   has_rebuilt_bucket_ = false;
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
+
+  // Ensure forward can run despite previous backward not succeeding.
+  expect_autograd_hooks_ = false;
+  require_finalize_ = false;
+
+  // Unset allreduce division factor, as it may change in next backwards pass
+  // when running with DDP join mode.
+  div_factor_ = kUnsetDivFactor;
 }
 
 } // namespace c10d

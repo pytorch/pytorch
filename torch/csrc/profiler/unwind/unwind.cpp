@@ -10,6 +10,12 @@ std::vector<void*> unwind() {
       "record_context_cpp is not support on non-linux non-x86_64 platforms");
 }
 
+c10::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
+  TORCH_CHECK(
+      false,
+      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+}
+
 #ifndef FBCODE_CAFFE2
 std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   TORCH_CHECK(

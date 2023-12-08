@@ -27,6 +27,7 @@
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/env.h>
 
+#include <iostream>
 
 namespace at::native {
 
@@ -1139,6 +1140,11 @@ void LayerNormBackwardKernelImplInternal(
     Tensor* dgamma,
     Tensor* dbeta) {
   using T_ACC = acc_type<T, true>;
+  std::cout << "dY.numel = " << dY.numel()
+    << ", mean.numel = " << mean.numel()
+    << ", rstd.numel = " << rstd.numel()
+    << ", M = " << M << ", N = " << N
+    << std::endl;
   TORCH_CHECK(dY.numel() == M * N);
   TORCH_CHECK(mean.numel() == M);
   TORCH_CHECK(rstd.numel() == M);

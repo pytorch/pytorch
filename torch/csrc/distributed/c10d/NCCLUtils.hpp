@@ -17,6 +17,11 @@
 #define NCCL_HAS_COMM_NONBLOCKING
 #endif
 
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 18)
+#define NCCL_HAS_COMM_SPLIT
+#endif
+
 // ncclGetLastError() is enabled only for NCCL versions 2.13+
 // ncclRemoteError only exists in NCCL versions 2.13+
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
@@ -246,6 +251,22 @@ class NCCLComm {
   }
 #endif
 
+#ifdef NCCL_HAS_COMM_SPLIT
+  static std::shared_ptr<NCCLComm> split(
+      NCCLComm* source,
+      int color_id,
+      int rank,
+      ncclConfig_t& config) {
+    auto comm = std::make_shared<NCCLComm>();
+    C10D_NCCL_CHECK(
+        ncclCommSplit(
+            source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
+        c10::nullopt);
+    ++source->ncclCommSplitCounter_;
+    return comm;
+  }
+#endif
+
   ncclUniqueId getNcclId() {
     return ncclId_;
   }
@@ -325,6 +346,10 @@ class NCCLComm {
     return aborted_;
   }
 
+  uint64_t getCommSplitCounter() const {
+    return ncclCommSplitCounter_;
+  }
+
   ncclResult_t checkForNcclError() {
     std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -401,6 +426,7 @@ class NCCLComm {
   // Unique nccl_id for this communicator.
   ncclUniqueId ncclId_;
   bool aborted_;
+  uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_;
   mutable std::mutex mutex_;
   // Rank that this communicator corresponds to.
