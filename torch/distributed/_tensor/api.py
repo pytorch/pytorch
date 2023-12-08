@@ -10,6 +10,7 @@ import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
+from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
     Placement,
@@ -25,7 +26,6 @@ from torch.distributed._tensor.redistribute import (
     Redistribute,
     redistribute_local_tensor,
 )
-from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 
 
 __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
@@ -255,7 +255,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         return ["_local_tensor"], (self._spec, self.requires_grad)
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors, flatten_spec):
+    def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
         assert (
             flatten_spec is not None
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
@@ -265,10 +265,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             local_tensor,
             spec.mesh,
             spec.placements,
-            shape=spec.tensor_meta.shape,
+            shape=outer_size,
             dtype=spec.tensor_meta.dtype,
             requires_grad=requires_grad,
-            stride=spec.tensor_meta.stride,
+            stride=outer_stride,
         )
 
     __torch_function__ = torch._C._disabled_torch_function_impl
