@@ -2094,7 +2094,12 @@ class TestSparseCSR(TestCase):
             # sparse.to_dense() uses torch.add internally so if torch.add is wrong,
             # the dense tensor will be wrong but this test would still pass
             # there's a separate test that checks for the correctness of the .to_dense() call
-            x = self.genSparseCompressedTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32, layout=layout, blocksize=())
+            x = self.genSparseCompressedTensor(shape, nnz,
+                                               dtype=dtype,
+                                               device=device,
+                                               index_dtype=torch.int32,
+                                               layout=layout,
+                                               blocksize=())
             y = torch.randn(*shape, dtype=dtype, device=device)
             r = random.random()
 
@@ -2118,6 +2123,7 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(res, expected)
             self.assertEqual(res_perm, expected)
+
 
         ns = [2, 5]
         batch_shapes = [(), (2,), (2, 3)]
