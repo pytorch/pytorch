@@ -95,7 +95,7 @@ jobs:
           python3 -m tools.stats.check_disabled_tests --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
 
   check-api-rate:
-    if: ${{ always() }} && github.repository_owner == 'pytorch'
+    if: ${{ always() && github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-latest
     continue-on-error: true
     environment: pytorchbot-env
