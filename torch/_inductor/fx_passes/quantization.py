@@ -97,7 +97,7 @@ dequantize_per_channel_to_bf16_clone_weight_pattern = CallFunction(
 )
 
 
-def get_dequantize(users=1):
+def get_dequantize_qconv_pt2e_pattern(users=1):
     return CallFunction(
         torch.ops.onednn.qconv2d_pointwise.default,
         KeywordArg("x"),
@@ -531,19 +531,19 @@ def _register_quantization_unary_fusion():
         # For example: pattern1 is qconv_fp32 -> relu, pattern2 is qconv_fp32 -> relu -> quant
         conv_unary_replace_patterns = {
             UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
-                get_dequantize(1),
+                get_dequantize_qconv_pt2e_pattern(1),
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(get_dequantize(1), aten.relu.default),
+                generate_pattern_with_unary(get_dequantize_qconv_pt2e_pattern(1), aten.relu.default),
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("hardtanh", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(get_dequantize(1), aten.hardtanh.default),
+                generate_pattern_with_unary(get_dequantize_qconv_pt2e_pattern(1), aten.hardtanh.default),
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("hardswish", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(get_dequantize(2), aten.hardswish.default),
+                generate_pattern_with_unary(get_dequantize_qconv_pt2e_pattern(2), aten.hardswish.default),
                 dtype=original_pattern_output_dtype,
             ),
         }
@@ -562,13 +562,13 @@ def _register_quantization_unary_fusion():
         # Priority 2 to match: QConv2d Unary pattern with fp32/bfloat16 output
         conv_unary_replace_float_out_patterns = {
             UnaryAttr("relu", [], ""): generate_pattern_with_unary(
-                get_dequantize(1), aten.relu.default
+                get_dequantize_qconv_pt2e_pattern(1), aten.relu.default
             ),
             UnaryAttr("hardtanh", [], ""): generate_pattern_with_unary(
-                get_dequantize(1), aten.hardtanh.default
+                get_dequantize_qconv_pt2e_pattern(1), aten.hardtanh.default
             ),
             UnaryAttr("hardswish", [], ""): generate_pattern_with_unary(
-                get_dequantize(2), aten.hardswish.default
+                get_dequantize_qconv_pt2e_pattern(2), aten.hardswish.default
             ),
         }
 
@@ -648,7 +648,7 @@ def _register_quantization_binary_fusion():
             ): generate_pattern_with_output_quant(
                 generate_pattern_with_binary(
                     aten.add.Tensor,
-                    get_dequantize(1),
+                    get_dequantize_qconv_pt2e_pattern(1),
                     dequantize_accum_pattern,
                     int8_mixed_bf16_with_inplace_add,
                 ),
@@ -662,7 +662,7 @@ def _register_quantization_binary_fusion():
                 generate_pattern_with_unary(
                     generate_pattern_with_binary(
                         aten.add.Tensor,
-                        get_dequantize(1),
+                        get_dequantize_qconv_pt2e_pattern(1),
                         dequantize_accum_pattern,
                         int8_mixed_bf16_with_inplace_add,
                     ),
@@ -688,7 +688,7 @@ def _register_quantization_binary_fusion():
             BinaryUnaryAttr("add", 1.0, "relu", [], ""): generate_pattern_with_unary(
                 generate_pattern_with_binary(
                     aten.add.Tensor,
-                    get_dequantize(1),
+                    get_dequantize_qconv_pt2e_pattern(1),
                     KeywordArg("accum_after_dequant"),
                     int8_mixed_bf16_with_inplace_add,
                 ),
@@ -725,7 +725,7 @@ def _register_quantization_binary_fusion():
         binary_replace_float_out_patterns = {
             BinaryUnaryAttr("add", 1.0, "none", [], ""): generate_pattern_with_binary(
                 aten.add.Tensor,
-                get_dequantize(1),
+                get_dequantize_qconv_pt2e_pattern(1),
                 KeywordArg("accum_after_dequant"),
                 int8_mixed_bf16_with_inplace_add,
             ),
