@@ -326,6 +326,30 @@ PyObject* THPModule_setDefaultDtype(PyObject* _unused, PyObject* dtype) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* a_ = nullptr;
+  PyObject* b_ = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &a_, &b_)) {
+    return nullptr;
+  }
+
+  // Ensure we have Tensors
+  TORCH_CHECK(THPVariable_Check(a_));
+  TORCH_CHECK(THPVariable_Check(b_));
+
+  THPVariable* a = reinterpret_cast<THPVariable*>(a_);
+  THPVariable* b = reinterpret_cast<THPVariable*>(b_);
+
+  // Swap the Tensor Impl
+  c10::MaybeOwned<at::Tensor> tmp = a->cdata;
+  a->cdata = b->cdata;
+  b->cdata = tmp;
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
   // adds a __doc__ string to a function, similar to numpy's arr_add_docstring
   static std::vector<std::string> all_docs;
@@ -1086,6 +1110,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
     {"_add_docstr", THPModule_addDocStr, METH_VARARGS, nullptr},
+    {"_swap_tensor_impl", THPModule_swap_tensor_impl, METH_VARARGS, nullptr},
     {"_init_names", THPModule_initNames, METH_O, nullptr},
     {"_has_distributed", THPModule_hasDistributed, METH_NOARGS, nullptr},
     {"_set_default_tensor_type",
