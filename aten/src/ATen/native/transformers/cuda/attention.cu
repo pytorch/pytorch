@@ -789,6 +789,10 @@ _flash_attention_forward(
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).as_float_unchecked();
   c10::optional<Tensor> out = c10::nullopt;
+  // This can be used when your sequence length k is not the full extent
+  // of the tensor. This is useful for kv cache scenarios but for now
+  // we will not support in this PR.
+  c10::optional<Tensor> seqused_k = c10::nullopt;
 
   // We are going to have two paths:
   // 1. The standard MHA path for dense tensors
@@ -816,6 +820,7 @@ _flash_attention_forward(
             out,
             cumulative_sequence_length_q.value(),
             cumulative_sequence_length_k.value(),
+            seqused_k, /*seqused_k*/
             max_seqlen_batch_q,
             max_seqlen_batch_k,
             dropout_p,
