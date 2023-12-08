@@ -86,11 +86,12 @@ def list_group_batch_fusions(pre_grad=True) -> List[str]:
 def decompose_stack(graph: torch.fx.GraphModule, input_tensors: List[Any]) -> Any:
     unsqueezed_inputs = []
     for input_tensor in input_tensors:
-        unsqueezed_input = graph.call_function(aten.unsqueeze, args=(input_tensor, 0))
+        unsqueezed_input = graph.call_function(
+            aten.unsqueeze, args=(input_tensor,), kwargs={"dim": 0}
+        )
         unsqueezed_inputs.append(unsqueezed_input)
     stacked_inputs = graph.call_function(
-        aten.cat,
-        args=(unsqueezed_inputs, 0),
+        aten.cat, args=(unsqueezed_inputs,), kwargs={"dim": 0}
     )
     return stacked_inputs
 
@@ -274,6 +275,77 @@ class GroupLinearFusion(GroupFusion):
             original_mm.replace_all_uses_with(new_mm)
             new_mm.meta.update(original_mm.meta)
             graph.erase_node(original_mm)
+
+
+class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
+    """
+    Batch pointwise operator (e.g., add, mul) in post grad pass.
+    """
+
+    def __init__(self, op, **kwargs):
+        super().__init__(op, **kwargs)
+        self.op = op
+
+    def _pointwise_node_can_be_fused(self, node: torch.fx.Node):
+        # note: we only consider the case where the inputs are tensors
+        # for mixed precision training, we need to make sure the inputs
+        # of the aten.cat when do the stack should be the same dtype
+        # otherwise, the output of the aten.cat may be not the same as
+        # its inputs, and cause dtype not same error in mm or addmm
+        input, other = node.args
+        return (
+            input.meta["tensor_meta"].shape == other.meta["tensor_meta"].shape
+            if hasattr(input, "meta")
+            and hasattr(other, "meta")
+            and "tensor_meta" in input.meta
+            and "tensor_meta" in other.meta
+            else False
+        )
+
+    def match(self, node: torch.fx.Node):
+        if CallFunctionVarArgs(self.op).match(
+            node
+        ) and self._pointwise_node_can_be_fused(node):
+            alpha = node.kwargs.get("alpha", 1.0)
+            input, other = node.args
+            shape = list(input.meta["tensor_meta"].shape)
+            group_key = (
+                "batch_" + self.op.__name__.lower() + "_post_grad",
+                str(shape),
+                str(input.meta["tensor_meta"].dtype),
+                str(other.meta["tensor_meta"].dtype),
+                str(alpha),
+            )
+        else:
+            group_key = None
+        return group_key
+
+    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+        batch_inputs, batch_others = [], []
+        alpha = subset[0].kwargs.get("alpha", 1.0)
+
+        for node in subset:
+            input, other = node.args
+            batch_inputs.append(input)
+            batch_others.append(other)
+
+        with graph.inserting_before(subset[0]):
+            stack_inputs = decompose_stack(graph, batch_inputs)
+            stack_others = decompose_stack(graph, batch_others)
+
+            batch_op = graph.call_function(
+                self.op,
+                args=(stack_inputs, stack_others),
+                kwargs={"alpha": alpha} if self.op == aten.add.Tensor else {},
+            )
+            for i, original_add in enumerate(subset):
+                with graph.inserting_after(batch_op):
+                    new_add = graph.call_function(
+                        torch.ops.aten.select, args=((batch_op, 0, i))
+                    )
+                original_add.replace_all_uses_with(new_add)
+                new_add.meta.update(original_add.meta)
+                graph.erase_node(original_add)
 
 
 @register_fusion("batch_linear_lhs")
@@ -636,6 +708,18 @@ class BatchSigmoidPreGradFusion(BatchPointwiseOpsPreGradFusion):
 class BatchReLuPreGradFusion(BatchPointwiseOpsPreGradFusion):
     def __init__(self, **kwargs):
         super().__init__(torch.nn.functional.relu, **kwargs)
+
+
+@register_fusion("batch_aten_add", pre_grad=False)
+class BatchAddPostGradFusion(BatchPointwiseOpsPostGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(aten.add.Tensor, **kwargs)
+
+
+@register_fusion("batch_aten_mul", pre_grad=False)
+class BatchMulPostGradFusion(BatchPointwiseOpsPostGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(aten.mul.Tensor, **kwargs)
 
 
 def find_independent_subset_greedy(
