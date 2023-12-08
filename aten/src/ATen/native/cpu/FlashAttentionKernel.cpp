@@ -21,6 +21,8 @@ namespace at::native {
 
 namespace {
 
+// 1) out = exp(a - val)
+// 2) val = sum(out)
 template <typename scalar_t>
 inline void _exp_reduce_sum_fusion_kernel(
     scalar_t* a,
@@ -53,6 +55,7 @@ inline void _exp_reduce_sum_fusion_kernel(
   val = tmp_sum;
 }
 
+// out = a / sum
 template <typename T1, typename T2>
 inline void _normalization_kernel(
     const T1* a,
@@ -73,6 +76,8 @@ inline void _normalization_kernel(
   }
 }
 
+// 1) out = a * scale
+// 2) max = max(out)
 template <typename scalar_t>
 inline void _mul_reduce_max_fusion_kernel(
     const scalar_t* a,
