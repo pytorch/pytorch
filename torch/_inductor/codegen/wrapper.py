@@ -774,8 +774,7 @@ class WrapperCodeGen(CodeGen):
             self.writeline(f"{node.sym} = {data}.item()")
         # No one should ever use this buffer, but for uniformity
         # define the variable and assign it None
-        if not V.graph.cpp_wrapper:
-            self.writeline(f"{node.get_name()} = None")
+        self.writeline(f"{node.get_name()} = None")
 
     def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
