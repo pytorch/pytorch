@@ -1917,11 +1917,9 @@ class CppCodeCache:
     def load(cls, source_code: str) -> CDLL:
         # picked_vec_isa = pick_vec_isa()
         # cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
-        dummy_builder = CxxBuilder("i", ["o"], CxxTorchOptions())
+        # dummy_builder = CxxBuilder("i", ["o"], CxxTorchOptions())
 
-        key, input_path = write(
-            source_code, "cpp", extra=dummy_builder.get_command_line()
-        )
+        key, input_path = write(source_code, "cpp")
         if key not in cls.cache:
             from filelock import FileLock
 
@@ -1932,7 +1930,7 @@ class CppCodeCache:
 
                 print(f"{key}, {input_path}, {output_dir}")
 
-                builder = CxxBuilder(key, [input_path], CxxOptions(), output_dir)
+                builder = CxxBuilder(key, [input_path], CxxTorchOptions(), output_dir)
                 target_file = builder.get_target_file_path()
                 if not os.path.exists(target_file):
                     status, target_file = builder.build()
