@@ -561,6 +561,12 @@ class TritonOverrides(OpOverrides):
         return f"{a} // {b}"
 
     @staticmethod
+    def truediv(a, b):
+        # Giving an explicit rounding mode prevents unsafe optimizations
+        # See gh-101039
+        return f"tl.math.div_rn({a}, {b})"
+
+    @staticmethod
     def ceil(x):
         return f"tl.math.ceil({x})"
 

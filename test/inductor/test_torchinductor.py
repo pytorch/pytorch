@@ -1655,6 +1655,16 @@ class CommonTemplate:
                 ),
             )
 
+    def test_div_precision(self):
+        def forward(query, key):
+            y = torch.matmul(query, key.transpose(-2, -1))
+            z = y.div(1e-06)
+            return F.softmax(z, dim=-1)
+
+        query = torch.randn(1, 10, 40)
+        key = torch.randn(1, 2, 40)
+        self.common(forward, (query, key))
+
     def test_both_scalars(self):
         def fn(a, b):
             return (
