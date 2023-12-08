@@ -2244,8 +2244,9 @@ def forward(self, x):
             return Tensors(x=x.sin(), y=y.cos())
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "reconstruct: UserDefinedObjectVariable",
+            AssertionError,
+            "original output #1 is .*Tensors.*, "
+            "but only the following types are supported",
         ):
             torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
 

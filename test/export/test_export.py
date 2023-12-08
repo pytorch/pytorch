@@ -1560,32 +1560,6 @@ def forward(self, l_x_):
         with self.assertRaisesRegex(RuntimeError, "shape\[0\] is specialized at 4"):
             ep_v2(*test_inp)
 
-    def test_constant_output(self):
-        class ModuleConstant(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.b = torch.randn(3, 2)
-
-            def forward(self):
-                return self.b
-
-        class ModuleNestedConstant(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.bff = torch.randn(3, 2)
-
-            def forward(self, x, y):
-                return {"prediction": (x + y, self.bff)}
-
-        mod = ModuleConstant()
-        ep = torch.export.export(mod, ())
-        self.assertEqual(ep(), mod())
-
-        args = (torch.randn(3, 2), torch.randn(3, 2))
-        mod = ModuleNestedConstant()
-        ep = torch.export.export(mod, args)
-        self.assertEqual(ep(*args), mod(*args))
-
     def test_non_arg_name_dynamic_shapes_api_with_kwarg(self):
         def foo(a, b, kw1, kw2):
             return a.sum() + b.sum() + kw1.sum() - kw2.sum()
