@@ -89,7 +89,6 @@ def set_proxy_slot(obj, tracer, proxy):
         # is derivable from a primal that we use that.
         assert isinstance(obj, SymNode), type(obj)
         if obj not in tracer.symnode_tracker:
-            # breakpoint()
             tracer.symnode_tracker[obj] = proxy
 
 def has_proxy_slot(obj, tracer):
