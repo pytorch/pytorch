@@ -168,13 +168,11 @@ struct alignas(sizeof(T) * 2) complex {
   // c10::complex<double>
   template <typename U = T>
   C10_HOST_DEVICE explicit constexpr complex(
-      const std::enable_if_t<std::is_same_v<U, float>, complex<double>>&
-          other)
+      const std::enable_if_t<std::is_same_v<U, float>, complex<double>>& other)
       : real_(other.real_), imag_(other.imag_) {}
   template <typename U = T>
   C10_HOST_DEVICE constexpr complex(
-      const std::enable_if_t<std::is_same_v<U, double>, complex<float>>&
-          other)
+      const std::enable_if_t<std::is_same_v<U, double>, complex<float>>& other)
       : real_(other.real_), imag_(other.imag_) {}
 
   constexpr complex<T>& operator=(T re) {
