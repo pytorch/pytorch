@@ -8,8 +8,8 @@ from torch.distributed._tensor._utils import (
     compute_local_shape,
     compute_local_shape_and_global_offset,
 )
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import Replicate, Shard
-from torch.distributed.device_mesh import DeviceMesh
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (

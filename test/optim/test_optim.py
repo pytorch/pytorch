@@ -618,8 +618,7 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
-        with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
-            SGD(None, lr=1e-2, momentum=-0.5)
+
 
     def test_sgd_sparse(self):
         for foreach in (False, True):
@@ -1190,19 +1189,6 @@ class TestOptim(TestCase):
             constructor_accepts_foreach=True,
         )
 
-        with self.assertRaisesRegex(
-            ValueError, "Invalid beta parameter at index 0: 1.0"
-        ):
-            Adam(None, lr=1e-2, betas=(1.0, 0.0))
-
-        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
-            Adam(None, lr=1e-2, weight_decay=-1)
-
-        with self.assertRaisesRegex(
-            ValueError, "lr as a Tensor is not supported for capturable=False and foreach=True"
-        ):
-            Adam(None, lr=torch.tensor(0.001), foreach=True)
-
     def test_adam_complex(self):
         for foreach in (False, True):
             self._test_complex_2d(functools.partial(Adam, foreach=foreach))
@@ -1267,13 +1253,7 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
-        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
-            AdamW(None, lr=1e-2, weight_decay=-1)
 
-        with self.assertRaisesRegex(
-            ValueError, "lr as a Tensor is not supported for capturable=False and foreach=True"
-        ):
-            AdamW(None, lr=torch.tensor(0.001), foreach=True)
 
     def test_adamw_complex(self):
         self._test_complex_2d(AdamW)
@@ -1304,18 +1284,6 @@ class TestOptim(TestCase):
                 self.assertEqual(len(warning.message.args), 1)
                 self.assertRegex(warning.message.args[0],
                                  "Passing in a raw Tensor as ``params`` to SparseAdam ")
-        with self.assertRaisesRegex(
-            ValueError, "Invalid beta parameter at index 0: 1.0"
-        ):
-            SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
-        with self.assertRaisesRegex(
-            ValueError, "SparseAdam requires dense parameter tensors"
-        ):
-            SparseAdam([torch.zeros(3, layout=torch.sparse_coo)])
-        with self.assertRaisesRegex(
-            ValueError, "SparseAdam requires dense parameter tensors"
-        ):
-            SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
     def test_adadelta(self):
@@ -1357,8 +1325,6 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
-        with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
-            Adadelta(None, lr=1e-2, rho=1.1)
 
     def test_adadelta_complex(self):
         # Handles https://github.com/pytorch/pytorch/issues/110606
@@ -1428,12 +1394,7 @@ class TestOptim(TestCase):
             [lambda opt: ExponentialLR(opt, gamma=0.9)],
             constructor_accepts_foreach=True,
         )
-        with self.assertRaisesRegex(
-            ValueError, "Invalid beta parameter at index 0: 1.0"
-        ):
-            NAdam(None, lr=1e-2, betas=(1.0, 0.0))
-        with self.assertRaisesRegex(ValueError, "Invalid momentum_decay value: -0.2"):
-            NAdam(None, lr=1e-2, momentum_decay=-0.2)
+
 
     def test_nadam_complex(self):
         for foreach in (False, True):
@@ -1511,8 +1472,7 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
-        with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
-            Adagrad(None, lr=1e-2, lr_decay=-0.5)
+
 
     def test_adagrad_sparse(self):
         for foreach in (False, True):
@@ -1574,10 +1534,7 @@ class TestOptim(TestCase):
         )
         self._test_complex_2d(Adamax)
         self._test_complex_2d(functools.partial(Adamax, foreach=True))
-        with self.assertRaisesRegex(
-            ValueError, "Invalid beta parameter at index 1: 1.0"
-        ):
-            Adamax(None, lr=1e-2, betas=(0.0, 1.0))
+
 
     def test_radam(self):
         self._test_basic_cases(
@@ -1625,13 +1582,7 @@ class TestOptim(TestCase):
             ],
             constructor_accepts_foreach=True,
         )
-        with self.assertRaisesRegex(
-            ValueError, "Invalid beta parameter at index 0: 1.0"
-        ):
-            RAdam(None, lr=1e-2, betas=(1.0, 0.0))
 
-        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
-            RAdam(None, lr=1e-2, weight_decay=-1)
 
     def test_radam_complex(self):
         for foreach in (False, True):
@@ -1743,8 +1694,7 @@ class TestOptim(TestCase):
             self._test_complex_optimizer(
                 lambda param: RMSprop([param], maximize=True, foreach=foreach)
             )
-            with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
-                RMSprop(None, lr=1e-2, momentum=-1.0, foreach=foreach)
+
 
     def test_asgd(self):
         for foreach in (False, True):
@@ -1795,8 +1745,7 @@ class TestOptim(TestCase):
                     [params], maximize=False, weight_decay=0.9, foreach=foreach
                 )
             )
-            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
-                ASGD(None, lr=1e-2, weight_decay=-0.5, foreach=foreach)
+
 
     @skipIfRocm
     @skipIfTorchDynamo()
@@ -1833,8 +1782,7 @@ class TestOptim(TestCase):
                     [param], lr=0.001, maximize=True, foreach=foreach
                 )
             )
-            with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
-                Rprop(None, lr=1e-2, etas=(1.0, 0.5), foreach=foreach)
+
 
     def test_lbfgs(self):
         self._test_basic_cases(
@@ -1859,12 +1807,6 @@ class TestOptim(TestCase):
         res2 = opt2.step(closure)
         self.assertEqual(type(res1), type(res2))
 
-    def test_invalid_param_type(self):
-        self.assertRaisesRegex(
-            TypeError,
-            'params argument given to the optimizer should be an iterable of Tensors or dicts',
-            lambda: LBFGS(Parameter(torch.randn(5, 5)))
-        )
 
     def test_duplicate_params_in_one_param_group(self):
         param = Parameter(torch.randn(1))

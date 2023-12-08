@@ -10046,7 +10046,7 @@ class DistributedTest:
             """
             world_size = int(os.environ["WORLD_SIZE"])
 
-            from torch.distributed.device_mesh import init_device_mesh
+            from torch.distributed._device_mesh import init_device_mesh
             device_mesh = init_device_mesh("cuda", (world_size,))
 
             pg = _get_default_group()
