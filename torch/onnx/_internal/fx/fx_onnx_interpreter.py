@@ -249,8 +249,9 @@ def _fill_tensor_shape_type(
             )
             onnxscript_value.shape = torch.Size([1])
         elif isinstance(expected_value, (int, float, bool)):
-            # These are onnx constants, skip setting dtype/shape.
-            onnxscript_value.dtype = fx_type_utils.from_scalar_type_to_torch_dtype(type(expected_value))
+            onnxscript_value.dtype = fx_type_utils.from_scalar_type_to_torch_dtype(
+                type(expected_value)
+            )
             onnxscript_value.shape = torch.Size([])
         elif fx_type_utils.is_torch_complex_dtype(expected_value.dtype):
             # Like torch.view_as_real, we flatten complex tensors to real tensors with
