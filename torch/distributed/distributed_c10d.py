@@ -1056,6 +1056,7 @@ def init_process_group(
     store: Optional[Store] = None,
     group_name: str = "",
     pg_options: Optional[Any] = None,
+    device_id: Optional[torch.device] = None,
 ):
     """
     Initialize the default distributed process group.
@@ -1189,7 +1190,8 @@ def init_process_group(
             store,
             group_name,
             pg_options=pg_options,
-            timeout=timeout
+            timeout=timeout,
+            device_id=device_id,
         )
         _update_default_pg(default_pg)
 
@@ -1218,6 +1220,26 @@ def init_process_group(
             # default devices and messes up NCCL internal state.
             _store_based_barrier(rank, store, group_name, world_size, timeout)
 
+def _get_split_source(pg):
+    split_from = None
+    if pg.bound_device_id:
+        split_from = pg._get_backend(pg.bound_device_id)
+    elif pg is _world.default_pg:
+        try:
+            split_from = pg._get_backend(torch.device("cuda"))
+        except RuntimeError:
+            # no cuda device associated with this backend
+            pass
+
+    if not split_from or not split_from.supports_splitting:
+        return None
+
+    # If necessary, find a backend to split from by peeling process
+    # group wrappers from our potentially wrapped process group.
+    while isinstance(split_from, _ProcessGroupWrapper):
+        split_from = split_from.wrapped_pg
+
+    return split_from
 
 def _new_process_group_helper(
     group_size,
@@ -1228,7 +1250,8 @@ def _new_process_group_helper(
     group_name,
     pg_options=None,
     timeout=None,
-    pg_tag=None
+    pg_tag=None,
+    device_id=None,
 ):
     """
     Create a new distributed process group.
@@ -1247,6 +1270,10 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
+    if device_id is not None and (device_id.index is None or device_id.type != 'cuda'):
+        raise ValueError("init_process_group device_id parameter must be a cuda device with an "
+                         "id, e.g. cuda:0, not just cuda or cpu")
+
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
     _check_valid_timeout(timeout)
 
@@ -1260,17 +1287,41 @@ def _new_process_group_helper(
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = len(global_ranks_in_group) == 0
 
+    # nccl and potentially other backends allow creation of
+    # communicators based on pre-existing ones, which can save
+    # initialization time.  Due to lazy initialization of
+    # communicators in some backends, we have to be careful and only
+    # split when we *know* the backends already are connected _on all
+    # ranks_.  We can only know this if the group we are making is the
+    # entire world or if we have bound a device id to the world (which
+    # causes early connection initialization).
+    if (is_initialized() and
+            (len(global_ranks_in_group) == _world.default_pg.size() or _world.default_pg.bound_device_id)):
+        split_from = _get_split_source(_world.default_pg)
+    else:
+        split_from = None
+
     # If this is a subgroup (which means group_ranks is specified),
     # we check if the current process is a member of the new group.
     if not is_default_group:
         global_rank = _get_default_group().rank()
         if global_rank not in global_ranks_in_group:
+            # If we are using `ncclCommSplit` (or similar split from
+            # other APIs) to create the communicator, we will need to
+            # call `ncclCommSplit` on *all* ranks in this new group's
+            # parent group, even those not in the new group.  This is
+            # a requirement of the NCCL API as otherwise we would get
+            # out of sync.
+            if split_from:
+                split_from.perform_nocolor_split(_world.default_pg.bound_device_id)
             return GroupMember.NON_GROUP_MEMBER, None
 
     prefix_store = PrefixStore(f"{group_name}/", store)
     base_pg_options = ProcessGroup.Options(backend=str(backend))
     base_pg_options._timeout = timeout
     pg: ProcessGroup = ProcessGroup(prefix_store, group_rank, group_size, base_pg_options)
+    if device_id:
+        pg.bound_device_id = device_id
     backend_config = BackendConfig(backend)
     for device, backend_str in backend_config.get_device_backend_map().items():
         # Use the group name as prefix in the default store, such that
@@ -1315,27 +1366,9 @@ def _new_process_group_helper(
                 pg_options.is_high_priority_stream = False
             pg_options._timeout = timeout
 
-            # If our new group includes all ranks, we can reduce
-            # overhead by splitting the communicator (`nccCommSplit`).
-
-            # TODO: support this in the general case by calling
-            # `nccCommSplit` with `NCCL_SPLIT_NOCOLOR` for the ranks
-            # not in the communicator.
-            split_from = None
-            if (
-                is_initialized()
-                and _world.default_pg._get_backend_name() == Backend.NCCL
-                and len(global_ranks_in_group) == _world.default_pg.size()
-            ):
-                # If possible, find a backend to split from by peeling
-                # process group wrappers from the world's default pg.
-                split_from = _world.default_pg._get_backend(_get_pg_default_device())
-                while isinstance(split_from, _ProcessGroupWrapper):
-                    split_from = split_from.wrapped_pg
-
-                if split_from:
-                    pg_options.split_from = split_from
-                    pg_options.split_color = _process_group_color(global_ranks_in_group)
+            if split_from:
+                pg_options.split_from = split_from
+                pg_options.split_color = _process_group_color(global_ranks_in_group)
             backend_class = ProcessGroupNCCL(
                 backend_prefix_store, group_rank, group_size, pg_options)
             backend_type = ProcessGroup.BackendType.NCCL
@@ -1410,6 +1443,10 @@ def _new_process_group_helper(
             break
 
         pg._register_backend(torch.device(device), backend_type, backend_class)
+
+    if device_id and pg._get_backend(device_id).supports_splitting:
+        eager_backend = pg._get_backend(device_id)
+        eager_backend.eager_connect_single_device(device_id)
 
     # update global state
     assert group_name is not None
