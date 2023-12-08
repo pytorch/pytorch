@@ -11,7 +11,7 @@ except ImportError:
 test_classes = {}
 
 
-def mocked_non_strict_export(*args, **kwargs):
+def mocked_retraceability_export(*args, **kwargs):
     ep = export(*args, **kwargs)
     ep = export(ep, *(args[1:]), **kwargs)
     return ep
@@ -26,7 +26,7 @@ def make_dynamic_cls(cls):
         cls,
         cls_prefix,
         suffix,
-        mocked_non_strict_export,
+        mocked_retraceability_export,
         xfail_prop="_expected_failure_retrace",
     )
 
