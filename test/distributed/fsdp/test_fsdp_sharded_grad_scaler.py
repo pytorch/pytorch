@@ -246,6 +246,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         offload_policy: OffloadPolicy = OffloadPolicy(),
     ):
         torch.manual_seed(42)
+        # TODO(weifengpy): use non-MLP model?
         model = nn.Sequential(
             MLP(lin_dim, torch.device("cpu"), dim_multiplier=3),
             MLP(lin_dim, torch.device("cpu")),
