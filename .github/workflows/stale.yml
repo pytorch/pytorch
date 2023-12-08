@@ -20,7 +20,7 @@ on:
 jobs:
   stale:
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: ubuntu-latest
+    runs-on: linux.2xlarge.arc
 
     steps:
       - uses: actions/github-script@v6
