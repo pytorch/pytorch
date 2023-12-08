@@ -265,7 +265,7 @@ class TestCUSPARSELT(TestCase):
         # for cuSPARSELt v0.4.0 there is a bug where although there are 5 alg_ids, we run into an error
         # when setting using the last one (4)
         # in cuSPARSELt v0.5.0 there are only 4 alg_ids total, so we should remove the +1 here when we update.
-        assert alg_id in range(CUSPARSELT_NUM_ALG_IDS+1)
+        assert alg_id in range(CUSPARSELT_NUM_ALG_IDS + 1)
 
 
 class TestSparseSemiStructured(TestCase):
