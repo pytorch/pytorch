@@ -3289,13 +3289,17 @@ def upsample_bicubic2d_aa_vec(input, output_size, align_corners, scale_factors):
 
 
 @register_decomposition(aten.upsample_bilinear2d.vec)
+@register_decomposition(aten.upsample_trilinear3d.vec)
+@aten.upsample_linear1d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.upsample_linear1d.vec.py_impl(DispatchKey.Autograd)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
-def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
+@aten.upsample_trilinear3d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.upsample_trilinear3d.vec.py_impl(DispatchKey.Autograd)
+def _upsample_linear_vec(input, output_size, align_corners, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
-    scale_h = get_scale_value(scale_factors, 0)
-    scale_w = get_scale_value(scale_factors, 1)
-    return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)
+    scales = scale_factors if scale_factors else [None] * len(osize)
+    return _upsample_linear(input, osize, align_corners, scales)
 
 
 @register_decomposition([aten.upsample_linear1d.default, aten.upsample_linear1d.out])
@@ -3311,7 +3315,9 @@ def upsample_linear1d(
     return _upsample_linear(input, output_size, align_corners, [scales_w])
 
 
-@register_decomposition([aten.upsample_bilinear2d.default, aten.upsample_bilinear2d.out])
+@register_decomposition(
+    [aten.upsample_bilinear2d.default, aten.upsample_bilinear2d.out]
+)
 @aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 @pw_cast_for_opmath
@@ -3325,7 +3331,9 @@ def upsample_bilinear2d(
     return _upsample_linear(input, output_size, align_corners, [scales_h, scales_w])
 
 
-@register_decomposition([aten.upsample_trilinear3d.default, aten.upsample_trilinear3d.out])
+@register_decomposition(
+    [aten.upsample_trilinear3d.default, aten.upsample_trilinear3d.out]
+)
 @aten.upsample_trilinear3d.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 @pw_cast_for_opmath
