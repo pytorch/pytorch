@@ -385,64 +385,49 @@ class AutogradFunctionVariable(VariableTracker):
             # and a limited input scope confined to contexts, tensors, and constants. If the forward trace is sound,
             # we install any guards accumulated from tracing. If not, we graph break. We trace backward, and evaluate
             # for soundness, same as forward, except with more strictness. We enable a strict mode on the tx, and
-            # reject certain ops when running under this strict mode. If the backward trace is sound, we discard the
-            # trace by restarting analysis and skipping the soundness evalution on the subsequent run. Otherwise, we raise.
-
-            # if both the forward and backward traces are sound, we write the autograd function’s apply into the graph.
+            # reject certain ops when running under this strict mode. If both the forward and backward traces are sound,
+            # we write the autograd function’s apply into the graph.
 
             # For tracing forward and backward, we use UserFunctionVariable. Although it does not directly contribute
             # to soundness evaluation, it plus a  GlobalSource makes sure we can produce valid guards,
             # and that we can inline properly here. Inlining is required in order to be able to ensure that the
             # soundness evaluation works as described above.
-            speculation = tx.speculate()
 
-            if not speculation.is_sound:
-                # NOTE [speculation history]
-                # The way the speculation log is designed is that each step unconditionally
-                # appends an entry in the instruction translator. By the nature of autograd function tracing
-                # we will inevitably diverge histories. This occurs when we first trace through forward + backward
-                # appending additional speculation entries. On success, we restart analysis and the next time we reach this code
-                # we will skip the speculation step since we have verified soundness, so on subsequent instruction translator steps
-                # we will diverge histories because the instruction tranlator expects the steps that occurred from verifying
-                # soundness, erroring out.  To avoid this we disable appending to the speculation log during soundness verification.
-                with tx.speculation_log.disabled():
-                    module_source = AttrSource(
-                        tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
-                    )
-                    fwd_bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
-                        tx.output,
-                        parent=tx.output.current_tracer,
-                        source_target="autograd.Function",
-                    )
-                    higher_order_autograd_fn = TorchHigherOrderOperatorVariable.make(
-                        trampoline_autograd_fwd,
-                        source=AttrSource(module_source, "forward"),
-                        fwd_bwd_tracer=fwd_bwd_tracer,
-                    )
-                    speculated_fwd_result = higher_order_autograd_fn.call_function(
-                        tx, args, kwargs
-                    )
+            module_source = AttrSource(
+                tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
+            )
+            fwd_bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
+                tx.output,
+                parent=tx.output.current_tracer,
+                source_target="autograd.Function",
+            )
+            higher_order_autograd_fn = TorchHigherOrderOperatorVariable.make(
+                trampoline_autograd_fwd,
+                source=AttrSource(module_source, "forward"),
+                fwd_bwd_tracer=fwd_bwd_tracer,
+            )
+            speculated_fwd_result = higher_order_autograd_fn.call_function(
+                tx, args, kwargs
+            )
 
-                    if isinstance(speculated_fwd_result, variables.TupleVariable):
-                        bwd_args = [ctx, *speculated_fwd_result.items]
-                    else:
-                        bwd_args = [ctx, speculated_fwd_result]
-
-                    TorchHigherOrderOperatorVariable.make(
-                        trampoline_autograd_bwd,
-                        source=AttrSource(module_source, "backward"),
-                        fwd_bwd_tracer=fwd_bwd_tracer,
-                    ).call_function(tx, bwd_args, {})
-
-                speculation.mark_sound_and_restart_analysis()
+            if isinstance(speculated_fwd_result, variables.TupleVariable):
+                bwd_args = [ctx, *speculated_fwd_result.items]
             else:
-                # If fwd and backward are sound, we want apply in the graph.
-                # We don't want backward because we are tracing forwards.
-                args = args[1:]
-                return TorchHigherOrderOperatorVariable.make(
-                    trampoline_autograd_apply,
-                    fwd_bwd_tracer=None,
-                ).call_function(tx, args, kwargs)
+                bwd_args = [ctx, speculated_fwd_result]
+
+            TorchHigherOrderOperatorVariable.make(
+                trampoline_autograd_bwd,
+                source=AttrSource(module_source, "backward"),
+                fwd_bwd_tracer=fwd_bwd_tracer,
+            ).call_function(tx, bwd_args, {})
+
+            # If fwd and backward are sound, we want apply in the graph.
+            # We don't want backward because we are tracing forwards.
+            args = args[1:]
+            return TorchHigherOrderOperatorVariable.make(
+                trampoline_autograd_apply,
+                fwd_bwd_tracer=None,
+            ).call_function(tx, args, kwargs)
 
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), "forward")

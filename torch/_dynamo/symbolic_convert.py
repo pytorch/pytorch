@@ -169,7 +169,6 @@ class SpeculationLog:
 
     entries: List[SpeculationEntry] = dataclasses.field(default_factory=list)
     index: int = 0
-    _disabled: bool = False
 
     def restart(self):
         self.index = 0
@@ -183,10 +182,6 @@ class SpeculationLog:
         Lookup or create a SpeculationEntry() that is shared across
         RestartAnalysis calls.  Args are used only for debug checks.
         """
-        if self._disabled:
-            # This is used to disable history when verifying soundness of autograd function variable
-            # see NOTE [speculation history] for details
-            return SpeculationEntry(filename, lineno, instruction_pointer)
 
         if len(self.entries) == self.index:
             self.entries.append(SpeculationEntry(filename, lineno, instruction_pointer))
@@ -205,17 +200,6 @@ class SpeculationLog:
             """
         )
         return entry
-
-    @contextlib.contextmanager
-    def disabled(self):
-        """
-        Used to disable history tracking when verifying soundness of autograd function variable
-        """
-        self._disabled = True
-        try:
-            yield
-        finally:
-            self._disabled = False
 
 
 @functools.lru_cache(None)
