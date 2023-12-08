@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <c10/core/Allocator.h>
 
 namespace c10 {

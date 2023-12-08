@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 
 #include <c10/core/Device.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <c10/util/UniqueVoidPtr.h>
