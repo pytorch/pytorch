@@ -565,10 +565,10 @@ def _is_namedtuple_instance(tree: Any) -> bool:
 def _get_node_type(tree: Any) -> Any:
     node_type = type(tree)
     if node_type not in SUPPORTED_NODES:
-        if is_namedtuple_class(node_type):
-            return namedtuple
         if is_structseq_class(node_type):
             return structseq
+        if is_namedtuple_class(node_type):
+            return namedtuple
     return node_type
 
 
