@@ -21,6 +21,9 @@ except ModuleNotFoundError:
 
 
 import torch
+
+if torch.distributed.is_available():
+    import torch.distributed._functional_collectives_impl
 import torch._functorch.deprecated as deprecated_func
 from torch.fx._symbolic_trace import is_fx_tracing
 
@@ -246,8 +249,8 @@ def _allowed_function_ids() -> Dict[int, str]:
     _find_torch_objects(torch)
     _find_torch_objects(math)
 
-    if config.trace_distributed:
-        from torch.distributed import _functional_collectives_impl as fci
+    if config.trace_distributed and torch.distributed.is_available():
+        import torch.distributed._functional_collectives_impl as fci
 
         for f in [
             fci._all_gather_into_tensor,

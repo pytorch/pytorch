@@ -195,6 +195,7 @@ def run_functionalized_fw_and_collect_metadata(
 
         # We need inp tensor id's to be able to tell if an outputs **are** inputs.
         inp_tensor_ids = {id(inpt) for inpt in flat_f_args if isinstance(inpt, Tensor)}
+        inp_tensor_sizes = {_sizes(inpt) for inpt in flat_f_args if isinstance(inpt, Tensor)}
         # We need output tensor id's to tell if any output._base` attributes **are** other outputs.
         # (This is also a dict because we need to know that output's index, so we can regenerate
         # the alias from it).
@@ -299,6 +300,8 @@ def run_functionalized_fw_and_collect_metadata(
                 if is_cur_tensor_multi_out_view:
                     num_aliased_tensors_that_are_multi_output_views[curr_storage] += 1
                 out_storage_to_tensors[curr_storage].add(o)
+            else:
+                curr_storage = None
 
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
@@ -499,6 +502,8 @@ from a multi-output view call"
                 }
             else:
                 dynamic_dims = None
+            # output_type = OutputType.non_alias
+            print("Output type compute for:", output_type, o.size(), storage_changed, "at", f_outs_pos)
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),

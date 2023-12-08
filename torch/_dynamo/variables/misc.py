@@ -6,7 +6,7 @@ import itertools
 import operator
 import sys
 import types
-from typing import Dict, List
+from typing import cast, Dict, List
 
 import torch._C
 import torch._numpy as tnp
@@ -145,6 +145,8 @@ class SuperVariable(VariableTracker):
         ):
             from .builder import VariableBuilder
 
+            # args[0] = args[0].add_guard(GuardBuilder.CONSTANT_MATCH)
+            # install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
             key = args[0].as_python_constant()
             return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
@@ -157,7 +159,7 @@ class SuperVariable(VariableTracker):
             and self.objvar.mutable_local
         ):
             assert not kwargs and len(args) == 2
-            k = variables.ConstDictVariable.get_key(args[0])
+            k = variables.ConstDictVariable.get_key(tx, args[0])
 
             newval = dict(self.objvar.items)
             newval[k] = args[1]
@@ -940,6 +942,37 @@ class SkipFilesVariable(VariableTracker):
             return variables.functions.FunctoolsPartialVariable(
                 fn, args=rest_args, keywords=kwargs
             )
+        elif (
+            self.value is cast
+            and isinstance(args[0], variables.UserDefinedClassVariable)
+            and isinstance(args[1], variables.nn_module.FSDPManagedNNModuleVariable)
+        ):
+            new_obj = cast(args[0].value, args[1].value)
+            args[1].mutable_local = MutableLocal()
+            return tx.replace_all(
+                args[1],
+                variables.nn_module.FSDPManagedNNModuleVariable(
+                    new_obj, args[1].module_key, source=args[1].source
+                ),
+            )
+        elif (
+            self.value is cast
+            and isinstance(args[0], variables.UserDefinedClassVariable)
+            and isinstance(args[1], variables.UserDefinedObjectVariable)
+        ):
+            new_obj = cast(args[0].value, args[1].value)
+            args[1].mutable_local = MutableLocal()
+            return tx.replace_all(args[1], variables.UserDefinedObjectVariable(new_obj))
+        elif (
+            self.value is cast
+            and isinstance(args[0], variables.UserDefinedClassVariable)
+            and isinstance(args[1], variables.NNModuleVariable)
+        ):
+            new_obj = cast(args[0].value, tx.output.nn_modules[args[1].module_key])
+            args[1].mutable_local = MutableLocal()
+            return tx.replace_all(args[1], args[1])
+        elif self.value is cast:
+            unimplemented(f"Cast with {args}")
         elif self.value is itertools.repeat:
             if len(args) < 2:
                 return variables.RepeatIteratorVariable(

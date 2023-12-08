@@ -373,6 +373,23 @@ Tensor& set_(Tensor& result, Storage source) {
   return result.set_(std::move(source), 0, new_size, {});
 }
 
+bool _same_storage(at::Tensor& a, at::Tensor const& b) {
+  return a.storage().data_ptr() == b.storage().data_ptr();
+}
+
+bool _data_ptr_allocated(at::Tensor& a) {
+  return a.storage().data_ptr() > 0;
+}
+
+bool _same_storage_size(at::Tensor&a, int64_t s) {
+  return a.storage().nbytes() == s;
+}
+
+bool _storage_size_allocated(at::Tensor&a) {
+  return a.storage().nbytes() > 0;
+}
+
+
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
 Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
   checkSetStorage(result, std::move(storage), storage_offset, size, stride);
@@ -436,6 +453,7 @@ Tensor& set_tensor_(Tensor& result, const Tensor& source) {
   }
   return result;
 }
+
 
 // this needs to be split along CPU/CUDA lines because we don't have a consistent
 // way of getting the allocator to use for a device (c10::GetAllocator is not

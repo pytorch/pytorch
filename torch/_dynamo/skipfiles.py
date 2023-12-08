@@ -33,6 +33,7 @@ from typing import Optional
 import torch
 import torch._inductor.test_operators
 import torch.distributed
+import torch.distributed.utils
 import torch.utils._content_store
 from .utils import getfile
 
