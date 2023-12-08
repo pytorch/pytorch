@@ -27,10 +27,6 @@ class AdamW(Adam):
                          maximize=maximize, capturable=capturable, differentiable=differentiable,
                          fused=fused, decoupled_weight_decay=True)
 
-    def step(self, closure=None):
-        super().step(closure)
-
-
 AdamW.__doc__ = r"""Implements AdamW algorithm.
 
     .. math::
