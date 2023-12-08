@@ -401,6 +401,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return std::string(NCCL_BACKEND_NAME);
   }
 
+  bool supportsSplitting() const override {
+    return true;
+  }
+
   void startCoalescing() override;
 
   c10::intrusive_ptr<Work> endCoalescing() override;
@@ -545,6 +549,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void shutdown();
 
+  void eagerConnectSingleDevice(at::Device device) override;
+
+  void performNocolorSplit(at::Device device);
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
@@ -646,6 +654,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // might run into issues with object lifetime since the ProcessGroupNCCL
   // object might get destroyed before the WorkNCCL object.
   void ncclCommWatchdog();
+
+  // Return the CUDA device most likely associated with this backend.
+  // If we aren't bound to a specific device, there is no strict
+  // guarantee that this heuristic is the correct assignment of ranks
+  // to GPUs that Python layers use, but in practice it tends to be.
+  // Fortunately we don't rely on this for correctness of any tensor
+  // operations, just for ancillary uses like health checks and
+  // barriers.
+  at::Device guessDeviceForRank() const;
 
   // Performs a health check by initializing dummy NCCL communicators and then
   // destroying them. This will help indicate and signal any NCCL-related issues
