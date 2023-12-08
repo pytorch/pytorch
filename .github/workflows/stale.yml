@@ -13,6 +13,9 @@
 name: Close stale pull requests
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/stale.yml 
   schedule:
     # Run hourly.
     - cron: 30 * * * *
