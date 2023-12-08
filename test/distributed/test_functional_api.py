@@ -620,14 +620,14 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
                 (0, 1),
                 (1, 0)
             ],
-            group=dt.DeviceMesh(device, torch.arange(self.world_size))
+            group=dt.DeviceMesh("cuda", torch.arange(self.world_size))
         )
 
-        # rank0: [2., 3.], rank1: [2., 3.]
+        # rank0: [2., 3.], rank1: [0., 1.]
         expected = torch.arange(
             2,
             dtype=torch.float32,
-            device=device
+            device="cuda"
         ) + 2 * ((self.rank - 1 + self.world_size) % self.world_size)
         self.assertEqual(
             recv_tensor,
