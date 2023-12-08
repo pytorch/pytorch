@@ -360,6 +360,7 @@ def get_openmp_args(cpp_compiler):
     ldflags: List[str] = []
     include_dir_paths: List[str] = []
     lib_dir_paths: List[str] = []
+    libs: List[str] = []
     if _IS_MACOS:
         from torch._inductor.codecache import (
             homebrew_libomp,
@@ -381,7 +382,8 @@ def get_openmp_args(cpp_compiler):
                 warnings.warn("environment variable `OMP_PREFIX` is invalid.")
             omp_available = omp_available or valid_env
 
-        libs = [] if omp_available else ["omp"]
+        if not omp_available:
+            libs.append("omp")
 
         # prefer to use openmp from `conda install llvm-openmp`
         conda_prefix = os.getenv("CONDA_PREFIX")
@@ -395,7 +397,7 @@ def get_openmp_args(cpp_compiler):
                 if os.uname().machine == "x86_64" and os.path.exists(
                     os.path.join(conda_lib_path, "libiomp5.dylib")
                 ):
-                    libs = ["iomp5"]
+                    libs.append("iomp5")
 
         # next, try to use openmp from `brew install libomp`
         if not omp_available:
@@ -415,10 +417,15 @@ def get_openmp_args(cpp_compiler):
         libs = []
     else:
         if config.is_fbcode():
-            libs = ["omp"]
+            libs.append("omp")
         else:
-            cflags.append("fopenmp")
-            libs = ["gomp"]
+            if is_clang(cpp_compiler):
+                # TODO: fix issue, can't find omp.h
+                cflags.append("fopenmp=libiomp5")
+                libs = []
+            else:
+                cflags.append("fopenmp")
+                libs.append("gomp")
 
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs
 
@@ -559,13 +566,13 @@ class CxxBuilder:
 
         for lib_dir in BuildOption.get_libraries_dirs():
             if _IS_WINDOWS:
-                self._libraries_dirs_args += f"/LIBPATH:\"{lib_dir}\" "
+                self._libraries_dirs_args += f'/LIBPATH:"{lib_dir}" '
             else:
                 self._libraries_dirs_args += f"-L{lib_dir} "
 
         for lib in BuildOption.get_libraries():
             if _IS_WINDOWS:
-                self._libraries_args += f"\"{lib}.lib\" "
+                self._libraries_args += f'"{lib}.lib" '
             else:
                 self._libraries_args += f"-l{lib} "
 
