@@ -4309,7 +4309,7 @@ def fn():
         self.assertEqual(exp_out, opt_out)
         self.assertEqual(cnt.frame_count, exp_frame_count)
         self.assertEqual(
-            len(torch._dynamo.eval_frame.guarded_backend_cache.cached_backends),
+            len(torch._dynamo.eval_frame.cached_backends),
             exp_n_cached_backend,
         )
 
@@ -4358,10 +4358,11 @@ def fn():
         def foo(x):
             return x.sin() + x.cos()
 
-        def compile_then_check_exp(*args):
-            self._optimize_then_check_exp(*args)
-            self._optimize_then_check_exp(*args)
-            self._optimize_then_check_exp(*args)
+        def compile_then_check_exp(foo, args, cnt, eager_result, exp_frame_count):
+            for i in range(3):
+                opt_out = torch._dynamo.optimize(backend=cnt)(foo)(*args)
+                self.assertEqual(opt_out, eager_result)
+            self.assertEqual(cnt.frame_count, exp_frame_count)
             thread_success[threading.current_thread()] = True
 
         eager_record_backend = torch._dynamo.testing.EagerAndRecordGraphs()
@@ -4370,7 +4371,6 @@ def fn():
         # Test dynamo recompiles but only caches a single backend for each thread
         eager_result = foo(x)
         # cnt and None
-        exp_n_cached_backend = 2
         exp_frame_count = 1
         threads = []
         thread_success = {}
@@ -4384,7 +4384,6 @@ def fn():
                     cnt,
                     eager_result,
                     exp_frame_count,
-                    exp_n_cached_backend,
                 ),
             )
             threads.append(thread)
@@ -4393,6 +4392,12 @@ def fn():
         # Wait for all threads to finish
         for thread in threads:
             thread.join()
+
+        # Threads are sharing the backend cache. We see two cnt backends and one None backend
+        self.assertEqual(
+            len(torch._dynamo.eval_frame.cached_backends),
+            3,
+        )
 
         self.assertEqual(len(thread_success), len(threads))
 
@@ -8410,6 +8415,19 @@ def ___make_guard_fn():
 
         self.assertEqual(eager, compiled)
         self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_list_iterator_contains(self):
+        def fn(x):
+            it = iter(["my_weight", "not_my_weight"])
+            next(it)
+            if "my_weight" in it:
+                return x + 2
+            return x + 1
+
+        x = torch.zeros(3)
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+
+        self.assertEqual(fn(x), compiled_fn(x))
 
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
