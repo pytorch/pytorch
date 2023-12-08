@@ -174,7 +174,6 @@ class SpeculationLog:
         Lookup or create a SpeculationEntry() that is shared across
         RestartAnalysis calls.  Args are used only for debug checks.
         """
-
         if len(self.entries) == self.index:
             self.entries.append(SpeculationEntry(filename, lineno, instruction_pointer))
         entry = self.entries[self.index]
