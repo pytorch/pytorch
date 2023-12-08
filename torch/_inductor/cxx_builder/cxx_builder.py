@@ -412,6 +412,7 @@ def get_openmp_args(cpp_compiler):
         # msvc openmp: https://learn.microsoft.com/zh-cn/cpp/build/reference/openmp-enable-openmp-2-0-support?view=msvc-170
 
         cflags.append("openmp")
+        libs = []
     else:
         if config.is_fbcode():
             libs = ["omp"]
@@ -558,13 +559,13 @@ class CxxBuilder:
 
         for lib_dir in BuildOption.get_libraries_dirs():
             if _IS_WINDOWS:
-                self._libraries_dirs_args += f"/LIBPATH:{lib_dir} "
+                self._libraries_dirs_args += f"/LIBPATH:\"{lib_dir}\" "
             else:
                 self._libraries_dirs_args += f"-L{lib_dir} "
 
         for lib in BuildOption.get_libraries():
             if _IS_WINDOWS:
-                self._libraries_args += f"lib{lib}.lib "
+                self._libraries_args += f"\"{lib}.lib\" "
             else:
                 self._libraries_args += f"-l{lib} "
 
@@ -588,10 +589,10 @@ class CxxBuilder:
                 # https://learn.microsoft.com/en-us/cpp/build/walkthrough-compile-a-c-program-on-the-command-line?view=msvc-1704
                 # https://stackoverflow.com/a/31566153
                 cmd = (
-                    f"{compiler} {include_dirs_args} {definations_args} {cflags_args} {sources} {ldflags_args} "
-                    f"{libraries_args} {libraries_dirs_args} {passthougn_args} /LD /Fe{target_file}"
+                    f"{compiler} {include_dirs_args} {definations_args} {cflags_args} {sources} "
+                    f"{passthougn_args} /LD /Fe{target_file} /link {libraries_dirs_args} {libraries_args} {ldflags_args} "
                 )
-                cmd = cmd.replace("\\", "\\\\")
+                cmd = cmd.replace("\\", "/")
             else:
                 cmd = (
                     f"{compiler} {sources} {include_dirs_args} {definations_args} {cflags_args} {ldflags_args} "

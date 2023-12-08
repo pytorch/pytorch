@@ -1199,7 +1199,8 @@ def x86_isa_checker() -> List[str]:
 # we only cache some key isa information.
 @functools.lru_cache(None)
 def valid_vec_isa_list() -> List[VecISA]:
-    if sys.platform != "linux":
+    cur_os = sys.platform
+    if cur_os != "linux" and cur_os != "win32":
         return []
 
     if platform.machine() == "s390x":
