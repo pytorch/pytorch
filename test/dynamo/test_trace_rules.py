@@ -41,6 +41,7 @@ ignored_torch_name_rule_set = {
     "torch._C._InferenceMode",
     "torch._C._RestorePythonTLSSnapshot",
     "torch._C._SetExcludeDispatchKeyGuard",
+    "torch.ao.nn.sparse.quantized.utils.LinearBlockSparsePattern",
     "torch.autograd.anomaly_mode.detect_anomaly",
     "torch.autograd.anomaly_mode.set_detect_anomaly",
     "torch.autograd.forward_ad._set_fwd_grad_enabled",
@@ -60,7 +61,7 @@ ignored_torch_name_rule_set = {
     "torch.cuda.device",
     "torch.cuda.device_of",
     "torch.cuda.graphs.graph",
-    "torch.device",  # constant folding
+    "torch.device",  # as constant folding function
     "torch.sparse.check_sparse_tensor_invariants",
 }
 
