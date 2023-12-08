@@ -613,6 +613,9 @@ class CxxBuilder:
         )
         return command_line
 
+    def get_target_file_path(self):
+        return self._target_file
+
     def build(self) -> Tuple[int, str]:
         """
         It is must need a temperary directory to store object files in Windows.

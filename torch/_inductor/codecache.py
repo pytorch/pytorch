@@ -1906,15 +1906,29 @@ class CppCodeCache:
 
     @classmethod
     def load(cls, source_code: str) -> CDLL:
-        picked_vec_isa = pick_vec_isa()
-        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
-        key, input_path = write(source_code, "cpp", extra=cpp_command)
+        # picked_vec_isa = pick_vec_isa()
+        # cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
+        dummy_builder = CxxBuilder("i", ["o"], CxxTorchOptions())
+
+        key, input_path = write(
+            source_code, "cpp", extra=dummy_builder.get_command_line()
+        )
         if key not in cls.cache:
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
+                output_dir = os.path.dirname(input_path)
+
+                print(f"{key}, {input_path}, {output_dir}")
+
+                builder = CxxBuilder(key, [input_path], CxxOptions(), output_dir)
+                target_file = builder.get_target_file_path()
+                if not os.path.exists(target_file):
+                    status, target_file = builder.build()
+
+                """
                 output_path = input_path[:-3] + "so"
                 if not os.path.exists(output_path):
                     cmd = shlex.split(
@@ -1923,7 +1937,8 @@ class CppCodeCache:
                         )
                     )
                     compile_file(input_path, output_path, cmd)
-                cls.cache[key] = cls._load_library(output_path)
+                """
+                cls.cache[key] = cls._load_library(target_file)
                 cls.cache[key].key = key  # type: ignore[attr-defined]
 
         return cls.cache[key]
