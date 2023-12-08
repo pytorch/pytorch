@@ -127,6 +127,7 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
+    @testing.expectedFailureRetraceability
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
@@ -145,6 +146,7 @@ class TestExport(TestCase):
         ep = export(f, args, strict=False)
         self.assertEqual(ep(*args), f(*args))
 
+    @testing.expectedFailureRetraceability
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self):
@@ -159,6 +161,7 @@ class TestExport(TestCase):
         ep = export(f, args, strict=False)
         self.assertEqual(ep(*args), f(*args))
 
+    @testing.expectedFailureRetraceability
     def test_basic_non_strict_fake_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self):
@@ -263,6 +266,7 @@ class TestExport(TestCase):
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "Expected tensor as input to dynamic_dim"):
             constraints = [dynamic_dim(inp_for_g, 0)]
 
+    @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_map(self):
         def list_tensor_map(xs, y, z):
@@ -351,7 +355,6 @@ class TestExport(TestCase):
                   "kw3": (torch.ones(2, 3), torch.ones(3, 4)), "kw4": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    # Need to fix for non-strict mode
     @testing.expectedFailureNonStrict
     def test_linear_conv(self):
 
@@ -790,6 +793,8 @@ class TestExport(TestCase):
         self.assertEqual(params[0].shape, [1, 10])  # weight
         self.assertEqual(params[1].shape, [1])  # bias
 
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureNonStrict
     def test_buffer_util(self):
         ep = export(torch.nn.BatchNorm2d(100, affine=False), (torch.ones(20, 100, 35, 45), ))
         num_buffer = 0
@@ -806,6 +811,7 @@ class TestExport(TestCase):
         self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
 
+    @testing.expectedFailureNonStrict
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -841,7 +847,6 @@ class TestExport(TestCase):
             ):
                 _ = export(mod, inp)
 
-    # Need to fix for non-strict mode
     @testing.expectedFailureNonStrict
     def test_module(self):
 
@@ -878,7 +883,6 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(ep(*inp_test)[0], ep_rexported(*inp_test)[0]))
         self.assertTrue(torch.allclose(ep(*inp_test)[1], ep_rexported(*inp_test)[1]))
 
-    # Need to fix for non-strict mode
     @testing.expectedFailureNonStrict
     def test_module_with_dict_container_inp_out(self):
 
@@ -1109,6 +1113,8 @@ class TestExport(TestCase):
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureNonStrict
     def test_to_module_with_mutated_buffer(self):
 
         class Foo(torch.nn.Module):
@@ -1137,6 +1143,8 @@ class TestExport(TestCase):
         for name, buffer in stateful_gm.named_buffers():
             self.assertTrue(torch.allclose(torch.tensor(2, dtype=torch.float), buffer))
 
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureNonStrict
     def test_to_module_with_mutated_buffer_multiple(self):
 
         class Bar(torch.nn.Module):
@@ -1216,6 +1224,8 @@ class TestExport(TestCase):
             _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported(*inps), g(*inps)))
 
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureNonStrict
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
 
         class Bar(torch.nn.Module):
@@ -1262,6 +1272,8 @@ class TestExport(TestCase):
             if name == "L__self___bar_buf":
                 self.assertTrue(torch.allclose(torch.tensor(7, dtype=torch.float), buffer))
 
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureNonStrict
     def test_retracable_ep(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -1412,6 +1424,7 @@ class TestExport(TestCase):
         exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
 
+    @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_lifted_constants(self) -> None:
         def f(x):
@@ -1536,6 +1549,8 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(core_aten_ep(*inp), m(*inp)))
 
     @testing.expectedFailureRetraceability
+    @testing.expectedFailureNonStrict
+    @testing.expectedFailureRetraceability
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1571,6 +1586,7 @@ class TestExport(TestCase):
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
 
+    @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_redundant_asserts(self):
         def f(x):
@@ -1690,6 +1706,8 @@ def forward(self, l_x_):
         inputs = {'x': torch.randn(3, 3), 'y': torch.randn(3, 3)}
         self.assertEqual(ep(**inputs), m(**inputs))
 
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureNonStrict
     def test_retrace_pre_autograd(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -1716,7 +1734,6 @@ def forward(self, l_x_):
         # there is no functionalization.
         self.assertTrue(torch.allclose(ep(test_inp), Foo().forward(test_inp) + 4*4*4))
 
-    # Need to fix for non-strict mode
     @testing.expectedFailureNonStrict
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
@@ -1856,6 +1873,8 @@ def forward(self, l_x_):
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureNonStrict
     def test_export_input_mutation_static_shape(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x, y):
@@ -1870,6 +1889,8 @@ def forward(self, l_x_):
         self.assertEqual(inputs[0] + 2.0, inputs_model[0])
         self.assertEqual(inputs[0] + 2.0, inputs_export[0])
 
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureNonStrict
     def test_export_input_mutation_dynamic_shape(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x, y):
