@@ -1,4 +1,4 @@
-"""Adds docstrings to functions defined in the torch._C."""
+"""Adds docstrings to functions defined in the torch._C module."""
 
 import re
 
