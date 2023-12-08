@@ -4485,7 +4485,7 @@ Examples::
             torch.nn.functional.pad, (input,), input, pad, mode=mode, value=value)
     if not torch.jit.is_scripting():
         if torch.are_deterministic_algorithms_enabled() and input.is_cuda:
-            if len(pad) == 4 and (input.dim() == 3 or input.dim() == 4) and mode == 'replicate':
+            if mode == 'replicate':
                 # Use slow decomp whose backward will be in terms of index_put.
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
