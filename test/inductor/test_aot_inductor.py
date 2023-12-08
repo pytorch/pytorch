@@ -576,6 +576,50 @@ class AOTInductorTestsTemplate:
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, constraints=constraints)
 
+    @unittest.skipIf(
+        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        "FP8 is only supported on H100+",
+    )
+    def test_fp8(self):
+        class Model(torch.nn.Module):
+            def __init__(self, dtype):
+                super().__init__()
+                self.out_dtype = dtype
+
+            def forward(self, x, weight, bias, scale_a, scale_b):
+                weight = weight.to(torch.float8_e4m3fn)
+                output, updated_amax = torch._scaled_mm(
+                    x,
+                    weight,
+                    bias=input_bias,
+                    out_dtype=self.out_dtype,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                )
+                return output
+
+        dtype = torch.float16
+
+        a_scale = torch.Tensor([1.0]).to(device="cuda")
+        b_scale = torch.Tensor([1.0]).to(device="cuda")
+        input_bias = torch.rand(32, device="cuda", dtype=dtype)
+        weight_shape = (32, 16)
+        weight = torch.rand(*weight_shape, device="cuda", dtype=dtype).T
+        a_inverse_scale = 1 / a_scale
+        b_inverse_scale = 1 / b_scale
+
+        x_shape = (16, 16)
+        x = torch.rand(*x_shape, device="cuda", dtype=dtype).to(torch.float8_e4m3fn)
+        constraints = [
+            torch._export.dynamic_dim(x, 0) >= 1,
+            torch._export.dynamic_dim(x, 0) <= 2048,
+        ]
+        self.check_model(
+            Model(dtype),
+            (x, weight, input_bias, a_inverse_scale, b_inverse_scale),
+            constraints=constraints,
+        )
+
     def test_poi_multiple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1101,6 +1145,18 @@ class AOTInductorTestsTemplate:
         with config.patch({"profile_bandwidth": "1", "profile_bandwidth_regex": ""}):
             self.check_model(Model(), example_inputs)
 
+    def test_with_no_triton_profiler(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.permute(x, (1, 0))
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"profile_bandwidth": "1", "profile_bandwidth_regex": ""}):
+            self.check_model(Model(), example_inputs)
+
     def test_repeat_output(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1373,6 +1429,27 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), inputs)
 
+    def test_convolution(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, w, b):
+                return torch.ops.aten.convolution(x, w, b, [4], [0], [1], True, [0], 1)
+
+        example_inputs = (
+            torch.randn([2, 32, 90], device=self.device),
+            torch.randn([32, 16, 8], device=self.device),
+            torch.randn([16], device=self.device),
+        )
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "Triton",
+            }
+        ):
+            self.check_model(Model(), example_inputs)
+
     def test_zero_size_weight(self):
         class Model(torch.nn.Module):
             def __init__(self, channel, r=8):
@@ -1394,6 +1471,20 @@ class AOTInductorTestsTemplate:
 
         inputs = (torch.rand(4, 4, 4, 4, device=self.device),)
         self.check_model(Model(4), inputs)
+
+    def test_no_args(self):
+        class Model(torch.nn.Module):
+            def __init__(self, m, n):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    torch.randn(m, n),
+                )
+                self.alpha = torch.nn.Parameter(torch.randn(m, n))
+
+            def forward(self):
+                return self.weight * self.alpha
+
+        self.check_model(Model(6, 4), ())
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
@@ -1430,8 +1521,8 @@ CPU_TEST_FAILURES = {
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
     #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
-    # Need to support convolution
-    "test_missing_cubin": fail_with_and_without_stack_allocation(),
+    # FIXME: failed with Segfault while exiting the Python runtime
+    "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
     "test_multi_device": TestFailure(
         ("abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",),
@@ -1443,8 +1534,6 @@ CPU_TEST_FAILURES = {
     "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
     # the test segfaults
     "test_scatter_fallback": fail_with_and_without_stack_allocation(is_skip=True),
-    "test_sdpa": fail_with_and_without_stack_allocation(),
-    "test_sdpa_2": fail_with_and_without_stack_allocation(),
     # error: could not find s0
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -1512,8 +1601,6 @@ copy_tests(
     # test_failures, xfail by default, set is_skip=True to skip
     {
         "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
-        # Need to support convolution
-        "test_missing_cubin": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
         # There is a double-free issue which will be fixed in another PR
         "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),
