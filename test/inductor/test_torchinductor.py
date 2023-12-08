@@ -640,6 +640,20 @@ class CommonTemplate:
         _, code = run_and_get_code(fn, x, y)
         self.assertEqual(code[0].count("aten.view"), 3)
 
+    def test_add_complex3(self):
+        # fix https://github.com/pytorch/pytorch/issues/115071
+        @torch.compile
+        def fn(*args):
+            a = torch.neg(args[0])
+            b = torch.add(args[0], args[0])
+            return (a, b)
+
+        x = torch.randn(41, dtype=torch.complex64)
+        y = x.clone()
+        # should not inplace write to the input
+        fn(x)
+        self.assertEqual(x, y)
+
     def test_concat_add_inplace(self):
         def fn(x, y, z):
             return torch.cat([x, y], dim=1).add_(z)

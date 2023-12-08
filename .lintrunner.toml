@@ -878,11 +878,7 @@ exclude_patterns = [
     'test/jit/**',  # should be run through test/test_jit.py
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
     'test/fx/**',  # should be run through test/test_fx.py
-    'test/bottleneck_test/test_args.py',
-    'test/bottleneck_test/test_cuda.py',
-    'test/distributed/_shard/test_sharder.py',
-    'test/distributed/_tensor/experimental/test_tp_transform.py',
-    'test/distributed/_tensor/test_optimizers.py',
+    'test/bottleneck_test/**',  # excluded by test/run_test.py
     'test/distributed/argparse_util_test.py',
     'test/distributed/bin/test_script.py',
     'test/distributed/checkpoint/e2e/test_pipeline.py',
