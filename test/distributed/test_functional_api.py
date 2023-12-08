@@ -630,10 +630,10 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
             device="cuda"
         ) + 2 * ((self.rank - 1 + self.world_size) % self.world_size)
         self.assertEqual(
-            recv_tensor,
+            recvd_tensor,
             expected,
             msg=f"Expected {expected} on {self.rank=} "
-                f"but received {recv_tensor} instead."
+                f"but received {recvd_tensor} instead."
         )
 
 
