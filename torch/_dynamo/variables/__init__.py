@@ -55,6 +55,7 @@ from .misc import (
     NumpyVariable,
     PythonModuleVariable,
     SkipFilesVariable,
+    StringFormatVariable,
     SuperVariable,
     UnknownVariable,
 )
@@ -66,7 +67,11 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchCtxManagerClassVariable, TorchVariable
+from .torch import (
+    TorchCtxManagerClassVariable,
+    TorchInGraphFunctionVariable,
+    TorchVariable,
+)
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
@@ -108,9 +113,11 @@ __all__ = [
     "RestrictedListSubclassVariable",
     "SkipFilesVariable",
     "SliceVariable",
+    "StringFormatVariable",
     "SuperVariable",
     "TensorVariable",
     "TorchCtxManagerClassVariable",
+    "TorchInGraphFunctionVariable",
     "TorchVariable",
     "TupleVariable",
     "UnknownVariable",

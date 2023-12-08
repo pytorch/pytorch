@@ -159,6 +159,7 @@ class PT2EQATTestCase(QuantizationTestCase):
         self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
 
         if verify_convert:
+            # We don't want to impose any ordering requirements between move_exported_model_to_eval and convert_pt2e
             torch.ao.quantization.move_exported_model_to_eval(model_pt2e)
             model_pt2e = convert_pt2e(model_pt2e)
             quant_result_pt2e = model_pt2e(*example_inputs)
