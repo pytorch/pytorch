@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import (
 
 from torch.utils._triton import has_triton
 
-
+CUSPARSELT_NUM_ALG_IDS = 4
 SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG.keys()
 SEMI_STRUCTURED_SUPPORTED_BACKENDS = []
 
@@ -239,9 +239,7 @@ class TestCUSPARSELT(TestCase):
 
         assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
-    # for cslt v0.4.0, we have 5 alg_ids
-    # for cslt v0.5.0, we have 4 alg_ids
-    @parametrize("alg_id", range(5))
+    @parametrize("alg_id", range(CUSPARSELT_NUM_ALG_IDS))
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_cslt_sparse_mm_alg_id(self, device, dtype, alg_id):
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
@@ -264,7 +262,10 @@ class TestCUSPARSELT(TestCase):
 
         A_compressed = torch._cslt_compress(A)
         alg_id = torch._cslt_sparse_mm_search(A_compressed, B.t())
-        assert alg_id in range(5)
+        # for cuSPARSELt v0.4.0 there is a bug where although there are 5 alg_ids, we run into an error
+        # when setting using the last one (4)
+        # in cuSPARSELt v0.5.0 there are only 4 alg_ids total, so we should remove the +1 here when we update.
+        assert alg_id in range(CUSPARSELT_NUM_ALG_IDS+1)
 
 
 class TestSparseSemiStructured(TestCase):
