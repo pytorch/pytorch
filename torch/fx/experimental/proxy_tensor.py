@@ -89,6 +89,7 @@ def set_proxy_slot(obj, tracer, proxy):
         # is derivable from a primal that we use that.
         assert isinstance(obj, SymNode), type(obj)
         if obj not in tracer.symnode_tracker:
+            # breakpoint()
             tracer.symnode_tracker[obj] = proxy
 
 def has_proxy_slot(obj, tracer):
@@ -171,8 +172,32 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     # the proxy on the proxy slot of the object, keyed on the tracer
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
+
+
+    # reuse existing sym int if it exists instead of inserting sym_size calls,
+    # which can interfere with graph passes / pattern-matching
+    def get_existing_proxy(s_inp):
+        if isinstance(s_inp, torch.SymInt):
+            if p := tracer.symnode_tracker.get(s_inp.node, None):
+                return p
+
+            # TODO - there should be a better way of doing this !
+            # Why do we have different nodes but same expr ??
+            for key, value in tracer.symnode_tracker.items():
+                if key.expr is s_inp.node.expr:
+                    return value
+        return None
+        
     for i, s in enumerate(tensor.shape):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
+        if p := get_existing_proxy(s):
+            def proxy_func(p):
+                def func(*arg, **kwargs):
+                    return p()
+                return func
+
+            try_set_proxy_slot(s, proxy_func(p))
+        else:
+            try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
 
     for i, s in enumerate(tensor.stride()):
         try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride.int(proxy, i), x), i)
