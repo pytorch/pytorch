@@ -321,7 +321,7 @@ namespace {
         batch_sizes_sum = input_sizes[0];
         input_size = input_sizes[1];
       } else {
-        if (batch_first) {
+        if (batch_first_) {
           seq_length = input_sizes[1];
           mini_batch = input_sizes[0];
         } else {
@@ -506,9 +506,9 @@ namespace {
           &format,
 #endif
           &nb_dims,
-          filter_dim_a,
+          filter_dim_a
 #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 9000
-          stride_dim_a
+          ,stride_dim_a
 #endif
           ));
 
@@ -636,9 +636,9 @@ namespace {
                 &format,
 #endif
                 &nb_dims,
-                filter_dim_a,
+                filter_dim_a
 #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 9000
-                stride_dim_a
+                ,stride_dim_a
 #endif
                 ));
 
