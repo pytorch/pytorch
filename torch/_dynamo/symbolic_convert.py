@@ -139,7 +139,6 @@ class SpeculationEntry:
     lineno: int
     instruction_pointer: int
     failed: bool = False
-    is_sound: bool = False
     reason: Optional[GraphCompileReason] = None
 
     def fail_and_restart_analysis(self):
