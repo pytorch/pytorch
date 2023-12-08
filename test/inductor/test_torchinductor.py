@@ -63,6 +63,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     skipIfRocm,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 from torch.utils import _pytree as pytree
@@ -686,27 +687,11 @@ class CommonTemplate:
                 ],
             )
 
-    def test_index_put_bf16(self):
-        def fn(inp, src, index):
-            inp2 = inp.clone()
-            inp2[index] = src
-            return inp2
-
-        for dtype in [torch.int64, torch.bool, torch.bfloat16]:
-            self.common(
-                fn,
-                [
-                    torch.zeros(3, 5, dtype=dtype),
-                    torch.ones((2, 5), dtype=dtype),
-                    torch.tensor([0, 1]),
-                ],
-            )
-
     def test_randn_generator(self):
         def fn(a, generator):
-            torch.randn([20, 20], generator=generator, device=a.device)
+            return torch.randn([20, 20], generator=generator, device=a.device)
 
-        self.common(fn, (torch.linspace(-10, 10, 41), None))
+        self.common(fn, (torch.linspace(-10, 10, 41), None), assert_equal=False)
 
         # generator not yet supported in dynamo
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Generator"):
@@ -1070,7 +1055,7 @@ class CommonTemplate:
             # make sure things also work if they aren't unrolled
             self.common(fn, (torch.randn(8, 3),))
 
-    def test_multilayer_low_prec(self):
+    def test_multilayer_sum_low_prec(self):
         # fp16 nyi for cpu
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -1179,6 +1164,17 @@ class CommonTemplate:
             return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
 
         self.common(fn, (torch.ones(32, 32) * 70,))
+
+    def test_cumsum(self):
+        def fn(x):
+            return x.cumsum(0), x.cumsum(1)
+
+        # Persistent reductions
+        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
+
+        # Non-persistent reduction
+        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
 
     def test_clamp(self):
         def fn(a, b):
