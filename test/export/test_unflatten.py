@@ -283,11 +283,11 @@ class TestUnflatten(TestCase):
                 return a
 
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
-        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be equal to 2, but got 6"):
+        with self.assertRaisesRegex(RuntimeError, ".shape\[1\] is specialized at 3"):
             export_module(torch.randn(6, 6))
 
         unflattened = export_module.module(flat=False)
-        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be equal to 2, but got 6"):
+        with self.assertRaisesRegex(RuntimeError, ".shape\[1\] is specialized at 3"):
             unflattened(torch.randn(6, 6))
 
 
