@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import enum
 import functools
 import pprint
 import re
@@ -115,8 +114,6 @@ def default_args_generator(seed_value):
                 new_val = val + 1 * i
             elif isinstance(val, float):
                 new_val = val + 0.1 * i
-            elif isinstance(val, enum.Enum):
-                new_val = val
             else:
                 raise AssertionError("unexpected arg type")
 
@@ -208,22 +205,6 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         self._test_wrap_simple(f, default_args_generator((x,)), 2)
-
-    def test_enum_arg(self):
-        class SomeEnum(enum.Enum):
-            A = 0
-            B = 1
-
-        def g(x, val):
-            if val == SomeEnum.A:
-                return torch.sin(x)
-            return torch.cos(x)
-
-        def f(x, val):
-            return wrap(g, x, val)
-
-        x = torch.randn(3)
-        self._test_wrap_simple(f, default_args_generator((x, SomeEnum.A)), 2)
 
     def test_return_captured_var(self):
         freevar = torch.randn(3)
@@ -426,7 +407,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.tensor(1.2)
         y = MyClass(torch.tensor(3.4))
-        self._test_wrap_simple(f, [(x, y)], 3)
+        self._assert_wrap_fallback(f, (x, y))
 
     def test_capture_constants(self):
         x = torch.randn(3, 3)
@@ -2709,7 +2690,7 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {".*torch.func.grad with body that accepts non-Tensors as input": 2},
+            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
         )
         self.assertEqual(actual, expected)
 
@@ -3244,7 +3225,7 @@ class GraphModule(torch.nn.Module):
             self,
             dict(counters["graph_break"]),
             {
-                ".*torch.vmap with body that accepts non-Tensors as input": 2,
+                ".*HigherOrderOperator with body that accepts non-Tensors as input": 2,
                 "Unsupported: meta converter nyi with fake tensor propagation.": 1,
             },
         )

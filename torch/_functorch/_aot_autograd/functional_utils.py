@@ -313,7 +313,9 @@ def was_tensor_metadata_updated(arg, new_arg):
 
 
 # Returns the number of detected copy_
-def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
+def assert_functional_graph(
+    fx_g: torch.fx.Graph, *, allow_input_mutations: bool = False
+) -> int:
     placeholders = set()
     copy_count = 0
     # NB: It would also be nice to verify that the mutations all happen at the
@@ -323,7 +325,7 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
         if n.op == "placeholder":
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
-            if n.target is torch.ops.aten.copy_.default:
+            if n.target is torch.ops.aten.copy_.default and allow_input_mutations:
                 suffix = True
                 # Can only copy_ into an input, and can only do so once
                 assert n.args[0] in placeholders

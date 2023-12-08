@@ -389,7 +389,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return self.elem.tolist()
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+    def __tensor_unflatten__(inner_tensors, meta):
         assert meta is None
         elem = inner_tensors["elem"]
         return AsyncCollectiveTensor(elem)

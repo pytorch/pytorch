@@ -129,12 +129,7 @@ class PostGradBatchLinearFusion(BatchFusion):
         )
 
     def _is_input_2d(self, input: torch.fx.Node) -> bool:
-        input_shapes = input.meta["tensor_meta"].shape
-        return (
-            len(input_shapes) == 2
-            and isinstance(input_shapes[0], int)
-            and isinstance(input_shapes[1], int)
-        )
+        return len(input.meta["tensor_meta"].shape) == 2
 
     def match(self, node: torch.fx.Node) -> Optional[Tuple[str, int, int, int, bool]]:
         if CallFunctionVarArgs(aten.mm).match(node):
@@ -710,7 +705,8 @@ def get_fusion_candidates(
             continue
 
         key = rule.match(node)
-        if key is not None:
+        # SymInt is not hashable, so we need to skip it
+        if key is not None and not isinstance(key, torch.SymInt):
             candidate_nodes = candidate_dict[key]
             if node not in candidate_nodes:
                 candidate_nodes.append(node)
