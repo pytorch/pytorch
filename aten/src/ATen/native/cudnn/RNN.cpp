@@ -1310,7 +1310,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           reserve.mutable_data_ptr(), reserve.size(0)
           ));
 #else
-
+    AT_CUDNN_CHECK(cudnnRNNForward(
+          handle,
+          descs.rnn_desc.desc(),
+          CUDNN_FWD_MODE_TRAINING,
+          nullptr,
+          x_descs_arr.desc(), x.data_ptr(),
+          y_descs_arr.desc(), y.data_ptr(),
+          descs.hx_desc.desc(), hx.data_ptr(), hy.data_ptr(),
+          descs.cx_desc.desc(), cx.defined() ? cx.data_ptr() : nullptr, cy.defined() ? cy.data_ptr() : nullptr,
+          weight_buf.numel() * weight_buf.element_size(), weight_buf.data_ptr(),
+          workspace.size(0), workspace.data_ptr(),
+          reserve.size(0), reserve.mutable_data_ptr()));
 #endif
   } else { // inference
     workspace = at::empty(workspace_size, input.options().dtype(kByte));
@@ -1340,6 +1351,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           workspace.data_ptr(), workspace.size(0)
           ));
 #else
+    AT_CUDNN_CHECK(cudnnRNNForward(
+          handle,
+          descs.rnn_desc.desc(),
+          CUDNN_FWD_MODE_INFERENCE,
+          nullptr,
+          x_descs_arr.desc(), x.data_ptr(),
+          y_descs_arr.desc(), y.data_ptr(),
+          descs.hx_desc.desc(), hx.data_ptr(), hy.data_ptr(),
+          descs.cx_desc.desc(), cx.defined() ? cx.data_ptr() : nullptr, cy.defined() ? cy.data_ptr() : nullptr,
+          weight_buf.numel() * weight_buf.element_size(), weight_buf.data_ptr(),
+          workspace.size(0), workspace.data_ptr(),
+          reserve.size(0), reserve.mutable_data_ptr()));
 #endif
   }
 
@@ -1478,6 +1501,22 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
         fn_reserve.data_ptr(), fn_reserve.size(0)
         ));
 #else
+  AT_CUDNN_CHECK(cudnnRNNBackwardData_v8(
+        handle,
+        descs.rnn_desc.desc(),
+        nullptr,
+        y_descs_arr.desc(), y.data_ptr(),
+        dy.data_ptr(),
+        x_descs_arr.desc(), dx.data_ptr(),
+        descs.hx_desc.desc(), hx.data_ptr(),
+        dhy.data_ptr(),
+        dhx.data_ptr(),
+        descs.cx_desc.desc(), cx.defined() ? cx.data_ptr() : nullptr,
+        cx.defined() ? dcy.data_ptr() : nullptr,
+        cx.defined() ? dcx.data_ptr() : nullptr,
+        weight_buf.numel() * weight_buf.element_size(), weight_buf.data_ptr(),
+        workspace.size(0), workspace.data_ptr(),
+        fn_reserve.size(0), fn_reserve.data_ptr()));
 #endif
   if (batch_first && !is_input_packed) {
     dx = dx.transpose_(0, 1);
@@ -1589,6 +1628,17 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
         fn_reserve.data_ptr(), fn_reserve.size(0)
         ));
 #else
+  AT_CUDNN_CHECK(cudnnRNNBackwardWeights_v8(
+        handle,
+        descs.rnn_desc.desc(),
+        CUDNN_WGRAD_MODE_ADD,
+        nullptr,
+        x_descs_arr.desc(), x.data_ptr(),
+        descs.hx_desc.desc(), hx.data_ptr(),
+        y_descs_arr.desc(), y.data_ptr(),
+        weight_buf.numel() * weight_buf.element_size(), weight_buf.data_ptr(),
+        workspace.size(0), workspace.data_ptr(),
+        fn_reserve.size(0), fn_reserve.data_ptr()));
 #endif
 
 
