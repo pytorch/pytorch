@@ -381,12 +381,17 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->materialize_non_diff_grads);
   args.collect(f->output_info);
   args.collect(f->input_info);
-  args.add_backward(c10::SafePyObject(obj, getPyInterpreter()));
-  // THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
+  // args.add_backward(c10::SafePyObject(obj, getPyInterpreter()));
+  static PyObject* forward_cls_name =
+      PyUnicode_InternFromString("_forward_cls");
+  PyObject* forward_cls(PyObject_GetAttr(obj, forward_cls_name));
+  static PyObject* backward_name =
+      PyUnicode_InternFromString("backward");
+  PyObject* backward(PyObject_GetAttr(forward_cls, backward_name));
 
   // std::cout << "Type of obj: " << ((PyTypeObject*)PyObject_Type(obj))->tp_name << std::endl;
 
-  // args.add_backward(c10::SafePyObject(apply_fn, getPyInterpreter()));
+  args.add_backward(c10::SafePyObject(backward, getPyInterpreter()));
   // PyObject* saved_variables = unpack_saved_variables(
   //       f, [](const Variable& var) { return THPVariable_Wrap(var); });
   // args.add_backward(c10::SafePyObject(saved_variables, getPyInterpreter()));

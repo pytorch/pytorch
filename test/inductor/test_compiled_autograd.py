@@ -23,11 +23,9 @@ def compiler_fn(gm):
 
     def inner_compiler(gm_, example_inputs_):
         counters["compiled_autograd"]["compiles"] += 1
-        import pdb
-        pdb.set_trace()
         return inductor.compile(gm_, example_inputs_)
 
-    return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+    return torch.compile(gm, backend="eager", fullgraph=True, dynamic=True)
 
 
 # TODO(jansel): hooks as lambdas creates recompiles in dynamo, we should fix that
@@ -82,6 +80,7 @@ class TestCompiledAutograd(TestCase):
                 print("PYTHON RUNNING BACKWARD")
                 out.sum().backward()#retain_graph=True)
                 print("PYTHON DONE BACKWARD")
+                breakpoint()
                 yield x.grad
 
         self.check_output_and_recompiles(fn, 1)

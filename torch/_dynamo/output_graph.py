@@ -1112,8 +1112,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
-        import pdb
-        pdb.set_trace()
         assert self.compiler_fn is not None
         tot = 0
         placeholders = []

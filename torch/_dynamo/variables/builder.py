@@ -749,9 +749,11 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif isinstance(value, types.MethodType) and isinstance(
-            value.__self__, torch.nn.Module
-        ):
+        elif isinstance(value, types.MethodType):
+            breakpoint()
+        #      and isinstance(
+        #     value.__self__, torch.nn.Module
+        # ):
             # don't let MethodTypes fall through to UserDefinedObject,
             # which doesn't support 'CALL_FUNCTION'
 
