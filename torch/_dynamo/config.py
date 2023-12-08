@@ -325,7 +325,7 @@ only_allow_pt2_compliant_ops = False
 capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
-capture_func_transforms = True
+capture_func_transforms = False
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
@@ -349,7 +349,7 @@ _autograd_backward_strict_mode_banned_ops.extend(
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
 
 if TYPE_CHECKING:
-    from .config_typing import *  # noqa: F401, F403
+    from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
 

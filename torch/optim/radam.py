@@ -65,7 +65,7 @@ class RAdam(Optimizer):
         )
         if not step_is_tensor:
             for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]))
+                s["step"] = torch.tensor(float(s["step"]), dtype=torch.float32)
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, state_steps):
         has_complex = False
@@ -80,7 +80,7 @@ class RAdam(Optimizer):
                 state = self.state[p]
                 # Lazy state initialization
                 if len(state) == 0:
-                    state["step"] = torch.tensor(0.0)
+                    state["step"] = torch.tensor(0.0, dtype=torch.float32)
                     # Exponential moving average of gradient values
                     state["exp_avg"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
