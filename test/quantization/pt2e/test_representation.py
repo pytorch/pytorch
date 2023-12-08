@@ -93,8 +93,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
                 return self.linear(x)
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=False)
-        quantizer.set_global(operator_config)
+        quantizer.set_global_config(is_per_channel=False)
         example_inputs = (torch.randn(2, 5),)
 
         self._test_representation(
@@ -115,10 +114,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
                 return self.linear(x)
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(
-            is_per_channel=False, is_dynamic=True
-        )
-        quantizer.set_global(operator_config)
+        quantizer.set_global_config(is_per_channel=False, is_dynamic=True)
         example_inputs = (torch.randn(2, 5),)
 
         self._test_representation(
@@ -140,8 +136,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
                 return self.conv2d(x)
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=False)
-        quantizer.set_global(operator_config)
+        quantizer.set_global_config(is_per_channel=False)
         example_inputs = (torch.randn(1, 3, 3, 3),)
 
         self._test_representation(
@@ -161,8 +156,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
                 return x + y
 
         quantizer = XNNPACKQuantizer()
-        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(quantization_config)
+        quantizer.set_global_config(is_per_channel=True)
         m_eager = M().eval()
 
         example_inputs = (
@@ -189,8 +183,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
                 return out
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantizer.set_global_config(is_per_channel=True)
 
         example_inputs = (
             torch.randn(1, 3, 3, 3),
@@ -210,8 +203,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
 
     def test_maxpool2d(self):
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantizer.set_global_config(is_per_channel=True)
         m_eager = TestHelperModules.ConvMaxPool2d().eval()
 
         example_inputs = (torch.randn(1, 2, 2, 2),)
@@ -237,8 +229,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
 
         quantizer = XNNPACKQuantizer()
         # use per channel quantization for weight
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantizer.set_global_config(is_per_channel=True)
         m_eager = M().eval()
 
         inputs = [
@@ -286,8 +277,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
                 return x + y
 
         quantizer = XNNPACKQuantizer()
-        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(quantization_config)
+        quantizer.set_global_config(is_per_channel=True)
         m_eager = M().eval()
 
         example_inputs = (

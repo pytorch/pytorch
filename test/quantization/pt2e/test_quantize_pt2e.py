@@ -166,8 +166,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
                 return self.linear(x)
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=is_per_channel)
-        quantizer.set_global(operator_config)
+        quantizer.set_global_config(is_per_channel)
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
         return self._quantize(m, quantizer, example_inputs)
@@ -1239,10 +1238,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 return self.linear(x) + t
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=False)
         # only quantize linear, so add is not quantized and the constant Tensor
         # should not be folded
-        quantizer.set_module_type(torch.nn.Linear, operator_config)
+        quantizer.set_module_type_config(torch.nn.Linear, is_per_channel=False)
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
         m = self._quantize(m, quantizer, example_inputs)
@@ -1272,8 +1270,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 return torch.nn.functional.linear(x, t)
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=False)
-        quantizer.set_global(operator_config)
+        quantizer.set_global_config(is_per_channel=False)
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
         m = self._quantize(m, quantizer, example_inputs)
@@ -1297,8 +1294,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 return self.linear(x)
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config()
-        quantizer.set_global(operator_config)
+        quantizer.set_global_config(is_per_channel=False)
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
         m = capture_pre_autograd_graph(
@@ -1349,8 +1345,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 pass
 
         quantizer = XNNPACKQuantizer()
-        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(quantization_config)
+        quantizer.set_global_config(is_per_channel=True)
         bad_quantizer = BadQuantizer()
         composable_quantizer = ComposableQuantizer([quantizer, bad_quantizer])
         m_eager = TestHelperModules.ConvLinearWPermute().eval()
@@ -1462,13 +1457,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_composable_quantizer_linear_conv(self):
         dynamic_quantizer = XNNPACKQuantizer()
-        quantization_config_dynamic = get_symmetric_quantization_config(
-            is_per_channel=False, is_dynamic=True
-        )
-        dynamic_quantizer.set_global(quantization_config_dynamic)
+        dynamic_quantizer.set_global_config(is_per_channel=False, is_dynamic=True)
         static_quantizer = XNNPACKQuantizer()
-        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
-        static_quantizer.set_global(quantization_config)
+        static_quantizer.set_global_config(is_per_channel=True, is_dynamic=False)
         # Note that dynamic quantization must be applied first here.
         # this is because static quantizer also quantizes linear with static qspec
         # and if we apply static_quantizer first then dynamic_quantizer cannot be applied
@@ -1561,13 +1552,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         embedding_quantizer = EmbeddingQuantizer()
         dynamic_quantizer = XNNPACKQuantizer()
-        quantization_config_dynamic = get_symmetric_quantization_config(
-            is_per_channel=True, is_dynamic=True
-        )
-        dynamic_quantizer.set_global(quantization_config_dynamic)
+        dynamic_quantizer.set_global_config(is_per_channel=True, is_dynamic=True)
         static_quantizer = XNNPACKQuantizer()
-        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
-        static_quantizer.set_global(quantization_config)
+        static_quantizer.set_global_config(is_per_channel=True, is_dynamic=False)
         composed_quantizer = ComposableQuantizer(
             [embedding_quantizer, dynamic_quantizer, static_quantizer]
         )
@@ -1723,13 +1710,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = TestHelperModules.ConvBnReLU2dAndLinearReLU()
         example_inputs = (torch.randn(3, 3, 10, 10),)
 
-        quantizer = XNNPACKQuantizer().set_global(get_symmetric_quantization_config(is_per_channel=True, is_qat=True))
+        quantizer = XNNPACKQuantizer(is_qat=True).set_global_config(is_per_channel=True)
         m.conv_bn_relu = capture_pre_autograd_graph(m.conv_bn_relu, example_inputs)
         m.conv_bn_relu = prepare_qat_pt2e(m.conv_bn_relu, quantizer)
         m(*example_inputs)
         m.conv_bn_relu = convert_pt2e(m.conv_bn_relu, fold_quantize=True)
 
-        quantizer = XNNPACKQuantizer().set_module_type(torch.nn.Linear, get_symmetric_quantization_config(is_per_channel=False))
+        quantizer = XNNPACKQuantizer(is_qat=False).set_module_type_config(torch.nn.Linear, is_per_channel=False)
         m = capture_pre_autograd_graph(m, example_inputs)
         m = prepare_pt2e(m, quantizer)
         m = convert_pt2e(m, fold_quantize=True)
@@ -1756,8 +1743,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_groupwise_per_channel_quant(self):
         m = TestHelperModules.GroupwiseConv2d()
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
+        quantizer.set_global_config(is_per_channel=True)
         example_inputs = m.example_inputs()
         m = self._quantize(m, quantizer, example_inputs)
         # make sure it runs

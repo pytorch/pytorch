@@ -6,13 +6,16 @@ from typing import Callable, Dict, List, NamedTuple, Optional
 import torch
 import torch.nn.functional as F
 from torch._subclasses import FakeTensor
+from torch.ao.quantization.fake_quantize import FakeQuantizeBase
 from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
+from torch.ao.quantization.observer import _PartialWrapper
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization.pt2e.utils import (
     _conv1d_bn_example_inputs,
     _conv2d_bn_example_inputs,
     get_aten_graph_module,
 )
+from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
@@ -51,8 +54,6 @@ class QuantizationConfig:
     output_activation: Optional[QuantizationSpec]
     weight: Optional[QuantizationSpec]
     bias: Optional[QuantizationSpec]
-    # TODO: remove, since we can use observer_or_fake_quant_ctr to express this
-    is_qat: bool = False
 
 
 OperatorPatternType = List[Callable]
@@ -90,6 +91,27 @@ class OperatorConfig(NamedTuple):
     config: QuantizationConfig
     operators: List[OperatorPatternType]
 
+
+def _quantization_config_is_qat(quantization_config: QuantizationConfig) -> bool:
+    """
+    Return whether the `QuantizationConfig` uses FakeQuantizes for all activations,
+    weight, and bias.
+    """
+
+    def _ctr_is_fq(ctr: _ObserverOrFakeQuantizeConstructor) -> bool:
+        if isinstance(ctr, _PartialWrapper):
+            ctr = ctr.p.func  # type: ignore[union-attr, assignment]
+        return issubclass(ctr, FakeQuantizeBase)
+
+    for qspec in [
+        quantization_config.input_activation,
+        quantization_config.output_activation,
+        quantization_config.weight,
+        quantization_config.bias,
+    ]:
+        if qspec is not None and not _ctr_is_fq(qspec.observer_or_fake_quant_ctr):
+            return False
+    return True
 
 def _is_annotated(nodes: List[Node]):
     """

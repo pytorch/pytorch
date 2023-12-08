@@ -24,6 +24,7 @@ from torch.ao.quantization.quantizer.quantizer import (
 )
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     _is_annotated,
+    _quantization_config_is_qat,
     get_bias_qspec,
     get_input_act_qspec,
     get_output_act_qspec,
@@ -211,7 +212,6 @@ def get_default_x86_inductor_quantization_config(is_qat: bool = False):
         act_quantization_spec,
         weight_quantization_spec,
         bias_quantization_spec,
-        is_qat,
     )
     return quantization_config
 
@@ -390,7 +390,7 @@ class X86InductorQuantizer(Quantizer):
         config = self.global_config
 
         # Step1: Recipe of fusion patterns like conv/linear.
-        if config.is_qat:
+        if _quantization_config_is_qat(config):
             # Annotate QAT specific pattern: mainly due to BN not folded in prepare_qat
             self._annotate_qat_conv2d_fusion_pattern(model, config)
 

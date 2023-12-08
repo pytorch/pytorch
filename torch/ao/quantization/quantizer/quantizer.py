@@ -157,6 +157,10 @@ class QuantizationAnnotation:
 
 
 class Quantizer(ABC):
+    @abstractmethod
+    def __init__(self, is_qat: bool = False):
+        self._is_qat = is_qat
+
     def transform_for_annotation(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
@@ -181,3 +185,7 @@ class Quantizer(ABC):
     @abstractmethod
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass
+
+    @property
+    def is_qat(self) -> bool:
+        return self._is_qat

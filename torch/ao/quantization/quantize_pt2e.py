@@ -97,6 +97,8 @@ def prepare_pt2e(
         # calibrate(m, sample_inference_data)
     """
     torch._C._log_api_usage_once("quantization_api.quantize_pt2e.prepare_pt2e")
+    if quantizer.is_qat:
+        raise ValueError("Quantizer must be initialized with is_qat=False")
     original_graph_meta = model.meta
     node_name_to_scope = _get_node_name_to_scope(model)
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
@@ -169,6 +171,9 @@ def prepare_qat_pt2e(
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize_pt2e.prepare_qat_pt2e")
+    # TODO: unify with prepare_pt2e and just branch QAT logic based on quantizer.is_qat
+    if not quantizer.is_qat:
+        raise ValueError("Quantizer must be initialized with is_qat=True")
     original_graph_meta = model.meta
     node_name_to_scope = _get_node_name_to_scope(model)
     quantizer.transform_for_annotation(model)

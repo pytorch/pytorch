@@ -27,6 +27,7 @@ from torch.ao.quantization.quantizer import QuantizationSpec, Quantizer
 
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     _convert_scalars_to_attrs,
+    _quantization_config_is_qat,
     OP_TO_ANNOTATOR,
     OperatorConfig,
     OperatorPatternType,
@@ -170,7 +171,6 @@ def get_symmetric_quantization_config(
             None,
             weight_quantization_spec,
             bias_quantization_spec,
-            is_qat,
         )
     else:
         quantization_config = QuantizationConfig(
@@ -178,7 +178,6 @@ def get_symmetric_quantization_config(
             act_quantization_spec,
             weight_quantization_spec,
             bias_quantization_spec,
-            is_qat,
         )
     return quantization_config
 
@@ -279,8 +278,8 @@ class XNNPACKQuantizer(Quantizer):
         "linear",
     ]
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, is_qat: bool = False):
+        super().__init__(is_qat)
         self.global_config: Optional[QuantizationConfig] = None
         self.operator_type_config: Dict[
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
@@ -315,30 +314,51 @@ class XNNPACKQuantizer(Quantizer):
                 return ops
         return []
 
-    def set_global(self, quantization_config: QuantizationConfig) -> XNNPACKQuantizer:
-        self.global_config = quantization_config
+    def set_global_config(self, is_per_channel: bool, is_dynamic: bool = False) -> XNNPACKQuantizer:
+        self.global_config = get_symmetric_quantization_config(
+            is_per_channel=is_per_channel,
+            is_qat=self.is_qat,
+            is_dynamic=is_dynamic,
+        )
         return self
 
-    def set_operator_type(
+    def set_operator_type_config(
         self,
         operator_type: torch._ops.OpOverloadPacket,
-        quantization_config: QuantizationConfig,
+        is_per_channel: bool,
+        is_dynamic: bool = False,
     ) -> XNNPACKQuantizer:
-        self.operator_type_config[operator_type] = quantization_config
+        self._verify_quantization_config(quantization_config)
+        self.operator_type_config[operator_type] = get_symmetric_quantization_config(
+            is_per_channel=is_per_channel,
+            is_qat=self.is_qat,
+            is_dynamic=is_dynamic,
+        )
         return self
 
-    def set_module_type(
-        self, module_type: Callable, quantization_config: QuantizationConfig
+    def set_module_type_config(
+        self,
+        module_type: Callable,
+        is_per_channel: bool,
+        is_dynamic: bool = False,
     ):
         """Set quantization_config for a submodule with type: `module_type`, for example:
         quantizer.set_module_name(Sub) or quantizer.set_module_name(nn.Linear), it will quantize all supported operator/operator
         patterns in the submodule with this module type with the given `quantization_config`
         """
-        self.module_type_config[module_type] = quantization_config
+        self._verify_quantization_config(quantization_config)
+        self.module_type_config[module_type] = get_symmetric_quantization_config(
+            is_per_channel=is_per_channel,
+            is_qat=self.is_qat,
+            is_dynamic=is_dynamic,
+        )
         return self
 
-    def set_module_name(
-        self, module_name: str, quantization_config: Optional[QuantizationConfig]
+    def set_module_name_config(
+        self,
+        module_name: str,
+        is_per_channel: bool,
+        is_dynamic: bool = False,
     ):
         """Set quantization_config for a submodule with name: `module_name`, for example:
         quantizer.set_module_name("blocks.sub"), it will quantize all supported operator/operator
@@ -347,7 +367,12 @@ class XNNPACKQuantizer(Quantizer):
         assert (
             quantization_config is not None
         ), " quantization_config == None is not supported yet"
-        self.module_name_config[module_name] = quantization_config
+        self._verify_quantization_config(quantization_config)
+        self.module_name_config[module_name] = get_symmetric_quantization_config(
+            is_per_channel=is_per_channel,
+            is_qat=self.is_qat,
+            is_dynamic=is_dynamic,
+        )
         return self
 
     def transform_for_annotation(
@@ -376,7 +401,7 @@ class XNNPACKQuantizer(Quantizer):
         if quantization_config is None:
             return model
 
-        if quantization_config.is_qat:
+        if _quantization_config_is_qat(quantization_config):
             for op in self.STATIC_QAT_ONLY_OPS:
                 OP_TO_ANNOTATOR[op](model, quantization_config, filter_fn)
         for op in self.STATIC_OPS:

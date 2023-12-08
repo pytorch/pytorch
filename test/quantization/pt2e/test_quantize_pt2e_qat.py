@@ -128,12 +128,8 @@ class PT2EQATTestCase(QuantizationTestCase):
         # PT2 export
 
         model_pt2e = copy.deepcopy(model)
-        quantizer = XNNPACKQuantizer()
-        quantizer.set_global(
-            get_symmetric_quantization_config(
-                is_per_channel=is_per_channel, is_qat=True
-            )
-        )
+        quantizer = XNNPACKQuantizer(is_qat=True)
+        quantizer.set_global_config(is_per_channel)
         model_pt2e = capture_pre_autograd_graph(
             model_pt2e,
             example_inputs,
@@ -215,10 +211,8 @@ class PT2EQATTestCase(QuantizationTestCase):
         # TODO: also verify that metadata is copied over to the new nodes.
         """
         m = copy.deepcopy(m)
-        quantizer = XNNPACKQuantizer()
-        quantizer.set_global(
-            get_symmetric_quantization_config(is_per_channel, is_qat=True)
-        )
+        quantizer = XNNPACKQuantizer(is_qat=True)
+        quantizer.set_global_config(is_per_channel)
         m = capture_pre_autograd_graph(
             m,
             example_inputs,
@@ -560,10 +554,8 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         (_, original_conv_bn_getitem_node) = _get_getitem_nodes(m)
 
         # Prepare QAT
-        quantizer = XNNPACKQuantizer()
-        quantizer.set_global(
-            get_symmetric_quantization_config(is_per_channel=False, is_qat=True)
-        )
+        quantizer = XNNPACKQuantizer(is_qat=True)
+        quantizer.set_global_config(is_per_channel=False)
         m = prepare_qat_pt2e(m, quantizer)
         (unrelated_getitem_node, conv_bn_getitem_node) = _get_getitem_nodes(m)
 
@@ -626,8 +618,8 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         # QAT prepare + convert
         backbone = self._get_conv_bn_model(has_relu=True)
         m = M(self.conv_class, self.bn_class, backbone)
-        quantizer = XNNPACKQuantizer()
-        quantizer.set_global(get_symmetric_quantization_config(is_qat=True))
+        quantizer = XNNPACKQuantizer(is_qat=True)
+        quantizer.set_global_config(is_per_channel=False)
         m = capture_pre_autograd_graph(m, example_inputs)
         m = prepare_qat_pt2e(m, quantizer)
         m(*example_inputs)
@@ -961,11 +953,8 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
 
                 example_input = (torch.rand((1, in_channels)),)
                 traced_child = capture_pre_autograd_graph(child, example_input)
-                quantizer = XNNPACKQuantizer()
-                quantization_config = get_symmetric_quantization_config(
-                    is_per_channel=True, is_qat=True
-                )
-                quantizer.set_global(quantization_config)
+                quantizer = XNNPACKQuantizer(is_qat=True)
+                quantizer.set_global_config(is_per_channel=True)
                 traced_child_prepared = prepare_qat_pt2e(traced_child, quantizer)
                 setattr(model, name, traced_child_prepared)
             else:
@@ -996,10 +985,9 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
             example_inputs,
         )
 
-        quantizer = XNNPACKQuantizer()
-        quantizer.set_module_type(torch.nn.Linear, None)
-        quantization_config = get_symmetric_quantization_config()
-        quantizer.set_global(quantization_config)
+        quantizer = XNNPACKQuantizer(is_qat=True)
+        quantizer.module_type_config[torch.nn.Linear] = None
+        quantizer.set_global_config(is_per_channel=False)
         model_pt2e = prepare_pt2e(model_pt2e, quantizer)
         after_prepare_result_pt2e = model_pt2e(*example_inputs)
         model_pt2e = convert_pt2e(model_pt2e)
