@@ -709,15 +709,17 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
-  dumpOnTimeout_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, true);
+  dumpOnTimeout_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
+      (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, false));
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
-  ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 20000);
+  ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
+      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
+      ncclTraceBufferSize_ > 0);
 #endif
   avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
@@ -1321,16 +1323,23 @@ void ProcessGroupNCCL::workCleanupLoop() {
     // we haven't polled for `heartbeat_timeout` seconds and there haven't
     // any work added or removed for `watchdog_timeout` seconds.
     if (dumpOnTimeout_) {
-      auto currentTimepoint = std::chrono::steady_clock::now();
-      if (std::chrono::duration_cast<std::chrono::milliseconds>(
-              currentTimepoint - lastWorkListUpdateTime_) >=
-              std::chrono::milliseconds(kWatchdogThreadSleepMillis) &&
-          std::chrono::duration_cast<std::chrono::seconds>(
-              currentTimepoint - lastTimePollStore) >=
-              std::chrono::seconds(heartbeatTimeoutInSec_)) {
-        lastTimePollStore = currentTimepoint;
+      auto currentTime = std::chrono::steady_clock::now();
+      auto timeSinceLastUpdate =
+          (currentTime - lastWorkListUpdateTime_).count();
+      auto timeSinceLastPollStore = (currentTime - lastTimePollStore).count();
+      if (timeSinceLastUpdate >= kWatchdogThreadSleepMillis &&
+          timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
+        lastTimePollStore = currentTime;
         if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
           optAsyncDebugDump = launchAsyncDebugDump();
+          optAsyncDebugDump->wait_for(
+              std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
+          const auto exitMsg = c10::str(
+              "[Rank ",
+              rank_,
+              "] NCCL watchdog thread detected timeout from Store");
+          LOG(ERROR) << exitMsg;
+          C10_THROW_ERROR(DistBackendError, exitMsg);
         }
       }
     }
