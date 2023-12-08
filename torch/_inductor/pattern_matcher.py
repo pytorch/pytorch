@@ -35,7 +35,8 @@ from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tenso
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from .._functorch import config as functorch_config
-from .._functorch.aot_autograd import aot_function, make_boxed_func
+from .._functorch._aot_autograd.utils import make_boxed_func
+from .._functorch.aot_autograd import aot_function
 from .._functorch.partitioners import default_partition
 from .._subclasses import FakeTensorMode
 from ..fx import Transformer

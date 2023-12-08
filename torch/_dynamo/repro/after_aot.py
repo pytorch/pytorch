@@ -69,7 +69,7 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
 
-        from torch._functorch.aot_autograd import get_aot_graph_name
+        from torch._functorch._aot_autograd.logging_utils import get_aot_graph_name
 
         graph_name = get_aot_graph_name()
 

@@ -33,7 +33,8 @@ from torch._dynamo import (
     utils as dynamo_utils,
 )
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
-from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
+from torch._functorch._aot_autograd.utils import make_boxed_func
+from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner

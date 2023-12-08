@@ -67,7 +67,7 @@ try:
     from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
-from torch._functorch.aot_autograd import set_model_name
+from torch._functorch._aot_autograd.logging_utils import set_model_name
 from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -1070,9 +1070,9 @@ class OnnxModel(abc.ABC):
 
     def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
         # Hack to get model name.
-        from torch._functorch import aot_autograd
+        from torch._functorch import _aot_autograd
 
-        model_name = aot_autograd.model_name
+        model_name = _aot_autograd.logging_utils.model_name
         self.model_dir = self._generate_onnx_model_directory(
             output_directory, self._COMPILER_NAME, model_name
         )

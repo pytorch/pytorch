@@ -9,7 +9,7 @@ from typing import Any, List, Optional, Tuple
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
-from torch._functorch.aot_autograd import MutationType
+from torch._functorch._aot_autograd.schemas import MutationType
 from torch._functorch.compile_utils import fx_graph_cse
 from torch._inductor.constant_folding import constant_fold, replace_node_with_constant
 

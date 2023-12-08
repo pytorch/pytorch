@@ -305,7 +305,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False, disable_clone=False):
     When disable_clone is True, we will use args as-is without cloning.
     This is higher fidelity but we may destroy the args in the process.
     """
-    from torch._functorch.aot_autograd import make_boxed_func
+    from torch._functorch._aot_autograd.utils import make_boxed_func
 
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
