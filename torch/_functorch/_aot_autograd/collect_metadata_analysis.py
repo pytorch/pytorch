@@ -303,39 +303,36 @@ def run_functionalized_fw_and_collect_metadata(
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
         intermediate_bases: List[torch.Tensor] = []
-        # Why do we care if storage changed?
-        # There is a really care class of situations, which basically only happen with something
-        # that looks like:
+        # Why Do We Care If Storage Changed?
+        # It's important to understand the implications of storage changes in complex scenarios. Take this example:
         #
         # def f(x):
         #     x_storage = x.untyped_storage()
         #     non_leaf_tensor = torch.ones(4, requires_grad=True).clone()
         #
+        #     # Using no_grad() and _unsafe_preserve_version_counter to simulate the .data = operation
         #     with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(x):
         #         x.set_(non_leaf_tensor.untyped_storage())
         #
         #     out = x.view(-1)
         #
+        #     # Restoring x to its original storage, again simulating .data = operation
         #     with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(x):
         #         x.set_(x_storage)
         #
         #     return out
         #
-        # Esentially, what his code does is calls set_() with no_grad() - aka, our simulation
-        # of a .data = via ops, and then grabs a view of x (to return later), and then sets
-        # x back to its original storage (again, via the same .data simulation)
-        #
-        # In this case, x and out have different shapes, and point to DIFFERENT
-        # memory addresses. There is no aliasing.
-        # However, the autograd engine is convinced that they alias, aka x is out._base. This
-        # flags the inp/out relationship via output type as alias_of_input, causing us to invoke
-        # gen_alias_from_base - and produce a spurious as_strided() call which will raise later on.
+        # In this scenario, 'x' and 'out' have different shapes and are stored at different memory addresses, aka no aliasing.
+        # However, due to how set_() and more specificlaly, set is functionalized, is defined to preserve eager semantics,
+        # the autograd engine mistakenly assumes that 'x' and 'out' are aliased, treating 'x' as 'out._base'.
+        # This misinterpretation leads to an 'alias_of_input' flag, causing an unnecessary as_strided() call to be generated,
+        # which could lead to issues later in the code.
         for o in flat_f_outs:
             functional_tensor_storage_changed = isinstance(
                 o, FunctionalTensor
-            ) and torch._functionalize_was_storage_changed(
+            ) and torch._functionalize_was_storage_changed(  # type: ignore[attr-defined]
                 o.elem
-            )  # type: ignore[attr-defined]
+            )
             curr_storage = (
                 None
                 if not isinstance(o, torch.Tensor)
