@@ -222,6 +222,7 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
             "torch._C._profiler",
             "torch.__config__",
             "torch._custom_op",
+            "torch._decomp",
             "torch._dispatch",
             "torch._export",
             "torch._functorch.make_functional",

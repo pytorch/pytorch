@@ -41,7 +41,6 @@ ignored_torch_name_rule_set = {
     "torch._C._InferenceMode",
     "torch._C._RestorePythonTLSSnapshot",
     "torch._C._SetExcludeDispatchKeyGuard",
-    "torch._decomp.decompositions_for_rng.PhiloxStateTracker",
     "torch.ao.nn.sparse.quantized.utils.LinearBlockSparsePattern",
     "torch.autograd.anomaly_mode.detect_anomaly",
     "torch.autograd.anomaly_mode.set_detect_anomaly",
