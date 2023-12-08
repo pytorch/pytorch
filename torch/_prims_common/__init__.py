@@ -1537,27 +1537,13 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
-    # TODO: Move this somewhere central?
-    def _is_singleton(s):
-        # check for SingletonSymNode
-        if not isinstance(s, torch.SymInt):
-            return False
-        if s.node.singleton_int() is not None:
-            return True
-
-        # check for SymInt wrapping a SingletonSymNode (fake-ifying causes this)
-        return (
-            s.node.is_symbolic()
-            and s.node.hint is not None
-            and isinstance(s.node.hint, torch.SymInt)
-            and s.node.hint.node.singleton_int() is not None
-        )
+    from torch.fx.experimental.symbolic_shapes import is_singleton
 
     multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= l if _is_singleton(l) else sym_max(l, 1)
+        multiplier *= l if is_singleton(l) else sym_max(l, 1)
 
     result = tuple(reversed(strides))
 
