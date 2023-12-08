@@ -90,8 +90,6 @@ static __device__ void dsa_add_new_assertion_failure(
       return;                                                            \
     }                                                                    \
   } while (false)
-#elif defined(USE_ROCM)
-#define CUDA_KERNEL_ASSERT2(condition)
 #else
 #define CUDA_KERNEL_ASSERT2(condition) assert(condition)
 #endif
