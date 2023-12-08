@@ -175,6 +175,7 @@ def lookup(obj):
         return None
     if is_user_defined_allowed(obj):
         return TorchInGraphFunctionVariable
+    # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
     if isinstance(obj, functools._lru_cache_wrapper) or (
         is_function(obj) and hasattr(obj, "__wrapped__")
     ):
