@@ -23,6 +23,7 @@ import textwrap
 import subprocess
 import weakref
 import sys
+import copyreg
 from torch import inf, nan
 from itertools import product, combinations, permutations
 from functools import partial
@@ -38,7 +39,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like,
-    AlwaysWarnTypedStorageRemoval)
+    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -59,6 +60,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
     get_all_qint_dtypes,
 )
+from torch.testing._internal.two_tensor import TwoTensor
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -9659,6 +9661,90 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         for invalid_val in [-1, 2**65]:
             self.assertRaises(RuntimeError, lambda: torch.set_num_threads(invalid_val))
             self.assertRaises(RuntimeError, lambda: torch.set_num_interop_threads(invalid_val))
+
+    def _get_tensor_prop(self, t):
+        preserved = (
+            id(t),
+            # Refcount values get modified by Dynamo resume frames
+            0 if TEST_WITH_TORCHDYNAMO else sys.getrefcount(t),
+        )
+        moved = (
+            copyreg._slotnames(t.__class__),
+            id(t.__dict__),
+            tuple(t.__dict__.keys()),
+        )
+        return preserved, moved
+
+    def _checked_swap(self, t1, t2):
+        t1_pres, t1_moved = self._get_tensor_prop(t1)
+        t2_pres, t2_moved = self._get_tensor_prop(t2)
+
+        torch.utils.swap_tensors(t1, t2)
+
+        new_t1_pres, new_t1_moved = self._get_tensor_prop(t1)
+        new_t2_pres, new_t2_moved = self._get_tensor_prop(t2)
+        self.assertEqual(t1_pres, new_t1_pres)
+        self.assertEqual(t2_pres, new_t2_pres)
+        self.assertEqual(t1_moved, new_t2_moved)
+        self.assertEqual(t2_moved, new_t1_moved)
+
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
+    def test_swap_basic(self):
+        ts = [
+            torch.rand(2),
+            torch.rand(3, 3),
+            torch.empty(3, dtype=torch.int),
+            TwoTensor(torch.rand(4), torch.rand(4))
+        ]
+
+        for t1, t2 in itertools.combinations(ts, 2):
+            t1 = t1.clone()
+            t2 = t2.clone()
+            t2.foo = "bar"
+            holder = []
+            holder.append(t1)
+
+            self._checked_swap(t1, t2)
+
+            self.assertIs(holder[0], t1)
+            self.assertEqual(t1.foo, "bar")
+
+            wr = weakref.ref(t1)
+            with self.assertRaisesRegex(RuntimeError, "has weakref"):
+                torch.utils.swap_tensors(t1, t2)
+
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
+    def test_swap_fail_slots(self):
+        class MyTwoTensor(TwoTensor):
+            __slots__ = ("a", "b")
+
+        class MyTwoTensor2(TwoTensor):
+            __slots__ = ("b", "a")
+
+        class MyTwoTensor3(TwoTensor):
+            __slots__ = ("a", "b", "c")
+
+        t1 = torch.rand(4)
+        t2 = TwoTensor(torch.rand(4), torch.rand(4))
+        t3 = MyTwoTensor(torch.rand(4), torch.rand(4))
+        t4 = MyTwoTensor(torch.rand(4), torch.rand(4))
+        t5 = MyTwoTensor2(torch.rand(4), torch.rand(4))
+        t6 = MyTwoTensor3(torch.rand(4), torch.rand(4))
+
+        self._checked_swap(t1, t2)
+        with self.assertRaisesRegex(TypeError, "object layout differs"):
+            torch.utils.swap_tensors(t1, t3)
+        with self.assertRaisesRegex(TypeError, "object layout differs"):
+            torch.utils.swap_tensors(t2, t3)
+        self._checked_swap(t3, t4)
+        self._checked_swap(t3, t5)
+        with self.assertRaisesRegex(TypeError, "object layout differs"):
+            torch.utils.swap_tensors(t3, t6)
+        t3.c = "foo"
+        t4.d = "bar"
+        self._checked_swap(t3, t4)
+        self.assertEqual(t4.c, "foo")
+        self.assertEqual(t3.d, "bar")
 
 
 # The following block extends TestTorch with negative dim wrapping tests
