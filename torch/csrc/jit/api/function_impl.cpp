@@ -1,3 +1,4 @@
+#include <c10/util/Flags.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -11,6 +12,11 @@
 #include <ATen/autocast_mode.h>
 #include <torch/csrc/jit/passes/autocast.h>
 #endif
+
+C10_DEFINE_bool(
+    torch_jit_do_not_store_optimized_graph,
+    false,
+    "Do not store the optimized graph.");
 
 namespace torch::jit {
 namespace {
@@ -84,6 +90,22 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
     schema_ = std::make_unique<c10::FunctionSchema>(defaultSchemaFor(*this));
   }
   return *schema_;
+}
+
+std::shared_ptr<Graph> GraphFunction::optimized_graph() const {
+  std::lock_guard<std::recursive_mutex> lock(compile_mutex);
+  decltype(optimized_graphs_)::value_type opt_graph;
+  auto& opt_graph_ref = !FLAGS_torch_jit_do_not_store_optimized_graph
+      ? optimized_graphs_[currentSpecialization()]
+      : opt_graph;
+  if (opt_graph_ref) {
+    return opt_graph_ref.value();
+  }
+  opt_graph_ref = graph_->copy();
+  if (getGraphExecutorOptimize()) {
+    preoptimizeGraph(opt_graph_ref.value(), force_no_amp_);
+  }
+  return opt_graph_ref.value();
 }
 
 GraphFunction::SpecializationKey GraphFunction::currentSpecialization() const {
