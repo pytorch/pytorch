@@ -627,7 +627,7 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
-        constraint_inputs = [a.constraint_dims for a in fs]
+        input_contexts = [a.symbolic_context for a in fs]
 
         def get_sources(t_id, dim):
             # Looks up base sources mapped to a tensor id and uses them to create
@@ -670,7 +670,7 @@ class GuardBuilder(GuardBuilderBase):
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
-            constraint_inputs=constraint_inputs,
+            input_contexts=input_contexts,
             equalities_inputs=equalities_inputs,
             source_ref=self.source_ref,
             # Export keeps static.

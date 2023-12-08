@@ -1100,7 +1100,7 @@ def init_process_group(
             This is the duration after which collectives will be aborted asynchronously and the process will crash.
             This is done since CUDA execution is async and it is no longer safe to continue executing user code since
             failed async NCCL operations might result in subsequent CUDA operations running on corrupted data.
-            When NCCL_BLOCKING_WAIT is set, the process will block and wait for this timeout.
+            When TORCH_NCCL_BLOCKING_WAIT is set, the process will block and wait for this timeout.
 
         group_name (str, optional, deprecated): Group name. This argument is ignored
         pg_options (ProcessGroupOptions, optional): process group options

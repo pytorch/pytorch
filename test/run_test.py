@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import defaultdict
 from contextlib import ExitStack
 from datetime import datetime
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
@@ -600,11 +601,7 @@ def run_test(
         os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_file_rerun = (
-        "--subprocess" not in command
-        and not RERUN_DISABLED_TESTS
-        and not options.continue_through_error
-    )
+    num_retries = 0 if "--subprocess" in command or RERUN_DISABLED_TESTS else 2
     is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
         "BUILD_ENVRIONMENT", ""
     )
@@ -612,7 +609,7 @@ def run_test(
         THRESHOLD * 6
         if is_slow
         else THRESHOLD * 3
-        if should_file_rerun
+        if num_retries > 0
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
         else None
@@ -623,30 +620,101 @@ def run_test(
         output = None
         if IS_CI:
             output = stack.enter_context(open(log_path, "w"))
-        ret_code, was_rerun = retry_shell(
-            command,
-            test_directory,
-            stdout=output,
-            stderr=output,
-            env=env,
-            timeout=timeout,
-            retries=2 if should_file_rerun else 0,
-        )
 
-        # Pytest return code 5 means no test is collected. This is needed
-        # here as we use pytest directly when running C++ tests. Return
-        # code 4 is ok too as this happens when the binary is not a C++
-        # test executable. All binary files under build/bin that are not
-        # C++ test at the time of this writing have been excluded, but we
-        # can accept code 4 too just in case a new non-test binary file
-        # comes up in the future.
-        ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
+        if options.continue_through_error and "--subprocess" not in command:
+            # I think subprocess is better handled by common_utils? but it's not working atm
+            ret_code, was_rerun = run_test_continue_through_error(
+                command, test_directory, env, timeout, stepcurrent_key, output
+            )
+        else:
+            ret_code, was_rerun = retry_shell(
+                command,
+                test_directory,
+                stdout=output,
+                stderr=output,
+                env=env,
+                timeout=timeout,
+                retries=num_retries,
+            )
+
+            # Pytest return code 5 means no test is collected. This is needed
+            # here as we use pytest directly when running C++ tests. Return
+            # code 4 is ok too as this happens when the binary is not a C++
+            # test executable. All binary files under build/bin that are not
+            # C++ test at the time of this writing have been excluded, but we
+            # can accept code 4 too just in case a new non-test binary file
+            # comes up in the future.
+            ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
 
     if IS_CI:
         handle_log_file(
             test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun
         )
     return ret_code
+
+
+def run_test_continue_through_error(
+    command, test_directory, env, timeout, stepcurrent_key, output
+):
+    # Run the test with -x to stop at first failure. Try again, skipping the
+    # previously run tests, repeating this until there is a test that fails 3
+    # times (same number of rVetries we typically give).  Then we skip that
+    # test, and keep going. Basically if the same test fails 3 times in a row,
+    # skip the test on the next run, but still fail in the end. I take advantage
+    # of the value saved in stepcurrent to keep track of the most recently run
+    # test (which is the one that failed if there was a failure).
+
+    num_failures = defaultdict(int)
+
+    sc_command = f"--sc={stepcurrent_key}"
+    while True:
+        ret_code = shell(
+            command + [sc_command],
+            test_directory,
+            stdout=output,
+            stderr=output,
+            env=env,
+            timeout=timeout,
+        )
+        ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
+        if ret_code == 0:
+            break  # Got to the end of the test suite successfully
+        signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
+        print(
+            f"Got exit code {ret_code}{signal_name}, retrying...",
+            file=output,
+            flush=True,
+        )
+
+        # Read what just failed
+        with open(
+            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
+        ) as f:
+            current_failure = f.read()
+
+        num_failures[current_failure] += 1
+        if num_failures[current_failure] >= 3:
+            sc_command = f"--scs={stepcurrent_key}"
+        else:
+            sc_command = f"--sc={stepcurrent_key}"
+
+    consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
+    flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
+    if len(flaky_failures) > 0:
+        print(
+            "The following tests failed flakily (had to be rerun in a new process,"
+            + f" doesn't include reruns froms same process): {flaky_failures}",
+            file=output,
+            flush=True,
+        )
+    if len(consistent_failures) > 0:
+        print(
+            f"The following tests failed consistently: {consistent_failures}",
+            file=output,
+            flush=True,
+        )
+        return 1, True
+    return 0, any(x > 0 for x in num_failures.values())
 
 
 def run_test_with_subprocess(test_module, test_directory, options):
@@ -982,9 +1050,6 @@ def get_pytest_args(
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
         rerun_options = ["--flake-finder", f"--flake-runs={count}"]
-    elif options.continue_through_error:
-        # If continue through error, don't stop on first failure
-        rerun_options = ["--reruns=2"]
     else:
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
@@ -1513,27 +1578,30 @@ class TestFailure(NamedTuple):
 def run_test_module(
     test: ShardedTest, test_directory: str, options
 ) -> Optional[TestFailure]:
-    maybe_set_hip_visible_devies()
+    try:
+        maybe_set_hip_visible_devies()
 
-    test_name = test.name
+        test_name = test.name
 
-    # Printing the date here can help diagnose which tests are slow
-    print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
-    handler = CUSTOM_HANDLERS.get(test_name, run_test)
-    return_code = handler(test, test_directory, options)
-    assert isinstance(return_code, int) and not isinstance(
-        return_code, bool
-    ), f"While running {str(test)} got non integer return code {return_code}"
-    if return_code == 0:
-        return None
+        # Printing the date here can help diagnose which tests are slow
+        print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
+        handler = CUSTOM_HANDLERS.get(test_name, run_test)
+        return_code = handler(test, test_directory, options)
+        assert isinstance(return_code, int) and not isinstance(
+            return_code, bool
+        ), f"While running {str(test)} got non integer return code {return_code}"
+        if return_code == 0:
+            return None
 
-    message = f"{str(test)} failed!"
-    if return_code < 0:
-        # subprocess.Popen returns the child process' exit signal as
-        # return code -N, where N is the signal number.
-        signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
-        message += f" Received signal: {signal_name}"
-    return TestFailure(test.test, message)
+        message = f"{str(test)} failed!"
+        if return_code < 0:
+            # subprocess.Popen returns the child process' exit signal as
+            # return code -N, where N is the signal number.
+            signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
+            message += f" Received signal: {signal_name}"
+        return TestFailure(test.test, message)
+    except Exception as e:
+        return TestFailure(test.test, f"{str(test)} failed! {e}")
 
 
 def run_tests(
