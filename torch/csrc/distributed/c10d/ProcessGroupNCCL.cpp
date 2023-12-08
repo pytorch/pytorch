@@ -1372,9 +1372,10 @@ void ProcessGroupNCCL::workCleanupLoop() {
           optAsyncDebugDump->wait_for(
               std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
           const auto exitMsg = c10::str(
-              "[Rank ",
+              "Some other rank's watchdog thread detected a timeout and notified ",
+              "all other ranks, so we're dumping debug info and aborting [Rank ",
               rank_,
-              "] NCCL watchdog thread detected timeout from Store");
+              "] as well.");
           LOG(ERROR) << exitMsg;
           C10_THROW_ERROR(DistBackendError, exitMsg);
         }
