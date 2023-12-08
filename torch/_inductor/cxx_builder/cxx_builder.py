@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 import torch
-from torch._inductor import config
+from torch._inductor import config, exc
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import (
@@ -45,11 +45,13 @@ _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
 
-def _get_cxx_compiler():
+def _get_cxx_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
     else:
-        compiler = os.environ.get("CXX", "c++")
+        from torch._inductor.codecache import cpp_compiler
+
+        compiler = cpp_compiler()
     return compiler
 
 
@@ -84,8 +86,23 @@ def _remove_dir(path_dir):
 
 def run_command_line(cmd_line, cwd=None):
     cmd = shlex.split(cmd_line)
-    status = subprocess.call(cmd, cwd=cwd, stderr=subprocess.STDOUT)
-
+    try:
+        status = subprocess.check_output(cmd, cwd=cwd, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        output = e.output.decode("utf-8")
+        openmp_problem = "'omp.h' file not found" in output or "libomp" in output
+        if openmp_problem and sys.platform == "darwin":
+            instruction = (
+                "\n\nOpenMP support not found. Please try one of the following solutions:\n"
+                "(1) Set the `CXX` environment variable to a compiler other than Apple clang++/g++ "
+                "that has builtin OpenMP support;\n"
+                "(2) install OpenMP via conda: `conda install llvm-openmp`;\n"
+                "(3) install libomp via brew: `brew install libomp`;\n"
+                "(4) manually setup OpenMP and set the `OMP_PREFIX` environment variable to point to a path"
+                " with `include/omp.h` under it."
+            )
+            output += instruction
+        raise exc.CppCompileError(cmd, output) from e
     return status
 
 
