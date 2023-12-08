@@ -82,8 +82,8 @@ class BaseUserFunctionVariable(VariableTracker):
             self, list(self.self_args()) + list(args), kwargs
         )
 
-    def num_parameters(self):
-        return len(inspect.signature(self.get_function()).parameters)
+    def inspect_parameter_names(self):
+        return list(inspect.signature(self.get_function()).parameters)
 
     def closure_vars(self, tx):
         return {}
@@ -293,8 +293,8 @@ class UserMethodVariable(UserFunctionVariable):
                 )
         return super().call_function(tx, args, kwargs)
 
-    def num_parameters(self):
-        return super().num_parameters() - 1
+    def inspect_parameter_names(self):
+        return super().inspect_parameter_names()[1:]
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
