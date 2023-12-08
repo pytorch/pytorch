@@ -192,10 +192,6 @@ TestEnvironment.def_flag("IS_FBCODE", env_var="PYTORCH_TEST_FBCODE",
 TestEnvironment.def_flag("IS_REMOTE_GPU", env_var="PYTORCH_TEST_REMOTE_GPU",
                          include_in_repro=False)
 
-TestEnvironment.def_flag("RETRY_TEST_CASES", env_var="PYTORCH_RETRY_TEST_CASES",
-                         include_in_repro=False)
-TestEnvironment.def_flag("OVERRIDE_FLAKY_SIGNAL", env_var="PYTORCH_OVERRIDE_FLAKY_SIGNAL",
-                         include_in_repro=False)
 TestEnvironment.def_flag(
     "DISABLE_RUNNING_SCRIPT_CHK",
     env_var="PYTORCH_DISABLE_RUNNING_SCRIPT_CHK",
