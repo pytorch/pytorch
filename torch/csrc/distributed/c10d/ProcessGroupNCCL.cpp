@@ -1339,6 +1339,9 @@ struct DumpPipe {
 
 void ProcessGroupNCCL::workCleanupLoop() {
   bool done = false;
+  lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
+  auto lastTimePollStore = std::chrono::steady_clock::now();
+  c10::optional<std::future<bool>> optAsyncDebugDump;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
@@ -1353,6 +1356,31 @@ void ProcessGroupNCCL::workCleanupLoop() {
         [&]() -> bool { return terminateProcessGroup_.load(); });
     // Bump up heart beat by one.
     heartbeat_++;
+
+    // poll store to see if some ranks have flagged a timeout when
+    // we haven't polled for `heartbeat_timeout` seconds and there haven't
+    // any work added or removed for `watchdog_timeout` seconds.
+    if (dumpOnTimeout_) {
+      auto currentTime = std::chrono::steady_clock::now();
+      auto timeSinceLastWorkListUpdate =
+          (currentTime - lastWorkListUpdateTime_).count();
+      auto timeSinceLastPollStore = (currentTime - lastTimePollStore).count();
+      if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
+          timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
+        lastTimePollStore = currentTime;
+        if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
+          optAsyncDebugDump = launchAsyncDebugDump();
+          optAsyncDebugDump->wait_for(
+              std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
+          const auto exitMsg = c10::str(
+              "[Rank ",
+              rank_,
+              "] NCCL watchdog thread detected timeout from Store");
+          LOG(ERROR) << exitMsg;
+          C10_THROW_ERROR(DistBackendError, exitMsg);
+        }
+      }
+    }
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
@@ -1377,10 +1405,11 @@ void ProcessGroupNCCL::workCleanupLoop() {
               // Set shutdown mode, so the heartbeat monitor thread will not
               // abort process immediately.
               collectiveDebugInfoMode_.store(true);
+              std::vector<uint8_t> vec(1);
+              store_->set(std::string(TIMEOUT_DUMP), vec);
             }
 
-            c10::optional<std::future<bool>> optAsyncDebugDump;
-            if (dumpOnTimeout_) {
+            if (dumpOnTimeout_ && !optAsyncDebugDump) {
               // Store debug info to storage. (By default to local disk)
               optAsyncDebugDump = launchAsyncDebugDump();
             }
@@ -1433,6 +1462,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
           completedWorkListCV_.notify_one();
         } else {
           it = workMetaList_.erase(it);
+          lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
         }
         at::cuda::CUDAGraph::dec_pending_event_queries();
       } else {
@@ -2138,6 +2168,7 @@ void ProcessGroupNCCL::workEnqueue(
     // needs to be destructed in user thread. Otherwise will
     // get deadlock. Here we enqueue work without outputs_.
     workMetaList_.emplace_back(*work);
+    lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   }
 }
 
