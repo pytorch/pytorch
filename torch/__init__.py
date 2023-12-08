@@ -633,6 +633,11 @@ def set_default_device(device):
         is causing problems for you, please comment on
         https://github.com/pytorch/pytorch/issues/92701
 
+    .. note::
+
+        This doesn't affect functions that create tensors that share the same memory as the input, like:
+        :func:`torch.from_numpy` and :func:`torch.frombuffer`
+
     Args:
         device (device or string): the device to set as default
 
