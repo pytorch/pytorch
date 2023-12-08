@@ -298,6 +298,7 @@ class TestExport(TestCase):
         kwargs = {"a": {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}, "b": [torch.ones(2, 3), torch.ones(3, 4)]}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_export_func_with_default_kwargs(self):
@@ -355,6 +356,7 @@ class TestExport(TestCase):
                   "kw3": (torch.ones(2, 3), torch.ones(3, 4)), "kw4": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_linear_conv(self):
 
@@ -795,8 +797,10 @@ class TestExport(TestCase):
 
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
+    @testing.expectedFailureSerDer
     def test_buffer_util(self):
-        ep = export(torch.nn.BatchNorm2d(100, affine=False), (torch.ones(20, 100, 35, 45), ))
+        ep = export(torch.nn.BatchNorm2d(100, affine=False), (torch.ones(20, 100, 35, 45)
+, ))
         num_buffer = 0
         buffer = []
 
@@ -847,6 +851,7 @@ class TestExport(TestCase):
             ):
                 _ = export(mod, inp)
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_module(self):
 
@@ -883,6 +888,7 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(ep(*inp_test)[0], ep_rexported(*inp_test)[0]))
         self.assertTrue(torch.allclose(ep(*inp_test)[1], ep_rexported(*inp_test)[1]))
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_module_with_dict_container_inp_out(self):
 
@@ -1115,8 +1121,8 @@ class TestExport(TestCase):
 
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
+    @testing.expectedFailureSerDer
     def test_to_module_with_mutated_buffer(self):
-
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1145,6 +1151,7 @@ class TestExport(TestCase):
 
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
+    @testing.expectedFailureSerDer
     def test_to_module_with_mutated_buffer_multiple(self):
 
         class Bar(torch.nn.Module):
@@ -1226,6 +1233,7 @@ class TestExport(TestCase):
 
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
+    @testing.expectedFailureSerDer
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
 
         class Bar(torch.nn.Module):
@@ -1274,6 +1282,7 @@ class TestExport(TestCase):
 
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
+    @testing.expectedFailureSerDer
     def test_retracable_ep(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -1586,6 +1595,7 @@ class TestExport(TestCase):
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_redundant_asserts(self):
@@ -1708,6 +1718,7 @@ def forward(self, l_x_):
 
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
+    @testing.expectedFailureSerDer
     def test_retrace_pre_autograd(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -1873,6 +1884,7 @@ def forward(self, l_x_):
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_export_input_mutation_static_shape(self):
@@ -1889,6 +1901,7 @@ def forward(self, l_x_):
         self.assertEqual(inputs[0] + 2.0, inputs_model[0])
         self.assertEqual(inputs[0] + 2.0, inputs_export[0])
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_export_input_mutation_dynamic_shape(self):
