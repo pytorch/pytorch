@@ -372,7 +372,6 @@ class AutogradFunctionVariable(VariableTracker):
 
             from .higher_order_ops import (
                 AutogradFunctionApplyVariable,
-                safe_or_raise_always_restore,
                 TorchHigherOrderOperatorVariable,
             )
 
@@ -389,16 +388,13 @@ class AutogradFunctionVariable(VariableTracker):
             # and a limited input scope confined to contexts, tensors, and constants. If the forward trace is sound,
             # we install any guards accumulated from tracing. If not, we graph break. We trace backward, and evaluate
             # for soundness, same as forward, except with more strictness. We enable a strict mode on the tx, and
-            # reject certain ops when running under this strict mode. If the backward trace is sound, we discard the
-            # trace by restoring. Otherwise, we raise.
-
-            # if both the forward and backward traces are sound, we write the autograd function’s apply into the graph.
+            # reject certain ops when running under this strict mode. If both the forward and backward traces are sound,
+            # we write the autograd function’s apply into the graph.
 
             # For tracing forward and backward, we use UserFunctionVariable. Although it does not directly contribute
             # to soundness evaluation, it plus a  GlobalSource makes sure we can produce valid guards,
             # and that we can inline properly here. Inlining is required in order to be able to ensure that the
             # soundness evaluation works as described above.
-            graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
 
             module_source = AttrSource(
                 tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
@@ -421,18 +417,15 @@ class AutogradFunctionVariable(VariableTracker):
                 bwd_args = [ctx, *speculated_fwd_result.items]
             else:
                 bwd_args = [ctx, speculated_fwd_result]
-            safe_or_raise_always_restore(
-                tx,
-                graph_checkpoint,
-                checkpoint,
-                TorchHigherOrderOperatorVariable.make(
-                    trampoline_autograd_bwd,
-                    source=AttrSource(module_source, "backward"),
-                    fwd_bwd_tracer=fwd_bwd_tracer,
-                ),
-                bwd_args,
-            )
+
+            TorchHigherOrderOperatorVariable.make(
+                trampoline_autograd_bwd,
+                source=AttrSource(module_source, "backward"),
+                fwd_bwd_tracer=fwd_bwd_tracer,
+            ).call_function(tx, bwd_args, {})
+
             # If fwd and backward are sound, we want apply in the graph.
+            # We don't want backward because we are tracing forwards.
             # And we don't want backwards for the obvious reasons.
             args = args[1:]  # Drop context
             return AutogradFunctionApplyVariable(

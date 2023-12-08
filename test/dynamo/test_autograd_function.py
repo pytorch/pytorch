@@ -851,8 +851,6 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                 ctx.save_for_backward(x, y)
                 ctx.t1 = x
                 ctx.t2 = y
-                x = x.clone()
-                y = y.clone()
                 output = torch.zeros_like(x)
                 n_elements = output.numel()
                 grid = lambda meta: (  # noqa: E731
