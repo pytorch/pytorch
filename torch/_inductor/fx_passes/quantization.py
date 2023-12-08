@@ -535,15 +535,21 @@ def _register_quantization_unary_fusion():
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(get_dequantize_qconv_pt2e_pattern(1), aten.relu.default),
+                generate_pattern_with_unary(
+                    get_dequantize_qconv_pt2e_pattern(1), aten.relu.default
+                ),
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("hardtanh", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(get_dequantize_qconv_pt2e_pattern(1), aten.hardtanh.default),
+                generate_pattern_with_unary(
+                    get_dequantize_qconv_pt2e_pattern(1), aten.hardtanh.default
+                ),
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("hardswish", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(get_dequantize_qconv_pt2e_pattern(2), aten.hardswish.default),
+                generate_pattern_with_unary(
+                    get_dequantize_qconv_pt2e_pattern(2), aten.hardswish.default
+                ),
                 dtype=original_pattern_output_dtype,
             ),
         }
