@@ -1,10 +1,8 @@
 import inspect
-import sys
 from collections import defaultdict
+from typing import Dict, List
 
-import sympy
 import torch
-import torch.utils._pytree as pytree
 from torch._dynamo.source import (
     GetItemSource,
     LocalSource,
@@ -13,30 +11,25 @@ from torch._dynamo.source import (
 )
 from torch._dynamo.variables.builder import TrackedFake
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import InputDim
+from torch._guards import Source
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.export import Constraint
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     EqualityConstraint,
     ShapeEnv,
     StatelessSymbolicContext,
-    StrictMinMaxConstraint,
 )
-from torch.utils._sympy.value_ranges import ValueRanges
 
 
 def fakify(mode, t, tensor_constraints, source, dim_name_to_sources):
     n_dims = len(t.shape)
+    symbolic_context = StatelessSymbolicContext(
+        dynamic_sizes=[DimDynamic.STATIC] * n_dims,
+        constraint_sizes=[None] * n_dims,
+    )
     t_id = id(t)
-    if t_id not in tensor_constraints:
-        symbolic_context = StatelessSymbolicContext(
-            dynamic_sizes=[DimDynamic.STATIC] * n_dims,
-            constraint_sizes=None,
-        )
-    else:
-        symbolic_context = StatelessSymbolicContext(
-            dynamic_sizes=[DimDynamic.STATIC] * n_dims,
-            constraint_sizes=[None] * n_dims,
-        )
+    if t_id in tensor_constraints:
         for i, constraint in tensor_constraints[t_id].items():
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
             symbolic_context.dynamic_sizes[i] = DimDynamic.DYNAMIC
@@ -80,7 +73,7 @@ def fake_tree(mode, arg, tensor_constraints, source, dim_name_to_sources):
 
 
 def make_fake_inputs(nn_module, args, constraints):
-    tensor_constraints = defaultdict(dict)
+    tensor_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
         tensor_constraints[constraint.t_id][constraint.dim] = constraint
         if constraint.shared is not None:
@@ -96,7 +89,7 @@ def make_fake_inputs(nn_module, args, constraints):
         shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields)
     ) as fake_mode:
         params = inspect.signature(nn_module.forward).parameters
-        dim_name_to_sources = defaultdict(list)
+        dim_name_to_sources: Dict[str, List[Source]] = defaultdict(list)
         fake_args = tuple(
             fake_tree(
                 fake_mode, arg, tensor_constraints, LocalSource(x), dim_name_to_sources
