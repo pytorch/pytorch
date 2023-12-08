@@ -568,7 +568,7 @@ class FxOnnxInterpreter:
         # or nodes with node.meta['val'] being a builtin value (ExportedProgram to dynamo_export).
         # Nonethless, the nodes are not consumed by others, so we don't need to
         # create a TorchScriptTensor for them.
-        if fake_tensor is None or isinstance(fake_tensor, (int, float, bool)):
+        if fake_tensor is None or isinstance(fake_tensor, (int, float, bool, str)):
             output = onnxscript_graph.add_input(
                 input_name=None,
             )

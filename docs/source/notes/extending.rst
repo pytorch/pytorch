@@ -923,12 +923,12 @@ Here is an example that shows logging modes of each type::
   class FunctionLog(TorchFunctionMode):
       def __torch_function__(self, func, types, args, kwargs=None):
           print(f"Function Log: {resolve_name(func)}(*{args}, **{kwargs})")
-          return func(*args, **kwargs or {})
+          return func(*args, **(kwargs or {}))
 
   class DispatchLog(TorchDispatchMode):
       def __torch_dispatch__(self, func, types, args, kwargs=None):
           print(f"Dispatch Log: {func}(*{args}, **{kwargs})")
-          return func(*args, **kwargs or {})
+          return func(*args, **(kwargs or {}))
 
   def f():
       a = torch.rand(10, requires_grad=True)
