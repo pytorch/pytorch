@@ -33,6 +33,7 @@ jobs:
           git config --global user.email "pytorchmergebot@users.noreply.github.com"
           git config --global user.name "PyTorch MergeBot"
       - name: Merge PR
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
@@ -45,8 +46,8 @@ jobs:
         run: |
           set -x
           if [ -n "${REBASE}" ]; then
-            python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"
-            if [ $? != 1 ]; then
+            # attempt to rebase, if it fails then comment on the PR that it failed
+            if ! python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"; then
               python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
               exit 0
             fi

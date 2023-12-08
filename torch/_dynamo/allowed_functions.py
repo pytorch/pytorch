@@ -222,6 +222,7 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
             "torch._C._profiler",
             "torch.__config__",
             "torch._custom_op",
+            "torch._decomp",
             "torch._dispatch",
             "torch._export",
             "torch._functorch.make_functional",
@@ -246,7 +247,6 @@ def gen_allowed_objs_and_ids() -> AllowedObjects:
             "torch._utils",
             "torch._utils_internal",
             "torch._vmap_internals",
-            "torch.ao",
             "torch.compiler",
             "torch.distributed",
             "torch.export",
@@ -388,8 +388,13 @@ def _builtin_function_ids() -> Dict[int, str]:
     rv.update(
         {id(v): f"functools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
     )
-    rv.update({id(cast): "typing.cast"})
-    rv[id(functools.reduce)] = "functools.reduce"
+    rv.update(
+        {
+            id(cast): "typing.cast",
+            id(functools.reduce): "functools.reduce",
+            id(copy.deepcopy): "copy.deepcopy",
+        }
+    )
     return rv
 
 

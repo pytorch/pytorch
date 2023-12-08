@@ -10,7 +10,7 @@ from .allowed_functions import (
     is_user_defined_allowed,
 )
 
-from .utils import hashable
+from .utils import hashable, is_function
 
 from .variables import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 
@@ -155,16 +155,7 @@ def is_in_graph_function(obj):
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
     ):
         return True
-    if isinstance(
-        obj,
-        (
-            types.FunctionType,
-            types.MethodType,
-            types.BuiltinFunctionType,
-            types.MethodDescriptorType,
-            types.WrapperDescriptorType,
-        ),
-    ):
+    if is_function(obj):
         return is_allowed(obj)
     else:
         return False
@@ -184,7 +175,10 @@ def lookup(obj):
         return None
     if is_user_defined_allowed(obj):
         return TorchInGraphFunctionVariable
-    if hasattr(obj, "__wrapped__"):
+    # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
+    if isinstance(obj, functools._lru_cache_wrapper) or (
+        is_function(obj) and hasattr(obj, "__wrapped__")
+    ):
         # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass.
         if not (
             hasattr(obj, "__qualname__")
