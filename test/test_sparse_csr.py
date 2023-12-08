@@ -2100,6 +2100,8 @@ class TestSparseCSR(TestCase):
             res = torch.add(y, x, alpha=r)
             expected = y + r * x.to_dense()
             self.assertEqual(res, expected)
+            res_perm = torch.add(x, y, alpha=r)
+            self.assertEqual(res_perm, expected)
 
             # Non contiguous dense tensor
             s = list(shape)
@@ -2111,8 +2113,10 @@ class TestSparseCSR(TestCase):
 
             res = torch.add(y, x, alpha=r)
             expected = y + r * x.to_dense()
+            res_perm = torch.add(x, y, alpha=r)
 
             self.assertEqual(res, expected)
+            self.assertEqual(res_perm, expected)
 
         ns = [2, 5]
         batch_shapes = [(), (2,), (2, 3)]
