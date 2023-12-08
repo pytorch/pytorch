@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [[ ${CUSPARSELT_VERSION} == "0.4.0" ]]; then
+if [[ -n ${USE_CUSPARSELT} ]]; then
     # cuSPARSELt license: https://docs.nvidia.com/cuda/cusparselt/license.html
     mkdir tmp_cusparselt && cd tmp_cusparselt
     # CUSPARSELT_NAME="libcusparse_lt-linux-x86_64-0.5.0.1-archive.tar.xz"
