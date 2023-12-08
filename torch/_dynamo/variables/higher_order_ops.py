@@ -273,6 +273,7 @@ def speculate_subgraph(
                 output_proxies = pytree.tree_map(
                     subtracer.maybe_lift_tracked_freevar_to_input, output_proxies
                 )
+
                 tx.output.create_node(
                     "output",
                     "output",
@@ -1263,6 +1264,11 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
                 unimplemented("NYI - New guards discovered in a restoring state")
             # Nothing left to do here
             return None
+
+        # don't add call module to parent graph if speculating forward
+        # return the result directly
+        if self.value.__name__ == "trampoline_autograd_fwd":
+            return body_r
 
         p_args = (
             *(arg.as_proxy() for arg in args),
