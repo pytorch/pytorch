@@ -157,7 +157,6 @@ class QuantizationAnnotation:
 
 
 class Quantizer(ABC):
-    @abstractmethod
     def __init__(self, is_qat: bool = False):
         self._is_qat = is_qat
 

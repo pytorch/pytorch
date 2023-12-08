@@ -328,7 +328,6 @@ class XNNPACKQuantizer(Quantizer):
         is_per_channel: bool,
         is_dynamic: bool = False,
     ) -> XNNPACKQuantizer:
-        self._verify_quantization_config(quantization_config)
         self.operator_type_config[operator_type] = get_symmetric_quantization_config(
             is_per_channel=is_per_channel,
             is_qat=self.is_qat,
@@ -346,7 +345,6 @@ class XNNPACKQuantizer(Quantizer):
         quantizer.set_module_name(Sub) or quantizer.set_module_name(nn.Linear), it will quantize all supported operator/operator
         patterns in the submodule with this module type with the given `quantization_config`
         """
-        self._verify_quantization_config(quantization_config)
         self.module_type_config[module_type] = get_symmetric_quantization_config(
             is_per_channel=is_per_channel,
             is_qat=self.is_qat,
@@ -367,7 +365,6 @@ class XNNPACKQuantizer(Quantizer):
         assert (
             quantization_config is not None
         ), " quantization_config == None is not supported yet"
-        self._verify_quantization_config(quantization_config)
         self.module_name_config[module_name] = get_symmetric_quantization_config(
             is_per_channel=is_per_channel,
             is_qat=self.is_qat,
