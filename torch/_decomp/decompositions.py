@@ -4345,15 +4345,53 @@ def _weight_norm_interface(x, y, dim):
 
 @register_decomposition(aten.isin)
 @out_wrapper()
-def isin(self, test_elements, *, assume_unique=False, invert=False):
-    yndims = len(test_elements.shape)
-    x = self.view(*self.shape, *(1,)*yndims)
+def isin(elements, test_elements, *, assume_unique=False, invert=False):
+    if test_elements.numel() < 10.0*torch.pow(torch.tensor(elements.numel(), dtype=torch.float32), torch.tensor(0.145)):
+        return isin_default(elements, test_elements, invert=invert)
+    else:
+        return isin_sorting(elements, test_elements, assume_unique=assume_unique, invert=invert)
+
+def isin_default(elements, test_elements, *, invert=False):
+    x = elements.view(*elements.shape, *((1,)*test_elements.ndim))
     if not invert:
         cmp = x == test_elements
     else:
         cmp = x != test_elements
-    dim = tuple(range(-1, -yndims-1, -1))
+    dim = tuple(range(-1, -test_elements.ndim-1, -1))
     return cmp.any(dim=dim)
+
+def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
+    if assume_unique:
+        elements_flat = elements.flatten()
+        test_elements_flat = test_elements.flatten()
+    else:
+        elements_flat, unique_order = torch.unique(elements,
+                                                   return_inverse=True, sorted=False)
+        test_elements_flat = torch.unique(test_elements, sorted=False)
+
+    all_elements = torch.cat([elements_flat, test_elements_flat])
+    sorted_elements, sorted_order = torch.sort(all_elements, stable=True)
+
+    duplicate_mask = torch.empty_like(sorted_elements, dtype=torch.bool)
+    sorted_except_first = sorted_elements[1:]
+    sorted_except_last = sorted_elements[:-1]
+    if invert:
+        duplicate_mask = duplicate_mask.slice_scatter(sorted_except_first !=
+                                                       sorted_except_last,
+                                                       start=0, end=-1)
+    else:
+        duplicate_mask = duplicate_mask.slice_scatter(sorted_except_first ==
+                                                       sorted_except_last,
+                                                       start=0, end=-1)
+    duplicate_mask = duplicate_mask.index_put([torch.tensor(-1)], torch.tensor(invert))
+
+    mask = torch.empty_like(duplicate_mask)
+    mask = mask.index_copy(0, sorted_order, duplicate_mask)
+
+    if assume_unique:
+        return mask[0:elements.numel()]
+    else:
+        return mask[unique_order]
 
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
