@@ -190,7 +190,6 @@ def all_gather_tensor(
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch.ops.c10d_functional.all_gather_into_tensor(self, tag, rankset, group_size)  # type: ignore[attr-defined]
     res = _maybe_wrap_tensor(tensor)
-
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
         res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
