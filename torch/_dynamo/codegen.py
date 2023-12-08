@@ -102,6 +102,8 @@ class PyCodegen:
                 self(value.mutable_local.source)
                 return
 
+        allow_cache &= not self.skip_cache
+
         if allow_cache:
             if value.mutable_local and value.mutable_local in self.tempvars:
                 output.append(self.create_load(self.tempvars[value.mutable_local]))
