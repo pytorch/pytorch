@@ -377,6 +377,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         else:
             raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
+        if benchmark_cls is None:
+            raise NotImplementedError(f"{model_name}.Model is None")
+
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
 

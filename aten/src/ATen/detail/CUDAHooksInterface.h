@@ -2,16 +2,10 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/Registry.h>
 
-#include <cstddef>
-#include <functional>
-#include <memory>
-
-// Forward-declares at::Context, at::Generator and at::cuda::NVRTC
+// Forward-declares at::Generator and at::cuda::NVRTC
 namespace at {
-class Context;
 struct Generator;
 namespace cuda {
 struct NVRTC;

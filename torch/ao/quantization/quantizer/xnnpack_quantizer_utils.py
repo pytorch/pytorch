@@ -5,9 +5,11 @@ from typing import Callable, Dict, List, NamedTuple, Optional
 
 import torch
 import torch.nn.functional as F
+from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization.pt2e.utils import (
+    _conv1d_bn_example_inputs,
     _conv2d_bn_example_inputs,
     get_aten_graph_module,
 )
@@ -390,6 +392,7 @@ def _do_annotate_conv_bn(
 
     matches = []
     combinations = [
+        (F.conv1d, _conv1d_bn_example_inputs),
         (F.conv2d, _conv2d_bn_example_inputs),
     ]
 
@@ -614,6 +617,27 @@ def _annotate_adaptive_avg_pool2d(
     return annotated_partitions
 
 
+def _is_input_large_scalar(node: Node, gm: torch.fx.GraphModule):
+    """Check if input is a large scalar value. So that we can skip quantization for the node
+    since histc op (in HistogramObserver) only works for values up to certain upper bound
+    """
+    if node.op == "get_attr":
+        tensor = getattr(gm, node.target)  # type: ignore[arg-type]
+        # torch.histc works until this upper bound
+        HISTC_UPPER_BOUND = 3.4028235e15
+        return tensor.numel() == 1 and abs(tensor.item()) > HISTC_UPPER_BOUND
+    return False
+
+
+def _is_input_non_float_tensor(node: Node):
+    """Check if the input is not a float tensor, so that we can skip quantization for the node
+    since observers only works with float Tensors
+    """
+    if "val" not in node.meta or not isinstance(node.meta["val"], FakeTensor):
+        return True
+    return node.meta["val"].dtype != torch.float32
+
+
 @register_annotator("add_relu")
 def _annotate_add_relu(
     gm: torch.fx.GraphModule,
@@ -621,7 +645,7 @@ def _annotate_add_relu(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
     fused_partitions = find_sequential_partitions(
-        gm, [torch.add, torch.nn.ReLU], filter_fn
+        gm, [torch.add, torch.nn.ReLU], filter_fn=filter_fn
     )
     annotated_partitions = []
     for fused_partition in fused_partitions:
@@ -643,10 +667,18 @@ def _annotate_add_relu(
         input_qspec_map = {}
         input_act0 = add_node.args[0]
         if isinstance(input_act0, Node):
+            if _is_input_large_scalar(input_act0, gm):
+                continue
+            if _is_input_non_float_tensor(input_act0):
+                continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = add_node.args[1]
         if isinstance(input_act1, Node):
+            if _is_input_large_scalar(input_act1, gm):
+                continue
+            if _is_input_non_float_tensor(input_act1):
+                continue
             input_qspec_map[input_act1] = input_act_qspec
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -683,10 +715,18 @@ def _annotate_add(
         input_qspec_map = {}
         input_act0 = add_node.args[0]
         if isinstance(input_act0, Node):
+            if _is_input_large_scalar(input_act0, gm):
+                continue
+            if _is_input_non_float_tensor(input_act0):
+                continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = add_node.args[1]
         if isinstance(input_act1, Node):
+            if _is_input_large_scalar(input_act1, gm):
+                continue
+            if _is_input_non_float_tensor(input_act1):
+                continue
             input_qspec_map[input_act1] = input_act_qspec
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -704,7 +744,7 @@ def _annotate_mul_relu(
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
     fused_partitions = find_sequential_partitions(
-        gm, [torch.mul, torch.nn.ReLU], filter_fn
+        gm, [torch.mul, torch.nn.ReLU], filter_fn=filter_fn
     )
     annotated_partitions = []
     for fused_partition in fused_partitions:
@@ -726,10 +766,18 @@ def _annotate_mul_relu(
         input_qspec_map = {}
         input_act0 = mul_node.args[0]
         if isinstance(input_act0, Node):
+            if _is_input_large_scalar(input_act0, gm):
+                continue
+            if _is_input_non_float_tensor(input_act0):
+                continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = mul_node.args[1]
         if isinstance(input_act1, Node):
+            if _is_input_large_scalar(input_act1, gm):
+                continue
+            if _is_input_non_float_tensor(input_act1):
+                continue
             input_qspec_map[input_act1] = input_act_qspec
 
         mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -766,10 +814,18 @@ def _annotate_mul(
         input_qspec_map = {}
         input_act0 = mul_node.args[0]
         if isinstance(input_act0, Node):
+            if _is_input_large_scalar(input_act0, gm):
+                continue
+            if _is_input_non_float_tensor(input_act0):
+                continue
             input_qspec_map[input_act0] = input_act_qspec
 
         input_act1 = mul_node.args[1]
         if isinstance(input_act1, Node):
+            if _is_input_large_scalar(input_act1, gm):
+                continue
+            if _is_input_non_float_tensor(input_act1):
+                continue
             input_qspec_map[input_act1] = input_act_qspec
 
         mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -897,10 +953,15 @@ def _convert_scalars_to_attrs(model: torch.fx.GraphModule) -> torch.fx.GraphModu
             prefix = "_tensor_constant_"
             get_new_attr_name = get_new_attr_name_with_prefix(prefix)
             tensor_constant_name = get_new_attr_name(model)
-            model.register_buffer(tensor_constant_name, torch.tensor(float(args[i])))
+            float_tensor = torch.tensor(float(args[i]))
+            model.register_buffer(tensor_constant_name, float_tensor)
+            fake_mode = n.meta["val"].fake_mode
             with model.graph.inserting_before(n):
                 get_attr_node = model.graph.create_node(
                     "get_attr", tensor_constant_name, (), {}
+                )
+                get_attr_node.meta["val"] = fake_mode.from_tensor(
+                    float_tensor, static_shapes=True
                 )
                 new_args.append(get_attr_node)
         n.args = tuple(new_args)
