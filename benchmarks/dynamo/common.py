@@ -131,7 +131,7 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
 }
 
 # These models currently fail accuracy with eager Adam optimizer
-# so we use SGD with momentum
+# so we use SGD
 CI_USE_SGD = {
     # TorchBench
     "BERT_pytorch",
