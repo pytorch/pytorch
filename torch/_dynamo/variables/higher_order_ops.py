@@ -210,6 +210,8 @@ def speculate_subgraph(
     # across fwd-bwd for autograd.Function
     tracer=None,
 ):
+    from . import TensorVariable
+
     if sub_kwargs is None:
         sub_kwargs = {}
 
@@ -247,6 +249,15 @@ def speculate_subgraph(
             if restore_side_effects:
                 prev_side_effects = tx.output.side_effects.clone()
 
+            if manually_set_subgraph_inputs:
+                subtracer.track_mutations_for_tensor_inputs(
+                    [
+                        arg.as_proxy()
+                        for arg in (*args, *sub_kwargs.values())
+                        if isinstance(arg, TensorVariable)
+                    ]
+                )
+
             with autograd_ctx:
                 output = f.call_function(tx, args, sub_kwargs)
 
@@ -277,8 +288,6 @@ def speculate_subgraph(
                 # Nothing left to do here
                 return (output, treespec), tx.output.graph, subtracer.lifted_freevars
             else:
-                from . import TensorVariable
-
                 if not only_consist_of(output, TensorVariable):
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
@@ -306,6 +315,7 @@ def speculate_subgraph(
                     (output, treespec),
                     graph,
                     lifted_freevars,
+                    subtracer.mutated_inputs,
                 )
 
     except Unsupported as ex:
@@ -503,6 +513,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 (ret_val, ret_treespec),
                 ret_graph,
                 ret_lifted_freevars,
+                mutated_inputs,
             ) = speculate_subgraph(
                 tx,
                 args[ix],
@@ -517,6 +528,18 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             if not only_consist_of(ret_val, (TensorVariable,)):
                 unimplemented(
                     "Expected branches to return a possibly nested list/tuple/dict of tensors but it consists of non tensors.",
+                )
+            if len(mutated_inputs) > 0:
+
+                def _fmt(mutated_inputs):
+                    msg = []
+                    for i, proxy in enumerate(mutated_inputs):
+                        msg.append("- " + str(proxy.node.meta))
+                    return "\n".join(msg)
+
+                unimplemented(
+                    "Expected branches to not mutate inputs, buffers, or closures "
+                    f"but found following mutations in {branch} branch:\n{_fmt(mutated_inputs)}"
                 )
             return ret_val, ret_treespec, ret_graph, ret_lifted_freevars
 
@@ -736,6 +759,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             (body_r, body_spec),
             body_graph,
             body_lifted_freevars,
+            mutated_inputs,
         ) = speculate_subgraph(
             tx,
             args[0],
@@ -863,7 +887,12 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # with no_grad():  # This will not disable grad tracking inside of grad(f).
         #     grad_o = torch.func.grad(f)(x)
         # TODO: Support kwargs
-        (body_r, _), body_graph, body_lifted_freevars = speculate_subgraph(
+        (
+            (body_r, _),
+            body_graph,
+            body_lifted_freevars,
+            mutated_inputs,
+        ) = speculate_subgraph(
             tx,
             func,
             args[3].items,
@@ -1065,7 +1094,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         #       to handle a few of them).
         with tx.strict_translation_mode():
             # trace through the function with unbatched inputs.
-            _, body_graph, body_lifted_freevars = speculate_subgraph(
+            _, body_graph, body_lifted_freevars, mutated_inputs = speculate_subgraph(
                 tx,
                 fn,
                 # Returns a ListVariable, since that's where we started flattening.
@@ -1196,6 +1225,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             (body_r, _),
             body_graph,
             body_lifted_freevars,
+            mutated_inputs,
         ) = speculate_subgraph(
             tx,
             fn,
@@ -1257,6 +1287,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             (body_r, treespec),
             body_graph,
             body_lifted_freevars,
+            mutated_inputs,
         ) = speculate_subgraph(
             tx,
             args[0],  # function

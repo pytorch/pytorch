@@ -1511,6 +1511,12 @@ class SubgraphTracer(fx.Tracer):
         # rewrite the HigherOrderOperator call using the traced body_fn.
         # Dicts maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = {}
+
+        # This dict maps a tensor inputs' proxy to the version of the example_value
+        # that's recorded when the subtracer first sees the proxy. We could detect
+        # if inputs are mutated based on whether the version has changed.
+        self.tensor_input_versions = {}
+
         self.prev_inst = None
 
         self._cur_code = None
@@ -1813,6 +1819,13 @@ class SubgraphTracer(fx.Tracer):
         new_proxy = self.create_graph_input(proxy.node.name)
         new_proxy.node.meta["example_value"] = proxy.node.meta["example_value"]
         self.lifted_freevars[proxy] = new_proxy
+
+        # We track the mutations based on original proxy to help analysis after speculation.
+        self.track_mutations_for_tensor_inputs(
+            [proxy]
+            if isinstance(proxy.node.meta["example_value"], torch.Tensor)
+            else []
+        )
         if self.parent is not None and proxy.tracer != self.parent:
             self.parent.lift_tracked_freevar_to_input(proxy)
         return new_proxy
@@ -1828,6 +1841,19 @@ class SubgraphTracer(fx.Tracer):
         elif arg.tracer == self:
             return arg
         return self.lift_tracked_freevar_to_input(arg)
+
+    def track_mutations_for_tensor_inputs(self, proxies: List[fx.Proxy]):
+        self.tensor_input_versions.update(
+            {proxy: proxy.node.meta["example_value"]._version for proxy in proxies}
+        )
+
+    @property
+    def mutated_inputs(self):
+        return {
+            proxy
+            for proxy, orig_v in self.tensor_input_versions.items()
+            if proxy.node.meta["example_value"]._version != orig_v
+        }
 
 
 # NOTE: [HigherOrderOperator tracing design]

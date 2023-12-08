@@ -530,10 +530,16 @@ class TestControlFlowTraced(TestCase):
         try:
             example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
-            with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile"
+            ):
                 f(example_input_func)
 
-            with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile"
+            ):
                 make_fx(f)(example_input_func)
         finally:
             torch._disable_functionalization()
@@ -548,7 +554,10 @@ class TestControlFlowTraced(TestCase):
                     torch._disable_functionalization()
             return wrapper
 
-        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile"
+        ):
             make_fx(f_wrapper(f))(example_input_func)
 
 
