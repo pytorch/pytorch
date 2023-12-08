@@ -72,6 +72,18 @@ def dynamo_enable_grad(tx, enable=True):
         GradModeVariable.create(tx, org_value, initialized=True)
 
 
+@contextlib.contextmanager
+def dynamo_disable_grad(tx):
+    from . import GradModeVariable
+
+    org_value = torch.is_grad_enabled()
+    try:
+        GradModeVariable.create(tx, False)
+        yield
+    finally:
+        GradModeVariable.create(tx, org_value)
+
+
 def only_consist_of(var, types):
     if isinstance(var, types):
         return True

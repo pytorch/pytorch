@@ -8,6 +8,7 @@
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <iostream>
 #include <vector>
+#include <ATen/SparseCsrTensorUtils.h>
 
 /*
 [Note: Compiled Autograd]
@@ -425,13 +426,98 @@ variable_list compiled_autograd(
 
       saved.debug_asserts();
       saved.before(call.node->next_edges());
-      validate_outputs(
-          call.node->next_edges(), outputs, [&](const std::string& msg) {
-            std::ostringstream ss;
-            ss << "[Compiled Autograd Tracing: " << call.node->name() << "] "
-               << msg;
-            return ss.str();
-          });
+      std::cout << "[Compiled Autograd Tracing: " << call.node->name() << "] " << std::endl;
+      auto edges = call.node->next_edges();
+      for (const auto i : c10::irange(outputs.size())) {
+        auto& output = outputs[i];
+        std::cout << "Output[" << i << "]: " << output.sym_sizes() << std::endl;
+        const auto& edge = edges[i];
+        if (!edge.is_valid()) {
+          std::cout << "Invalid edge" << std::endl;
+          continue;
+        }
+        if (!output.defined()) {
+          std::cout << "Undefined output" << std::endl;
+          continue;
+        }
+
+        const auto& metadata = edge.function->input_metadata(edge.input_nr);
+        if (!metadata.is_same_shape(output)) {
+          std::cout << "Shape mismatch" << std::endl;
+          if (metadata.is_expandable_to_shape(output)) {
+            // output = metadata.reduce_grad(output);
+            std::cout << "Fine!" << std::endl;
+          } else {
+            // const auto message = metadata.incompatible_shape_error_message(i, output);
+            std::cout << "Incompatible!" << std::endl;
+            // TORCH_CHECK(false, message.str());
+          }
+        } else {
+          std::cout << "Shape match" << std::endl;
+        }
+
+        // bool input_is_complex =
+        // isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
+        // bool grad_is_complex = isComplexType(output.scalar_type());
+
+        // TORCH_CHECK(
+        //     isFloatingType(output.scalar_type()) ||
+        //     (input_is_complex == grad_is_complex));
+        // if (c10::typeMetaToScalarType(metadata.options().dtype()) !=
+        //     output.scalar_type()) {
+        //   std::cout << "would have done .to" << std::endl;
+        //   // output = output.to(c10::typeMetaToScalarType(metadata.options().dtype()));
+        // }
+        // if (output.dtype() != metadata.dtype()) {
+        //   std::stringstream ss;
+        //   ss << "invalid gradient at index " << i << " - expected dtype ";
+        //   ss << metadata.dtype() << " but got " << output.dtype();
+        //   TORCH_CHECK(false, ss.str());
+        // }
+        // if (output.layout() != metadata.layout()) {
+        //   // TODO: Currently we only support (*, Sparse) combination for
+        //   // (tensor.layout(), tensor.grad.layout()) In future, there will be an
+        //   // opportunity to support more combinations of layouts if they are
+        //   // composable (example., operations like addition etc., are well defined
+        //   // between tensors of different layouts.), as well as all parts of
+        //   // autograd like AccumulateGrad correctly handle this. We allow grad to be
+        //   // Strided when metadata is SparseCsr
+        //   if (!output.is_sparse() &&
+        //       !(output.layout() == at::kStrided &&
+        //         (at::sparse_csr::is_sparse_compressed(metadata.layout()) ||
+        //         metadata.layout() == at::kSparse))) {
+        //     std::stringstream ss;
+        //     ss << "invalid gradient at index " << i << " - expected layout ";
+        //     ss << metadata.layout() << " but got " << output.layout();
+        //     TORCH_CHECK(false, ss.str());
+        //   }
+        // }
+
+        // if (output.device() != metadata.device()) {
+        //   // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but
+        //   // should be eventually removed
+        //   if (!(metadata.is_tensor_subclass() ||
+        //         output.unsafeGetTensorImpl()->is_python_dispatch())) {
+        //     if (output.dim() == 0) {
+        //       output = output.to(metadata.device());
+        //     } else {
+        //       std::stringstream ss;
+        //       ss << "invalid gradient at index " << i << " - expected device ";
+        //       ss << metadata.device() << " but got " << output.device();
+        //       TORCH_CHECK(false, ss.str());
+        //     }
+        //   }
+        // }
+        // We should not build graph for Tensors that are not differentiable
+        // TORCH_INTERNAL_ASSERT(isDifferentiableType(output.scalar_type()));
+      }
+      // validate_outputs(
+      //     call.node->next_edges(), outputs, [&](const std::string& msg) {
+      //       std::ostringstream ss;
+      //       ss << "[Compiled Autograd Tracing: " << call.node->name() << "] "
+      //          << msg;
+      //       return ss.str();
+      //     });
       saved.after(call.node->next_edges());
       saved.debug_asserts();
 

@@ -80,13 +80,13 @@ std::stringstream InputMetadata::incompatible_shape_error_message(
     const size_t index,
     const at::Tensor& grad) const {
   std::stringstream ss{};
-  ss << "invalid gradient at index " << index << " - got ";
+  ss << "gradient at index " << index << " - got ";
   if (::torch::autograd::is_cpp_nested_tensor(grad)) {
     ss << grad._nested_tensor_size();
   } else {
     ss << grad.sym_sizes();
   }
-  ss << " but expected shape compatible with ";
+  ss << " and expected shape compatible with ";
   if (is_cpp_nested_tensor()) {
     ss << shape_as_tensor();
   } else {

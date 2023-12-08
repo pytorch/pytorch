@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
+#include <iostream>
 
 namespace torch {
 namespace inductor {

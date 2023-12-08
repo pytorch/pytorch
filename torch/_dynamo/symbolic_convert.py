@@ -444,8 +444,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # TODO link the torch.cond doc later
             raise exc.UserError(
                 exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
-                "Dynamic control flow is not supported at the moment. Please use "
-                "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
+                f"Dynamic control flow on {value} from {inst} is not supported at the moment. Please use "
+                "functorch.experimental.control_flow.cond to explicitly capture the control flow",
                 case_name="cond_operands",
             )
 
@@ -654,6 +654,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def update_locals_and_stack(self, oldvar: VariableTracker, newvar: VariableTracker):
         def repl(v: VariableTracker):
             if v.mutable_local is oldvar.mutable_local:
+                if not newvar.source:
+                    newvar.source = oldvar.source
                 return newvar
             return v
 
@@ -676,8 +678,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):
             newvar = self.output.side_effects.mutation(oldvar, newvar)
         else:
-            assert isinstance(oldvar.mutable_local, variables.base.MutableLocal)
-            newvar = newvar.clone(mutable_local=variables.base.MutableLocal())
+            assert isinstance(
+                oldvar.mutable_local,
+                (variables.base.MutableLocal, side_effects.AttributeMutation),
+            ), f"ML: {oldvar.mutable_local}"
+            newvar = newvar.clone(mutable_local=oldvar.mutable_local)
         self.update_locals_and_stack(oldvar, newvar)
         return newvar
 
@@ -1406,7 +1411,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 or k.is_python_constant()
             )
 
-            result[ConstDictVariable.get_key(k)] = v
+            result[ConstDictVariable.get_key(self, k)] = v
         assert len(result) == len(items) / 2
         self.push(ConstDictVariable(result, dict, mutable_local=MutableLocal()))
 

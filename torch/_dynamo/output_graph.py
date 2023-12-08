@@ -5,6 +5,7 @@ import functools
 import itertools
 import logging
 import operator
+import os
 import re
 import sys
 import traceback
@@ -689,12 +690,35 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         *names,
         **options,
     ):
-        if is_dynamic_nn_module(target):
+        # Dynamic modules should be routed via UnspecializedNNModuleVariable - however,
+        # FSDP modules have their own path where they inherit from UnspecializedNNModuleVariable
+        # but route here fore registration of children.
+        if is_dynamic_nn_module(target) and not getattr(
+            target, "_is_fsdp_managed_module", False
+        ):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
         assert "source" in options
         source = options["source"]
+
+        if is_dynamic_nn_module(target) and getattr(
+            target, "_is_fsdp_managed_module", False
+        ):
+            name = "_".join(map(str, names))
+            base = name
+            for i in itertools.count():
+                if name not in self.nn_modules:
+                    self.nn_modules[name] = target
+                    break
+                name = f"{base}_{i}"
+            vt = variables.nn_module.FSDPManagedNNModuleVariable(
+                target,
+                name,
+                **options,
+            )
+            return self.side_effects.track_object_existing(source, target, vt)
+
         assert not isinstance(source, ParamBufferSource)
 
         if isinstance(target, torch.Tensor):

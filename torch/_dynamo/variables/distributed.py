@@ -2,12 +2,14 @@ import inspect
 from typing import Dict, List
 
 import torch
+from torch._dynamo.variables.base import VariableTracker
 from .. import variables
 from ..exc import unimplemented
-from ..utils import istype
+from ..utils import istype, proxy_args_kwargs
 from .base import VariableTracker
 from .constant import ConstantVariable
 
+from .functions import UserFunctionVariable
 
 class DistributedVariable(VariableTracker):
     def __init__(self, **kwargs):
@@ -35,12 +37,14 @@ def is_constant_pg_functions(value):
 
     from torch.distributed.distributed_c10d import (
         _get_group_tag,
+        _rank_not_in_group,
         get_process_group_ranks,
     )
 
     constant_processgroup_functions = [
         get_process_group_ranks,
         _get_group_tag,
+        _rank_not_in_group,
     ]
 
     return inspect.isfunction(value) and value in constant_processgroup_functions
@@ -152,6 +156,13 @@ class DeviceMeshVariable(DistributedVariable):
             return ConstantVariable.create(self.value.ndim)
         return super().var_getattr(tx, name)
 
+    def call_method(
+        self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        if name == "_get_or_create_default_group":
+            return ProcessGroupVariable(self.value._get_or_create_default_group())
+        return super().call_method(tx, name, args, kwargs)
+
 
 class ProcessGroupVariable(DistributedVariable):
     """
@@ -213,3 +224,24 @@ class ProcessGroupVariable(DistributedVariable):
         from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
         return istype(value, (ProcessGroup, FakeProcessGroup))
+
+class FSDPAllocFreeStorageUtilVariable(VariableTracker):
+    def __init__(self, fn, **kwargs):
+        super().__init__(**kwargs)
+        assert FSDPAllocFreeStorageUtilVariable.match(fn)
+        self.fn = fn
+
+    @staticmethod
+    def match(value):
+        return value in [torch.distributed.utils._alloc_storage, torch.distributed.utils._free_storage]
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", self.fn, *proxy_args_kwargs(args, kwargs)
+            )
+        )

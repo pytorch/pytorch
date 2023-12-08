@@ -46,6 +46,8 @@
 #include <unordered_set>
 #include <utility>
 
+#include <iostream>
+
 namespace torch {
 namespace autograd {
 
@@ -846,6 +848,10 @@ void validate_outputs(
       continue;
     }
 
+
+    std::cout << "GRAD SHAPE START" << metadata.layout()  << std::endl;
+    const auto message = metadata.incompatible_shape_error_message(i, grad);
+    std::cout << message.str() << std::endl;
     if (!metadata.is_same_shape(grad)) {
       if (metadata.is_expandable_to_shape(grad)) {
         grad = metadata.reduce_grad(grad);
@@ -854,6 +860,7 @@ void validate_outputs(
         TORCH_CHECK(false, format_error(message.str()));
       }
     }
+    std::cout << "GRAD SHAPE END" << std::endl;
 
     bool input_is_complex =
         isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));

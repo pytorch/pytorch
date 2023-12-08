@@ -49,7 +49,7 @@ class ConstDictVariable(VariableTracker):
             )
         # instructions to build the dict keys and values
         for key in self.items.keys():
-            if istensor(key):
+            if is_valid_global_ref_key(key):
                 codegen.append_output(
                     codegen.create_load_global(global_key_name(key), True, add=True)
                 )
@@ -67,8 +67,8 @@ class ConstDictVariable(VariableTracker):
         else:
             return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
-    def getitem_const(self, arg: VariableTracker):
-        return self.items[ConstDictVariable.get_key(arg)]
+    def getitem_const(self, tx, arg: VariableTracker):
+        return self.items[ConstDictVariable.get_key(tx, arg)]
 
     def call_method(
         self,
@@ -87,8 +87,8 @@ class ConstDictVariable(VariableTracker):
         val = self.items
 
         if name == "__getitem__":
-            assert len(args) == 1
-            return self.getitem_const(args[0])
+            return self.getitem_const(tx, args[0])
+
         elif name == "items":
             assert not (args or kwargs)
             return TupleVariable(
@@ -108,6 +108,7 @@ class ConstDictVariable(VariableTracker):
         elif name == "keys":
             assert not (args or kwargs)
             return SetVariable(
+                tx=tx,
                 items=[
                     ConstDictVariable._key_to_var(
                         tx,
@@ -133,9 +134,9 @@ class ConstDictVariable(VariableTracker):
             and self.mutable_local
         ):
             assert not kwargs and len(args) == 2
-            k = ConstDictVariable.get_key(args[0])
+            k = ConstDictVariable.get_key(tx, args[0])
 
-            if istensor(k):
+            if is_valid_global_ref_key(k):
                 tx.store_global_weakref(global_key_name(k), k)
             newval = dict(val)
             newval[k] = args[1]
@@ -149,7 +150,8 @@ class ConstDictVariable(VariableTracker):
             and len(args) == 2
             and not kwargs
             and ConstDictVariable.is_valid_key(args[0])
-            and ConstDictVariable.get_key(args[0]) not in self.items
+            and ConstDictVariable.get_key(tx, args[0]) not in self.items
+            and len(args) == 2
         ):
             # missing item, return the default value
             return args[1]
@@ -168,7 +170,7 @@ class ConstDictVariable(VariableTracker):
             and self.mutable_local
         ):
             newval = dict(val)
-            result = newval.pop(ConstDictVariable.get_key(args[0]))
+            result = newval.pop(ConstDictVariable.get_key(tx, args[0]))
             tx.replace_all(self, self.modifed(newval))
             return result
         elif (
@@ -207,15 +209,42 @@ class ConstDictVariable(VariableTracker):
             name in ("get", "__getattr__")
             and args
             and ConstDictVariable.is_valid_key(args[0])
-            and ConstDictVariable.get_key(args[0]) in self.items
+            and ConstDictVariable.get_key(tx, args[0]) in self.items
         ):
-            return self.items[ConstDictVariable.get_key(args[0])]
+            return self.items[ConstDictVariable.get_key(tx, args[0])]
         elif (
             name == "__contains__" and args and ConstDictVariable.is_valid_key(args[0])
         ):
             return ConstantVariable.create(
-                ConstDictVariable.get_key(args[0]) in self.items
+                ConstDictVariable.get_key(tx, args[0]) in self.items
             )
+        elif name == "__contains__":
+            content = args[0]
+            if isinstance(args[0], TupleVariable):
+                content = f"tuple({args[0].items})"
+
+            unimplemented(f"NYI - __contains__ with {content}")
+        elif name == "__setitem__" and args and ConstDictVariable.is_valid_key(args[0]):
+            self.mutable_local = MutableLocal()
+            assert not kwargs and len(args) == 2
+            k = ConstDictVariable.get_key(tx, args[0])
+
+            if is_valid_global_ref_key(k):
+                tx.store_dict_key(global_key_name(k), k)
+            newval = collections.OrderedDict(val)
+            newval[k] = args[1]
+
+            new_rec_contains = self.recursively_contains.union(
+                args[1].recursively_contains
+            )
+            if args[1].mutable_local is not None:
+                new_rec_contains.add(args[1].mutable_local)
+
+            return tx.replace_all(
+                self,
+                self.modifed(newval, new_rec_contains, **options),
+            )
+
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -229,9 +258,11 @@ class ConstDictVariable(VariableTracker):
         return result
 
     @classmethod
-    def get_key(cls, arg: VariableTracker):
+    def get_key(cls, tx, arg: VariableTracker):
         if isinstance(arg, TensorVariable) and arg.specialized_value is not None:
             return arg.specialized_value
+        elif isinstance(arg, variables.NNModuleVariable):
+            return tx.output.nn_modules[arg.module_key]
         else:
             return arg.as_python_constant()
 
@@ -239,19 +270,29 @@ class ConstDictVariable(VariableTracker):
     def is_valid_key(cls, key):
         return (
             key.is_python_constant()
-            or (isinstance(key, TensorVariable) and key.specialized_value is not None)
-            or (isinstance(key, ConstantVariable) and key.python_type() is torch.dtype)
+            or isinstance(key, TensorVariable)
+            and key.specialized_value is not None
+            or isinstance(key, ConstantVariable)
+            and key.python_type() is torch.dtype
+            or isinstance(key, variables.NNModuleVariable)
         )
 
     @classmethod
     def _key_to_var(cls, tx, key, **options):
         from .builder import VariableBuilder
 
-        if istensor(key):
+        if is_valid_global_ref_key(key):
             return VariableBuilder(tx, GlobalWeakRefSource(global_key_name(key)))(key)
         else:
             assert ConstantVariable.is_literal(key)
             return ConstantVariable.create(key, **options)
+
+
+def is_valid_global_ref_key(key):
+    if istensor(key):
+        return True
+    else:
+        return isinstance(key, (torch.nn.Module, tuple))
 
 
 class DefaultDictVariable(ConstDictVariable):
@@ -282,15 +323,15 @@ class DefaultDictVariable(ConstDictVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__getitem__":
-            k = ConstDictVariable.get_key(args[0])
+            k = ConstDictVariable.get_key(tx, args[0])
 
             if k in self.items:
-                return self.getitem_const(args[0])
+                return self.getitem_const(tx, args[0])
             else:
                 if self.default_factory is None:
                     raise KeyError(f"{k}")
                 else:
-                    if istensor(k):
+                    if is_valid_global_ref_key(k):
                         tx.store_global_weakref(global_key_name(k), k)
                     new_val = dict(self.items)
                     default_var = self.default_factory.call_function(tx, [], {})
@@ -320,6 +361,7 @@ class SetVariable(VariableTracker):
 
     def __init__(
         self,
+        tx,
         items: List[VariableTracker],
         **kwargs,
     ):
@@ -329,7 +371,8 @@ class SetVariable(VariableTracker):
         assert all(isinstance(x, VariableTracker) for x in items)
 
         self.items = []
-        self._add(items)
+        self._add(tx, items)
+        self.tx = tx
 
     def as_proxy(self):
         return [x.as_proxy() for x in self.items]
@@ -345,7 +388,7 @@ class SetVariable(VariableTracker):
         ] + create_call_function(1, True)
 
     # Note - this is only used for producing a set
-    def _as_set_element(self, vt):
+    def _as_set_element(self, tx, vt):
         from .base import VariableTracker
         from .misc import MethodWrapperVariable
         from .tensor import TensorVariable
@@ -363,21 +406,24 @@ class SetVariable(VariableTracker):
             return SetVariable.SetElement(vt, vt.value)
         if isinstance(vt, MethodWrapperVariable):
             return SetVariable.SetElement(vt, vt.as_python_constant())
+        if isinstance(vt, variables.UserDefinedObjectVariable):
+            return SetVariable.SetElement(vt, vt.value)
+        if isinstance(vt, variables.NNModuleVariable):
+            return SetVariable.SetElement(vt, tx.output.get_submodule(vt.module_key))
 
         unimplemented(f"Sets with {type(vt)} NYI")
 
-    @property
-    def _underlying_items(self):
+    def _underlying_items(self, tx):
         underlying_items = set()
         for current_item in self.items:
             assert (
                 current_item not in underlying_items
             ), "Items modeling set invariant violated"
-            underlying_items.add(self._as_set_element(current_item))
+            underlying_items.add(self._as_set_element(tx, current_item))
         return underlying_items
 
-    def _add(self, item):
-        underlying_items = self._underlying_items
+    def _add(self, tx, item):
+        underlying_items = self._underlying_items(tx)
 
         if isinstance(item, (list, set)):
             items_to_add = item
@@ -385,7 +431,7 @@ class SetVariable(VariableTracker):
             items_to_add = [item]
 
         for item_to_add in items_to_add:
-            set_element = self._as_set_element(item_to_add)
+            set_element = self._as_set_element(tx, item_to_add)
             if set_element not in underlying_items:
                 underlying_items.add(set_element)
                 self.items.append(set_element.vt)
@@ -414,7 +460,8 @@ class SetVariable(VariableTracker):
             assert not kwargs
             item = args[0]
             result = SetVariable(
-                self._add(item),
+                tx,
+                self._add(tx, item),
                 mutable_local=self.mutable_local,
             )
             tx.replace_all(self, result)
@@ -426,7 +473,7 @@ class SetVariable(VariableTracker):
             result = items.pop()
             tx.replace_all(
                 self,
-                SetVariable(items),
+                SetVariable(tx, items, regen_guards=False, **options),
             )
             return result
         elif name == "__len__":
@@ -438,7 +485,7 @@ class SetVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx, arg: VariableTracker):
         raise RuntimeError("Illegal to getitem on a set")
 
     def as_python_constant(self):
@@ -797,7 +844,7 @@ class PythonSysModulesVariable(VariableTracker):
         return real_dict.call_method(tx, name, args, kwargs)
 
     def _contains_helper(self, tx, key: VariableTracker):
-        k = ConstDictVariable.get_key(key)
+        k = ConstDictVariable.get_key(tx, key)
         has_key = k in sys.modules
         install_guard(
             self.make_guard(

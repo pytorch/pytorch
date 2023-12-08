@@ -18,8 +18,10 @@ import torch._numpy as tnp
 
 import torch.fx
 import torch.random
-from torch._dynamo import compiled_autograd
 
+from torch._dynamo.variables.base import VariableTracker
+
+from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
     GuardOnDataDependentSymNode,
@@ -28,6 +30,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 
+from torch._dynamo import compiled_autograd
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 
@@ -110,6 +113,7 @@ class TensorVariable(VariableTracker):
         stride=None,
         is_contiguous=None,
         specialized_value=None,
+        storage_offset=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -126,12 +130,31 @@ class TensorVariable(VariableTracker):
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.specialized_value = specialized_value
+        self.storage_offset = storage_offset
 
     def as_proxy(self):
         return self.proxy
 
     def python_type(self):
         return self.class_type
+
+    def call_isinstance(self, tensor_type):
+        def check_type(ty):
+            if ty not in tensortype_to_dtype:
+                return issubclass(self.python_type(), ty)
+
+            dtypes = tensortype_to_dtype[ty]
+            return self.dtype in dtypes
+
+        if type(tensor_type) is tuple:
+            return any(check_type(ty) for ty in tensor_type)
+        else:
+            return check_type(tensor_type)
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        val = self.as_proxy().node.meta["example_value"]
+        result = hasattr(val, name)
+        return variables.ConstantVariable(result)
 
     @staticmethod
     def specialize(value: torch.Tensor):
@@ -246,10 +269,27 @@ class TensorVariable(VariableTracker):
         if name == "__class__":
             return TorchVariable(self.python_type())
 
+        # This is somewhat annoying - you can get into states where a source
+        # poitns to a real object, one that is realized during tracing, but not realized
+        # in the real user frame.
+        # Consider a case of a None grad on a tensor, being assigned during trace
+        # or, the case of a tensor subclass starting with a None field that is then assigned
+        # to a tensor. In this case, the source is valid, but the realization of the value
+        # has not happeend, and so guarding on it will fail eval() at installation time.
+        # We do this check here, so as not to fail guard installation.
+        def tensor_property_realized():
+            scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
+            try:
+                eval(self.source.name(), scope)
+                return True
+            except Exception as exc:
+                return False
+
+
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
         # <tensor> is later changed to another type
-        if result is not None and self.source is not None:
+        if result is not None and self.source is not None and tensor_property_realized():
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
@@ -508,9 +548,9 @@ class TensorVariable(VariableTracker):
             assert not kwargs, f"Tensor.{name}() unhandled kwargs"
             # TODO: I think this branch is dead
             if len(args) == 1:
-                return constant_result.getitem_const(args[0])
+                return constant_result.getitem_const(tx, args[0])
             elif args:
-                return TupleVariable([constant_result.getitem_const(a) for a in args])
+                return TupleVariable([constant_result.getitem_const(tx, a) for a in args])
             return constant_result
         elif name == "numpy":
             if not config.trace_numpy:
@@ -687,7 +727,7 @@ class TensorVariable(VariableTracker):
                 mutable_local=variables.base.MutableLocal(),
             )
 
-            if not self.source:
+            if not self.source or name == "register_post_accumulate_grad_hook":
                 # Intermediary
                 src = fn_var.source
                 if (
@@ -699,8 +739,7 @@ class TensorVariable(VariableTracker):
 
                 if not src:
                     unimplemented("No source for register_hook target fn")
-
-                tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+                    # tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
 
                 if not compiled_autograd.compiled_autograd_enabled:
                     # TODO(voz):

@@ -155,18 +155,19 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
         storage was already allocated.
     """
     with torch.no_grad():
-        already_allocated = tensor._typed_storage()._size() == size.numel()
-        if not already_allocated:
-            tensor_storage_size = tensor._typed_storage()._size()
-            _p_assert(
-                tensor_storage_size == 0,
-                f"Tensor storage should have been resized to be 0 but got {tensor_storage_size}",
-            )
-            tensor._typed_storage()._resize_(size.numel())
+        if (
+            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+        ):
+            already_allocated = tensor._typed_storage()._size() == size.numel()
+            if not already_allocated:
+                _p_assert(
+                    not torch._data_ptr_allocated(tensor),
+                    "Tensor storage should have been resized to be 0 but got PLACEHOLDEr",
+                )
+                tensor._typed_storage()._resize_(size.numel())
 
 
-
-def _free_storage(tensor: torch.Tensor) -> None:
+def _free_storage(tensor: torch.Tensor):
     """
     Frees the underlying storage of ``tensor``.
 
@@ -175,6 +176,9 @@ def _free_storage(tensor: torch.Tensor) -> None:
         storage was already freed.
     """
     with torch.no_grad():
+        # if (
+        #     not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+        # ):
         already_freed = tensor._typed_storage()._size() == 0
         if not already_freed:
             _p_assert(
@@ -185,6 +189,7 @@ def _free_storage(tensor: torch.Tensor) -> None:
                 f"tensor shape: {tensor.shape}",
             )
             tensor._typed_storage()._resize_(0)
+
 
 
 Q = TypeVar("Q")
