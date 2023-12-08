@@ -3867,7 +3867,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             z = x
             x.data = y
             y.data = torch.zeros([0])
-            return x is z
+            return torch.tensor(x is z)
 
         for backend in ["eager", "aot_eager", "inductor"]:
             for func in [func1, func2, func3]:
@@ -3893,7 +3893,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                     out_compiled = compiled_fn(compiled_a, compiled_b)
                     self.assertEqual(eager_a, compiled_a)
                     self.assertEqual(eager_b, compiled_b)
-                    self.assertEqual(out_eager, out_compiled)
+                    self.assertTrue(torch.equal(out_eager, out_compiled))
 
                     # func1 hits a leaf Variable that requires grad is being used in an in-place operation
                     if requires_grad:
