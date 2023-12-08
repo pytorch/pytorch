@@ -351,7 +351,6 @@ def _get_params_buffers(mod: torch.nn.Module) -> Dict[str, torch.Tensor]:
     return params_buffers
 
 
-# TODO This wrapper should be removed.
 @_disable_prexisiting_fake_mode
 def _export(
     f: Callable,
