@@ -2476,6 +2476,8 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "XNNPACK/src/memory.c",
             "XNNPACK/src/mutex.c",
             "XNNPACK/src/microparams-init.c",
+            "XNNPACK/src/operators/post-operation.c",
+            "XNNPACK/src/microkernel-utils.c",
         ],
         headers = subdir_glob([
             ("XNNPACK/src", "**/*.h"),
