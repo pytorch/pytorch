@@ -713,14 +713,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
       return dim_custom();
     }
-    return sizes_and_strides_.size();
+    return static_cast<int64_t>(sizes_and_strides_.size());
   }
 
   int64_t dim_default() const {
     if (has_symbolic_sizes_strides_) {
-      return symbolic_shape_meta().sizes_.size();
+      return static_cast<int64_t>(symbolic_shape_meta().sizes_.size());
     } else {
-      return sizes_and_strides_.size();
+      return static_cast<int64_t>(sizes_and_strides_.size());
     }
   }
 
@@ -1674,7 +1674,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_ = {};
     set_storage_access_should_throw();
     get_extra_meta().custom_data_ptr_error_msg_ = s;
-    get_extra_meta().custom_storage_error_msg_ = s;
+    get_extra_meta().custom_storage_error_msg_ = std::move(s);
   }
 
  protected:
@@ -2433,7 +2433,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   template <
       typename T,
-      typename = typename std::enable_if<std::is_integral<T>::value>::type>
+      typename = typename std::enable_if_t<std::is_integral_v<T>>>
   bool SetDimsTemplate(ArrayRef<T> src) {
     TORCH_CHECK(
         !has_symbolic_sizes_strides_,
