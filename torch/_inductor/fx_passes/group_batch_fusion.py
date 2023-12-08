@@ -129,7 +129,12 @@ class PostGradBatchLinearFusion(BatchFusion):
         )
 
     def _is_input_2d(self, input: torch.fx.Node) -> bool:
-        return len(input.meta["tensor_meta"].shape) == 2
+        input_shapes = input.meta["tensor_meta"].shape
+        return (
+            len(input_shapes) == 2
+            and isinstance(input_shapes[0], int)
+            and isinstance(input_shapes[1], int)
+        )
 
     def match(self, node: torch.fx.Node) -> Optional[Tuple[str, int, int, int, bool]]:
         if CallFunctionVarArgs(aten.mm).match(node):
@@ -705,8 +710,7 @@ def get_fusion_candidates(
             continue
 
         key = rule.match(node)
-        # SymInt is not hashable, so we need to skip it
-        if key is not None and not isinstance(key, torch.SymInt):
+        if key is not None:
             candidate_nodes = candidate_dict[key]
             if node not in candidate_nodes:
                 candidate_nodes.append(node)
@@ -728,7 +732,7 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
         candidates = get_fusion_candidates(rule, node, fused_set)
 
         for key, candidate_nodes in candidates.items():
-            if len(candidate_nodes) < MIN_FUSE_SET_SIZE:
+            if len(candidate_nodes) < rule.graph_search_options["min_fuse_set_size"]:
                 continue
 
             for subset in find_independent_subset_greedy(
@@ -763,23 +767,6 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
     fusions: List[GroupBatchFusionBase] = []
     # we keep all current pre grad fusions to keep
     # current implementation, will remove this later
-    # TODO: deperate batch_fusion and group_fusion flags
-    if config.batch_fusion:
-        config.pre_grad_fusion_options = {
-            "batch_linear": {},
-            "batch_linear_lhs": {},
-            "batch_layernorm": {},
-            "batch_tanh": {},
-            "batch_relu": {},
-            "batch_sigmoid": {},
-        }
-        # config.post_grad_fusion_options = {
-        #     "batch_linear_post_grad": {},
-        # }
-    if config.group_fusion:
-        config.post_grad_fusion_options = {
-            "group_linear": {"require_fbgemm": True},
-        }
     if pre_grad:
         fusions += generate_fusion_from_config(
             config.pre_grad_fusion_options, pre_grad=True

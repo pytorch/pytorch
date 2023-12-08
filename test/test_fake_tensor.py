@@ -41,6 +41,10 @@ import torch.utils._pytree as pytree
 
 aten = torch.ops.aten
 
+FakeTensorMode.cache_enabled = True
+FakeTensorMode.cache_crosscheck = True
+
+
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):
         self.assertTrue(isinstance(t, FakeTensor))
@@ -1351,6 +1355,17 @@ class FakeTensorDispatchCache(TestCase):
         self.assertEqual(info.hits, hits)
         self.assertEqual(info.misses, misses)
 
+    def assertBypasses(self, reason, count):
+        """
+        Helper to assert on the number of recorded bypasses.
+        """
+        info = FakeTensorMode.cache_info()
+        if count > 0:
+            self.assertIn(reason, info.bypasses)
+            self.assertEqual(info.bypasses[reason], count)
+        else:
+            self.assertNotIn(reason, info.bypasses)
+
     def test_cache_hit(self):
         with FakeTensorMode():
             x = torch.randn(4, 3)
@@ -1373,13 +1388,10 @@ class FakeTensorDispatchCache(TestCase):
             x = torch.randn(1, 2)
 
             FakeTensorMode.cache_clear()
-            info = FakeTensorMode.cache_info()
-            self.assertFalse("inplace view" in info.bypasses)
+            self.assertBypasses("inplace view", 0)
 
             x.unsqueeze_(0)
-            info = FakeTensorMode.cache_info()
-            self.assertEqual(info.misses, 0)
-            self.assertTrue("inplace view" in info.bypasses)
+            self.assertBypasses("inplace view", 1)
 
     def test_cache_default_dtype(self):
         with FakeTensorMode():
@@ -1457,6 +1469,19 @@ class FakeTensorDispatchCache(TestCase):
             z = x.view(5, 5)
             self.assertHitsMisses(1, 1)
             self.assertTrue(outputs_alias_inputs(x, z))
+
+    def test_cache_dispatch_key_set(self):
+        with FakeTensorMode():
+            FakeTensorMode.cache_clear()
+            self.assertBypasses("dispatch_key_set mismatch", 0)
+
+            x = torch._efficientzerotensor(3)
+            self.assertTrue(x._is_zerotensor())
+            self.assertBypasses("dispatch_key_set mismatch", 1)
+
+            y = torch._efficientzerotensor(3)
+            self.assertTrue(y._is_zerotensor())
+            self.assertBypasses("dispatch_key_set mismatch", 2)
 
 
 instantiate_parametrized_tests(FakeTensorTest)

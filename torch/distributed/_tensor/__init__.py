@@ -52,15 +52,12 @@ def _dtensor_init_helper(
     # get local tensor shape
     local_shape = compute_local_shape(size, device_mesh, placements)
     # initialize the local tensor
-    if len(local_shape) == 0:
-        local_tensor = torch.empty(0, **kwargs)
-    elif init_op == torch.full:
+    if init_op == torch.full:
         fill_value = kwargs.pop("fill_value", 0)
         local_tensor = init_op(local_shape, fill_value, **kwargs)
     elif init_op == torch.rand or init_op == torch.randn:
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
-        requires_grad = kwargs.get("requires_grad", False)
 
         from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 

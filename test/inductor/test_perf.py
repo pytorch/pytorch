@@ -216,54 +216,6 @@ class NumBytesMetricTests(TestCase):
         inp = [T(10, 10, 10), T(10, 10, 10)]
         self.assertExpectedInline(count_numel(f, *inp), """2600""")
 
-    def test_cat_pointwise(self):
-        def f(a, b):
-            return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)])
-
-        inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """400""")
-
-        def f(a, b):
-            return torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)]).cos()
-
-        inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """680""")
-
-        # This one is a little bit tricky since in theory, fusing the `cos()`
-        # could result in saving a read.
-        # But in this case, using masked pointwise codegen for concat forces
-        # softmax to materialize extra values, so we don't want to.
-
-        def f(a, b):
-            out = torch.cat([torch.softmax(a, dim=-1), torch.softmax(b, dim=-1)])
-            return out, out.cos()
-
-        inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """800""")
-
-        def f(a, b):
-            out = torch.cat([a, b])
-            return out.cos()
-
-        inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """400""")
-
-        # Should turn into pointwise even if only some of inputs are pointwise.
-        def f(a, b):
-            out = torch.cat([a.cos(), torch.mm(b, b)])
-            return out.cos()
-
-        inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """600""")
-
-        # Should not turn into pointwise if all inputs are not pointwise
-        def f(a, b):
-            out = torch.cat([torch.mm(a, a), torch.mm(b, b)])
-            return out.cos()
-
-        inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), """800""")
-
     def test_index(self):
         def f(a, b):
             return a[b]
@@ -847,7 +799,6 @@ class InplacingTests(TestCase):
 
 
 # Test cases where we don't do the right thing yet.
-# NOTE: These tests do not get run (and that's intentional)!
 class WouldBeNiceIfItWorked:
     def test_horizontal(self):
         def f(a):

@@ -25,7 +25,7 @@ from torch._prims_common import (
     is_integer_dtype,
     suggest_memory_format,
 )
-from torch._subclasses.meta_utils import MetaConverter
+from torch._subclasses.meta_utils import assert_eq, assert_metadata_eq, MetaConverter
 from torch._utils import render_call
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -1559,34 +1559,38 @@ class FakeTensorMode(TorchDispatchMode):
     ):
         """
         Lookup a cache entry for the given arguments. If none exists, dispatch
-        and cache the result (if the result is cache-able).
+        and cache the result (if the result is eligible for caching).
         """
+        output = unassigned = object()
         try:
             key = self._cache_key(func, args, kwargs)
+            entry = FakeTensorMode.cache.get(key, None)
+            if entry is not None:
+                output = self._output_from_cache_entry(entry, func, args)
+                FakeTensorMode.cache_hits += 1
+                if FakeTensorMode.cache_crosscheck:
+                    # For debugging / testing: Validate that the output synthesized
+                    # from the cache matches the output created by normal dispatch.
+                    xcheck = self._dispatch_impl(func, types, args, kwargs)
+                    assert_metadata_eq(assert_eq, output, xcheck)
+            else:
+                output = self._dispatch_impl(func, types, args, kwargs)
+                entry = self._make_cache_entry(key, func, args, kwargs, output)
+                FakeTensorMode.cache[key] = entry
+                FakeTensorMode.cache_misses += 1
         except _BypassDispatchCache as e:
             FakeTensorMode.cache_bypasses[e.reason] += 1
-            return self._dispatch_impl(func, types, args, kwargs)
 
-        entry = FakeTensorMode.cache.get(key, None)
-        if entry is not None:
-            FakeTensorMode.cache_hits += 1
-            output = self._output_from_cache_entry(entry, func, args)
-            if FakeTensorMode.cache_crosscheck:
-                self._crosscheck_cache_hit(
-                    output, key, entry, func, types, args, kwargs
-                )
-        else:
+        if output is unassigned:
             output = self._dispatch_impl(func, types, args, kwargs)
-            try:
-                FakeTensorMode.cache[key] = self._make_cache_entry(key, args, output)
-                FakeTensorMode.cache_misses += 1
-            except _BypassDispatchCache as e:
-                FakeTensorMode.cache_bypasses[e.reason] += 1
 
         return output
 
     def _cache_key(
-        self, func: OpOverload, args: Tuple[Any], kwargs: Dict[str, Any]
+        self,
+        func: OpOverload,
+        args: Tuple[Any, ...],
+        kwargs: Dict[str, Any],
     ) -> _DispatchCacheKey:
         """
         Create a cache key given the dispatch args. Raises _BypassDispatchCache
@@ -1666,7 +1670,12 @@ class FakeTensorMode(TorchDispatchMode):
             return (type(arg), arg)
 
     def _make_cache_entry(
-        self, key: _DispatchCacheKey, args: Tuple[Any], output: FakeTensor
+        self,
+        key: _DispatchCacheKey,
+        func: OpOverload,
+        args: Tuple[Any, ...],
+        kwargs: Dict[str, Any],
+        output: FakeTensor,
     ) -> _DispatchCacheEntry:
         """
         Make a cache entry object for the given 'output' Tensor. Raises
@@ -1687,16 +1696,37 @@ class FakeTensorMode(TorchDispatchMode):
         if output.is_sparse:
             raise _BypassDispatchCache("sparse output")
 
-        # If this is an in-place op, we just record which input arg is aliased.
+        # Can an in-place op really reference a kwarg? If so, then we need
+        # to extend the implementation to handle it.
+        for kval in kwargs.values():
+            if id(kval) == id(output):
+                raise _BypassDispatchCache("kwarg aliases output")
+
+        # If this is an in-place op, the entry records which input arg is aliased.
         for idx in range(len(args)):
             if id(args[idx]) == id(output):
                 return _DispatchCacheEntry(None, idx)
 
-        # Otherwise, record the output tensor's metadata.
-        return _DispatchCacheEntry(extract_tensor_metadata(output), None)
+        # Otherwise, create an entry that records the output tensor's metadata.
+        # N.B.: Some checks for bypassing the cache would be performed on the
+        # output tensor synthesized from the cached metadata. As an optimization,
+        # we can synthesize a tensor here and do the checks on that instance.
+        # This approach keeps the (more frequent) cache-hit path as lightweight
+        # as possible.
+        entry = _DispatchCacheEntry(extract_tensor_metadata(output), None)
+
+        # Make sure the dispatch_key_set from the synthesized output tensor will
+        # be the same.
+        synth_output = self._output_from_cache_entry(entry, func, args)
+        synth_key_set = torch._C._dispatch_key_set(synth_output)
+        key_set = torch._C._dispatch_key_set(output)
+        if synth_key_set != key_set:
+            raise _BypassDispatchCache("dispatch_key_set mismatch")
+
+        return entry
 
     def _output_from_cache_entry(
-        self, entry: _DispatchCacheEntry, func: OpOverload, args: Tuple[Any]
+        self, entry: _DispatchCacheEntry, func: OpOverload, args: Tuple[Any, ...]
     ) -> FakeTensor:
         """
         Create a new FakeTensor from the cache entry.
@@ -1705,19 +1735,18 @@ class FakeTensorMode(TorchDispatchMode):
             # This is an in-place op; return the aliased arg.
             return args[entry.arg_idx]
 
-        # Create a new empty FakeTensor with the cached metadata.
+        # Synthesize a new FakeTensor with the cached metadata.
         metadata = entry.metadata
         assert not metadata.is_sparse
 
-        with torch.inference_mode(metadata.is_inference):
-            empty = torch.empty_strided(
-                metadata.shape,
-                metadata.stride,
-                dtype=metadata.dtype,
-                layout=metadata.layout,
-                device="meta",
-                requires_grad=metadata.requires_grad,
-            )
+        empty = torch.empty_strided(
+            metadata.shape,
+            metadata.stride,
+            dtype=metadata.dtype,
+            layout=metadata.layout,
+            device="meta",
+            requires_grad=metadata.requires_grad,
+        )
 
         torch._C._set_conj(empty, metadata.is_conj)
         torch._C._set_neg(empty, metadata.is_neg)
@@ -1736,40 +1765,6 @@ class FakeTensorMode(TorchDispatchMode):
                 )
 
         return FakeTensor(self, empty, metadata.device)
-
-    def _crosscheck_cache_hit(
-        self,
-        output: FakeTensor,
-        key: _DispatchCacheKey,
-        entry: _DispatchCacheEntry,
-        func: OpOverload,
-        types: Tuple[Any, ...],
-        args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
-    ):
-        """
-        For debugging: cross-check the entry we pulled from the cache
-        with the one that would be created without caching.
-        """
-        # Normal dispatch should not raise an exception. Otherwise, a cache
-        # hit would be wrong.
-        try:
-            expected_output = self._dispatch_impl(func, types, args, kwargs)
-            expected_entry = self._make_cache_entry(key, args, expected_output)
-        except Exception as e:
-            raise RuntimeError(
-                f"FakeTensor cache crosscheck failure: func={func}, "
-                f"args={args}, kwargs={kwargs}: Dispatch raised={e}"
-            ) from e
-
-        # The metadata and aliasing info should match.
-        with in_kernel_invocation_manager(self):
-            if entry != expected_entry:
-                raise RuntimeError(
-                    f"FakeTensor cache crosscheck failure: func={func}, "
-                    f"args={args}, kwargs={kwargs}: Expected={expected_entry}. "
-                    f"Observed={entry}"
-                )
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
@@ -2044,6 +2039,11 @@ class FakeTensorMode(TorchDispatchMode):
             )
 
         def maybe_run_unsafe_fallback(error=None):
+            # We infer the meta of a custom ops that return None to just
+            # return None. custom ops are not allowed to mutate metadata
+            # of their inputs, so this is safe.
+            if can_generate_trivial_abstract_impl(func):
+                return None
             # no meta kernel registered, fallback to kernel for the device
             if has_symbolic_sizes or not can_run_unsafe_fallback(func):
                 raise UnsupportedOperatorException(func)
@@ -2314,6 +2314,22 @@ def run_fallback_kernel(
             return e
 
     return pytree.tree_map(map_out, r)
+
+
+def can_generate_trivial_abstract_impl(op: torch._ops.OpOverload) -> bool:
+    assert isinstance(op, torch._ops.OpOverload)
+    if torch._library.utils.is_builtin(op):
+        # We control the built-ins. These may (in rare cases)
+        # do input metadata mutation (which we have banned on custom ops)
+        return False
+    schema = op._schema
+    # It's suspicious if the op is not mutable but returns nothing, so we return False out of an abundance of caution
+    if not schema.is_mutable:
+        return False
+    if len(schema.returns) > 0:
+        return False
+    # If the op returns nothing, then it has a trivial abstract impl.
+    return True
 
 
 # Just for use to allow copying a module to fake tensors,

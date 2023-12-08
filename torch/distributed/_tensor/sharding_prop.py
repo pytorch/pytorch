@@ -245,7 +245,13 @@ class ShardingPropagator:
                     # returned from the op strategy
                     output_spec: OutputSpecType = tuple(
                         [
-                            output_strategy.output_spec
+                            # create a new DTensorSpec with the same placement as the
+                            # output_spec in output_strategy
+                            DTensorSpec(
+                                mesh=output_strategy.output_spec.mesh,
+                                placements=output_strategy.output_spec.placements,
+                                tensor_meta=output_strategy.output_spec.tensor_meta,
+                            )
                             for _ in range(len(op_schema.op._schema.returns))
                         ]
                     )
