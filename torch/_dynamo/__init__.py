@@ -1,6 +1,6 @@
 import torch
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
-from .backends.registry import list_backends, register_backend
+from .backends.registry import list_backends, lookup_backend, register_backend
 from .code_context import code_context
 from .convert_frame import replay
 from .decorators import (
@@ -51,6 +51,7 @@ __all__ = [
     "is_compiling",
     "register_backend",
     "list_backends",
+    "lookup_backend",
 ]
 
 if torch.manual_seed is torch.random.manual_seed:

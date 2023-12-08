@@ -16,6 +16,7 @@ from typing import (
     List,
     Optional,
     Tuple,
+    Type,
     TYPE_CHECKING,
     Union,
 )
@@ -349,6 +350,7 @@ def export(
     *,
     constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+    strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
@@ -421,6 +423,16 @@ def export(
          are denoted by None. Arguments that are dicts or tuples / lists of tensors are
          recursively specified by using mappings or sequences of contained specifications.
 
+        strict: When enabled (default), the export function will trace the program through
+         TorchDynamo which will ensure the soundness of the resulting graph. Otherwise, the
+         exported program will not validate the implicit assumptions baked into the graph and
+         may cause behavior divergence between the original model and the exported one. This is
+         useful when users need to workaround bugs in the tracer, or simply want incrementally
+         enable safety in their models. Note that this does not affect the resulting IR spec
+         to be different and the model will be serialized in the same way regardless of what value
+         is passed here.
+         WARNING: This option is experimental and use this at your own risk.
+
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
 
@@ -443,6 +455,7 @@ def export(
             args,
             kwargs,
             constraints,
+            strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
         )
     else:
@@ -451,6 +464,7 @@ def export(
             args,
             kwargs,
             dynamic_shapes=dynamic_shapes,
+            strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
         )
 
@@ -570,7 +584,7 @@ def load(
     )
 
 
-def register_dataclass(cls: Any) -> None:
+def register_dataclass(cls: Type[Any]) -> None:
     """
     Registers a dataclass as a valid input/output type for :func:`torch.export.export`.
 

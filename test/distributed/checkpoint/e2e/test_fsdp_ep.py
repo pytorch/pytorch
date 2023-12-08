@@ -1,27 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 
-from enum import auto, Enum
-
 import torch
-import torch.distributed as dist
-import torch.distributed.checkpoint as DCP
 import torch.nn as nn
 from torch.distributed._tensor import DTensor
-from torch.distributed.checkpoint.state_dict import (
-    get_model_state_dict,
-    get_state_dict,
-    set_state_dict,
-)
+from torch.distributed.checkpoint.state_dict import get_state_dict
 from torch.distributed.device_mesh import _mesh_resources, init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.api import ShardingStrategy
-from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-)
-
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -134,3 +119,7 @@ class TestFSDPWithEP(DTensorTestBase, VerifyStateDictMixin):
                         self.assertEqual(tuple(v.device_mesh.mesh), ranks)
 
         self.assertEqual(set(osd["state"].keys()), set(msd.keys()))
+
+
+if __name__ == "__main__":
+    run_tests()
