@@ -614,7 +614,6 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
 
         # rank0: [0., 1.], rank1: [2., 3.]
         send_tensor = torch.arange(2, dtype=torch.float32, device="cuda") + 2 * self.rank
-
         recvd_tensor = ft_c.permute_tensor(
             send_tensor,
             [
@@ -630,8 +629,6 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
             dtype=torch.float32,
             device=device
         ) + 2 * ((self.rank - 1 + self.world_size) % self.world_size)
-
-
         self.assertEqual(
             recv_tensor,
             expected,
