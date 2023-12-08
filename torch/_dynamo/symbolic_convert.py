@@ -444,7 +444,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # TODO link the torch.cond doc later
             raise exc.UserError(
                 exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
-                f"Dynamic control flow on {value} from {inst} is not supported at the moment. Please use "
+                "Dynamic control flow is not supported at the moment. Please use "
                 "functorch.experimental.control_flow.cond to explicitly capture the control flow",
                 case_name="cond_operands",
             )
@@ -654,6 +654,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def update_locals_and_stack(self, oldvar: VariableTracker, newvar: VariableTracker):
         def repl(v: VariableTracker):
             if v.mutable_local is oldvar.mutable_local:
+                # Note - this is a replacement function, and as such,
+                # if the newvar is created with a different source,
+                # it's an invariant violation.
+                # TODO(voz): Replace this with an assert, fix the callsites, PR on its own
                 if not newvar.source:
                     newvar.source = oldvar.source
                 return newvar
@@ -681,7 +685,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             assert isinstance(
                 oldvar.mutable_local,
                 (variables.base.MutableLocal, side_effects.AttributeMutation),
-            ), f"ML: {oldvar.mutable_local}"
+            )
             newvar = newvar.clone(mutable_local=oldvar.mutable_local)
         self.update_locals_and_stack(oldvar, newvar)
         return newvar

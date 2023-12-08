@@ -1132,7 +1132,7 @@ class BuiltinVariable(VariableTracker):
         if not name_var.is_python_constant():
             unimplemented("non-const getattr() name")
 
-        # TODO(voz): This grad check is gross
+        # Note - grad attribute mutation is handled below
         if tx.output.side_effects.is_attribute_mutation(obj) and name != "grad":
             try:
                 # re-read a pending side effect?
@@ -1281,20 +1281,18 @@ class BuiltinVariable(VariableTracker):
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
-            isinstance(obj, variables.TensorVariable)
-            and name_var.is_python_constant()
-            and name_var.value == "zeroed_out"
-        ):
-            obj.mutable_local = MutableLocal()
-            return val
-        elif (
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
             name = name_var.as_python_constant()
             if isinstance(obj, variables.TensorVariable):
                 from .builder import wrap_fx_proxy
-
+                if name == "requires_grad" and not config.trace_distributed:
+                    # TODO(voz): Make it work properly for all cases
+                    unimplemented(
+                        "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
+                        "the middle of the graph, which aot_autograd does not currently know how to handle. "
+                    )
                 if name == "data":
                     # Remove the old reference in tracked fakes - if we don't do this
                     # new .data value size and shape differences will cause
@@ -1341,21 +1339,6 @@ class BuiltinVariable(VariableTracker):
                     # This handles options prop, guards and ends with a clone
                     # Step 4 - replace all reference to the current object with the new one
                     return tx.replace_all(obj, out)
-                elif name_var.value == "grad":
-                    def update_grad(x, grad):
-                        x.grad = grad
-                        return x
-
-
-                    if isinstance(val, ConstantVariable):
-                        obj.as_proxy().node.meta["example_value"].grad = val.value
-
-                    else:
-                        tx.output.create_proxy(
-                            "call_function",
-                            update_grad,
-                            *proxy_args_kwargs([obj, val], {}),
-                        )
 
             tx.output.side_effects.store_attr(obj, name, val)
             return val
@@ -1525,6 +1508,9 @@ class BuiltinVariable(VariableTracker):
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
 
         def _resolve_getattr(get_attr_var):
+            # This comparison is going to access an attribute that was not initially
+            # there, but may be now. That is the only case when GetAttrVariable should
+            # be created. So, we need to resolve it first.
             assert isinstance(get_attr_var, variables.GetAttrVariable)
             try:
                 return get_attr_var.call_function(tx, [], {})
