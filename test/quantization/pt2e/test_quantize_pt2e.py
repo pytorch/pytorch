@@ -90,6 +90,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         check_against_fx_quant=False,
         fx_qconfig_mapping=None,
         export_with_dynamic_shape=False,
+        is_qat=False,
     ):
         # resetting dynamo cache
         torch._dynamo.reset()
@@ -103,7 +104,10 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             constraints=[dynamic_dim(example_inputs[0], 0)] if export_with_dynamic_shape else [],
         )
 
-        m = prepare_pt2e(m, quantizer)
+        if is_qat:
+            m = prepare_qat_pt2e(m, quantizer)
+        else:
+            m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m, fold_quantize=True)
@@ -1648,6 +1652,42 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self._test_move_exported_model_to_eval_dropout(inplace=False)
         self._test_move_exported_model_to_eval_dropout(inplace=True)
 
+    def test_bn_move_exported_model_to_eval(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.bn = torch.nn.BatchNorm2d(3)
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                return self.conv(self.bn(x))
+
+        m = M().train()
+        example_inputs = (
+            torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=True).add(1),
+        )
+
+        m = capture_pre_autograd_graph(m, example_inputs)
+
+        # Assert that bn op exists and is in train mode
+        batch_norm_node = None
+        for n in m.graph.nodes:
+            if n.target == torch.ops.aten._native_batch_norm_legit.default:
+                batch_norm_node = n
+                break
+        self.assertTrue(batch_norm_node is not None)
+        self.assertTrue(batch_norm_node.args[5])
+
+        # Do the subgraph rewriting
+        torch.ao.quantization.move_exported_model_to_eval(m)
+
+        # Assert that bn op is now in eval mode
+        targets = [n.target for n in m.graph.nodes]
+        self.assertTrue(torch.ops.aten._native_batch_norm_legit.default not in targets)
+        self.assertTrue(torch.ops.aten._native_batch_norm_legit_no_training.default in targets)
+
     def test_disallow_eval_train(self):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
         example_inputs = (torch.rand(3, 3, 5, 5),)
@@ -1712,3 +1752,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.checkGraphModuleNodes(
             m, expected_node_occurrence=node_occurrence, expected_node_list=node_list
         )
+
+    def test_groupwise_per_channel_quant(self):
+        m = TestHelperModules.GroupwiseConv2d()
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        example_inputs = m.example_inputs()
+        m = self._quantize(m, quantizer, example_inputs)
+        # make sure it runs
+        m(*example_inputs)

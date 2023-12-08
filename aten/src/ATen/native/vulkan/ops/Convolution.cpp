@@ -1,8 +1,8 @@
-#include <ATen/native/ConvUtils.h>
-#include <ATen/native/utils/ParamUtils.h>
 
 #include <ATen/Context.h>
 
+#include <ATen/native/ConvUtils.h>
+#include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
@@ -529,7 +529,7 @@ vTensor pack_weights(
       api::context(),
       weight_rearranged.sizes(),
       weight_arg.scalar_type(),
-      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
+      api::StorageType::TEXTURE_2D,
   };
 
   if (quantized) {
@@ -557,7 +557,7 @@ vTensor pack_biases(
       api::context(),
       bias_rearranged.sizes(),
       bias_rearranged.scalar_type(),
-      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
+      api::StorageType::TEXTURE_2D,
   };
 
   if (quantized) {

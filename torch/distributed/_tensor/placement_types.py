@@ -54,9 +54,6 @@ class Shard(Placement):
         assert (
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
-        assert (
-            tensor.size(self.dim) > 0
-        ), f"Tensor size along dim{self.dim} is 0. There is nothing to be sharded."
 
         # chunk tensor over dimension `dim` into n slices with padding if necessary
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
@@ -123,10 +120,6 @@ class Shard(Placement):
         """
         returns the local shard size and offset on a given tensor dim
         """
-        assert (
-            size_on_dim >= num_chunks
-        ), f"Size to be sharded on dim {self.dim} must be at least as large as the number of devices in that dimension {num_chunks}"
-
         # Compute the chunk size inline with ``torch.chunk``
         full_chunk_size = (size_on_dim + num_chunks - 1) // num_chunks
 

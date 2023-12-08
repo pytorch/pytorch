@@ -1,7 +1,6 @@
 """
 Python polyfills for common builtins.
 """
-import math
 
 
 def all(iterator):
@@ -9,6 +8,13 @@ def all(iterator):
         if not elem:
             return False
     return True
+
+
+def any(iterator):
+    for elem in iterator:
+        if elem:
+            return True
+    return False
 
 
 def index(iterator, item, start=0, end=-1):
@@ -22,7 +28,3 @@ def index(iterator, item, start=0, end=-1):
 def repeat(item, count):
     for i in range(count):
         yield item
-
-
-def radians(x):
-    return math.pi / 180.0 * x
