@@ -2320,6 +2320,22 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(4, 2), torch.randn(4, 2)), check_lowp=False)
 
+    def test_slice_view_with_graph_break(self):
+        def fn():
+            a = torch.tensor([1], device=self.device)
+            a = a[0:1]
+            b = a.squeeze()
+            a[0] = 0
+            if a[0] < 1e5:
+                pass
+            a[0] = 2
+            return b
+
+        expect = fn()
+        opt_fn = torch.compile(fn)
+        actual = opt_fn()
+        self.assertEqual(expect, actual)
+
     def test_view_detach(self):
         def fn(a):
             return a[0].detach()
