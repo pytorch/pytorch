@@ -13,6 +13,7 @@ constexpr size_t kMaxDevices = 8;
 constexpr size_t kMaxIntraNodeSize = 10 * 1024 * 1024;
 
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
+using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
 
 enum class Topology { UNKNOWN = 0, FULLY_CONNECTED = 1, HYBRID_CUBE_MESH = 2 };
 
@@ -24,6 +25,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       Topology topology,
       std::array<void*, kMaxDevices> p2pStates,
       std::array<void*, kMaxDevices> buffers,
+      void* topoInfo,
       size_t rank,
       size_t worldSize);
 
@@ -52,6 +54,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   Topology topology_;
   std::array<void*, kMaxDevices> p2pStates_;
   std::array<void*, kMaxDevices> buffers_;
+  void* topoInfo_;
   size_t rank_;
   size_t worldSize_;
 };

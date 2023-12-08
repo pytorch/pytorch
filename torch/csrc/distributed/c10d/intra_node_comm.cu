@@ -122,8 +122,8 @@ DEVICE_INLINE void acquireSignal(uint32_t* addr) {
 // Fully Connected Algos
 ////////////////////////////////////////////////////////////////////////////////
 
-struct FcP2pState {
-  uint32_t signals[kMaxAllReduceBlocks][kMaxDevices];
+struct P2pState {
+  uint32_t signals0[kMaxAllReduceBlocks][kMaxDevices];
   uint32_t signals1[kMaxAllReduceBlocks][kMaxDevices];
 };
 
@@ -132,7 +132,7 @@ static __global__ void oneShotAllReduceKernel(
     at::BFloat16* input,
     size_t N,
     size_t N_aligned,
-    std::array<FcP2pState*, kMaxDevices> p2pStates,
+    std::array<P2pState*, kMaxDevices> p2pStates,
     std::array<at::BFloat16*, kMaxDevices> buffers,
     size_t rank) {
   const size_t numelPerThread = kBytesPerThread / sizeof(at::BFloat16);
@@ -143,8 +143,8 @@ static __global__ void oneShotAllReduceKernel(
   // Wait for all other ranks to enter the kernel
   if (threadIdx.x < kWorldSize) {
     auto targetRank = threadIdx.x;
-    releaseSignal(&p2pStates[targetRank]->signals[blockIdx.x][rank]);
-    acquireSignal(&p2pStates[rank]->signals[blockIdx.x][targetRank]);
+    releaseSignal(&p2pStates[targetRank]->signals0[blockIdx.x][rank]);
+    acquireSignal(&p2pStates[rank]->signals0[blockIdx.x][targetRank]);
   }
   __syncthreads();
 
@@ -186,7 +186,7 @@ template <uint32_t kWorldSize>
 static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
     at::BFloat16* input,
     size_t N_aligned,
-    std::array<FcP2pState*, kMaxDevices> p2pStates,
+    std::array<P2pState*, kMaxDevices> p2pStates,
     std::array<at::BFloat16*, kMaxDevices> buffers,
     size_t rank) {
   const size_t numelPerThread = kBytesPerThread / sizeof(at::BFloat16);
@@ -199,8 +199,8 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
   // Wait for all other ranks to enter the kernel
   if (threadIdx.x < kWorldSize) {
     auto targetRank = threadIdx.x;
-    releaseSignal(&p2pStates[targetRank]->signals[blockIdx.x][rank]);
-    acquireSignal(&p2pStates[rank]->signals[blockIdx.x][targetRank]);
+    releaseSignal(&p2pStates[targetRank]->signals0[blockIdx.x][rank]);
+    acquireSignal(&p2pStates[rank]->signals0[blockIdx.x][targetRank]);
   }
   __syncthreads();
 
@@ -257,18 +257,12 @@ static __launch_bounds__(1024) __global__ void twoShotAllReduceKernel(
 // Hybrid Cube Mesh Algos
 ////////////////////////////////////////////////////////////////////////////////
 
-struct HcmP2pState {
-  uint32_t signals[kMaxAllReduceBlocks][kMaxDevices];
-  size_t neighborRanks[3];
-  size_t relayRank;
-};
-
 /**
  * NOTE [hybrid cube mesh]
  *
  * In a hybrid cube mesh topology, every device has exactly 4 neighbors
  * (directly connected via NVLink). For every device X, it has exactly 1
- * neighbor X that is a neighbor of the 3 non-neighbor of X. We call Y the
+ * neighbor Y that is a neighbor of the 3 non-neighbor of X. We call Y the
  * relay neighbor of X. This property is symmetrical: X is also guaranteed to
  * be the relay neighbor of Y.
  *
@@ -285,9 +279,7 @@ struct HcmP2pState {
  * - For load balancing purpose, we also ensure that if hcm[X][k] = Y,
  *   hcm[Y][k] = X.
  */
-using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
-
-HybridCubeMesh getHybridCubeMesh(NvlMesh nvlMesh) {
+std::optional<HybridCubeMesh> getHybridCubeMesh(NvlMesh nvlMesh) {
   std::array<std::unordered_set<size_t>, kMaxDevices> neighbors = {};
   std::array<size_t, kMaxDevices> neighborMasks = {};
   for (size_t i = 0; i < kMaxDevices; ++i) {
@@ -302,14 +294,27 @@ HybridCubeMesh getHybridCubeMesh(NvlMesh nvlMesh) {
   for (auto& row : hcm) {
     row.fill(-1);
   }
+  // A topology is an HCM if:
+  // - Every device has exactly 4 neighbors.
+  // - For every device, it has exactly 1 relay neighbor that is
+  //   a neighbor of the 3 non-neighbor of the device.
   for (size_t i = 0; i < kMaxDevices; ++i) {
-    TORCH_CHECK(neighbors[i].size() == 4);
+    if (neighbors[i].size() != 4) {
+      return std::nullopt;
+    }
+    // Condition 1: check the number of neighbors
+    std::vector<size_t> relayNeighbors;
     for (size_t j = 0; j < kMaxDevices; ++j) {
       if ((neighborMasks[i] & neighborMasks[j]) == 0) {
-        neighbors[i].erase(j);
-        hcm[i][3] = j;
+        relayNeighbors.push_back(j);
       }
     }
+    // Condition 2: check the number of relay neighbors
+    if (relayNeighbors.size() != 1) {
+      return std::nullopt;
+    }
+    neighbors[i].erase(relayNeighbors[0]);
+    hcm[i][3] = relayNeighbors[0];
   }
 
   for (size_t i = 0; i < kMaxDevices; ++i) {
@@ -334,29 +339,29 @@ static __global__ void hybridCubeMeshAllReduceKernel(
     at::BFloat16* input,
     size_t N,
     size_t N_aligned,
-    std::array<HcmP2pState*, kMaxDevices> p2pStates,
+    std::array<P2pState*, kMaxDevices> p2pStates,
     std::array<at::BFloat16*, kMaxDevices> buffers,
+    int hcmInfo[4],
     size_t rank) {
   const size_t numelPerThread = kBytesPerThread / sizeof(at::BFloat16);
   const size_t offset =
       (blockDim.x * blockIdx.x + threadIdx.x) * numelPerThread;
   const size_t stride = blockDim.x * gridDim.x * numelPerThread;
+  const int relayRank = hcmInfo[3];
 
   // Wait for HCM neigbors to enter the kernel
   if (threadIdx.x < 3) {
-    auto targetRank = p2pStates[rank]->neighborRanks[threadIdx.x];
-    releaseSignal(&p2pStates[targetRank]->signals[blockIdx.x][rank]);
-    acquireSignal(&p2pStates[rank]->signals[blockIdx.x][targetRank]);
+    auto targetRank = hcmInfo[threadIdx.x];
+    releaseSignal(&p2pStates[targetRank]->signals0[blockIdx.x][rank]);
+    acquireSignal(&p2pStates[rank]->signals0[blockIdx.x][targetRank]);
   }
   __syncthreads();
 
-  const auto neighborRanks = p2pStates[rank]->neighborRanks;
-  const auto relayRank = p2pStates[rank]->relayRank;
   const at::BFloat16* srcs[4] = {
       buffers[rank],
-      buffers[neighborRanks[0]],
-      buffers[neighborRanks[1]],
-      buffers[neighborRanks[2]],
+      buffers[hcmInfo[0]],
+      buffers[hcmInfo[1]],
+      buffers[hcmInfo[2]],
   };
   at::BFloat16* localRelay = buffers[rank] + kMaxIntraNodeSize / 2;
   at::BFloat16* remoteRelay = buffers[relayRank] + kMaxIntraNodeSize / 2;
@@ -382,8 +387,8 @@ static __global__ void hybridCubeMeshAllReduceKernel(
   __syncthreads();
 
   if (threadIdx.x == 0) {
-    releaseSignal(&p2pStates[relayRank]->signals[blockIdx.x][rank]);
-    acquireSignal(&p2pStates[rank]->signals[blockIdx.x][relayRank]);
+    releaseSignal(&p2pStates[relayRank]->signals0[blockIdx.x][rank]);
+    acquireSignal(&p2pStates[rank]->signals0[blockIdx.x][relayRank]);
   }
   __syncthreads();
 
@@ -464,36 +469,25 @@ bool isIntraNodeCommSupported() {
 #endif
 }
 
-static void* initFcP2pState() {
+void* initP2pState() {
   void* state = nullptr;
-  C10_CUDA_CHECK(cudaMalloc(&state, sizeof(FcP2pState)));
-  C10_CUDA_CHECK(cudaMemset(state, 0, sizeof(FcP2pState)));
+  AT_CUDA_CHECK(cudaMalloc(&state, sizeof(P2pState)));
+  AT_CUDA_CHECK(cudaMemset(state, 0, sizeof(P2pState)));
   return state;
 }
 
-static void* initHcmP2pState(NvlMesh nvlMesh, size_t rank) {
-  HcmP2pState state;
-  memset(&state, 0, sizeof(state));
-
-  auto hcm = getHybridCubeMesh(nvlMesh);
-  std::copy(hcm[rank].begin(), hcm[rank].begin() + 3, state.neighborRanks);
-  state.relayRank = hcm[rank][3];
-
-  void* stateDev = nullptr;
-  C10_CUDA_CHECK(cudaMalloc(&stateDev, sizeof(state)));
-  AT_CUDA_CHECK(
-      cudaMemcpy(stateDev, &state, sizeof(state), cudaMemcpyHostToDevice));
-  return stateDev;
-}
-
-void* initP2pState(Topology topology, NvlMesh nvlMesh, size_t rank) {
-  if (topology == Topology::FULLY_CONNECTED) {
-    return initFcP2pState();
-  } else if (topology == Topology::HYBRID_CUBE_MESH) {
-    return initHcmP2pState(nvlMesh, rank);
-  } else {
-    C10_THROW_ERROR(ValueError, "IntraNodeComm: invalid topology");
+void* initTopoInfo(Topology topology, NvlMesh nvlMesh, size_t rank) {
+  void* topoInfo = nullptr;
+  if (topology != Topology::HYBRID_CUBE_MESH) {
+    return topoInfo;
   }
+  auto hcm = getHybridCubeMesh(nvlMesh);
+  int hcmInfo[4];
+  std::copy((*hcm)[rank].begin(), (*hcm)[rank].begin() + 4, hcmInfo);
+  AT_CUDA_CHECK(cudaMalloc(&topoInfo, sizeof(hcmInfo)));
+  AT_CUDA_CHECK(
+      cudaMemcpy(topoInfo, hcmInfo, sizeof(hcmInfo), cudaMemcpyHostToDevice));
+  return topoInfo;
 }
 
 at::Tensor oneShotAllReduce(
@@ -527,7 +521,7 @@ at::Tensor oneShotAllReduce(
             input.data_ptr<at::BFloat16>(),      \
             input.numel(),                       \
             N_aligned,                           \
-            castArr<FcP2pState*>(p2pStates),     \
+            castArr<P2pState*>(p2pStates),       \
             castArr<at::BFloat16*>(buffers),     \
             rank);                               \
     C10_CUDA_KERNEL_LAUNCH_CHECK();              \
@@ -587,7 +581,7 @@ at::Tensor twoShotAllReduce(
     twoShotAllReduceKernel<kWorldSize><<<blocks, threads, 0, stream>>>( \
         output.data_ptr<at::BFloat16>(),                                \
         N_aligned,                                                      \
-        castArr<FcP2pState*>(p2pStates),                                \
+        castArr<P2pState*>(p2pStates),                                  \
         castArr<at::BFloat16*>(buffers),                                \
         rank);                                                          \
     C10_CUDA_KERNEL_LAUNCH_CHECK();                                     \
@@ -616,6 +610,7 @@ at::Tensor hybridCubeMeshAllReduce(
     const at::Tensor& input,
     std::array<void*, kMaxDevices> p2pStates,
     std::array<void*, kMaxDevices> buffers,
+    int hcmInfo[4],
     size_t rank,
     size_t worldSize,
     at::cuda::CUDAStream& stream) {
@@ -641,8 +636,9 @@ at::Tensor hybridCubeMeshAllReduce(
       input.data_ptr<at::BFloat16>(),                                      \
       input.numel(),                                                       \
       N_aligned,                                                           \
-      castArr<HcmP2pState*>(p2pStates),                                    \
+      castArr<P2pState*>(p2pStates),                                       \
       castArr<at::BFloat16*>(buffers),                                     \
+      hcmInfo,                                                             \
       rank);                                                               \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -687,6 +683,7 @@ at::Tensor allReduce(
     const at::Tensor& input,
     std::array<void*, kMaxDevices> p2pStates,
     std::array<void*, kMaxDevices> buffers,
+    void* topoInfo,
     size_t rank,
     size_t worldSize,
     AllReduceAlgo algo,
@@ -700,7 +697,7 @@ at::Tensor allReduce(
           input, p2pStates, buffers, rank, worldSize, stream);
     case AllReduceAlgo::HCM:
       return hybridCubeMeshAllReduce(
-          input, p2pStates, buffers, rank, worldSize, stream);
+          input, p2pStates, buffers, (int*)topoInfo, rank, worldSize, stream);
     default:
       C10_THROW_ERROR(ValueError, "IntraNodeComm: invalid algo");
   }

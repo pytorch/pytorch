@@ -28,10 +28,37 @@ static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
     "ENABLE_INTRA_NODE_COMM"};
 
 ////////////////////////////////////////////////////////////////////////////////
+// CUDA Functions
+////////////////////////////////////////////////////////////////////////////////
+
+bool isIntraNodeCommSupported();
+
+std::optional<HybridCubeMesh> getHybridCubeMesh(NvlMesh nvlMesh);
+
+void* initP2pState();
+
+void* initTopoInfo(Topology topology, NvlMesh nvlMesh, size_t rank);
+
+AllReduceAlgo selectAllReduceAlgo(
+    const at::Tensor& input,
+    Topology topology,
+    size_t worldSize);
+
+at::Tensor allReduce(
+    const at::Tensor& input,
+    std::array<void*, kMaxDevices> p2pStates,
+    std::array<void*, kMaxDevices> buffers,
+    void* topoInfo,
+    size_t rank,
+    size_t worldSize,
+    AllReduceAlgo algo,
+    at::cuda::CUDAStream& stream);
+
+////////////////////////////////////////////////////////////////////////////////
 // Topology Detection
 ////////////////////////////////////////////////////////////////////////////////
 
-// TODO: determine via GPU model
+// TODO: find a better way to determine this
 static constexpr size_t kMaxNvLinks = 20;
 
 static std::ostream& operator<<(std::ostream& os, const NvlMesh& nvlMesh) {
@@ -44,6 +71,17 @@ static std::ostream& operator<<(std::ostream& os, const NvlMesh& nvlMesh) {
   }
   os << oss.str();
   return os;
+}
+
+static bool isSame(NvlMesh lhs, NvlMesh rhs) {
+  for (size_t i = 0; i < kMaxDevices; ++i) {
+    for (size_t j = 0; j < kMaxDevices; ++j) {
+      if (lhs[i][j] != rhs[i][j]) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 /**
@@ -78,12 +116,13 @@ static NvlMesh getNvlMesh(std::vector<std::string> rankToBusId) {
       nvmlIntNvLinkDeviceType_t deviceType;
       ret = driverApi->nvmlDeviceGetNvLinkRemoteDeviceType_(
           devices[idx], link, &deviceType);
-      if (ret == NVML_ERROR_INVALID_ARGUMENT) {
-        // We've exhausted NVLinks connected to this device
+      if (ret != NVML_SUCCESS) {
+        // We've exhausted the NVLinks connected to this device.
+        // This error is benign. There doesn't seem to be a reliable
+        // way to obtain the maximum link value that can be passed to
+        // the API, so we simply increment the link value until the
+        // API fails or we hit a predefined maximum value.
         break;
-      } else if (ret != NVML_SUCCESS) {
-        // Unexpected error. Return an empty NvlMesh
-        return {};
       }
       // Remote device is GPU
       if (deviceType == NVML_NVLINK_DEVICE_TYPE_GPU) {
@@ -160,35 +199,13 @@ static Topology detectTopology(const NvlMesh nvlMesh, size_t worldSize) {
     LOG(INFO) << "IntraNodeComm: Topology::FULLY_CONNECTED";
     return Topology::FULLY_CONNECTED;
   }
-  if (worldSize == kMaxDevices && isHybridCubeMesh(nvlMesh)) {
+  if (worldSize == kMaxDevices && getHybridCubeMesh(nvlMesh) != std::nullopt) {
     LOG(INFO) << "IntraNodeComm: Topology::HYBRID_CUBE_MESH";
     return Topology::HYBRID_CUBE_MESH;
   }
   LOG(INFO) << "IntraNodeComm: Topology::UNKNOWN";
   return Topology::UNKNOWN;
 };
-
-////////////////////////////////////////////////////////////////////////////////
-// CUDA Functions
-////////////////////////////////////////////////////////////////////////////////
-
-bool isIntraNodeCommSupported();
-
-void* initP2pState(Topology topology, NvlMesh nvlMesh, size_t rank);
-
-AllReduceAlgo selectAllReduceAlgo(
-    const at::Tensor& input,
-    Topology topology,
-    size_t worldSize);
-
-at::Tensor allReduce(
-    const at::Tensor& input,
-    std::array<void*, kMaxDevices> p2pStates,
-    std::array<void*, kMaxDevices> buffers,
-    size_t rank,
-    size_t worldSize,
-    AllReduceAlgo algo,
-    at::cuda::CUDAStream& stream);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Rendezvous and Initialization
@@ -198,11 +215,13 @@ IntraNodeComm::IntraNodeComm(
     Topology topology,
     std::array<void*, kMaxDevices> p2pStates,
     std::array<void*, kMaxDevices> buffers,
+    void* topoInfo,
     size_t rank,
     size_t worldSize)
     : topology_(topology),
       p2pStates_(p2pStates),
       buffers_(buffers),
+      topoInfo_(topoInfo),
       rank_(rank),
       worldSize_(worldSize) {}
 
@@ -219,6 +238,9 @@ IntraNodeComm::~IntraNodeComm() {
   }
   AT_CUDA_CHECK(cudaFree(p2pStates_[rank_]));
   AT_CUDA_CHECK(cudaFree(buffers_[rank_]));
+  if (topoInfo_ != nullptr) {
+    AT_CUDA_CHECK(cudaFree(topoInfo_));
+  }
 }
 
 /**
@@ -301,7 +323,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
 
   std::vector<std::string> rankToBusId;
   for (const auto& info : peerDevInfos) {
-    if (strcmp(info.hostname, devInfo.hostname) != 0) {
+    if (strcmp(info.hostname, peerDevInfos.front().hostname) != 0) {
       LOG(WARNING) << "Aborting IntraNodeComm::rendezvous because some "
                       "participants are not on the same host ("
                    << info.hostname << ", " << devInfo.hostname << ")";
@@ -327,7 +349,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
   Topology topology = detectTopology(nvlMesh, worldSize);
 
   // Initialize p2p state
-  auto p2pState = initP2pState(topology, nvlMesh, rank);
+  auto p2pState = initP2pState();
 
   // Allocate buffer
   void* buffer = nullptr;
@@ -335,6 +357,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
 
   // Second handshake: exchange topology and CUDA IPC handles
   struct IpcInfo {
+    NvlMesh nvlMesh;
     Topology topology;
     cudaIpcMemHandle_t p2pStateHandle, bufferHandle;
   };
@@ -345,15 +368,17 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
   AT_CUDA_CHECK(cudaIpcGetMemHandle(&bufferHandle, buffer));
 
   IpcInfo ipcInfo{
+      .nvlMesh = nvlMesh,
       .topology = topology,
       .p2pStateHandle = p2pStateHandle,
       .bufferHandle = bufferHandle};
 
   auto peerIpcInfos = storeAllGather(
-      store, prefix + "-IntraNodeCommHandShake-1", rank, worldSize, ipcInfo);
+      store, prefix + "-IntraNodeCommHandShake-2", rank, worldSize, ipcInfo);
 
   for (const auto& info : peerIpcInfos) {
-    if (info.topology != topology) {
+    if (!isSame(info.nvlMesh, peerIpcInfos.front().nvlMesh) ||
+        info.topology != peerIpcInfos.front().topology) {
       LOG(WARNING) << "Aborting IntraNodeComm::rendezvous because some "
                       "participants are observing different topologies ("
                    << int(info.topology) << " and " << int(topology) << ")";
@@ -379,8 +404,9 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
           cudaIpcMemLazyEnablePeerAccess));
     }
   }
+  void* topoInfo = initTopoInfo(topology, nvlMesh, rank);
   return c10::make_intrusive<IntraNodeComm>(
-      topology, p2pStates, buffers, rank, worldSize);
+      topology, p2pStates, buffers, topoInfo, rank, worldSize);
 #else
   return nullptr;
 #endif
@@ -398,7 +424,7 @@ at::Tensor IntraNodeComm::allReduce(
   c10::cuda::CUDACachingAllocator::recordStream(
       input.storage().data_ptr(), stream);
   return c10d::intra_node_comm::allReduce(
-      input, p2pStates_, buffers_, rank_, worldSize_, algo, stream);
+      input, p2pStates_, buffers_, topoInfo_, rank_, worldSize_, algo, stream);
 }
 
 } // namespace intra_node_comm
