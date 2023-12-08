@@ -154,6 +154,9 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
       for (auto&& [name, op] : GetHipBlasLtGemmTypeStringAndOps<T, ALayout, BLayout>()) {
         this->RegisterOp(std::move(name), std::move(op));
       }
+      for (auto&& [name, op] : GetHipBlasLtTransposedGemmTypeStringAndOps<T, ALayout, BLayout>()) {
+        this->RegisterOp(std::move(name), std::move(op));
+      }
     }
 
     if (validators.find("HIPBLASLT_VERSION") == validators.end()) {
