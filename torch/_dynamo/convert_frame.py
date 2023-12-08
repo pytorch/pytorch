@@ -560,7 +560,6 @@ def _compile(
             CompileContext.get().attempt = attempt
             try:
                 out_code = transform_code_object(code, transform)
-                orig_code_map[out_code] = code
                 break
             except exc.RestartAnalysis as e:
                 log.info(
@@ -581,7 +580,6 @@ def _compile(
                 if one_graph:
                     log.debug("No graph captured with one_graph=True")
                 return None
-        output_codes.add(out_code)
 
         def log_bytecode(prefix, name, filename, line_no, code):
             if bytecode_log.isEnabledFor(logging.DEBUG):
@@ -608,6 +606,9 @@ def _compile(
             hook_output = hook(code, out_code)
             if hook_output is not None:
                 out_code = hook_output
+
+        orig_code_map[out_code] = code
+        output_codes.add(out_code)
 
         assert output is not None
 

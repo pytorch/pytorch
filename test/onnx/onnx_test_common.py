@@ -220,7 +220,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         rtol: Optional[float] = 1e-3,
         atol: Optional[float] = 1e-7,
         has_mutation: bool = False,
-        verbose: bool = False,
         additional_test_inputs: Optional[
             List[
                 Union[
@@ -242,8 +241,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             has_mutation (bool, optional): Whether the model mutates its input or state.
                 `mutation` as `True` incurs extra overhead of cloning the inputs and model.
                 Defaults to False.
-            verbose (bool, optional): Whether to save diagnostics as Sarif log and print
-                verbose information. Defaults to False.
             additional_test_inputs: Test the models with another dataset input, which
                 is designed for dynamic axes testing. Defaults to None. It's a list of
                 different input sets in tuples. Inside tuple, the first element is a tuple
@@ -308,7 +305,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             export_error = e
             onnx_program = e.onnx_program
 
-        if verbose and diagnostics.is_onnx_diagnostics_log_artifact_enabled():
+        if diagnostics.is_onnx_diagnostics_log_artifact_enabled():
             onnx_program.save_diagnostics(
                 f"test_report_{self._testMethodName}"
                 f"_op_level_debug_{self.op_level_debug}"
@@ -324,7 +321,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
 
         _compare_pytorch_onnx_with_ort(
             onnx_program,
-            model,
+            ref_model,
             input_args,
             input_kwargs,
             atol,
@@ -347,7 +344,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 )
                 _compare_pytorch_onnx_with_ort(
                     onnx_program,
-                    model,
+                    ref_model,
                     additional_input_args,
                     additional_input_kwargs,
                     atol,
@@ -439,20 +436,18 @@ def _compare_pytorch_onnx_with_ort(
         ref_input_args = input_args
         ref_input_kwargs = input_kwargs
 
-    # Format original model inputs into the format expected by exported ONNX model.
-    onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(
-        *input_args, **input_kwargs
-    )
-
-    ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
-        ref_model(*ref_input_args, **ref_input_kwargs)
-    )
-    ort_outputs = run_ort(onnx_program, onnx_format_args)
+    # ONNXProgram holds a reference (not copy) to the original ref_model, including its state_dict.
+    # Thus, ONNXProgram() must run before ref_model() to prevent ref_model.forward() from changing the state_dict.
+    # Otherwise, the ref_model can change buffers on state_dict which would be used by ONNXProgram.__call__()
+    ort_outputs = onnx_program(*input_args, **input_kwargs)
+    ref_outputs = ref_model(*ref_input_args, **ref_input_kwargs)
+    ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(ref_outputs)
 
     if len(ref_outputs) != len(ort_outputs):
         raise AssertionError(
             f"Expected {len(ref_outputs)} outputs, got {len(ort_outputs)}"
         )
+
     for ref_output, ort_output in zip(ref_outputs, ort_outputs):
         torch.testing.assert_close(
             ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol

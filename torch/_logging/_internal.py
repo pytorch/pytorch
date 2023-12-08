@@ -514,11 +514,13 @@ def help_message(verbose=False):
         heading = "Visible registered names (use TORCH_LOGS='+help' for full list)"
     lines = (
         ["all"]
-        + list(log_registry.log_alias_to_log_qnames.keys())
-        + [
-            f"{pad_to(name)}\t{log_registry.artifact_descriptions[name]}"
-            for name in printed_artifacts
-        ]
+        + sorted(log_registry.log_alias_to_log_qnames.keys())
+        + sorted(
+            [
+                f"{pad_to(name)}\t{log_registry.artifact_descriptions[name]}"
+                for name in printed_artifacts
+            ]
+        )
     )
     setting_info = "  " + "\n  ".join(lines)
     examples = """

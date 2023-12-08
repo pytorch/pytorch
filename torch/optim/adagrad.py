@@ -50,7 +50,7 @@ class Adagrad(Optimizer):
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
-                state["step"] = torch.tensor(0.0)
+                state["step"] = torch.tensor(0.0, dtype=torch.float32)
                 init_value = (
                     complex(initial_accumulator_value, initial_accumulator_value)
                     if torch.is_complex(p)
@@ -73,7 +73,7 @@ class Adagrad(Optimizer):
         )
         if not step_is_tensor:
             for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]))
+                s["step"] = torch.tensor(float(s["step"]), dtype=torch.float32)
 
     def share_memory(self):
         for group in self.param_groups:

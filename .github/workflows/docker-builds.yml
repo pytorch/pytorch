@@ -6,6 +6,7 @@ on:
     paths:
       - .ci/docker/**
       - .github/workflows/docker-builds.yml
+      - .lintrunner.toml
   push:
     branches:
       - main
@@ -14,6 +15,7 @@ on:
     paths:
       - .ci/docker/**
       - .github/workflows/docker-builds.yml
+      - .lintrunner.toml
   schedule:
     - cron: 1 3 * * 3
 
