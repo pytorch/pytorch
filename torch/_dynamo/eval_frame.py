@@ -293,6 +293,7 @@ class _TorchDynamoContext:
         patch_fn=nothing,
         first_ctx=False,
         *,
+        export=False,
         dynamic=None,
         compiler_config=None,
     ):
@@ -303,6 +304,7 @@ class _TorchDynamoContext:
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
+        self.export = export
         self.dynamic = dynamic
         self.compiler_config = compiler_config
         patch_fn()
@@ -483,6 +485,7 @@ class OptimizeContext(_TorchDynamoContext):
         backend_ctx_ctor,
         first_ctx=False,
         *,
+        export=False,
         dynamic=None,
         compiler_config=None,
     ):
@@ -495,6 +498,7 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
+            export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
         )
@@ -582,6 +586,7 @@ def _optimize_catch_errors(
     compile_fn,
     hooks: Hooks,
     backend_ctx_ctor=null_context,
+    export=False,
     dynamic=None,
     compiler_config=None,
 ):
@@ -589,6 +594,7 @@ def _optimize_catch_errors(
         catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
+        export=export,
         dynamic=dynamic,
         compiler_config=compiler_config,
     )
@@ -1400,6 +1406,7 @@ def optimize_assert(
         ),
         hooks,
         backend_ctx_ctor,
+        export=export,
         dynamic=dynamic,
     )
 
