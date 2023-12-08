@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -300,7 +301,7 @@ class _Uninitialized final {};
 //
 
 // item sizes for TypeMeta::itemsize() fast path
-static constexpr uint8_t scalarTypeItemSizes[NumScalarTypes] = {
+static constexpr std::array<uint8_t, NumScalarTypes> scalarTypeItemSizes = {
 #define SCALAR_TYPE_SIZE(T, name) sizeof(T),
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_SIZE)
 #undef SCALAR_TYPE_SIZE
