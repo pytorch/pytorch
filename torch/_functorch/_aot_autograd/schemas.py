@@ -623,6 +623,7 @@ class AOTConfig:
     aot_autograd_arg_pos_to_source: Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
+    scope_root: Optional[torch.nn.Module] = None
 
 
 SubclassTracingInfo = collections.namedtuple(

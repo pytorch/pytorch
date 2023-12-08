@@ -1870,5 +1870,54 @@ def forward(self, l_x_):
         ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
         self.assertEqual(ep(t, dim, index, src), output)
 
+    def test_nn_module_stack(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.randn(4, 4))
+
+            def forward(self, x):
+                return self.buffer.sum() + x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                return (self.bar(x) + x.sum(),)
+
+        inp = (torch.randn(4, 4),)
+        ep_strict = torch.export.export(Foo(), inp)
+        ep_non_strict = torch.export.export(Foo(), inp, strict=False)
+
+        for node in ep_strict.graph.nodes:
+            print(node, node.meta["nn_module_stack"] if "nn_module_stack" in node.meta else None)
+
+        print("NOT STRICT")
+        for node in ep_non_strict.graph.nodes:
+            if "nn_module_stack" in node.meta:
+                for key, (val1, val2) in node.meta["nn_module_stack"].items():
+                    print(val2)
+
+            print(node, dict(node.meta["nn_module_stack"]) if "nn_module_stack" in node.meta else None)
+
+
+        # print("AOT EXPORT")
+        # from torch._functorch.aot_autograd import aot_export_module
+        # gm, _ = aot_export_module(Foo(), inp, trace_joint=False)
+        # for node in gm.graph.nodes:
+        #     print(node, node.meta["nn_module_stack"] if "nn_module_stack" in node.meta else None)
+
+        # print("GM TORCH LEVEL")
+        # gm, _ = torch._dynamo.export(Foo(), *inp)
+        # for node in gm.graph.nodes:
+        #     print(node, node.meta["nn_module_stack"] if "nn_module_stack" in node.meta else None)
+
+        ep_non_strict.module(flat=False)
+
+
+
+
 if __name__ == '__main__':
     run_tests()

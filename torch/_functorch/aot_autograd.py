@@ -706,6 +706,7 @@ def aot_function(
         is_export=False,
         no_tangents=False,
         enable_log=enable_log,
+        scope_root=scope_root,
     )
     cached_res = None
 
@@ -907,6 +908,7 @@ def aot_module_simplified(
 
     return forward
 
+
 def aot_export_module(
     mod: nn.Module,
     args,
@@ -949,6 +951,7 @@ def aot_export_module(
     (5) If an input is mutated, it is not allowed to alias any other inputs.
     (6) Parameters must not be duplicated.
     """
+
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     params_and_buffers = {
@@ -1026,6 +1029,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             decompositions=decompositions,
             num_params_buffers=params_len,
             no_tangents=True,
+            scope_root=mod,
         )
     if trace_joint:
         def flattened_joint(*args):
@@ -1171,6 +1175,7 @@ def _aot_export_function(
     # (requiring it to be a graph input).
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
+    scope_root: Optional[torch.nn.Module] = None,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     dynamic_shapes = False
     for x in args:
@@ -1200,6 +1205,7 @@ def _aot_export_function(
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
         no_tangents=no_tangents,
+        scope_root=scope_root,
     )
 
     fx_g, meta = create_aot_dispatcher_function(
