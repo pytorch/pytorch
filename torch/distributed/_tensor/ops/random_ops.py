@@ -1,5 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import torch
+
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
     OpSchema,
     OpStrategy,
@@ -7,8 +9,6 @@ from torch.distributed._tensor.op_schema import (
     StrategyType,
 )
 from torch.distributed._tensor.ops.utils import is_tensor_partial, register_op_strategy
-
-from torch.distributed.device_mesh import DeviceMesh
 
 aten = torch.ops.aten
 

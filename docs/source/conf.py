@@ -969,6 +969,7 @@ coverage_ignore_functions = [
     "is_concrete_int",
     "is_contiguous",
     "is_non_overlapping_and_dense_indicator",
+    "is_singleton",
     "is_symbol_binding_fx_node",
     "is_symbolic",
     "parallel_and",
@@ -2869,6 +2870,7 @@ coverage_ignore_classes = [
     "SymbolicContext",
     "StatelessSymbolicContext",
     "StatefulSymbolicContext",
+    "SubclassSymbolicContext",
     # torch.fx.experimental.unification.match
     "Dispatcher",
     "VarDispatcher",

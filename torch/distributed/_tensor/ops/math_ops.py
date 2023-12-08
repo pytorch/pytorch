@@ -4,6 +4,7 @@ from typing import cast, List, Optional, Sequence, Tuple
 import torch
 
 import torch.distributed.distributed_c10d as c10d
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
     OpSchema,
     OpStrategy,
@@ -27,7 +28,6 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.distributed.device_mesh import DeviceMesh
 
 
 aten = torch.ops.aten
