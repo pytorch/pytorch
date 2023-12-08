@@ -286,7 +286,12 @@ def speculate_subgraph(
             # like bwd.
             if always_restore:
                 # Nothing left to do here
-                return (output, treespec), tx.output.graph, subtracer.lifted_freevars
+                return (
+                    (output, treespec),
+                    tx.output.graph,
+                    subtracer.lifted_freevars,
+                    subtracer.mutated_inputs,
+                )
             else:
                 if not only_consist_of(output, TensorVariable):
                     unimplemented(
