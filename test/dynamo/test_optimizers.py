@@ -29,9 +29,6 @@ def get_optimizer_step(opt, closure=None):
     # see the [Note on graph break] in optimizer.py
     # This ignores the outer _use_grad_if_differentiable wrapper, which is fine for now
     # as dynamo does not support differentiable optimizers anyway
-    if not hasattr(opt.step, "__wrapped__"):
-        return lambda: opt.step
-
     step_fn = opt.step.__wrapped__
     if closure is not None:
 
@@ -47,10 +44,8 @@ def get_optimizer_step(opt, closure=None):
 
 
 def make_test(optim_cls, closure=None, **kwargs):
-    opt = optim_cls(model.parameters(), **kwargs)
-
     def test_fn(self):
-        nonlocal opt
+        opt = optim_cls(model.parameters(), **kwargs)
 
         fn = get_optimizer_step(opt, closure=closure)
 
