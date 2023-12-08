@@ -148,13 +148,6 @@ class SpeculationEntry:
         self.failed = True
         raise exc.SpeculationRestartAnalysis()
 
-    def mark_sound_and_restart_analysis(self):
-        """
-        Start tracing of the current frame over again, and don't run soundness checks here.
-        """
-        self.is_sound = True
-        raise exc.SpeculationRestartAnalysis()
-
 
 @dataclasses.dataclass
 class SpeculationLog:
