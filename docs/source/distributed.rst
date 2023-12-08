@@ -453,6 +453,8 @@ Collective functions
 
 .. autofunction:: monitored_barrier
 
+.. autoclass:: Work
+
 .. autoclass:: ReduceOp
 
 .. class:: reduce_op
