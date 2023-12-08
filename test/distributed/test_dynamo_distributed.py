@@ -875,6 +875,52 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 .run(GUARDS_FILE.getvalue())
             self.assertTrue(same(correct_outputs, outputs))
 
+    def test_fsdp_skip_register_attr_or_module(self):
+        """
+        ensure FSDP module is not registered as attrbutes
+        in the fx graph
+        see `not source.guard_source().is_fsdp_module()`
+        before calling `register_attr_or_module`
+        in variables/builder.py
+        """
+        class ToyModel(nn.Module):
+            def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5):
+                super().__init__()
+                self.net = nn.Sequential(
+                    *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
+                    + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+                )
+
+            def forward(self, inputs):
+                out = self.net(inputs)
+                return out
+
+        torch._dynamo.reset()
+
+        device = f"cuda:{self.rank}"
+        m = ToyModel(in_feat=10, hidden_feat=5000, out_feat=5,).to(device)
+        inputs = torch.rand(20, 10).to(device)
+        m.apply(init_weights)
+        correct_outputs = m(inputs)
+        fsdp_m = FSDP(m, use_orig_params=True)
+
+        def debug_compiler(gm, _):
+            for node in gm.graph.nodes:
+                if node.op == "get_attr":
+                    for name in [
+                        "l__self___net_0_weight",
+                        "l__self___net_0_bias",
+                        "l__self___net_2_weight",
+                        "l__self___net_2_bias"
+                    ]:
+                        self.assertFalse(name in node.name, f"FSDP module {name} should not be registered as attributes")
+            return gm
+
+        opt_m = torch._dynamo.optimize(backend=debug_compiler)(fsdp_m)
+        outputs = opt_m(inputs)
+
+        self.assertTrue(same(correct_outputs, outputs))
+
     def test_fsdp_dup_tensors_same_source(self):
         """
         Tests that FSDP-managed modules' parameters and buffers with the same

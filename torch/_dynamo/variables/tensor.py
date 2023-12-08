@@ -798,9 +798,6 @@ class SymNodeVariable(VariableTracker):
         else:
             return type(self.sym_num)
 
-    def unpack_var_sequence(self, tx):
-        super().unpack_var_sequence(tx)
-
     def as_proxy(self):
         return self.proxy
 
