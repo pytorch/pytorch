@@ -101,7 +101,7 @@ class CUDATemplate(KernelTemplate):
         # Generate Row-Major and Column-Major variants of all flexible input tensor layouts
         input_nodes = list(self.input_nodes)
         Bias, aux_inputs = self.determine_additional_inputs(**kwargs)
-        if Bias is not None:
+        if Bias is not None and len(input_nodes) < 3:
             input_nodes.append(Bias)
         input_nodes.extend(aux_inputs)
         for aux_inp in aux_inputs:
