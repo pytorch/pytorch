@@ -3,6 +3,7 @@
 #ifdef USE_C10D_NCCL
 
 #include <chrono>
+#include <future>
 #include <iostream>
 #include <list>
 #include <mutex>
@@ -398,6 +399,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return std::string(NCCL_BACKEND_NAME);
   }
 
+  bool supportsSplitting() const override {
+    return true;
+  }
+
   void startCoalescing() override;
 
   c10::intrusive_ptr<Work> endCoalescing() override;
@@ -542,6 +547,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void shutdown();
 
+  void eagerConnectSingleDevice(at::Device device) override;
+
+  void performNocolorSplit(at::Device device);
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
@@ -644,6 +653,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // object might get destroyed before the WorkNCCL object.
   void ncclCommWatchdog();
 
+  // Return the CUDA device most likely associated with this backend.
+  // If we aren't bound to a specific device, there is no strict
+  // guarantee that this heuristic is the correct assignment of ranks
+  // to GPUs that Python layers use, but in practice it tends to be.
+  // Fortunately we don't rely on this for correctness of any tensor
+  // operations, just for ancillary uses like health checks and
+  // barriers.
+  at::Device guessDeviceForRank() const;
+
   // Performs a health check by initializing dummy NCCL communicators and then
   // destroying them. This will help indicate and signal any NCCL-related issues
   // prior to the first collective. The actual initialization and subsequent
@@ -666,7 +684,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // In the timeout case and we will dump debug info such as the NCCL flight
   // recorder to storage. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
-  void dumpDebuggingInfo();
+  bool dumpDebuggingInfo();
 
   // Desync debug helper
   void logWorkStart(WorkNCCL& work);
@@ -685,10 +703,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // gets terminated.
   virtual void terminateProcess(std::string errMsg);
 
-  // Check the writeDebugInfo_ flag and if it is true, we do nothing.
-  // If not, we first set the flag to be true and return a thread which will
-  // get and write the debug info into storage.
-  c10::optional<std::thread> tryWriteDebugInfo();
+  // Create a thread that dumps debug info to the file specified as
+  // ${TORCH_NCCL_DEBUG_INFO_TEMP_FILE}{$RANK}
+  // Serializes all dumping activity, but allows concurrent calls.
+  // Each call returns a future, which can be checked or waited on
+  // for dump completion.
+  std::future<bool> launchAsyncDebugDump();
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
