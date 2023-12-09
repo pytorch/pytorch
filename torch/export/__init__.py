@@ -57,12 +57,13 @@ __all__ = [
     "register_dataclass",
     "save",
     "unflatten",
+    "FlatArgsAdapter",
 ]
 
 
 from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
 from .graph_signature import ExportBackwardSignature, ExportGraphSignature
-from .unflatten import unflatten
+from .unflatten import FlatArgsAdapter, unflatten
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
