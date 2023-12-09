@@ -1053,6 +1053,8 @@ def run_tests(argv=UNITTEST_ARGS):
             other_args.append("--use-pytest")
         if RERUN_DISABLED_TESTS:
             other_args.append("--rerun-disabled-tests")
+        if TEST_SAVE_XML:
+            other_args += ['--save-xml', args.save_xml]
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -1329,6 +1331,8 @@ if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.accumulated_cache_size_limit = 8
+    # Do not log compilation metrics from unit tests
+    torch._dynamo.config.log_compilation_metrics = False
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
