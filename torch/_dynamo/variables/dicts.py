@@ -402,11 +402,13 @@ class SetVariable(VariableTracker):
         if name == "add" and args and self.mutable_local:
             assert not kwargs
             item = args[0]
+            tx.output.side_effects.mutation(self)
             self._add(item)
             return ConstantVariable.create(None)
         elif name == "pop" and self.mutable_local:
             assert not kwargs
             assert not args
+            tx.output.side_effects.mutation(self)
             return self.items.pop()
         elif name == "__len__":
             return ConstantVariable.create(len(self.items))

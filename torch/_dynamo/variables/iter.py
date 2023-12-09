@@ -38,6 +38,7 @@ class CountIteratorVariable(IteratorVariable):
 
     def next_variables(self, tx):
         assert self.mutable_local
+        tx.output.side_effects.mutation(self)
         next_item = self.item.call_method(tx, "__add__", [self.step], {})
         self.item = next_item
         return self.item, self
@@ -70,7 +71,7 @@ class CycleIteratorVariable(IteratorVariable):
                     unimplemented(
                         "input iterator to itertools.cycle has too many items"
                     )
-
+                tx.output.side_effects.mutation(self)
                 self.saved.append(new_item)
                 self.item = new_item
                 if self.item is None:
@@ -80,6 +81,7 @@ class CycleIteratorVariable(IteratorVariable):
                 self.iterator = None
                 return self.next_variables(tx)
         elif len(self.saved) > 0:
+            tx.output.side_effects.mutation(self)
             self.saved_index = (self.saved_index + 1) % len(self.saved)
             return self.item, self
         else:

@@ -188,6 +188,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             if isinstance(arg, ListVariable) and all(
                 isinstance(t, torch.Tensor) for t in py_arg
             ):
+                tx.output.side_effects.mutation(arg)
                 arg.items.extend([self.wrap_tensor(tx, t) for t in py_arg])
 
     def create_finalizer(self, tx):
