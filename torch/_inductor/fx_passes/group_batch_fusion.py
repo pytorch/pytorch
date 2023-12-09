@@ -307,6 +307,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             node
         ) and self._pointwise_node_can_be_fused(node):
             alpha = node.kwargs.get("alpha", 1.0)
+            rounding_mode = node.kwargs.get("rounding_mode", None)
             input, other = node.args
             shape = list(input.meta["tensor_meta"].shape)
             group_key = (
@@ -315,6 +316,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
                 str(input.meta["tensor_meta"].dtype),
                 str(other.meta["tensor_meta"].dtype),
                 str(alpha),
+                str(rounding_mode),
             )
         else:
             group_key = None
@@ -714,6 +716,18 @@ class BatchReLuPreGradFusion(BatchPointwiseOpsPreGradFusion):
 class BatchAddPostGradFusion(BatchPointwiseOpsPostGradFusion):
     def __init__(self, **kwargs):
         super().__init__(aten.add.Tensor, **kwargs)
+
+
+@register_fusion("batch_aten_sub", pre_grad=False)
+class BatchSubPostGradFusion(BatchPointwiseOpsPostGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(aten.sub.Tensor, **kwargs)
+
+
+@register_fusion("batch_aten_div", pre_grad=False)
+class BatchDivPostGradFusion(BatchPointwiseOpsPostGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(aten.div.Tensor, **kwargs)
 
 
 @register_fusion("batch_aten_mul", pre_grad=False)
