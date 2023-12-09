@@ -1938,7 +1938,13 @@ class CppCodeCache:
                 builder = CxxBuilder(key, [input_path], CxxTorchOptions(), output_dir)
                 target_file = builder.get_target_file_path()
                 if not os.path.exists(target_file):
+                    if is_clang():
+                        print(
+                            f"!!!! clang: fb -> {config.is_fbcode()}, CppCodeCache --> cmd: ",
+                            builder.get_command_line(),
+                        )
                     status, target_file = builder.build()
+                    # raise RuntimeError("Debug here.")
 
                 """
                 output_path = input_path[:-3] + "so"
