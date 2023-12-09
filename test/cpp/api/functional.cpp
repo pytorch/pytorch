@@ -254,17 +254,35 @@ TEST_F(FunctionalTest, LPPool2d) {
   int stride = 2;
   std::vector<int64_t> kernel_size({2, 3});
 
-  auto x = torch::ones({1, 2, 5});
+  auto x = torch::ones({1, 1, 2, 5});
   auto y = F::lp_pool2d(
       x, F::LPPool2dFuncOptions(norm_type, kernel_size).stride(stride));
   auto expected =
-      (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) *
+      (torch::pow(torch::tensor({{{{1, 1}}}}, torch::kFloat), norm_type) *
        (kernel_size[0] * kernel_size[1]))
           .pow(1. / norm_type);
 
-  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.ndimension(), 4);
   ASSERT_TRUE(torch::allclose(y, expected));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 1, 2}));
+}
+
+TEST_F(FunctionalTest, LPPool3d) {
+  int norm_type = 2;
+  int stride = 2;
+  std::vector<int64_t> kernel_size({1, 2, 3});
+
+  auto x = torch::ones({1, 1, 1, 2, 5});
+  auto y = F::lp_pool3d(
+      x, F::LPPool3dFuncOptions(norm_type, kernel_size).stride(stride));
+  auto expected =
+      (torch::pow(torch::tensor({{{{{1, 1}}}}}, torch::kFloat), norm_type) *
+       (kernel_size[0] * kernel_size[1] * kernel_size[2]))
+          .pow(1. / norm_type);
+
+  ASSERT_EQ(y.ndimension(), 5);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 1, 1, 2}));
 }
 
 TEST_F(FunctionalTest, CosineSimilarity) {

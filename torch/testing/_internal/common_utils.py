@@ -1053,6 +1053,8 @@ def run_tests(argv=UNITTEST_ARGS):
             other_args.append("--use-pytest")
         if RERUN_DISABLED_TESTS:
             other_args.append("--rerun-disabled-tests")
+        if TEST_SAVE_XML:
+            other_args += ['--save-xml', args.save_xml]
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -1329,6 +1331,8 @@ if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.accumulated_cache_size_limit = 8
+    # Do not log compilation metrics from unit tests
+    torch._dynamo.config.log_compilation_metrics = False
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
@@ -1384,24 +1388,35 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
 
     return decorator
 
-def markDynamoStrictTest(cls_or_func):
+
+def markDynamoStrictTest(cls_or_func=None, nopython=False):
     """
     Marks the test as 'strict'. In strict mode, we reset before and after the
     test, and run without suppress errors.
+
+    Args:
+    - nopython: if we should run torch._dynamo.optimize with nopython={True/False}.
     """
-    if inspect.isclass(cls_or_func):
-        cls_or_func.dynamo_strict = True
-        return cls_or_func
+    def decorator(cls_or_func):
+        if inspect.isclass(cls_or_func):
+            cls_or_func.dynamo_strict = True
+            cls_or_func.dynamo_strict_nopython = nopython
+            return cls_or_func
 
-    fn = cls_or_func
+        fn = cls_or_func
 
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        torch._dynamo.reset()
-        with unittest.mock.patch("torch._dynamo.config.suppress_errors", False):
-            fn(*args, **kwargs)
-        torch._dynamo.reset()
-    return wrapper
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            torch._dynamo.reset()
+            with unittest.mock.patch("torch._dynamo.config.suppress_errors", False):
+                fn(*args, **kwargs)
+            torch._dynamo.reset()
+        return wrapper
+
+    if cls_or_func is None:
+        return decorator
+    else:
+        return decorator(cls_or_func)
 
 
 def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor on the ROCm stack"):
@@ -2720,6 +2735,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR
         # Is the class strict and compiling?
         strict_mode = getattr(test_cls, "dynamo_strict", False) and compiled
+        nopython = getattr(test_cls, "dynamo_strict_nopython", False) and compiled
 
         if strict_mode:
             torch._dynamo.reset()
@@ -2738,7 +2754,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition", save_config=False)(super_run)
             elif TEST_WITH_TORCHDYNAMO:
                 # TorchDynamo optimize annotation
-                super_run = torch._dynamo.optimize("eager", save_config=False, nopython=strict_mode)(super_run)
+                super_run = torch._dynamo.optimize("eager", save_config=False, nopython=nopython)(super_run)
 
             super_run(result=result)
 
