@@ -512,19 +512,6 @@ def is_numpy_float_type(value):
     )
 
 
-def is_function(value):
-    return istype(
-        value,
-        (
-            types.FunctionType,
-            types.MethodType,
-            types.BuiltinFunctionType,
-            types.MethodDescriptorType,
-            types.WrapperDescriptorType,
-        ),
-    )
-
-
 def is_numpy_ndarray(value):
     if not np:
         return False

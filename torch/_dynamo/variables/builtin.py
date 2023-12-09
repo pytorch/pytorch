@@ -1118,7 +1118,6 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
-            TorchInGraphFunctionVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1227,10 +1226,6 @@ class BuiltinVariable(VariableTracker):
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
-        elif isinstance(obj, TorchInGraphFunctionVariable):
-            member = getattr(obj.value, name)
-            if trace_rules.lookup(member) is not None:
-                return trace_rules.lookup(member)(member, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
             if is_utils_checkpoint(member):
