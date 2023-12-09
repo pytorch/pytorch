@@ -294,7 +294,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             allow_non_fake_inputs=True if self.export else False,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
-        print("Output Graph init")
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
@@ -1082,7 +1081,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             # TODO(voz): Ostensibily, this should be scoped and
             # restore back to old_fake_mode, but doing so currently violates
             # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
-            log.debug(f"fake_mode changed from {old_fake_mode} -> {backend_fake_mode}")
             self.tracing_context.fake_mode = backend_fake_mode
 
         with self.restore_global_state():
@@ -1092,10 +1090,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
-        # breakpoint()
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)
-        # breakpoint()
         return cg.get_instructions()
 
     @property
@@ -1138,7 +1134,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 else ""
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            # breakpoint()
             compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)

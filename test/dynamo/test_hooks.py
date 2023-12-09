@@ -582,11 +582,11 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         # Eager values
         x = torch.tensor([0.5, 0.5, 0.5], requires_grad=True)
         y = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
-        # test_fn(reg_and_mul)
+        test_fn(reg_and_mul)
 
         # Compiled
-        for backend in ["eager"]: # ["eager", "aot_eager", "inductor"]:
-            for compiled_bwd in [True]: #[False, True]:
+        for backend in ["eager", "aot_eager", "inductor"]:
+            for compiled_bwd in [False, True]:
                 torch._dynamo.reset()
                 x = torch.tensor([0.5, 0.5, 0.5], requires_grad=True)
                 y = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
@@ -601,7 +601,6 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                     if compiled_bwd
                     else contextlib.nullcontext()
                 )
-                print("Running w/ Compiled Autograd")
                 with compiled_bwd_ctx:
                     test_fn(compiled_fn)
 

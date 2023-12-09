@@ -649,9 +649,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             inner_fn = fn.fn
         if inner_fn and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
-
-        # import pdb
-        # pdb.set_trace()
         self.push(fn.call_function(self, args, kwargs))
 
     def update_locals_and_stack(self, oldvar: VariableTracker, newvar: VariableTracker):
@@ -729,7 +726,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             and self.should_compile_partial_graph()
             and self.is_non_empty_graph()
         ):
-            print("SPECULATING")
             self.current_speculation = self.speculate()
             if self.current_speculation.failed:
                 return self.step_graph_break(inst)

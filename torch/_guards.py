@@ -821,7 +821,6 @@ def detect_fake_mode(inputs: Any = None):
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
 
     if fake_modes:
-        print(f"detect_fake_mode check, fake modes={fake_modes}")
         fake_mode, desc1, i1 = fake_modes[0]
         for m, desc2, i2 in fake_modes[1:]:
             assert fake_mode is m, (

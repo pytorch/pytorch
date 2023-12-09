@@ -1,4 +1,3 @@
-#include <iostream>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/custom_function.h>
@@ -545,7 +544,6 @@ void AutogradContext::save_variables() {
 }
 
 variable_list AutogradContext::get_saved_variables() const {
-  std::cout << "AutogradContext::get_saved_variables, !has_freed_buffers=" << !has_freed_buffers_ << std::endl;
   TORCH_CHECK(!has_freed_buffers_, ERR_BACKWARD_TWICE);
   variable_list saved;
   saved.reserve(saved_variables_.size());

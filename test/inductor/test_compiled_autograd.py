@@ -55,20 +55,15 @@ class TestCompiledAutograd(TestCase):
                 print("=========== running compiled")
                 actual = list(fn())
 
-            print(f"expected={expected}")
-            print(f"actual={actual}")
             self.assertEqual(expected, actual)
             self.assertEqual(counters["compiled_autograd"]["captures"], count)
             self.assertEqual(counters["compiled_autograd"]["compiles"], count)
 
-    def test_compiled_autograd_key(self):
-        # torch._dynamo.config.cache_size_limit = 1
-        # torch._dynamo.config.error_on_recompile = True
+    def test_custom_fn_saved_tensors(self):
         def fn():
-            class MyFn(torch.autograd.Function):
+            class MySin(torch.autograd.Function):
                 @staticmethod
                 def forward(ctx, x):
-                    print("PYTHON FORWARD")
                     ctx.save_for_backward(x)
                     return torch.sin(x)
 
@@ -79,45 +74,91 @@ class TestCompiledAutograd(TestCase):
 
             for i in [10, 100, 10]:
                 x = torch.arange(0.0, i, requires_grad=True)
-                out = MyFn.apply(x)
-                print("PYTHON RUNNING BACKWARD")
+                out = MySin.apply(x)
                 loss = out.sum()
-                from torchviz import make_dot
-                print("Printing autograd graph")
-                print(make_dot(loss))
                 loss.backward()
-                # out.sum().backward(retain_graph=True)
                 yield x.grad
 
-        # self.check_output_and_recompiles(fn, 1)
-        self.check_output_and_recompiles(fn, 3)
+        self.check_output_and_recompiles(fn, 2)
 
-    # def test_compiled_autograd_key_attribute_error(self):
-    #     def fn():
-    #         class MyFn(torch.autograd.Function):
-    #             @staticmethod
-    #             def forward(ctx, x):
-    #                 ctx.save_for_backward(x)
-    #                 ctx.shape = x.shape
-    #                 return x
+    def test_custom_fn_saved_tensors_shapes(self):
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
 
-    #             @staticmethod
-    #             def backward(ctx, gO):
-    #                 (x,) = ctx.saved_tensors
-    #                 # accessing ctx.shape should raise AttributeError
-    #                 return gO * x + ctx.shape[0]
+                @staticmethod
+                def backward(ctx, gO):
+                    (x,) = ctx.saved_tensors
+                    return gO * torch.cos(x) + x.shape[0]
 
-    #         for i in [10, 100, 10]:
-    #             x = torch.randn((i), requires_grad=True)
-    #             out = MyFn.apply(x)
-    #             out.sum().backward()
-    #             yield x.grad
+            for i in [10, 100, 10]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = MySin.apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
 
-    #     with self.assertRaisesRegex(
-    #         AttributeError,
-    #         "Only ctx.saved_tensors in backward is supported with compiled autograd",
-    #     ):
-    #         self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, 2)
+
+    def test_custom_fns(self):
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    (x,) = ctx.saved_tensors
+                    return gO * torch.cos(x)
+
+            class MyCos(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return torch.cos(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    (x,) = ctx.saved_tensors
+                    return gO * -torch.sin(x)
+
+            for i in [10, 100, 10]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out1 = MySin.apply(x)
+                out2 = MyCos.apply(out1)
+                loss = out2.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn, 2)
+
+    def test_custom_fn_attribute_error(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    ctx.shape = x.shape
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    (x,) = ctx.saved_tensors
+                    # accessing ctx.shape should raise AttributeError
+                    return gO * x + ctx.shape[0]
+
+            for i in [10, 100, 10]:
+                x = torch.randn((i), requires_grad=True)
+                out = MyFn.apply(x)
+                out.sum().backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn, 2)
 
     def test_basic(self):
         def fn():
@@ -553,40 +594,6 @@ known_failing_tests = {
     "test_will_engine_execute_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
     "test_backward_to_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
     "test_callback_propagates_errors_from_device_thread",  # AssertionError: "blah" does not match "call_method UserDefinedObj..."
-    "test_anomaly_detect_nan",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.fail_0th
-    "test_autograd_multiple_views_python",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.idx
-    "test_autograd_simple_views_python",  # RuntimeError: tried to get Bool out of SymBool
-    "test_callback_adds_callback",  # RuntimeError: Final callbacks can only be installed during backward pass.
-    "test_custom_autograd_no_early_free",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got: Cannot access storage of BatchedTensorImpl
-    "test_custom_function_cycle",  # RuntimeError: Originating a RelaxedNumberPair() at item  with
-    "test_custom_function_non_tensor_inputs_outputs",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.scale
-    "test_custom_function_save_for_forward",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.z
-    "test_custom_function_saved_tensors",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx._raw_saved_tensors
-    "test_custom_function_setup_context_multi_input",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.x_shape
-    "test_custom_function_setup_context_multi_output",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.two_x
-    "test_deep_reentrant",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.x
-    "test_grad_fn_prehooks",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
-    "test_grad_fn_prehooks_multiple_outputs",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.a
-    "test_grad_fn_prehooks_remove_hooks",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.register_prehook
-    "test_grad_mode_restored_reentrant",  # RuntimeError: TorchDispatchMode not yet implemented for compiled autograd
-    "test_hook_none",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNotNone | assertIsNotNone /home/xmfan/.conda/envs/autograd/lib/python3.10/unittest/case.py, skipped according skipfiles.SKIP_DIRS'
-    "test_mark_non_differentiable_mixed",  # RuntimeError: tried to get Bool out of SymBool
-    "test_materialize_grads",  # RuntimeError: Comparing
-    "test_no_grad_copy",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.size
-    "test_no_grad_copy_sparse",  # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
-    "test_reentrant_priority",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.x
-    "test_reentrant_with_callbacks_both_depths",  # RuntimeError: Final callbacks can only be installed during backward pass.
-    "test_reentrant_with_callbacks_depth_0",  # RuntimeError: Final callbacks can only be installed during backward pass.
-    "test_reentrant_with_callbacks_depth_1",  # RuntimeError: TorchDispatchMode not yet implemented for compiled autograd
-    "test_return_duplicate",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got: Cannot access storage of BatchedTensorImpl
-    "test_return_duplicate_inplace",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got: Cannot access storage of BatchedTensorImpl
-    "test_return_leaf",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
-    "test_save_output_nr",  # AssertionError: Scalars are not equal!
-    "test_saved_variables_deprecated",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.saved_variables
-    "test_setup_context_when_forward_has_default_args",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.y
-    "test_simple_reentrant",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.output_var
-    "test_tensor_hooks_inplace_multiple_outputs",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
-    "test_lobpcg",  # AttributeError: Only ctx.saved_tensors in backward is supported with compiled autograd, invalid access ctx.largest
 }
 
 if not HAS_CUDA:

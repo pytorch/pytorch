@@ -310,7 +310,6 @@ variable_list compiled_autograd(
   TORCH_CHECK(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
-  std::cout << "compiled autograd start" << std::endl;
   static std::mutex lock;
   std::lock_guard<std::mutex> lock_guard(lock);
   pybind11::gil_scoped_acquire gil;
@@ -368,9 +367,7 @@ variable_list compiled_autograd(
   }
 
   // TODO(jansel): some dynamic sizes seem to be ints not symints
-  std::cout << "checking for cache hit" << std::endl;
   if (!cache->check_dynamic_sizes(compiler_call)) {
-    std::cout << "cache miss" << std::endl;
     // cache miss, need to capture FX graph
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
@@ -424,16 +421,7 @@ variable_list compiled_autograd(
       }
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
-      std::cout << "calling apply_with_saved on name=" << call.node->name() << std::endl;
-      variable_list outputs;
-      // if (call.node->name() == "MyFnBackward") {
-        // std::cout << "lift custom autograd function's backward" << std::endl;
-      saved.hack_use_compiled_apply = true;
-      // }
-      outputs = call.node->apply_with_saved(inputs, saved);
-      // if (call.node->name() == "MyFnBackward") {
-        // compiler_call.backward_ctx = saved.hack_backward_obj;
-      // }
+      variable_list outputs = call.node->apply_with_saved(inputs, saved);
 
       saved.debug_asserts();
       saved.before(call.node->next_edges());
@@ -494,9 +482,7 @@ variable_list compiled_autograd(
       cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), backwards.get(), NULL)));
   std::cout << "calling compiled_fn (graph) done" << std::endl;
   variable_list outputs = THPVariable_UnpackList(pyresult);
-  std::cout << "unpacking outputs" << std::endl;
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
-  std::cout << "compiled autograd done, returning to engine" << std::endl;
   return outputs;
 }
 

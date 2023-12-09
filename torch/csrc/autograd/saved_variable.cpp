@@ -13,7 +13,6 @@
 #include <list>
 #include <memory>
 #include <sstream>
-#include <iostream>
 
 namespace torch {
 namespace autograd {
@@ -134,11 +133,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   }
 
   if (!data_.defined()) {
-    std::cout << "SavedVariable::unpack: data_ is undefined" << std::endl;
-    TORCH_INTERNAL_ASSERT(false);
     TORCH_CHECK(hooks_, ERR_BACKWARD_TWICE);
-    // did we really backward through the graph twice?
-    // saved_tensors are freed already. or were they always empty because of the proxy?
   }
 
   // We want grad_fn here to provide the most helpful debug message to the user

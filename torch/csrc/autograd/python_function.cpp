@@ -1,7 +1,5 @@
 #include <torch/csrc/autograd/python_function.h>
 
-#include <iostream>
-
 #include <ATen/ATen.h>
 #include <ATen/SequenceNumber.h>
 #include <c10/util/irange.h>
@@ -313,18 +311,10 @@ auto PyNode::release_variables() -> void {
   // that the python interpreter is already dead here. In that case
   // we just leak the saved objects.
   if (Py_IsInitialized()) {
-    if (name() == "MyFnBackward") {
-      std::cout << "releasing backward pass saved_variables" << std::endl;
-    }
     pybind11::gil_scoped_acquire gil;
     auto f = (THPFunction*)obj;
     f->saved_variables.clear();
-    std::cout << "PyNode(" << name() << ")::release_variables" << std::endl;
-    auto temp = f->has_freed_buffers;
     f->has_freed_buffers = 1;
-    std::cout << "has_freed_buffers updated: " << (temp == 1) << "->" << (f->has_freed_buffers == 1) << std::endl;
-  } else {
-    std::cout << "Python interpreter dead already, LEAK" << std::endl;
   }
 }
 
@@ -406,14 +396,8 @@ variable_list PyNode::apply_with_saved(
   saved.before(f->output_info);
   saved.before(f->input_info);
   f->compiled_autograd_tracing = true;
-  std::cout << "start PyNode::apply" << std::endl;
   variable_list result;
-  if (saved.hack_use_compiled_apply) {
-    result = compiled_apply(variable_list(inputs), saved);
-  } else {
-    result = apply(variable_list(inputs));
-  }
-  std::cout << "done PyNode::apply" << std::endl;
+  result = compiled_apply(variable_list(inputs), saved);
   f->compiled_autograd_tracing = false;
   saved.after(f->compiled_autograd_symints);
   saved.after(f->saved_variables);
@@ -1125,10 +1109,8 @@ PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS;
-  std::cout << "THPFunction_maybe_clear_saved_tensors" << std::endl;
   auto cdata = ((THPFunction*)self)->cdata.lock();
   if (!get_current_graph_task_keep_graph()) {
-    std::cout << "THPFunction_maybe_clear_saved_tensors released variables" << std::endl;
     cdata->release_variables();
   }
   Py_RETURN_NONE;
@@ -1236,7 +1218,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   auto cdata =
       std::shared_ptr<PyNode>(new PyNode(std::move(ctx_obj)), deleteNode);
   ctx->cdata = cdata;
-  std::cout << "THPFunction_apply creating PyNode(" << cdata->name() << ")" << std::endl;
+  // std::cout << "THPFunction_apply creating PyNode(" << cdata->name() << ")" << std::endl;
 
   // Record input nodes if tracing
   auto* node = _trace_pre_record(cls, inputs, unpacked_input.input_vars);
@@ -1314,7 +1296,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       node,
       overridden_setup_context);
 
-  std::cout << "returning from THPFunction_apply" << std::endl;
+  // std::cout << "returning from THPFunction_apply" << std::endl;
 
   return res;
   END_HANDLE_TH_ERRORS
@@ -1421,12 +1403,7 @@ int THPFunction_set_materialize_non_diff_grads(
 static PyObject* unpack_saved_variables(
     THPFunction* self,
     const std::function<PyObject*(const Variable&)>& unpack_fn) {
-  std::cout << "unpack saved variables, !has_freed_buffers: " << !self->has_freed_buffers << std::endl;
-  if (self->has_freed_buffers) {
-    std::cout << "ALREADY FREED!" << std::endl;
-  }
   THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
-  std::cout << "unpack saved variables passes" << std::endl;
   auto& saved_variables = self->saved_variables;
   if (saved_variables.empty())
     return PyTuple_New(0);
@@ -1518,9 +1495,7 @@ PyObject* THPFunction_get_compiled_autograd_symints(
 PyObject* THPFunction_raw_saved_tensors(THPFunction* self, void* _unused) {
   HANDLE_TH_ERRORS
   // User tries to access saved variables after they have been freed
-  std::cout << "raw saved tensors, !has_freed_buffers: " << !self->has_freed_buffers << "wtf" << std::endl;
   THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
-  std::cout << "???" << self->has_freed_buffers << std::endl;
   const auto& saved_variables = self->saved_variables;
   if (saved_variables.empty())
     return PyTuple_New(0);
@@ -1534,7 +1509,6 @@ PyObject* THPFunction_raw_saved_tensors(THPFunction* self, void* _unused) {
         py::cast(saved_variables[i], py::return_value_policy::reference);
     PyTuple_SET_ITEM(saved.get(), i, obj.release().ptr());
   }
-  std::cout << "raw saved tensors releasing" << std::endl;
   return saved.release();
   END_HANDLE_TH_ERRORS
 }

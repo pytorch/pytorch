@@ -190,8 +190,6 @@ def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
 
 def unimplemented(msg: str) -> NoReturn:
     assert msg != os.environ.get("BREAK", False)
-    import pdb
-    pdb.set_trace()
     raise Unsupported(msg)
 
 

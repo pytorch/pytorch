@@ -431,8 +431,6 @@ def create_aot_dispatcher_function(
     # Check flat_args to see if they're already fake.  If so, use that fake
     # mode instead.
 
-    # if any([isinstance(x, FakeTensor) for x in flat_args]):
-    #     breakpoint()
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None

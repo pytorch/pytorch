@@ -190,8 +190,7 @@ class AutogradCompilerInstance:
         compiled_autograd_log.info(
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
         )
-        temp = self.compiler_fn(graph)
-        return temp
+        return self.compiler_fn(graph)
 
     def to_proxy(self, t):
         if t is None:
