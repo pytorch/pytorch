@@ -1051,7 +1051,7 @@ cdll.LoadLibrary("__lib_path__")
         with lock:
             output_dir = os.path.dirname(input_path)
 
-            print(f"{key}, {input_path}, {output_dir}")
+            # print(f"!!!! {key}, {input_path}, {output_dir}")
 
             x86_isa_help_builder = CxxBuilder(
                 key, [input_path], CxxTorchOptions(), output_dir
@@ -1175,7 +1175,7 @@ def x86_isa_checker() -> List[str]:
     with lock:
         output_dir = os.path.dirname(input_path)
 
-        print(f"{key}, {input_path}, {output_dir}")
+        # print(f"!!!!!! {key}, {input_path}, {output_dir}")
 
         x86_isa_help_builder = CxxBuilder(key, [input_path], CxxOptions(), output_dir)
         status, target_file = x86_isa_help_builder.build()
@@ -1918,7 +1918,8 @@ class CppCodeCache:
         # picked_vec_isa = pick_vec_isa()
         # cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
         # dummy_builder = CxxBuilder("i", ["o"], CxxTorchOptions())
-        print("!!! source_code: ", source_code)
+
+        # print("!!! source_code: ", source_code)
         """
         if(len(source_code) == 0):
             raise "bp"
@@ -1933,7 +1934,7 @@ class CppCodeCache:
             with lock:
                 output_dir = os.path.dirname(input_path)
 
-                print(f"{key}, {input_path}, {output_dir}")
+                # print(f"!!! {key}, {input_path}, {output_dir}")
 
                 builder = CxxBuilder(key, [input_path], CxxTorchOptions(), output_dir)
                 target_file = builder.get_target_file_path()

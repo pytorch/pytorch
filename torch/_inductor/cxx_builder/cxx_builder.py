@@ -790,7 +790,7 @@ class CxxBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
-        print("!!! build_cmd: ", build_cmd)
+        # print("!!! build_cmd: ", build_cmd)
         status = run_command_line(build_cmd, cwd=_build_tmp_dir)
 
         _remove_dir(_build_tmp_dir)

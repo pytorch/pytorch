@@ -4947,7 +4947,7 @@ def make_lazy_class(cls):
                     return getattr(self._value, name)(*args, **kwargs)
                 else:
                     return getattr(operator, name)(self._value, *args, **kwargs)
-            print(f"!!! name: {name} wrapped: {wrapped}")
+            # print(f"!!! name: {name} wrapped: {wrapped}")
             return wrapped
 
         setattr(cls, name, inner_wrapper(name))
