@@ -18,7 +18,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
-#define RNNV8VERSION 8907
+#define RNNV8VERSION 9000
 
 namespace at { namespace native {
 
@@ -274,6 +274,8 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
            cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnDataType_t input_type, cudnnRNNAlgo_t algo, bool allow_tf32) {
     dropout_desc_ = std::move(dropout_desc);
+    TORCH_WARN("handle == 0? ", handle == nullptr);
+    TORCH_WARN("DATATYPEishalf? ", datatype == CUDNN_DATA_HALF);
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
           handle,
@@ -296,7 +298,6 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
 #else
     auto md = mut_desc();
     TORCH_WARN("md nullptr? ", md == nullptr);
-    TORCH_WARN("handle == 0? ", handle == nullptr);
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v8(
           md,
           algo,

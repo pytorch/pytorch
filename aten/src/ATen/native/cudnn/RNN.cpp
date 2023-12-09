@@ -427,6 +427,7 @@ namespace {
 #endif
     auto elem_size = dataSize(datatype);
     TORCH_INTERNAL_ASSERT(weight_size % elem_size == 0, "cudnnGetRNNParamsSize returned nonsensical weight_size");
+    TORCH_WARN("GET NUM WEIGHTS!!! ", weight_size, " / ", elem_size, " = ", weight_size / elem_size);
     return weight_size / elem_size;
   }
 
@@ -588,6 +589,7 @@ namespace {
 	  void *unused_pointer;
 	  TensorDescriptor unused_desc;
           TensorDescriptor lin_layer_mat_desc;
+	  for (int stateless = 0; stateless < 100; stateless++) {
           if (cudnn_method) { // matrix
                AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
                    handle,
@@ -615,6 +617,7 @@ namespace {
                    &matrix_pointer
                    ));
           }
+	  }
 #endif
           cudnnDataType_t data_type;
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
@@ -649,7 +652,7 @@ namespace {
           auto offset_bytes = (char*)matrix_pointer - (char*)weight_buf.data_ptr();
           TORCH_INTERNAL_ASSERT(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
           size_t offset = offset_bytes / elem_size;
-	  TORCH_WARN("INCLUDE_BIAS? ", include_bias, " OFFSET BYTES ", offset_bytes, " ELEM_SIZE", elem_size, " OFFSET: ", offset);
+	  TORCH_WARN("NB DIMS? ", nb_dims, " MIN DIM ", min_dim, " INCLUDE_BIAS? ", include_bias, " OFFSET BYTES ", offset_bytes, " ELEM_SIZE", elem_size, " OFFSET: ", offset);
 #if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNNV8VERSION
           TORCH_WARN("UNUSED OFFSET ", ((char *) unused_pointer - (char *)weight_buf.data_ptr()));
 #endif
@@ -1141,6 +1144,7 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t fn_num_layers, bool batch_first,
     bool fn_bidirectional
     ) {
+  TORCH_WARN("COPY WIDTH? ", dataSize(getCudnnDataType(weight_arr[0])));
   // returns flat weight_buf
   return std::get<0>(copy_weights_to_flat_buf_views(
       weight_arr,
