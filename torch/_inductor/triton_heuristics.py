@@ -366,7 +366,9 @@ class CachingAutotuner(KernelInterface):
             )
             return float("inf")
 
-        stream = torch.cuda.current_stream(torch.cuda.current_device()).cuda_stream
+        from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+
+        stream = get_cuda_stream(torch.cuda.current_device())
 
         def kernel_call():
             if launcher.config.pre_hook is not None:
