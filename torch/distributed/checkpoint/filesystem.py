@@ -8,12 +8,14 @@ import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast, Dict, List, Union
+from typing import cast, Dict, List, Optional, Union
 
 import torch
+import torch.distributed as dist
 from torch import Tensor
 from torch._utils import _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
+from torch.distributed.checkpoint.checkpointer import Checkpointer
 from torch.futures import Future
 
 from .metadata import Metadata, MetadataIndex
@@ -30,16 +32,7 @@ from .planner import (
 from .storage import StorageReader, StorageWriter, WriteResult
 from .utils import _create_file_view
 
-import torch.distributed as dist
-from torch.distributed.checkpoint.checkpointer import Checkpointer
-from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch._utils import _get_device_module
-
-__all__ = [
-    "FileSystemWriter",
-    "FileSystemReader",
-    "FileSystemCheckpointer"
-]
+__all__ = ["FileSystemWriter", "FileSystemReader", "FileSystemCheckpointer"]
 
 
 @dataclass
@@ -487,6 +480,7 @@ class FileSystemReader(StorageReader):
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan
 
+
 class FileSystemCheckpointer(Checkpointer):
     """An implementation of :py:class:`torch.distributed.checkpoint.checkpointer.Checkpointer`
     for the file system. Wraps the creation and usage of ``FileSystemWriter`` and ``FileSystemReader``.
@@ -522,11 +516,7 @@ class FileSystemCheckpointer(Checkpointer):
         """
 
         storage_writer = FileSystemWriter(
-            path,
-            single_file_per_rank,
-            sync_files,
-            thread_count,
-            per_thread_copy_ahead
+            path, single_file_per_rank, sync_files, thread_count, per_thread_copy_ahead
         )
         storage_reader = FileSystemReader(path)
 
@@ -537,5 +527,5 @@ class FileSystemCheckpointer(Checkpointer):
             coordinator_rank=coordinator_rank,
             no_dist=no_dist,
             load_planner=load_planner,
-            save_planner=save_planner
+            save_planner=save_planner,
         )
