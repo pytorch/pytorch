@@ -1840,7 +1840,7 @@ class CppCodeCache:
                             input=input_path, output=output_path, vec_isa=picked_vec_isa
                         )
                     )
-                    if is_clang(cpp_compiler()):
+                    if is_clang():
                         print("!!!! clang: CppCodeCache --> cmd: ", cmd)
                         # raise RuntimeError("Debug here.")
                     compile_file(input_path, output_path, cmd)
