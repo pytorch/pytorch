@@ -343,6 +343,10 @@ class SymFloat:
     def __sym_int__(self):
         raise AssertionError("type stub not overridden")
 
+    def is_integer(self):
+        """Return True if the float is an integer."""
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
         return self.node.str()
 
@@ -633,6 +637,11 @@ def set_default_device(device):
         is causing problems for you, please comment on
         https://github.com/pytorch/pytorch/issues/92701
 
+    .. note::
+
+        This doesn't affect functions that create tensors that share the same memory as the input, like:
+        :func:`torch.from_numpy` and :func:`torch.frombuffer`
+
     Args:
         device (device or string): the device to set as default
 
@@ -661,7 +670,13 @@ def set_default_device(device):
 
 
 def set_default_tensor_type(t):
-    r"""Sets the default ``torch.Tensor`` type to floating point tensor type
+    r"""
+    .. warning::
+
+        This function is deprecated as of PyTorch 2.1, please use :func:`torch.set_default_dtype()` and
+        :func:`torch.set_default_device()` as alternatives.
+
+    Sets the default ``torch.Tensor`` type to floating point tensor type
     ``t``. This type will also be used as default floating point type for
     type inference in :func:`torch.tensor`.
 

@@ -72,6 +72,19 @@ IN_PLACE_DESUGARING_MAP = {
 }
 
 
+def _polyfill_call_impl(name):
+    """Create a BuiltinVariable.call_{name} method that inlines through polyfill.{name}"""
+
+    def call_fn(self, tx, *args, **kwargs):
+        return tx.inline_user_function_return(
+            variables.UserFunctionVariable(fn), args, kwargs
+        )
+
+    fn = getattr(polyfill, name)
+    call_fn.__name__ = f"call_{name}"
+    return call_fn
+
+
 class BuiltinVariable(VariableTracker):
     @staticmethod
     @functools.lru_cache(None)
@@ -1449,6 +1462,10 @@ class BuiltinVariable(VariableTracker):
         # None no-ops this handler and lets the driving function proceed
         return None
 
+    def call_format(self, tx, _format_string, *args, **kwargs):
+        format_string = _format_string.as_python_constant()
+        return variables.StringFormatVariable.create(format_string, args, kwargs)
+
     def call_id(self, tx, *args):
         if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
             nn_mod_variable = args[0]
@@ -1456,6 +1473,9 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstantVariable.create(id(mod))
         else:
             unimplemented(f"call_id with args {args}")
+
+    def call_deepcopy(self, tx, x):
+        unimplemented(f"copy.deepcopy {repr(x)}")
 
     def _comparison(self, tx, left, right):
         """
@@ -1649,12 +1669,8 @@ class BuiltinVariable(VariableTracker):
     call_is_ = _comparison
     call_is_not = _comparison
 
-    def call_all(self, tx, *args, **kwargs):
-        from .builder import SourcelessBuilder
-
-        return tx.inline_user_function_return(
-            SourcelessBuilder()(tx, polyfill.all), args, kwargs
-        )
+    call_all = _polyfill_call_impl("all")
+    call_any = _polyfill_call_impl("any")
 
 
 @contextlib.contextmanager
