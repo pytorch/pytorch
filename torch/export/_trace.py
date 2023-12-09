@@ -19,11 +19,10 @@ from torch._export.passes.lift_constant_tensor_pass import lift_constant_tensor_
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
-    ShapeEnv,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError
@@ -58,8 +57,16 @@ DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
 
 
 def _convert_input_to_fake(gm, args, kwargs):
-    params_buffers = _get_params_buffers(gm)
+    if (
+        len(args) == 0
+        and len(kwargs) == 0
+        and len(dict(gm.named_parameters())) == 0
+        and len(dict(gm.named_buffers())) == 0
+    ):
+        return [], {}, {}, None
+
     fake_inps: List[torch.Tensor] = []
+    fake_mode = None
     for node in gm.graph.nodes:
         if node.op == "placeholder" and "val" in node.meta:
             fake_val = node.meta["val"]
@@ -68,11 +75,10 @@ def _convert_input_to_fake(gm, args, kwargs):
 
     if detected_fake_mode := detect_fake_mode(fake_inps):
         fake_mode = detected_fake_mode
-    else:
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
 
-    if len(args) == 0 and len(kwargs) == 0:
-        return (), {}, params_buffers, fake_mode
+    assert (
+        fake_mode is not None
+    ), "Cannot find fake_mode attatched to the graph's placeholders."
 
     count = 0
 
@@ -88,7 +94,10 @@ def _convert_input_to_fake(gm, args, kwargs):
     fake_params_buffers = pytree.tree_map_only(
         torch.Tensor,
         functools.partial(fake_mode.from_tensor, static_shapes=True),
-        params_buffers,
+        {
+            **dict(gm.named_parameters(remove_duplicate=False)),
+            **dict(gm.named_buffers(remove_duplicate=False)),
+        },
     )
     return fake_args, fake_kwargs, fake_params_buffers, fake_mode
 
@@ -645,11 +654,12 @@ def _export(
     # so we serialize them here instead of inside dynamo
 
     # dynamo_fake_mode can be None if there's no placeholder in gm_torch_level
-    gm.meta["inline_constraints"] = {
-        k: v
-        for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
-        if re.match(r"^[if]\d+$", str(k))
-    }
+    if dynamo_fake_mode:
+        gm.meta["inline_constraints"] = {
+            k: v
+            for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
+            if re.match(r"^[if]\d+$", str(k))
+        }
 
     num_lifted = next(
         (
@@ -657,7 +667,7 @@ def _export(
             for i, s in enumerate(export_graph_signature.input_specs)
             if s.kind == InputKind.USER_INPUT
         ),
-        len(export_graph_signature.input_specs),
+        0,
     )
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
     range_constraints, equality_constraints = _process_constraints(
