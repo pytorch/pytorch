@@ -657,9 +657,15 @@ class CxxBuilder:
     _output_dir = ""
     _target_file = ""
 
+    _compile_only = False
+
     def get_shared_lib_ext(self) -> str:
         SHARED_LIB_EXT = ".dll" if _IS_WINDOWS else ".so"
         return SHARED_LIB_EXT
+
+    def get_object_ext(self) -> str:
+        EXT = ".obj" if _IS_WINDOWS else ".o"
+        return EXT
 
     def __init__(
         self,
@@ -667,18 +673,20 @@ class CxxBuilder:
         sources: List[str],
         BuildOption: BuildOptionsBase,
         output_dir: str = "",
+        compile_only: bool = False,
     ) -> None:
         self._name = name
         self._sources_args = " ".join(sources)
+
+        self._compile_only = compile_only
 
         if output_dir is None:
             self._output_dir = os.path.dirname(os.path.abspath(__file__))
         else:
             self._output_dir = output_dir
 
-        self._target_file = os.path.join(
-            self._output_dir, f"{self._name}{self.get_shared_lib_ext()}"
-        )
+        file_ext = self.get_object_ext() if compile_only else self.get_shared_lib_ext()
+        self._target_file = os.path.join(self._output_dir, f"{self._name}{file_ext}")
 
         self._compiler = BuildOption.get_compiler()
 
@@ -743,10 +751,13 @@ class CxxBuilder:
                 )
                 cmd = cmd.replace("\\", "/")
             else:
+                compile_only_arg = "-c" if self._compile_only else ""
                 cmd = re.sub(
                     r"[ \n]+",
                     " ",
-                    f"""{compiler} {sources} {definations_args} {cflags_args} {include_dirs_args} {passthougn_args} {ldflags_args} {libraries_args} {libraries_dirs_args} -o {target_file}
+                    f"""
+                    {compiler} {sources} {definations_args} {cflags_args} {include_dirs_args}
+                    {passthougn_args} {ldflags_args} {libraries_args} {libraries_dirs_args} {compile_only_arg} -o {target_file}
                     """,
                 ).strip()
             return cmd
