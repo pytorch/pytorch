@@ -871,7 +871,10 @@ def make_fx(f,
 
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         assert scope_root is not None
-        fx_tracer = ModuleStackTracer(scope_root)
+        if scope_root is None:
+            fx_tracer = PythonKeyTracer()
+        else:
+            fx_tracer = ModuleStackTracer(scope_root)
         fake_tensor_mode: Any = nullcontext()
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()

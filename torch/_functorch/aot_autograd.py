@@ -706,7 +706,6 @@ def aot_function(
         is_export=False,
         no_tangents=False,
         enable_log=enable_log,
-        scope_root=scope_root,
     )
     cached_res = None
 

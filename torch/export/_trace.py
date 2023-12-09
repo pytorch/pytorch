@@ -464,9 +464,10 @@ def _export(
                         del nn_module_stack[""]
                         node.meta["nn_module_stack"] = {
                             fixup_key(key): val
-                            for key, val in pytree.tree_map(strip_root, nn_module_stack).items()
+                            for key, val in pytree.tree_map(
+                                strip_root, nn_module_stack
+                            ).items()
                         }
-
 
                 return gm, sig
 
