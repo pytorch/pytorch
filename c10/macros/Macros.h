@@ -395,7 +395,7 @@ __host__ __device__
 }
 #endif // NDEBUG
 // ROCm disable kernel assert by default
-#if !defined(USE_ROCM_KERNEL_ASSERT)
+#if !defined(USE_ROCM_KERNEL_ASSERT) and defined(USE_ROCM)
 #define CUDA_KERNEL_ASSERT(cond)
 #define SYCL_KERNEL_ASSERT(cond)
 #else
@@ -409,7 +409,7 @@ __host__ __device__
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
-#endif //  USE_ROCM_KERNEL_ASSERT
+#endif //  USE_ROCM_KERNEL_ASSERT and USE_ROCM
 #endif // __APPLE__
 
 #ifdef __APPLE__
