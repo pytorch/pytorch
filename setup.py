@@ -162,7 +162,7 @@
 #
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
-# 
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
