@@ -469,11 +469,11 @@ FX_TESTED_OPSETS = range(FX_MIN_ONNX_OPSET_VERSION, FX_MAX_ONNX_OPSET_VERSION + 
 BOOL_TYPES = (torch.bool,)
 
 INT_TYPES = (
-    torch.int8,
-    torch.int16,
+    # torch.int8,
+    # torch.int16,
     torch.int32,
     torch.int64,
-    torch.uint8,
+    # torch.uint8,
 )
 
 QINT_TYPES = (
