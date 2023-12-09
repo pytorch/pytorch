@@ -36,15 +36,6 @@ from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 log = logging.getLogger(__name__)
 
 
-def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
-    # Will raise if not sound
-    try:
-        f.call_function(tx, sub_args, {})
-    finally:
-        tx.output.graph = graph_checkpoint
-        tx.restore_graphstate(checkpoint)
-
-
 def raise_hard_error_if_graph_break(reason):
     def deco(fn):
         @functools.wraps(fn)
@@ -300,6 +291,7 @@ def speculate_subgraph(
                 output_proxies = pytree.tree_map(
                     subtracer.maybe_lift_tracked_freevar_to_input, output_proxies
                 )
+
                 tx.output.create_node(
                     "output",
                     "output",
@@ -1228,6 +1220,11 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
                 unimplemented("NYI - New guards discovered in a restoring state")
             # Nothing left to do here
             return None
+
+        # don't add call module to parent graph if speculating forward
+        # return the result directly
+        if self.value.__name__ == "trampoline_autograd_fwd":
+            return body_r
 
         p_args = (
             *(arg.as_proxy() for arg in args),
