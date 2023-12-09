@@ -272,6 +272,7 @@ c10::SmallVector<int64_t, 6u> calc_gpu_sizes(
             gpu_sizes[1] = sizes[1];
             gpu_sizes[2] = sizes[3];
             gpu_sizes[3] = api::utils::align_up(sizes[3], INT64_C(4));
+            break;
           case api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED:
             gpu_sizes[0] = sizes[0];
             gpu_sizes[1] = sizes[1];
@@ -320,12 +321,17 @@ api::utils::uvec3 create_image_extents(
       case api::GPUMemoryLayout::TENSOR_WIDTH_PACKED:
         TORCH_CHECK(width % 4 == 0, "Channels must be divisible by 4!")
         width /= 4;
+        break;
       case api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED:
         TORCH_CHECK(height % 4 == 0, "Channels must be divisible by 4!")
         height /= 4;
+        break;
       case api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED:
         TORCH_CHECK(channels % 4 == 0, "Channels must be divisible by 4!")
         channels /= 4;
+        break;
+      default:
+        TORCH_CHECK(false, "Invalid memory format used!");
     }
 
     return {width, height, batch * channels};

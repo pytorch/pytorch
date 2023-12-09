@@ -99,7 +99,7 @@ def redistribute_local_tensor(
 
     for i, (current, target) in sorted_placements:
         my_coordinate = device_mesh.get_coordinate()
-        num_chunks = device_mesh.size(dim=i)
+        num_chunks = device_mesh.size(mesh_dim=i)
 
         if my_coordinate is None:
             # if rank is not part of mesh, we simply return local_tensor,
@@ -182,12 +182,12 @@ class Redistribute(torch.autograd.Function):
         ctx,
         input: "dtensor.DTensor",
         device_mesh: DeviceMesh,
-        placements: List[Placement],
+        placements: Tuple[Placement, ...],
     ):
         current_spec = input._spec
         ctx.current_spec = current_spec
         target_spec = DTensorSpec(
-            device_mesh, tuple(placements), tensor_meta=input._spec.tensor_meta
+            device_mesh, placements, tensor_meta=input._spec.tensor_meta
         )
 
         local_tensor = input._local_tensor

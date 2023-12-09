@@ -1,8 +1,6 @@
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 
-#include <type_traits>
-
 #ifdef USE_KINETO
 #include <libkineto.h>
 #endif
@@ -32,6 +30,7 @@ const std::set<libkineto::ActivityType> kCpuTypes{
 const std::set<libkineto::ActivityType> kCudaTypes = {
     libkineto::ActivityType::GPU_MEMCPY,
     libkineto::ActivityType::GPU_MEMSET,
+    libkineto::ActivityType::GPU_USER_ANNOTATION,
     libkineto::ActivityType::CONCURRENT_KERNEL,
     // CUDA_RUNTIME appears in both kCpuTypes and kCudaTypes.
     libkineto::ActivityType::CUDA_RUNTIME,
@@ -363,6 +362,8 @@ void addMetadataJson(const std::string& key, const std::string& value) {
 
 void profilerStep() {
 #ifdef USE_KINETO
+  libkineto::api().initProfilerIfRegistered();
+
   if (libkineto::api().isProfilerInitialized()) {
     libkineto::api().activityProfiler().step();
   } else {

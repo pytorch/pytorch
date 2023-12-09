@@ -32,7 +32,7 @@ def simple_sympify(e):
             return sympy.oo if e > 0 else -sympy.oo
         return sympy.Float(e)
     elif isinstance(e, sympy.Expr):
-        assert e.is_constant(), e
+        assert e.is_number, e
         # NaNs can occur when doing things like 0 * sympy.oo, but it is better
         # if the operator notices this and takes care of it, because sometimes
         # the NaN is inappropriate (for example, for ints, the [-oo, oo] range
@@ -591,7 +591,7 @@ def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRange
     ranges = ranges or {}
 
     # If there's a tracing context, augment available constrained ranges.
-    context = torch._guards.TracingContext.get()
+    context = torch._guards.TracingContext.try_get()
     if context and context.fake_mode.shape_env:
         ranges = {**ranges, **context.fake_mode.shape_env.var_to_range}
 

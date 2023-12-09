@@ -36,7 +36,7 @@ class TestDummyModel(torch.nn.Module):
         torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
         self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
-        self.net3 = nn.Linear(32, 64)
+        self.net3 = nn.Sequential(nn.Linear(32, 64), nn.ReLU())
         self.net4 = nn.Sequential(nn.ReLU(), nn.Linear(64, 8))
 
     def forward(self, x):
@@ -289,6 +289,53 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             self.assertEqual(type(v2), DTensor)
             # check whether DTensor are the same
             self.assertEqual(v1, v2)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_raises_warning_or_errors(self):
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        model, optim = self._create_model(
+            is_even_sharded_model=True, device_mesh=device_mesh
+        )
+        # initialize optim
+        model(model.get_input()).sum().backward()
+        optim.step()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "DeviceMesh is not compatible with LOCAL_STATE_DICT."
+        ):
+            with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
+                state_dict = model.state_dict()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "DeviceMesh is not compatible with LOCAL_STATE_DICT."
+        ):
+            with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
+                optim_state_dict = FSDP.optim_state_dict(model, optim)
+
+        with self.assertLogs(
+            "torch.distributed.fsdp._state_dict_utils", level="WARNING"
+        ) as log:
+            with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT):
+                state_dict = model.state_dict()
+                self.assertEqual(len(log.records), 1)
+                self.assertEqual(len(log.output), 1)
+                self.assertIn(
+                    "Found both state_dict_type FULL_STATE_DICT and device_mesh.",
+                    log.output[0],
+                )
+
+        with self.assertLogs(
+            "torch.distributed.fsdp._optim_utils", level="WARNING"
+        ) as log:
+            with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT):
+                state_dict = FSDP.optim_state_dict(model, optim)
+                self.assertEqual(len(log.records), 1)
+                self.assertEqual(len(log.output), 1)
+                self.assertIn(
+                    "Found both state_dict_type FULL_STATE_DICT and device_mesh.",
+                    log.output[0],
+                )
 
 
 instantiate_parametrized_tests(TestFSDPWithDeviceMeshAndDTensor)

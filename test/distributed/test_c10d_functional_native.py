@@ -188,8 +188,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             assert output.eq(self.rank * i).all()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(debug=True)
     def test_inductor_all_reduce_single(self):
-        torch._inductor.config.debug = True
         self._init_process_group()
 
         def func(arg: torch.Tensor) -> torch.Tensor:
@@ -224,8 +224,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(debug=True)
     def test_inductor_all_reduce_coalesced(self):
-        torch._inductor.config.debug = True
         self._init_process_group()
 
         def func(args: List[torch.Tensor]) -> torch.Tensor:
@@ -274,8 +274,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(debug=True)
     def test_inductor_reuse_buffer_after_inplace_collective(self):
-        torch._inductor.config.debug = True
         self._init_process_group()
 
         def func(arg: torch.Tensor) -> torch.Tensor:
@@ -313,8 +313,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(debug=True)
     def test_inductor_all_gather_into_tensor_single(self):
-        torch._inductor.config.debug = True
         self._init_process_group()
 
         def func(arg: torch.Tensor) -> torch.Tensor:
@@ -342,8 +342,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(debug=True)
     def test_inductor_all_gather_into_tensor_coalesced(self):
-        torch._inductor.config.debug = True
         self._init_process_group()
 
         def func(args: List[torch.Tensor]) -> torch.Tensor:
@@ -380,8 +380,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(debug=True)
     def test_inductor_reduce_scatter_tensor_single(self):
-        torch._inductor.config.debug = True
         self._init_process_group()
 
         def func(arg: torch.Tensor) -> torch.Tensor:
@@ -409,8 +409,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(debug=True)
     def test_inductor_reduce_scatter_tensor_coalesced(self):
-        torch._inductor.config.debug = True
         self._init_process_group()
 
         def func(args: List[torch.Tensor]) -> torch.Tensor:

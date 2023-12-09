@@ -75,6 +75,10 @@ class ShardingPropagator:
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
         """
+        if op_schema.op == aten.equal.default:
+            # data dependent ops can't be used for fake propagation
+            return None
+
         # NOTE: We must call the tracing in fake tensor mode so that it
         # avoids materializing memory
         with FakeTensorMode():
@@ -163,14 +167,9 @@ class ShardingPropagator:
         """
         Propagate the sharding for an operator given the op_schema.
         """
-        # special case op list, we don't need to propagate for local
+        # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
-        skip_prop_list = {
-            aten._local_scalar_dense.default,
-            aten.equal.default,
-            aten.is_same_size.default,
-        }
-        if op_schema.op in skip_prop_list:
+        if op_schema.op is aten._local_scalar_dense.default:
             return OutputSharding(None, [op_schema])
 
         out_tensor_meta = self._propagate_tensor_meta(op_schema)
@@ -246,12 +245,20 @@ class ShardingPropagator:
                     # returned from the op strategy
                     output_spec: OutputSpecType = tuple(
                         [
-                            output_strategy.output_spec
+                            # create a new DTensorSpec with the same placement as the
+                            # output_spec in output_strategy
+                            DTensorSpec(
+                                mesh=output_strategy.output_spec.mesh,
+                                placements=output_strategy.output_spec.placements,
+                                tensor_meta=output_strategy.output_spec.tensor_meta,
+                            )
                             for _ in range(len(op_schema.op._schema.returns))
                         ]
                     )
-                else:
+                elif op_schema.return_type_tensor():
                     output_spec = output_strategy.output_spec
+                else:
+                    output_spec = None
 
                 output_sharding = OutputSharding(
                     output_spec,
