@@ -1841,7 +1841,10 @@ class CppCodeCache:
                         )
                     )
                     if is_clang():
-                        print("!!!! clang: CppCodeCache --> cmd: ", cmd)
+                        print(
+                            f"!!!! clang: fb -> {config.is_fbcode()}, CppCodeCache --> cmd: ",
+                            cmd,
+                        )
                         # raise RuntimeError("Debug here.")
                     compile_file(input_path, output_path, cmd)
 
