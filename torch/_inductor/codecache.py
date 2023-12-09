@@ -1918,6 +1918,11 @@ class CppCodeCache:
         # picked_vec_isa = pick_vec_isa()
         # cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
         # dummy_builder = CxxBuilder("i", ["o"], CxxTorchOptions())
+        print("!!! source_code: ", source_code)
+        """
+        if(len(source_code) == 0):
+            raise "bp"
+        """
 
         key, input_path = write(source_code, "cpp")
         if key not in cls.cache:

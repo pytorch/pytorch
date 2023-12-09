@@ -9,10 +9,11 @@ import sys
 import sysconfig
 import warnings
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 from torch._inductor import config, exc
+from torch._inductor.codegen.cuda import cuda_env
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import (
@@ -488,6 +489,132 @@ class CxxTorchOptions(CxxOptions):
             _nonduplicate_append(self._passthough_args, use_fb_internal_macros())
 
 
+def _cuda_compiler() -> Optional[str]:
+    if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
+        return config.cuda.cuda_cxx
+    if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
+        return os.getenv("CUDACXX", "")
+    if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
+        return os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc")
+    return "nvcc"
+
+
+def get_torch_cuda_args():
+    cutlass_path = config.cuda.cutlass_dir
+    cuda_include_dirs: List[str] = [
+        os.path.join(cutlass_path, "include"),
+        os.path.join(cutlass_path, "tools/library/include"),
+        os.path.join(cutlass_path, "tools/library/src"),
+        os.path.join(cutlass_path, "tools/util/include"),
+    ]
+
+    from torch.utils import cpp_extension
+
+    cuda_lib_dirs: List[str] = []
+    cuda_libs: List[str] = []
+    if _IS_LINUX:
+        extra_lib_dir = "lib64"
+        if not os.path.exists(
+            cpp_extension._join_cuda_home(extra_lib_dir)
+        ) and os.path.exists(cpp_extension._join_cuda_home("lib")):
+            # 64-bit CUDA may be installed in "lib"
+            # Note that it's also possible both don't exist (see _find_cuda_home) - in that case we stay with "lib64"
+            extra_lib_dir = "lib"
+        cuda_lib_dirs.append(f"{cpp_extension._join_cuda_home(extra_lib_dir)}")
+        cuda_lib_dirs.append(f'{cpp_extension._join_cuda_home(extra_lib_dir, "stubs")}')
+        cuda_libs.append("cuda")
+        cuda_libs.append("cudart")
+    else:
+        # Not sure if it works on Windows, confirm later.
+        raise NotImplementedError(
+            "Unsupported env, failed to find cuda libs! Currently only Linux is supported."
+        )
+
+    return cuda_include_dirs, cuda_libs, cuda_lib_dirs
+
+
+def get_nvcc_host_compiler_options() -> List[str]:
+    if not _IS_WINDOWS:
+        cflags = [
+            "fPIC",
+            "fno-strict-aliasing",
+            "fvisibility=hidden",
+            "Wconversion",
+        ]
+    else:
+        cflags = []
+    return cflags
+
+
+def get_nvcc_compiler_options():
+    cuda_cflags = []
+    cuda_defines = []
+    cuda_pass_args = []
+    if not _IS_WINDOWS:
+        arch = cuda_env.get_cuda_arch()
+        if arch == "90":
+            # Required by cutlass compilation.
+            arch = "90a"
+        code = [f"sm_{arch}", f"compute_{arch}"]
+        if config.cuda.enable_cuda_lto:
+            code += [f"lto_{arch}"]
+        """
+        # original_code:
+        options = [
+            "-t=0",
+            "-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1",
+            "-w",
+            f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
+            config.cuda.compile_opt_level,
+            # "-std=c++17",
+            "--expt-relaxed-constexpr",
+        ]
+        """
+        cuda_cflags.append("t=0")
+        cuda_defines.append("CUTLASS_ENABLE_TENSOR_CORE_MMA=1")
+        cuda_pass_args.append("-w")
+        cuda_pass_args.append(f"-gencode=arch=compute_{arch},code=[{','.join(code)}]")
+        cuda_pass_args.append(config.cuda.compile_opt_level)
+        cuda_pass_args.append("--expt-relaxed-constexpr")
+
+        if config.cuda.enable_debug_info:
+            # options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
+            cuda_cflags.append("lineinfo")
+            cuda_cflags.append("g")
+            cuda_defines.append("CUTLASS_DEBUG_TRACE_LEVEL=1")
+
+        if config.cuda.enable_ptxas_info:
+            # options.extend(
+            cuda_pass_args.extend(
+                [
+                    "--keep",  # Keep the intermediate files for debugging (including ptx, sass, cubin etc.)
+                    "--ptxas-options=--warn-on-local-memory-usage",  # warn us if local memory is used in CUDA Kernels
+                    "--ptxas-options=--warn-on-spills",  # warn us if register spilling happens in CUDA Kernels
+                    "--resource-usage",  # Report on CUDA resource usage (shared mem, registers etc.)
+                    "--source-in-ptx",
+                ]
+            )  # Annotate the ptx file with source information
+
+        if config.cuda.use_fast_math:
+            """
+            options.extend(
+                [
+                    "--use_fast_math",
+                    "-DCUTLASS_USE_TANH_FOR_SIGMOID=1",
+                ]
+            )
+            """
+            cuda_pass_args.append("--use_fast_math")
+            cuda_defines.append("CUTLASS_USE_TANH_FOR_SIGMOID=1")
+        # return options
+    else:
+        # Not sure if it works on Windows, confirm later.
+        raise NotImplementedError(
+            "Unsupported env, failed to find cuda libs! Currently only Linux is supported."
+        )
+    return cuda_cflags, cuda_defines, cuda_pass_args
+
+
 class CxxTorchCudaOptions(CxxTorchOptions):
     """
     This class is inherited from CxxTorchOptions, which automatic contains
@@ -497,7 +624,22 @@ class CxxTorchCudaOptions(CxxTorchOptions):
 
     def __init__(self) -> None:
         super().__init__()
-        # _nonduplicate_append(self._cflags, ["DCUDA"])
+        # re-setup to cuda compiler
+        nvcc = _cuda_compiler()
+        if nvcc is not None:
+            self._compiler = nvcc
+
+        cuda_include_dirs, cuda_libs, cuda_lib_dirs = get_torch_cuda_args()
+        _nonduplicate_append(self._include_dirs, cuda_include_dirs)
+        _nonduplicate_append(self._libraries, cuda_libs)
+        _nonduplicate_append(self._libraries_dirs, cuda_lib_dirs)
+
+        cuda_host_cflags = get_nvcc_host_compiler_options()
+        cuda_cflags, cuda_defines, cuda_pass_args = get_nvcc_compiler_options()
+        _nonduplicate_append(self._cflags, cuda_host_cflags)
+        _nonduplicate_append(self._cflags, cuda_cflags)
+        _nonduplicate_append(self._cflags, cuda_defines)
+        _nonduplicate_append(self._cflags, cuda_pass_args)
 
 
 class CxxBuilder:
