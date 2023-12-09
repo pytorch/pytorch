@@ -744,8 +744,8 @@ class CxxBuilder:
                 cmd = cmd.replace("\\", "/")
             else:
                 cmd = (
-                    f"{compiler} {sources} {include_dirs_args} {definations_args} {cflags_args} {ldflags_args} "
-                    f"{libraries_args} {libraries_dirs_args} {passthougn_args} -o {target_file}"
+                    f"{compiler} {sources} {definations_args} {cflags_args} {include_dirs_args} {passthougn_args} "
+                    f"{ldflags_args} {libraries_args} {libraries_dirs_args} -o {target_file}"
                 )
             return cmd
 
