@@ -2,11 +2,13 @@ import logging
 import os
 from typing import Any, Dict, List
 
+from torch._inductor.metrics import get_metric_table
+
 from .. import config
 from ..codecache import PyCodeCache, TritonFuture
-from ..utils import do_bench
+from ..utils import cache_on_self, do_bench
 from ..virtualized import V
-from torch._inductor.metrics import get_metric_table
+from .common import TensorArg
 
 log = logging.getLogger(__name__)
 
@@ -146,6 +148,10 @@ class MultiKernel:
             kernels
         )
 
+        # need this since some code in inductor check if the kernel object has an args
+        # attribute to decide if it's a non-null kernel.
+        self.args = object()
+
     def call_kernel(self, kernel_name):
         """
         Collect the union of arguments from all subkernels as the arguments
@@ -176,7 +182,19 @@ class MultiKernel:
         )
 
     def codegen_nan_check(self):
-        pass
+        wrapper = V.graph.wrapper_code
+        seen = set()
+        for k in self.kernels:
+            _, call_args, arg_types = k.args.python_argdefs()
+            for arg, arg_type in zip(call_args, arg_types):
+                if arg in seen:
+                    continue
+                seen.add(arg)
+                if isinstance(arg_type, TensorArg):
+                    line = f"assert not {arg}.isnan().any().item()"
+                    wrapper.writeline(line)
+                    line = f"assert not {arg}.isinf().any().item()"
+                    wrapper.writeline(line)
 
     @property
     def removed_buffers(self):
@@ -185,6 +203,16 @@ class MultiKernel:
     @property
     def inplaced_to_remove(self):
         return set.intersection(*[k.inplaced_to_remove for k in self.kernels])
+
+    @property
+    @cache_on_self
+    def inplace_update_buffers(self):
+        """
+        Make sure all kernels have the same inplace update mappings.
+        """
+        for k in self.kernels[1:]:
+            assert k.inplace_update_buffers == self.kernels[0].inplace_update_buffers
+        return self.kernels[0].inplace_update_buffers
 
     @property
     def warn_mix_layout(self):
@@ -201,7 +229,9 @@ class MultiKernelCall:
         self._kernels = kernels
 
         self._run = PyCodeCache.load(src_code).run
-        self.disable_cache = os.environ.get("TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE") == "1"
+        self.disable_cache = (
+            os.environ.get("TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE") == "1"
+        )
 
         self.picked_kernel = None
         if config.triton.multi_kernel > 1:

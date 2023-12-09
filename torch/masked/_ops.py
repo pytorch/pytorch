@@ -463,7 +463,7 @@ def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int, ...]:
     if dim is None:
         return tuple(range(ndim))
     ndim = max(ndim, 1)
-    dim_ = (dim,) if isinstance(dim, int) else dim
+    dim_ = (dim,) if isinstance(dim, (int, torch.SymInt)) else dim
     for d in dim_:
         if d in dims:
             raise RuntimeError(f"dim={d} appears multiple times in the list of dims")

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-
 import operator
+import types
 from typing import (
     Any,
     Callable,
@@ -317,16 +317,12 @@ class OnnxFunctionDispatcher:
             aten_op_default = node.target.default
             return registration.OpName.from_op_overload(op_overload=aten_op_default)  # type: ignore[no-any-return]
 
-        if (
-            aten_op := _symint_symfloat_builtin_to_exporter_key_table(node.target)
-        ) is not None:
+        if isinstance(node.target, types.BuiltinFunctionType):
             # Make sure it's symint/symfloat consuming builtin ops.
             for node_arg in node.args:
                 if (not isinstance(node_arg, (torch.fx.Node, int, float))) or (
                     isinstance(node_arg, torch.fx.Node)
-                    and not isinstance(
-                        node_arg.meta["val"], (torch.SymInt, torch.SymFloat)
-                    )
+                    and not fx_type_utils.is_torch_symbolic_type(node_arg.meta["val"])
                 ):
                     # TODO: reduce number of explicit initializations.
                     # TODO: Log location, stack.
@@ -339,7 +335,7 @@ class OnnxFunctionDispatcher:
                     )
                     diagnostic_context.log(diagnostic)
                     raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
-            return registration.OpName.from_op_overload(op_overload=aten_op)
+            return registration.OpName.from_builtin_function(node.target)
 
         if isinstance(node.target, torch._ops.OpOverload):
             return registration.OpName.from_op_overload(op_overload=node.target)
@@ -424,23 +420,6 @@ class OnnxFunctionDispatcher:
         )
         diagnostic_context.log(diagnostic)
         raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
-
-
-@_beartype.beartype
-def _symint_symfloat_builtin_to_exporter_key_table(
-    target,
-) -> Optional[torch._ops.OpOverload]:
-    """Maps builtin ops to exporter key table."""
-
-    _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE: Dict[
-        Union[Callable[..., Any], str], torch._ops.OpOverload
-    ] = {
-        operator.mul: torch.ops.aten.mul.default,  # type: ignore[has-type]
-        operator.add: torch.ops.aten.add.default,  # type: ignore[has-type]
-        operator.pow: torch.ops.aten.pow.int,  # type: ignore[has-type]
-        operator.sub: torch.ops.aten.sub.default,  # type: ignore[has-type]
-    }
-    return _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE.get(target)
 
 
 class _OnnxSchemaChecker:

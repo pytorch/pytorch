@@ -161,6 +161,7 @@ MetricTable.register_table(
     ],
 )
 
+
 def purge_old_log_files():
     """
     Purge the old log file at the beginning when the benchmark script runs.

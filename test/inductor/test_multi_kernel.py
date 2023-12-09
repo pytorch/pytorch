@@ -46,6 +46,20 @@ class MultiKernelTest(TestCase):
             torch.allclose(ref, act, atol=1e-4, rtol=1e-4), f"ref:\n{ref}\nact:\n{act}"
         )
 
+    def test_inplace_update(self):
+        """
+        Inductor generate inplace kernel for mul.
+        """
+
+        def f(x, y):
+            return x.sum(dim=-1, keepdims=True) * (y @ y)
+
+        x = torch.rand(1024, 1024).cuda()
+        y = torch.rand(1024, 1024).cuda()
+        ref = f(x, y)
+        act = torch.compile(f)(x, y)
+        self.assertTrue(torch.allclose(ref, act))
+
     def test_transformer_snippet(self):
         """
         Test a snippet of transformer that will cause different arglist for

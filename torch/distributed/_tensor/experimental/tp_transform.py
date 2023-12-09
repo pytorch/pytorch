@@ -211,8 +211,10 @@ def _mark_sharding(
 
                 # get DTensor specs for inputs and outputs
                 if (
-                    op_schema.op not in DTensor._propagator.op_strategy_funcs
-                    and op_schema.op not in DTensor._propagator.op_to_rules
+                    op_schema.op
+                    not in DTensor._op_dispatcher.sharding_propagator.op_strategy_funcs
+                    and op_schema.op
+                    not in DTensor._op_dispatcher.sharding_propagator.op_to_rules
                 ):
                     # Mark all as replicated
                     output_sharding = _generate_default_output_sharding(
@@ -221,7 +223,7 @@ def _mark_sharding(
                         op_schema,
                     )
                 else:
-                    output_sharding = DTensor._propagator.propagate_op_sharding(
+                    output_sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding(
                         op_schema,
                     )
                 placement_strategies[node] = PlacementStrategy(
@@ -408,7 +410,7 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
         for idx, placement in enumerate(spec.placements):
             if placement.is_shard():
                 placement = cast(Shard, placement)
-                num_chunks = spec.mesh.size(dim=idx)
+                num_chunks = spec.mesh.size(mesh_dim=idx)
                 my_coord = spec.mesh.get_coordinate()
                 assert my_coord is not None, "current rank not in mesh!"
                 my_coord_on_mesh_dim = my_coord[idx]

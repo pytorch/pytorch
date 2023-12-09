@@ -9,8 +9,14 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import map, cond
 from torch import Tensor
-from torch.export import Constraint, Dim, export
-from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
+from torch.export import (
+    Constraint,
+    Dim,
+    dynamic_dim,
+    export,
+)
+from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch._export import capture_pre_autograd_graph
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -256,6 +262,34 @@ class TestUnflatten(TestCase):
         unflattened = export_module.module(flat=False)
 
         self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
+
+    def test_unflatten_wrong_input(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param_list = torch.nn.ParameterList()
+                self.param_dict = torch.nn.ParameterDict()
+                for i in range(2):
+                    self.param_list.append(torch.nn.Parameter(torch.randn((2, 3))))
+                    self.param_dict[f"key_{i}"] = torch.nn.Parameter(
+                        torch.randn((2, 3))
+                    )
+
+            def forward(self, x):
+                a = x.sum()
+                for i in range(2):
+                    a = a + self.param_list[i].sum()
+                    a = a + self.param_dict[f"key_{i}"].sum()
+                return a
+
+        export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
+        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be equal to 2, but got 6"):
+            export_module(torch.randn(6, 6))
+
+        unflattened = export_module.module(flat=False)
+        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be equal to 2, but got 6"):
+            unflattened(torch.randn(6, 6))
+
 
 if __name__ == '__main__':
     run_tests()

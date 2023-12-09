@@ -266,6 +266,8 @@ ALLOW_LIST = [
     ("aten::_upsample_nearest_exact2d_backward", datetime.date(2022, 12, 15)),
     ("aten::_efficient_attention_forward", datetime.date(2023, 11, 30)),
     ("aten::_efficient_attention_backward", datetime.date(2023, 11, 30)),
+    ("aten::_flash_attention_forward", datetime.date(2023, 12, 30)),
+    ("aten::_flash_attention_backward", datetime.date(2023, 12, 30)),
     ("aten::_sparse_mask_helper", datetime.date(2023, 3, 15)),
     ("mkldnn::_convolution_pointwise.binary", datetime.date(2022, 12, 15)),
     ("prim::CudaFusionIvalGuard", datetime.date(2023, 2, 1)),

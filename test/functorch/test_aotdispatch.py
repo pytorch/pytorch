@@ -32,6 +32,7 @@ from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
+from torch.testing._internal.common_utils import parametrize, instantiate_parametrized_tests
 from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
 from torch.testing._internal.optests import _test_aot_autograd_forwards_backwards_helper, aot_autograd_check
 from functorch import (
@@ -263,13 +264,14 @@ class TestAOTAutograd(AOTTestCase):
         inp_: Union[Callable, List[Any]],
         *,
         test_mutation: bool = False,
+        only_keep_inference_mutations: bool = False,
         decompositions: Optional[Dict] = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.
         make_inputs_subclasses: bool = False,
     ):
-        for keep_input_mutations in [True, False]:
+        for keep_input_mutations in [True] if only_keep_inference_mutations else [True, False]:
             # Some tests pass in a callable for inp, to generate the inputs
             # (useful if we want to generate complicated aliasing inputs)
             if isinstance(inp_, Callable):
@@ -576,6 +578,33 @@ def forward(self, primals_1):
         print(test)
         self.assertEqual(ref, test)
 
+    def test_input_mutation_modifies_autograd_meta_of_aliases(self):
+        def f(a):
+            a.mul_(2)
+            out = a + 1
+            return out.detach()
+
+        x_ref = torch.ones(3, 3, requires_grad=True).clone()
+        x_ref_view = x_ref.view(3, 3)
+
+        x_test = torch.ones(3, 3, requires_grad=True).clone()
+        x_test_view = x_test.view(3, 3)
+
+        f_compiled = aot_function(f, nop, keep_inference_input_mutations=True)
+        f(x_ref)
+        f_compiled(x_test)
+        # f will mutate aliases of the input, including its autograd metadata!
+        # y.grad_fn is AsStridedBackward
+        self.assertEqual(x_ref_view, x_test_view)
+        self.assertEqual(x_ref_view._version, x_test_view._version)
+        self.assertEqual(x_ref_view.grad_fn.__class__, x_test_view.grad_fn.__class__)
+        # Test the actual gradients are correct
+        (x_ref * x_ref_view).sum().backward()
+        (x_test * x_test_view).sum().backward()
+        self.assertEqual(x_ref.grad, x_test.grad)
+        self.assertEqual(x_ref_view.grad, x_test_view.grad)
+
+
     def test_outputs_are_aliased(self):
         # Tensor, None, int
         def f(a):
@@ -687,7 +716,31 @@ def forward(self, primals_1, primals_2, primals_3):
                 a.mul_(2)
             return a + 3
         inp = [torch.ones(4, requires_grad=True)]
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, only_keep_inference_mutations=True)
+        # Even though the input requires_grad, we expect the keep the input mutation in the graph
+        # (Even though this is a training graph!)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 2)
+    add = torch.ops.aten.add.Tensor(mul, 3)
+    copy_ = torch.ops.aten.copy_.default(primals_1, mul);  primals_1 = mul = None
+    return [add]""")
+
+    def test_input_mutation_requires_grad_no_grad_inference_graph(self):
+        def f(a):
+            with torch.no_grad():
+                a.mul_(2)
+                return a + 3
+        inp = [torch.ones(4, requires_grad=True)]
+        # Even though the input requires_grad, we expect the keep the input mutation in the graph
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, only_keep_inference_mutations=True)
+
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, arg0_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, 2)
+    add = torch.ops.aten.add.Tensor(mul, 3)
+    copy_ = torch.ops.aten.copy_.default(arg0_1, mul);  arg0_1 = mul = None
+    return (add,)""")
 
     def test_input_mutation_requires_grad_no_grad_detach_mixed(self):
         # Perform a mix of mutations on a:
@@ -1278,9 +1331,6 @@ def forward(self, primals_1):
             return [(x,), (x,)]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
-        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
-        with self.assertRaisesRegex(AssertionError, "which is currently unsupported in the subclass use case"):
-            self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
         # TODO: make this test run with dynamic shapes so it is more meaningful
         # metadata output order: (a_updated_meta, out1_meta, out2_meta, out3_meta)
@@ -1293,6 +1343,21 @@ def forward(self, primals_1):
     transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0)
     unsqueeze = torch.ops.aten.unsqueeze.default(transpose, 0)
     return [transpose, squeeze, transpose_1, unsqueeze, mul]""")
+
+    @parametrize("req_grad", [False, True])
+    def test_subclass_metadata_mutation(self, req_grad):
+        def f(a):
+            a.transpose_(1, 0)
+            tmp = a.mul(2)
+            return tmp.transpose(1, 0)
+
+        def inp_callable(req_grad):
+            x = torch.ones(1, 2, 4, requires_grad=req_grad).clone()
+            return [(x,), (x,)]
+
+        # See https://github.com/pytorch/pytorch/issues/114975
+        with self.assertRaisesRegex(RuntimeError, "Metadata mutations are currently not allowed on tensor subclasses"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=req_grad), test_mutation=True, make_inputs_subclasses=True)
 
     def test_input_data_and_metadata_mutation(self):
         def f(a):
@@ -1410,6 +1475,91 @@ def forward(self, primals_1, primals_2):
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
         with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
             self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
+
+    # Mutations in the backward are allowed as long as the mutated object does not require grad
+    def test_backward_mutation_data(self):
+        class BwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, = ctx.saved_tensors
+                # bw mutation
+                x.mul_(2)
+                return grad_output.clone()
+
+        def f(a, b):
+            out = BwMutation.apply(b)
+            return a * out
+
+        inp_no_grad = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+
+        # Mutation on buffer that does not require grad during the backward is allowed
+        self.verify_aot_autograd(f, inp_no_grad, test_mutation=True)
+
+        inp_grad = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=True),
+        ]
+        with self.assertRaisesRegex(AssertionError, "input that requires_grad and was mutated in the backward"):
+            self.verify_aot_autograd(f, inp_grad, test_mutation=True)
+
+    def test_backward_mutation_metadata(self):
+        class BwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.save_for_backward(b)
+                return a.clone(), b.clone()
+
+            @staticmethod
+            def backward(ctx, grad_a, grad_b):
+                b, = ctx.saved_tensors
+                # bw metadata mutation
+                b.transpose_(1, 0)
+                return grad_a.clone(), grad_b.clone()
+
+        def f(a, b):
+            a_, b_ = BwMutation.apply(a, b)
+            out = a_ * b_
+            return out
+
+        inp_no_grad = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+
+        with self.assertRaisesRegex(AssertionError, "input that had its metadata mutated in the backward"):
+            self.verify_aot_autograd(f, inp_no_grad, test_mutation=True)
+
+    def test_backward_mutation_on_grad_out(self):
+        class BwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                grad_output.mul_(2)
+                return grad_output.clone()
+
+        def f(a, b):
+            tmp = a * b
+            out = BwMutation.apply(tmp)
+            return out
+
+        inp_grad = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=True),
+        ]
+        f_compiled = aot_function(f, nop)
+        with self.assertRaisesRegex(AssertionError, "input to the backward that was mutated during the backward"):
+            out = f_compiled(*inp_grad)
 
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
     def test_input_mutation_false_aliasing(self):
@@ -1742,7 +1892,7 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
 
-        with self.assertRaisesRegex(RuntimeError, "is a tensor subclass. This is not supported today"):
+        with self.assertRaisesRegex(RuntimeError, "Metadata mutations are currently not allowed on tensor subclasses"):
             self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
 
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
@@ -2803,6 +2953,52 @@ class <lambda>(torch.nn.Module):
         ):
             aot_export_module(mod, [inp], trace_joint=True, output_loss_index=1)
 
+    @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond needs dynamo to run")
+    def test_aot_export_with_torch_cond(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                def true_fn(x):
+                    y = x + 4
+                    y.add_(5)
+                    return x.cos()
+
+                def false_fn(x):
+                    y = x + 5
+                    y.add_(6)
+                    return x.sin()
+
+                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                return (a + 3, a + 4)
+
+        inp = torch.randn(3, 4)
+        gm, _ = aot_export_module(M(), (inp,), trace_joint=False)
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, arg0_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
+    getitem = conditional[0];  conditional = None
+    add = torch.ops.aten.add.Tensor(getitem, 3)
+    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    return (add, add_1)""")  # noqa: B950
+
+        self.assertExpectedInline(gm.true_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 4)
+    add_1 = torch.ops.aten.add.Tensor(add, 5);  add = None
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    return (cos,)""")
+
+        self.assertExpectedInline(gm.false_graph_0.code.strip(), """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 5)
+    add_1 = torch.ops.aten.add.Tensor(add, 6);  add = None
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+    return (sin,)""")
+
     def test_aot_export_simplified_input_mutations_banned(self):
         def fn(x):
             x.mul_(2)
@@ -3423,6 +3619,9 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
         self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
 
+    # NB: Metadata mutation for subclasses is currently broken and disabled
+    # See https://github.com/pytorch/pytorch/issues/114975
+    @unittest.expectedFailure
     def test_aot_dispatch_input_metadata_mutation(self):
         def f(a, b):
             a.t_()
@@ -3468,6 +3667,9 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
         self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
 
+    # NB: Metadata mutation for subclasses is currently broken and disabled
+    # See https://github.com/pytorch/pytorch/issues/114975
+    @unittest.expectedFailure
     def test_aot_dispatch_input_data_and_metadata_mutation(self):
         def f(a, b):
             a.t_()
@@ -3558,6 +3760,7 @@ def forward(self, tangents_1, tangents_2):
         # Both grad_inputs are TwoTensors
         self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
         self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
+
 
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
@@ -3956,6 +4159,7 @@ class TestEagerFusionModuleInfo(AOTTestCase):
         _test_aot_autograd_module_helper(self, device, dtype, training, module_info, dynamic=True)
 
 
+instantiate_parametrized_tests(TestAOTAutograd)
 only_for = ("cpu")
 instantiate_device_type_tests(
     TestPythonKey,
