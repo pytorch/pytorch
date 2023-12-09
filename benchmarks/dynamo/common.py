@@ -3145,7 +3145,7 @@ def main(runner, original_dir=None, args=None):
         process_entry(0, runner, original_dir, args)
 
 
-def write_csv_when_exception(name: str, status: str, device=None):
+def write_csv_when_exception(args, name: str, status: str, device=None):
     print(status)
     placeholder_batch_size = 0
     devices = [device] if device is not None else args.devices
@@ -3599,7 +3599,7 @@ def run(runner, args, original_dir=None):
                         if isinstance(e, NotImplementedError)
                         else "eager_fail_to_run"
                     )
-                    write_csv_when_exception(name, status, device)
+                    write_csv_when_exception(args, name, status, device)
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:
@@ -3695,7 +3695,7 @@ def run(runner, args, original_dir=None):
                     [sys.executable] + sys.argv + [f"--only={name}"], timeout=timeout
                 )
             except subprocess.TimeoutExpired:
-                write_csv_when_exception(name, "timeout")
+                write_csv_when_exception(args, name, "timeout")
             except subprocess.CalledProcessError as e:
                 print("Run failed with return code: ", e.returncode, file=sys.stderr)
                 print("Output: ", e.output, file=sys.stderr)
