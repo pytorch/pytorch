@@ -1053,6 +1053,8 @@ def run_tests(argv=UNITTEST_ARGS):
             other_args.append("--use-pytest")
         if RERUN_DISABLED_TESTS:
             other_args.append("--rerun-disabled-tests")
+        if TEST_SAVE_XML:
+            other_args += ['--save-xml', args.save_xml]
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
