@@ -14,6 +14,10 @@ Background_Matting,pass_due_to_skip,0
 
 
 
+DALLE2_pytorch,eager_fail_to_run,0
+
+
+
 LearningToPaint,pass,8
 
 
@@ -42,6 +46,10 @@ basic_gnn_sage,pass,8
 
 
 
+cm3leon_generate,eager_fail_to_run,0
+
+
+
 dcgan,pass,8
 
 
@@ -54,7 +62,23 @@ densenet121,pass,8
 
 
 
+detectron2_fcos_r_50_fpn,model_fail_to_load,0
+
+
+
+detectron2_maskrcnn_r_50_c4,eager_fail_to_run,0
+
+
+
 dlrm,pass,8
+
+
+
+doctr_det_predictor,eager_fail_to_run,0
+
+
+
+doctr_reco_predictor,eager_fail_to_run,0
 
 
 
@@ -106,11 +130,19 @@ hf_T5_base,OOM,4
 
 
 
+hf_T5_generate,eager_fail_to_run,0
+
+
+
 hf_T5_large,pass_due_to_skip,0
 
 
 
 hf_Whisper,pass,7
+
+
+
+hf_clip,eager_fail_to_run,0
 
 
 
@@ -130,6 +162,10 @@ mobilenet_v2,pass,8
 
 
 
+mobilenet_v2_quantized_qat,eager_fail_to_run,0
+
+
+
 mobilenet_v3_large,pass,8
 
 
@@ -143,6 +179,10 @@ nanogpt,pass,8
 
 
 nvidia_deeprecommender,pass,8
+
+
+
+opacus_cifar10,eager_fail_to_run,0
 
 
 
@@ -178,7 +218,15 @@ resnet50,pass,8
 
 
 
+resnet50_quantized_qat,eager_fail_to_run,0
+
+
+
 resnext50_32x4d,pass,8
+
+
+
+sam,eager_fail_to_run,0
 
 
 

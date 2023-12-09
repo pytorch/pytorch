@@ -32,6 +32,7 @@ from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
+from torch.testing._internal.common_utils import parametrize, instantiate_parametrized_tests
 from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
 from torch.testing._internal.optests import _test_aot_autograd_forwards_backwards_helper, aot_autograd_check
 from functorch import (
@@ -1331,9 +1332,6 @@ def forward(self, primals_1):
             return [(x,), (x,)]
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
-        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
-        with self.assertRaisesRegex(AssertionError, "which is currently unsupported in the subclass use case"):
-            self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
         # TODO: make this test run with dynamic shapes so it is more meaningful
         # metadata output order: (a_updated_meta, out1_meta, out2_meta, out3_meta)
@@ -1346,6 +1344,21 @@ def forward(self, primals_1):
     transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0)
     unsqueeze = torch.ops.aten.unsqueeze.default(transpose, 0)
     return [transpose, squeeze, transpose_1, unsqueeze, mul]""")
+
+    @parametrize("req_grad", [False, True])
+    def test_subclass_metadata_mutation(self, req_grad):
+        def f(a):
+            a.transpose_(1, 0)
+            tmp = a.mul(2)
+            return tmp.transpose(1, 0)
+
+        def inp_callable(req_grad):
+            x = torch.ones(1, 2, 4, requires_grad=req_grad).clone()
+            return [(x,), (x,)]
+
+        # See https://github.com/pytorch/pytorch/issues/114975
+        with self.assertRaisesRegex(RuntimeError, "Metadata mutations are currently not allowed on tensor subclasses"):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=req_grad), test_mutation=True, make_inputs_subclasses=True)
 
     def test_input_data_and_metadata_mutation(self):
         def f(a):
@@ -1880,7 +1893,7 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
 
-        with self.assertRaisesRegex(RuntimeError, "is a tensor subclass. This is not supported today"):
+        with self.assertRaisesRegex(RuntimeError, "Metadata mutations are currently not allowed on tensor subclasses"):
             self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
 
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
@@ -2725,7 +2738,8 @@ class TestAOTExport(AOTTestCase):
     def test_aot_export_predispatch_func_simple(self):
         def fn(p, x):
             y = x + 2
-            y.add_(2)
+            with torch.no_grad():
+                y.add_(2)
             return (x * 2 + y,)
 
         mod = TestMod(fn)
@@ -2735,14 +2749,17 @@ class TestAOTExport(AOTTestCase):
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1, arg1_1):
     add = torch.ops.aten.add.Tensor(arg1_1, 2)
+    _set_grad_enabled = torch._C._set_grad_enabled(False)
     add_1 = torch.ops.aten.add.Tensor(add, 2);  add = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
     mul = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
     add_2 = torch.ops.aten.add.Tensor(mul, add_1);  mul = add_1 = None
     return (add_2,)""")
 
     def test_aot_export_predispatch_func_composite_implicit(self):
         def fn(p, x):
-            y = x @ x
+            with torch.enable_grad():
+                y = x @ x
             y.add_(2)
             return (x.sum() + y.sum(),)
 
@@ -2752,7 +2769,9 @@ def forward(self, arg0_1, arg1_1):
         gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1, arg1_1):
+    _set_grad_enabled = torch._C._set_grad_enabled(True)
     mm = torch.ops.aten.mm.default(arg1_1, arg1_1)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
     add = torch.ops.aten.add.Tensor(mm, 2);  mm = None
     sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
     sum_2 = torch.ops.aten.sum.default(add);  add = None
@@ -3832,6 +3851,9 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
         self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
 
+    # NB: Metadata mutation for subclasses is currently broken and disabled
+    # See https://github.com/pytorch/pytorch/issues/114975
+    @unittest.expectedFailure
     def test_aot_dispatch_input_metadata_mutation(self):
         def f(a, b):
             a.t_()
@@ -3877,6 +3899,9 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
         self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
 
+    # NB: Metadata mutation for subclasses is currently broken and disabled
+    # See https://github.com/pytorch/pytorch/issues/114975
+    @unittest.expectedFailure
     def test_aot_dispatch_input_data_and_metadata_mutation(self):
         def f(a, b):
             a.t_()
@@ -3967,6 +3992,7 @@ def forward(self, tangents_1, tangents_2):
         # Both grad_inputs are TwoTensors
         self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
         self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
+
 
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
@@ -4365,6 +4391,7 @@ class TestEagerFusionModuleInfo(AOTTestCase):
         _test_aot_autograd_module_helper(self, device, dtype, training, module_info, dynamic=True)
 
 
+instantiate_parametrized_tests(TestAOTAutograd)
 only_for = ("cpu")
 instantiate_device_type_tests(
     TestPythonKey,

@@ -205,21 +205,39 @@ class TestPoitwiseOps(torch.nn.Module):
 
     def forward(self, x):
         inputs = torch.split(x.to(self.device), 500, dim=1)
-        x_split = torch.split(inputs[0].to(self.device), 100, dim=1)
-        y_split = torch.split(inputs[1].to(self.device), 100, dim=1)
+        x_split = torch.split(inputs[0].to(self.device), 50, dim=1)
+        y_split = torch.split(inputs[1].to(self.device), 50, dim=1)
         tanh_1 = [torch.tanh(x_split[i]) for i in range(len(x_split))]
         tanh_2 = [torch.tanh(y_split[i]) for i in range(len(y_split))]
         sigmoid_1 = [torch.sigmoid(tanh_1[i]) for i in range(len(tanh_1))]
         sigmoid_2 = [torch.sigmoid(tanh_2[i]) for i in range(len(tanh_2))]
         relu_1 = [torch.nn.functional.relu(sigmoid_1[i]) for i in range(len(sigmoid_1))]
         relu_2 = [torch.nn.functional.relu(sigmoid_2[i]) for i in range(len(sigmoid_2))]
-        return torch.cat(relu_1, dim=1) + torch.cat(relu_2, dim=1)
+        add = [torch.add(relu_1[i], relu_2[i]) for i in range(len(relu_1))]
+        mul = [torch.mul(add[i], add[i]) for i in range(len(add))]
+        sub = [torch.sub(mul[i], mul[i]) for i in range(len(mul))]
+        div = [torch.div(sub[i], sub[i]) for i in range(len(sub))]
+        return torch.cat(div, dim=1)
 
 
 @requires_cuda()
-@torch._inductor.config.patch(post_grad_fusion_options={})
-@torch._inductor.config.patch(pre_grad_fusion_options={})
-@torch._inductor.config.patch(group_fusion=True, batch_fusion=True)
+@torch._inductor.config.patch(
+    pre_grad_fusion_options={
+        "batch_linear": {},
+        "batch_linear_lhs": {},
+        "batch_layernorm": {},
+        "batch_tanh": {},
+        "batch_relu": {},
+        "batch_sigmoid": {},
+    },
+    post_grad_fusion_options={
+        "batch_aten_add": {},
+        "batch_aten_mul": {},
+        "batch_aten_sub": {},
+        "batch_aten_div": {},
+        "group_linear": {"require_fbgemm": True},
+    },
+)
 class TestGroupBatchFusion(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -277,7 +295,7 @@ class TestGroupBatchFusion(TestCase):
             )
             self.assertEqual(
                 counters["inductor"]["batch_fusion"],
-                0,
+                3,
             )
             counters.clear()
 
@@ -308,7 +326,7 @@ class TestGroupBatchFusion(TestCase):
         )
         self.assertEqual(
             counters["inductor"]["batch_fusion"],
-            0,
+            1,
         )
         counters.clear()
 
@@ -391,7 +409,7 @@ class TestGroupBatchFusion(TestCase):
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
 
-    def test_pointwise_op_pre_grad_fusion(self):
+    def test_pointwise_op_fusion(self):
         counters.clear()
         module = TestPoitwiseOps("cuda")
         input = [torch.randn(50, 1000, requires_grad=True, device="cuda")]
@@ -399,7 +417,7 @@ class TestGroupBatchFusion(TestCase):
         ref = module(*input)
         res = traced(*input)
         self.compare_pred(module, traced, input)
-        self.assertEqual(counters["inductor"]["batch_fusion"], 3)
+        self.assertEqual(counters["inductor"]["batch_fusion"], 7)
         self.assertEqual(
             counters["inductor"]["scmerge_split_removed"],
             0,
@@ -433,7 +451,9 @@ class TestBMMFusionModule(torch.nn.Module):
 
 
 @requires_cuda()
-@torch._inductor.config.patch(post_grad_fusion_options={"batch_linear_post_grad": {}})
+@torch._inductor.config.patch(
+    post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
+)
 class TestPostGradBatchLinearFusion(TestCase):
     def test_batch_linear_post_grad_fusion(self):
         pt1_module = TestBMMFusionModule().cuda()
