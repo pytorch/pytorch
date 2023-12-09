@@ -288,6 +288,11 @@ class VariableBuilder:
         install_guard(*[source.make_guard(guard) for guard in guards], skip=1)
         return {}
 
+    def set_source_and_track_mutable(self, value, var):
+        assert isinstance(var, VariableTracker)
+        var.source = self.source
+        return self.tx.output.side_effects.track_mutable(value, var)
+
     @classmethod
     @functools.lru_cache(None)
     def _type_dispatch(cls):
@@ -472,7 +477,7 @@ class VariableBuilder:
             else:
                 result = ConstDictVariable(result, type(value), source=self.source)
 
-            return self.tx.output.side_effects.track_mutable(value, result)
+            return self.set_source_and_track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
             return self.wrap_module(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals
@@ -786,7 +791,7 @@ class VariableBuilder:
             )
         elif RestrictedListSubclassVariable.is_matching_cls(type(value)):
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.LIST_LENGTH)
-            return self.tx.output.side_effects.track_mutable(
+            return self.set_source_and_track_mutable(
                 value,
                 RestrictedListSubclassVariable(
                     [
@@ -797,7 +802,6 @@ class VariableBuilder:
                     ],
                     user_cls=type(value),
                     user_cls_source=AttrSource(self.source, "__class__"),
-                    source=self.source,
                 ),
             )
         else:
@@ -854,7 +858,7 @@ class VariableBuilder:
             output, mutable_local=MutableLocal(), source=self.source
         )
         if istype(value, list):
-            return self.tx.output.side_effects.track_mutable(value, result)
+            return self.set_source_and_track_mutable(value, result)
         return result
 
     def wrap_tuple_iterator(self, value: tuple_iterator):
@@ -869,8 +873,7 @@ class VariableBuilder:
             output, mutable_local=MutableLocal(), source=self.source
         )
 
-        self.tx.output.side_effects.track_mutable(value, result)
-        return result
+        return self.set_source_and_track_mutable(value, result)
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
