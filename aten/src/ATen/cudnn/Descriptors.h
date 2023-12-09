@@ -18,6 +18,8 @@
 #include <ATen/ops/empty.h>
 #endif
 
+#define RNNV8VERSION 8907
+
 namespace at { namespace native {
 
 std::string cudnnTypeToString(cudnnDataType_t dtype);
@@ -108,6 +110,7 @@ class TORCH_CUDA_CPP_API Descriptor {
   T* mut_desc() { init(); return desc_.get(); }
 protected:
   void init() {
+    TORCH_WARN("am i nullptr? ", desc_ == nullptr);
     if (desc_ == nullptr) {
       T* raw_desc;
       AT_CUDNN_CHECK(ctor(&raw_desc));
@@ -271,7 +274,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
            cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnDataType_t input_type, cudnnRNNAlgo_t algo, bool allow_tf32) {
     dropout_desc_ = std::move(dropout_desc);
-#if defined(CUDNN_VERSION) && CUDNN_VERSION < 9000
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
           handle,
           mut_desc(),
@@ -291,24 +294,27 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
             /*outProjSize=*/0));
     }
 #else
+    auto md = mut_desc();
+    TORCH_WARN("md nullptr? ", md == nullptr);
+    TORCH_WARN("handle == 0? ", handle == nullptr);
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v8(
-          this->desc(),
+          md,
           algo,
           mode,
-          CUDNN_RNN_NO_BIAS,
+          CUDNN_RNN_DOUBLE_BIAS,
           bidirectional,
           input_mode,
           datatype,
-          CUDNN_DATA_FLOAT,
+          datatype == CUDNN_DATA_DOUBLE ? CUDNN_DATA_DOUBLE : CUDNN_DATA_FLOAT,
           allow_tf32 ? CUDNN_TENSOR_OP_MATH : CUDNN_DEFAULT_MATH,
           hidden_size,
           hidden_size,
-          proj_size,
+          proj_size ? proj_size : hidden_size,
           num_layers,
           dropout_desc_.desc(),
           0));
 #endif
-#if defined(CUDNN_VERSION) && CUDNN_VERSION < 9000
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major >= 7) {
       if (input_type == CUDNN_DATA_HALF) {
