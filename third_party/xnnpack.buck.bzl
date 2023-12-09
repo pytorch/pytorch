@@ -2457,67 +2457,11 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         }),
     )
 
-    def get_microkernel_config_srcs():
-        XNNPACK_MICROKERNEL_CONFIGS = []
-        for xnnpack_src in XNNPACK_SRCS:
-            if "config.c" in xnnpack_src:
-                XNNPACK_MICROKERNEL_CONFIGS.append(xnnpack_src)
-        return XNNPACK_MICROKERNEL_CONFIGS
-
-    fb_xplat_cxx_library(
-        name = "operators",
-        srcs = OPERATOR_SRCS + get_microkernel_config_srcs() + [
-            "XNNPACK/src/packing.c",
-            "XNNPACK/src/cache.c",
-            "XNNPACK/src/indirection.c",
-            "XNNPACK/src/operator-utils.c",
-            "XNNPACK/src/normalization.c",
-            "XNNPACK/src/allocator.c",
-            "XNNPACK/src/memory.c",
-            "XNNPACK/src/mutex.c",
-            "XNNPACK/src/microparams-init.c",
-            "XNNPACK/src/operators/post-operation.c",
-            "XNNPACK/src/microkernel-utils.c",
-        ],
-        headers = subdir_glob([
-            ("XNNPACK/src", "**/*.h"),
-            ("XNNPACK/include", "**/*.h")
-        ]),
-        header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
-        compiler_flags = [
-            "-Oz",
-        ],
-        fbobjc_preprocessor_flags = [
-            "-DXNN_PRIVATE=",
-            "-DXNN_INTERNAL=",
-        ],
-        labels = labels,
-        preferred_linkage = "static",
-        preprocessor_flags = [
-            "-DXNN_LOG_LEVEL=0",
-            "-DXNN_ENABLE_GEMM_M_SPECIALIZATION=0",
-            "-DXNN_ENABLE_CPUINFO",
-        ],
-        visibility = ["PUBLIC"],
-        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
-        windows_compiler_flags_override = WINDOWS_FLAGS,
-        deps = [
-            ":interface",
-            ":prod_ukernels", # microkernel configs need prod_ukernels as dep
-            third_party("cpuinfo"),
-            third_party("FP16"),
-            third_party("FXdiv"),
-            third_party("clog"),
-        ],
-    )
-
     fb_xplat_cxx_library(
         name = "XNNPACK",
         apple_sdks = (IOS, MACOSX, APPLETVOS),
         labels = labels,
         deps = [
-            ":operators",
             ":subgraph",
             ":tables",
             ":prod_ukernels",
@@ -2558,11 +2502,19 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_ENABLE_ARM_FP16_VECTOR=1",
             "-DXNN_ENABLE_AVXVNNI=0",
         ],
-        srcs = XNNPACK_SRCS + LOGGING_SRCS + [
+        srcs = XNNPACK_SRCS + LOGGING_SRCS + OPERATOR_SRCS + [
             "XNNPACK/src/configs/hardware-config.c",
             "XNNPACK/src/microkernel-utils.c",
-            "XNNPACK/src/microparams-init.c",
             "XNNPACK/src/operator-run.c",
+            "XNNPACK/src/packing.c",
+            "XNNPACK/src/cache.c",
+            "XNNPACK/src/indirection.c",
+            "XNNPACK/src/operator-utils.c",
+            "XNNPACK/src/normalization.c",
+            "XNNPACK/src/allocator.c",
+            "XNNPACK/src/memory.c",
+            "XNNPACK/src/mutex.c",
+            "XNNPACK/src/microparams-init.c",
             "XNNPACK/src/operators/post-operation.c",
         ],
         visibility = ["PUBLIC"],
