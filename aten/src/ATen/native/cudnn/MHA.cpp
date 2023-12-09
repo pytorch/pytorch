@@ -232,12 +232,12 @@ auto build_graph_and_tensors(int64_t b,
 
     TORCH_INTERNAL_ASSERT(mha_graph->build_operation_graph(handle).is_good());
 
-    auto plans = mha_graph->get_execution_plan_list({fe::HeurMode_t::A});
+    auto status = mha_graph->create_execution_plans({fe::HeurMode_t::A});
 
 
-    TORCH_INTERNAL_ASSERT(plans.check_support(handle).is_good());
-
-    TORCH_INTERNAL_ASSERT(mha_graph->set_execution_plans(plans).is_good());
+    TORCH_INTERNAL_ASSERT(mha_graph->check_support(handle).is_good());
+    TORCH_INTERNAL_ASSERT(mha_graph->build_plans(handle).is_good());
+    // TORCH_INTERNAL_ASSERT(mha_graph->set_execution_plans(plans).is_good());
     return std::make_tuple(mha_graph, Q, K, V, attn_scale, seed, offset, O, Stats);
 }
 
