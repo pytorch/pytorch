@@ -3424,6 +3424,8 @@ class CUDATemplateBuffer(TemplateBuffer):
                 # timings = cast(Dict[CUDATemplateCaller, float], timings)
                 self.make_kernel_render = choice.make_kernel_render
                 self.template = choice.template
+                # this does nothing if the workspace size is already current
+                choice.bmreq.update_workspace_size()
                 self.workspace_size = choice.bmreq.workspace_size
                 self._tuned_for_epilogue = list(
                     epilogue_nodes

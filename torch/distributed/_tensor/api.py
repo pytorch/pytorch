@@ -10,7 +10,6 @@ import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
-from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
     Placement,
@@ -26,6 +25,7 @@ from torch.distributed._tensor.redistribute import (
     Redistribute,
     redistribute_local_tensor,
 )
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 
 
 __all__ = ["DTensor", "distribute_tensor", "distribute_module"]

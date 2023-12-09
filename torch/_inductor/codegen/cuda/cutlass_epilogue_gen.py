@@ -16,7 +16,7 @@ _MAGIC_SYMPY_ERROR_STRING = "[!sympy: unsupported expr!]"
 
 
 def map_pointwise_index_to_read_strides(
-    index_expr: sympy.Expr, master_layout: Layout
+    index_expr: sympy.Expr, master_layout: Layout, flip_mn: bool
 ) -> List[int]:
     """
     Converts a sympy index expression to a list of strides, mapped to the master layout
@@ -28,10 +28,15 @@ def map_pointwise_index_to_read_strides(
     ), f"Too many free symbols in index expression {index_expr} for layout {master_layout}"
     subs = {sym: 0 for sym in free_symbols}
     result_strides = [0] * len(master_layout.stride)
+    sym_idx_map = list(range(len(result_strides)))
+    # flip m and n dimensions in this mapping
+    if flip_mn and len(master_layout.stride) >= 2:
+        sym_idx_map[-1] = len(master_layout.stride) - 2
+        sym_idx_map[-2] = len(master_layout.stride) - 1
     for i in range(len(free_symbols)):
         sym_name = free_symbols[i].name
         assert sym_name[0] == "i"
-        sym_idx = int(sym_name[1:])
+        sym_idx = sym_idx_map[int(sym_name[1:])]
         assert sym_idx >= 0 and sym_idx < len(
             master_layout.stride
         ), f"Invalid symbol name {sym_name} in index expression {index_expr} for layout {master_layout}"
@@ -83,6 +88,7 @@ class CutlassEVTEpilogueTypeFormatter:
         pre_fused_evt: Optional[str] = None,
         c_operand_alias: Optional[str] = None,
         gemm_output_layout: Layout = None,
+        flip_mn: bool = False,
     ):
         """
 
@@ -107,6 +113,7 @@ class CutlassEVTEpilogueTypeFormatter:
         self.c_operand_alias = c_operand_alias
         self.accumulator_index_expr = None
         self.gemm_output_layout = gemm_output_layout
+        self.flip_mn = flip_mn
 
     @staticmethod
     def ir_to_evt_string(
@@ -116,6 +123,7 @@ class CutlassEVTEpilogueTypeFormatter:
         pre_fused_evt: Optional[str] = None,
         c_operand_alias: Optional[str] = None,
         gemm_output_layout: Layout = None,
+        flip_mn: bool = False,
     ):
         """
         Formats IR nodes into a string representation compatible with Cutlass EVT format.
@@ -144,6 +152,7 @@ class CutlassEVTEpilogueTypeFormatter:
             pre_fused_evt,
             c_operand_alias,
             gemm_output_layout,
+            flip_mn,
         )
 
         with virtualized.V.set_ops_handler(formatter), patch.object(  # type: ignore[call-arg]
@@ -239,7 +248,11 @@ class CutlassEVTEpilogueTypeFormatter:
             node is not None
         ), f"Input buffer with name {name} not found in current graph"
         aux_load_descriptor, strides_mnl = create_cutlass_aux_load_descriptor(
-            node, index_expr, self.accumulator_index_expr, self.gemm_output_layout
+            node,
+            index_expr,
+            self.accumulator_index_expr,
+            self.gemm_output_layout,
+            self.flip_mn,
         )
         ALD = f"{name}AuxLoadDesc"
         self.output.writeline(f"using {ALD} = {aux_load_descriptor};")
@@ -250,7 +263,10 @@ class CutlassEVTEpilogueTypeFormatter:
         elif strides_mnl == (1, 0, 0):
             # Special case: col broadcast
             aux_load_op = "Sm90ColBroadcast"
-            aux_load_template_args = f"{ALD}::Stages, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride"
+            # ColBroadcast only supports 0 stages, since it doesn't use smem
+            aux_load_template_args = (
+                f"0, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride"
+            )
         else:
             aux_load_op = "Sm90AuxLoad"
             aux_load_template_args = f"{ALD}::Stages, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride, typename {ALD}::SmemLayoutAtom, typename {ALD}::CopyOpS2R"
@@ -376,6 +392,7 @@ class CutlassEVTEpilogueArgumentFormatter:
         c_operand_alias: Optional[str] = None,
         dry_run: bool = False,
         gemm_output_layout: Layout = None,
+        flip_mn: bool = False,
     ):
         """
 
@@ -399,6 +416,7 @@ class CutlassEVTEpilogueArgumentFormatter:
         self.c_operand_alias = c_operand_alias
         self.dry_run = dry_run
         self.gemm_output_layout = gemm_output_layout
+        self.flip_mn = flip_mn
 
     @staticmethod
     def ir_to_evt_argument_string(
@@ -408,6 +426,7 @@ class CutlassEVTEpilogueArgumentFormatter:
         c_operand_alias: Optional[str] = None,
         dry_run: bool = False,
         gemm_output_layout: Layout = None,
+        flip_mn: bool = False,
     ) -> str:
         formatter = CutlassEVTEpilogueArgumentFormatter(
             template_output_node_name,
@@ -415,6 +434,7 @@ class CutlassEVTEpilogueArgumentFormatter:
             c_operand_alias,
             dry_run,
             gemm_output_layout,
+            flip_mn,
         )
         result = pre_fused_evt_args
         if (pre_fused_evt_args is None) and (
@@ -506,7 +526,7 @@ class CutlassEVTEpilogueArgumentFormatter:
             data_ptr = kernel.ptr(aux_input_node)
 
             strides: List[int] = map_pointwise_index_to_read_strides(
-                index_expr, self.gemm_output_layout
+                index_expr, self.gemm_output_layout, self.flip_mn
             )
             load_stride_max_idx = sum(
                 [
@@ -614,7 +634,7 @@ def cute_stride_mnl_decl(strides):
 
 
 def create_cutlass_aux_load_descriptor(
-    node: IRNode, index_expr, accumulator_index_expr, gemm_output_layout
+    node: IRNode, index_expr, accumulator_index_expr, gemm_output_layout, flip_mn=False
 ) -> Tuple[str, Tuple[int, int, int]]:
     """
     Creates a Cutlass auxiliary descriptor for the given node.
@@ -623,7 +643,7 @@ def create_cutlass_aux_load_descriptor(
     cutlass_dtype = CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
     # these load strides are extracted from the index expression, and therefore properly mapped to the output layout.
     strides: List[int] = map_pointwise_index_to_read_strides(
-        index_expr, gemm_output_layout
+        index_expr, gemm_output_layout, flip_mn
     )
     load_stride_max_idx = sum(
         [stride * (dim - 1) for stride, dim in zip(strides, gemm_output_layout.size)]
