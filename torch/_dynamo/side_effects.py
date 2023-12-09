@@ -514,11 +514,7 @@ class SideEffects:
                     cg.load_import_from(utils.__name__, "iter_next")
                     cg(var.mutable_local.source)
                     cg.extend_output(create_call_function(1, True))
-                    cg.extend_output(
-                        [
-                            create_instruction("POP_TOP"),
-                        ]
-                    )
+                    cg.append_output(create_instruction("POP_TOP"))
             else:
                 raise AssertionError(type(var))
 

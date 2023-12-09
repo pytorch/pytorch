@@ -275,9 +275,6 @@ class VariableBuilder:
     def get_source(self):
         return self.source
 
-    def options(self):
-        return {"source": self.get_source()}
-
     def install_guards(self, *guards):
         source = self.get_source()
         if (
@@ -475,7 +472,7 @@ class VariableBuilder:
                     source=self.source,
                 )
             else:
-                result = ConstDictVariable(result, type(value), source=self.source)
+                result = ConstDictVariable(result, type(value))
 
             return self.set_source_and_track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
@@ -779,10 +776,10 @@ class VariableBuilder:
             )
         elif isinstance(value, types.GetSetDescriptorType):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return GetSetDescriptorVariable(value, source=self.source)
+            return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return MethodWrapperVariable(value, source=self.source)
+            return MethodWrapperVariable(value, self.source)
         elif issubclass(type(value), type):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserDefinedClassVariable(
@@ -855,7 +852,7 @@ class VariableBuilder:
             for i, item in enumerate(value)
         ]
         result = BaseListVariable.cls_for_instance(value)(
-            output, mutable_local=MutableLocal(), source=self.source
+            output, mutable_local=MutableLocal()
         )
         if istype(value, list):
             return self.set_source_and_track_mutable(value, result)
