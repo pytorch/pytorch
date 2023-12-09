@@ -7,8 +7,11 @@ import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.functional import scaled_dot_product_attention
+from torch.nn.attention.bias import CausalVariant, causal_lower_right, causal_upper_left
 from torch.nn.parameter import Parameter
 import unittest
+from unittest import expectedFailure as xfail
 from unittest.mock import patch, MagicMock, ANY
 import math
 from torch.backends.cuda import sdp_kernel, SDPBackend
@@ -41,6 +44,7 @@ if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
 
 SdpaShape = namedtuple('Sdpa_Shape', ['batch', 'num_heads', 'seq_len', 'head_dim'])
+Tolerances = namedtuple('Tolerances', ['atol', 'rtol'])
 
 @contextlib.contextmanager
 def use_deterministic_algorithims(mode: bool, warn_only: bool):
@@ -103,6 +107,15 @@ backend_map = {
     SDPBackend.EFFICIENT_ATTENTION: {
         "enable_math": False, "enable_flash": False, "enable_mem_efficient": True}
 }
+
+def query_key_value_clones(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, dtype: torch.dtype = None):
+    """ Clones the query, key, and value tensors and moves them to the specified dtype. """
+    if dtype is None:
+        dtype = query.dtype
+    query_ref = query.clone().detach().to(dtype).requires_grad_(query.requires_grad)
+    key_ref = key.clone().detach().to(dtype).requires_grad_(key.requires_grad)
+    value_ref = value.clone().detach().to(dtype).requires_grad_(value.requires_grad)
+    return query_ref, key_ref, value_ref
 
 
 def rand_sdpa_tensor(shape: SdpaShape, device: str, dtype: torch.dtype, type: str,
@@ -1822,13 +1835,6 @@ class TestSDPACudaOnly(NNTestCase):
             S_converted = F.pad(S_converted, (0, seqlen_k_og - seqlen_k))
         return S_converted
 
-    def query_key_value_clones(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, dtype: torch.dtype):
-        """ Clones the query, key, and value tensors and moves them to the specified dtype. """
-        query_ref = query.clone().detach().to(dtype).requires_grad_(query.requires_grad)
-        key_ref = key.clone().detach().to(dtype).requires_grad_(key.requires_grad)
-        value_ref = value.clone().detach().to(dtype).requires_grad_(value.requires_grad)
-        return query_ref, key_ref, value_ref
-
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
     def test_mem_efficient_attetntion_mask_variants(self, device, mask_dim: List[int]):
@@ -2260,10 +2266,10 @@ class TestSDPACudaOnly(NNTestCase):
                            device=device, dtype=dtype, requires_grad=True)
 
         # Run the math kernel on low precision references
-        query_ref_lp, key_ref_lp, value_ref_lp = self.query_key_value_clones(query, key, value, dtype=dtype)
+        query_ref_lp, key_ref_lp, value_ref_lp = query_key_value_clones(query, key, value, dtype=dtype)
 
         higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
-        query_ref, key_ref, value_ref = self.query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
+        query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
 
         # Create real output
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
@@ -2364,11 +2370,11 @@ class TestSDPACudaOnly(NNTestCase):
         attn_mask = torch.rand(seq_len_q, seq_len_k, device=device, dtype=dtype, requires_grad=True)
 
         # Run the math kernel on low precision references
-        query_ref_lp, key_ref_lp, value_ref_lp = self.query_key_value_clones(query, key, value, dtype=dtype)
+        query_ref_lp, key_ref_lp, value_ref_lp = query_key_value_clones(query, key, value, dtype=dtype)
         attn_mask_ref_lp = attn_mask.detach().to(dtype).requires_grad_(True)
 
         higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
-        query_ref, key_ref, value_ref = self.query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
+        query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
         attn_mask_ref = attn_mask.detach().to(higher_precision_dtype).requires_grad_(True)
 
         # Create real output
@@ -2474,10 +2480,10 @@ class TestSDPACudaOnly(NNTestCase):
                            device=device, dtype=dtype, requires_grad=True)
 
         # Run the math kernel on low precision references
-        query_ref_lp, key_ref_lp, value_ref_lp = self.query_key_value_clones(query, key, value, dtype=dtype)
+        query_ref_lp, key_ref_lp, value_ref_lp = query_key_value_clones(query, key, value, dtype=dtype)
 
         higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
-        query_ref, key_ref, value_ref = self.query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
+        query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
 
         is_dropout = dropout_p > 0.0
 
@@ -2612,10 +2618,10 @@ class TestSDPACudaOnly(NNTestCase):
         fused_op = (torch.ops.aten._scaled_dot_product_efficient_attention
                     if fused_kernel == SDPBackend.EFFICIENT_ATTENTION else torch.ops.aten._scaled_dot_product_flash_attention)
         # Run the math kernel on low precision references
-        query_ref_lp, key_ref_lp, value_ref_lp = self.query_key_value_clones(query, key, value, dtype=dtype)
+        query_ref_lp, key_ref_lp, value_ref_lp = query_key_value_clones(query, key, value, dtype=dtype)
 
         higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
-        query_ref, key_ref, value_ref = self.query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
+        query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
 
         # warmup
         s = torch.cuda.Stream()
@@ -2985,6 +2991,143 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
+class TestAttnMasks(NNTestCase):
+
+    def run_test(self, device, compile, make_q, make_kv, attn_bias=None,
+                 forw_tolerances: Optional[Tolerances] = None, grad_tolerances: Optional[Tolerances] = None):
+        if compile:
+            torch._dynamo.reset()
+
+        query, key, value = make_q(), make_kv(), make_kv()
+        query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
+
+        realized = attn_bias._materialize(device) if attn_bias is not None else None
+        pytorch_output = scaled_dot_product_attention(
+            query, key, value, attn_mask=realized, dropout_p=0.0, is_causal=False
+        )
+
+        sdpa_op = (
+            torch.compile(scaled_dot_product_attention, fullgraph=True)
+            if compile
+            else scaled_dot_product_attention
+        )
+        sdpa_output = sdpa_op(
+            query_prototype,
+            key_prototype,
+            value_prototype,
+            attn_mask=attn_bias,
+            dropout_p=0.0,
+            is_causal=False,
+            scale=None,
+        )
+
+        dOut = torch.randn_like(pytorch_output)
+        pytorch_output.backward(dOut)
+        sdpa_output.backward(dOut)
+
+        # Use default assert_close tolerances for dtypes
+        if forw_tolerances is None:
+            forw_tolerances = Tolerances(atol=None, rtol=None)
+        if grad_tolerances is None:
+            grad_tolerances = Tolerances(atol=None, rtol=None)
+
+        torch.testing.assert_close(pytorch_output, sdpa_output, rtol=forw_tolerances.rtol, atol=forw_tolerances.atol)
+        torch.testing.assert_close(query.grad, query_prototype.grad, rtol=grad_tolerances.rtol, atol=grad_tolerances.atol)
+        torch.testing.assert_close(key.grad, key_prototype.grad, rtol=grad_tolerances.rtol, atol=grad_tolerances.atol)
+        torch.testing.assert_close(value.grad, value_prototype.grad, rtol=grad_tolerances.rtol, atol=grad_tolerances.atol)
+
+    @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
+    @parametrize(
+        "shape",
+        [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
+    )
+    def test_causal_variants(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
+        make_tensor = partial(
+            torch.rand, device=device, dtype=torch.float16, requires_grad=True
+        )
+
+        bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shape
+        make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
+        make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
+        if causal_variant == CausalVariant.LOWER_RIGHT and seq_len_q > seq_len_kv:
+            self.skipTest(
+                "Lower right causal mask will produce NaNs in the output when seq_len_q > seq_len_kv!"
+            )
+
+        forw_tol = Tolerances(1e-3, 1e-3)
+        grad_tol = Tolerances(5e-3, 5e-3)
+
+        if causal_variant == CausalVariant.UPPER_LEFT:
+            attn_bias = causal_upper_left(seq_len_q, seq_len_kv)
+        else:
+            attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
+
+        self.run_test(device, False, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
+
+    @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
+    @parametrize(
+        "shape",
+        [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
+    )
+    @xfail
+    def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
+        make_tensor = partial(
+            torch.rand, device=device, dtype=torch.float16, requires_grad=True
+        )
+
+        bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shape
+        make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
+        make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
+        if causal_variant == CausalVariant.LOWER_RIGHT and seq_len_q > seq_len_kv:
+            self.skipTest(
+                "Lower right causal mask will produce NaNs in the output when seq_len_q > seq_len_kv!"
+            )
+        forw_tol = Tolerances(1e-3, 1e-3)
+        grad_tol = Tolerances(5e-3, 5e-3)
+
+        if causal_variant == CausalVariant.UPPER_LEFT:
+            attn_bias = causal_upper_left(seq_len_q, seq_len_kv)
+        else:
+            attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
+
+        self.run_test(device, True, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol)
+
+    @parametrize("shape", [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)])
+    def test_is_causal_equals_upper_left(self, device, shape: List[Tuple[int]]):
+        make_tensor = partial(
+            torch.rand, device=device, dtype=torch.float16, requires_grad=True
+        )
+
+        bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shape
+        make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
+        make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
+
+        forw_tol = Tolerances(1e-3, 1e-3)
+        grad_tol = Tolerances(5e-3, 5e-3)
+
+        query = make_q_tensor()
+        key = make_kv_tensor()
+        value = make_kv_tensor()
+        attn_bias = causal_upper_left(seq_len_q, seq_len_kv)
+
+        out_attn_bias = scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, dropout_p=0.0)
+        out_is_causal = scaled_dot_product_attention(query, key, value, is_causal=True, dropout_p=0.0)
+        torch.testing.assert_close(out_attn_bias, out_is_causal, rtol=forw_tol.rtol, atol=forw_tol.atol)
+
+    def test_is_causal_and_mask_fails(self, device):
+        make_tensor = partial(
+            torch.rand, device=device, dtype=torch.float16, requires_grad=True
+        )
+        make_q_tensor = partial(make_tensor, SdpaShape(16, 16, 128, 16))
+        make_kv_tensor = partial(make_tensor, SdpaShape(16, 16, 128, 16))
+
+        query = make_q_tensor()
+        key = make_kv_tensor()
+        value = make_kv_tensor()
+        attn_bias = causal_upper_left(128, 128)
+
+        with self.assertRaisesRegex(ValueError, "CausalBias should not be used with causal=True"):
+            scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
 
 if NOTEST_CPU:
     device_types = ("cuda", )
@@ -2995,6 +3138,7 @@ instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
+instantiate_device_type_tests(TestAttnMasks, globals(), only_for=device_types)
 
 if __name__ == '__main__':
     run_tests()

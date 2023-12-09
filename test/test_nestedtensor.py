@@ -3249,7 +3249,7 @@ class TestNestedTensorSubclass(NestedTestCase):
         self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
         self.assertEqual(nt.shape[2:], first_t.shape[1:])
 
-    @skipIfTorchDynamo("Dynamo type of torch.SymInt returns int")
+    @torch._dynamo.config.patch(suppress_errors=True)
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
@@ -3272,7 +3272,7 @@ class TestNestedTensorSubclass(NestedTestCase):
                 t = t if isinstance(t, torch.Tensor) else torch.as_tensor(t)
                 self.assertTrue(t.grad is None)
 
-    @skipIfTorchDynamo("Dynamo type of torch.SymInt returns int")
+    @torch._dynamo.config.patch(suppress_errors=True)
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("components_require_grad", [False, True])
     def test_jagged_layout_construction_as_nested_tensor(
@@ -3298,7 +3298,6 @@ class TestNestedTensorSubclass(NestedTestCase):
                     else:
                         self.assertTrue(t.grad is None)
 
-    @skipIfTorchDynamo("Dynamo type of torch.SymInt returns int")
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
     @onlyCUDA
     def test_jagged_layout_construction_with_pinned_memory(self, device):
@@ -3424,6 +3423,17 @@ class TestNestedTensorSubclass(NestedTestCase):
         self.assertTrue(nt_contiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
+
+    def test_noncontiguous_pointwise(self, device):
+        a = torch.randn(2, 3, 4, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, 4, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, 4, requires_grad=True, dtype=torch.float64, device=device)
+        nt, _ = jagged_from_list([a, b, c], None)
+        # transpose ragged dim
+        transposed = nt.transpose(1, 2)
+        # pointwise ops are not supported on ragged dim transposed jagged layout NTs
+        with self.assertRaisesRegex(ValueError, "expected .* to be a contiguous jagged layout"):
+            clone = transposed.clone()
 
     # Note 1: CPU Fused kernels do not support nested, Math is missing ops to work with NT jagged
     # Note 2: Unless running on newer GPUs, only mem-effn or math are available, and mem-effn

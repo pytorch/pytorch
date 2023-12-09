@@ -442,7 +442,6 @@ def _compare_pytorch_onnx_with_ort(
     ort_outputs = onnx_program(*input_args, **input_kwargs)
     ref_outputs = ref_model(*ref_input_args, **ref_input_kwargs)
     ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(ref_outputs)
-
     if len(ref_outputs) != len(ort_outputs):
         raise AssertionError(
             f"Expected {len(ref_outputs)} outputs, got {len(ort_outputs)}"
@@ -520,6 +519,7 @@ class DecorateMeta:
         test_behavior: The behavior of the test case. [skip or xfail]
         matcher: The matcher to apply to the test case.
         enabled_if: Whether to enable test behavior. Usually used on onnx/ort version control
+        model_type: The type of the torch model. Defaults to None.
     """
 
     op_name: str
@@ -531,6 +531,7 @@ class DecorateMeta:
     test_behavior: str
     matcher: Optional[Callable[[Any], bool]] = None
     enabled_if: bool = True
+    model_type: Optional[TorchModelType] = None
 
     def contains_opset(self, opset: int) -> bool:
         if self.opsets is None:
@@ -550,6 +551,7 @@ def xfail(
     dtypes: Optional[Collection[torch.dtype]] = None,
     matcher: Optional[Callable[[Any], bool]] = None,
     enabled_if: bool = True,
+    model_type: Optional[TorchModelType] = None,
 ):
     """Expects a OpInfo test to fail.
 
@@ -562,6 +564,7 @@ def xfail(
         matcher: A function that matches the test sample input. It is used only when
             xfail is in the SKIP_XFAIL_SUBTESTS list.
         enabled_if: Whether to enable xfail. Usually used on onnx/ort version control
+        model_type: The type of the torch model. Defaults to None.
     """
     return DecorateMeta(
         op_name=op_name,
@@ -573,6 +576,7 @@ def xfail(
         matcher=matcher,
         reason=reason,
         test_behavior="xfail",
+        model_type=model_type,
     )
 
 
@@ -585,6 +589,7 @@ def skip(
     dtypes: Optional[Collection[torch.dtype]] = None,
     matcher: Optional[Callable[[Any], Any]] = None,
     enabled_if: bool = True,
+    model_type: Optional[TorchModelType] = None,
 ):
     """Skips a test case in OpInfo that we don't care about.
 
@@ -599,6 +604,7 @@ def skip(
         matcher: A function that matches the test sample input. It is used only when
             skip is in the SKIP_XFAIL_SUBTESTS list.
         enabled_if: Whether to enable skip. Usually used on onnx/ort version control
+        model_type: The type of the torch model. Defaults to None.
     """
     return DecorateMeta(
         op_name=op_name,
@@ -610,6 +616,7 @@ def skip(
         matcher=matcher,
         enabled_if=enabled_if,
         test_behavior="skip",
+        model_type=model_type,
     )
 
 
