@@ -1840,7 +1840,12 @@ class CppCodeCache:
                             input=input_path, output=output_path, vec_isa=picked_vec_isa
                         )
                     )
+                    print("!!!! CppCodeCache --> cmd: ", cmd)
                     compile_file(input_path, output_path, cmd)
+
+                    if is_clang(cpp_compiler()):
+                        raise RuntimeError("Debug here.")
+
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key  # type: ignore[attr-defined]
 
@@ -2242,6 +2247,7 @@ class CUDACodeCache:
                     cmd = cuda_compile_command(
                         [input_path], output_path, dst_file_ext
                     ).split(" ")
+                    print("!!! CUDACodeCache --> cmd: ", cmd)
                     try:
                         subprocess.check_output(
                             cmd, stderr=subprocess.STDOUT, env=os.environ
