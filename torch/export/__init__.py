@@ -56,11 +56,13 @@ __all__ = [
     "load",
     "register_dataclass",
     "save",
+    "unflatten",
 ]
 
 
 from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
 from .graph_signature import ExportBackwardSignature, ExportGraphSignature
+from .unflatten import unflatten
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]

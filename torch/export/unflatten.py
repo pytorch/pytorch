@@ -6,14 +6,13 @@ from typing import cast, Dict, List, Optional, Union
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
-from torch.export import ExportedProgram
 from torch.export.exported_program import (
+    ExportedProgram,
     ConstantArgument,
     ModuleCallSignature,
     SymIntArgument,
     TensorArgument,
 )
-from .utils import _check_input_constraints_pre_hook
 
 
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
@@ -156,8 +155,13 @@ class _UnflattenedModule(torch.nn.Module):
                     continue
                 assert node.name not in inputs_to_state
 
+        # Import here to avoid an unfortunate circular dependency.
+        from torch._export.utils import _check_input_constraints_pre_hook
+        self.register_forward_pre_hook(_check_input_constraints_pre_hook)
+
     def forward(self, *args, **kwargs):
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
+
         assert self.module_call_graph[0].fqn == ""
         signature = self.module_call_graph[0].signature
         if in_spec != signature.in_spec:
@@ -180,7 +184,6 @@ def unflatten(module: ExportedProgram) -> _UnflattenedModule:
     hierarchy as the original eager module.
     """
     module = _UnflattenedModule(module)
-    module.register_forward_pre_hook(_check_input_constraints_pre_hook)
     return module
 
 
