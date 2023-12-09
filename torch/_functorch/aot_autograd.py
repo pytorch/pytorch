@@ -451,6 +451,9 @@ def create_aot_dispatcher_function(
                 if shape_env is not None:
                     from torch._dynamo.source import ConstantSource
                     if isinstance(x, int):
+                        # We always specialize on scalar values in export.
+                        if aot_config.is_export:
+                            return x
                         source = ConstantSource(f"sym_{idx}")
                         return shape_env.create_symintnode(
                             shape_env.create_symbol(x, source),
@@ -488,7 +491,6 @@ def create_aot_dispatcher_function(
                 return fake_mode.from_tensor(
                     x, static_shapes=False, symbolic_context=symbolic_context, source=source
                 )
-
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
         fake_flat_args = process_inputs(flat_args)
@@ -506,6 +508,7 @@ def create_aot_dispatcher_function(
                     flat_fn,
                     keep_input_mutations=aot_config.keep_inference_input_mutations,
                     is_train=needs_autograd,
+                    pre_dispatch=aot_config.pre_dispatch,
                 )(*fake_flat_args)
 
                 req_subclass_dispatch = requires_subclass_dispatch(fake_flat_args, fw_metadata)

@@ -5,7 +5,6 @@ from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
 import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
     DTensorSpec,
     OpInfo,
@@ -19,6 +18,7 @@ from torch.distributed._tensor.op_schema import (
     TupleStrategy,
 )
 from torch.distributed._tensor.placement_types import TensorMeta
+from torch.distributed.device_mesh import DeviceMesh
 
 aten = torch.ops.aten
 
@@ -245,7 +245,13 @@ class ShardingPropagator:
                     # returned from the op strategy
                     output_spec: OutputSpecType = tuple(
                         [
-                            output_strategy.output_spec
+                            # create a new DTensorSpec with the same placement as the
+                            # output_spec in output_strategy
+                            DTensorSpec(
+                                mesh=output_strategy.output_spec.mesh,
+                                placements=output_strategy.output_spec.placements,
+                                tensor_meta=output_strategy.output_spec.tensor_meta,
+                            )
                             for _ in range(len(op_schema.op._schema.returns))
                         ]
                     )

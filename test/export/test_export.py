@@ -10,7 +10,14 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
+from torch.export import (
+    Constraint,
+    Dim,
+    dynamic_dim,
+    export,
+)
+from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch._export import capture_pre_autograd_graph
 from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
     get_buffer,
@@ -112,6 +119,24 @@ class TestExport(TestCase):
 
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
+
+    def test_external_call_non_strict_real_tensor(self):
+        class ExternalMethod:
+            def add(self, x):
+                return x + x
+
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.external_add = ExternalMethod().add
+
+            def forward(self, x):
+                return self.external_add(x)
+
+        f = Basic()
+        args = (torch.randn(1, 3), )
+        ep = export(f, args, strict=False)
+        self.assertEqual(ep(*args), f(*args))
 
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
@@ -1287,7 +1312,7 @@ class TestExport(TestCase):
     def test_constraint_directly_construct(self):
         with self.assertRaisesRegex(
             TypeError,
-            "torch.export.Constraint has no public constructor. Please use torch.export.dynamic_dim"
+            "Constraint has no public constructor. Please use torch.export.dynamic_dim"
         ):
             _ = Constraint()
 
@@ -1301,7 +1326,7 @@ class TestExport(TestCase):
                     return x.cos()
                 return x.sin()
 
-        graph_module = capture_pre_autograd_graph(Foo(), (torch.ones(7, 5),))
+        graph_module = capture_pre_autograd_graph(Foo(), (torch.ones(7, 5),), _functional_pre_dispatch_IR=True)
         with self.assertRaisesRegex(NotImplementedError, r"Calling train\(\) is not supported yet."):
             graph_module.train()
 
@@ -1333,13 +1358,15 @@ class TestExport(TestCase):
         example_inputs = (torch.randn(1, 3, 3, 3),)
         m = CondBranchClassMethod()
         m.eval()
-        gm = capture_pre_autograd_graph(m, example_inputs)
+        # TODO (tmanlaibaatar) It doesn't work on aot_export yet
+        gm = capture_pre_autograd_graph(m, example_inputs, _functional_pre_dispatch_IR=False)
 
         actual_source_fns = []
         for mod in gm.modules():
             for node in mod.graph.nodes:
                 if node.name in {"sin", "cos"}:
                     source_fn_st = node.meta.get("source_fn_stack", None)
+                    print(source_fn_st)
                     if source_fn_st is not None:
                         source_names = []
                         for source_fn in source_fn_st:
@@ -1608,20 +1635,18 @@ def forward(self, l_x_):
                 return x.sum() + self.buffer.sum()
 
         inp = torch.randn(4, 4)
-        gm = capture_pre_autograd_graph(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3])
+        gm = capture_pre_autograd_graph(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3], _functional_pre_dispatch_IR=True)
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "l_x_.shape\[1\]"):
             gm(torch.randn(2, 2))
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "l_x_.shape\[1\]"):
             torch.export.export(gm, (torch.randn(2, 2),))
 
         ep = torch.export.export(gm, (torch.randn(5, 4),), dynamic_shapes=({0: torch.export.Dim("dim", min=3)},))
 
         test_inp = torch.ones(8, 4)
-        # This is actually correct because how make_fx modifies the buffer since
-        # there is no functionalization.
-        self.assertTrue(torch.allclose(ep(test_inp), Foo().forward(test_inp) + 4*4*4))
+        self.assertTrue(torch.allclose(ep(test_inp), Foo().forward(test_inp)))
 
     def test_issue_113041(self):
         class TestModule(torch.nn.Module):
@@ -1757,6 +1782,7 @@ def forward(self, l_x_):
         exported_model = capture_pre_autograd_graph(
             m,
             (tensor_cpu, mask_cpu),
+            _functional_pre_dispatch_IR=True,
         )
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
@@ -1797,6 +1823,28 @@ def forward(self, l_x_):
         self.assertEqual(ep(*inputs_export), model(*inputs_model))
         self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
         self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
+
+    def test_check_specialized_int(self):
+        class SingleOp(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.op = torch.ops.aten.scatter_add
+
+            def forward(self, t, dim, index, src, **kwargs):
+                return self.op(t, dim, index, src, **kwargs)
+
+
+        t = torch.randn(10, 5)
+        dim = -1
+        index = torch.tensor([[2, 4, 3, 1, 0],[0, 2, 1, 4, 3],[3, 1, 4, 2, 0],[4, 0, 3, 1, 2],[3, 0, 4, 1, 2]])
+        src = torch.randn(5, 5)
+
+        model = SingleOp()
+        output = model(t, dim, index, src)
+
+        ep = torch.export.export(model, args=(t, dim, index, src))
+        ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
+        self.assertEqual(ep(t, dim, index, src), output)
 
 if __name__ == '__main__':
     run_tests()
