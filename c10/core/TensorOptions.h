@@ -199,7 +199,7 @@ struct C10_API TensorOptions {
   template <typename... Args>
   C10_NODISCARD TensorOptions device(Args&&... args) const noexcept {
     return device(
-        c10::optional<Device>(c10::in_place, std::forward<Args>(args)...));
+        c10::optional<Device>(std::in_place, std::forward<Args>(args)...));
   }
 
   /// Return a copy of `TensorOptions`, but with device set to CUDA, and the
