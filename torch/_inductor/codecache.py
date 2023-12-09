@@ -1840,11 +1840,10 @@ class CppCodeCache:
                             input=input_path, output=output_path, vec_isa=picked_vec_isa
                         )
                     )
-                    print("!!!! CppCodeCache --> cmd: ", cmd)
-                    compile_file(input_path, output_path, cmd)
-
                     if is_clang(cpp_compiler()):
-                        raise RuntimeError("Debug here.")
+                        print("!!!! clang: CppCodeCache --> cmd: ", cmd)
+                        # raise RuntimeError("Debug here.")
+                    compile_file(input_path, output_path, cmd)
 
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key  # type: ignore[attr-defined]
