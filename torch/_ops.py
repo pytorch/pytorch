@@ -153,8 +153,7 @@ class OperatorBase:
             return fn(_CppFunctionalizeAPI(), *args, **kwargs)
 
         def functionalize_dispatch_mode_fn(mode, *args, **kwargs):
-            # Mode is unused (there's a global FunctionalTensorMode that we can access)
-            return fn(_PythonFunctionalizeAPI(), *args, **kwargs)
+            return fn(_PythonFunctionalizeAPI(mode), *args, **kwargs)
 
         def functionalize_functorch_fn(interpreter, *args, **kwargs):
             return fn(_FunctorchFunctionalizeAPI(interpreter), *args, **kwargs)
@@ -353,7 +352,11 @@ class HigherOrderOperator(OperatorBase):
 
         # This can current fail due to backend fallbacks.  You just have to
         # register them by hand for HigherOrderOperator.
-        assert final_key in self.py_kernels, f"{dispatch_key} -> {final_key}"
+        if final_key not in self.py_kernels:
+            raise NotImplementedError(
+                f"could not find kernel for HigherOrderOperator {self._name} "
+                f"at dispatch key {final_key} (resolved from {dispatch_key})"
+            )
         self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
         kernel = self.py_kernels[final_key]
         # It's illegal to register DispatchKey to py_kernels, since there's no
