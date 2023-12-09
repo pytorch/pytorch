@@ -57,7 +57,7 @@ class InterpreterModule(torch.nn.Module):
     ):
         super().__init__()
         self.graph = graph
-        self.graph.owning_module = self  # type: ignore
+        self.graph.owning_module = self
         self.module_call_signature = module_call_signature
 
     def forward(self, *args, **kwargs):
