@@ -1164,10 +1164,6 @@ class WrapperCodeGen(CodeGen):
         self.writeline(AllocateLine(self, buffer))
 
     def codegen_free(self, buffer):
-        assert (
-            buffer.get_workspace_size() == 0
-        ), "Only support zero workspace size for now!"
-
         name = buffer.get_name()
 
         # can be freed but not reused
