@@ -870,7 +870,6 @@ def make_fx(f,
         from .symbolic_shapes import ShapeEnv
 
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
-        assert scope_root is not None
         if scope_root is None:
             fx_tracer = PythonKeyTracer()
         else:
