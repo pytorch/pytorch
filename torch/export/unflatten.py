@@ -123,7 +123,7 @@ class FlatArgsAdapter(abc.ABC):
         ...
 
 
-class _UnflattenedModule(torch.nn.Module):
+class UnflattenedModule(torch.nn.Module):
     def __init__(
         self,
         export_module: ExportedProgram,
@@ -230,7 +230,7 @@ class _UnflattenedModule(torch.nn.Module):
 
 def unflatten(
     module: ExportedProgram, flat_args_adapter: Optional[FlatArgsAdapter] = None
-) -> _UnflattenedModule:
+) -> UnflattenedModule:
     """Unflatten an ExportedProgram, producing a module with the same module
     hierarchy as the original eager module.
 
@@ -238,7 +238,7 @@ def unflatten(
         module (ExportedProgram): The ExportedProgram to unflatten.
         flat_args_adapter (Optional[FlatArgsAdapter]): Adapt flat args if input TreeSpec does not match with exported module's.
     """
-    return _UnflattenedModule(module, flat_args_adapter)
+    return UnflattenedModule(module, flat_args_adapter)
 
 
 def _inplace_buffer_mutations(graph: torch.fx.Graph, graph_signature) -> None:
