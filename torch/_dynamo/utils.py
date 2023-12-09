@@ -512,6 +512,19 @@ def is_numpy_float_type(value):
     )
 
 
+def is_function(value):
+    return istype(
+        value,
+        (
+            types.FunctionType,
+            types.MethodType,
+            types.BuiltinFunctionType,
+            types.MethodDescriptorType,
+            types.WrapperDescriptorType,
+        ),
+    )
+
+
 def is_numpy_ndarray(value):
     if not np:
         return False
@@ -2268,11 +2281,14 @@ def get_static_address_type(t):
 
 def is_rng_state_getter_or_setter(value):
     getters = (
+        # The following two functions are not identical, so don't remove anyone!
+        torch._C.Generator.get_state,
         torch.default_generator.get_state,
         torch.get_rng_state,
         torch.cuda.get_rng_state,
     )
     setters = (
+        torch._C.Generator.set_state,
         torch.default_generator.set_state,
         torch.set_rng_state,
         torch.cuda.set_rng_state,
