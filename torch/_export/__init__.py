@@ -793,11 +793,9 @@ def _export(
                 return gm, sig
             return _aot_export_non_strict
 
-        fake_mode, fake_args, dim_name_to_sources = make_fake_inputs(f, args, constraints)
+        fake_mode, fake_args, src_equalities = make_fake_inputs(f, args, constraints)
         ep_non_strict = _export_non_strict(f, fake_args, {}, f.state_dict(), transform=_tuplify_outputs)
-
-        range_constraints, equality_constraints = make_constraints(fake_mode, dim_name_to_sources, ep_non_strict.gm)
-
+        range_constraints, equality_constraints = make_constraints(fake_mode, src_equalities, ep_non_strict.gm)
 
         assert out_spec is not None
         return ExportedProgram(
