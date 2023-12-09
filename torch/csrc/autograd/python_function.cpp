@@ -40,6 +40,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 using namespace torch;
 using namespace torch::autograd;
@@ -236,6 +237,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
 
   auto& is_variable_input = py_fn->is_variable_input;
   auto num_outputs = PyTuple_GET_SIZE(r.get());
+  std::cout << "inputs=" << inputs.size() << ", num_outputs=" << num_outputs << std::endl;
   auto num_forward_inputs = static_cast<Py_ssize_t>(is_variable_input.size());
   // Returning too many results is ok, but only as long as they're all None.
   // Truncate the result tuple in that case.
@@ -398,6 +400,7 @@ variable_list PyNode::apply_with_saved(
   f->compiled_autograd_tracing = true;
   variable_list result;
   result = compiled_apply(variable_list(inputs), saved);
+  // result = apply(variable_list(inputs));
   f->compiled_autograd_tracing = false;
   saved.after(f->compiled_autograd_symints);
   saved.after(f->saved_variables);

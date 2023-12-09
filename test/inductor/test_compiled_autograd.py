@@ -59,6 +59,33 @@ class TestCompiledAutograd(TestCase):
             self.assertEqual(counters["compiled_autograd"]["captures"], count)
             self.assertEqual(counters["compiled_autograd"]["compiles"], count)
 
+    def test_custom_fn_saved_tensors_changed(self):
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x, y):
+                    ctx.save_for_backward(x, y )
+                    # return torch.sin(x) * torch.sin(y)
+                    return x + y
+
+                @staticmethod
+                def backward(ctx, gO):
+                    (x, y) = ctx.saved_tensors
+                    # return gO * -torch.cos(x), g1 * -torch.cos(y)
+                    return gO, gO
+
+
+            for i in [10, 100, 10]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                y = torch.arange(0.0, i, requires_grad=True)
+                out = MySin.apply(x, y)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+                yield y.grad
+
+        self.check_output_and_recompiles(fn, 2)
+
     def test_custom_fn_saved_tensors(self):
         def fn():
             class MySin(torch.autograd.Function):

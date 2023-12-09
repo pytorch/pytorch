@@ -94,7 +94,6 @@ class AutogradCompilerInstance:
         return inputs, sizes
 
     def proxy_call_backward(self, inputs, backward_id: int):
-        print("hello from proxy_call_backward")
         assert self.backward_proxy is not None
         backward_fn = self.backward_proxy[backward_id]
         saved_variables = self.backward_proxy[backward_id+1]
@@ -111,9 +110,9 @@ class AutogradCompilerInstance:
 
         # accessing call_backward[0] somewhere here
         with disable_proxy_modes_tracing():
-            inputs = [maybe_clone(x) for x in inputs]
-            self.bind_tensors_to_proxies(inputs, proxies)
-        return inputs[0]
+            outputs = [maybe_clone(x) for x in inputs]
+            self.bind_tensors_to_proxies(outputs, proxies)
+        return outputs
 
     def proxy_call_hook(self, hook, *args):
         return self.fx_tracer.create_proxy(

@@ -477,10 +477,8 @@ variable_list compiled_autograd(
   THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
   THPObjectPtr hooks(wrap_pyobject_list(compiler_call.hooks));
   THPObjectPtr backwards(wrap_pyobject_list(compiler_call.backwards));
-  std::cout << "calling compiled_fn (graph) start" << std::endl;
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), backwards.get(), NULL)));
-  std::cout << "calling compiled_fn (graph) done" << std::endl;
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
   return outputs;
