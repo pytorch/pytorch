@@ -1,6 +1,6 @@
 import inspect
 from collections import defaultdict
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 import torch
 from torch._dynamo.source import (
@@ -93,9 +93,7 @@ def make_fake_inputs(nn_module, args, constraints):
         params = inspect.signature(nn_module.forward).parameters
         sources: Dict[Tuple[int, int], Source] = {}
         fake_args = tuple(
-            fake_tree(
-                fake_mode, arg, t_constraints, LocalSource(x), sources
-            )
+            fake_tree(fake_mode, arg, t_constraints, LocalSource(x), sources)
             for x, arg in zip(params, args)
         )
         src_equalities = []
