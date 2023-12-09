@@ -1,6 +1,6 @@
 import inspect
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import torch
 from torch._dynamo.source import (
@@ -22,19 +22,24 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 
 
-def fakify(mode, t, tensor_constraints, source, dim_name_to_sources):
+def fakify(mode, t, t_constraints, source, sources):
+    """
+    Make a fake tensor, given a fake mode, a tensor, constraints indexed
+    by tensor ids, the source for the tensor, and an accumulator mapping
+    tensor dimensions to their sources.
+    """
     n_dims = len(t.shape)
     symbolic_context = StatelessSymbolicContext(
         dynamic_sizes=[DimDynamic.STATIC] * n_dims,
         constraint_sizes=[None] * n_dims,
     )
     t_id = id(t)
-    if t_id in tensor_constraints:
-        for i, constraint in tensor_constraints[t_id].items():
+    if t_id in t_constraints:
+        for i, constraint in t_constraints[t_id].items():
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
             symbolic_context.dynamic_sizes[i] = DimDynamic.DYNAMIC
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
-            dim_name_to_sources[constraint.debug_name].append(src)
+            sources[(t_id, i)] = src
             mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(
@@ -43,41 +48,38 @@ def fakify(mode, t, tensor_constraints, source, dim_name_to_sources):
     return fake
 
 
-def fake_tree(mode, arg, tensor_constraints, source, dim_name_to_sources):
+def fake_tree(mode, arg, t_constraints, source, sources):
+    """
+    Call fakify while recursively mapping on lists and dictionaries. Using pytree map
+    would be ideal here, but we are also building sources as we recurse.
+    """
     if isinstance(arg, list):
         return [
-            fake_tree(
-                mode,
-                arg,
-                tensor_constraints,
-                GetItemSource(source, i),
-                dim_name_to_sources,
-            )
+            fake_tree(mode, arg, t_constraints, GetItemSource(source, i), sources)
             for i, arg in enumerate(arg)
         ]
-
     elif isinstance(arg, dict):
         return {
-            k: fake_tree(
-                mode,
-                arg,
-                tensor_constraints,
-                GetItemSource(source, k),
-                dim_name_to_sources,
-            )
+            k: fake_tree(mode, arg, t_constraints, GetItemSource(source, k), sources)
             for k, arg in arg.items()
         }
-
+    # TODO(avik): data classes
     else:
-        return fakify(mode, arg, tensor_constraints, source, dim_name_to_sources)
+        return fakify(mode, arg, t_constraints, source, sources)
 
 
 def make_fake_inputs(nn_module, args, constraints):
-    tensor_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
+    """
+    Given an nn module, example inputs, and constraints, return a new fake mode,
+    fake inputs created in that mode whose dynamic shape dimensions are constrained
+    by the given ranges, and sources for pairs of dynamic shape dimensions that are
+    constrained to be equal.
+    """
+    t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
-        tensor_constraints[constraint.t_id][constraint.dim] = constraint
+        t_constraints[constraint.t_id][constraint.dim] = constraint
         if constraint.shared is not None:
-            tensor_constraints[constraint.shared.t_id][constraint.shared.dim] = constraint
+            t_constraints[constraint.shared.t_id][constraint.shared.dim] = constraint
 
     code = nn_module.forward.__code__
     co_fields = {
@@ -89,29 +91,36 @@ def make_fake_inputs(nn_module, args, constraints):
         shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields)
     ) as fake_mode:
         params = inspect.signature(nn_module.forward).parameters
-        dim_name_to_sources: Dict[str, List[Source]] = defaultdict(list)
+        sources: Dict[Tuple[int, int], Source] = {}
         fake_args = tuple(
             fake_tree(
-                fake_mode, arg, tensor_constraints, LocalSource(x), dim_name_to_sources
+                fake_mode, arg, t_constraints, LocalSource(x), sources
             )
             for x, arg in zip(params, args)
         )
-        return fake_mode, fake_args, dim_name_to_sources
+        src_equalities = []
+        for constraint in constraints:
+            if constraint.shared is not None:
+                src_equality = (
+                    sources[(constraint.t_id, constraint.dim)],
+                    sources[(constraint.shared.t_id, constraint.shared.dim)],
+                )
+                src_equalities.append(src_equality)
+        return fake_mode, fake_args, src_equalities
 
 
-def make_constraints(fake_mode, dim_name_to_sources, gm):
+def make_constraints(fake_mode, src_equalities, gm):
+    """
+    Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
+    and a graph module, produce guards on the fake mode's shape env (raising constraint
+    violations if any), solve (to suggest simplifications or fixes), and return the
+    resulting range constraints and equality constraints.
+    """
     shape_env = fake_mode.shape_env
     placeholders = [tf.fake for tf in shape_env.tracked_fakes]
     sources = [tf.source for tf in shape_env.tracked_fakes]
     constraint_inputs = [tf.constraint_dims for tf in shape_env.tracked_fakes]
-    source_pairs = []
-    for equal_sources in dim_name_to_sources.values():
-        primary_src, *others = equal_sources
-        for src in others:
-            source_pairs.append((primary_src, src))
-    equalities_inputs = EqualityConstraint(
-        source_pairs=source_pairs, warn_only=False
-    )
+    equalities_inputs = EqualityConstraint(source_pairs=src_equalities, warn_only=False)
     shape_env.produce_guards(
         placeholders,
         sources,
@@ -129,12 +138,8 @@ def make_constraints(fake_mode, dim_name_to_sources, gm):
             continue
         for i, d in enumerate(node.meta["val"].shape):
             if isinstance(d, torch.SymInt):
-                range_constraints[d.node.expr] = shape_env.var_to_range[
-                    d.node.expr
-                ]
-                input_dims[d.node.expr].append(
-                    InputDim(input_name=node.name, dim=i)
-                )
+                range_constraints[d.node.expr] = shape_env.var_to_range[d.node.expr]
+                input_dims[d.node.expr].append(InputDim(input_name=node.name, dim=i))
 
     equality_constraints = []
     for equal_input_dims in input_dims.values():
