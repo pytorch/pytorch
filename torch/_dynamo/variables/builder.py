@@ -779,7 +779,7 @@ class VariableBuilder:
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return MethodWrapperVariable(value, self.source)
+            return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserDefinedClassVariable(
