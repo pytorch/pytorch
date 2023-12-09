@@ -419,7 +419,7 @@ class TestMaxAutotune(TestCase):
                 n=1024 * 10,
                 k=2048,
                 batch_size=10,
-                max_profiling_configs=None,
+                max_profiling_configs=4,
                 config_override={"cuda.generate_test_runner": True},
             )
 
@@ -443,7 +443,7 @@ class TestMaxAutotune(TestCase):
             n=1024 * 10,
             k=2048,
             batch_size=10,
-            max_profiling_configs=None,
+            max_profiling_configs=4,
             max_autotune_gemm_backends="ATen,Triton,CUTLASS",
         )
 
@@ -566,7 +566,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_one_additional_input_random_mask(self):
         def mm(a, b, c):
-            return (a @ b) * 0.0 + c
+            return (a @ b) * 1.5 + c
 
         source_capture = CUDACompileSourceCapturingContext()
         with source_capture:
@@ -861,9 +861,11 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
+    @parametrize("cutlass_prefer_evt_capable_ops", (True, False))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
-        self, dynamic, max_autotune_gemm_backends
+        self, dynamic=False, max_autotune_gemm_backends="CUTLASS",
+        cutlass_prefer_evt_capable_ops=True,
     ):
         """
         Make sure autotuning addmm in sub processes work without crashes.
@@ -896,6 +898,7 @@ class TestMaxAutotune(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_prefer_evt_capable_ops": cutlass_prefer_evt_capable_ops,
             }
         ):
             # No broadcast
