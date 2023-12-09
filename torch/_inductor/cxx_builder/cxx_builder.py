@@ -88,7 +88,7 @@ def _remove_dir(path_dir):
 def run_command_line(cmd_line, cwd=None):
     cmd = shlex.split(cmd_line)
     try:
-        status = subprocess.check_output(cmd, cwd=cwd, stderr=subprocess.STDOUT)
+        status = subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
         output = e.output.decode("utf-8")
         openmp_problem = "'omp.h' file not found" in output or "libomp" in output
@@ -165,7 +165,7 @@ class BuildOptionsBase:
         return self._passthough_args
 
 
-def get_warning_all_flag(warning_all: bool = False) -> List[str]:
+def get_warning_all_flag(warning_all: bool = True) -> List[str]:
     if not _IS_WINDOWS:
         return ["Wall"] if warning_all else []
     else:
@@ -335,7 +335,7 @@ def get_torch_related_args():
         os.path.join(_TORCH_PATH, "include", "THC"),
     ]
     libraries_dirs = [TORCH_LIB_PATH]
-    libraries = ["torch", "torch_cpu", "c10"]
+    libraries = ["torch", "torch_cpu", "c10", "torch_python"]
     return include_dirs, libraries_dirs, libraries
 
 
@@ -743,10 +743,12 @@ class CxxBuilder:
                 )
                 cmd = cmd.replace("\\", "/")
             else:
-                cmd = (
-                    f"{compiler} {sources} {definations_args} {cflags_args} {include_dirs_args} {passthougn_args} "
-                    f"{ldflags_args} {libraries_args} {libraries_dirs_args} -o {target_file}"
-                )
+                cmd = re.sub(
+                    r"[ \n]+",
+                    " ",
+                    f"""{compiler} {sources} {definations_args} {cflags_args} {include_dirs_args} {passthougn_args} {ldflags_args} {libraries_args} {libraries_dirs_args} -o {target_file}
+                    """,
+                ).strip()
             return cmd
 
         command_line = format_build_command(
