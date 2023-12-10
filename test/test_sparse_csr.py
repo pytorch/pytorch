@@ -3562,7 +3562,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                                     "sizes involved in the matrix product are not compatible for matrix multiplication"):
             bsr_dense_mm(lhs, torch.rand(1, 1, dtype=dtype, device=device))
         with self.assertRaisesRegex(ValueError,
-                                    r"dense.size\(-1\) == 15 should be divisible by blocksize\[0\] == 16"):
+                                    r"dense.size\(-1\) == 15 should be divisible by 16"):
             bsr_dense_mm(lhs, torch.rand(32, 15, dtype=dtype, device=device))
         # Blocksizes check
         for blocksize in (15, 30):
@@ -3888,7 +3888,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     def test_triton_kernel(self, op, device, dtype, blocksize):
         from torch.sparse._triton_ops import bsr_dense_addmm, bsr_dense_mm
         from torch.sparse._triton_ops_meta import (create_blocked_tensor, get_meta,
-                                                   optimize_bsr_dense_addmm, optimize_bsr_dense_mm, dump)
+                                                   optimize_bsr_dense_addmm, dump)
 
         def bsr_dense_linear(input, weights, bias=None):
             return torch.nn.functional.linear(input, weights, bias=bias).transpose(-1, -2)
@@ -3926,19 +3926,16 @@ class TestSparseCompressedTritonKernels(TestCase):
         else:
             BM, BK = (blocksize,) * 2
 
-        if op in {"bsr_dense_mm", "bsr_dense_linear"} and BM != BK:
+        if op in {"bsr_dense_linear"} and BM != BK:
             # todo: eliminate this skip
             self.skipTest(f"{op} does not support non-square blocks")
 
         beta_lst = dict(bsr_dense_addmm=[0, 1, 2], bsr_dense_mm=[0], bsr_dense_linear=[1])[op]
         alpha_lst = dict(bsr_dense_addmm=[0, 1, 2], bsr_dense_mm=[1], bsr_dense_linear=[1])[op]
         sparsity_lst = [0, 0.5, 1]
-        # todo: eliminate `[:1]`
-        blocks_per_row_lst = dict(bsr_dense_addmm=[1, 2], bsr_dense_mm=[1, 2][:1], bsr_dense_linear=[1, 2])[op]
+        blocks_per_row_lst = [1, 2]
         blocks_per_col_lst = [1, 2]
-        # todo: eliminate `[1:]`
-        result_cols_lst = dict(bsr_dense_addmm=[16, 32, 64], bsr_dense_mm=[16, 32, 64][1:],
-                               bsr_dense_linear=[16, 32, 64])[op]
+        result_cols_lst = [16, 32, 64]
         for beta, alpha, sparsity, blocks_per_row, blocks_per_col, N in itertools.product(
                 beta_lst, alpha_lst, sparsity_lst, blocks_per_row_lst, blocks_per_col_lst, result_cols_lst):
             M = BM * blocks_per_row
@@ -3948,23 +3945,17 @@ class TestSparseCompressedTritonKernels(TestCase):
             mat2 = make_tensor(K, N, dtype=dtype, device=device, low=0.5, high=1.5)
             input = make_tensor(M, N, dtype=dtype, device=device, low=0.5, high=1.5)
 
-            if 0 and op != "bsr_dense_linear":
+            if 0 and op == "bsr_dense_addmm":
                 # Find optimal kernel parameters, the speed-up is
                 # about 10x for running this test.
                 #
                 # Enable this if-block when the test method is
                 # updated, run the test, and finally, disable the
                 # if-block.
-                key = dict(bsr_dense_addmm=(M, K, N, BM, BK, beta == 0, beta == 1, alpha == 1),
-                           bsr_dense_mm=(M, K, N, BM, BK))[op]
+                key = (M, K, N, BM, BK, beta == 0, beta == 1, alpha == 1)
                 meta = get_meta(op, key, version=(0, dtype, 0.5))
                 if meta is None:
-                    if op == 'bsr_dense_addmm':
-                        optimize_bsr_dense_addmm(M, K, N, BM, BK, beta=beta, alpha=alpha, dtype=dtype, sparsity=0.5)
-                    elif op == 'bsr_dense_mm':
-                        optimize_bsr_dense_mm(M, K, N, BM, BK, dtype=dtype, sparsity=0.5)
-                    else:
-                        raise NotImplementedError(op)
+                    optimize_bsr_dense_addmm(M, K, N, BM, BK, beta=beta, alpha=alpha, dtype=dtype, sparsity=0.5)
                     meta = get_meta(op, key, version=(0, dtype, 0.5))
                     assert meta is not None
                     dump()  # this will update torch/sparse/_triton_ops_meta.py
@@ -3988,7 +3979,9 @@ class TestSparseCompressedTritonKernels(TestCase):
             result = operation(*args, **kwargs)
             self.assertEqual(result, expected)
 
-            # todo: add bsr_dense_linear to the set below
+            # todo: add bsr_dense_linear to the set below (currently,
+            # nn.linear has unnecessarily restrictive arguments
+            # checks).
             if op in {'bsr_dense_addmm', 'bsr_dense_mm'}:
                 args = dict(bsr_dense_addmm=(input, nc_bsr, mat2), bsr_dense_mm=(nc_bsr, mat2),
                             bsr_dense_linear=(mat2.transpose(-1, -2), nc_bsr))[op]
