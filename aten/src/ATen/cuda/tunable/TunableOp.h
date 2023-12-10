@@ -10,13 +10,12 @@
 #pragma once
 
 #include <ATen/cuda/tunable/Tunable.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #ifndef _WIN32
 #include <cxxabi.h>
 #endif
 
-#include <chrono>
-#include <thread>
 #include <type_traits>
 
 namespace at::cuda::tunable {
@@ -98,9 +97,7 @@ class TunableOp {
 
         // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
         if (result < 0 && ctx->IsTuningEnabled()) {
-          auto maybe_proxy_params = PreTuning(params);
-          auto result = FindFastest(maybe_proxy_params);
-          PostTuning(maybe_proxy_params);
+          auto result = FindFastest(params);
           mgr.Add(op_sig, params_sig, result);
         }
       }
@@ -108,18 +105,6 @@ class TunableOp {
         TUNABLE_LOG("result < 0, using default_id_; result=", result);
       }
       return (ops_[result < 0 ? default_id_ : result](params));
-    }
-
-    // We might want to do some tricks to the `params`, e.g., some op will use a buffer for input and output at the same
-    // time, so it will do inplace update to it. If we blindly tune over the `params`, there will be accumulated update
-    // to that buffer during FindFastest, which is an undesired side effect. In this case, we must prepare a new (proxy)
-    // params struct for the tuning to avoid this side effect.
-    virtual const ParamsT* PreTuning(const ParamsT* params) {
-      return params;
-    }
-
-    virtual void PostTuning(const ParamsT* /*params*/) {
-      // Do nothing if we are not playing around with params
     }
 
     virtual std::string Signature() {
@@ -184,19 +169,35 @@ class TunableOp {
       int id = -1;
       std::string id_name = "";
 
+      // calcaulte a reference answer for numerical check
+      ParamsT* reference_params = params->DeepCopy();
+      auto& reference_op = const_cast<Callable<ParamsT>&>(candidates[0]);
+      TORCH_CHECK(reference_op(reference_params) == OK);
+
+      // need a copy of params to reuse
+      ParamsT* reusable_params = params->DeepCopy();
+
       for (size_t i = 0; i < candidates.size(); i++) {
         auto& candidate = const_cast<Callable<ParamsT>&>(candidates[i]);
-        auto status = IsSupported(candidate, params);
+        auto status = IsSupported(candidate, reusable_params);
         if (status != OK) {
           TUNABLE_LOG("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
         }
 
-        // do 1 initial tuning in case there is overhead
-        WarmUp(candidate, params, 1);
+        // do 1 initial op for the numeric check, but this also counts as a warmup in case there is initial overhead.
+        ParamsT* numerical_params = params->DeepCopy();
+        WarmUp(candidate, numerical_params, 1);
+        status = reference_params->NumericalCheck(numerical_params);
+        numerical_params->Delete();
+        if (status != OK) {
+          TUNABLE_LOG("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+          continue;
+        }
+
         // collect a small profile
         constexpr const int approx_num_iter = 3;
-        auto approx_duration = Profile(candidate, params, approx_num_iter);
+        auto approx_duration = Profile(candidate, reusable_params, approx_num_iter);
         // bail if too slow
         if (approx_duration > 2 * min_duration_ms) {
           TUNABLE_LOG("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
@@ -244,8 +245,8 @@ class TunableOp {
             "warmup iters ", warmup_iter, " [", warmup_ms, " ms] "
             "and tuning iters ", tuning_iter, " [", tuning_ms, " ms] ",
             "instance id=", i, ", ", op_sig, "(", params_sig, ") ", op_names_[i]);
-        WarmUp(candidate, params, warmup_iter);
-        auto duration_ms = Profile(candidate, params, tuning_iter);
+        WarmUp(candidate, reusable_params, warmup_iter);
+        auto duration_ms = Profile(candidate, reusable_params, tuning_iter);
         if (duration_ms < min_duration_ms) {
           TUNABLE_LOG("├──found better instance, ",
               "new best id=", i, ", old id=", id, ". " , duration_ms, "ms. ", op_names_[i]);
@@ -254,9 +255,13 @@ class TunableOp {
           id_name = op_names_[i];
         }
       }
+
+      // done with reusable_params and reference_params
+      reusable_params->Delete();
+      reference_params->Delete();
+
       TORCH_CHECK(id >= 0, "Could not find viable op");
       TUNABLE_LOG("└──found fastest with id=", id, " for ", op_sig, '(', params_sig, ") ", id_name);
-      //std::this_thread::sleep_for(std::chrono::milliseconds(50));
       return ResultEntry(id, min_duration_ms, id_name);
     }
 

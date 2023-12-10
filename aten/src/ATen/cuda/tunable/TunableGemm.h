@@ -173,31 +173,6 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
 #endif
   }
 
-  const GemmParams<T>* PreTuning(const GemmParams<T>* params) override {
-    if (!IsZero(params->beta)) {
-      // When beta != 0, C buffer is used as an input as well as an output. We need to create a proxy params for the
-      // tuning process. Otherwise, tuning will cause the C buffer been updated accumulatedly, say, we tune it for n
-      // iterations, then during tuning C^(1) = alpha A B + beta C^(0), ..., C^(n) = alpha A B + beta C^(n-1). And for
-      // the actual run after tuning, the result will be C^(n+1), whereas what we want is C^(1). This only happens if
-      // the tuning's FindFastest is invoked.
-      //
-      // Note, C^(i) is the C at i-th iteration.
-      GemmParams<T>* proxy = new GemmParams<T>();
-      *proxy = *params;
-      proxy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(proxy->m * proxy->ldc * sizeof(T)));
-      return proxy;
-    }
-
-    return params;
-  }
-
-  void PostTuning(const GemmParams<T>* params) override {
-    if (!IsZero(params->beta)) {
-      c10::cuda::CUDACachingAllocator::raw_delete(params->c);
-      delete params;
-    }
-  }
-
   std::string Signature() override {
     return c10::str("GemmTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
