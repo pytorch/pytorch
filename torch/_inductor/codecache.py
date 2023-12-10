@@ -49,12 +49,7 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.cxx_builder.cxx_builder import (
-    CxxBuilder,
-    CxxOptions,
-    CxxTorchOptions,
-)
-from torch._inductor.cxx_builder.isa_help_code_store import get_x86_isa_detect_code
+
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
@@ -1037,6 +1032,8 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)
     def __bool__(self) -> bool:
+        from torch._inductor.cxx_builder.cxx_builder import CxxBuilder, CxxTorchOptions
+
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
@@ -1053,8 +1050,10 @@ cdll.LoadLibrary("__lib_path__")
 
             # print(f"!!!! {key}, {input_path}, {output_dir}")
 
+            print(f"!!!! bit_width: {self.bit_width}")
+
             x86_isa_help_builder = CxxBuilder(
-                key, [input_path], CxxTorchOptions(), output_dir
+                key, [input_path], CxxTorchOptions(self), output_dir
             )
 
             """
@@ -1149,6 +1148,9 @@ supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 
 
 def x86_isa_checker() -> List[str]:
+    from torch._inductor.cxx_builder.cxx_builder import CxxBuilder, CxxOptions
+    from torch._inductor.cxx_builder.isa_help_code_store import get_x86_isa_detect_code
+
     supported_isa: List[str] = []
 
     def _check_and_append_supported_isa(
@@ -1904,7 +1906,7 @@ class CppCodeCache:
 
     @classmethod
     def load(cls, source_code: str) -> CDLL:
-        # picked_vec_isa = pick_vec_isa()
+        picked_vec_isa = pick_vec_isa()
         # cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
         # dummy_builder = CxxBuilder("i", ["o"], CxxTorchOptions())
 
@@ -1918,6 +1920,11 @@ class CppCodeCache:
         if key not in cls.cache:
             from filelock import FileLock
 
+            from torch._inductor.cxx_builder.cxx_builder import (
+                CxxBuilder,
+                CxxTorchOptions,
+            )
+
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
@@ -1925,7 +1932,9 @@ class CppCodeCache:
 
                 # print(f"!!! {key}, {input_path}, {output_dir}")
 
-                builder = CxxBuilder(key, [input_path], CxxTorchOptions(), output_dir)
+                builder = CxxBuilder(
+                    key, [input_path], CxxTorchOptions(picked_vec_isa), output_dir
+                )
                 target_file = builder.get_target_file_path()
                 if not os.path.exists(target_file):
                     if is_clang():

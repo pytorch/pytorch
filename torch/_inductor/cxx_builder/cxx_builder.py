@@ -13,6 +13,7 @@ from typing import List, Optional, Tuple
 
 import torch
 from torch._inductor import config, exc
+from torch._inductor.codecache import VecISA
 from torch._inductor.codegen.cuda import cuda_env
 
 if config.is_fbcode():
@@ -308,11 +309,7 @@ def _cpp_prefix_path() -> str:
     return filename
 
 
-def get_build_args_of_chosen_isa():
-    from torch._inductor.codecache import pick_vec_isa
-
-    chosen_isa = pick_vec_isa()
-
+def get_build_args_of_chosen_isa(chosen_isa: VecISA):
     cap = str(chosen_isa).upper()
     macros = [
         f"CPU_CAPABILITY={cap}",
@@ -445,14 +442,14 @@ class CxxTorchOptions(CxxOptions):
     5. MISC
     """
 
-    def __init__(self) -> None:
+    def __init__(self, chosen_isa: VecISA) -> None:
         super().__init__()
         _nonduplicate_append(self._definations, get_torch_cpp_wrapper_defination())
         _nonduplicate_append(self._definations, use_custom_generated_macros())
 
         _nonduplicate_append(self._cflags, use_standard_sys_dir_headers())
 
-        macros, build_flags = get_build_args_of_chosen_isa()
+        macros, build_flags = get_build_args_of_chosen_isa(chosen_isa)
         _nonduplicate_append(self._definations, macros)
         _nonduplicate_append(self._passthough_args, build_flags)
 
@@ -792,7 +789,7 @@ class CxxBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
-        # print("!!! build_cmd: ", build_cmd)
+        print("!!! build_cmd: ", build_cmd)
         status = run_command_line(build_cmd, cwd=_build_tmp_dir)
 
         _remove_dir(_build_tmp_dir)
