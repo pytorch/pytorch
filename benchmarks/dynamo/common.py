@@ -2975,7 +2975,7 @@ def parse_args(args=None):
         "--amp", action="store_true", help="use automatic mixed precision"
     )
     parser.add_argument(
-        "--amp_dtype",
+        "--amp-dtype",
         choices=("bfloat16", "float16"),
         help="use automatic mixed precision",
     )
