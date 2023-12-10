@@ -177,8 +177,7 @@ class TestBaseStructuredSparsifier(TestCase):
         for config in pruner.groups:
             modules = []
             if type(config["module"]) is tuple:
-                for module in config["module"]:
-                    modules.append(module)  # noqa: PERF402
+                modules.extend(config["module"])
             else:
                 module = config["module"]
                 modules.append(module)
@@ -190,8 +189,7 @@ class TestBaseStructuredSparsifier(TestCase):
         for config in pruner.groups:
             modules = []
             if type(config["module"]) is tuple:
-                for module in config["module"]:
-                    modules.append(module)  # noqa: PERF402
+                modules.extend(config["module"])
             else:
                 module = config["module"]
                 modules.append(module)

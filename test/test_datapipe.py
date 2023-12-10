@@ -2926,9 +2926,7 @@ class TestSharding(TestCase):
 
         dp0 = self._get_pipeline().sharding_filter()
         dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
-        items = []
-        for i in dl:
-            items.append(i)  # noqa: PERF402
+        items = list(dl)
 
         self.assertEqual(sorted(expected), sorted(items))
 
@@ -2939,9 +2937,7 @@ class TestSharding(TestCase):
         dp0 = self._get_pipeline()
         dp0 = CustomShardingIterDataPipe(dp0)
         dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
-        items = []
-        for i in dl:
-            items.append(i)  # noqa: PERF402
+        items = list(dl)
 
         self.assertEqual(sorted(expected), sorted(items))
 
