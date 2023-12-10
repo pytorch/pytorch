@@ -914,6 +914,7 @@ exclude_patterns = [
     'test/dynamo/test_compile.py',
     'test/dynamo/test_sources.py',
     'test/functorch/test_logging.py',
+    'test/inductor/test_aot_inductor_utils.py',
     'test/lazy/test_bindings.py',
     'test/lazy/test_extract_compiled_graph.py',
     'test/lazy/test_meta_kernel.py',
