@@ -511,7 +511,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if dynamic_subobj.__self__ is not self.value:
                     unimplemented("__self__ mismatch for bound method")
                 func = subobj.__func__
-                source = AttrSource(source, "__func__") if source else None
             else:
                 assert isinstance(subobj, types.FunctionType)
                 func = subobj
