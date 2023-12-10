@@ -109,8 +109,8 @@ struct sha1 {
     unsigned int e = h_[4];
 
     for (std::size_t i = 0; i < 80; ++i) {
-      unsigned int f;
-      unsigned int k;
+      unsigned int f = 0;
+      unsigned int k = 0;
 
       if (i < 20) {
         f = (b & c) | (~b & d);
@@ -226,11 +226,11 @@ struct sha1 {
     digest[4] = h_[4];
   }
 
-  unsigned int h_[5];
-  unsigned char block_[64];
-  std::size_t block_byte_index_;
-  std::size_t bit_count_low;
-  std::size_t bit_count_high;
+  unsigned int h_[5]{};
+  unsigned char block_[64]{};
+  std::size_t block_byte_index_{};
+  std::size_t bit_count_low{};
+  std::size_t bit_count_high{};
 };
 
 ////////////////////////////////////////////////////////////////////////////////

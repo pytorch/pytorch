@@ -1105,7 +1105,6 @@ aten::replication_pad1d
 aten::replication_pad1d.out
 aten::replication_pad1d_backward
 aten::replication_pad1d_backward.grad_input
-aten::replication_pad2d
 aten::replication_pad2d.out
 aten::replication_pad2d_backward
 aten::replication_pad2d_backward.grad_input
