@@ -1202,9 +1202,6 @@ def x86_isa_checker() -> List[str]:
         return supported_isa
 
 
-# Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
-# might have too much redundant content that is useless for ISA check. Hence,
-# we only cache some key isa information.
 @functools.lru_cache(None)
 def valid_vec_isa_list() -> List[VecISA]:
     cur_os = sys.platform
@@ -1222,6 +1219,7 @@ def valid_vec_isa_list() -> List[VecISA]:
     return isa_list
 
 
+# valid_vec_isa_list only need setup once.
 _valid_vec_isa_list = valid_vec_isa_list()
 
 
