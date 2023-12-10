@@ -22,8 +22,7 @@
 
 #include <utility>
 
-namespace at {
-namespace indexing {
+namespace at::indexing {
 
 const int64_t INDEX_MIN = c10::SymInt::min_representable_int();
 const int64_t INDEX_MAX = -(INDEX_MIN + 1);
@@ -225,7 +224,8 @@ static inline Tensor applySlice(
       return self;
     }
   }
-  return self.slice_symint(dim, start, stop, std::move(step));
+  return self.slice_symint(
+      dim, std::move(start), std::move(stop), std::move(step));
 }
 
 static inline Tensor applySelect(
@@ -259,7 +259,7 @@ static inline Tensor applySelect(
   // if the index is negative, do not normalize it because that would fix the
   // index on the current tensor size in the tracer. aten::select also works on
   // negative indices
-  return self.select_symint(dim, index);
+  return self.select_symint(dim, std::move(index));
 }
 
 static inline Tensor boolToIndexingTensorCPUOrCUDA(
@@ -372,7 +372,7 @@ static inline Tensor scalarToTensor(
     const Scalar& v,
     const TensorOptions& options,
     const at::Device& self_device) {
-  if (self_device == at::kCPU) {
+  if (self_device == at::kCPU && !v.isSymbolic()) {
     return at::detail::scalar_tensor_static(
         v, options.dtype_opt()->toScalarType(), self_device);
   } else {
@@ -535,7 +535,7 @@ static inline Tensor applySlicing(
         /*original_tensor=*/self,
         /*index=*/obj,
         /*dim=*/&dim,
-        /*specified_dims=*/&specified_dims,
+        /*specified_dims_ptr=*/&specified_dims,
         /*real_dim=*/i,
         /*outIndices=*/outIndices,
         /*disable_slice_optimization=*/disable_slice_optimization,
@@ -728,5 +728,4 @@ static inline void set_item(
   return;
 }
 
-} // namespace indexing
-} // namespace at
+} // namespace at::indexing

@@ -37,15 +37,23 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
             return cnt
 
-        @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", False)
-        @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_without_automatic():
-            return run_foo_6_times_and_count_recompiles()
+            with torch._dynamo.config.patch(
+                {
+                    "automatic_dynamic_shapes": False,
+                    "assume_static_by_default": True,
+                }
+            ):
+                return run_foo_6_times_and_count_recompiles()
 
-        @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", True)
-        @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_with_automatic():
-            return run_foo_6_times_and_count_recompiles()
+            with torch._dynamo.config.patch(
+                {
+                    "automatic_dynamic_shapes": True,
+                    "assume_static_by_default": True,
+                }
+            ):
+                return run_foo_6_times_and_count_recompiles()
 
         without = run_without_automatic()
         self.assertEqual(without.frame_count, 5)
@@ -99,15 +107,23 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
             return cnt
 
-        @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", False)
-        @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_without_automatic():
-            return run_foo_6_times_and_count_recompiles()
+            with torch._dynamo.config.patch(
+                {
+                    "automatic_dynamic_shapes": False,
+                    "assume_static_by_default": True,
+                }
+            ):
+                return run_foo_6_times_and_count_recompiles()
 
-        @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", True)
-        @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_with_automatic():
-            return run_foo_6_times_and_count_recompiles()
+            with torch._dynamo.config.patch(
+                {
+                    "automatic_dynamic_shapes": True,
+                    "assume_static_by_default": True,
+                }
+            ):
+                return run_foo_6_times_and_count_recompiles()
 
         without = run_without_automatic()
         self.assertEqual(without.frame_count, 5)
@@ -146,15 +162,23 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
             return cnt
 
-        @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", False)
-        @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_without_automatic():
-            return run_foo_6_times_and_count_recompiles_swap_types()
+            with torch._dynamo.config.patch(
+                {
+                    "automatic_dynamic_shapes": False,
+                    "assume_static_by_default": True,
+                }
+            ):
+                return run_foo_6_times_and_count_recompiles_swap_types()
 
-        @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", True)
-        @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_with_automatic():
-            return run_foo_6_times_and_count_recompiles_swap_types()
+            with torch._dynamo.config.patch(
+                {
+                    "automatic_dynamic_shapes": True,
+                    "assume_static_by_default": True,
+                }
+            ):
+                return run_foo_6_times_and_count_recompiles_swap_types()
 
         without = run_without_automatic()
         self.assertEqual(without.frame_count, 5)
@@ -251,29 +275,45 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
             return cnt
 
-        @patch.object(torch._dynamo.config, "force_parameter_static_shapes", True)
-        @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", False)
-        @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_static_comp_default_param():
-            return run_foo_6_times_and_count_recompiles()
+            with torch._dynamo.config.patch(
+                {
+                    "force_parameter_static_shapes": True,
+                    "automatic_dynamic_shapes": False,
+                    "assume_static_by_default": True,
+                }
+            ):
+                return run_foo_6_times_and_count_recompiles()
 
-        @patch.object(torch._dynamo.config, "force_parameter_static_shapes", True)
-        @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", True)
-        @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_dynamic_comp_default_param():
-            return run_foo_6_times_and_count_recompiles()
+            with torch._dynamo.config.patch(
+                {
+                    "force_parameter_static_shapes": True,
+                    "automatic_dynamic_shapes": True,
+                    "assume_static_by_default": True,
+                }
+            ):
+                return run_foo_6_times_and_count_recompiles()
 
-        @patch.object(torch._dynamo.config, "force_parameter_static_shapes", False)
-        @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", False)
-        @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_static_comp_dynamic_param():
-            return run_foo_6_times_and_count_recompiles()
+            with torch._dynamo.config.patch(
+                {
+                    "force_parameter_static_shapes": False,
+                    "automatic_dynamic_shapes": False,
+                    "assume_static_by_default": True,
+                }
+            ):
+                return run_foo_6_times_and_count_recompiles()
 
-        @patch.object(torch._dynamo.config, "force_parameter_static_shapes", False)
-        @patch.object(torch._dynamo.config, "automatic_dynamic_shapes", True)
-        @patch.object(torch._dynamo.config, "assume_static_by_default", True)
         def run_dynamic_comp_dynamic_param():
-            return run_foo_6_times_and_count_recompiles()
+            with torch._dynamo.config.patch(
+                {
+                    "force_parameter_static_shapes": False,
+                    "automatic_dynamic_shapes": True,
+                    "assume_static_by_default": True,
+                }
+            ):
+                return run_foo_6_times_and_count_recompiles()
 
         torch._dynamo.reset()
         static_comp_default_param = run_static_comp_default_param()
@@ -294,6 +334,27 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         dynamic_comp_dynamic_param = run_dynamic_comp_dynamic_param()
         self.assertEqual(dynamic_comp_dynamic_param.frame_count, 2)
         self.assertEqual(dynamic_comp_dynamic_param.op_count, 2)
+
+    def test_simple_module_recompile(self):
+        class SimpleDropout(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dropout = torch.nn.Dropout(0.5)
+                self.linear = torch.nn.Linear(10, 1)
+
+            def forward(self, x):
+                return self.dropout(self.linear(x))
+
+        model = SimpleDropout()
+        x = torch.randn(10)
+        counter = torch._dynamo.testing.CompileCounter()
+        model = torch.compile(model, backend=counter, fullgraph=True)
+        for _ in range(20):
+            model.eval()
+            model(x)
+            model.train()
+            model(x)
+        self.assertEqual(counter.frame_count, 2)
 
 
 if __name__ == "__main__":

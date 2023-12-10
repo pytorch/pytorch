@@ -67,6 +67,12 @@ TEST_F(ModulesTest, Conv1dSameStrided) {
       "padding='same' is not supported for strided convolutions");
 }
 
+TEST_F(ModulesTest, Conv1dIvalidArg) {
+  auto options = Conv1dOptions(3, 2, 3).groups(-1);
+  ASSERT_THROWS_WITH(
+      Conv1d(options), "in_channels, groups and out_channels must");
+}
+
 TEST_F(ModulesTest, Conv2dEven) {
   Conv2d model(Conv2dOptions(3, 2, 3).stride(1).bias(false));
   model->weight.set_data(
@@ -527,16 +533,34 @@ TEST_F(ModulesTest, LPPool2d) {
   std::vector<int64_t> kernel_size({2, 3});
 
   LPPool2d model(LPPool2dOptions(norm_type, kernel_size).stride(stride));
-  auto x = torch::ones({1, 2, 5});
+  auto x = torch::ones({1, 1, 2, 5});
   auto y = model(x);
   auto expected =
-      (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) *
+      (torch::pow(torch::tensor({{{{1, 1}}}}, torch::kFloat), norm_type) *
        (kernel_size[0] * kernel_size[1]))
           .pow(1. / norm_type);
 
-  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.ndimension(), 4);
   ASSERT_TRUE(torch::allclose(y, expected));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 1, 2}));
+}
+
+TEST_F(ModulesTest, LPPool3d) {
+  int norm_type = 2;
+  int stride = 2;
+  std::vector<int64_t> kernel_size({1, 2, 3});
+
+  LPPool3d model(LPPool3dOptions(norm_type, kernel_size).stride(stride));
+  auto x = torch::ones({1, 1, 1, 2, 5});
+  auto y = model(x);
+  auto expected =
+      (torch::pow(torch::tensor({{{{{1, 1}}}}}, torch::kFloat), norm_type) *
+       (kernel_size[0] * kernel_size[1] * kernel_size[2]))
+          .pow(1. / norm_type);
+
+  ASSERT_EQ(y.ndimension(), 5);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 1, 1, 2}));
 }
 
 TEST_F(ModulesTest, Identity) {
@@ -2673,6 +2697,18 @@ TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
     ASSERT_TRUE(
         torch::allclose(asfm(x, y).output.squeeze(0), asfm(x2, y2).output));
   }
+  {
+    // test div_value
+    auto options =
+        AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(0.);
+    ASSERT_THROWS_WITH(
+        AdaptiveLogSoftmaxWithLoss(options),
+        "div_value should not be equal to 0");
+
+    options =
+        AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(0.25);
+    ASSERT_TRUE(AdaptiveLogSoftmaxWithLoss(options));
+  }
 }
 
 TEST_F(ModulesTest, Softmax2d) {
@@ -4355,6 +4391,7 @@ TEST_F(ModulesTest, CrossMapLRN2d) {
 TEST_F(ModulesTest, RNNCell) {
   torch::manual_seed(0);
   auto rnn = RNNCell(1, 2);
+
   auto input = torch::randn({3, 1});
   auto hx = torch::randn({3, 2});
   auto output = rnn(input, hx);
@@ -4366,15 +4403,51 @@ TEST_F(ModulesTest, RNNCell) {
   expected =
       torch::tensor({{-0.0775, 0.6688}, {-0.0734, 0.4759}, {-0.0725, 0.4225}});
   ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+
+  input = torch::randn({1});
+  hx = torch::randn({2});
+  output = rnn(input, hx);
+  expected = torch::tensor({0.2808, 0.6505});
+  ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+
+  {
+    auto input = torch::randn({3, 2});
+    auto hx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        rnn(input, hx), "input has inconsistent input_size: got 2 expected 1");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 1});
+    ASSERT_THROWS_WITH(
+        rnn(input, hx),
+        "hidden0 has inconsistent hidden_size: got 1, expected 2");
+  }
+
+  {
+    auto input = torch::randn({3, 1, 1, 1, 1});
+    auto hx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        rnn(input, hx), "Expected input to be 1D or 2D, got 5D instead");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 1, 1, 1, 2});
+    ASSERT_THROWS_WITH(
+        rnn(input, hx), "Expected hidden to be 1D or 2D, got 5D instead");
+  }
 }
 
 TEST_F(ModulesTest, LSTMCell) {
   torch::manual_seed(0);
-  auto rnn = LSTMCell(1, 2);
+  auto lstm = LSTMCell(1, 2);
+
   auto input = torch::randn({3, 1});
   auto hx = torch::randn({3, 2});
   auto cx = torch::randn({3, 2});
-  auto output = rnn(input, std::make_tuple(hx, cx));
+  auto output = lstm(input, std::make_tuple(hx, cx));
   auto output_hx = std::get<0>(output);
   auto output_cx = std::get<1>(output);
   auto expected_hx =
@@ -4384,7 +4457,7 @@ TEST_F(ModulesTest, LSTMCell) {
   ASSERT_TRUE(torch::allclose(output_hx, expected_hx, 1e-05, 2e-04));
   ASSERT_TRUE(torch::allclose(output_cx, expected_cx, 1e-05, 2e-04));
 
-  output = rnn(input);
+  output = lstm(input);
   output_hx = std::get<0>(output);
   output_cx = std::get<1>(output);
   expected_hx =
@@ -4393,22 +4466,123 @@ TEST_F(ModulesTest, LSTMCell) {
       torch::tensor({{-0.2679, 0.2180}, {-0.3049, 0.3493}, {-0.2896, 0.2853}});
   ASSERT_TRUE(torch::allclose(output_hx, expected_hx, 1e-05, 2e-04));
   ASSERT_TRUE(torch::allclose(output_cx, expected_cx, 1e-05, 2e-04));
+
+  input = torch::randn({1});
+  hx = torch::randn({2});
+  cx = torch::randn({2});
+  output = lstm(input, std::make_tuple(hx, cx));
+  output_hx = std::get<0>(output);
+  output_cx = std::get<1>(output);
+  expected_hx = torch::tensor({-0.0443, 0.1537});
+  expected_cx = torch::tensor({-0.1195, 0.2144});
+  ASSERT_TRUE(torch::allclose(output_hx, expected_hx, 1e-05, 2e-04));
+  ASSERT_TRUE(torch::allclose(output_cx, expected_cx, 1e-05, 2e-04));
+
+  {
+    auto input = torch::randn({3, 2});
+    auto hx = torch::randn({3, 2});
+    auto cx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        lstm(input, std::make_tuple(hx, cx)),
+        "input has inconsistent input_size: got 2 expected 1");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 1});
+    auto cx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        lstm(input, std::make_tuple(hx, cx)),
+        "hidden0 has inconsistent hidden_size: got 1, expected 2");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 2});
+    auto cx = torch::randn({3, 1});
+    ASSERT_THROWS_WITH(
+        lstm(input, std::make_tuple(hx, cx)),
+        "hidden1 has inconsistent hidden_size: got 1, expected 2");
+  }
+
+  {
+    auto input = torch::randn({3, 1, 1, 1, 1});
+    auto hx = torch::randn({3, 1});
+    auto cx = torch::randn({3, 1});
+    ASSERT_THROWS_WITH(
+        lstm(input, std::make_tuple(hx, cx)),
+        "Expected input to be 1D or 2D, got 5D instead");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 1, 1, 1, 2});
+    auto cx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        lstm(input, std::make_tuple(hx, cx)),
+        "Expected hx[0] to be 1D or 2D, got 5D instead");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 2});
+    auto cx = torch::randn({3, 1, 1, 1, 2});
+    ASSERT_THROWS_WITH(
+        lstm(input, std::make_tuple(hx, cx)),
+        "Expected hx[1] to be 1D or 2D, got 5D instead");
+  }
 }
 
 TEST_F(ModulesTest, GRUCell) {
   torch::manual_seed(0);
-  auto rnn = GRUCell(1, 2);
+  auto gru = GRUCell(1, 2);
+
   auto input = torch::randn({3, 1});
   auto hx = torch::randn({3, 2});
-  auto output = rnn(input, hx);
+  auto output = gru(input, hx);
   auto expected =
       torch::tensor({{1.0243, 0.3227}, {-0.5659, 0.0330}, {-0.4030, -0.2800}});
   ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
 
-  output = rnn(input);
+  output = gru(input);
   expected =
       torch::tensor({{-0.0085, 0.1095}, {-0.1291, 0.2675}, {-0.1339, 0.2725}});
   ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+
+  input = torch::randn({1});
+  hx = torch::randn({2});
+  output = gru(input, hx);
+  expected = torch::tensor({-1.0058, -0.3025});
+  ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+
+  {
+    auto input = torch::randn({3, 2});
+    auto hx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        gru(input, hx), "input has inconsistent input_size: got 2 expected 1");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 1});
+    ASSERT_THROWS_WITH(
+        gru(input, hx),
+        "hidden0 has inconsistent hidden_size: got 1, expected 2");
+  }
+
+  {
+    auto input = torch::randn({3, 1, 1, 1, 1});
+    auto hx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        gru(input, hx), "Expected input to be 1D or 2D, got 5D instead");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 1, 1, 1, 2});
+    ASSERT_THROWS_WITH(
+        gru(input, hx), "Expected hidden to be 1D or 2D, got 5D instead");
+  }
 }
 
 TEST_F(ModulesTest, PrettyPrintLinear) {
@@ -4623,6 +4797,14 @@ TEST_F(ModulesTest, PrettyPrintLPPool) {
                             .stride({5, 6})
                             .ceil_mode(true))),
       "torch::nn::LPPool2d(norm_type=1, kernel_size=[3, 4], stride=[5, 6], ceil_mode=true)");
+  ASSERT_EQ(
+      c10::str(LPPool3d(2, std::vector<int64_t>({1, 2, 3}))),
+      "torch::nn::LPPool3d(norm_type=2, kernel_size=[1, 2, 3], stride=[1, 2, 3], ceil_mode=false)");
+  ASSERT_EQ(
+      c10::str(LPPool3d(LPPool3dOptions(1, std::vector<int64_t>({3, 4, 5}))
+                            .stride({5, 6, 7})
+                            .ceil_mode(true))),
+      "torch::nn::LPPool3d(norm_type=1, kernel_size=[3, 4, 5], stride=[5, 6, 7], ceil_mode=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {

@@ -95,9 +95,9 @@ def tuned_bmm(mat1, mat2, *, layout=None):
         for config in mm_configs(m, n, k):
             bmm_template.maybe_append_choice(
                 choices,
-                (mat1, mat2),
-                layout,
-                **mm_options(config, k, layout),
+                input_nodes=(mat1, mat2),
+                layout=layout,
+                **mm_options(config, m, n, k, layout),
             )
 
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
@@ -118,9 +118,9 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         for config in mm_configs(m, n, k):
             bmm_template.maybe_append_choice(
                 choices,
-                (inp, mat1, mat2),
-                layout,
-                **mm_options(config, k, layout),
+                input_nodes=(inp, mat1, mat2),
+                layout=layout,
+                **mm_options(config, m, n, k, layout),
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
             )

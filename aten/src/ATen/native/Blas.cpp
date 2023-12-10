@@ -82,13 +82,13 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
     if (result.numel() != 0) {
 
       NoNamesGuard guard;
-      if (use_mkldnn_bf16_matmul(mat, vec, /*result=*/Tensor())){
+      if (use_mkldnn_lower_precision_matmul(mat, vec, /*result=*/Tensor())){
         mkldnn_matmul(mat, vec, result, beta_.to<float>(), alpha_.to<float>());
         return;
       }
 
       auto r_stride = result.stride(0);
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, mat.scalar_type(), "addmv_impl_cpu", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, mat.scalar_type(), "addmv_impl_cpu", [&] {
         auto beta = beta_.to<scalar_t>();
         auto alpha = alpha_.to<scalar_t>();
         if (mat.stride(0) == 1 && lda_cond(mat.size(0), mat.size(1), mat.stride(1))) {
@@ -177,14 +177,14 @@ Tensor dot(const Tensor &self, const Tensor &other){
     return at::_efficientzerotensor({}, self.options());
   }
 
-  if (use_mkldnn_bf16_matmul(self, other, /*result=*/Tensor())){
+  if (use_mkldnn_lower_precision_matmul(self, other, /*result=*/Tensor())){
     // mkldnn matmul expect result have sizes info to create ideep tensor
     auto r =  at::empty({1, 1}, self.options());
     mkldnn_matmul(self, other, r, /*beta=*/0);
     return r;
   }
 
-  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::BFloat16, self.scalar_type(), "dot", [&] {
+  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
     result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
     return result;

@@ -591,6 +591,7 @@ class TestSparse(TestSparseBase):
         b = a.to_sparse().to_dense()
         self.assertEqual(a, b)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/108667")
     @dtypes(torch.double, torch.cdouble)
     def test_scalar(self, device, dtype):
         # tensor with value
@@ -4224,6 +4225,10 @@ class TestSparseUnaryUfuncs(TestCase):
 class TestSparseMaskedReductions(TestCase):
     exact_dtype = True
 
+    fp16_low_precision_list = {
+        'masked.prod',
+    }
+
     @ops(sparse_masked_reduction_ops)
     def test_future_empty_dim(self, device, dtype, op):
         """Currently, `dim=()` in reductions operations means "reduce over
@@ -4262,7 +4267,12 @@ class TestSparseMaskedReductions(TestCase):
             self.assertEqual(actual.layout, torch.sparse_coo)
 
             expected = op(t, *sample_input.args, **sample_input_kwargs).to_sparse()
-            self.assertEqual(actual, expected)
+            atol = None
+            rtol = None
+            if op.name in self.fp16_low_precision_list and dtype == torch.half:
+                atol = 1e-5
+                rtol = 2e-3
+            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
 
 
 class TestSparseMeta(TestCase):
@@ -4297,6 +4307,19 @@ class TestSparseMeta(TestCase):
         self.assertEqual(r._values(), torch.empty(0, 4, device='meta'))
         self.assertEqual(r.indices(), torch.empty(2, 0, device='meta', dtype=torch.int64))
         self.assertEqual(r.values(), torch.empty(0, 4, device='meta'))
+
+
+class _SparseDataset(torch.utils.data.Dataset):
+    # An utility class used in TestSparseAny.test_dataloader method.
+
+    def __init__(self, sparse_tensors):
+        self.sparse_tensors = sparse_tensors
+
+    def __len__(self):
+        return len(self.sparse_tensors)
+
+    def __getitem__(self, index):
+        return self.sparse_tensors[index]
 
 
 class TestSparseAny(TestCase):
@@ -5078,7 +5101,7 @@ class TestSparseAny(TestCase):
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("masked", [subtest(False, name='nonmasked'), subtest(True, name='masked')])
     @parametrize("fast_mode", [subtest(False, name='slow'), subtest(True, name='fast')])
-    def test_as_sparse_gradcheck(self, layout, masked, fast_mode):
+    def test_as_sparse_gradcheck(self, layout, device, masked, fast_mode):
         gradcheck = torch.sparse.as_sparse_gradcheck(torch.autograd.gradcheck)
         sparse_compressed_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
 
@@ -5098,6 +5121,7 @@ class TestSparseAny(TestCase):
                 continue
             for x in self.generate_simple_inputs(
                     layout,
+                    device=device,
                     dtype=torch.float64,
                     # TODO: fix gh-104868  to enable batched samples:
                     enable_batch=layout not in sparse_compressed_layouts,
@@ -5118,6 +5142,35 @@ class TestSparseAny(TestCase):
                     x = x.coalesce()
 
                 gradcheck(func, x.requires_grad_(True), masked=masked, fast_mode=fast_mode)
+
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=False)
+    @dtypes(torch.double)
+    def test_dataloader(self, device, layout, dtype):
+
+        data = list(self.generate_simple_inputs(layout, device=device, dtype=dtype))
+
+        dataset = _SparseDataset(data)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=None, num_workers=2)
+
+        loaded_data = list(loader)
+        self.assertEqual(data, loaded_data)
+
+    @onlyCPU
+    def test_invalid_blocksize(self):
+        # Blocksize should be a tuple/list/torch.Size containing two values
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 1"):
+            torch.randn(1).to_sparse(blocksize=(1,))
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 1"):
+            torch.randn(1).to_sparse(blocksize=[1])
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 1"):
+            torch.randn(1).to_sparse(blocksize=torch.Size((1,)))
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
+            torch.randn(1).to_sparse(blocksize=(1, 1, 1))
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
+            torch.randn(1).to_sparse(blocksize=[1, 1, 1])
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
+            torch.randn(1).to_sparse(blocksize=torch.Size((1, 1, 1)))
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA

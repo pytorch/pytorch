@@ -30,6 +30,18 @@ def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tens
 
 
 class RNNBase(Module):
+    r"""Base class for RNN modules (RNN, LSTM, GRU).
+
+    Implements aspects of RNNs shared by the RNN, LSTM, and GRU classes, such as module initialization
+    and utility methods for parameter storage management.
+
+    .. note::
+        The forward method is not implemented by the RNNBase class.
+
+    .. note::
+        LSTM and GRU classes override some methods implemented by RNNBase.
+    """
+
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
                      'batch_first', 'dropout', 'bidirectional', 'proj_size']
     __jit_unused_properties__ = ['all_weights']
@@ -77,6 +89,8 @@ class RNNBase(Module):
             raise TypeError(f"hidden_size should be of type int, got: {type(hidden_size).__name__}")
         if hidden_size <= 0:
             raise ValueError("hidden_size must be greater than zero")
+        if num_layers <= 0:
+            raise ValueError("num_layers must be greater than zero")
         if proj_size < 0:
             raise ValueError("proj_size should be a positive integer or zero to disable projections")
         if proj_size >= hidden_size:
@@ -151,7 +165,7 @@ class RNNBase(Module):
         super().__setattr__(attr, value)
 
     def flatten_parameters(self) -> None:
-        """Resets parameter data pointer so that they can use faster code paths.
+        """Reset parameter data pointer so that they can use faster code paths.
 
         Right now, this works only if the module is on the GPU and cuDNN is enabled.
         Otherwise, it's a no-op.
@@ -351,12 +365,11 @@ class RNNBase(Module):
 
 
 class RNN(RNNBase):
-    r"""Applies a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}` non-linearity to an
-    input sequence.
+    r"""__init__(input_size,hidden_size,num_layers=1,nonlinearity='tanh',bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
 
-
-    For each element in the input sequence, each layer computes the following
-    function:
+    Apply a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}`
+    non-linearity to an input sequence. For each element in the input sequence,
+    each layer computes the following function:
 
     .. math::
         h_t = \tanh(x_t W_{ih}^T + b_{ih} + h_{t-1}W_{hh}^T + b_{hh})
@@ -453,6 +466,17 @@ class RNN(RNNBase):
         >>> output, hn = rnn(input, h0)
     """
 
+    @overload
+    def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1,
+                 nonlinearity: str = 'tanh', bias: bool = True, batch_first: bool = False,
+                 dropout: float = 0., bidirectional: bool = False, device=None,
+                 dtype=None) -> None:
+        ...
+
+    @overload
+    def __init__(self, *args, **kwargs):
+        ...
+
     def __init__(self, *args, **kwargs):
         if 'proj_size' in kwargs:
             raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
@@ -462,7 +486,7 @@ class RNN(RNNBase):
         elif self.nonlinearity == 'relu':
             mode = 'RNN_RELU'
         else:
-            raise ValueError(f"Unknown nonlinearity '{self.nonlinearity}'")
+            raise ValueError(f"Unknown nonlinearity '{self.nonlinearity}'. Select from 'tanh' or 'relu'.")
         super().__init__(mode, *args, **kwargs)
 
     @overload
@@ -569,11 +593,12 @@ class RNN(RNNBase):
 #
 # TODO: remove the overriding implementations for LSTM and GRU when TorchScript
 # support expressing these two modules generally.
+
+
 class LSTM(RNNBase):
-    r"""Applies a multi-layer long short-term memory (LSTM) RNN to an input
-    sequence.
+    r"""__init__(input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,proj_size=0,device=None,dtype=None)
 
-
+    Apply a multi-layer long short-term memory (LSTM) RNN to an input sequence.
     For each element in the input sequence, each layer computes the following
     function:
 
@@ -731,6 +756,16 @@ class LSTM(RNNBase):
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
 
+    @overload
+    def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1, bias: bool = True,
+                 batch_first: bool = False, dropout: float = 0., bidirectional: bool = False,
+                 proj_size: int = 0, device=None, dtype=None) -> None:
+        ...
+
+    @overload
+    def __init__(self, *args, **kwargs):
+        ...
+
     def __init__(self, *args, **kwargs):
         super().__init__('LSTM', *args, **kwargs)
 
@@ -859,9 +894,9 @@ class LSTM(RNNBase):
 
 
 class GRU(RNNBase):
-    r"""Applies a multi-layer gated recurrent unit (GRU) RNN to an input sequence.
+    r"""__init__(input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
 
-
+    Apply a multi-layer gated recurrent unit (GRU) RNN to an input sequence.
     For each element in the input sequence, each layer computes the following
     function:
 
@@ -869,15 +904,15 @@ class GRU(RNNBase):
         \begin{array}{ll}
             r_t = \sigma(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
             z_t = \sigma(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
-            n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn})) \\
-            h_t = (1 - z_t) * n_t + z_t * h_{(t-1)}
+            n_t = \tanh(W_{in} x_t + b_{in} + r_t \odot (W_{hn} h_{(t-1)}+ b_{hn})) \\
+            h_t = (1 - z_t) \odot n_t + z_t \odot h_{(t-1)}
         \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the input
     at time `t`, :math:`h_{(t-1)}` is the hidden state of the layer
     at time `t-1` or the initial hidden state at time `0`, and :math:`r_t`,
     :math:`z_t`, :math:`n_t` are the reset, update, and new gates, respectively.
-    :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.
+    :math:`\sigma` is the sigmoid function, and :math:`\odot` is the Hadamard product.
 
     In a multilayer GRU, the input :math:`x^{(l)}_t` of the :math:`l` -th layer
     (:math:`l \ge 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by
@@ -960,20 +995,20 @@ class GRU(RNNBase):
 
     .. note::
         The calculation of new gate :math:`n_t` subtly differs from the original paper and other frameworks.
-        In the original implementation, the Hadamard product :math:`(*)` between :math:`r_t` and the
+        In the original implementation, the Hadamard product :math:`(\odot)` between :math:`r_t` and the
         previous hidden state :math:`h_{(t-1)}` is done before the multiplication with the weight matrix
         `W` and addition of bias:
 
         .. math::
             \begin{aligned}
-                n_t = \tanh(W_{in} x_t + b_{in} + W_{hn} ( r_t * h_{(t-1)} ) + b_{hn})
+                n_t = \tanh(W_{in} x_t + b_{in} + W_{hn} ( r_t \odot h_{(t-1)} ) + b_{hn})
             \end{aligned}
 
         This is in contrast to PyTorch implementation, which is done after :math:`W_{hn} h_{(t-1)}`
 
         .. math::
             \begin{aligned}
-                n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn}))
+                n_t = \tanh(W_{in} x_t + b_{in} + r_t \odot (W_{hn} h_{(t-1)}+ b_{hn}))
             \end{aligned}
 
         This implementation differs on purpose for efficiency.
@@ -987,6 +1022,16 @@ class GRU(RNNBase):
         >>> h0 = torch.randn(2, 3, 20)
         >>> output, hn = rnn(input, h0)
     """
+
+    @overload
+    def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1, bias: bool = True,
+                 batch_first: bool = False, dropout: float = 0., bidirectional: bool = False,
+                 device=None, dtype=None) -> None:
+        ...
+
+    @overload
+    def __init__(self, *args, **kwargs):
+        ...
 
     def __init__(self, *args, **kwargs):
         if 'proj_size' in kwargs:
@@ -1169,6 +1214,7 @@ class RNNCell(RNNCellBase):
         ...     hx = rnn(input[i], hx)
         ...     output.append(hx)
     """
+
     __constants__ = ['input_size', 'hidden_size', 'bias', 'nonlinearity']
     nonlinearity: str
 
@@ -1225,11 +1271,11 @@ class LSTMCell(RNNCellBase):
         f = \sigma(W_{if} x + b_{if} + W_{hf} h + b_{hf}) \\
         g = \tanh(W_{ig} x + b_{ig} + W_{hg} h + b_{hg}) \\
         o = \sigma(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
-        c' = f * c + i * g \\
-        h' = o * \tanh(c') \\
+        c' = f \odot c + i \odot g \\
+        h' = o \odot \tanh(c') \\
         \end{array}
 
-    where :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.
+    where :math:`\sigma` is the sigmoid function, and :math:`\odot` is the Hadamard product.
 
     Args:
         input_size: The number of expected features in the input `x`
@@ -1309,18 +1355,18 @@ class LSTMCell(RNNCellBase):
 
 
 class GRUCell(RNNCellBase):
-    r"""A gated recurrent unit (GRU) cell
+    r"""A gated recurrent unit (GRU) cell.
 
     .. math::
 
         \begin{array}{ll}
         r = \sigma(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
         z = \sigma(W_{iz} x + b_{iz} + W_{hz} h + b_{hz}) \\
-        n = \tanh(W_{in} x + b_{in} + r * (W_{hn} h + b_{hn})) \\
-        h' = (1 - z) * n + z * h
+        n = \tanh(W_{in} x + b_{in} + r \odot (W_{hn} h + b_{hn})) \\
+        h' = (1 - z) \odot n + z \odot h
         \end{array}
 
-    where :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.
+    where :math:`\sigma` is the sigmoid function, and :math:`\odot` is the Hadamard product.
 
     Args:
         input_size: The number of expected features in the input `x`

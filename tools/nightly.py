@@ -343,7 +343,7 @@ def deps_install(deps: List[str], existing_env: bool, env_opts: List[str]) -> No
 
 @timed("Installing pytorch nightly binaries")
 def pytorch_install(url: str) -> "tempfile.TemporaryDirectory[str]":
-    """ "Install pytorch into a temporary directory"""
+    """Install pytorch into a temporary directory"""
     pytdir = tempfile.TemporaryDirectory()
     cmd = ["conda", "create", "--yes", "--no-deps", "--prefix", pytdir.name, url]
     p = subprocess.run(cmd, check=True)

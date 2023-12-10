@@ -5,7 +5,6 @@
 #include <ATen/Config.h>
 
 #include <c10/util/SmallBuffer.h>
-#include <c10/util/C++17.h>
 #include <c10/util/irange.h>
 
 #include <climits>
@@ -328,6 +327,25 @@ void gemm(
 }
 
 void gemm(
+   TransposeType transa, TransposeType transb,
+   int64_t m, int64_t n, int64_t k,
+   const float alpha,
+   const at::Half *a, int64_t lda,
+   const at::Half *b, int64_t ldb,
+   const float beta,
+   at::Half *c, int64_t ldc) {
+   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#if AT_MKLDNN_ENABLED()
+   if (mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
+   }
+#endif
+   gemm_stub(
+      at::kCPU, at::kHalf,
+      transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+}
+
+void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     const float alpha,
@@ -562,7 +580,7 @@ void gemm_batched_with_stride(
       scalar_t beta,                                            \
       scalar_t *c, int64_t ldc, int64_t batch_stride_c);
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(INSTANTIATE_BATCHED_GEMM)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_F8NZ(INSTANTIATE_BATCHED_GEMM)
 
 DEFINE_DISPATCH(axpy_stub);
 

@@ -1,11 +1,12 @@
 import operator
 from functools import partial
-from typing import Dict, Optional
+from typing import Any, Callable, Dict
+
+from sympy import Expr
 
 import torch
-from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
-from .ir import InterpreterShim, LoopBody
+from .ir import InterpreterShim, LoopBody, LoopBodyBlock
 from .utils import cache_on_self, dominated_nodes
 from .virtualized import V
 
@@ -20,10 +21,12 @@ class BoundVars:
     the case a bounded variable is returned by a kernel and fed into another.
     """
 
-    def __init__(self, loop_body: LoopBody):
+    def __init__(self, loop_body: LoopBody) -> None:
         self.loop_body = loop_body
         self.replacement_vals = {
-            k: ValueRanges(0, v - 1) if not free_symbols(v) else bound_sympy(v)
+            k: ValueRanges(0, v - 1)
+            if (isinstance(v, int) or v.is_number)
+            else bound_sympy(v)
             for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded
@@ -34,10 +37,10 @@ class BoundVars:
             or "masked_subblock" in node.target
         )
         # To access this variable call `get_bounds()`
-        self._bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = {}
+        self._bounds: Dict[torch.fx.Node, ValueRanges] = {}
 
     @cache_on_self
-    def get_bounds(self):
+    def get_bounds(self) -> Dict[torch.fx.Node, ValueRanges]:
         submodules = self.swap_submodules(self.loop_body.submodules)
 
         # Initialize the environment with the unbounded variables
@@ -54,8 +57,10 @@ class BoundVars:
             interpreter.run(V.get_ops_handler(), initial_env=self._bounds)
         return self._bounds
 
-    def swap_submodules(self, submodules):
-        result = {}
+    def swap_submodules(
+        self, submodules: Dict[str, Callable[..., Any]]
+    ) -> Dict[str, Callable[..., ValueRanges]]:
+        result: Dict[str, Callable[..., ValueRanges]] = {}
         for key in submodules.keys():
             if key == "get_index":
                 result[key] = self.get_index
@@ -63,9 +68,18 @@ class BoundVars:
                 subblock = self.loop_body.subblocks[key]
                 # The result within the lambda will reference to the final
                 # set of modules at the end of the for-loop as it stores a reference to it
-                result[key] = lambda mask, value: self.masked_subblock(
-                    subblock, self._bounds, mask, value, result
-                )
+
+                # bind subblock in a function because python lambdas close over by reference
+                # moving the lambda out of make_fn would close over the reference to subblock,
+                # so all lambdas would have the same subblock reference that is the final
+                # subblock in the loop
+                def make_fn(subblock):
+                    return lambda mask, value: self.masked_subblock(
+                        subblock, self._bounds, mask, value, result
+                    )
+
+                result[key] = make_fn(subblock)
+
             else:
                 assert "set_indirect" in key
                 idx = int(key[len("set_indirect") :])
@@ -75,7 +89,14 @@ class BoundVars:
 
         return result
 
-    def masked_subblock(self, subblock, env, mask, value, submodules):
+    def masked_subblock(
+        self,
+        subblock: LoopBodyBlock,
+        env: Dict[torch.fx.Node, ValueRanges],
+        mask: Any,
+        value: Any,
+        submodules: Dict[str, Callable[..., Any]],
+    ) -> ValueRanges:
         interp = InterpreterShim(subblock.graph, submodules)
         interp.run(V.get_ops_handler(), initial_env=env)
         output = [node for node in subblock.graph.nodes if node.target == "output"]
@@ -84,12 +105,12 @@ class BoundVars:
         # pessimistically assumed to be inf anyway
         return interp.env[output[0]]
 
-    def set_indirect(self, old, new):
+    def set_indirect(self, old: Expr, new: ValueRanges) -> ValueRanges:
         assert isinstance(new, ValueRanges)
         self.replacement_vals[old] = new
         return new
 
-    def get_index(self, name):
+    def get_index(self, name: Expr) -> ValueRanges:
         expr = self.loop_body.indexing_exprs[name]
         bound = self.replacement_vals.get(expr)
         if bound is None:

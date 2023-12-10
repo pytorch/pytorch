@@ -1,6 +1,6 @@
 Thank you for your interest in contributing to PyTorch!
 If you're a new contributor, please first take a read through our
-[Contributing Guidelines](https://docs.google.com/document/d/1oNhUeGE-8ajsYaMpoV6ZQANQZVeKrdFanI9VMbFzOzc/edit)
+[Contributing Guide](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions), specifically the [Submitting a Change](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions#submitting-a-change) section
 that walks through the process of contributing a change to PyTorch.
 
 The rest of this document (CONTRIBUTING.md) covers some of the more technical
@@ -514,7 +514,7 @@ For C++ documentation (https://pytorch.org/cppdocs), we use
 [Sphinx](http://www.sphinx-doc.org/) via
 [Breathe](https://github.com/michaeljones/breathe) and
 [Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
-reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
+reference](https://www.doxygen.nl/manual/) for more
 information on the documentation syntax.
 
 We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
@@ -562,7 +562,7 @@ rsync -az me@my_machine:/path/to/pytorch/docs/cpp/build/html cpp/build
 
 ### Previewing documentation on PRs
 
-PyTorch will host documentation previews at `https://docs-preview.pytorch.org/<pr number>/` once the
+PyTorch will host documentation previews at `https://docs-preview.pytorch.org/pytorch/pytorch/<pr number>/index.html` once the
 `pytorch_python_doc_build` GitHub Actions job has completed on your PR. You can visit that page directly
 or find its link in the automated Dr. CI comment on your PR.
 
@@ -669,7 +669,7 @@ only interested in a specific component.
 - Don't need Caffe2?  Pass `BUILD_CAFFE2=0` to disable Caffe2 build.
 
 On the initial build, you can also speed things up with the environment
-variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `USE_FBGEMM`, `USE_NNPACK` and `USE_QNNPACK`.
+variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `USE_FLASH_ATTENTION`, `USE_MEM_EFF_ATTENTION`, `BUILD_TEST`, `USE_FBGEMM`, `USE_NNPACK` and `USE_QNNPACK`.
 
 - `DEBUG=1` will enable debug builds (-g -O0)
 - `REL_WITH_DEB_INFO=1` will enable debug symbols with optimizations (-g -O3)
@@ -681,6 +681,7 @@ variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `U
 - `USE_NNPACK=0` will disable compiling with NNPACK.
 - `USE_QNNPACK=0` will disable QNNPACK build (quantized 8-bit operators).
 - `USE_XNNPACK=0` will disable compiling with XNNPACK.
+- `USE_FLASH_ATTENTION=0` and `USE_MEM_EFF_ATTENTION=0` will disable compiling flash attention and memory efficient kernels respectively
 
 For example:
 
@@ -711,6 +712,8 @@ system.  You can get faster builds if you install the ninja build system
 with `pip install ninja`.  If PyTorch was already built, you will need
 to run `python setup.py clean` once after installing ninja for builds to
 succeed.
+
+Note: Make sure to use a machine with a larger number of CPU cores, this will significantly reduce your build times.
 
 #### Use CCache
 

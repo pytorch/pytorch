@@ -231,7 +231,7 @@ std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<stri
     dummyTensor(DispatchKey::CUDA),
     5,
     c10::List<Tensor>({dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA)}),
-    c10::optional<int64_t>(c10::in_place, 0),
+    c10::optional<int64_t>(std::in_place, 0),
     dict
   );
 }
@@ -649,7 +649,7 @@ TEST(OperatorRegistrationTestFunctionBasedKernel, givenKernelWithOptionalInputs_
 }
 
 std::string concatKernel(const Tensor& tensor1, std::string a, const std::string& b, int64_t c) {
-  return a + b + c10::guts::to_string(c);
+  return a + b + std::to_string(c);
 }
 
 void expectCallsConcatUnboxed(DispatchKey dispatch_key) {

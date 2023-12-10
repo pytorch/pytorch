@@ -702,6 +702,20 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_sparse_allreduce_basics_cuda(self):
         self._test_sparse_allreduce_basics(lambda t: t.clone().cuda())
 
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_sparse_allreduce_cuda_dispatched(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
+        tests = simple_sparse_reduce_tests(
+            self.rank, self.world_size, num_inputs=1
+        )
+        for (inputs, outputs) in tests:
+            tensors = inputs[-1].clone().cuda()
+            work = dist.all_reduce(tensors, async_op=True)
+            work.wait()
+            self.assertEqual([tensors], outputs)
+
     @requires_gloo()
     def test_scatter_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1203,7 +1217,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Output is not a list of lists.
         dummy_output_lists = [torch.zeros([0], dtype=torch.float32)]
         with self.assertRaisesRegex(
-            RuntimeError, "Invalid function argument.*output_tensor_lists"
+            TypeError, "Invalid function argument.*output_tensor_lists"
         ):
             c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
 

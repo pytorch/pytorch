@@ -20,6 +20,7 @@
 #include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
@@ -27,6 +28,11 @@
 #include <ATen/ops/_to_copy_native.h>
 #include <ATen/ops/_to_cpu_native.h>
 #include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/_to_sparse_bsc_native.h>
+#include <ATen/ops/_to_sparse_bsr_native.h>
+#include <ATen/ops/_to_sparse_csc_native.h>
+#include <ATen/ops/_to_sparse_csr_native.h>
+#include <ATen/ops/_to_sparse_native.h>
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
@@ -695,7 +701,7 @@ Tensor sparse_compressed_to_dense(
 
 // Computes the strides for view_dtype output when the view dtype is
 // smaller than the original dtype
-inline DimVector compute_strides_for_view_dtype_downsize(IntArrayRef old_strides, int64_t size_ratio, ScalarType old_dtype, ScalarType new_dtype) {
+inline SymDimVector compute_strides_for_view_dtype_downsize(SymIntArrayRef old_strides, int64_t size_ratio, ScalarType old_dtype, ScalarType new_dtype) {
   const int64_t ndim = old_strides.size();
 
   TORCH_CHECK(
@@ -703,7 +709,7 @@ inline DimVector compute_strides_for_view_dtype_downsize(IntArrayRef old_strides
     "self.stride(-1) must be 1 to view ", old_dtype, " as ", new_dtype,
     " (different element sizes), but got ", old_strides[ndim - 1]);
 
-  DimVector new_strides(ndim);
+  SymDimVector new_strides(ndim);
   for (int64_t dim_idx = 0; dim_idx < ndim - 1; dim_idx++) {
     new_strides[dim_idx] = old_strides[dim_idx] * size_ratio;
   }
@@ -713,14 +719,14 @@ inline DimVector compute_strides_for_view_dtype_downsize(IntArrayRef old_strides
 
 // Computes the strides for view_dtype output when the view dtype is
 // larger than the original dtype
-inline DimVector compute_strides_for_view_dtype_upsize(IntArrayRef old_strides, int64_t size_ratio, ScalarType old_dtype, ScalarType new_dtype) {
+inline SymDimVector compute_strides_for_view_dtype_upsize(SymIntArrayRef old_strides, int64_t size_ratio, ScalarType old_dtype, ScalarType new_dtype) {
   const int64_t ndim = old_strides.size();
   TORCH_CHECK(
     old_strides[ndim - 1] == 1,
     "self.stride(-1) must be 1 to view ", old_dtype, " as ", new_dtype,
     " (different element sizes), but got ", old_strides[ndim - 1]);
 
-  DimVector new_strides(ndim);
+  SymDimVector new_strides(ndim);
   for (int64_t dim_idx = 0; dim_idx < ndim - 1; dim_idx++) {
     TORCH_CHECK(
       (old_strides[dim_idx] % size_ratio) == 0,
@@ -753,8 +759,7 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   auto* impl = new_tensor.unsafeGetTensorImpl();
 
   if (self_element_size == new_element_size) {
-    impl->set_storage_offset(self.storage_offset());
-    impl->set_sizes_and_strides(self.sizes(), self.strides());
+    impl->set_sizes_and_strides(self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
 
   } else if (self.dim() == 0) {
     TORCH_CHECK(false,
@@ -766,17 +771,16 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
 
     int64_t size_ratio = self_element_size / new_element_size;
     auto new_strides = compute_strides_for_view_dtype_downsize(
-      self.strides(), size_ratio, self.scalar_type(), dtype);
+      self.sym_strides(), size_ratio, self.scalar_type(), dtype);
 
-    auto old_sizes = self.sizes();
-    DimVector new_sizes(self.dim());
+    auto old_sizes = self.sym_sizes();
+    SymDimVector new_sizes(self.dim());
     std::copy(old_sizes.begin(), old_sizes.end(), new_sizes.begin());
     new_sizes[self.dim() - 1] *= size_ratio;
 
-    auto new_storage_offset = size_ratio * self.storage_offset();
+    auto new_storage_offset = size_ratio * self.sym_storage_offset();
 
-    impl->set_storage_offset(new_storage_offset);
-    impl->set_sizes_and_strides(new_sizes, new_strides);
+    impl->set_sizes_and_strides(new_sizes, new_strides, new_storage_offset);
 
   } else {
     // Upsizing element size
@@ -784,29 +788,28 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
     int64_t size_ratio = new_element_size / self_element_size;
 
     TORCH_CHECK(
-      (self.size(-1) % size_ratio) == 0,
+      (self.sym_size(-1) % size_ratio) == 0,
       "self.size(-1) must be divisible by ", size_ratio, " to view ",
       self.scalar_type(), " as ", dtype, " (different element sizes), ",
-      "but got ", self.size(-1));
+      "but got ", self.sym_size(-1));
 
     TORCH_CHECK(
-      (self.storage_offset() % size_ratio) == 0,
+      (self.sym_storage_offset() % size_ratio) == 0,
       "self.storage_offset() must be divisible by ", size_ratio, " to view ",
       self.scalar_type(), " as ", dtype, " (different element sizes), but got ",
-      self.storage_offset());
+      self.sym_storage_offset());
 
     auto new_strides = compute_strides_for_view_dtype_upsize(
-      self.strides(), size_ratio, self.scalar_type(), dtype);
+      self.sym_strides(), size_ratio, self.scalar_type(), dtype);
 
-    auto old_sizes = self.sizes();
-    DimVector new_sizes(self.dim());
+    auto old_sizes = self.sym_sizes();
+    SymDimVector new_sizes(self.dim());
     std::copy(old_sizes.begin(), old_sizes.end(), new_sizes.begin());
     new_sizes[self.dim() - 1] /= size_ratio;
 
-    auto new_storage_offset = self.storage_offset() / size_ratio;
+    auto new_storage_offset = self.sym_storage_offset() / size_ratio;
 
-    impl->set_storage_offset(new_storage_offset);
-    impl->set_sizes_and_strides(new_sizes, new_strides);
+    impl->set_sizes_and_strides(new_sizes, new_strides, new_storage_offset);
   }
 
   return new_tensor;
@@ -947,6 +950,9 @@ void _to_sparse_check_arguments(const std::string& funcname, const Tensor& self,
   }
 
   if (blocksize.has_value()) {
+    if (blocksize.value().size() != 2) {
+      AT_ERROR(funcname, ": blocksize needs to be a tuple of size 2, but got ", blocksize.value().size());
+    }
     auto blocksize_to = *blocksize;
     if (blocksize_to[0] <= 0 || blocksize_to[1] <= 0) {
       AT_ERROR(funcname, ": blocksize needs to be positive, but got ", blocksize_to);

@@ -29,7 +29,7 @@ LlgaKernel::LlgaKernel(const Node* fusionNode)
       partitions.size() == 1,
       "LLGA subgraph should contain only one partition");
   partition_ = partitions[0];
-  nPartitionInputs_ = partition_.get_in_ports().size();
+  nPartitionInputs_ = partition_.get_input_ports().size();
 #ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Initialized ", debugName(), "\n", graph_->toString());
 #endif
@@ -40,7 +40,7 @@ bool LlgaKernel::useOpaqueLayout(size_t offset) const {
 }
 
 void LlgaKernel::initializeConstantInputs() {
-  for (auto& lt : partition_.get_in_ports()) {
+  for (auto& lt : partition_.get_input_ports()) {
     auto inputId = lt.get_id();
     if (initializedInputIds_.find(inputId) == initializedInputIds_.end()) {
       TORCH_CHECK(
@@ -66,7 +66,7 @@ void LlgaKernel::initializeConstantInputs() {
 
 std::map<size_t, int64_t> LlgaKernel::initializeTensorIdToOccurence() const {
   std::map<size_t, int64_t> tensorIdToOccurence;
-  for (auto& lt : partition_.get_in_ports()) {
+  for (auto& lt : partition_.get_input_ports()) {
     auto inputId = lt.get_id();
     std::map<size_t, int64_t>::iterator it(tensorIdToOccurence.find(inputId));
     if (it != tensorIdToOccurence.end()) {

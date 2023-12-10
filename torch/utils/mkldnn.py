@@ -34,7 +34,8 @@ class MkldnnLinear(torch.jit.ScriptModule):
 
 
 class _MkldnnConvNd(torch.jit.ScriptModule):
-    """Common base of MkldnnConv1d and MkldnnConv2d"""
+    """Common base of MkldnnConv1d and MkldnnConv2d."""
+
     __constants__ = ['stride', 'padding', 'dilation', 'groups']
 
     def __init__(self, dense_module):
@@ -202,8 +203,8 @@ class MkldnnPrelu(torch.jit.ScriptModule):
         return y
 
 def to_mkldnn(module, dtype=torch.float):
-    assert dtype in [torch.float, torch.bfloat16], \
-        "MKLDNN only support float or bfloat16 path now"
+    assert dtype in [torch.float, torch.bfloat16, torch.half], \
+        "MKLDNN only support float, bfloat16, and half path now"
 
     def m_fn(m, d):
         if isinstance(m, torch.nn.Linear):

@@ -20,10 +20,11 @@ struct ActivityTraceWrapper;
 namespace autograd {
 namespace profiler {
 using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
+using extra_meta_t = std::unordered_map<std::string, std::string>;
 
 struct TORCH_API KinetoEvent {
   KinetoEvent(
-      std::shared_ptr<const torch::profiler::impl::Result>,
+      const std::shared_ptr<const torch::profiler::impl::Result>&,
       const bool verbose);
 
   uint64_t startThreadId() const;
@@ -59,6 +60,7 @@ struct TORCH_API KinetoEvent {
   int64_t cudaElapsedUs() const;
   int64_t privateuse1ElapsedUs() const;
   void getPerfEventCounters(torch::profiler::perf_counters_t&) const;
+  extra_meta_t extraMeta() const;
 
  private:
   torch::profiler::impl::ProfilerVoidEventStub fallbackStart() const;
