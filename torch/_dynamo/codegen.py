@@ -83,7 +83,7 @@ class PyCodegen:
         output = self._output
         graph_outputs = self.graph_outputs
 
-        if self.top_of_stack is value:
+        if self.top_of_stack is value and allow_cache:
             output.append(create_dup_top())
             return
 
