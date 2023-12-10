@@ -219,32 +219,13 @@ class ConstDictVariable(VariableTracker):
                 ConstDictVariable.get_key(tx, args[0]) in self.items
             )
         elif name == "__contains__":
+            # The fall-through case will trigger unimplemented, but this makes for a cleaner
+            # message
             content = args[0]
             if isinstance(args[0], TupleVariable):
                 content = f"tuple({args[0].items})"
 
             unimplemented(f"NYI - __contains__ with {content}")
-        elif name == "__setitem__" and args and ConstDictVariable.is_valid_key(args[0]):
-            self.mutable_local = MutableLocal()
-            assert not kwargs and len(args) == 2
-            k = ConstDictVariable.get_key(tx, args[0])
-
-            if is_valid_global_ref_key(k):
-                tx.store_dict_key(global_key_name(k), k)
-            newval = collections.OrderedDict(val)
-            newval[k] = args[1]
-
-            new_rec_contains = self.recursively_contains.union(
-                args[1].recursively_contains
-            )
-            if args[1].mutable_local is not None:
-                new_rec_contains.add(args[1].mutable_local)
-
-            return tx.replace_all(
-                self,
-                self.modifed(newval, new_rec_contains, **options),
-            )
-
         else:
             return super().call_method(tx, name, args, kwargs)
 

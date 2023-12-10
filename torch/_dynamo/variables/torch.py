@@ -740,6 +740,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                         tx.symbolic_locals[name] = tensor_variable
                 else:
                     unimplemented(f"out variant of {type(kwargs['out'])}")
+
             return tensor_variable
 
     def _call_cross_entropy_loss(self, tx, args, kwargs):

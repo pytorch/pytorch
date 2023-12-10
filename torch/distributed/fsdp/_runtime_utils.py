@@ -725,11 +725,8 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
-    # print("Running post backward hook!")
     _log_post_backward_hook(state, handle, log)
     flat_param = handle.flat_param
-    # print("Flat param size at invoke?", flat_param.size())
-    assert flat_param is handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(
         "FullyShardedDataParallel._post_backward_hook"
@@ -748,7 +745,6 @@ def _post_backward_hook(
 
         if flat_param.grad is None:
             return
-
         if flat_param.grad.requires_grad:
             raise RuntimeError("FSDP does not support gradients of gradients")
 
@@ -773,7 +769,6 @@ def _post_backward_hook(
                 and not handle._force_full_precision
             ):
                 flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
-
             if handle.uses_sharded_strategy:
                 _reduce_grad(state, handle)
             else:

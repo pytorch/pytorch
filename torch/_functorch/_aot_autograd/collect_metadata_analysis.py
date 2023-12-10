@@ -299,8 +299,6 @@ def run_functionalized_fw_and_collect_metadata(
                 if is_cur_tensor_multi_out_view:
                     num_aliased_tensors_that_are_multi_output_views[curr_storage] += 1
                 out_storage_to_tensors[curr_storage].add(o)
-            else:
-                curr_storage = None
 
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}

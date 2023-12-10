@@ -619,14 +619,6 @@ class FunctoolsPartialVariable(VariableTracker):
         merged_kwargs = {**self.keywords, **kwargs}
         return self.func.call_function(tx, merged_args, merged_kwargs)
 
-    def reconstruct(self, codegen):
-        codegen.load_import_from("functools", "partial")
-        codegen(self.func.source)
-        for arg in self.args:
-            codegen(arg)
-        codegen.extend_output(create_call_function(3, True))
-        return []
-
     def as_python_constant(self):
         if self.original:
             return self.original

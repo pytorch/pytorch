@@ -113,7 +113,6 @@ class TensorVariable(VariableTracker):
         stride=None,
         is_contiguous=None,
         specialized_value=None,
-        storage_offset=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -130,7 +129,6 @@ class TensorVariable(VariableTracker):
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.specialized_value = specialized_value
-        self.storage_offset = storage_offset
 
     def as_proxy(self):
         return self.proxy
@@ -739,7 +737,7 @@ class TensorVariable(VariableTracker):
 
                 if not src:
                     unimplemented("No source for register_hook target fn")
-                    # tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+                    tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
 
                 if not compiled_autograd.compiled_autograd_enabled:
                     # TODO(voz):

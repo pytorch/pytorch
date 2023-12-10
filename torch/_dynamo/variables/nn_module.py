@@ -350,7 +350,6 @@ class NNModuleVariable(VariableTracker):
         constant=False,
     ) -> "VariableTracker":
         from . import ConstantVariable, ListIteratorVariable, TupleVariable
-        options = {}
         key = self.module_key
         module = tx.output.get_submodule(key)
 
