@@ -309,7 +309,9 @@ def _cpp_prefix_path() -> str:
 
 
 def get_build_args_of_chosen_isa():
-    from torch._inductor.codecache import chosen_isa
+    from torch._inductor.codecache import pick_vec_isa
+
+    chosen_isa = pick_vec_isa()
 
     cap = str(chosen_isa).upper()
     macros = [
