@@ -149,7 +149,7 @@ struct C10_API TensorOptions {
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
   template <
       typename T,
-      typename = std::enable_if_t<std::is_same<std::decay_t<T>, Device>::value>>
+      typename = std::enable_if_t<std::is_same_v<std::decay_t<T>, Device>>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -164,8 +164,7 @@ struct C10_API TensorOptions {
   ///     constructors too.
   template <
       typename... Args,
-      typename =
-          std::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
+      typename = std::enable_if_t<std::is_constructible_v<Device, Args&&...>>>
   /* implicit */ TensorOptions(Args&&... args)
       : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
