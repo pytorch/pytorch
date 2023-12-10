@@ -1222,11 +1222,13 @@ def valid_vec_isa_list() -> List[VecISA]:
     return isa_list
 
 
-def do_pick_vec_isa() -> VecISA:
+_valid_vec_isa_list = valid_vec_isa_list()
+
+
+def pick_vec_isa() -> VecISA:
     if config.is_fbcode():
         return VecAVX2()
 
-    _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
@@ -1240,14 +1242,6 @@ def do_pick_vec_isa() -> VecISA:
             return isa
 
     return invalid_vec_isa
-
-
-_chosen_isa = do_pick_vec_isa()
-
-
-def pick_vec_isa() -> VecISA:
-    print("!!! chosen_isa: ", _chosen_isa)
-    return _chosen_isa
 
 
 def get_compile_only(compile_only: bool = True) -> str:
