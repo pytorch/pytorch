@@ -1521,16 +1521,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
-        if isinstance(seq, (BaseListVariable, SetVariable)):
-            val = seq.unpack_var_sequence(self)
-        elif seq.is_python_constant() and isinstance(seq, ConstantVariable):
-            val = seq.unpack_var_sequence(self)
-        elif isinstance(seq, TensorVariable):
+        if isinstance(seq, TensorVariable):
             val = seq.unpack_var_sequence(self, idxes=range(inst.argval))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
+        elif seq.has_unpack_var_sequence(self):
+            val = seq.unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
         assert len(val) == inst.argval
@@ -1621,12 +1619,28 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
     def BUILD_STRING(self, inst):
-        result = ""
-        for _ in range(inst.arg):
-            str_var = self.pop()
-            assert isinstance(str_var, ConstantVariable)
-            result = str_var.value + result
-        self.push(ConstantVariable.create(value=result))
+        format_string_parts: List[str] = []
+        args: List[VariableTracker] = []
+        kwargs: Dict[str, VariableTracker] = {}
+        for part in self.popn(inst.arg):
+            if isinstance(part, ConstantVariable):
+                format_string_parts.append("{}")
+                args.append(part)
+            elif isinstance(part, variables.StringFormatVariable):
+                format_string_parts.append(part.format_string)
+                args.extend(part.sym_args)
+                if set(kwargs.keys()) & set(part.sym_kwargs.keys()):
+                    unimplemented(
+                        f"BUILD_STRING key conflict {kwargs} & {part.sym_kwargs}"
+                    )
+                kwargs.update(part.sym_kwargs)
+            else:
+                unimplemented(f"BUILD_STRING {part}")
+        self.push(
+            variables.StringFormatVariable.create(
+                "".join(format_string_parts), args, kwargs
+            )
+        )
 
     def IS_OP(self, inst):
         assert inst.argval == 0 or inst.argval == 1
@@ -2118,6 +2132,13 @@ class InstructionTranslator(InstructionTranslatorBase):
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
+
+    def get_example_value(self, source: Source):
+        if isinstance(source, LocalSource):
+            return self.f_locals[source.local_name]
+        if isinstance(source, GlobalSource):
+            return self.f_globals[source.global_name]
+        raise KeyError()
 
     def run(self):
         super().run()
