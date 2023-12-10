@@ -39,6 +39,7 @@ from .lists import (
     RangeVariable,
     RestrictedListSubclassVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .misc import (
