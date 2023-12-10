@@ -127,7 +127,7 @@ class MaybeOwned final {
 
   MaybeOwned(MaybeOwned&& rhs) noexcept(
       std::is_nothrow_move_constructible_v<T>&&
-      std::is_nothrow_move_assignable_v<borrow_type>)
+          std::is_nothrow_move_assignable_v<borrow_type>)
       : isBorrowed_(rhs.isBorrowed_) {
     if (C10_LIKELY(rhs.isBorrowed_)) {
       MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
@@ -137,11 +137,10 @@ class MaybeOwned final {
   }
 
   MaybeOwned& operator=(MaybeOwned&& rhs) noexcept(
-      std::is_nothrow_move_assignable_v<T> &&
-      std::is_nothrow_move_assignable_v<borrow_type> &&
-      std::is_nothrow_move_constructible_v<T> &&
-      std::is_nothrow_destructible_v<T> &&
-      std::is_nothrow_destructible_v<borrow_type>) {
+      std::is_nothrow_move_assignable_v<T>&& std::is_nothrow_move_assignable_v<
+          borrow_type>&& std::is_nothrow_move_constructible_v<T>&&
+          std::is_nothrow_destructible_v<T>&&
+              std::is_nothrow_destructible_v<borrow_type>) {
     if (this == &rhs) {
       return *this;
     }
@@ -179,9 +178,8 @@ class MaybeOwned final {
     return MaybeOwned(std::in_place, std::forward<Args>(args)...);
   }
 
-  ~MaybeOwned() noexcept(
-      std::is_nothrow_destructible_v<T> &&
-      std::is_nothrow_destructible_v<borrow_type>) {
+  ~MaybeOwned() noexcept(std::is_nothrow_destructible_v<T>&&
+                             std::is_nothrow_destructible_v<borrow_type>) {
     if (C10_UNLIKELY(!isBorrowed_)) {
       own_.~T();
     } else {

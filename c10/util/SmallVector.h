@@ -1019,7 +1019,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
 
   SmallVectorImpl& operator=(SmallVectorImpl&& RHS) noexcept(
       std::is_nothrow_move_constructible_v<T>&&
-std::is_nothrow_destructible_v<T>);
+          std::is_nothrow_destructible_v<T>);
 
   bool operator==(const SmallVectorImpl& RHS) const {
     if (this->size() != RHS.size())
@@ -1125,9 +1125,8 @@ SmallVectorImpl<T>& SmallVectorImpl<T>::operator=(
 
 template <typename T>
 SmallVectorImpl<T>& SmallVectorImpl<T>::operator=(
-    SmallVectorImpl<T>&& RHS) noexcept(
-    std::is_nothrow_move_constructible_v<T>&&
-std::is_nothrow_destructible_v<T>) {
+    SmallVectorImpl<T>&& RHS) noexcept(std::is_nothrow_move_constructible_v<T>&&
+                                           std::is_nothrow_destructible_v<T>) {
   // Avoid self-assignment.
   if (this == &RHS)
     return *this;
