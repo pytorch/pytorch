@@ -1,3 +1,101 @@
+"""Provides optimal triton kernel parameters.
+
+Aim
+---
+
+The usage of optimal triton kernel parameters may increase the
+performance of operations several times. For example, for large tensor
+shapes, the usage of a bsr tensor as mat1 argument in addmm-based
+operations typically outperforms the corresponding operation with
+strided-only inputs when the blocked representation of a tensor
+provides a better alignement with memory access than what the strided
+representation would provide.
+
+Pre-computed kernel parameters
+------------------------------
+
+This script finds and stores the optimal triton kernel parameters for
+a specific set of shape configurations. For instance, the set of shape
+configurations of the bsr_dense_addmm kernel is defined as
+
+  input, out: M x N strided tensor
+  mat1: M x K bsr tensor with blocksize (BM, BK) and given sparsity
+  mat2: M x N strided tensor
+  dtype = float16, bfloat16, float32
+  sparsity = 0.5
+  M = 256, 512, ..., 16384
+  K = M
+  N = 256, 512, ..., 131072
+  BM = 16, 32, ..., 128
+  BK = BM
+  alpha = 1
+  beta = 0, 1
+  GPUs: NVIDIA A100-SXM4-80GB
+
+Approximations
+--------------
+
+It is practically infeasible to pre-compute optimal kernel parameter
+for all possible shape configurations as well as for all existing
+GPUs. Therefore, we'll assume that the pre-computed optimal parameters
+are good enough approximations when
+1) the used GPU is any of NVIDIA A100 Tensor Core GPUs,
+2) the actual sparsity of mat1 is different from sparsity value 0.5.
+
+If a particular shape configuration does not fall in the set of
+pre-computed kernel parameters, or it does not match with the listed
+approximations above, or the used GPU device is not a NVIDIA A100 GPU,
+then a reference set of triton kernel parameters will be used when
+executing operations. The reference kernel parameters are defined in
+torch/sparse/_triton_ops.py, see bsr_dense_addmm_meta function, for
+instance.
+
+Computing optimal kernel parameters
+-----------------------------------
+
+If the approximations listed above are unacceptable, e.g. when one
+seeks a maximal performance possible, the optimal kernel parameters
+for a particular GPU can be computed by simply running this script in
+the pytorch developement tree::
+
+  cd /path/to/pytorch
+  python setup.py develop
+  python torch/sparse/_triton_ops_meta.py
+
+This will compute the optimal kernel parameters for the GPU device
+available in the host system for all shape configurations listed in
+"Pre-computed kernel parameters" above. The results will be stored in
+the database of kernel parameters. Currently, this database is defined
+as this module (see "BEGIN GENERATED DATA" comment below) that will be
+modified when the script is run. Create a pytorch PR with the
+corresponding modifications in this file to make the computed optimal
+kernel parameters available for other users as pre-computed kernel
+parameters.
+
+Moreover, one can compute the optimal kernel parameters for a specific
+set of shape configurations and specific sparsity patterns. For that,
+use tuning functions provided by this module:
+
+  tune_bsr_dense_addmm(input, mat1, mat2, beta=1, alpha=1, out=None, verbose=False, store=False) -> meta
+
+The tuning functions return a dictionary of optimal kernel parameters
+that can be passed to the corresponding operation, e.g.
+
+  bsr_dense_addmm(..., meta=meta)
+
+Or, when store==True, the optimal kernel parameters will be stored in
+the database of pre-computed kernel parameters in runtime so that all
+addmm-based operations such as torch.addmm, torch.mm,
+torch.nn.functional.linear will benefit from using the computed
+optimal set of kernel parameters.
+
+Note that running tune_bsr_dense_addmm can take several minutes. So,
+use it wisely, e.g. by implementing persisten storage of optimized
+kernel parameters. See the source code of get_meta and
+tune_bsr_dense_addmm to learn how to register a custom set of optimal
+kernel parameters for addmm-based operations.
+
+"""
 __all__ = ["get_meta", "tune_bsr_dense_addmm"]
 
 import inspect
@@ -574,6 +672,7 @@ def optimize_bsr_dense_addmm(
     device="cuda",
     sparsity=0.5,
     force=False,
+    verbose=False,
 ):
     torch.manual_seed(0)
     bsr = create_blocked_tensor(
@@ -582,11 +681,18 @@ def optimize_bsr_dense_addmm(
     dense = make_tensor(k, n, dtype=dtype, device=device)
     input = make_tensor(m, n, dtype=dtype, device=device)
     tune_bsr_dense_addmm(
-        input, bsr, dense, beta=beta, alpha=alpha, store=True, force=force
+        input,
+        bsr,
+        dense,
+        beta=beta,
+        alpha=alpha,
+        store=True,
+        force=force,
+        verbose=verbose,
     )
 
 
-def main(op="scatter_mm", force=False, dtype=torch.float16):
+def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
     import itertools
 
     sizes_lst = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072]
@@ -616,6 +722,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16):
                             force=force,
                             sparsity=sparsity,
                             dtype=dtype,
+                            verbose=verbose,
                         )
                 else:
                     raise NotImplementedError(op)
