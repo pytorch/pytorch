@@ -1248,7 +1248,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     @skip_but_pass_in_sandcastle_if(
         torch.cuda.device_count() == 0, "No GPUs available, skipping test"
     )
-    def test_reset_nccl_pg_timeout(self):
+    def test_set_nccl_pg_timeout(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         opts = dict(
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size, timeout=timedelta(seconds=123)
@@ -1257,7 +1257,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         pg = dist.distributed_c10d._get_default_group()
         pg.allreduce(torch.rand(10).cuda(self.rank))
         self._check_nccl_timeout(timedelta(seconds=123))
-        pg._get_backend(torch.device(f"cuda:{self.rank}"))._reset_nccl_collective_timeout(23000)
+        pg._get_backend(torch.device(f"cuda:{self.rank}"))._set_default_timeout(timedelta(seconds=23))
         self._check_nccl_timeout(timedelta(seconds=23))
         pg.allreduce(torch.rand(10).cuda(self.rank))
 

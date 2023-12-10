@@ -1121,7 +1121,6 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
-            TorchInGraphFunctionVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1230,10 +1229,6 @@ class BuiltinVariable(VariableTracker):
                 return obj.var_getattr(tx, name).clone(source=source)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
-        elif isinstance(obj, TorchInGraphFunctionVariable):
-            member = getattr(obj.value, name)
-            if trace_rules.lookup(member) is not None:
-                return trace_rules.lookup(member)(member, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
             if is_utils_checkpoint(member):
@@ -1461,6 +1456,10 @@ class BuiltinVariable(VariableTracker):
             )
         # None no-ops this handler and lets the driving function proceed
         return None
+
+    def call_format(self, tx, _format_string, *args, **kwargs):
+        format_string = _format_string.as_python_constant()
+        return variables.StringFormatVariable.create(format_string, args, kwargs)
 
     def call_id(self, tx, *args):
         if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
