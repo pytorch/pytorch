@@ -22,6 +22,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Mapping,
     NamedTuple,
     Optional,
     Set,
@@ -234,6 +235,22 @@ class OptimizedModule(torch.nn.Module):
         return orig_mod_attrs + [
             attr for attr in super().__dir__() if attr not in orig_mod_attrs
         ]
+
+    def state_dict(self, *args, **kwargs):
+        return self._orig_mod.state_dict(*args, **kwargs)
+
+    def load_state_dict(
+        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
+    ):
+        # we strip away the '_orig_mod' prefix for backward-compatibility with old checkpoints
+        prefix = "_orig_mod."
+        processed_state_dict = {}
+        for key in state_dict:
+            clean_key = key[len(prefix) :] if key.startswith(prefix) else key
+            processed_state_dict[clean_key] = state_dict[key]
+        return self._orig_mod.load_state_dict(
+            state_dict=processed_state_dict, strict=strict, assign=assign
+        )
 
 
 def remove_from_cache(f):
