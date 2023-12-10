@@ -230,10 +230,6 @@ stable_diffusion_unet,pass,0
 
 
 
-stable_diffusion_unet,infra_error,0
-
-
-
 timm_efficientdet,model_fail_to_load,0
 
 

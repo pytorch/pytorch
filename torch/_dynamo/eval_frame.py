@@ -285,22 +285,19 @@ def _maybe_init_guarded_config_cache():
     if not hasattr(config_cache, "saved_config_and_hash"):
         # Optional[ConfigAndHash]
         config_cache.saved_config_and_hash = None
-        config_cache.nopython = None
 
 
 @contextlib.contextmanager
 def restore_guarded_dynamo_config(
-    first_ctx: bool, saved_config_and_hash: ConfigAndHash, nopython: bool
+    first_ctx: bool, saved_config_and_hash: ConfigAndHash
 ):
     _maybe_init_guarded_config_cache()
     # Set exactly once from top-level compile
     is_top_level = False
     try:
         if first_ctx and config_cache.saved_config_and_hash is None:
-            assert config_cache.nopython is None
             is_top_level = True
             config_cache.saved_config_and_hash = saved_config_and_hash
-            config_cache.nopython = nopython
             log.debug(
                 "Setting top-level compile config hash: %s",
                 saved_config_and_hash.hash.hex(),
@@ -315,7 +312,6 @@ def restore_guarded_dynamo_config(
                 config_cache.saved_config_and_hash.hash.hex(),
             )
             config_cache.saved_config_and_hash = None
-            config_cache.nopython = None
 
 
 def _get_config_and_hash(dynamic=None):
@@ -345,10 +341,10 @@ class _TorchDynamoContext:
         patch_fn=nothing,
         first_ctx=False,
         *,
+        export=False,
         dynamic=None,
         compiler_config=None,
         save_config=True,
-        nopython=False,
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -357,10 +353,10 @@ class _TorchDynamoContext:
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
+        self.export = export
         self.dynamic = dynamic
         self.compiler_config = compiler_config
         self.save_config = save_config and first_ctx
-        self.nopython = nopython
         if self.save_config:
             self.save_and_hash_config()
         patch_fn()
@@ -388,7 +384,7 @@ class _TorchDynamoContext:
         self.backend_ctx.__enter__()
         if self.save_config:
             self.dynamo_config_ctx = restore_guarded_dynamo_config(
-                self.first_ctx, self.saved_config_and_hash, self.nopython
+                self.first_ctx, self.saved_config_and_hash
             )
             self.dynamo_config_ctx.__enter__()
 
@@ -481,7 +477,7 @@ class _TorchDynamoContext:
             backend_ctx.__enter__()
             if self.save_config:
                 dynamo_config_ctx = restore_guarded_dynamo_config(
-                    self.first_ctx, self.saved_config_and_hash, self.nopython
+                    self.first_ctx, self.saved_config_and_hash
                 )
                 dynamo_config_ctx.__enter__()
             try:
@@ -557,10 +553,10 @@ class OptimizeContext(_TorchDynamoContext):
         backend_ctx_ctor,
         first_ctx=False,
         *,
+        export=False,
         dynamic=None,
         save_config=True,
         compiler_config=None,
-        nopython=False,
     ):
         def on_enter():
             install_generation_tagging_init()
@@ -571,10 +567,10 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
+            export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
             save_config=save_config,
-            nopython=nopython,
         )
 
 
@@ -661,19 +657,19 @@ def _optimize_catch_errors(
     compile_fn,
     hooks: Hooks,
     backend_ctx_ctor=null_context,
+    export=False,
     dynamic=None,
     compiler_config=None,
     save_config=True,
-    nopython=False,
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
+        export=export,
         dynamic=dynamic,
         compiler_config=compiler_config,
         save_config=save_config,
-        nopython=nopython,
     )
 
 
@@ -1489,9 +1485,9 @@ def optimize_assert(
         ),
         hooks,
         backend_ctx_ctor,
+        export=export,
         dynamic=dynamic,
         save_config=save_config,
-        nopython=True,
     )
 
 
