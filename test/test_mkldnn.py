@@ -1464,7 +1464,7 @@ class TestMkldnn(TestCase):
 
         params_list = []
         for value in params_dict.values():
-            params_list.append(value)
+            params_list.append(value)  # noqa: PERF402
         return params_list
 
     def _cast_dtype(self, input, bf16):

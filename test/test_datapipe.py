@@ -2928,7 +2928,7 @@ class TestSharding(TestCase):
         dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
         items = []
         for i in dl:
-            items.append(i)
+            items.append(i)  # noqa: PERF402
 
         self.assertEqual(sorted(expected), sorted(items))
 
@@ -2941,7 +2941,7 @@ class TestSharding(TestCase):
         dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
         items = []
         for i in dl:
-            items.append(i)
+            items.append(i)  # noqa: PERF402
 
         self.assertEqual(sorted(expected), sorted(items))
 

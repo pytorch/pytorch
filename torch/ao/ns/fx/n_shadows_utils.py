@@ -544,9 +544,8 @@ def create_one_transformed_and_logged_copy_of_subgraph(
                 if isinstance(old_kwarg, Node):
                     new_kwargs[name] = old_kwarg
                 elif isinstance(old_kwarg, (list, tuple)) and len(old_kwarg):
-                    for inner_old_kwarg in old_kwarg:
-                        # TODO(future PR): clarify why we are adding kwargs to args
-                        new_args.append(inner_old_kwarg)
+                    # TODO(future PR): clarify why we are adding kwargs to args
+                    new_args.extend(old_kwargs)
 
             new_args = tuple(new_args)  # type: ignore[assignment]
 

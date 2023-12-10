@@ -29,8 +29,7 @@ def sink_waits(
                     new_order.append(wait)
                     cur_waits.remove(wait)
             new_order.append(snode)
-    for snode in tuple_sorted(cur_waits):
-        new_order.append(snode)
+    new_order.extend(tuple_sorted(cur_waits))
     return new_order
 
 
@@ -61,8 +60,7 @@ def raise_comms(
                 new_order_reversed.append(comm)
             new_order_reversed.append(snode)
     assert len(cur_comms) <= 1
-    for snode in tuple_sorted(cur_comms):
-        new_order_reversed.append(snode)
+    new_order_reversed.extend(cur_comms)
     return new_order_reversed[::-1]
 
 

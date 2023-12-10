@@ -178,7 +178,7 @@ class TestBaseStructuredSparsifier(TestCase):
             modules = []
             if type(config["module"]) is tuple:
                 for module in config["module"]:
-                    modules.append(module)
+                    modules.append(module)  # noqa: PERF402
             else:
                 module = config["module"]
                 modules.append(module)
@@ -191,7 +191,7 @@ class TestBaseStructuredSparsifier(TestCase):
             modules = []
             if type(config["module"]) is tuple:
                 for module in config["module"]:
-                    modules.append(module)
+                    modules.append(module)  # noqa: PERF402
             else:
                 module = config["module"]
                 modules.append(module)

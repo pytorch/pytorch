@@ -119,7 +119,7 @@ def get_bdim_choices(num_tensors):
     # All permutations of (-1, None)
     options = (-1, None)
     for choice in itertools.product(options, repeat=num_tensors):
-        choices.append(choice)
+        choices.append(choice)  # noqa: PERF402
 
     assert choices[-1] == (None,) * num_tensors
     return tuple(choices[:-1])
