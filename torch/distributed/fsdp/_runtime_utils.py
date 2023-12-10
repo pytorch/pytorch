@@ -1165,8 +1165,9 @@ def _finalize_params(
         return
     flat_param = handle.flat_param
     if hasattr(flat_param, "_post_backward_hook_handle"):
-        flat_param._post_backward_hook_handle.remove()
-        delattr(flat_param, "_post_backward_hook_handle")
+        pbhs_handle = flat_param._post_backward_hook_handle
+        pbhs_handle.remove()
+        del flat_param._post_backward_hook_handle
     if flat_param.requires_grad:
         if not state._sync_gradients:
             # Preserve the gradient accumulation state if not synchronizing
@@ -1461,7 +1462,7 @@ def _register_post_backward_reshard_only_hook(
     hands = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard, state, handle)
     )
-    handle.flat_param._post_backward_hook_handle = hands  # type: ignore[attr-defined, assignment]
+    flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined, assignment]
 
 
 @no_type_check

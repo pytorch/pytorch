@@ -430,7 +430,6 @@ class NNModuleVariable(VariableTracker):
             key=key,
             source_cls=NNModuleSource,
             source=self.source,
-            options=options,
         )
         wrap_values = functools.partial(
             _wrap_values,
@@ -438,7 +437,6 @@ class NNModuleVariable(VariableTracker):
             key=key,
             source_cls=NNModuleSource,
             source=self.source,
-            options=options,
         )
         get_kwargs = functools.partial(
             _get_kwargs, mod=module, name=name, args=args, kwargs=kwargs
@@ -790,7 +788,6 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
         self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         key = self.module_key
-        options = {}
 
         named_embed = functools.partial(
             _named_embed,
@@ -798,7 +795,6 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
             key=key,
             source_cls=FSDPNNModuleSource,
             source=self.source,
-            options=options,
         )
         wrap_values = functools.partial(
             _wrap_values,
@@ -806,7 +802,6 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
             key=key,
             source_cls=FSDPNNModuleSource,
             source=self.source,
-            options=options,
         )
         get_kwargs = functools.partial(
             _get_kwargs, mod=self.value, name=name, args=args, kwargs=kwargs
@@ -821,7 +816,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
             ):
                 result.append(named_embed(name, buffer))
             return variables.ListIteratorVariable(
-                result, mutable_local=MutableLocal(), **options
+                result, mutable_local=MutableLocal()
             )
         elif name == "children":
             assert not (args or kwargs)
@@ -875,7 +870,7 @@ def _get_kwargs(*names, mod, name, args, kwargs, assert_const=True):
 
 # Breaks tx first convention because meant for functools partial usage, post * args should be
 # same for a given VT
-def _wrap_values(items, *, tx, key, source_cls, source, options):
+def _wrap_values(items, *, tx, key, source_cls, source):
     result = []
     for name, submod in items:
         result.append(
@@ -884,26 +879,24 @@ def _wrap_values(items, *, tx, key, source_cls, source, options):
                 key,
                 name,
                 source=source_cls(_gen_source(source, name)),
-                **options,
             )
         )
     return variables.ListIteratorVariable(
-        result, mutable_local=MutableLocal(), **options
+        result, mutable_local=MutableLocal()
     )
 
 
 # Breaks tx first convention because meant for functools partial usage, post * args should be
 # same for a given VT
-def _named_embed(name, obj, *, tx, key, source_cls, source, options):
+def _named_embed(name, obj, *, tx, key, source_cls, source):
     return variables.TupleVariable(
         [
-            variables.ConstantVariable.create(name, **options),
+            variables.ConstantVariable.create(name),
             tx.output.register_attr_or_module(
                 obj,
                 key,
                 name,
                 source=source_cls(_gen_source(source, name)),
-                **options,
             ),
         ]
     )

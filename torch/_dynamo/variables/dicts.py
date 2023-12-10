@@ -87,6 +87,7 @@ class ConstDictVariable(VariableTracker):
         val = self.items
 
         if name == "__getitem__":
+            assert len(args) == 1
             return self.getitem_const(tx, args[0])
 
         elif name == "items":

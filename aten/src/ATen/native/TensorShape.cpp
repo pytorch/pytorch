@@ -382,7 +382,7 @@ bool _data_ptr_allocated(at::Tensor& a) {
 }
 
 bool _same_storage_size(at::Tensor&a, int64_t s) {
-  return a.storage().nbytes() == s;
+  return a.storage().nbytes() == static_cast<size_t>(s);
 }
 
 bool _storage_size_allocated(at::Tensor&a) {
