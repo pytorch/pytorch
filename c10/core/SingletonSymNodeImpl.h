@@ -1,7 +1,11 @@
 #include <c10/core/ConstantSymNodeImpl.h>
-#include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
-#include <iostream>
+#include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <c10/util/intrusive_ptr.h>
+#include <cstdint>
+#include <string>
 
 namespace c10 {
 

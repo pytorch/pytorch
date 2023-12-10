@@ -1,4 +1,9 @@
 #include <c10/core/SymNodeImpl.h>
+#include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <cstdint>
+#include <string>
 #include <variant>
 
 namespace c10 {
