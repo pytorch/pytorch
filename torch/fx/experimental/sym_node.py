@@ -14,7 +14,7 @@ import logging
 import math
 import operator
 import sys
-from functools import lru_cache
+from functools import lru_cache, update_wrapper
 from typing import Optional, Type, TYPE_CHECKING, Union
 
 import torch
@@ -276,6 +276,9 @@ class SymNode:
     def floor(self) -> "SymNode":
         return self._floor()  # type: ignore[attr-defined]
 
+    def is_integer(self) -> "SymNode":
+        return self._is_integer()  # type: ignore[attr-defined]
+
     def sym_float(self) -> "SymNode":  # noqa: F811
         return self._sym_float()  # type: ignore[attr-defined]
 
@@ -414,6 +417,7 @@ METHOD_TO_OPERATOR = {
     "floordiv": operator.floordiv,
     "ge": operator.ge,
     "gt": operator.gt,
+    "is_integer": lambda x: x.is_integer(),
     "le": operator.le,
     "lshift": operator.lshift,
     "lt": operator.lt,
@@ -472,12 +476,24 @@ for name in math_op_names:
     __all__.append(sym_name)
 
 
+# Unary methods that are not magic methods
+unary_nonmagic_methods = {
+    "is_integer",
+}
+
+unary_methods = unary_magic_methods | unary_nonmagic_methods
+
 # Most methods are only registered on SymInt and SymFloat
 # Some methods are only be registered on SymBool
 only_bool_magic_methods = {"and", "or", "sym_not", "sym_ite"}
+# Methods that implicitly convert SymBool into SymInt
+bool_becomes_int_magic_methods = {"add", "sub", "mul"}
 # Methods that are also on SymBool, in addition to on SymInt and SymFloat
 also_bool_magic_methods = {"eq"}
 bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
+
+# Methods that are only for float
+only_float_magic_methods = {"is_integer"}
 
 
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
@@ -502,6 +518,7 @@ always_bool_magic_methods = {
     "or",
     "sym_not",
     "is_non_overlapping_and_dense",
+    "is_integer",
 }
 
 # Methods that have a `__foo__` as well as `__rfoo__`
@@ -691,6 +708,12 @@ def _sympy_sym_float(a):
     return a * 1.0
 
 
+def _sympy_is_integer(a):
+    import sympy
+
+    return sympy.Eq(sympy.floor(a), a)
+
+
 magic_methods = {
     **reflectable_magic_methods,
     "sym_not": lambda a: ~a,
@@ -709,6 +732,7 @@ magic_methods = {
     "sym_ite": _sympy_ite,
     "sym_sqrt": _sympy_sqrt,
     "abs": _sympy_abs,
+    "is_integer": _sympy_is_integer,
 }
 
 
@@ -944,6 +968,8 @@ def _make_node_magic(method, func):
         pytype: Type
         if method in always_int_magic_methods:
             pytype = int
+        elif method in always_bool_magic_methods:
+            pytype = bool
         elif method in always_float_magic_methods:
             pytype = float
         else:
@@ -952,7 +978,7 @@ def _make_node_magic(method, func):
         fx_node, _ = self.shape_env.create_fx_call_function(op, (self.fx_node,))
         return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
-    if method in unary_magic_methods:
+    if method in unary_methods:
         setattr(SymNode, f"_{method_attr}", unary_magic_impl)
     elif method == "sym_ite":
 
@@ -1111,6 +1137,19 @@ def _make_user_magic(method, user_type):
             return x.node.is_constant()
         return False
 
+    if method in bool_becomes_int_magic_methods:
+
+        def promote(x):
+            """Implements True+True=2, which works in python but not sympy"""
+            if isinstance(x, SymBool):
+                return SymInt(x.node.wrap_int(int(x)))
+            return x
+
+    else:
+
+        def promote(x):
+            return x
+
     # Before and after performing the operation, check if any operands are constant.
     # If so, extract out the constant values first. If `self` itself is a
     # constant, then "redispatch" by calling back into the operator. Sometimes
@@ -1119,11 +1158,14 @@ def _make_user_magic(method, user_type):
     # implementing wrap_bool in ConstantSymNodeImpl), but we're not doing that
     # today for no particular reason.
     def unary_magic_impl(self):
+        self = promote(self)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self))
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        self = promote(self)
+        other = promote(other)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self), other)
         if is_constant(other):
@@ -1135,6 +1177,8 @@ def _make_user_magic(method, user_type):
         return get_constant(ret) if is_constant(ret) else ret
 
     def rbinary_magic_impl(self, other):
+        self = promote(self)
+        other = promote(other)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self), other)
         if is_constant(other):
@@ -1147,6 +1191,9 @@ def _make_user_magic(method, user_type):
 
     if method in unary_magic_methods:
         setattr(user_type, f"__{method}__", unary_magic_impl)
+    elif method in unary_nonmagic_methods:
+        orig = getattr(user_type, method)
+        setattr(user_type, method, update_wrapper(unary_magic_impl, orig))
     elif method == "sym_ite":
 
         def sym_ite_magic_impl(pred, then_val, else_val):
@@ -1174,7 +1221,10 @@ for method, func in magic_methods.items():  # type: ignore[assignment]
     if method in only_bool_magic_methods:
         _make_user_magic(method, SymBool)
         continue
-    if method in also_bool_magic_methods:
+    if method in only_float_magic_methods:
+        _make_user_magic(method, SymFloat)
+        continue
+    if method in also_bool_magic_methods or method in bool_becomes_int_magic_methods:
         _make_user_magic(method, SymBool)
     _make_user_magic(method, SymInt)
     _make_user_magic(method, SymFloat)

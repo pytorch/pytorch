@@ -1,11 +1,11 @@
 import functools
 import warnings
-from typing import Callable, Tuple, Optional, Union
+from typing import Callable, Optional, Tuple, Union
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import Placement
+from torch.distributed.device_mesh import _mesh_resources
 try:
     from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
 except Exception:

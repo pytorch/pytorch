@@ -428,6 +428,7 @@ def meta__cslt_sparse_mm(
     compressed_A: torch.Tensor,
     dense_B: torch.Tensor,
     bias: Optional[Tensor] = None,
+    alpha: Optional[Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
     transpose_result: bool = False,
 ):
@@ -447,13 +448,12 @@ def meta__cslt_sparse_mm(
     if bias is not None:
         assert m == bias.size(0)
 
-    mixed_dtype = out_dtype is not None and (is_int8_input_type != out_dtype)
-    if mixed_dtype:
+    if out_dtype is not None:
         assert (
-            is_int8_input_type and mixed_dtype is torch.float16
+            is_int8_input_type and out_dtype == torch.float16
         ), "out_dtype is only supported for i8i8->fp16 matmul"
     output_shape = (n, m) if transpose_result else (m, n)
-    result = dense_B.new_empty(output_shape, dtype=out_dtype if mixed_dtype else None)
+    result = dense_B.new_empty(output_shape, dtype=out_dtype)
     return result
 
 
@@ -5294,6 +5294,93 @@ def meta__scaled_dot_product_efficient_backward(
         grad_bias = grad_bias[..., :lastDim]
 
     return grad_q, grad_k, grad_v, grad_bias
+
+
+@register_meta(
+    [
+        aten._flash_attention_forward,
+    ]
+)
+def meta__flash_attention_forward(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    cum_seq_q: Optional[Tensor],
+    cum_seq_k: Optional[Tensor],
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    return_debug_mask: bool,
+    scale: Optional[float] = None,
+):
+    batch_size = query.size(0)
+    max_seqlen_batch_q = query.size(1)
+    num_heads = query.size(2)
+    head_dim = query.size(3)
+
+    max_seqlen_batch_k = key.size(1)
+
+    # Cuda Path
+    attention = torch.empty_like(query)
+    logsumexp = torch.empty(
+        (batch_size, num_heads, max_seqlen_batch_q),
+        dtype=torch.float,
+        device=query.device,
+    )
+
+    if return_debug_mask:
+        blocksize_c = 128 if head_dim > 64 else 256
+        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
+        if max_seqlen_batch_k <= 128:
+            max_seqlen_k = 128
+        elif max_seqlen_batch_k <= 256:
+            max_seqlen_k = 256
+        debug_mask = torch.empty(
+            (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_k),
+            dtype=query.dtype,
+            device=query.device,
+        )
+    else:
+        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+
+    # See Note [Seed and Offset]:
+    return (
+        attention,
+        logsumexp,
+        torch.empty((), dtype=torch.long, device="meta"),
+        torch.empty((), dtype=torch.long, device="meta"),
+        debug_mask,
+    )
+
+
+@register_meta(
+    [
+        aten._flash_attention_backward,
+    ]
+)
+def meta__flash_attention_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    cum_seq_q: Tensor,
+    cum_seq_k: Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
+    scale: Optional[float] = None,
+):
+    grad_query = torch.empty_like(query)
+    grad_key = torch.empty_like(key)
+    grad_value = torch.empty_like(value)
+
+    return grad_query, grad_key, grad_value
 
 
 @register_meta(

@@ -467,7 +467,7 @@ class ExportedProgram:
         ]
 
         state_dict = self.state_dict.copy()
-        lift_constant_tensor_pass(gm, new_graph_signature, state_dict)
+        lift_constant_tensor_pass(gm, new_graph_signature)
         _replace_sym_size_ops_pass(gm)
         exported_program = ExportedProgram(
             gm,

@@ -7,7 +7,7 @@ import torch
 
 from .allowed_functions import _disallowed_function_ids, is_user_defined_allowed
 
-from .utils import hashable
+from .utils import hashable, is_function
 
 from .variables import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 
@@ -2786,7 +2786,10 @@ def lookup(obj):
         return None
     if is_user_defined_allowed(obj):
         return TorchInGraphFunctionVariable
-    if hasattr(obj, "__wrapped__"):
+    # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
+    if isinstance(obj, functools._lru_cache_wrapper) or (
+        is_function(obj) and hasattr(obj, "__wrapped__")
+    ):
         # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass.
         if not (
             hasattr(obj, "__qualname__")
