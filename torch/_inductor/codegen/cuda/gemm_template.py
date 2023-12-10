@@ -670,8 +670,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         all_match = all(
             CUTLASSGemmTemplate.layout_match(buf.get_layout(), op_layout)
             for buf, op_layout in zip(
-                [X, W, Bias, Y],
-                [op.A.layout, op.B.layout, op.C.layout, op.D.layout],
+                (X, W, Bias, Y),
+                (op.A.layout, op.B.layout, op.C.layout, op.D.layout),
             )
             if buf is not None
         )
