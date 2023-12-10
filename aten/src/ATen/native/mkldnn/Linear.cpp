@@ -72,7 +72,10 @@ Tensor mkldnn_linear(
       "mkldnn_linear: input needs to be mkldnn layout");
   if (self.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_linear: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "mkldnn_linear: bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq");
+  } else if (self.scalar_type() == ScalarType::Half) {
+    TORCH_CHECK(mkldnn_fp16_device_check(),
+        "mkldnn_linear: fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
   }
 
   // reshape first if input dim != 2 and the reshape will cost a memory copy.
@@ -186,6 +189,9 @@ static Tensor mkldnn_linear_pointwise(
     c10::optional<c10::string_view> algorithm) {
   auto input = input_t.contiguous();
   auto input_size = input.sizes();
+
+  // Make sure input has default contiguous strides if it's contiguous tensors for better performance.
+  input = may_convert_to_default_contiguous_strides(input);
 
   const int64_t dim = input.dim();
   auto input_reshaped =

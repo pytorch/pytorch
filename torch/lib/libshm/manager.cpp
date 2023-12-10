@@ -54,9 +54,19 @@ void unregister_fd(int fd) {
   client_sessions.erase(fd);
 }
 
-void print_init_message(const char* message) {
-  write(1, message, strlen(message));
-  write(1, "\n", 1);
+void print_init_message(std::string_view message) {
+  ssize_t written_bytes = -1;
+  while (!message.empty()) {
+    // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
+    SYSCHECK_ERR_RETURN_NEG1(
+        written_bytes = write(1, message.data(), message.size()));
+    message.remove_prefix(written_bytes);
+  }
+  written_bytes = 0;
+  while (written_bytes != 1) {
+    // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
+    SYSCHECK_ERR_RETURN_NEG1(written_bytes = write(1, "\n", 1));
+  }
 }
 
 bool object_exists(const char* name) {
@@ -83,7 +93,7 @@ int main(int argc, char* argv[]) {
   setsid(); // Daemonize the process
 
   std::unique_ptr<ManagerServerSocket> srv_socket;
-  c10::optional<c10::TempDir> tempdir;
+  std::optional<c10::TempDir> tempdir;
   try {
     tempdir = c10::try_make_tempdir(/*name_prefix=*/"torch-shm-dir-");
     if (!tempdir.has_value()) {
@@ -111,10 +121,10 @@ int main(int argc, char* argv[]) {
   std::vector<int> to_add;
   std::vector<int> to_remove;
   for (;;) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int nevents;
+    int nevents = -1;
     if (client_sessions.empty())
       timeout = SHUTDOWN_TIMEOUT;
+    // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
     SYSCHECK_ERR_RETURN_NEG1(
         nevents = poll(pollfds.data(), pollfds.size(), timeout));
     timeout = -1;

@@ -149,7 +149,7 @@ struct C10_API TensorOptions {
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
   template <
       typename T,
-      typename = std::enable_if_t<std::is_same<std::decay_t<T>, Device>::value>>
+      typename = std::enable_if_t<std::is_same_v<std::decay_t<T>, Device>>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -164,8 +164,7 @@ struct C10_API TensorOptions {
   ///     constructors too.
   template <
       typename... Args,
-      typename =
-          std::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
+      typename = std::enable_if_t<std::is_constructible_v<Device, Args&&...>>>
   /* implicit */ TensorOptions(Args&&... args)
       : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
@@ -199,7 +198,7 @@ struct C10_API TensorOptions {
   template <typename... Args>
   C10_NODISCARD TensorOptions device(Args&&... args) const noexcept {
     return device(
-        c10::optional<Device>(c10::in_place, std::forward<Args>(args)...));
+        c10::optional<Device>(std::in_place, std::forward<Args>(args)...));
   }
 
   /// Return a copy of `TensorOptions`, but with device set to CUDA, and the
@@ -625,6 +624,7 @@ inline DispatchKey computeDispatchKey(
   const auto layout_ = layout_or_default(layout);
   const auto device_ = device_or_default(device);
   switch (layout_) {
+    case Layout::Jagged:
     case Layout::Strided: {
       const auto dtype_ = dtype_or_default(dtype);
       switch (device_.type()) {

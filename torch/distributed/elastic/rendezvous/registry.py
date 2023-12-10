@@ -47,12 +47,13 @@ def _register_default_handlers() -> None:
 
 def get_rendezvous_handler(params: RendezvousParameters) -> RendezvousHandler:
     """
-    This method is used to obtain a reference to a :py:class`RendezvousHandler`.
+    Obtain a reference to a :py:class`RendezvousHandler`.
+
     Custom rendezvous handlers can be registered by
 
     ::
 
-      from torch.distributed.elastid.rendezvous import rendezvous_handler_registry
+      from torch.distributed.elastic.rendezvous import rendezvous_handler_registry
       from torch.distributed.elastic.rendezvous.registry import get_rendezvous_handler
 
       def create_my_rdzv(params: RendezvousParameters):

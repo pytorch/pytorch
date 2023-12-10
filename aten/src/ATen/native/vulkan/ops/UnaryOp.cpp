@@ -117,6 +117,14 @@ Tensor& sqrt_(Tensor& self_arg) {
   return unary_op_(self_arg, VK_KERNEL(sqrt_));
 }
 
+Tensor log(const Tensor& self_arg) {
+  return unary_op(self_arg, VK_KERNEL(log));
+}
+
+Tensor& log_(Tensor& self_arg) {
+  return unary_op_(self_arg, VK_KERNEL(log_));
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
@@ -124,6 +132,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::exp_"), TORCH_FN(exp_));
   m.impl(TORCH_SELECTIVE_NAME("aten::sqrt"), TORCH_FN(sqrt));
   m.impl(TORCH_SELECTIVE_NAME("aten::sqrt_"), TORCH_FN(sqrt_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::log"), TORCH_FN(log));
+  m.impl(TORCH_SELECTIVE_NAME("aten::log_"), TORCH_FN(log_));
 }
 
 #endif /* USE_VULKAN_API */

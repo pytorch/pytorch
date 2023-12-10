@@ -83,6 +83,7 @@ Features described in this documentation are classified by release status:
    torch.func <func>
    futures
    fx
+   holistic_trace_analysis
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
@@ -93,8 +94,8 @@ Features described in this documentation are classified by release status:
    torch.package <package>
    profiler
    nn.init
+   nn.attention.bias
    onnx
-   onnx_diagnostics
    optim
    complex_numbers
    ddp_comm_hooks
@@ -113,6 +114,7 @@ Features described in this documentation are classified by release status:
    torch.utils.checkpoint <checkpoint>
    torch.utils.cpp_extension <cpp_extension>
    torch.utils.data <data>
+   torch.utils.deterministic <deterministic>
    torch.utils.jit <jit_utils>
    torch.utils.dlpack <dlpack>
    torch.utils.mobile_optimizer <mobile_optimizer>

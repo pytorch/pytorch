@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <cstddef>
 #include <limits>
@@ -28,7 +27,7 @@ struct FunctionalGraphSlicer {
     // subgraphs, invalidating the AliasDb, so we need to do our analysis
     // first.
     for (size_t i = 0; i < MAX_NUM_ITERATIONS && changed; ++i) {
-      aliasDb_ = torch::make_unique<AliasDb>(graph_);
+      aliasDb_ = std::make_unique<AliasDb>(graph_);
       AnalyzeFunctionalSubset(graph_->block());
       changed = CreateFunctionalGraphsImpl(graph_->block());
     }

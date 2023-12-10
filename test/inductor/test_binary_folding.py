@@ -8,6 +8,7 @@ import unittest
 
 import torch
 from torch import nn
+from torch._inductor import config as inductor_config
 from torch.testing._internal.common_cuda import TEST_CUDNN
 
 # Make the helper files in test/ importable
@@ -15,6 +16,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
+from torch.testing._internal.inductor_utils import skipCUDAIf
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -36,7 +38,7 @@ aten = torch.ops.aten
 
 
 class BinaryFoldingTemplate(TestCase):
-    @unittest.skipIf(TEST_CUDNN, "CUDNN has accuracy issues for this test")
+    @skipCUDAIf(TEST_CUDNN, "CUDNN has accuracy issues for this test")
     def test_conv_binary_folding(self):
         @torch.no_grad()
         def test_conv_fusion(use_bias, module, op, scalar, add_tensor, expect_success):
@@ -158,6 +160,7 @@ class BinaryFoldingTemplate(TestCase):
                 expect_success=False,
             )
 
+    @inductor_config.patch({"freezing": True})
     def test_conv_bn_folding(self):
         @torch.no_grad()
         def test_conv_fusion(use_bias, module, expect_success):

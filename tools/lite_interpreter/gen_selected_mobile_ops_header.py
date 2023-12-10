@@ -149,7 +149,7 @@ def main() -> None:
         "--yaml_file_path",
         type=str,
         required=True,
-        help="Path to the yaml" " file with a list of operators used by the model.",
+        help="Path to the yaml file with a list of operators used by the model.",
     )
     parser.add_argument(
         "-o",

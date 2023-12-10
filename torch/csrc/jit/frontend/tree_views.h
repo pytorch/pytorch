@@ -907,7 +907,7 @@ struct Const : public Expr {
   int64_t asIntegral() const {
     try {
       // NOLINTNEXTLINE(modernize-use-nullptr)
-      return c10::stoll(subtree(0)->stringValue(), /*__idx=*/0, /*base=*/0);
+      return std::stoll(subtree(0)->stringValue(), /*__idx=*/0, /*base=*/0);
     } catch (const std::out_of_range&) {
       throw ErrorReport(range()) << "Integral constant out of range "
                                     "(must fit in a signed 64 bit integer)";
@@ -1207,6 +1207,61 @@ struct Delete : public Stmt {
     return Delete(Compound::create(TK_DELETE, range, {targets}));
   }
 };
+
+/*
+ * NOTE: transforming PEP 604 union into equivalent union type
+ *
+ * NOTE: Union[int, float] parses into:
+ * <EXPR> expr:(subscript
+ *  (variable (ident Union))
+ *  (list
+ *    (variable (ident int))
+ *    (variable (ident float))))
+ * <KIND> subscript
+ *
+ * NOTE: (int | float) parses into:
+ * <EXPR> expr:(|
+ *  (variable (ident int))
+ *  (variable (ident float)))
+ * <KIND> |
+ */
+
+inline void _flatten_pep604_union(
+    const torch::jit::Expr& node,
+    std::vector<torch::jit::Expr>* result) {
+  // flatten possibly nested union expressions like (int | (float | str))
+  // into a flat list of expressions like [int, float, str]
+  if (node.kind() == '|') {
+    auto as_binop = torch::jit::BinOp(node);
+    _flatten_pep604_union(as_binop.lhs(), result);
+    _flatten_pep604_union(as_binop.rhs(), result);
+  } else {
+    result->push_back(node);
+  }
+}
+
+inline std::vector<Expr> get_pep604_union_members(const Expr& node) {
+  std::vector<Expr> result;
+  _flatten_pep604_union(node, &result);
+  return result;
+}
+
+// Flattens a PEP 604 union into a classical union.
+// For example, ((x | y) | z) is transformed into Union[x, y, z].
+inline Expr pep604union_to_union(const Expr& expr) {
+  // noop if not a pep604 union
+  if (expr.kind() != '|')
+    return expr;
+
+  // In order to support unions with more than 2 operands ((x|y)|z), we need to
+  // recursively flatten the tree of | expressions.
+  auto members = get_pep604_union_members(expr);
+  auto synthesised_union = Subscript::create(
+      expr.range(),
+      Var::create(expr.range(), Ident::create(expr.range(), "Union")),
+      List<Expr>::create(expr.range(), members));
+  return std::move(synthesised_union);
+}
 
 } // namespace jit
 } // namespace torch

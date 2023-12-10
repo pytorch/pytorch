@@ -1,4 +1,4 @@
-"""Dtypes/scalar type implementtaions with torch dtypes.
+"""Dtypes/scalar type implementaions with torch dtypes.
 
 Here `dtype` is always a torch.dtype, this module knows nothing about
 scalar types, wrapper dtypes or anything like that. PyTorch only.
@@ -80,38 +80,87 @@ def python_type_for_torch(dtyp):
 
 # ### NEP 50 helpers ###
 
-SCALAR_TYPES = {int, bool, float, complex}
+_SCALAR_TYPES = (int, bool, float, complex)
+
+_SCALAR_AND_SYMBOLIC_TYPES = (
+    *_SCALAR_TYPES,
+    torch.SymInt,
+    torch.SymFloat,
+    torch.SymBool,
+)
+
+_NEP50_FUNCS_TENSOR_ONLY = (
+    "minimum",
+    "maximum",
+    "logaddexp",
+    "logaddexp2",
+    "lcm",
+    "gcd",
+    "hypot",
+    "heaviside",
+    "fmod",
+    "fmin",
+    "fmax",
+    "copysign",
+    "arctan2",
+)
+
+
+def is_scalar(x):
+    return isinstance(x, _SCALAR_TYPES)
+
+
+def is_scalar_or_symbolic(x):
+    return isinstance(x, _SCALAR_AND_SYMBOLIC_TYPES)
 
 
 def _dtype_for_scalar(py_type):
     return {
         bool: torch.bool,
+        torch.SymBool: torch.bool,
         int: torch.int64,
+        torch.SymInt: torch.int64,
         float: torch.float64,
+        torch.SymFloat: torch.float64,
         complex: torch.complex128,
     }[py_type]
+
+
+def _dtype_for_scalar_or_tensor(x):
+    return x.dtype if isinstance(x, torch.Tensor) else _dtype_for_scalar(type(x))
+
+
+def is_float_or_fp_tensor(x):
+    return _dtype_for_scalar_or_tensor(x).is_floating_point
+
+
+def is_complex_or_complex_tensor(x):
+    return _dtype_for_scalar_or_tensor(x).is_complex
 
 
 def _category(dtype):
     return {
         torch.bool: 0,
+        torch.SymBool: 0,
         # int
         torch.uint8: 1,
         torch.int8: 1,
         torch.int16: 1,
         torch.int32: 1,
         torch.int64: 1,
+        torch.SymInt: 1,
         # float
         torch.float16: 2,
         torch.float32: 2,
         torch.float64: 2,
+        torch.SymFloat: 2,
         # complex
         torch.complex64: 3,
         torch.complex128: 3,
     }[dtype]
 
 
-def nep50_to_tensors(x1, x2, handle_weaks):
+def nep50_to_tensors(x1, x2, handle_weaks, function_name):
     """If either of inputs is a python scalar, type-promote with NEP 50."""
 
     def to_tensor(scalar, dtype=None):
@@ -158,8 +207,8 @@ def nep50_to_tensors(x1, x2, handle_weaks):
             raise OverflowError(
                 f"Python integer {weak} out of bounds for {not_weak.dtype}"
             )
-
-    # finally, can make `weak` into a 0D tensor
-    weak = to_tensor(weak, dt)
+    if weak_dtype != dt or function_name in _NEP50_FUNCS_TENSOR_ONLY:
+        # finally, can make `weak` into a 0D tensor, if both parameters are required to be tensor.
+        weak = to_tensor(weak, dt)
 
     return (weak, not_weak) if x1_is_weak else (not_weak, weak)

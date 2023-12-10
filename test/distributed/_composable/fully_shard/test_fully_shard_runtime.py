@@ -14,7 +14,7 @@ import torch.nn as nn
 from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, ShardingStrategy
 from torch.distributed.fsdp._common_utils import _FSDPState
-from torch.distributed.fsdp.flat_param import FlatParamHandle
+from torch.distributed.fsdp._flat_param import FlatParamHandle
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,

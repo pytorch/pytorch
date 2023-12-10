@@ -5,10 +5,10 @@ from pathlib import Path
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import export
 
 from torch._export.db.case import ExportCase, normalize_inputs
 from torch._export.db.examples import all_examples
+from torch.export import export
 
 
 PWD = Path(__file__).absolute().parent
@@ -73,7 +73,7 @@ Result:
             model,
             inputs.args,
             inputs.kwargs,
-            constraints=example_case.constraints,
+            dynamic_shapes=example_case.dynamic_shapes,
         )
         graph_output = str(exported_program)
         graph_output = re.sub(r"        # File(.|\n)*?\n", "", graph_output)
@@ -81,6 +81,10 @@ Result:
         output = f"    {graph_output}"
     except torchdynamo.exc.Unsupported as e:
         output = "    Unsupported: " + str(e).split("\n")[0]
+    except AssertionError as e:
+        output = "    AssertionError: " + str(e).split("\n")[0]
+    except RuntimeError as e:
+        output = "    RuntimeError: " + str(e).split("\n")[0]
 
     doc_contents += output + "\n"
 
@@ -119,7 +123,9 @@ def generate_index_rst(example_cases, tag_to_modules, support_level_to_modules):
         blurb = file.read()
 
     # Generate contents of the .rst file
-    doc_contents = f"""ExportDB
+    doc_contents = f""".. _torch.export_db:
+
+ExportDB
 ========
 
 {blurb}

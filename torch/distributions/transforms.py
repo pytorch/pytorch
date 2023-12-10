@@ -564,7 +564,6 @@ class PowerTransform(Transform):
     domain = constraints.positive
     codomain = constraints.positive
     bijective = True
-    sign = +1
 
     def __init__(self, exponent, cache_size=0):
         super().__init__(cache_size=cache_size)
@@ -574,6 +573,10 @@ class PowerTransform(Transform):
         if self._cache_size == cache_size:
             return self
         return PowerTransform(self.exponent, cache_size=cache_size)
+
+    @lazy_property
+    def sign(self):
+        return self.exponent.sign()
 
     def __eq__(self, other):
         if not isinstance(other, PowerTransform):

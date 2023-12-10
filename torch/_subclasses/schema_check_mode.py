@@ -5,8 +5,9 @@ from itertools import combinations
 import torch
 from torch.fx.operator_schemas import normalize_function
 from torch.testing._internal.jit_utils import clone_inputs
+from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_map
 
 # Named Tuples used within SchemaCheckMode
 Mutation = namedtuple("Mutation", ["op_name", "arg_name"])
@@ -42,6 +43,14 @@ class SchemaCheckMode(TorchDispatchMode):
         print(*self.ops, sep=",")
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        def bitwise_equal(lhs, rhs):
+            if lhs.is_quantized:
+                # TODO: This is only OK if can't have NaN quantized; idk if
+                # this is actually true
+                return torch.equal(lhs, rhs)
+            else:
+                return torch.allclose(lhs, rhs, equal_nan=True)
+
         def has_mutated(before, after, md):
             are_tensors = type(before) == torch.Tensor and type(after) == torch.Tensor
             if (
@@ -51,7 +60,7 @@ class SchemaCheckMode(TorchDispatchMode):
             ):
                 return not (
                     before.size() == after.size()
-                    and torch.allclose(before, after, equal_nan=True)
+                    and bitwise_equal(before, after)
                     and md[0] == after.stride()
                     and md[1] == after._typed_storage()._cdata
                 )
@@ -105,7 +114,9 @@ class SchemaCheckMode(TorchDispatchMode):
             name: tree_map(unwrap, c_p_args.get(name)) for name in c_p_args
         }
         cloned_metadata = {
-            name: tree_map(parse_metadata, tree_flatten(pre_arguments.get(name))[0])
+            name: [
+                parse_metadata(a) for a in pytree.tree_leaves(pre_arguments.get(name))
+            ]
             for name in pre_arguments
         }
 
@@ -161,7 +172,7 @@ However, we found that `outputs[{str(j)}] is {name}"""
                 if any(
                     has_mutated(a, b, c)
                     for a, b, c in zip(
-                        tree_flatten(before)[0], tree_flatten(after)[0], md
+                        pytree.tree_leaves(before), pytree.tree_leaves(after), md
                     )
                 ):
                     if not schema_info.is_mutable(

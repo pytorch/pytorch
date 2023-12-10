@@ -29,7 +29,8 @@ from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_CUDA, TEST_CUDA_GRAPH, TEST_WITH_ROCM, TEST_NUMPY, \
     get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
-from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, _create_scaling_case, _create_scaling_models_optimizers
+from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
+    _create_scaling_case, _create_scaling_models_optimizers, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 from torch.utils.viz._cycles import observe_tensor_cycles
 
@@ -75,6 +76,28 @@ class TestCuda(TestCase):
     def tearDown(self):
         del self.autocast_lists
         super().tearDown()
+
+    def test_pinned_memory_with_cudaregister(self):
+        torch.cuda.memory._set_allocator_settings("pinned_use_cuda_host_register:True,pinned_num_register_threads:8")
+        t = torch.ones(20)
+        self.assertFalse(t.is_pinned())
+        try:
+            pinned_t = torch.ones(1 << 21).pin_memory()
+            self.assertTrue(pinned_t.is_pinned())
+            pinned_t = torch.ones(1 << 24).pin_memory()
+            self.assertTrue(pinned_t.is_pinned())
+        except RuntimeError as e:
+            # Some GPUs don't support same address space on host and device side
+            pass
+
+    def test_pinned_memory_with_cudaregister_multithread(self):
+        num_threads = 4
+        threads = [threading.Thread(target=self.test_pinned_memory_with_cudaregister)
+                   for t in range(num_threads)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
     def test_cudart_register(self):
         t = torch.ones(20)
@@ -274,6 +297,7 @@ class TestCuda(TestCase):
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "temporarily disabled for async")
+    @unittest.skipIf(_get_torch_cuda_version() >= (12, 2), "skipped as explicit workspace allocation is removed")
     def test_cublas_workspace_explicit_allocation(self):
         a = torch.randn(7, 7, device='cuda', requires_grad=False)
         default_workspace_size = 4096 * 2 * 1024 + 16 * 8 * 1024  # :4096:2:16:8
@@ -856,7 +880,7 @@ except RuntimeError as e:
             @staticmethod
             def backward(ctx, grad):
                 self.assertEqual(torch.cuda.current_stream(), ctx.stream)
-                # delays the operation in the the background stream
+                # delays the operation in the background stream
                 torch.cuda._sleep(1000 * 5000)
                 return grad * ctx.val, None
 
@@ -2140,7 +2164,7 @@ torch.cuda.synchronize()
     def test_graph_is_current_stream_capturing(self):
         self.assertFalse(torch.cuda.is_current_stream_capturing())
 
-        if (TEST_CUDA and (not TEST_WITH_ROCM) and int(torch.version.cuda.split(".")[0]) >= 11):
+        if TEST_CUDA and (not TEST_WITH_ROCM):
             s = torch.cuda.Stream()
             with torch.cuda.stream(s):
                 g = torch.cuda.CUDAGraph()
@@ -2167,6 +2191,41 @@ torch.cuda.synchronize()
         g.replay()
 
         self.assertTrue(b.sum().item() == 11000.)
+
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    def test_graph_capture_reset_recapture(self):
+        s = torch.cuda.Stream()
+
+        with torch.cuda.stream(s):
+            a = torch.full((1000,), 1, device="cuda")
+            g = torch.cuda.CUDAGraph()
+            torch.cuda.empty_cache()
+            g.capture_begin()
+            b = a
+            for _ in range(10):
+                b = b + 1
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        g.replay()
+
+        self.assertTrue(b.sum().item() == 11000.)
+
+        g.reset()
+
+        with torch.cuda.stream(s):
+            g.capture_begin()
+            b.fill_(2.0)
+            for _ in range(10):
+                b = b + 2
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        g.replay()
+        self.assertTrue(b.sum().item() == 22000.)
+
+        g.reset()
+        del g
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_error(self):
@@ -3060,7 +3119,11 @@ exit(2)
         ] + [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
+        ] + [
+            (torch.optim.ASGD, {"lr": 0.1, "foreach": True, "maximize": maximize, "weight_decay": weight_decay})
+            for maximize, weight_decay in product((False, True), (0.0, 0.1))
         ]
+
 
         for optimizer_ctor, kwargs in cases:
             with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
@@ -3619,6 +3682,13 @@ class TestCudaMallocAsync(TestCase):
             # not supported with the cudaMallocAsync backend
             self.assertTrue(pow2_div2_mem - start_mem == power2_div(nbytes_big, 2))
 
+        torch.cuda.memory.empty_cache()
+        torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:True")
+        start_mem = torch.cuda.memory_stats()[key_allocated]
+        w = torch.rand(nelems, device='cuda')
+        reg_mem = torch.cuda.memory_stats()[key_allocated]
+        self.assertTrue(reg_mem - start_mem == nbytes)
+
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
 
@@ -3627,6 +3697,18 @@ class TestCudaMallocAsync(TestCase):
 
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("max_split_size_mb:2")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:none")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("pinned_use_cuda_host_register:none")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:none")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:1024")
 
 
     def test_raises_oom(self):

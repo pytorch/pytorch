@@ -269,13 +269,16 @@ class Invocation:
 
 @dataclasses.dataclass
 class DiagnosticOptions:
-    """
-    Options for diagnostic context.
+    """Options for diagnostic context.
+
+    Attributes:
+        verbosity_level: Set the amount of information logged for each diagnostics,
+            equivalent to the 'level' in Python logging module.
+        warnings_as_errors: When True, warning diagnostics are treated as error diagnostics.
     """
 
     verbosity_level: int = dataclasses.field(default=logging.INFO)
-    """Diagnostic context verbosity level, equivalent to the 'level' in Python logging module.
-    Controls the amount of information logged inside each diagnostics."""
+    """Set the amount of information logged for each diagnostics, equivalent to the 'level' in Python logging module."""
 
     warnings_as_errors: bool = dataclasses.field(default=False)
     """If True, warning diagnostics are treated as error diagnostics."""

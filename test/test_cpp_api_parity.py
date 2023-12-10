@@ -56,4 +56,5 @@ if not common.IS_ARM64:
     functional_impl_check.build_cpp_tests(TestCppApiParity, print_cpp_source=PRINT_CPP_SOURCE)
 
 if __name__ == "__main__":
+    common.TestCase._default_dtype_check_enabled = True
     common.run_tests()

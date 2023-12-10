@@ -474,7 +474,7 @@ class TestShapeInference(test_util.TestCase):
         model = model_helper.ModelHelper(name="test_model")
 
         types = [
-            ('bool', np.bool, caffe2_pb2.TensorProto.BOOL),
+            ('bool', bool, caffe2_pb2.TensorProto.BOOL),
             #('byte', None, caffe2_pb2.TensorProto.BYTE),
             ('int8', np.int8, caffe2_pb2.TensorProto.INT8),
             ('uint8', np.uint8, caffe2_pb2.TensorProto.UINT8),

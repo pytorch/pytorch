@@ -34,7 +34,7 @@ TEST(LeftRightTest, givenVector_whenWritingReturnsValue_thenValueIsReturned) {
   LeftRight<vector<int>> obj;
 
   auto a = obj.write([](vector<int>&) -> int { return 5; });
-  static_assert(std::is_same<int, decltype(a)>::value, "");
+  static_assert(std::is_same<int, decltype(a)>::value);
   EXPECT_EQ(5, a);
 }
 

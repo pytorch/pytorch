@@ -87,7 +87,7 @@ class TestDataParallel(TestCase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_lazy_linear(self):
 
-        with self.assertRaisesRegex(RuntimeError, 'Modules with uninitialized parameters'):
+        with self.assertRaisesRegex(ValueError, 'Attempted to use an uninitialized parameter'):
             model_dp = torch.nn.DataParallel(torch.nn.LazyLinear(10).to(0))
             model_dp(torch.rand(10, 10).to(0))
 
@@ -876,4 +876,5 @@ class TestDataParallelDeviceType(TestCase):
 instantiate_device_type_tests(TestDataParallelDeviceType, globals())
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()
