@@ -2977,7 +2977,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--amp-dtype",
         choices=("bfloat16", "float16"),
-        help="use automatic mixed precision",
+        help="the data type used with automatic mixed precision",
     )
     group_printout = parser.add_mutually_exclusive_group()
     group_printout.add_argument(
