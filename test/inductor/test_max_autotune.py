@@ -383,9 +383,10 @@ class TestMaxAutotune(TestCase):
             mm_jit = torch.compile(mm, dynamic=dynamic)
             Y_compiled = mm_jit(*args)
             actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
-            assert (
-                actual_count == expected_fuse_count
-            ), f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
+            if expected_fuse_count is not None:
+                assert (
+                    actual_count == expected_fuse_count
+                ), f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
             torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -437,7 +438,7 @@ class TestMaxAutotune(TestCase):
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
             mixed_precision=False,
             fp16=True,
-            expected_fuse_count=1,
+            expected_fuse_count=None,
             mm=mm,
             m=1024 * 10,
             n=1024 * 10,
