@@ -1222,7 +1222,7 @@ def valid_vec_isa_list() -> List[VecISA]:
     return isa_list
 
 
-def pick_vec_isa() -> VecISA:
+def do_pick_vec_isa() -> VecISA:
     if config.is_fbcode():
         return VecAVX2()
 
@@ -1242,15 +1242,12 @@ def pick_vec_isa() -> VecISA:
     return invalid_vec_isa
 
 
-def get_chosen_isa() -> VecISA:
-    from torch._inductor.codecache import pick_vec_isa
-
-    vec_isa = pick_vec_isa()
-    print("!!!! debug vec_isa: ", vec_isa)
-    return vec_isa
+_chosen_isa = do_pick_vec_isa()
 
 
-chosen_isa = get_chosen_isa()
+def pick_vec_isa() -> VecISA:
+    print("!!! chosen_isa: ", _chosen_isa)
+    return _chosen_isa
 
 
 def get_compile_only(compile_only: bool = True) -> str:
