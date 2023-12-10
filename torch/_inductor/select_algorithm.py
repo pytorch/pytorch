@@ -768,6 +768,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
         return_selection_result_details=False,
+        precompilation_timeout_seconds: int = 60 * 15,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -792,6 +793,11 @@ class AlgorithmSelectorCache(PersistentCache):
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
         def precompile(choices):
+            if (
+                precompilation_timeout_seconds is None
+                or precompilation_timeout_seconds <= 0
+            ):
+                return
             if config.autotune_precompilation_workers <= 0:
                 return
             with ThreadPoolExecutor(
@@ -802,7 +808,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 executor.map(
                     lambda c: c.precompile(),
                     [c for c in choices if hasattr(c, "precompile")],
-                    timeout=60 * 15,
+                    timeout=precompilation_timeout_seconds,
                 )
 
         def autotune(choices):
