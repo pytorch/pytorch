@@ -366,14 +366,12 @@ constexpr inline bool isShiftedInt(int64_t x) {
 /// to keep MSVC from (incorrectly) warning on isUInt<64> that we're shifting
 /// left too many places.
 template <unsigned N>
-constexpr inline std::enable_if_t<(N < 64), bool>isUInt(
-    uint64_t X) {
+constexpr inline std::enable_if_t<(N < 64), bool> isUInt(uint64_t X) {
   static_assert(N > 0, "isUInt<0> doesn't make sense");
   return X < (UINT64_C(1) << (N));
 }
 template <unsigned N>
-constexpr inline std::enable_if_t<N >= 64, bool>isUInt(
-    uint64_t /*X*/) {
+constexpr inline std::enable_if_t<N >= 64, bool> isUInt(uint64_t /*X*/) {
   return true;
 }
 
@@ -807,9 +805,7 @@ inline int64_t SignExtend64(uint64_t X, unsigned B) {
 /// Subtract two unsigned integers, X and Y, of type T and return the absolute
 /// value of the result.
 template <typename T>
-std::enable_if_t<std::is_unsigned_v<T>, T>AbsoluteDifference(
-    T X,
-    T Y) {
+std::enable_if_t<std::is_unsigned_v<T>, T> AbsoluteDifference(T X, T Y) {
   return std::max(X, Y) - std::min(X, Y);
 }
 
@@ -817,7 +813,7 @@ std::enable_if_t<std::is_unsigned_v<T>, T>AbsoluteDifference(
 /// maximum representable value of T on overflow.  ResultOverflowed indicates if
 /// the result is larger than the maximum representable value of type T.
 template <typename T>
-std::enable_if_t<std::is_unsigned_v<T>, T>SaturatingAdd(
+std::enable_if_t<std::is_unsigned_v<T>, T> SaturatingAdd(
     T X,
     T Y,
     bool* ResultOverflowed = nullptr) {
@@ -837,7 +833,7 @@ std::enable_if_t<std::is_unsigned_v<T>, T>SaturatingAdd(
 /// maximum representable value of T on overflow.  ResultOverflowed indicates if
 /// the result is larger than the maximum representable value of type T.
 template <typename T>
-std::enable_if_t<std::is_unsigned_v<T>, T>SaturatingMultiply(
+std::enable_if_t<std::is_unsigned_v<T>, T> SaturatingMultiply(
     T X,
     T Y,
     bool* ResultOverflowed = nullptr) {
@@ -886,8 +882,11 @@ std::enable_if_t<std::is_unsigned_v<T>, T>SaturatingMultiply(
 /// overflow. ResultOverflowed indicates if the result is larger than the
 /// maximum representable value of type T.
 template <typename T>
-std::enable_if_t<std::is_unsigned_v<T>, T>
-SaturatingMultiplyAdd(T X, T Y, T A, bool* ResultOverflowed = nullptr) {
+std::enable_if_t<std::is_unsigned_v<T>, T> SaturatingMultiplyAdd(
+    T X,
+    T Y,
+    T A,
+    bool* ResultOverflowed = nullptr) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool Dummy;
   bool& Overflowed = ResultOverflowed ? *ResultOverflowed : Dummy;
