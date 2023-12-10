@@ -1182,9 +1182,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(cnt.frame_count, 1)
 
-        # We increase the number of ops to 2 and 3 for top-level graph because of an additional
+        # We increase the number of ops to 3 and 4 for top-level graph because of an additional
         # get_item call created by the flatten/unflatten logic in HOP speculation.
-        self.assertEqual(cnt.op_count, ifdynstaticdefault(2, 3))
+        self.assertEqual(cnt.op_count, ifdynstaticdefault(3, 4))
 
     def test_map_lowers_to_graph(self):
         backend = EagerAndRecordGraphs()
@@ -1205,11 +1205,15 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
+        # TODO(yidi): remove the getitem = l_x_.__getitem__(0) call. It's
+        # created accidently when we create sample inputs based on the 0-th slice
+        # before specualting the f in MapHigherOrder.
         self.assertExpectedInline(
             graph.code.strip(),
             """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
+    getitem = l_x_.__getitem__(0)
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
     getitem_1 = map_impl[0];  map_impl = None
