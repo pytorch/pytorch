@@ -253,6 +253,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
             MLP(lin_dim, torch.device("cpu"), dim_multiplier=3),
         )
 
+        # TODO(weifengpy): test with DDP
         if build_extra_ddp:
             ref_model = copy.deepcopy(model).cuda()
             replicate(ref_model, device_ids=[self.rank])
