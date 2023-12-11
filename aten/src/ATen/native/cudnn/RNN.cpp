@@ -111,6 +111,9 @@ namespace {
   // RNNDescriptor
 
   struct RNNDescriptorParams {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNNV8VERSION
+    int64_t input_size;
+#endif
     int64_t hidden_size;
     int64_t proj_size;
     int64_t num_layers;
@@ -156,8 +159,13 @@ namespace {
       this->algo = algo;
     }
 
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNN_V8_VERSION
     void set(int64_t mode, int64_t hidden_size, int64_t proj_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
+#else
+    void set(int64_t mode, int64_t input_size, int64_t hidden_size, int64_t proj_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
+#endif
       this->set_mode(mode);
+      this->input_size = input_size;
       this->hidden_size = hidden_size;
       this->proj_size = proj_size;
       this->num_layers = num_layers;
@@ -168,7 +176,11 @@ namespace {
 
     RNNDescriptor descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
       RNNDescriptor rnn_desc;
+ #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
       rnn_desc.set(handle, hidden_size, proj_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, input_datatype, algo, at::globalContext().allowTF32CuDNN());
+ #else
+      rnn_desc.set(handle, input_size, hidden_size, proj_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, input_datatype, algo, at::globalContext().allowTF32CuDNN());
+ #endif
       return rnn_desc;
     }
 
@@ -348,9 +360,9 @@ namespace {
     auto descriptors(Tensor x) const {
       auto is_input_packed = batch_sizes.size() != 0;
       if (is_input_packed) {
-        return rnn_descriptor_sequence(x, mini_batch, seq_length, input_size);
+        return rnn_descriptor_sequence(x, mini_batch, seq_length, x.size(-1));
       } else {
-        return rnn_descriptor(x, batch_first, mini_batch, seq_length, input_size);
+        return rnn_descriptor(x, batch_first, mini_batch, seq_length, x.size(-1));
       }
     }
 #endif
@@ -411,7 +423,7 @@ namespace {
     std::vector<cudnnTensorDescriptor_t> get_y_descs() {
       return get_descs(y_descs);
     }
- #endif
+#endif
   };
 
   int64_t get_num_weights(cudnnHandle_t handle, const RNNDescriptor& rnn_desc,
@@ -473,6 +485,8 @@ namespace {
         /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
         /*linLayerMat=*/&matrix_pointer));
 #else
+    void *unused_pointer;
+    TensorDescriptor unused_desc; 
     TensorDescriptor lin_layer_mat_desc;
     AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
         /*handle=*/handle,
@@ -482,7 +496,7 @@ namespace {
         /*w=*/weight_buf.data_ptr(),
         /*linLayerID=*/linear_id,
         /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
-        /*linLayerMat=*/&matrix_pointer, NULL, NULL));
+        /*linLayerMat=*/&matrix_pointer, unused_desc.mut_desc(), &unused_pointer));
 #endif
 
     cudnnDataType_t data_type;
@@ -586,10 +600,10 @@ namespace {
                 &matrix_pointer
                 ));
 #else
-	  void *unused_pointer;
-	  TensorDescriptor unused_desc;
+          void *unused_pointer;
+          TensorDescriptor unused_desc;
           TensorDescriptor lin_layer_mat_desc;
-	  for (int stateless = 0; stateless < 100; stateless++) {
+          for (int stateless = 0; stateless < 100; stateless++) {
           if (cudnn_method) { // matrix
                AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
                    handle,
@@ -617,7 +631,7 @@ namespace {
                    &matrix_pointer
                    ));
           }
-	  }
+          }
 #endif
           cudnnDataType_t data_type;
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
@@ -652,7 +666,7 @@ namespace {
           auto offset_bytes = (char*)matrix_pointer - (char*)weight_buf.data_ptr();
           TORCH_INTERNAL_ASSERT(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
           size_t offset = offset_bytes / elem_size;
-	  TORCH_WARN("NB DIMS? ", nb_dims, " MIN DIM ", min_dim, " INCLUDE_BIAS? ", include_bias, " OFFSET BYTES ", offset_bytes, " ELEM_SIZE", elem_size, " OFFSET: ", offset);
+          TORCH_WARN("NB DIMS? ", nb_dims, " MIN DIM ", min_dim, " INCLUDE_BIAS? ", include_bias, " OFFSET BYTES ", offset_bytes, " ELEM_SIZE", elem_size, " OFFSET: ", offset);
 #if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNNV8VERSION
           TORCH_WARN("UNUSED OFFSET ", ((char *) unused_pointer - (char *)weight_buf.data_ptr()));
 #endif
@@ -714,10 +728,8 @@ namespace {
         const RNNDescriptor& rnn_desc, const TensorDescriptor& x_desc, cudnnDataType_t datatype) {
 #if defined (CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
     FilterDescriptor w_desc;
-#else
-    TensorDescriptor w_desc;
-#endif
     w_desc.set(weight_buf, 3);
+#endif
 
     int64_t num_linear_layers = _num_linear_layers(rnn.mode);
     int64_t num_dir_layers = rnn.num_directions() * rnn.num_layers;
@@ -754,6 +766,8 @@ namespace {
                 &matrix_pointer
                 ));
 #else
+        void *unused_pointer;
+        TensorDescriptor unused_desc; 
         TensorDescriptor lin_layer_mat_desc;
           if (cudnn_method) { // matrix
               AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
@@ -765,8 +779,8 @@ namespace {
                     linear_id,
                     lin_layer_mat_desc.mut_desc(),
                     &matrix_pointer,
-                    NULL,
-                    NULL
+                    unused_desc.mut_desc(),
+                    &unused_pointer
                     ));
           } else { // bias
               AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
@@ -776,8 +790,8 @@ namespace {
                     weight_buf.numel() * weight_buf.element_size(),
                     weight_buf.data_ptr(),
                     linear_id,
-                    NULL,
-                    NULL,
+                    unused_desc.mut_desc(),
+                    &unused_pointer,
                     lin_layer_mat_desc.mut_desc(),
                     &matrix_pointer 
                     ));
@@ -901,6 +915,7 @@ namespace {
   }
 
   std::vector<int64_t> _output_size(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors) {
+    TORCH_WARN("out sIZZE??", rnn.hidden_size, rnn.hidden_size * rnn.num_directions());
     auto out_size = rnn.hidden_size;
     if (rnn.proj_size != 0) {
       out_size = rnn.proj_size;
@@ -1062,6 +1077,9 @@ copy_weights_to_flat_buf_views(
   RNNDescriptorParams rnn;
   rnn.set(
       mode,
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNNV8VERSION
+      input_size,
+#endif
       hidden_size,
       proj_size,
       num_layers,
@@ -1087,8 +1105,10 @@ copy_weights_to_flat_buf_views(
 #endif
   auto weight_buf = at::zeros(num_weights, flat_buf_options);
 
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
   FilterDescriptor w_desc;
   w_desc.set(weight_buf, 3);
+# endif
 
   // Slice off views into weight_buf
   std::vector<Tensor> params_arr;
@@ -1193,7 +1213,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   }
   RNNParams fn;
   auto datatype = getCudnnDataType(input);
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
   fn.rnn.set(fn_mode, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
+#else
+  auto input_size = input_r.size(-1);
+  fn.rnn.set(fn_mode, input_size, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
+#endif
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
@@ -1235,15 +1260,19 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   fn.rnn.set_algo(algo);
   RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION 
   FilterDescriptor w_desc;
+#endif
   if (!weight_buf.defined()) {
- #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
     auto num_weights = get_num_weights(handle, descs.rnn_desc, descs.x_descs[0], datatype);
- #else
+#else
     auto num_weights = get_num_weights(handle, descs.rnn_desc, datatype);
- #endif
+#endif
     weight_buf = at::empty(num_weights, x.options());
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
     w_desc.set(weight_buf, 3);
+#endif
     weight_buf.zero_();
     std::vector<Tensor> params;
     size_t params_stride0;
@@ -1255,7 +1284,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     _copyParams(MatrixRef<Tensor>{weight, static_cast<size_t>(weight_stride0)},
                 MatrixRef<Tensor>{params, params_stride0});
   } else {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8_VERSION
     w_desc.set(weight_buf, 3);
+#endif
   }
 
   TORCH_CHECK(!cx.defined() || cx.sizes().equals(cell_size),
@@ -1403,7 +1434,12 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
 
   RNNParams fn;
   auto datatype = getCudnnDataType(input);
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
   fn.rnn.set(fn_mode, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
+#else
+  auto cudnn_input_size = input_r.size(-1);
+  fn.rnn.set(fn_mode, cudnn_input_size, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
+#endif
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
@@ -1467,8 +1503,10 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   fn.rnn.set_algo(algo);
   RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
   FilterDescriptor w_desc;
   w_desc.set(weight_buf, 3);
+#endif
 
   size_t workspace_size;
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
@@ -1557,7 +1595,12 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
 
   RNNParams fn;
   auto datatype = getCudnnDataType(input);
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
   fn.rnn.set(fn_mode, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
+#else
+  auto cudnn_input_size = input_r.size(-1);
+  fn.rnn.set(fn_mode, cudnn_input_size, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
+#endif
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
@@ -1601,8 +1644,10 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   fn.rnn.set_algo(algo);
   RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
   FilterDescriptor w_desc;
   w_desc.set(weight_buf, 3);
+#endif
 
   size_t workspace_size;
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
@@ -1902,7 +1947,12 @@ Tensor try_get_weight_buf(
   // box handling for dynamic shapes, we could also hypothetically infer out
   // the relationships
   RNNDescriptorParams rnn;
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
   rnn.set(mode, hidden_size.guard_int(__FILE__, __LINE__), proj_size.guard_int(__FILE__, __LINE__), num_layers, bidirectional, promote_rnn_math_type(datatype), datatype);
+#else
+  auto cudnn_input_size = input.size(-1);
+  rnn.set(mode, cudnn_input_size, hidden_size.guard_int(__FILE__, __LINE__), proj_size.guard_int(__FILE__, __LINE__), num_layers, bidirectional, promote_rnn_math_type(datatype), datatype);
+#endif
   RNNDescriptor rnn_desc = rnn.descriptor(handle);
 
   TensorGeometry x_geom ({1, input.sym_size(-1).guard_int(__FILE__, __LINE__)});
