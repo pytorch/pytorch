@@ -2935,6 +2935,27 @@ utils_device.CURRENT_DEVICE == None""".split(
             self.assertEqual(cnts.op_count, 3)
             cnts.clear()
 
+    def test_closure_with_mutation_and_graph_break(self):
+        def fn():
+            x = torch.zeros(1)
+
+            def subfunc():
+                x[0] = backup
+
+            if x[0] >= -1e5:
+                pass
+
+            backup = 1
+            subfunc()
+            return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        expected = fn()
+        actual = opt_fn()
+        self.assertTrue(same(expected, actual))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_closure_out_of_scope_cell_with_cond(self):
         # Test closure with out-of-scope cell variable, used in a cond
         # where the two branches read different closure variables
