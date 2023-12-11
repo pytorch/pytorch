@@ -14,12 +14,11 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch.export import export
-from torch._export.passes import (
-    ReplaceViewOpsWithViewCopyOpsPass,
-)
+from torch._export.pass_base import _ExportPassBase
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     is_view_op,
     get_view_copy_of_view_op,
+    ReplaceViewOpsWithViewCopyOpsPass,
 )
 from torch._export.passes.functionalize_side_effectful_ops_pass import (
     _FunctionalizeSideEffectfulOpsPass,
