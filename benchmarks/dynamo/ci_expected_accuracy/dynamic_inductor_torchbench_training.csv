@@ -282,7 +282,7 @@ vgg16,pass,8
 
 
 
-vision_maskrcnn,fail_accuracy,36
+vision_maskrcnn,pass,36
 
 
 
