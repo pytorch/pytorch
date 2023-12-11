@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import operator
 import os
@@ -593,9 +592,11 @@ class GraphLowering(torch.fx.Interpreter):
                 name = f"{prefix}_{cnt}"
                 cnt += 1
             self.constants[name] = data
-            self.constant_reprs[name] = hashlib.sha256(
-                repr(data).encode("utf-8")
-            ).hexdigest()
+            self.constant_reprs[name] = (
+                f"{data.device!r} {data.dtype!r} "
+                f"{tuple(data.size())!r} {tuple(data.stride())!r} "
+                f"{hash(data):x}"
+            )
             return name
 
         name = allocate(name)
@@ -840,6 +841,14 @@ class GraphLowering(torch.fx.Interpreter):
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
+            if (
+                is_output
+                and isinstance(result, TensorBox)
+                and isinstance(result.data, ir.BaseView)
+            ):
+                # Realize so that outputs are correctly alised
+                result.realize()
+
             if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):

@@ -208,7 +208,7 @@ def _check_hipsparse_generic_available():
 TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()
 TEST_HIPSPARSE_GENERIC = _check_hipsparse_generic_available()
 
-# Shared by test_cuda.py and test_multigpu.py
+# Shared by test_torch.py and test_multigpu.py
 def _create_scaling_models_optimizers(device="cuda", optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
     # Create a module+optimizer that will use scaling, and a control module+optimizer
     # that will not use scaling, against which the scaling-enabled module+optimizer can be compared.
@@ -226,7 +226,7 @@ def _create_scaling_models_optimizers(device="cuda", optimizer_ctor=torch.optim.
 
     return mod_control, mod_scaling, opt_control, opt_scaling
 
-
+# Shared by test_torch.py, test_cuda.py and test_multigpu.py
 def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
     data = [(torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
             (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),

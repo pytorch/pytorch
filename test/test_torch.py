@@ -23,6 +23,7 @@ import textwrap
 import subprocess
 import weakref
 import sys
+import copyreg
 from torch import inf, nan
 from itertools import product, combinations, permutations, chain
 from functools import partial
@@ -38,7 +39,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like,
-    AlwaysWarnTypedStorageRemoval)
+    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -59,6 +60,8 @@ from torch.testing._internal.common_dtype import (
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
     get_all_qint_dtypes,
 )
+from torch.testing._internal.two_tensor import TwoTensor
+
 from torch.testing._internal.common_cuda import (
     _create_scaling_case, _create_scaling_models_optimizers
 )
@@ -5425,14 +5428,16 @@ else:
         self._test_multinomial_empty(device, False, 1)
         self._test_multinomial_empty(device, False, 2)
 
-    @onlyCPU
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_grad_scaling_unscale(self, device, dtype):
-        inv_scale = torch.full((1,), 0.25, dtype=torch.float, device=device)
-        found_inf = torch.full((1,), 0.0, dtype=torch.float, device=device)
+        device = torch.device(device)
+        device0 = "cuda:0" if device.type == "cuda" else "cpu"
+        inv_scale = torch.full((1,), 0.25, dtype=torch.float, device=device0)
+        found_inf = torch.full((1,), 0.0, dtype=torch.float, device=device0)
 
         size = 20
-        g = torch.full((size, size), 4.0, dtype=dtype, device=device)
+        g = torch.full((size, size), 4.0, dtype=dtype, device=device0)
         ginf = g.clone()
         ginf[2, 2] = float('inf')
         gnan = g.clone()
@@ -5468,12 +5473,56 @@ else:
                     self.assertEqual(grad, torch.ones_like(grad), rtol=1e-5, atol=1e-7)
 
         # When passing lists with mismatched dtypes to a raw
-        # _amp_foreach_non_finite_check_and_unscale_ call,
+        # _amp_foreach_non_finite_check_and_unscale_ call on CUDA,
         # it's expected to fall back to single-tensor TensorIterator kernel.
         grads = [g.clone(), g.to(dtype=torch.float16)]
         torch._amp_foreach_non_finite_check_and_unscale_(grads, found_inf, inv_scale)
         for grad in grads:
             self.assertEqual(grad, torch.ones_like(grad), rtol=1e-5, atol=1e-7)
+
+        # Passing lists with mismatched devices to a raw
+        # _amp_foreach_non_finite_check_and_unscale_ call should raise errors.
+        if device.type == "cuda" and TEST_MULTIGPU:
+            with self.assertRaisesRegex(RuntimeError, r"Expected all tensors to be on the same device"):
+                torch._amp_foreach_non_finite_check_and_unscale_([g.clone(), g.to(device="cuda:1")],
+                                                                 found_inf,
+                                                                 inv_scale)
+
+        # Creates a list of grads with mismatched dtypes and devices, to ensure
+        # scaler._unscale_grads_ organizes grads by dtype and device before calling
+        # _amp_foreach_non_finite_check_and_unscale_ on each set.
+        # If inject_inf >= 0, writes an inf into one grad for _unscale_grads_ to find.
+        def perfect_storm_grads(inject_inf):
+            grads = [g.clone(), g.clone()[:, :5], g.to(dtype=torch.float16), g.to(dtype=torch.float16)]
+            if device.type == "cuda" and TEST_MULTIGPU:
+                grads += [g.to(device="cuda:1"),
+                          g.to(device="cuda:1")[:, :5],
+                          g.to(device="cuda:1", dtype=torch.float16),
+                          g.to(device="cuda:1", dtype=torch.float16)]
+            if inject_inf >= 0:
+                grads[inject_inf][2, 2] = float('inf')
+            return grads
+
+        GradScaler = partial(torch.GradScaler, device=device.type)
+        scaler = GradScaler()
+        dummy_params = [torch.empty_like(g) for g in perfect_storm_grads(-1)]
+        dummy_opt = torch.optim.SGD(dummy_params, lr=1.)
+
+        # Ensures the inf/nan checking can find an inf injected onto any grad in the perfect storm.
+        for inject_inf in range(-1, len(dummy_params)):
+            found_inf = torch.full((1,), 0.0, dtype=torch.float, device=device0)
+            grads = perfect_storm_grads(inject_inf)
+            for i, p in enumerate(dummy_params):
+                p.grad = grads[i]
+            found_inf_per_device = scaler._unscale_grads_(dummy_opt, inv_scale, found_inf, True)
+            if inject_inf < 0:
+                # No inf was injected, ensures unscaling worked normally.
+                self.assertTrue(sum(v.item() for v in found_inf_per_device.values()) == 0)
+                for grad in grads:
+                    self.assertEqual(grad, torch.ones_like(grad), rtol=1e-5, atol=1e-7)
+            else:
+                # inf was injected, ensures inf was found.
+                self.assertTrue(sum(v.item() for v in found_inf_per_device.values()) == 1)
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -5681,6 +5730,11 @@ else:
         device = torch.device(device)
         for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
             self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
+
+    @onlyCUDA
+    def test_grad_scaling_autocast_fused(self, device):
+        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
+            self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
 
 
     # Make sure that the parameters become nonsense when scaled gradients are finite
@@ -6659,6 +6713,17 @@ class TestTorch(TestCase):
                 self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
                 index = (torch.ones(256) * 257).to(dtype=torch.long)
                 self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
+
+    def test_index_add_cornercase(self):
+        for device in get_all_device_types():
+            dest = torch.randn((), device=device)
+            index = torch.tensor([0], device=device)
+            source = torch.randn(1, 1, 1, device=device)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"source tensor shape must match self tensor shape, excluding the specified dimension",
+            ):
+                dest.index_add(0, index, source)
 
     def test_linspace_logspace(self):
         # Ensure the output does not require grad regardless of inputs requiring gard or not.
@@ -10207,6 +10272,90 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         for invalid_val in [-1, 2**65]:
             self.assertRaises(RuntimeError, lambda: torch.set_num_threads(invalid_val))
             self.assertRaises(RuntimeError, lambda: torch.set_num_interop_threads(invalid_val))
+
+    def _get_tensor_prop(self, t):
+        preserved = (
+            id(t),
+            # Refcount values get modified by Dynamo resume frames
+            0 if TEST_WITH_TORCHDYNAMO else sys.getrefcount(t),
+        )
+        moved = (
+            copyreg._slotnames(t.__class__),
+            id(t.__dict__),
+            tuple(t.__dict__.keys()),
+        )
+        return preserved, moved
+
+    def _checked_swap(self, t1, t2):
+        t1_pres, t1_moved = self._get_tensor_prop(t1)
+        t2_pres, t2_moved = self._get_tensor_prop(t2)
+
+        torch.utils.swap_tensors(t1, t2)
+
+        new_t1_pres, new_t1_moved = self._get_tensor_prop(t1)
+        new_t2_pres, new_t2_moved = self._get_tensor_prop(t2)
+        self.assertEqual(t1_pres, new_t1_pres)
+        self.assertEqual(t2_pres, new_t2_pres)
+        self.assertEqual(t1_moved, new_t2_moved)
+        self.assertEqual(t2_moved, new_t1_moved)
+
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
+    def test_swap_basic(self):
+        ts = [
+            torch.rand(2),
+            torch.rand(3, 3),
+            torch.empty(3, dtype=torch.int),
+            TwoTensor(torch.rand(4), torch.rand(4))
+        ]
+
+        for t1, t2 in itertools.combinations(ts, 2):
+            t1 = t1.clone()
+            t2 = t2.clone()
+            t2.foo = "bar"
+            holder = []
+            holder.append(t1)
+
+            self._checked_swap(t1, t2)
+
+            self.assertIs(holder[0], t1)
+            self.assertEqual(t1.foo, "bar")
+
+            wr = weakref.ref(t1)
+            with self.assertRaisesRegex(RuntimeError, "has weakref"):
+                torch.utils.swap_tensors(t1, t2)
+
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
+    def test_swap_fail_slots(self):
+        class MyTwoTensor(TwoTensor):
+            __slots__ = ("a", "b")
+
+        class MyTwoTensor2(TwoTensor):
+            __slots__ = ("b", "a")
+
+        class MyTwoTensor3(TwoTensor):
+            __slots__ = ("a", "b", "c")
+
+        t1 = torch.rand(4)
+        t2 = TwoTensor(torch.rand(4), torch.rand(4))
+        t3 = MyTwoTensor(torch.rand(4), torch.rand(4))
+        t4 = MyTwoTensor(torch.rand(4), torch.rand(4))
+        t5 = MyTwoTensor2(torch.rand(4), torch.rand(4))
+        t6 = MyTwoTensor3(torch.rand(4), torch.rand(4))
+
+        self._checked_swap(t1, t2)
+        with self.assertRaisesRegex(TypeError, "object layout differs"):
+            torch.utils.swap_tensors(t1, t3)
+        with self.assertRaisesRegex(TypeError, "object layout differs"):
+            torch.utils.swap_tensors(t2, t3)
+        self._checked_swap(t3, t4)
+        self._checked_swap(t3, t5)
+        with self.assertRaisesRegex(TypeError, "object layout differs"):
+            torch.utils.swap_tensors(t3, t6)
+        t3.c = "foo"
+        t4.d = "bar"
+        self._checked_swap(t3, t4)
+        self.assertEqual(t4.c, "foo")
+        self.assertEqual(t3.d, "bar")
 
 
 # The following block extends TestTorch with negative dim wrapping tests

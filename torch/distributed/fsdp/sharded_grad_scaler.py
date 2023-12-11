@@ -285,21 +285,14 @@ class ShardedGradScaler(GradScaler):
         future_handles = []
 
         for v in optimizer_state["found_inf_per_device"].values():
-            if self._device == "cuda":
-                if v.device.type == "cpu":
-                    v_on_cuda = v.cuda()
-                    future_handles.append(
-                        dist.all_reduce(
-                            v_on_cuda, async_op=True, group=self.process_group
-                        ).get_future()
-                    )
-                    v.copy_(v_on_cuda.cpu())
-                else:
-                    future_handles.append(
-                        dist.all_reduce(
-                            v, async_op=True, group=self.process_group
-                        ).get_future()
-                    )
+            if self._device == "cuda" and v.device.type == "cpu":
+                v_on_cuda = v.cuda()
+                future_handles.append(
+                    dist.all_reduce(
+                        v_on_cuda, async_op=True, group=self.process_group
+                    ).get_future()
+                )
+                v.copy_(v_on_cuda.cpu())
             else:
                 future_handles.append(
                     dist.all_reduce(
