@@ -244,7 +244,7 @@ class InlineOptionalDeviceGuard {
   /// and result in initialized OptionalDeviceGuard.
   template <typename... Args>
   explicit InlineOptionalDeviceGuard(Args&&... args)
-      : guard_(in_place, std::forward<Args>(args)...) {}
+      : guard_(std::in_place, std::forward<Args>(args)...) {}
 
   // TODO: Consider reading Tensor and TensorList constructors here, when
   // Tensor moves to c10.  (These are only valid on OptionalDeviceGuard,
