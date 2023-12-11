@@ -27,3 +27,13 @@ def call_hook(hook, *args):
     if result is None:
         return args[0]
     return result
+
+class FakeContext:
+    def __init__(self, saved_tensors):
+        # this will cache the results of saved_tensors
+        # and will no longer call into c++ binding
+        self.saved_tensors = saved_tensors
+
+def call_backward(backward_fn, saved_tensors, *args):
+    # wrap in tuple, since result is accessed as call_backward[0]
+    return (backward_fn(FakeContext(saved_tensors), *args),)

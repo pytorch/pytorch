@@ -30,6 +30,7 @@ struct PyNode : public Node {
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
   variable_list apply(variable_list&& inputs) override;
+  variable_list compiled_apply(variable_list&& inputs, SwapSavedVariables& saved);
 
   void release_variables() override;
   std::string name() const override;

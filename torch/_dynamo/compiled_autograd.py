@@ -3,7 +3,7 @@ import functools
 from typing import List, Optional
 
 import torch
-from torch._dynamo.external_utils import call_hook
+from torch._dynamo.external_utils import call_hook, call_backward
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code
 from torch._logging import getArtifactLogger
@@ -65,6 +65,7 @@ class AutogradCompilerInstance:
         args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
         sizes_proxy = self.fx_tracer.create_proxy("placeholder", "sizes", (), {})
         self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
+        self.backward_proxy = self.fx_tracer.create_proxy("placeholder", "backward", (), {})
 
         # tensor inputs to fake tensors
         inputs = [
@@ -93,6 +94,26 @@ class AutogradCompilerInstance:
         self.stack.enter_context(disable_autocast_cache())
         self.stack.enter_context(disable_proxy_modes_tracing(enable_current=True))
         return inputs, sizes
+
+    def proxy_call_backward(self, inputs, backward_id: int):
+        assert self.backward_proxy is not None
+        backward_fn = self.backward_proxy[backward_id]
+        saved_variables = self.backward_proxy[backward_id+1]
+        proxies = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=call_backward,
+            args=(
+                backward_fn,
+                saved_variables,
+                *[self.to_proxy(x) for x in inputs],
+            ),
+            kwargs={},
+        )
+
+        with disable_proxy_modes_tracing():
+            outputs = [maybe_clone(x) for x in inputs]
+            self.bind_tensors_to_proxies(outputs, proxies)
+        return outputs
 
     def proxy_call_hook(self, hook, *args):
         return self.fx_tracer.create_proxy(
