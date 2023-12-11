@@ -1,4 +1,4 @@
-#include <c10/core/SingletonSymNodeImpl.h>
+#include <ATen/core/SingletonSymNodeImpl.h>
 #include <c10/core/SymNodeImpl.h>
 #include <c10/util/Exception.h>
 
@@ -20,11 +20,13 @@ bool _ge(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
       }
       TORCH_CHECK(false, "Singleton int ", op, ": Relation is indeterminate");
     }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (rhs->constant_int() && *rhs->constant_int() <= 2) {
       return true;
     }
     TORCH_CHECK(false, "Singleton int ", op, ": Relation is indeterminate");
   } else if (rhs->singleton_int()) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (lhs->constant_int() && *lhs->constant_int() < 2) {
       return false;
     }
@@ -70,7 +72,29 @@ c10::SymNode SingletonSymNodeImpl::mul(const c10::SymNode& other) {
   }
   c10::optional<int64_t> c = other->constant_int();
   TORCH_CHECK(c.has_value());
-  return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c));
+  return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c, data_, dummy_, sum_offsets_));
+}
+
+std::optional<at::Tensor> try_call_with_dummy(const std::function<at::Tensor(at::Tensor)>& fn, c10::SymIntArrayRef size) {
+  at::TensorImpl* ptr = nullptr;
+  for (const auto& s : size) {
+    if (!s.is_heap_allocated()) {
+      continue;
+    }
+    auto _ptr = reinterpret_cast<at::TensorImpl*>(s.toSymNode()->singleton_dummy());
+    if (_ptr != nullptr) {
+      TORCH_CHECK(ptr == nullptr, "Only one singleton dimension supported");
+      ptr = _ptr;
+    }
+  }
+  if (ptr != nullptr) {
+    auto p = c10::intrusive_ptr<at::TensorImpl>(ptr, c10::raw::DontIncreaseRefcount{});
+    auto dummy = at::Tensor(p);
+    auto ret = fn(dummy);
+    dummy.unsafeReleaseTensorImpl();
+    return ret;
+  }
+  return std::nullopt;  // Return std::nullopt if no singleton dimension is found
 }
 
 } // namespace c10

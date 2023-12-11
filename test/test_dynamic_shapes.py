@@ -27,7 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     ShapeEnv,
     is_symbolic,
-    FreshCreateSymbolicPolicy,
+    StatelessSymbolicContext,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -137,7 +137,7 @@ def create_symbolic_tensor(name, arg, shape_env):
         shape_env.create_symbolic_sizes_strides_storage_offset(
             arg,
             source=ConstantSource(name),
-            policy=FreshCreateSymbolicPolicy(
+            symbolic_context=StatelessSymbolicContext(
                 dynamic_sizes=dynamic_dims,
                 constraint_sizes=constraint_dims
             ),
@@ -497,7 +497,7 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 <= s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[i0 <= s0]"""
+            """[i0 - s0 <= 0]"""
         )
         self.assertTrue(i0 <= s0)
         self.assertFalse(i0 > s0)
@@ -800,10 +800,12 @@ class TestSymNumberMagicMethods(TestCase):
             with self.assertRaisesRegex(TypeError, "unhashable"):
                 hash(x)
 
+        a = torch.tensor(1.)
+
         # Singleton SymInt, constant SymBool, SymNode are hashable
-        j1 = torch._C._get_singleton_int(1, 1)
-        j1_copy = torch._C._get_singleton_int(1, 1)
-        j2 = torch._C._get_singleton_int(2, 1)
+        j1 = torch._C._get_singleton_int(1, 1, a, a, 1)
+        j1_copy = torch._C._get_singleton_int(1, 1, a, a, 1)
+        j2 = torch._C._get_singleton_int(2, 1, a, a, 1)
         t = self.get_constant_bool(True)
         t_copy = self.get_constant_bool(True)
         f = self.get_constant_bool(False)
@@ -823,9 +825,10 @@ class TestSymNumberMagicMethods(TestCase):
         hash(m)
 
     def test_non_symbolic_symnode(self):
-        j1 = torch._C._get_singleton_int(1, 1)
-        j2 = torch._C._get_singleton_int(1, 1)
-        j3 = torch._C._get_singleton_int(3, 1)
+        a = torch.tensor(1.)
+        j1 = torch._C._get_singleton_int(1, 1, a, a, 1)
+        j2 = torch._C._get_singleton_int(1, 1, a, a, 1)
+        j3 = torch._C._get_singleton_int(3, 1, a, a, 1)
 
         self.assertIsInstance(j1, torch.SymInt)
         self.assertNotIsInstance(j1, int)

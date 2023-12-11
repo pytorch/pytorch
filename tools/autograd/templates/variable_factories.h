@@ -9,6 +9,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <torch/csrc/api/include/torch/detail/TensorDataContainer.h>
 #include <torch/csrc/autograd/variable.h>
+#include <ATen/core/SingletonSymNodeImpl.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

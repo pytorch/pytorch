@@ -1,5 +1,6 @@
 #include "torch/csrc/autograd/FunctionsManual.h"
 #include "torch/csrc/dynamo/compiled_autograd.h"
+#include <torch/csrc/autograd/generated/variable_factories.h>
 
 // ${generated_comment}
 

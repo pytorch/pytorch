@@ -1,3 +1,5 @@
+#pragma once
+
 #include <c10/core/SymNodeImpl.h>
 #include <variant>
 

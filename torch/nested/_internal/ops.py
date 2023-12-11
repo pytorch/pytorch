@@ -2,6 +2,7 @@ import functools
 import math
 
 import torch
+from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
 from .nested_tensor import NestedTensor
 from typing import *  # noqa: F403
@@ -184,6 +185,8 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
+        "_max_seqlen": arg._max_seqlen,
+        "_min_seqlen": arg._min_seqlen,
     }
     return kwargs
 
@@ -256,18 +259,10 @@ def jagged_binary_pointwise(func, *args, **kwargs):
 
 
 def jagged_torch_function(func, *args, **kwargs):
-    # Handle SDPA specially since it's CompositeImplicit. We don't want
-    # the nestedness of the inputs to affect the kernel choice, so unwrap
-    # the NTs here before passing to SDPA -> rewrap the output as NT.
+    # SDPA has special kernels that handle nested tensors.
+    # Dispatch to the correct implementation here
     if func is torch._C._nn.scaled_dot_product_attention:
-        t_args = [t._values if isinstance(t, NestedTensor) else t for t in args]
-        t_kwargs = {
-            k: v._values if isinstance(v, NestedTensor) else v
-            for k, v in kwargs.items()
-        }
-
-        output = func(*t_args, **t_kwargs)
-        return NestedTensor(output, **extract_kwargs(args[0]))
+        return jagged_scaled_dot_product_attention(*args, **kwargs)
 
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
@@ -353,6 +348,10 @@ def is_contiguous_general(func, *args, **kwargs):
 
     # If created from narrow() check for lengths
     if inp.lengths() is not None:
+        return False
+
+    # If jagged dim is not 1 it's not contiguous
+    if inp._ragged_idx != 1:
         return False
 
     new_kwargs["memory_format"] = new_kwargs.get(
@@ -537,6 +536,11 @@ def unbind_int(func, *args, **kwargs):
     offsets = inp.offsets()
     lengths = inp.lengths()
 
+    if inp._ragged_idx != 1:
+        raise RuntimeError(
+            "unbind(): only supported for NestedTensor when jagged dimension is 1"
+        )
+
     if lengths is None:
         return torch.split(values, offsets.diff().tolist())
     return [
@@ -624,17 +628,37 @@ def expand_default(func, *args, **kwargs):
     expand_arg = [-1, *size[2:]]
     return NestedTensor(func(inp._values, expand_arg), **extract_kwargs(inp))
 
-
-@register_jagged_func(torch.ops.aten.expand_as.default, "self: t, other: jt")
-def expand_as_default(func, *args, **kwargs):
+# Allow both jt and t for self
+@register_jagged_func(torch.ops.aten._nested_expand.default, "self: any, size: any, dummy: jt")
+def _nested_expand(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-
     inp = new_kwargs.pop("input")
-    other = new_kwargs.pop("other")
+    size = new_kwargs.pop("size")
+    _unused_B, singleton, *Ds = size
+    offsets = singleton.node.singleton_values()
+    sum_offsets = singleton.node.singleton_sum_offsets()
+    assert inp.dim() <= len(size)
 
-    return NestedTensor(func(inp, other._values), **extract_kwargs(other))
+    if inp.is_nested:
+        # B and j0 of inp.shape must match that of size
+        # ex: (B, j0, 1) -> (B, j0, D)
+        assert inp.dim() == len(size)
+        assert singleton == size[1]
+        inp = inp._values
+    else:
+        # currently you must either expand both or neither
+        # and since j0 must be expanded, both are always expanded
+        # cannot expand (B, j0, D) to (B, 1, D) today
+        # ex: (1, 1, D) -> (B, j0 ,D)
+        # - (1, 1, D) is squeezed to (1, D,) and then expanded to (sum_offsets, D)
+        if inp.dim() == len(size):
+            # because both B and j0 must be expanded, the two leading dimensions
+            # are 1 here. squeeze until expandable to [sum_offsets, *Ds]
+            # TODO: decide whether we want to do error checking here.
+            inp = inp.squeeze(0)
+    return NestedTensor(inp.expand([sum_offsets, *Ds]), offsets)
 
 
 @register_jagged_func(torch.ops.aten.where.self, "condition: jt, self: jt, other: jt")
@@ -706,6 +730,12 @@ def sum_dim_IntList(func, *args, **kwargs):
             out = out.unsqueeze(0)
         return out
 
+@register_jagged_func(
+    torch.ops.aten.sum.default, "self: jt, dtype: any?"
+)
+def sum_default(func, *args, **kwargs):
+    return args[0]._values.sum(**kwargs)
+
 
 @register_jagged_func(torch.ops.aten.transpose.int, "self: jt, dim0: any, dim1: any")
 def transpose_int(func, *args, **kwargs):
@@ -713,7 +743,32 @@ def transpose_int(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
+    from torch._prims_common import canonicalize_dims
+
     inp = new_kwargs.pop("input")
+    dim0, dim1 = canonicalize_dims(inp.dim(), (new_kwargs["dim0"], new_kwargs["dim1"]))
+
+    # To support the SDPA API, inputs need to have the ragged idx transposed to dim 2
+    # instead of 1, although the internal Flash and mem-effn implementations will
+    # use the inputs with raggedness in dim 1.
+    if dim0 == inp._ragged_idx or dim1 == inp._ragged_idx:
+        if dim0 == 0 or dim1 == 0:
+            raise ValueError(
+                "Transpose is not supported on the batch dimension for jagged NT"
+            )
+        if dim0 == inp._ragged_idx:
+            to_dim = dim1
+        else:
+            to_dim = dim0
+        return NestedTensor(
+            inp.values().transpose(
+                _outer_to_inner_dim(len(inp._size), dim0),
+                _outer_to_inner_dim(len(inp._size), dim1),
+            ),
+            **extract_kwargs(inp),
+            _ragged_idx=to_dim,
+        )
+
     new_kwargs["dim0"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim0"], "transpose")
     new_kwargs["dim1"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim1"], "transpose")
 
@@ -880,3 +935,41 @@ def embedding_default(func, *args, **kwargs):
     return NestedTensor(
         func(weight, indices._values, **new_kwargs), **extract_kwargs(indices)
     )
+
+def get_factory_from_new_factory(aten_op):
+    factory_map = {
+        torch.ops.aten.new_zeros.default: torch.zeros,
+        torch.ops.aten.new_empty.default: torch.empty,
+        torch.ops.aten.new_full.default: torch.full,
+        torch.ops.aten.new_ones.default: torch.ones,
+    }
+    return factory_map.get(aten_op, None)
+
+# Note [ NestedTensor factory functions ]
+#
+# new_* functions are used to implement the factory functions for NestedTensor
+# Here, `self` is only used to enable dispatching to happen.
+# When someone calls into torch.zeros(sizes) where sizes contains a singleton,
+# The torch.zeros(sizes) call will dispatch to nt.new_zeros(sizes)
+def jagged_new_factory(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    new_kwargs.pop("input")
+    # TODO: don't assume that the ragged_idx == 1
+    _unused_B, singleton, *Ds = new_kwargs.pop("size")
+    offsets = singleton.node.singleton_data()
+    sum_offsets = singleton.node.singleton_sum_offsets()
+    factory_fn = get_factory_from_new_factory(func)
+
+    return NestedTensor(factory_fn([sum_offsets, *Ds], **new_kwargs), offsets)
+
+register_jagged_func(
+    [
+       torch.ops.aten.new_zeros.default,
+       torch.ops.aten.new_empty.default,
+       torch.ops.aten.new_full.default,
+       torch.ops.aten.new_ones.default,
+    ],
+    "self: jt, size: any, dtype: any?, layout: any?, device: any?, pin_memory: any?",
+)(jagged_new_factory)

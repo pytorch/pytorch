@@ -31,6 +31,8 @@
 #include <c10/util/SmallVector.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+#include <ATen/core/SingletonSymNodeImpl.h>
+
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -205,6 +207,7 @@
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/zeros_native.h>
+#include <ATen/ops/_nested_expand.h>
 #endif
 
 #include <c10/util/StringUtil.h>
@@ -432,7 +435,7 @@ Tensor& set__symint(Tensor& result, const Tensor& storage, c10::SymInt storage_o
 
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
   if (result.unsafeGetTensorImpl() != source.unsafeGetTensorImpl()) {
-    return result.set_(source.storage(), source.storage_offset(), source.sizes(), source.strides());
+    return result.set__symint(source.storage(), source.sym_storage_offset(), source.sym_sizes(), source.sym_strides());
   }
   return result;
 }
@@ -1143,6 +1146,15 @@ Tensor expand(const Tensor& self, c10::IntArrayRef size, bool /*unused*/) {
 }
 
 Tensor expand_as(const Tensor& self, const Tensor& other) {
+  if (self.is_nested() || other.is_nested()) {
+    TORCH_CHECK(other.is_nested());
+    auto size = other.sym_sizes();
+    auto ret = c10::try_call_with_dummy([self, size](at::Tensor dummy) {
+      return self._nested_expand_symint(size, dummy);
+    }, size);
+    TORCH_INTERNAL_ASSERT(ret.has_value());
+    return ret.value();
+  }
   return self.expand_symint(other.sym_sizes());
 }
 
