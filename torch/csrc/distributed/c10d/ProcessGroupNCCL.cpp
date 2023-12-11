@@ -1359,7 +1359,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
     // poll store to see if some ranks have flagged a timeout when
     // we haven't polled for `heartbeat_timeout` seconds and there haven't
     // any work added or removed for `watchdog_timeout` seconds.
-    if (!terminateProcessGroup_.load() && dumpOnTimeout_) {
+    if (dumpOnTimeout_) {
       auto currentTime = std::chrono::steady_clock::now();
       auto timeSinceLastWorkListUpdate =
           std::chrono::duration_cast<std::chrono::milliseconds>(
