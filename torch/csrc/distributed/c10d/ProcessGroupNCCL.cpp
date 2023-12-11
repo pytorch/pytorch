@@ -727,8 +727,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
-      ncclTraceBufferSize_ > 0);
+      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
 #endif
   avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
@@ -984,15 +983,23 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
 }
 
-c10::optional<std::thread> ProcessGroupNCCL::tryWriteDebugInfo() {
-  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
-  if (writeDebugInfo_) {
-    return c10::nullopt;
-  }
-  // If we have not dumped the debugInfo return true and set the flag
-  writeDebugInfo_ = true;
-  return c10::optional<std::thread>(
-      std::thread(&ProcessGroupNCCL::dumpDebuggingInfo, this));
+std::future<bool> ProcessGroupNCCL::launchAsyncDebugDump() {
+  std::promise<bool> resultPromise;
+  std::future<bool> resultFuture = resultPromise.get_future();
+
+  std::thread workerThread(
+      [promise = std::move(resultPromise), this]() mutable {
+        try {
+          promise.set_value(dumpDebuggingInfo());
+        } catch (...) {
+          promise.set_exception(std::current_exception());
+        }
+      });
+
+  // Detach the thread to allow it to run independently
+  workerThread.detach();
+
+  return resultFuture;
 }
 
 void abortCommsFromMap(
@@ -1097,7 +1104,11 @@ void ProcessGroupNCCL::registerDebugInfoWriter(
   debugInfoWriter_ = std::move(writer);
 }
 
-void ProcessGroupNCCL::dumpDebuggingInfo() {
+bool ProcessGroupNCCL::dumpDebuggingInfo() {
+  // Serialize all calls to this function to avoid corrupting data, but allow
+  // multiple calls in one runtime. User is responsible for preserving the
+  // output file from an earlier call before a later call overwrites it.
+  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
   LOG(ERROR) << "ProcessGroupNCCL preparing to dump debug info.";
   if (ncclTraceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
@@ -1111,7 +1122,9 @@ void ProcessGroupNCCL::dumpDebuggingInfo() {
       registerDebugInfoWriter(std::move(debugInfoWriterPtr));
     }
     debugInfoWriter_->write(ncclTrace);
+    return true;
   }
+  return false;
 }
 
 void ProcessGroupNCCL::terminateProcess(std::string errMsg) {
@@ -1148,7 +1161,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
-  auto maybeWriteDebugInfo = tryWriteDebugInfo();
+  std::future<bool> asyncDebugDump = launchAsyncDebugDump();
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
@@ -1157,8 +1170,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       rank_,
       "] NCCL monitor thread timeout. Basically, this could ",
       "be due to CUDA or NCCL calls being unexpectedly blocking, ",
-      "especially when your program enters a deadlock state in watchdog"
-      "or destructors. If you see this error, please file a bug to pytorch.");
+      "especially when your program enters a deadlock state in watchdog "
+      "or destructors. If you see this error, please file a bug to PyTorch.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
@@ -1168,8 +1181,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Case two: desync might be slow or get stuck. Or we get stuck in
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
-  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
-       (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable())) &&
+  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave another two mins for desync report generation or process group
     // destroy.
@@ -1181,9 +1193,11 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // thread, so We mark the thread detach and the dump of debug info becomes
   // "best effort". If the process exit normally, marking it detach also makes
   // sense because we don't really care about dumping the debug info.
-  if (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable()) {
-    maybeWriteDebugInfo->detach();
-  }
+
+  // We already log completion inside the thread, so it may not be necessary to
+  // check the return value here.  We mainly use a future so we can exit early
+  // if done.
+  asyncDebugDump.wait_for(std::chrono::seconds(heartbeatTimeoutInSec_));
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     const auto logMsg = c10::str(
@@ -1324,6 +1338,9 @@ struct DumpPipe {
 
 void ProcessGroupNCCL::workCleanupLoop() {
   bool done = false;
+  lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
+  auto lastTimePollStore = std::chrono::steady_clock::now();
+  c10::optional<std::future<bool>> optAsyncDebugDump;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
@@ -1338,6 +1355,31 @@ void ProcessGroupNCCL::workCleanupLoop() {
         [&]() -> bool { return terminateProcessGroup_.load(); });
     // Bump up heart beat by one.
     heartbeat_++;
+
+    // poll store to see if some ranks have flagged a timeout when
+    // we haven't polled for `heartbeat_timeout` seconds and there haven't
+    // any work added or removed for `watchdog_timeout` seconds.
+    if (dumpOnTimeout_) {
+      auto currentTime = std::chrono::steady_clock::now();
+      auto timeSinceLastWorkListUpdate =
+          (currentTime - lastWorkListUpdateTime_).count();
+      auto timeSinceLastPollStore = (currentTime - lastTimePollStore).count();
+      if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
+          timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
+        lastTimePollStore = currentTime;
+        if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
+          optAsyncDebugDump = launchAsyncDebugDump();
+          optAsyncDebugDump->wait_for(
+              std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
+          const auto exitMsg = c10::str(
+              "[Rank ",
+              rank_,
+              "] NCCL watchdog thread detected timeout from Store");
+          LOG(ERROR) << exitMsg;
+          C10_THROW_ERROR(DistBackendError, exitMsg);
+        }
+      }
+    }
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
@@ -1362,12 +1404,13 @@ void ProcessGroupNCCL::workCleanupLoop() {
               // Set shutdown mode, so the heartbeat monitor thread will not
               // abort process immediately.
               collectiveDebugInfoMode_.store(true);
+              std::vector<uint8_t> vec(1);
+              store_->set(std::string(TIMEOUT_DUMP), vec);
             }
 
-            c10::optional<std::thread> dumpingDebugInfo;
-            if (dumpOnTimeout_) {
+            if (dumpOnTimeout_ && !optAsyncDebugDump) {
               // Store debug info to storage. (By default to local disk)
-              dumpingDebugInfo = tryWriteDebugInfo();
+              optAsyncDebugDump = launchAsyncDebugDump();
             }
 
             if (desyncDebug_) {
@@ -1377,15 +1420,8 @@ void ProcessGroupNCCL::workCleanupLoop() {
 
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
-              if (dumpingDebugInfo && dumpingDebugInfo->joinable()) {
-                std::this_thread::sleep_for(
-                    std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
-                // At this point, we either have already waited for
-                // `kWatchdogThreadSleepMillis * 30` or the thread has finished
-                // so that we mark the thread detach and the dump of debug info
-                // becomes "best effort".
-                dumpingDebugInfo->detach();
-              }
+              optAsyncDebugDump->wait_for(
+                  std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
             }
 
           } catch (const std::exception& e) {
@@ -1425,6 +1461,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
           completedWorkListCV_.notify_one();
         } else {
           it = workMetaList_.erase(it);
+          lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
         }
         at::cuda::CUDAGraph::dec_pending_event_queries();
       } else {
@@ -1435,8 +1472,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
     }
     // process a request to dump the trace
     if (dumpPipe.shouldDump()) {
-      std::thread dump_thread(&ProcessGroupNCCL::dumpDebuggingInfo, this);
-      dump_thread.detach();
+      launchAsyncDebugDump();
     }
     done = workMetaList_.empty();
   }
@@ -2131,6 +2167,7 @@ void ProcessGroupNCCL::workEnqueue(
     // needs to be destructed in user thread. Otherwise will
     // get deadlock. Here we enqueue work without outputs_.
     workMetaList_.emplace_back(*work);
+    lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   }
 }
 
