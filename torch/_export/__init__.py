@@ -59,6 +59,7 @@ from torch.export.dynamic_shapes import (
     _process_constraints,
     _process_dynamic_shapes,
 )
+from torch.export._unlift import _create_stateful_graph_module
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
@@ -72,7 +73,6 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
 from .exported_program import (
-    _create_stateful_graph_module,
     CallSpec,
 )
 from .passes.add_runtime_assertions_for_constraints_pass import (
