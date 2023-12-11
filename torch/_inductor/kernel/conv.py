@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import cast, List, Tuple, TypedDict
+from typing import cast, List, Optional, Sequence, Tuple, TypedDict
 
 import torch
 from .. import config, ir
@@ -228,8 +228,8 @@ class ConvLayoutParams(TypedDict):
 def conv_layout(
     x: TensorBox,
     weight: TensorBox,
-    bias: TensorBox,
-    stride: tuple[int, ...],
+    bias: Optional[TensorBox],
+    stride: Sequence[int],
     padding: tuple[int, ...],
     dilation: tuple[int, ...],
     transposed: bool,
@@ -310,6 +310,8 @@ def convolution(
     padding = tuple(padding)
     dilation = tuple(dilation)
     output_padding = tuple(output_padding)
+    if not isinstance(groups, int):
+        groups = V.graph.sizevars.evaluate_static_shape(groups)
     assert isinstance(groups, int)
     kwargs: ConvLayoutParams = {
         "stride": stride,

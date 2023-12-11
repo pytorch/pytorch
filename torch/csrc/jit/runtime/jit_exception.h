@@ -6,8 +6,7 @@
 #include <torch/csrc/Export.h>
 #include <string>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct TORCH_API JITException : public std::runtime_error {
   explicit JITException(
@@ -36,5 +35,4 @@ struct TORCH_API JITException : public std::runtime_error {
   c10::optional<std::string> original_msg_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

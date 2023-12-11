@@ -42,8 +42,6 @@ struct TORCH_API PythonPrint {
   const SourceRangeRecords& ranges() const;
   uint64_t minVersion() const;
 
-  ~PythonPrint();
-
  private:
   std::shared_ptr<PythonPrintImpl> pImpl;
 };

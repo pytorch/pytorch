@@ -422,8 +422,7 @@ void cpu_max_pool_channels_last(
     int64_t size = channels;
     int64_t len = size - (size % Vec::size());
     // temp buffer holding index with integer_t
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-    std::unique_ptr<integer_t []> index_buffer(new integer_t[len]);
+    auto index_buffer = std::make_unique<integer_t []>(len);
     integer_t * index_ptr = index_buffer.get();
     // temp buffer holding max value with opmath_t
     std::unique_ptr<opmath_t []> max_arr;

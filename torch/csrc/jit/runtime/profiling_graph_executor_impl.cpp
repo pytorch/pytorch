@@ -14,7 +14,6 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -70,8 +69,7 @@ C10_DEFINE_int64(
     kDefaultBailoutDepth,
     "Number of re-specializations");
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 #if defined(C10_MOBILE)
 static std::atomic<bool> executor_mode{true};
@@ -448,7 +446,6 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
     }
 
     // Run custom post-fusion passes
-    // e.g. NVFuser
     for (const auto& passPair : getCustomPostPasses()) {
       passPair.first(graph);
     }
@@ -648,13 +645,6 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     // before any other pass that could insert `prim::iprofile_value` node on
     // `aten::_grad_sum_to_size` input.
     InsertProfileNodesForSpecializeAutogradZero(pr_.get());
-    // `InsertProfileNodesForCUDAFuser` inserts profile node for non-tensor
-    // value
-#ifndef C10_MOBILE
-    if (torch::jit::fuser::cuda::isEnabled()) {
-      torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
-    }
-#endif
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
     profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
     // fall-through
@@ -776,5 +766,4 @@ void ProfilingGraphExecutorImpl::runFinalOptimizations(
   AddIfThenElseOp(graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

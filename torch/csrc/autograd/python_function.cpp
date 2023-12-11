@@ -45,6 +45,7 @@ using namespace torch::autograd;
 using at::Tensor;
 
 PyObject* THPFunctionClass = nullptr;
+PyObject* THPGradientEdgeClass = nullptr;
 
 #define THPFunction_assert(condition, ...) \
   if (!(condition)) {                      \
@@ -55,20 +56,18 @@ PyObject* THPFunctionClass = nullptr;
 // Anonymous namespace for helpful functions used in this file
 namespace {
 
-// Throw a python_error with the PyErr state persisted, so that we
-// don't lose the error state if the GIL is released when we don't
-// have a PyThreadState created beforehand, this is made so that
-// even for pure C++ thread without a pre-created PyThreadState could
-// also capture the correct error message.
-// TODO: This is a temporary approach to allow C++ thread to correctly
-// capture Python Error in autograd, remove this when c10 thread pool
-// allow to do one time initialization.
-// see discussion in https://github.com/pytorch/pytorch/pull/34845
-// Follow up issue: https://github.com/pytorch/pytorch/issues/35006
+// TODO: We shouldn't need to call this function because the engine
+// can already persist the errors for us. This still seems to be
+// needed for the DistEngine however.
+//
+// python test/distributed/rpc/test_tensorpipe_agent.py -k
+// test_backward_autograd_engine_error
+//
+// See Note [ Persisting PyErr state across autograd engine threads ]
 void throw_python_error() {
   python_error err;
   err.persist();
-  throw err;
+  throw std::move(err);
 }
 
 } // namespace
@@ -507,6 +506,21 @@ static void _wrap_outputs(
     return results;
   };
 
+  auto view_as_self_fn = [](const at::Tensor& x) -> at::Tensor {
+    pybind11::gil_scoped_acquire gil;
+    THPObjectPtr py_x(THPVariable_Wrap(x));
+    THPObjectPtr py_view_as_method(PyObject_GetAttrString(py_x, "view_as"));
+    if (!py_view_as_method)
+      throw python_error();
+    THPObjectPtr args(PyTuple_Pack(1, py_x.get()));
+    if (!args)
+      throw python_error();
+    THPObjectPtr result(PyObject_CallObject(py_view_as_method, args));
+    if (!result)
+      throw python_error();
+    return THPVariable_Unpack(result);
+  };
+
   // Wrap only the tensor outputs.
   auto wrapped_outputs = _wrap_outputs(
       input_vars,
@@ -515,7 +529,8 @@ static void _wrap_outputs(
       raw_output_vars,
       cdata_if_executable,
       jvp_user_function,
-      to_save_if_setup_context);
+      to_save_if_setup_context,
+      view_as_self_fn);
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -528,8 +543,10 @@ static void _wrap_outputs(
       PyTuple_SetItem(outputs, i, obj);
     } else {
       if (is_executable) {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         self->output_info.emplace_back(*wrapped_outputs[i]);
       }
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
     }
   }
@@ -946,6 +963,14 @@ PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS;
   auto cdata = ((THPFunction*)self)->cdata.lock();
   return THPUtils_packUInt64(cdata->sequence_nr());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  cdata->set_sequence_nr(THPUtils_unpackUInt64(sequence_nr));
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -1517,6 +1542,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
 static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
     {(char*)"_sequence_nr", THPFunction_sequence_nr, METH_NOARGS, nullptr},
+    {(char*)"_set_sequence_nr", THPFunction_set_sequence_nr, METH_O, nullptr},
     {(char*)"maybe_clear_saved_tensors",
      THPFunction_maybe_clear_saved_tensors,
      METH_NOARGS,
@@ -1557,6 +1583,7 @@ PyTypeObject THPFunctionType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */

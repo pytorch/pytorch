@@ -1,6 +1,6 @@
 import copy
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Type, Union
 
 import torch.fx
 from torch.fx._compatibility import compatibility
@@ -59,7 +59,10 @@ class Component:
 
 @compatibility(is_backward_compatible=False)
 def split_by_tags(
-    gm: torch.fx.GraphModule, tags: List[str], return_fqn_mapping: bool = False
+    gm: torch.fx.GraphModule,
+    tags: List[str],
+    return_fqn_mapping: bool = False,
+    GraphModuleCls: Type[torch.fx.GraphModule] = torch.fx.GraphModule,
 ) -> Union[torch.fx.GraphModule, Tuple[torch.fx.GraphModule, Dict[str, str]]]:
     """
     Splits a GraphModule using tags on its graph nodes. We honor the order of
@@ -287,7 +290,7 @@ def split_by_tags(
         if x.op == "get_attr":
             setattr(main_root, x.name, getattr_recursive(gm, x.target))  # type: ignore[arg-type]
 
-    result_gm = torch.fx.GraphModule(main_root, main_g)
+    result_gm = GraphModuleCls(main_root, main_g)
     if return_fqn_mapping:
         return result_gm, orig_to_split_fqn_mapping
 

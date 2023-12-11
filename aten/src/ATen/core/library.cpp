@@ -44,7 +44,7 @@ namespace {
 
 CppFunction::CppFunction(c10::KernelFunction func, c10::optional<c10::impl::CppSignature> cpp_signature, std::unique_ptr<c10::FunctionSchema> schema)
   : func_(std::move(func))
-  , cpp_signature_(std::move(cpp_signature))
+  , cpp_signature_(cpp_signature)
   , schema_(std::move(schema))
   , debug_()
   {}
@@ -56,7 +56,7 @@ CppFunction::~CppFunction() = default;
 Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, const char* file, uint32_t line)
   : kind_(kind)
   , ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
-  , dispatch_key_(k.value_or(CatchAll) == CatchAll ? c10::nullopt : k)
+  , dispatch_key_(k.value_or(CatchAll) == CatchAll ? c10::optional<c10::DispatchKey>() : k)
   , file_(file)
   , line_(line)
   {
@@ -66,6 +66,7 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
         // don't register a library
         registrars_.emplace_back(
           c10::Dispatcher::singleton().registerLibrary(
+            // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
             *ns_, debugString(file_, line_)
           )
         );
@@ -128,6 +129,14 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
   }
   switch (rv) {
     case _RegisterOrVerify::REGISTER:
+      if (impl_abstract_pystub_.has_value()) {
+        registrars_.emplace_back(
+          c10::Dispatcher::singleton().registerAbstractImplPyStub(
+            schema.operator_name(),
+            impl_abstract_pystub_->first,
+            impl_abstract_pystub_->second)
+        );
+      }
       registrars_.emplace_back(
         c10::Dispatcher::singleton().registerDef(
           std::move(schema),
@@ -144,13 +153,13 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
 }
 #undef DEF_PRELUDE
 
-Library& Library::_def(c10::either<c10::OperatorName, c10::FunctionSchema>&& name_or_schema, CppFunction&& f) & {
+Library& Library::_def(std::variant<c10::OperatorName, c10::FunctionSchema>&& name_or_schema, CppFunction&& f, const std::vector<at::Tag>& tags) & {
   c10::FunctionSchema schema = [&] {
-    if (name_or_schema.is_right()) {
-      return std::move(name_or_schema).right();
+    if (std::holds_alternative<c10::FunctionSchema>(name_or_schema)){
+      return std::get<c10::FunctionSchema>(std::move(name_or_schema));
     } else {
       // it's a name; use the inferred schema
-      c10::OperatorName name = std::move(name_or_schema).left();
+      c10::OperatorName name = std::get<c10::OperatorName>(std::move(name_or_schema));
       TORCH_CHECK(f.schema_,
         "def(\"", name, "\"): "
         "Full schema string was not specified, and we couldn't infer schema either.  ",
@@ -164,7 +173,7 @@ Library& Library::_def(c10::either<c10::OperatorName, c10::FunctionSchema>&& nam
   }();
   c10::OperatorName name("", "");  // Get the namespaced name for the impl call
   // First define the schema...
-  _def(std::move(schema), &name);
+  _def(std::move(schema), &name, tags);
   // Then register the implementation...
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
   registrars_.emplace_back(
@@ -172,7 +181,7 @@ Library& Library::_def(c10::either<c10::OperatorName, c10::FunctionSchema>&& nam
       std::move(name),
       dispatch_key,
       std::move(f.func_),
-      std::move(f.cpp_signature_),
+      f.cpp_signature_,
       std::move(f.schema_),
       debugString(std::move(f.debug_), file_, line_)
     )
@@ -187,15 +196,18 @@ at::OperatorName Library::_parseNameForLib(const char* name_str) const {
   // This is a copy paste of Library::_impl
   if (ns_opt.has_value()) {
     // See Note [Redundancy in registration code is OK]
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     TORCH_CHECK(*ns_opt == *ns_,
       IMPL_PRELUDE,
       "Explicitly provided namespace (", *ns_opt, ") in operator name "
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       "does not match namespace of enclosing ", toString(kind_), " block (", *ns_, ").  "
       "Move this definition to the ", toString(kind_), " block corresponding to this namespace "
       "(and consider deleting the namespace from your schema string.)  ",
       ERROR_CONTEXT
     );
   } else {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     bool b = name.setNamespaceIfNotSet(ns_->c_str());
     TORCH_INTERNAL_ASSERT(b, ERROR_CONTEXT);
   }
@@ -223,7 +235,7 @@ Library& Library::_impl(const char* name_str, CppFunction&& f, _RegisterOrVerify
           std::move(name),
           dispatch_key,
           std::move(f.func_),
-          std::move(f.cpp_signature_),
+          f.cpp_signature_,
           std::move(f.schema_),
           debugString(std::move(f.debug_), file_, line_)
         )

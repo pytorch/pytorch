@@ -575,6 +575,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
                 local_graph_task->cpu_ready_queue_);
           }
         } catch (std::exception& e) {
+          // See Note [ Persisting PyErr state across autograd engine threads ]
           thread_on_exception(local_graph_task, task.fn_, e);
         }
       }
@@ -707,6 +708,7 @@ void GraphTask::exec_post_processing() {
       // If leaf_stream.device_index() happens to be for a new device,
       // operator* on the c10::nullopt should throw an error.
       const auto caller_current_stream =
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           *caller_current_streams_[leaf_stream.device_index()];
 
       if (caller_current_stream != leaf_stream) {
@@ -1229,7 +1231,6 @@ auto Engine::execute(
 
   if (compiled_autograd != nullptr) {
     // see [Note: Compiled Autograd]
-    TORCH_CHECK(!keep_graph, "compiled_autograd does not support keep_graph");
     TORCH_CHECK(
         !create_graph, "compiled_autograd does not support create_graph");
     _thread_check.release();

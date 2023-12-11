@@ -5,7 +5,7 @@
 
 #include <ATen/cpu/vec/vec.h>
 
-namespace at { namespace vec {
+namespace at::vec {
 
 // BFloat16 specification
 template <typename scalar_t> struct VecScalarType { using type = scalar_t; };
@@ -571,4 +571,4 @@ inline void map4(
   }
 }
 
-}} // namespace at::vec
+} // namespace at::vec

@@ -86,7 +86,7 @@ def _port_metadata_for_input_quant_nodes(
         if len(choose_qparam_users) != 2:
             raise InternalError(f"Expecting exactly two user for {choose_qparams_node}")
         scale_node = choose_qparam_users.pop()
-        dynamic_q_node = list(scale_node.users.keys())[0]
+        dynamic_q_node = next(iter(scale_node.users.keys()))
         dynamic_q_node_users = _filter_sym_size_users(dynamic_q_node)
         if len(dynamic_q_node_users) > 1:
             raise InternalError(f"Expecting single user for {dynamic_q_node}")
@@ -169,7 +169,7 @@ class PortNodeMetaForQDQ(_ExportPassBase):
           - [Q-> [DQ -> Conv -> Q] -> DQ -> [AvgPool] -> Q -> [DQ -> Linear -> Q] -> DQ]
           - Note DQ and Q nodes around AvgPool do not inherit metadata from AvgPool because
             AvgPool was not supposed to be quantized. Metadata porting relies on quantization_annotation
-            on the nodes (in this case AvgPool node) to conclude if the the node or patter was
+            on the nodes (in this case AvgPool node) to conclude if the node or patter was
             supposed to be quantized. And subsequntly decide if the preceding Q, if any, should
             inherit metadata from AvgPool.
       - Dynamically quantized patterns:

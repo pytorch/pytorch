@@ -22,6 +22,10 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 class FsdpModelStateCheckpoint(DTensorTestBase):
+    @property
+    def backend(self):
+        return "cpu:gloo,cuda:nccl"
+
     def _test_fsdp_model_state(self, process_group) -> None:
         CHECKPOINT_DIR = self.temp_dir
 
@@ -67,7 +71,7 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
                 self.assertEqual(model.bias, model_2.bias)
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     @with_temp_dir
     def test_fsdp_model_state_no_resharding(self):
         self._test_fsdp_model_state(process_group=None)
