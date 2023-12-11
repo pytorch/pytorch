@@ -727,8 +727,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
-      ncclTraceBufferSize_ > 0);
+      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
 #endif
   avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
@@ -1171,8 +1170,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       rank_,
       "] NCCL monitor thread timeout. Basically, this could ",
       "be due to CUDA or NCCL calls being unexpectedly blocking, ",
-      "especially when your program enters a deadlock state in watchdog"
-      "or destructors. If you see this error, please file a bug to pytorch.");
+      "especially when your program enters a deadlock state in watchdog "
+      "or destructors. If you see this error, please file a bug to PyTorch.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
@@ -1373,9 +1372,10 @@ void ProcessGroupNCCL::workCleanupLoop() {
           optAsyncDebugDump->wait_for(
               std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
           const auto exitMsg = c10::str(
-              "[Rank ",
+              "Some other rank's watchdog thread detected a timeout and notified ",
+              "all other ranks, so we're dumping debug info and aborting [Rank ",
               rank_,
-              "] NCCL watchdog thread detected timeout from Store");
+              "] as well.");
           LOG(ERROR) << exitMsg;
           C10_THROW_ERROR(DistBackendError, exitMsg);
         }
