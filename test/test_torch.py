@@ -6114,6 +6114,17 @@ class TestTorch(TestCase):
                 index = (torch.ones(256) * 257).to(dtype=torch.long)
                 self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
 
+    def test_index_add_cornercase(self):
+        for device in get_all_device_types():
+            dest = torch.randn((), device=device)
+            index = torch.tensor([0], device=device)
+            source = torch.randn(1, 1, 1, device=device)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"source tensor shape must match self tensor shape, excluding the specified dimension",
+            ):
+                dest.index_add(0, index, source)
+
     def test_linspace_logspace(self):
         # Ensure the output does not require grad regardless of inputs requiring gard or not.
         # The output of factory functions should not be part of any computational graph.
