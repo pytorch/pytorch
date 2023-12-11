@@ -1,8 +1,9 @@
 #!/bin/bash
 
 set -ex
+echo "this is a first test"
 
-if [[ -n ${USE_CUSPARSELT} ]]; then
+if [ -n "${USE_CUSPARSELT}" ]; then
     # cuSPARSELt license: https://docs.nvidia.com/cuda/cusparselt/license.html
     mkdir tmp_cusparselt && cd tmp_cusparselt
     # CUSPARSELT_NAME="libcusparse_lt-linux-x86_64-0.5.0.1-archive.tar.xz"
@@ -25,3 +26,5 @@ if [[ -n ${USE_CUSPARSELT} ]]; then
     rm -rf tmp_cusparselt
     ldconfig
 fi
+
+echo "This is a test"
