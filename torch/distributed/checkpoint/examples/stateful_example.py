@@ -78,16 +78,15 @@ def run(rank, world_size, device="cuda"):
     model, optim = _init_model(device, world_size)
     _train(model, optim, train_steps=2)
 
-    DCP.save(
+    checkpointer = DCP.FileSystemCheckpointer(CHECKPOINT_DIR)
+    checkpointer.save(
         state_dict={"model": model, "optimizer": optim},
-        storage_writer=DCP.FileSystemWriter(CHECKPOINT_DIR),
     )
 
     # presumably do something else
     model, optim = _init_model(device, world_size)
-    DCP.load(
+    checkpointer.load(
         state_dict={"model": model, "optimizer": optim},
-        storage_reader=DCP.FileSystemReader(CHECKPOINT_DIR),
     )
     _train(model, optim, train_steps=2)
 

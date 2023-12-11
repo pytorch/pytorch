@@ -10,14 +10,7 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch.export import (
-    Constraint,
-    Dim,
-    dynamic_dim,
-    export,
-)
-from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
-from torch._export import capture_pre_autograd_graph
+from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
 from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
     get_buffer,
@@ -238,7 +231,7 @@ class TestExport(TestCase):
             torch.export.export(m, (a,), dynamic_shapes=dynamic_shapes)
         em = torch.export.export(m, (a,))
         x = torch.randn(3, 5)
-        with self.assertRaisesRegex(RuntimeError, "shape\[1\] to be equal to 4, but got 5"):
+        with self.assertRaisesRegex(RuntimeError, "\\[1\\] is specialized at 4"):
             em(x)
 
     def test_not_correct_dim(self):
@@ -783,7 +776,6 @@ class TestExport(TestCase):
         self.assertEqual(params[0].shape, [1, 10])  # weight
         self.assertEqual(params[1].shape, [1])  # bias
 
-    @testing.expectedFailureNonStrict
     def test_buffer_util(self):
         ep = export(torch.nn.BatchNorm2d(100, affine=False), (torch.ones(20, 100, 35, 45), ))
         num_buffer = 0
@@ -1102,7 +1094,6 @@ class TestExport(TestCase):
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
-    @testing.expectedFailureNonStrict
     def test_to_module_with_mutated_buffer(self):
 
         class Foo(torch.nn.Module):
@@ -1131,7 +1122,6 @@ class TestExport(TestCase):
         for name, buffer in stateful_gm.named_buffers():
             self.assertTrue(torch.allclose(torch.tensor(2, dtype=torch.float), buffer))
 
-    @testing.expectedFailureNonStrict
     def test_to_module_with_mutated_buffer_multiple(self):
 
         class Bar(torch.nn.Module):
@@ -1190,13 +1180,13 @@ class TestExport(TestCase):
             torch.allclose(exported(torch.ones(8, 5), 5), f(torch.ones(8, 5), 5))
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Expected input arg1 to be equal to 5, but got 6"
+            RuntimeError, "is specialized to be 5 at tracing time"
         ):
             _ = exported(torch.ones(8, 5), 6)
 
         exported = torch.export.export(f, (tensor_inp, 5.0), dynamic_shapes=dynamic_shapes)
         with self.assertRaisesRegex(
-            RuntimeError, "Expected input arg1 to be equal to 5.0, but got 6.0"
+            RuntimeError, "is specialized to be 5.0 at tracing time"
         ):
             _ = exported(torch.ones(7, 5), 6.0)
 
@@ -1207,11 +1197,10 @@ class TestExport(TestCase):
 
         inps = (torch.randn(4, 4), torch.randn(4), "trunc")
         exported = torch._export.export(g, inps)
-        with self.assertRaisesRegex(RuntimeError, "to be equal to trunc, but got floor"):
+        with self.assertRaisesRegex(RuntimeError, "is specialized to be trunc at"):
             _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported(*inps), g(*inps)))
 
-    @testing.expectedFailureNonStrict
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
 
         class Bar(torch.nn.Module):
@@ -1258,7 +1247,6 @@ class TestExport(TestCase):
             if name == "L__self___bar_buf":
                 self.assertTrue(torch.allclose(torch.tensor(7, dtype=torch.float), buffer))
 
-    @testing.expectedFailureNonStrict
     def test_retracable_ep(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -1290,7 +1278,7 @@ class TestExport(TestCase):
         dim0_x = torch.export.Dim("dim0_x")
         exported = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x}})
         reexported = torch.export.export(exported, (inp,))
-        with self.assertRaisesRegex(RuntimeError, "shape\[0\] to be equal to 5, but got 7"):
+        with self.assertRaisesRegex(RuntimeError, "shape\[0\] is specialized at 5"):
             reexported(torch.ones(7, 5))
 
         reexported = torch.export.export(exported, (inp,), dynamic_shapes=({0: dim0_x},))
@@ -1299,7 +1287,7 @@ class TestExport(TestCase):
         # can't retrace with invalid inputs with respect to the original ExportedProgram
         dim0_x_v2 = torch.export.Dim("dim0_x_v2", min=3)
         exported_v2 = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x_v2}})
-        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be >= 3, but got 2"):
+        with self.assertRaisesRegex(RuntimeError, "shape\[1\] is specialized at 5"):
             torch.export.export(exported_v2, (torch.randn(2, 2),))
 
     def test_retrace_graph_level_meta_preservation(self):
@@ -1434,7 +1422,7 @@ class TestExport(TestCase):
         self.assertEqual(len(ep.state_dict), 1)
         self.assertEqual(len(ep.tensor_constants), 2)
 
-        inp = (torch.tensor(5),)
+        inp = (torch.randn(1),)
         self.assertTrue(torch.allclose(ep(*inp), Foo()(*inp)))
 
         transform = ep.run_decompositions()
@@ -1597,34 +1585,8 @@ def forward(self, l_x_):
         self.assertEqual(ep(*test_inp), foo(*test_inp))
 
         ep_v2 = torch.export.export(foo, (torch.randn(4, 4), torch.randn(4, 4)), dynamic_shapes=(None, None))
-        with self.assertRaisesRegex(RuntimeError, "shape\[0\] to be equal to 4, but got 7"):
+        with self.assertRaisesRegex(RuntimeError, "shape\[0\] is specialized at 4"):
             ep_v2(*test_inp)
-
-    def test_constant_output(self):
-        class ModuleConstant(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.b = torch.randn(3, 2)
-
-            def forward(self):
-                return self.b
-
-        class ModuleNestedConstant(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.bff = torch.randn(3, 2)
-
-            def forward(self, x, y):
-                return {"prediction": (x + y, self.bff)}
-
-        mod = ModuleConstant()
-        ep = torch.export.export(mod, ())
-        self.assertEqual(ep(), mod())
-
-        args = (torch.randn(3, 2), torch.randn(3, 2))
-        mod = ModuleNestedConstant()
-        ep = torch.export.export(mod, args)
-        self.assertEqual(ep(*args), mod(*args))
 
     def test_non_arg_name_dynamic_shapes_api_with_kwarg(self):
         def foo(a, b, kw1, kw2):
@@ -1670,7 +1632,8 @@ def forward(self, l_x_):
 
         test_inp = ((torch.randn(4, 4), torch.randn(2, 4)), torch.randn(4, 4))
         with self.assertRaisesRegex(
-            RuntimeError, "shape\[0\] to be >= 3, but got 2"
+            RuntimeError,
+            "shape\[0\] is outside of specified dynamic range \[3, inf\]"
         ):
             ep(*test_inp)
 
@@ -1687,7 +1650,6 @@ def forward(self, l_x_):
         inputs = {'x': torch.randn(3, 3), 'y': torch.randn(3, 3)}
         self.assertEqual(ep(**inputs), m(**inputs))
 
-    @testing.expectedFailureNonStrict
     def test_retrace_pre_autograd(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -1701,10 +1663,10 @@ def forward(self, l_x_):
         inp = torch.randn(4, 4)
         gm = capture_pre_autograd_graph(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3])
 
-        with self.assertRaisesRegex(RuntimeError, "Expected input arg0_1.shape\[0\] to be >= 3, but got 2"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             gm(torch.randn(2, 2))
 
-        with self.assertRaisesRegex(RuntimeError, "Expected input arg0_1.shape\[0\] to be >= 3, but got 2"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             torch.export.export(gm, (torch.randn(2, 2),))
 
         ep = torch.export.export(gm, (torch.randn(5, 4),), dynamic_shapes=({0: torch.export.Dim("dim", min=3)},))
@@ -1853,7 +1815,6 @@ def forward(self, l_x_):
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 
-    @testing.expectedFailureNonStrict
     def test_export_input_mutation_static_shape(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x, y):
@@ -1868,7 +1829,6 @@ def forward(self, l_x_):
         self.assertEqual(inputs[0] + 2.0, inputs_model[0])
         self.assertEqual(inputs[0] + 2.0, inputs_export[0])
 
-    @testing.expectedFailureNonStrict
     def test_export_input_mutation_dynamic_shape(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x, y):
