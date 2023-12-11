@@ -277,12 +277,20 @@ def find_symbol_binding_fx_nodes(graph):
         if is_symbol_binding_fx_node(node)
     }
 
-def definitely_true(a):
+def definitely_true(a, *, never_guard=False):
     """
     Returns True only if we can tell that a is True, possibly introducing
     a guard in the process.  If a depends on some unbacked SymInt, we may
     return False even though there may exist a possible value of the SymInt
     that would cause the expression to return True.
+
+    If never_guard=True, then we will **not** guard, and potentially return
+    False, even if we statically know that the expression is true,
+    but doing so would require specializing on any symbols.
+    This is useful for cases like inductor's no-op removal pass,
+    where we might be able to remove a no-op in the graph given
+    a specific input shape, but cannot remove the node generally
+    for any shape.
 
     When is it appropriate to use definitely_true?  First, if you can use
     a higher level combinator like parallel_or/parallel_and, prefer using
@@ -297,7 +305,7 @@ def definitely_true(a):
     doesn't matter (e.g., strides often fall in this bucket.)
     """
     if isinstance(a, SymBool):
-        if a.node.has_hint():
+        if a.node.has_hint() and not never_guard:
             return guard_bool(a)
         else:
             return False
