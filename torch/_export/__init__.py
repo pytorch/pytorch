@@ -117,6 +117,7 @@ def export__RC__(
     See `export` for documentation of `f`, `args`, `kwargs` and return.
     """
     from torch.export._trace import _export
+    warnings.warn("This function is deprecated. Please use torch.export.export instead.")
 
     constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
     return _export(
@@ -219,26 +220,6 @@ def capture_pre_autograd_graph(
         return unlifted_m
 
 
-def _export_to_torch_ir(
-    f: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
-    *,
-    preserve_module_call_signature: Tuple[str, ...] = (),
-    disable_constraint_solver: bool = False,
-) -> torch.fx.GraphModule:
-    from torch.export._trace import _export_to_torch_ir
-    return _export_to_torch_ir(
-        f,
-        args,
-        kwargs,
-        constraints,
-        preserve_module_call_signature=preserve_module_call_signature,
-        disable_constraint_solver=disable_constraint_solver
-    )
-
-
 def export(
     f: Callable,
     args: Tuple[Any, ...],
@@ -299,6 +280,7 @@ def _export(
         An ExportedProgram containing the traced method.
     """
     from torch.export._trace import _export
+    warnings.warn("This function is deprecated. Please use torch.export.export instead.")
 
     return _export(
         f,
@@ -428,6 +410,7 @@ def aot_compile(
             "Please use dynamic_shapes instead."
         )
 
+    from torch.export._trace import _export_to_torch_ir
     from torch._inductor.decomposition import select_decomp_table
 
     if constraints is None:
