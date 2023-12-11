@@ -2458,7 +2458,11 @@ Example::
   py::class_<
       ::c10d::Work,
       c10::intrusive_ptr<::c10d::Work>,
-      ::c10d::PyProcessGroup::PyWork>(module, "Work")
+      ::c10d::PyProcessGroup::PyWork>(module, "Work", R"(
+A `Work` object represents the handle to a pending asynchronous operation in
+PyTorch's distributed package. It is returned by non-blocking collective operations,
+such as `dist.all_reduce(tensor, async_op=True)`.
+)")
       .def(py::init<>())
       .def("is_completed", &::c10d::Work::isCompleted)
       .def(
