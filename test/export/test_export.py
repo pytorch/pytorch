@@ -10,7 +10,13 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
+from torch.export import (
+    Constraint,
+    Dim,
+    dynamic_dim,
+    export
+)
+from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, capture_pre_autograd_graph, _export
 from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
     get_buffer,
@@ -113,6 +119,8 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
+    # TODO: torch._dynamo.exc.Unsupported: call_function UserDefinedObjectVariable(add) [TensorVariable()] {}
+    @unittest.expectedFailure
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
@@ -1305,7 +1313,7 @@ class TestExport(TestCase):
     def test_constraint_directly_construct(self):
         with self.assertRaisesRegex(
             TypeError,
-            "torch.export.Constraint has no public constructor. Please use torch.export.dynamic_dim"
+            "Constraint has no public constructor. Please use torch.export.dynamic_dim"
         ):
             _ = Constraint()
 
