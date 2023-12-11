@@ -1047,23 +1047,9 @@ cdll.LoadLibrary("__lib_path__")
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
             output_dir = os.path.dirname(input_path)
-
-            # print(f"!!!! {key}, {input_path}, {output_dir}")
-
-            print(f"!!!! bit_width: {self.bit_width}")
-
             x86_isa_help_builder = CxxBuilder(
                 key, [input_path], CxxTorchOptions(self), output_dir
             )
-
-            """
-            output_path = input_path[:-3] + "so"
-            build_cmd = shlex.split(
-                cpp_compile_command(
-                    input_path, output_path, warning_all=False, vec_isa=self
-                )
-            )
-            """
             try:
                 # Check build result
                 # compile_file(input_path, output_path, build_cmd)
@@ -1176,9 +1162,6 @@ def x86_isa_checker() -> List[str]:
     lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
     with lock:
         output_dir = os.path.dirname(input_path)
-
-        # print(f"!!!!!! {key}, {input_path}, {output_dir}")
-
         x86_isa_help_builder = CxxBuilder(key, [input_path], CxxOptions(), output_dir)
         status, target_file = x86_isa_help_builder.build()
 
@@ -1906,24 +1889,17 @@ class CppCodeCache:
 
     @classmethod
     def load(cls, source_code: str) -> CDLL:
+        from torch._inductor.cxx_builder.cxx_builder import CxxBuilder, CxxTorchOptions
+
         picked_vec_isa = pick_vec_isa()
-        # cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
-        # dummy_builder = CxxBuilder("i", ["o"], CxxTorchOptions())
-
-        # print("!!! source_code: ", source_code)
-        """
-        if(len(source_code) == 0):
-            raise "bp"
-        """
-
-        key, input_path = write(source_code, "cpp")
+        isa_seed = CxxBuilder("i", ["o"], CxxTorchOptions(picked_vec_isa))
+        # write will calc source_code hash, but we need split same code with different
+        # ISAs. get a command_line which contains isa parameters as a seed, what make
+        # hash value different with multiple Isa.
+        hash_seed = isa_seed.get_command_line()
+        key, input_path = write(source_code, "cpp", extra=hash_seed)
         if key not in cls.cache:
             from filelock import FileLock
-
-            from torch._inductor.cxx_builder.cxx_builder import (
-                CxxBuilder,
-                CxxTorchOptions,
-            )
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)

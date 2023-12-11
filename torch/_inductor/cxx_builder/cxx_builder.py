@@ -13,7 +13,7 @@ from typing import List, Tuple
 
 import torch
 from torch._inductor import config, exc
-from torch._inductor.codecache import pick_vec_isa, VecISA
+from torch._inductor.codecache import VecISA
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import (
@@ -678,6 +678,8 @@ class CxxTorchCudaOptions(CxxTorchOptions):
 
     def __init__(self) -> None:
         self._compiler = _get_cxx_compiler()
+        from torch._inductor.codecache import pick_vec_isa
+
         chosen_isa = pick_vec_isa()
 
         (
