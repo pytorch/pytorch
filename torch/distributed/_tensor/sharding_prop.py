@@ -6,7 +6,6 @@ import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._tensor._utils import try_find_mesh_from_args
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
     DTensorSpec,
     OpInfo,
@@ -20,6 +19,7 @@ from torch.distributed._tensor.op_schema import (
     TupleStrategy,
 )
 from torch.distributed._tensor.placement_types import TensorMeta
+from torch.distributed.device_mesh import DeviceMesh
 
 aten = torch.ops.aten
 
@@ -178,7 +178,11 @@ class ShardingPropagator:
         def spec_to_strategy(spec: object) -> object:
             if isinstance(spec, DTensorSpec):
                 return OpStrategy([PlacementStrategy(spec)])
-            elif isinstance(spec, (list, tuple)) and isinstance(spec[0], DTensorSpec):
+            elif (
+                isinstance(spec, (list, tuple))
+                and len(spec) > 0
+                and isinstance(spec[0], DTensorSpec)
+            ):
                 # tensor list create tuple strategy
                 tuple_strategy = [spec_to_strategy(s) for s in spec]
                 tuple_strategy = cast(Sequence[StrategyType], tuple_strategy)
