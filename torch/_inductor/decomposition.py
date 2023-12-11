@@ -108,7 +108,7 @@ def functional_assert_async_msg_decomp(tensor, msg):
 
 @register_decomposition([aten.sym_constrain_range_for_size.default])
 def sym_constrain_range_for_size(symbol, *, min=None, max=None):
-    return
+    return NotImplemented
 
 
 @register_decomposition([aten.clamp])

@@ -862,11 +862,17 @@ class GraphLowering(torch.fx.Interpreter):
             if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):
+                sizes = n.meta["val"].size()
+                sizes = [val.node.expr if isinstance(val, torch.SymInt) else val for val in sizes]
+                no_unbacked_symint_in_size = all(
+                    isinstance(self.sizevars.symbolic_hint(val), int)
+                    for val in sizes
+                )
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
-                if dense and len(strides):
+                if dense and len(strides) and no_unbacked_symint_in_size:
                     stride_order = ir.get_stride_order(strides)
                     if (
                         len(result.get_size()) == 4

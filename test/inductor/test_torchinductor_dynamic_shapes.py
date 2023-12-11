@@ -506,6 +506,38 @@ class TestInductorDynamic(TestCase):
         expect = fn(5)
         actual = cfn(5)
         self.assertEqual(expect, actual)
+    
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_unsqueeze_nobreak(self, device):
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(x):
+            max_val = x.max().item()
+            torch._constrain_as_size(max_val, min=2, max=100)
+            y = torch.ones(max_val, max_val)
+            return y[:, :, None]
+
+        f(torch.tensor([3, 4, 5, 6], device=device))
+    
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_mask_mul_nobreak(self, device):
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(x, lengths):
+            max_seq_len = lengths.max().item()
+            torch._constrain_as_size(max_seq_len, min=2, max=100)
+            row_vector = torch.arange(0, max_seq_len, 1)
+            matrix = torch.unsqueeze(lengths, dim=-1)
+            mask = row_vector < matrix
+            mask = mask.type(torch.float32)
+            mask = mask[:, :, None]
+            x = x * mask
+            return x
+
+        batch = 3
+        seq_len = 6
+        dim = 10
+        x = torch.randn((batch, seq_len, dim), device=device)
+        lengths = torch.tensor([6, 4, 4], dtype=torch.int32, device=device)
+        f(x, lengths)
 
     @parametrize(
         "op",

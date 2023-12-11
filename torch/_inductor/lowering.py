@@ -5248,6 +5248,13 @@ def sym_constrain_range(a, min, max):
     return a
 
 
+@register_lowering(aten.sym_constrain_range_for_size)
+def sym_constrain_range_for_size(a, min, max):
+    # AOTInductor not under tracing context, so TracingContext is not used.
+    assert a in V.graph.fake_mode.shape_env.var_to_range
+    return a
+
+
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
     val = V.graph.current_node.meta["val"]

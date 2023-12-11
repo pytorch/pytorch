@@ -542,7 +542,7 @@ def fx_codegen_and_compile(
                     if hasattr(out, "layout"):
                         output_strides.append(
                             tuple(
-                                V.graph.sizevars.size_hint(s) for s in out.layout.stride
+                                V.graph.sizevars.size_hint(s, fallback=2) for s in out.layout.stride
                             )
                         )
                     else:
