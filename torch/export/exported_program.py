@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+import functools
 from typing import (
     Any,
     Callable,
@@ -26,6 +27,7 @@ import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
+from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
@@ -66,6 +68,15 @@ class ModuleCallSignature:
 class ModuleCallEntry:
     fqn: str
     signature: Optional[ModuleCallSignature] = None
+
+
+def _disable_prexisiting_fake_mode(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with maybe_disable_fake_tensor_mode():
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 
 class ExportedProgram:
@@ -232,11 +243,10 @@ class ExportedProgram:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
-        from torch._export import combine_args_kwargs
 
         if self.call_spec.in_spec is not None:
             try:
-                user_args = combine_args_kwargs(args, kwargs)
+                user_args = (args, kwargs or {})
                 args = fx_pytree.tree_flatten_spec(
                     user_args, self.call_spec.in_spec, exact_structural_match=True
                 )  # type: ignore[assignment]
@@ -277,9 +287,10 @@ class ExportedProgram:
         )
 
         if self.call_spec.out_spec is not None:
-            mutation = self.graph_signature.buffers_to_mutate
-            num_mutated = len(mutation)
-            mutated_buffers = res[:num_mutated]
+            buffer_mutation = self.graph_signature.buffers_to_mutate
+            user_input_mutation = self.graph_signature.user_inputs_to_mutate
+            num_mutated = len(buffer_mutation) + len(user_input_mutation)
+            mutated_values = res[:num_mutated]
 
             # Exclude dependency token from final result.
             assertion_dep_token = self.graph_signature.assertion_dep_token
@@ -299,10 +310,27 @@ class ExportedProgram:
                     f"{received_spec}"
                 )
             finally:
-                ix = 0
-                for buffer in self.graph_signature.buffers_to_mutate.values():
-                    self.state_dict[buffer] = mutated_buffers[ix]
-                    ix += 1
+                user_inputs = [
+                    spec
+                    for spec in self.graph_signature.input_specs
+                    if spec.kind == InputKind.USER_INPUT
+                ]
+                for i, value in enumerate(mutated_values):
+                    output_spec = self.graph_signature.output_specs[i]
+                    if output_spec.kind == OutputKind.BUFFER_MUTATION:
+                        assert output_spec.target is not None
+                        self.state_dict[output_spec.target] = value
+                    elif output_spec.kind == OutputKind.USER_INPUT_MUTATION:
+                        assert output_spec.target is not None
+                        index = next(
+                            i
+                            for i, spec in enumerate(user_inputs)
+                            if spec.arg.name == output_spec.target
+                        )
+                        args[index].copy_(value)
+                    else:
+                        raise AssertionError(f"Unexpected kind: {output_spec.kind}")
+
         return res
 
     def __str__(self) -> str:
@@ -330,6 +358,7 @@ class ExportedProgram:
         else:
             return unflatten(self)
 
+    @_disable_prexisiting_fake_mode
     def run_decompositions(
         self, decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None
     ) -> "ExportedProgram":
@@ -365,7 +394,6 @@ class ExportedProgram:
         decomp_table = decomp_table or core_aten_decompositions()
 
         old_placeholders = _get_placeholders(self.graph_module)
-        old_outputs = list(self.graph.nodes)[-1].args[0]
         fake_args = [node.meta["val"] for node in old_placeholders]
 
         buffers_to_remove = [name for name, _ in self.graph_module.named_buffers()]
@@ -439,7 +467,7 @@ class ExportedProgram:
         ]
 
         state_dict = self.state_dict.copy()
-        lift_constant_tensor_pass(gm, new_graph_signature, state_dict)
+        lift_constant_tensor_pass(gm, new_graph_signature)
         _replace_sym_size_ops_pass(gm)
         exported_program = ExportedProgram(
             gm,
