@@ -188,11 +188,13 @@ def skip_min_ort_version(reason: str, version: str, dynamic_only: bool = False):
     return skip_dec
 
 
-def skip_dynamic_fx_test(reason: str):
+def skip_dynamic_fx_test(reason: str, skip_model_type=None):
     """Skip dynamic exporting test.
 
     Args:
         reason: The reason for skipping dynamic exporting test.
+        skip_model_type (onnx_test_common.TorchModelType): The model type to skip dynamic exporting test for.
+            When None, model type is not used to skip dynamic tests.
 
     Returns:
         A decorator for skipping dynamic exporting test.
@@ -201,7 +203,9 @@ def skip_dynamic_fx_test(reason: str):
     def skip_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
-            if self.dynamic_shapes:
+            if self.dynamic_shapes and (
+                not skip_model_type or self.model_type == skip_model_type
+            ):
                 raise unittest.SkipTest(
                     f"Skip verify dynamic shapes test for FX. {reason}"
                 )

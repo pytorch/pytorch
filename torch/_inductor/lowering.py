@@ -1076,14 +1076,12 @@ def cat(inputs, dim=0):
 
         return False
 
-    if (
-        len(inputs) <= config.max_pointwise_cat_inputs
-        and inputs[0].get_device().type != "cpu"
-    ):
+    if len(inputs) <= config.max_pointwise_cat_inputs:
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
-        all_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
+        all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
+        any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
 
-        if all_pointwise_inputs and pointwise_uses:
+        if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
             return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
@@ -2188,8 +2186,6 @@ make_fallback(aten.pixel_shuffle)
 make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
 make_fallback(aten.put)
-make_fallback(aten.reflection_pad1d)
-make_fallback(aten.replication_pad1d)
 make_fallback(aten.resize)
 make_fallback(aten.resize_)
 make_fallback(aten.resize_as)
@@ -3494,36 +3490,6 @@ def upsample_bicubic2d_default(
     )
 
 
-@register_lowering(aten.reflection_pad2d)
-def reflection_pad2d(x, padding):
-    assert len(padding) == 4
-    left, right, top, bot = padding
-
-    x_loader = x.make_loader()
-    *batch, h, w = x.get_size()
-
-    def reflect(x, size, offset):
-        size_num = size
-        size = ops.index_expr(size - 1, torch.int32)
-        x = ops.index_expr(x, torch.int32)
-        x = ops.sub(x, ops.index_expr(offset, torch.int32))
-        x = ops.sub(size, ops.abs(ops.sub(size, ops.abs(x))))
-        return ops.indirect_indexing(x, size_num, check=False)
-
-    def fn(idx):
-        *b, x, y = idx
-        x = reflect(x, h, top)
-        y = reflect(y, w, left)
-        return x_loader([*b, x, y])
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=fn,
-        ranges=[*batch, h + top + bot, w + left + right],
-    )
-
-
 @register_lowering(aten.reflection_pad2d_backward)
 def reflection_pad2d_backward(grad_output, x, padding):
     assert len(padding) == 4
@@ -4648,7 +4614,7 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     rnumel = sympy_product(size[i] for i in axis)
 
     def get_constant_or_index_expr(x, dtype):
-        if isinstance(x, sympy.Expr) and not x.is_constant():
+        if isinstance(x, sympy.Expr) and not x.is_number:
             return ops.to_dtype(ops.index_expr(x, torch.int64), dtype)
         return ops.constant(x, dtype)
 

@@ -428,6 +428,7 @@ def meta__cslt_sparse_mm(
     compressed_A: torch.Tensor,
     dense_B: torch.Tensor,
     bias: Optional[Tensor] = None,
+    alpha: Optional[Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
     transpose_result: bool = False,
 ):
@@ -447,13 +448,12 @@ def meta__cslt_sparse_mm(
     if bias is not None:
         assert m == bias.size(0)
 
-    mixed_dtype = out_dtype is not None and (is_int8_input_type != out_dtype)
-    if mixed_dtype:
+    if out_dtype is not None:
         assert (
-            is_int8_input_type and mixed_dtype is torch.float16
+            is_int8_input_type and out_dtype == torch.float16
         ), "out_dtype is only supported for i8i8->fp16 matmul"
     output_shape = (n, m) if transpose_result else (m, n)
-    result = dense_B.new_empty(output_shape, dtype=out_dtype if mixed_dtype else None)
+    result = dense_B.new_empty(output_shape, dtype=out_dtype)
     return result
 
 
