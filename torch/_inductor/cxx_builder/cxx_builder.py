@@ -703,7 +703,7 @@ class CxxTorchCudaOptions(CxxTorchOptions):
     maintains cuda device related build args.
     """
 
-    def __init__(self, aot_mode: bool = False) -> None:
+    def __init__(self, use_cuda: bool = True, aot_mode: bool = False) -> None:
         self._compiler = _get_cxx_compiler()
         from torch._inductor.codecache import pick_vec_isa
 
@@ -731,15 +731,24 @@ class CxxTorchCudaOptions(CxxTorchOptions):
             cpp_compiler=self._compiler, chosen_isa=chosen_isa, aot_mode=aot_mode
         )
 
-        (
-            cuda_definations,
-            cuda_include_dirs,
-            cuda_cflags,
-            cuda_ldflags,
-            cuda_libraries_dirs,
-            cuda_libraries,
-            cuda_passthough_args,
-        ) = get_cxx_torch_cuda_options(aot_mode=aot_mode)
+        cuda_definations: List[str] = []
+        cuda_include_dirs: List[str] = []
+        cuda_cflags: List[str] = []
+        cuda_ldflags: List[str] = []
+        cuda_libraries_dirs: List[str] = []
+        cuda_libraries: List[str] = []
+        cuda_passthough_args: List[str] = []
+
+        if use_cuda:
+            (
+                cuda_definations,
+                cuda_include_dirs,
+                cuda_cflags,
+                cuda_ldflags,
+                cuda_libraries_dirs,
+                cuda_libraries,
+                cuda_passthough_args,
+            ) = get_cxx_torch_cuda_options(aot_mode=aot_mode)
 
         definations = cxx_definations + torch_definations + cuda_definations
         include_dirs = cxx_include_dirs + torch_include_dirs + cuda_include_dirs
