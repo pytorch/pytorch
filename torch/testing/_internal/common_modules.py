@@ -3763,7 +3763,7 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
-                   # FIXME: file an issue about these failures
+                   # https://github.com/pytorch/pytorch/issues/115588
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),)
