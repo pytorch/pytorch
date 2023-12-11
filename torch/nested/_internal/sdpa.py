@@ -14,7 +14,7 @@ from torch.backends.cuda import (
     SDPBackend,
 )
 
-from .nested_tensor import NestedTensor
+from .nested_tensor import buffer_from_jagged, NestedTensor, ViewNestedFromBuffer
 
 log = logging.getLogger(__name__)
 
@@ -217,21 +217,6 @@ def _check_for_seq_len_0_nested(params: SDPAParams, debug=False) -> bool:
     return True
 
 
-def _check_requires_grad_nested(params: SDPAParams, debug=False) -> bool:
-    if (
-        params.query.requires_grad
-        or params.key.requires_grad
-        or params.value.requires_grad
-    ):
-        # TODO: This can be done, it just isn't written yet
-        if debug:
-            log.warning(
-                "Memory efficient attention currently doesn't support training with NT inputs."
-            )
-        return False
-    return True
-
-
 def _can_use_flash_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
     constraints = (
         _check_batch_size_nested,
@@ -246,7 +231,6 @@ def _can_use_flash_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
 
 def _can_use_efficient_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
     constraints = (
-        _check_requires_grad_nested,
         _check_batch_size_nested,
         _check_for_seq_len_0_nested,
     )
@@ -379,7 +363,7 @@ def _view_as_dense(
     tensor: torch.Tensor, Nnz: int, num_heads: int, head_dim: int
 ) -> torch.Tensor:
     if tensor.is_nested:
-        return tensor.values()
+        return buffer_from_jagged(tensor)
     return tensor.view(Nnz, num_heads, head_dim)
 
 
@@ -681,9 +665,10 @@ def jagged_scaled_dot_product_attention(
             False,
             scale=og_scale,
         )
-
         # Reshape output to convert nnz to batch_size and seq_len
-        attention = NestedTensor(attention, **output_nt_info).transpose(1, 2)
+        attention = ViewNestedFromBuffer.apply(
+            attention.squeeze(0), output_nt_info["offsets"]
+        ).transpose(1, 2)
         return _post_process_flash_output(attention, og_size)
     elif backend_choice == SDPBackend.EFFICIENT_ATTENTION:
         (
@@ -693,7 +678,7 @@ def jagged_scaled_dot_product_attention(
             cumulative_sequence_length_q,
             cumulative_sequence_length_kv,
             max_seqlen_batch_q,
-            _,
+            max_seqlen_batch_kv,
             output_nt_info,
         ) = _sdpa_nested_preprocessing(query, key, value)
         (
@@ -711,6 +696,7 @@ def jagged_scaled_dot_product_attention(
             cumulative_sequence_length_q,
             cumulative_sequence_length_kv,
             max_seqlen_batch_q,
+            max_seqlen_batch_kv,
             dropout_p,
             int(is_causal),
             compute_logsumexp,
@@ -718,7 +704,9 @@ def jagged_scaled_dot_product_attention(
         )
 
         # Reshape output to convert nnz to batch_size and seq_len
-        return NestedTensor(attention.squeeze(0), **output_nt_info).transpose(1, 2)
+        return ViewNestedFromBuffer.apply(
+            attention.squeeze(0), output_nt_info["offsets"]
+        ).transpose(1, 2)
     elif backend_choice == SDPBackend.MATH:
         return torch._scaled_dot_product_attention_math(
             query, key, value, attn_mask, dropout_p, is_causal, scale=scale
