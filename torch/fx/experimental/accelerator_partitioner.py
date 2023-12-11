@@ -583,8 +583,8 @@ class Partitioner:
             if node.target == operator.__getitem__:
                 continue
             input_nodes: Dict[Node, None] = {}
-            map_arg(node.args, lambda n: input_nodes.setdefault(n))
-            map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
+            map_arg(node.args, input_nodes.setdefault)
+            map_arg(node.kwargs, input_nodes.setdefault)
             # When a node has two or more output nodes,
             # it outputs its result to 'getitem' nodes.
             # Those 'getitem' nodes are the output node for this node.

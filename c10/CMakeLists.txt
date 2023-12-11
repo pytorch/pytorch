@@ -81,11 +81,11 @@ if(WERROR)
 endif()
 
 # ---[ Dependency of c10
-if(${USE_GFLAGS})
+if(C10_USE_GFLAGS)
    target_link_libraries(c10 PUBLIC gflags)
 endif()
 
-if(${USE_GLOG})
+if(C10_USE_GLOG)
     target_link_libraries(c10 PUBLIC glog::glog)
 endif()
 target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
@@ -95,7 +95,7 @@ if(C10_USE_NUMA)
   target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
 endif()
 
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x")
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
     target_link_libraries(c10 PRIVATE cpuinfo)
 endif()
 

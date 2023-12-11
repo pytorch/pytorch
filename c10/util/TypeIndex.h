@@ -167,7 +167,7 @@ inline constexpr type_index get_type_index() {
 #if !defined(TORCH_PEDANTIC)
 // Use precomputed hashsum for std::string
 // Needed to workaround ambiguity in class name resolution
-// into __PRETTY_FUNCION__ when abovementioned class is defined in inlined
+// into __PRETTY_FUNCTION__ when abovementioned class is defined in inlined
 // namespace. In multi-ABI C++ library, `std::string` is an alias to
 // `std::__cxx11::basic_string<char>` which depending on compiler flags can be
 // resolved to `basic_string<char>` either in `std` namespace or in

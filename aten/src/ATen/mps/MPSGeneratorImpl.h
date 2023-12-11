@@ -8,8 +8,7 @@
 #include <c10/util/Optional.h>
 
 namespace at {
-namespace mps {
-namespace detail {
+namespace mps::detail {
 
 static const uint32_t PHILOX_STATE_N = 7;
 struct rng_data_pod {
@@ -20,8 +19,7 @@ struct rng_data_pod {
 TORCH_API const Generator& getDefaultMPSGenerator();
 TORCH_API Generator createMPSGenerator(uint64_t seed_val = default_rng_seed_val);
 
-} // namespace detail
-} // namespace mps
+} // namespace mps::detail
 
 struct TORCH_API MPSGeneratorImpl : public c10::GeneratorImpl {
   // Constructors

@@ -4,7 +4,8 @@
 #include <ATen/core/List.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/ArrayRef.h>
-#if !defined(__s390x__)
+#include <c10/util/strides.h>
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
 #include <vector>
@@ -54,6 +55,19 @@ static inline std::vector<int64_t> padding_r(
     pad_r[d] = padding[d] - output_padding[d];
   }
   return pad_r;
+}
+
+// Make sure input has default contiguous strides if it's contiguous tensors for better performance.
+// For example, for tensor of size = [1, 1280], stride = [0, 1], we'll convert it to size = [1, 1280], stride = [1280, 1]
+// before calling oneDNN for better performance.
+static inline Tensor may_convert_to_default_contiguous_strides(const Tensor& input) {
+  auto input_size = input.sizes().vec();
+  auto input_stride = input.strides().vec();
+  auto input_default_contiguous_strides = c10::contiguous_strides(input_size);
+  if (input.is_contiguous() && input_stride != c10::IntArrayRef(input_default_contiguous_strides)) {
+     return input.as_strided(input_size, input_default_contiguous_strides);
+  }
+  return input;
 }
 
 #if AT_MKLDNN_ENABLED()

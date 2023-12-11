@@ -58,7 +58,6 @@
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
 #include <ATen/ops/pow.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 namespace at::native {
@@ -98,6 +97,43 @@ namespace at::native {
     }                                                           \
                                                                 \
     return result;                                              \
+  }
+
+#define FOREACH_BINARY_OP_TENSOR_ALPHA(OP)                             \
+  void foreach_tensor_##OP##_tensor_kernel_slow_(                      \
+      TensorList tensors, const Tensor& scalar, const Scalar& alpha) { \
+    TORCH_CHECK(                                                       \
+        scalar.dim() == 0 && scalar.numel() == 1,                      \
+        "scalar tensor expected to be 0 dim but it has ",              \
+        scalar.dim(),                                                  \
+        " dimensions and ",                                            \
+        scalar.numel(),                                                \
+        " elements.");                                                 \
+    check_foreach_api_restrictions(tensors);                           \
+                                                                       \
+    for (auto& t : tensors) {                                          \
+      t.OP##_(scalar, alpha);                                          \
+    }                                                                  \
+  }                                                                    \
+                                                                       \
+  std::vector<Tensor> foreach_tensor_##OP##_tensor_kernel_slow(        \
+      TensorList tensors, const Tensor& scalar, const Scalar& alpha) { \
+    TORCH_CHECK(                                                       \
+        scalar.dim() == 0 && scalar.numel() == 1,                      \
+        "scalar tensor expected to be 0 dim but it has ",              \
+        scalar.dim(),                                                  \
+        " dimensions and ",                                            \
+        scalar.numel(),                                                \
+        " elements.");                                                 \
+    check_foreach_api_restrictions(tensors);                           \
+                                                                       \
+    std::vector<Tensor> result;                                        \
+    result.reserve(tensors.size());                                    \
+    for (const auto& t : tensors) {                                    \
+      result.emplace_back(t.OP(scalar, alpha));                        \
+    }                                                                  \
+                                                                       \
+    return result;                                                     \
   }
 
 #define FOREACH_BINARY_OP_SCALAR(OP)                            \
@@ -295,7 +331,9 @@ FOREACH_BINARY_OP_LIST_ALPHA(add);
 FOREACH_BINARY_OP_LIST_ALPHA(sub);
 FOREACH_BINARY_OP_LIST_ALPHA(lerp);
 
+FOREACH_BINARY_OP_TENSOR_ALPHA(add);
 FOREACH_BINARY_OP_TENSOR(mul);
+FOREACH_BINARY_OP_TENSOR(div);
 
 FOREACH_BINARY_OP_SCALAR(add);
 FOREACH_BINARY_OP_SCALAR(sub);

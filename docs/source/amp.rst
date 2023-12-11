@@ -384,3 +384,12 @@ Some ops not listed here (e.g., binary ops like ``add``) natively promote
 inputs without autocasting's intervention.  If inputs are a mixture of ``bfloat16``
 and ``float32``, these ops run in ``float32`` and produce ``float32`` output,
 regardless of whether autocast is enabled.
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.amp.autocast_mode
+.. py:module:: torch.cpu.amp.autocast_mode
+.. py:module:: torch.cuda.amp.autocast_mode
+.. py:module:: torch.cuda.amp.common
+.. py:module:: torch.cuda.amp.grad_scaler

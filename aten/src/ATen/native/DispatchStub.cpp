@@ -1,10 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/DispatchStub.h>
 
+#include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
-#include <c10/macros/Macros.h>
 
-#if !defined(__s390x__)
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
 #include <cstdlib>

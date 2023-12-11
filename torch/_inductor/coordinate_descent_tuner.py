@@ -38,10 +38,10 @@ class CoordescTuner:
     """
     The coordinate descent tuner. Tune one field/coordinate at a time.
 
-    TODO will it be necessary to tune multiple fields simultanuously.
+    TODO will it be necessary to tune multiple fields simultaneously.
 
 
-    TODO: what if both increasing and descreasing a field can improve perf.
+    TODO: what if both increasing and decreasing a field can improve perf.
           i.e., there are multiple local optima..
     """
 
@@ -224,7 +224,7 @@ class CoordescTuner:
         Check if candidate_config is better than best_config.
 
         Return a touple of (compare_result, candidate_timing).
-        compare_result is true iff condidate_config is better.
+        compare_result is true iff candidate_config is better.
         """
         log.debug("Try config %s", candidate_config)
         try:

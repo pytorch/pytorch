@@ -57,6 +57,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return reinterpret_cast<std::intptr_t>(this);
   }
 
+  virtual bool supportsSplitting() const {
+    return false;
+  }
+
   virtual void startCoalescing() {
     TORCH_CHECK(
         false,
@@ -99,7 +103,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       const AllreduceOptions& /* opts */ = AllreduceOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), "does not support allreduce"));
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support allreduce sparse"));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
@@ -362,6 +369,25 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return pg_name_;
   }
 
+  // See similar functions in ProcessGroup.hpp for context.
+  c10::optional<at::Device> getBoundDeviceId() const {
+    return bound_device_id_;
+  }
+
+  // Perform an eager connect to the specified device if the backend supports
+  // it.
+  virtual void eagerConnectSingleDevice(at::Device device) {
+    // no-op in the default case; this is an optimization some
+    // backends may perform
+  }
+
+  void setBoundDeviceId(c10::optional<at::Device> device) {
+    if (device) {
+      TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
+    }
+    bound_device_id_ = device;
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -375,6 +401,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   std::string pg_name_;
 
   std::function<void(std::shared_ptr<WorkInfo>)> onCompletionHook_;
+
+  c10::optional<at::Device> bound_device_id_;
 };
 
 } // namespace c10d

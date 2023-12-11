@@ -139,6 +139,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     int64_t,
                     int64_t,
+                    bool,
                     int64_t)>();
     // It's awakward to unbox the opts here and box them again in the custom C++
     // op. But it's also complicated to make opts as a CustomClassHolder. Leave
@@ -148,6 +149,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.rootRank,
         opts.rootTensor,
+        opts.asyncOp,
         opts.timeout.count()));
   }
 
@@ -247,12 +249,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             .typed<std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(
                 at::Tensor&,
                 at::Tensor&,
-                const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                bool,
+                int64_t)>();
 
     return std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
-        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this)));
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        opts.asyncOp,
+        opts.timeout.count()));
   }
 
   // This function is deprecated and will be moved out of ProcessGroup to comms:
@@ -331,12 +337,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const std::vector<std::vector<at::Tensor>>&,
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     int64_t,
+                    bool,
                     int64_t)>();
     return std::get<1>(op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.rootRank,
+        opts.asyncOp,
         opts.timeout.count()));
   }
 
@@ -374,12 +382,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 at::Tensor&,
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                bool,
                 int64_t)>();
     return std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
+        opts.asyncOp,
         opts.timeout.count()));
   }
 
@@ -621,11 +631,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         backendTypeToBackend_.end()) {
       auto existingBackend = backendTypeToBackend_.at(backendType);
       deviceTypeToBackend_[deviceType] = existingBackend;
+      TORCH_CHECK(
+          existingBackend->getBoundDeviceId() ==
+          (*backend)->getBoundDeviceId());
     } else {
       // check if backend has value
       if (backend.has_value()) {
         deviceTypeToBackend_[deviceType] = backend.value();
         backendTypeToBackend_[backendType] = backend.value();
+        (*backend)->setBoundDeviceId(bound_device_id_);
       }
     }
   }
@@ -682,12 +696,30 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   void setGroupName(const std::string& name);
   void enableCollectivesTiming();
 
+  void release_resources() override;
+
+  // ProcessGroups optionally can be "bound" to a specific device.
+  // Currently this is only for nccl and allows for some opt-in
+  // optimizations such as automatic use of ncclCommSplit.  The device
+  // is specified in `init_process_group` and eventually makes it
+  // here and then down into the actual backend instances.
+  c10::optional<at::Device> getBoundDeviceId() const {
+    return bound_device_id_;
+  }
+
+  void setBoundDeviceId(c10::optional<at::Device> device) {
+    if (device) {
+      TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
+    }
+    bound_device_id_ = device;
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();
 
-  const c10::intrusive_ptr<c10d::Store> store_;
+  c10::intrusive_ptr<c10d::Store> store_;
   const int rank_;
   const int size_;
   const c10::intrusive_ptr<Options> options_;
@@ -704,6 +736,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       deviceTypeToBackend_;
   std::unordered_map<BackendType, c10::intrusive_ptr<Backend>>
       backendTypeToBackend_;
+
+  c10::optional<at::Device> bound_device_id_;
 };
 
 } // namespace c10d

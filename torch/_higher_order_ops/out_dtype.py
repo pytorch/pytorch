@@ -75,12 +75,6 @@ class OutDtypeOperator(HigherOrderOperator):
 
 
 out_dtype = OutDtypeOperator()
-out_dtype.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
-out_dtype.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
-out_dtype.fallthrough(DispatchKey.ADInplaceOrView)  # type: ignore[attr-defined]
-out_dtype.fallthrough(DispatchKey.BackendSelect)  # type: ignore[attr-defined]
-out_dtype.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
-
 
 def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
     # NB: Long-term we should put the decomposition logic into
@@ -133,7 +127,7 @@ def is_int_mm(op, output_dtype, args):
 
 
 def out_dtype_fallback(op, output_dtype, *args):
-    flat_inputs = pytree.tree_flatten(args)[0] + [torch.ones(1, dtype=output_dtype)]
+    flat_inputs = pytree.arg_tree_leaves(*args) + [torch.ones(1, dtype=output_dtype)]
     promote_dtype: torch.dtype = elementwise_dtypes(
         *flat_inputs,
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
