@@ -669,7 +669,7 @@ class TestCommon(TestCase):
         dtype = (
             torch.float32
             if torch.float32 in supported_dtypes
-            else next(iter(supported_dtypes))
+            else list(supported_dtypes)[0]
         )
 
         # Ops from python_ref_db point to python decomps that are potentially

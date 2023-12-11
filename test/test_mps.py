@@ -665,6 +665,7 @@ def mps_ops_modifier(ops):
         'bfloat16': None,
         'cdouble': None,
         'cfloat': None,
+        'complex': None,
         'double': None,
         'chalf': None,
         'nn.functional.softminwith_dtype': None,
