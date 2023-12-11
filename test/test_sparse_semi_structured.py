@@ -269,6 +269,34 @@ class TestCUSPARSELT(TestCase):
         # in cuSPARSELt v0.5.0 there are only 4 alg_ids total, so we should remove the +1 here when we update.
         assert alg_id in range(CUSPARSELT_NUM_ALG_IDS + 1)
 
+    @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128), (64, 128, 128)])
+    def test_cslt_fp32_mlp(self, dense_input_shape, device):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = False
+        input = torch.rand(dense_input_shape, device=device)
+        model = (
+            nn.Sequential(
+                nn.Linear(128, 256),
+                nn.Linear(256, 128),
+            ).to(device)
+        )
+
+        for i in range(2):
+            m, n = model[i].weight.shape
+            mask = rand_sparse_semi_structured_mask(
+                m, n, device=device, dtype=torch.bool
+            )
+            # set masked weight
+            model[i].weight = nn.Parameter(model[i].weight * mask)
+
+        dense_result = model(input)
+
+        for i in range(2):
+            model[i].weight = nn.Parameter(to_sparse_semi_structured(model[i].weight))
+
+        sparse_result = model(input)
+
+        assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
+
 
 class TestSparseSemiStructured(TestCase):
 
