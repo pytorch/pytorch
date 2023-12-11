@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -ex
+
 if [[ -n ${USE_CUSPARSELT} ]]; then
     # cuSPARSELt license: https://docs.nvidia.com/cuda/cusparselt/license.html
     mkdir tmp_cusparselt && cd tmp_cusparselt
