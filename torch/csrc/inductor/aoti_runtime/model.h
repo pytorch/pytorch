@@ -151,6 +151,44 @@ class RAIIAtenTensorHandle {
 
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
+class ConstantHandle {
+ public:
+  ConstantHandle() = default;
+
+  explicit ConstantHandle(AtenTensorHandle handle) : handle_(handle) {
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(handle_, &data_));
+  }
+
+  operator AtenTensorHandle() const {
+    return handle_;
+  }
+
+  AtenTensorHandle tensor() const {
+    return handle_;
+  }
+
+  void* data_ptr() const {
+    return data_;
+  }
+
+ private:
+  AtenTensorHandle handle_;
+  void* data_ = nullptr;
+};
+
+inline void* get_data_ptr_wrapper(const ConstantHandle& constant) {
+  return constant.data_ptr();
+}
+
+inline const ConstantHandle& unwrap_raii_handle_if_needed(
+    const ConstantHandle& handle) {
+  return handle;
+}
+
+// Shouldn't be called.
+inline AtenTensorHandle wrap_with_raii_handle_if_needed(
+    const ConstantHandle& handle) = delete;
+
 // Steal the ownership from raw AtenTensorHandle to RAIIAtenTensorHandle
 inline std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
     AtenTensorHandle* handles,
@@ -294,7 +332,7 @@ class AOTInductorModelBase {
   }
 #endif
 
-  std::shared_ptr<std::vector<AtenTensorHandle>> get_constants_array() {
+  std::shared_ptr<std::vector<ConstantHandle>> get_constants_array() {
     return constants_;
   }
 
@@ -400,7 +438,7 @@ class AOTInductorModelBase {
           "constants_map_ was not ready when constants_ is trying to be constructed from it!"};
     }
     if (!constants_) {
-      constants_ = std::make_shared<std::vector<AtenTensorHandle>>(
+      constants_ = std::make_shared<std::vector<ConstantHandle>>(
           constants_info_.size());
     } else {
       constants_->resize(constants_info_.size());
@@ -409,7 +447,7 @@ class AOTInductorModelBase {
     for (const auto& info : constants_info_) {
       const auto it = constants_map_->find(info.name);
       if (it != constants_map_->end()) {
-        constants_->at(idx) = it->second;
+        constants_->at(idx) = ConstantHandle(it->second);
       }
       idx++;
     }
@@ -427,7 +465,7 @@ class AOTInductorModelBase {
   // This function allows us to update the constants_ that is used to look up
   // the corresponding constant tensor during runtime.
   void update_constants_array(
-      std::shared_ptr<std::vector<AtenTensorHandle>> constants_array) {
+      std::shared_ptr<std::vector<ConstantHandle>> constants_array) {
     constants_ = std::move(constants_array);
   }
 
@@ -485,7 +523,7 @@ class AOTInductorModelBase {
   std::string out_spec_;
 
   std::shared_ptr<ConstantMap> constants_map_;
-  std::shared_ptr<std::vector<AtenTensorHandle>> constants_;
+  std::shared_ptr<std::vector<ConstantHandle>> constants_;
 
 #ifdef USE_CUDA
   // Holds the blob storage for constants' at::Tensor for CUDA.
@@ -517,7 +555,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
  public:
   AOTInductorModel(
       std::shared_ptr<ConstantMap>,
-      std::shared_ptr<std::vector<AtenTensorHandle>>,
+      std::shared_ptr<std::vector<ConstantHandle>>,
       std::optional<std::string>);
 
   void run_impl(
@@ -533,7 +571,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
 
   static std::unique_ptr<AOTInductorModel> Create(
       std::shared_ptr<ConstantMap> constants_map,
-      std::shared_ptr<std::vector<AtenTensorHandle>> constants_array,
+      std::shared_ptr<std::vector<ConstantHandle>> constants_array,
       std::optional<std::string> cubin_dir) {
     return std::make_unique<AOTInductorModel>(
         std::move(constants_map), std::move(constants_array), cubin_dir);
