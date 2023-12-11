@@ -169,10 +169,17 @@ def generate_pattern_with_binary(
 
 def generate_pattern_with_unary(computation_call, unary_post_op):
     if unary_post_op is not None:
-        return CallFunction(
-            unary_post_op,
-            computation_call,
-        )
+        if unary_post_op == aten.hardtanh.default:
+            return CallFunction(
+                aten.clamp_max,
+                CallFunction(aten.clamp_min, computation_call, KeywordArg("min_value")),
+                KeywordArg("max_value"),
+            )
+        else:
+            return CallFunction(
+                unary_post_op,
+                computation_call,
+            )
     return computation_call
 
 
@@ -286,6 +293,11 @@ def _register_quantized_conv_lowering(
         assert (
             kwargs["attr"] == "none"
         )  # Expected no post op fused in weight prepack phase
+        if unary_attr.op_name == "hardtanh":
+            min_value = kwargs.get("min_value")
+            max_value = kwargs.get("max_value")
+            unary_attr.scalars_attr = [min_value, max_value]
+
         computation_args = (
             x,
             x_scale,
@@ -389,6 +401,34 @@ def _register_quantized_linear_lowering(
     return qlinear
 
 
+def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
+    # Check if it's a valid Conv Binary Pattern:
+    # * qconv2d_pointwise should only has one users
+    # * Extra input of binary node comes from dequant pattern
+    def fn(match):
+        qconv2d_node_after_weight_prepack = filter_nodes(
+            match.nodes, torch.ops.onednn.qconv2d_pointwise
+        )[0]
+        if len(qconv2d_node_after_weight_prepack.users) != 1:
+            return False
+        if output_dtype is not None:
+            binary_node_inputs = list(qconv2d_node_after_weight_prepack.users)[0].args
+            assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
+            extra_input_node = None
+            for arg in binary_node_inputs:
+                if arg != qconv2d_node_after_weight_prepack:
+                    extra_input_node = arg
+                    break
+            assert extra_input_node is not None
+            if (not isinstance(extra_input_node, torch.fx.Node)) or (
+                extra_input_node.target != aten.mul.Tensor
+            ):
+                return False
+        return True
+
+    return fn
+
+
 def _register_quantized_conv_binary_lowering(
     pattern,
     pass_number,
@@ -398,6 +438,7 @@ def _register_quantized_conv_binary_lowering(
 ):
     @register_lowering_pattern(
         pattern,
+        extra_check=_is_valid_quantized_conv_binary_optimization_pattern(output_dtype),
         pass_number=pass_number,
     )
     def qconv_binary(match: Match, *args, **kwargs):
@@ -477,6 +518,12 @@ def _register_quantization_unary_fusion():
                 ),
                 dtype=original_pattern_output_dtype,
             ),
+            UnaryAttr("hardtanh", [], ""): generate_pattern_with_output_quant(
+                generate_pattern_with_unary(
+                    dequantize_qconv_pt2e_pattern, aten.hardtanh.default
+                ),
+                dtype=original_pattern_output_dtype,
+            ),
         }
 
         for unary_attr, patterns in conv_unary_replace_patterns.items():
@@ -494,6 +541,9 @@ def _register_quantization_unary_fusion():
         conv_unary_replace_float_out_patterns = {
             UnaryAttr("relu", [], ""): generate_pattern_with_unary(
                 dequantize_qconv_pt2e_pattern, aten.relu.default
+            ),
+            UnaryAttr("hardtanh", [], ""): generate_pattern_with_unary(
+                dequantize_qconv_pt2e_pattern, aten.hardtanh.default
             ),
         }
 
@@ -771,7 +821,7 @@ def _register_quantization_maxpool2d():
         )
 
 
-def _is_valid_quantized_cat_optimization_pattern():
+def _is_input_output_same_scale_zp(check_node):
     def fn(match):
         # Ensure all the inputs and output has same scale and zero point
         # Step 1: Check inputs/output zero point
@@ -790,7 +840,7 @@ def _is_valid_quantized_cat_optimization_pattern():
         scales = [
             (
                 mul_node.args[1]
-                if mul_node.args[0].target is aten.cat.default
+                if mul_node.args[0].target is check_node
                 else 1.0 / mul_node.args[1]
             )
             for mul_node in mul_nodes
@@ -809,7 +859,7 @@ def _register_quantized_cat_lowering(
 ):
     @register_lowering_pattern(
         pattern,
-        extra_check=_is_valid_quantized_cat_optimization_pattern(),
+        extra_check=_is_input_output_same_scale_zp(aten.cat.default),
     )
     def qcat(match: Match, inputs, dim, **kwargs):
         # inputs is with format: [[x1, x1_dq_dtype, x1_zp, x1_scale], ...]
@@ -846,11 +896,42 @@ def _register_quantization_cat():
     )
 
 
+def _register_quantized_reshape_lowering(
+    pattern,
+    computation_op,
+):
+    @register_lowering_pattern(
+        pattern,
+        extra_check=_is_input_output_same_scale_zp(aten.reshape.default),
+    )
+    def qreshape(match: Match, *args, **kwargs):
+        qx = kwargs["x"]
+        shape = kwargs["shape"]
+        counters["inductor"]["qreshape_matcher_count"] += 1
+        counters["inductor"]["qreshape_matcher_nodes"] += len(match.nodes)
+        return L[computation_op](qx, shape)
+
+    return qreshape
+
+
+def _register_quantization_reshape():
+    dequantize_reshape_pattern = CallFunction(
+        torch.ops.aten.reshape.default,
+        dequantize_per_tensor_activation_pattern,
+        KeywordArg("shape"),
+    )
+    _register_quantized_reshape_lowering(
+        generate_pattern_with_output_quant(dequantize_reshape_pattern),
+        aten.reshape,
+    )
+
+
 def _register_quantization_lowerings():
     _register_quantization_unary_fusion()
     _register_quantization_binary_fusion()
     _register_quantization_maxpool2d()
     _register_quantization_cat()
+    _register_quantization_reshape()
 
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
