@@ -1331,6 +1331,8 @@ if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.accumulated_cache_size_limit = 8
+    # Do not log compilation metrics from unit tests
+    torch._dynamo.config.log_compilation_metrics = False
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
