@@ -1305,7 +1305,7 @@ class TestExport(TestCase):
     def test_constraint_directly_construct(self):
         with self.assertRaisesRegex(
             TypeError,
-            "Constraint has no public constructor. Please use torch.export.dynamic_dim"
+            "torch.export.Constraint has no public constructor. Please use torch.export.dynamic_dim"
         ):
             _ = Constraint()
 
