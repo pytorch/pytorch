@@ -55,26 +55,26 @@ inline void _exp_reduce_sum_fusion_kernel(
   val = tmp_sum;
 }
 
-// out = a / sum
-template <typename T1, typename T2>
-inline void _normalization_kernel(
-    const T1* a,
-    const T1& sum,
-    const int& size,
-    T2* out) {
-  auto vec_size = vec::Vectorized<T1>::size();
-  auto vec_sum = vec::Vectorized<T1>(sum);
-  for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
-    auto tmp0 = vec::Vectorized<T1>::loadu(a + i);
-    auto tmp1 = tmp0 / vec_sum;
-    _store(out + i, tmp1);
-  }
-  for (long i = vec_size * (size / vec_size); i < size; i++) {
-    auto tmp0 = a[i];
-    auto tmp1 = tmp0 / sum;
-    out[i] = tmp1;
-  }
-}
+// // out = a / sum
+// template <typename T1, typename T2>
+// inline void _normalization_kernel(
+//     const T1* a,
+//     const T1& sum,
+//     const int& size,
+//     T2* out) {
+//   auto vec_size = vec::Vectorized<T1>::size();
+//   auto vec_sum = vec::Vectorized<T1>(sum);
+//   for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
+//     auto tmp0 = vec::Vectorized<T1>::loadu(a + i);
+//     auto tmp1 = tmp0 / vec_sum;
+//     _store(out + i, tmp1);
+//   }
+//   for (long i = vec_size * (size / vec_size); i < size; i++) {
+//     auto tmp0 = a[i];
+//     auto tmp1 = tmp0 / sum;
+//     out[i] = tmp1;
+//   }
+// }
 
 // 1) out = a * scale
 // 2) max = max(out)
@@ -294,8 +294,17 @@ void cpu_flash_attention(
           qk_max_data[row] = tmp_max;
           // qk <- qk / sum[row]
           accum_t sum_new = qk_sum_data[row];
-          _normalization_kernel(qk_data + row * kvBlockSize, sum_new, kvBlockSize,
-                conditional_data_ptr(qk_data, qk_reduced_data) + row * kvBlockSize);
+          // _normalization_kernel(qk_data + row * kvBlockSize, sum_new, kvBlockSize,
+          //       conditional_data_ptr(qk_data, qk_reduced_data) + row * kvBlockSize);
+          vec::map<accum_t>(
+            [sum_new](Vec x) { return x / Vec(sum_new); },
+            qk_data + row * kvBlockSize, qk_data + row * kvBlockSize, kvBlockSize);
+          if (is_reduced_type) {
+            convert<accum_t, scalar_t>(
+              qk_data + row * kvBlockSize,
+              qk_reduced_data + row * kvBlockSize,
+              kvBlockSize);
+          }
           // dst <- dst * sum_old / sum_new * exp_tmp
           if (n > 0) {
             accum_t sum_cor = sum_old / sum_new;
