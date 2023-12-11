@@ -40,7 +40,7 @@ class basic_string_view final {
 
   static constexpr size_type npos = size_type(-1);
 
-  constexpr basic_string_view() noexcept : begin_(nullptr), size_(0) {}
+  constexpr basic_string_view() noexcept : begin_(nullptr) {}
 
   explicit constexpr basic_string_view(const_pointer str, size_type count)
       : begin_(str), size_(count) {}
@@ -580,7 +580,7 @@ inline std::basic_ostream<CharT>& operator<<(
 template <class CharT>
 constexpr inline void swap(
     basic_string_view<CharT>& lhs,
-    basic_string_view<CharT>& rhs) {
+    basic_string_view<CharT>& rhs) noexcept {
   lhs.swap(rhs);
 }
 
