@@ -1613,7 +1613,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.prefix.splice(
             f"""
             AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
-                                               std::shared_ptr<std::vector<AtenTensorHandle>> constants_array,
+                                               std::shared_ptr<std::vector<ConstantHandle>> constants_array,
                                                std::optional<std::string> cubin_dir)
                 : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, cubin_dir) {{
             """
@@ -1705,7 +1705,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 if config.aot_inductor.abi_compatible:
                     self.wrapper_call.writeline(
                         f"if constexpr (std::is_same_v<std::decay_t<decltype({output})>, RAIIAtenTensorHandle> || "
-                        f"std::is_same_v<std::decay_t<decltype({output})>, AtenTensorHandle>) {{"
+                        f"    std::is_same_v<std::decay_t<decltype({output})>, AtenTensorHandle> || "
+                        f"    std::is_same_v<std::decay_t<decltype({output})>, ConstantHandle>) {{"
                     )
                     with self.wrapper_call.indent():
                         if output in cst_names:

@@ -33,6 +33,18 @@ struct ThreadLocalCachedOutputTensor<AtenTensorHandle> {
   }
 };
 
+template <>
+struct ThreadLocalCachedOutputTensor<ConstantHandle> {
+  explicit ThreadLocalCachedOutputTensor(const ConstantHandle&) {}
+  void copy_data_from(const ConstantHandle& handle) {
+    throw std::runtime_error("can't happen");
+  }
+
+  AtenTensorHandle tensor() const {
+    throw std::runtime_error("can't happen");
+  }
+};
+
 template <typename T>
 struct ThreadLocalCachedOutputTensor<ArrayRefTensor<T>> {
   explicit ThreadLocalCachedOutputTensor(const ArrayRefTensor<T>& t) {
