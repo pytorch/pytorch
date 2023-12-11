@@ -62,16 +62,15 @@ ignored_ctx_manager_class_names = {
     "torch.cuda.device",
     "torch.cuda.device_of",
     "torch.cuda.graphs.graph",
-    "torch.device",  # constant folding
+    "torch.device",  # as constant folding function
     "torch.sparse.check_sparse_tensor_invariants",
 }
 
 ignored_c_binding_in_graph_function_names = {
-    # Ignored because they have manual rules defined at `trace_rules.manual_torch_name_rule_map`.
-    "torch._nested_tensor_from_mask",
-    "torch._nested_from_padded",
-    # Ignored and go through rules defined at `skipfiles.check`.
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
+    "torch._C._swap_tensor_impl",
+    "torch._C._unsafe_reset_storage",
+    "torch._dynamo.eval_frame.reset_code",
 }
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {

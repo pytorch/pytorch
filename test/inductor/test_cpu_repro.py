@@ -1034,7 +1034,7 @@ class CPUReproTests(TestCase):
                     2,
                 ),
             )
-            assert metrics.generated_cpp_vec_kernel_count == 1
+            assert metrics.generated_cpp_vec_kernel_count == 2
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -2693,6 +2693,31 @@ class CPUReproTests(TestCase):
             metrics.reset()
             self.common(m, (idx, x))
             assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_embedding_vec_bf16(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(64, 128)
+
+            def forward(self, idx, x):
+                return self.emb(idx)
+
+        idx = torch.randint(0, 64, (4, 32))
+        x = torch.randn(4, 32, 128).to(torch.bfloat16)
+        m = M().eval()
+        with torch.no_grad():
+            metrics.reset()
+            self.common(m, (idx, x))
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+        # we are doing direct load/store, make sure we do not generate
+        # redundant type casts
+        m_opt = torch.compile(m)
+        _, code = run_and_get_cpp_code(m_opt, idx, x)
+        self.assertTrue("Vectorized" in code)
+        self.assertTrue("cvt_lowp_fp_to_fp32" not in code)
+        self.assertTrue("cvt_fp32_to_lowp_fp" not in code)
 
 
 if __name__ == "__main__":
