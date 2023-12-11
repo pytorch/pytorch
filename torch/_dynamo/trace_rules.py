@@ -2,6 +2,7 @@ import functools
 import importlib
 import sys
 import types
+from typing import Any, Dict
 
 import torch
 
@@ -14,6 +15,8 @@ from .variables import (
     TorchCtxManagerClassVariable,
     TorchInGraphFunctionVariable,
 )
+
+from .variables.base import VariableTracker
 
 
 """
@@ -2725,7 +2728,7 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 
 @functools.lru_cache(None)
 def get_torch_obj_rule_map():
-    d = dict()
+    d: Dict[Any, VariableTracker] = dict()
     for m in torch_name_rule_map:
         for k, v in m.items():
             obj = load_object(k)
