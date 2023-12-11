@@ -60,7 +60,7 @@ def raise_comms(
                 new_order_reversed.append(comm)
             new_order_reversed.append(snode)
     assert len(cur_comms) <= 1
-    new_order_reversed.extend(cur_comms)
+    new_order_reversed.extend(tuple_sorted(cur_comms))
     return new_order_reversed[::-1]
 
 
