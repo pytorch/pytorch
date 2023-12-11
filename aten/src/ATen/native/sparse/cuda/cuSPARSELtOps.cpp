@@ -98,7 +98,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     return compressed_tensor;
 }
 
-std::tuple<int, at::Tensor> _cslt_sparse_mm_impl(
+std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const c10::optional<Tensor>& bias_opt,
@@ -316,10 +316,9 @@ at::Tensor _cslt_sparse_mm(
     const c10::optional<Tensor>& alpha_opt,
     const c10::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result,
-    long alg_id
+    int64_t alg_id
 )
 {
-    int alg_id_int = (int) alg_id;
     auto result = _cslt_sparse_mm_impl(
         compressed_A,
         dense_B,
@@ -327,12 +326,12 @@ at::Tensor _cslt_sparse_mm(
         alpha_opt,
         out_dtype_opt,
         transpose_result,
-        alg_id_int,
+        (int) alg_id,
         false);
     return std::get<1>(result);
 }
 
-int _cslt_sparse_mm_search(
+int64_t _cslt_sparse_mm_search(
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const c10::optional<Tensor>& bias_opt,
@@ -351,7 +350,7 @@ int _cslt_sparse_mm_search(
         transpose_result,
         alg_id_int,
         true);
-    return std::get<0>(result);
+    return (int64_t) std::get<0>(result);
 }
 
 
@@ -365,20 +364,6 @@ at::Tensor _cslt_compress(const Tensor& sparse_input){
     TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
 }
 
-std::tuple<int, at::Tensor> _cslt_sparse_mm_impl(
-    const Tensor& compressed_A,
-    const Tensor& dense_B,
-    const c10::optional<Tensor>& bias_opt,
-    const c10::optional<Tensor>& alpha_opt,
-    const c10::optional<c10::ScalarType> out_dtype_opt,
-    bool transpose_result,
-    int alg_id,
-    bool search_alg_id
-)
-{
-    TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
-}
-
 at::Tensor _cslt_sparse_mm(
     const Tensor& compressed_A,
     const Tensor& dense_B,
@@ -386,12 +371,12 @@ at::Tensor _cslt_sparse_mm(
     const c10::optional<Tensor>& alpha_opt,
     const c10::optional<c10::ScalarType> out_dtype,
     bool transpose_result,
-    long alg_id)
+    int64_t alg_id)
 {
     TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
 }
 
-int _cslt_sparse_mm_search(
+int64_t _cslt_sparse_mm_search(
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const c10::optional<Tensor>& bias_opt,
