@@ -214,29 +214,25 @@ class SideEffects:
 
     def _track_obj(
         self,
-        source: Source,
         item: Any,
         variable: VariableTracker,
         mutable_cls=MutableSideEffects,
     ):
         """Start tracking a new variable for mutation"""
-        variable = variable.clone(mutable_local=mutable_cls(source), source=source)
+        assert variable.source is not None
+        variable.mutable_local = mutable_cls(variable.source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
 
-    track_list = _track_obj
-    track_dict = _track_obj
+    track_mutable = _track_obj
 
     def track_object_existing(
         self,
-        source: Source,
         item: Any,
         variable: VariableTracker,
     ):
-        return self._track_obj(
-            source, item, variable, mutable_cls=AttributeMutationExisting
-        )
+        return self._track_obj(item, variable, mutable_cls=AttributeMutationExisting)
 
     def track_object_new(
         self,
@@ -325,11 +321,10 @@ class SideEffects:
             k: v for k, v in self.store_attr_mutations.items() if is_live(k)
         }
 
-    def mutation(self, oldvar, newvar):
-        self.check_allowed_side_effect(oldvar)
-        return newvar.clone(
-            mutable_local=MutableSideEffects(oldvar.mutable_local.source, True)
-        )
+    def mutation(self, var):
+        self.check_allowed_side_effect(var)
+        if isinstance(var.mutable_local, MutableSideEffects):
+            var.mutable_local = MutableSideEffects(var.mutable_local.source, True)
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
@@ -514,6 +509,12 @@ class SideEffects:
                         cg(value)
                         cg(var.mutable_local.source)
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
+            elif isinstance(var, variables.TupleIteratorVariable):
+                for _ in range(var.index):
+                    cg.load_import_from(utils.__name__, "iter_next")
+                    cg(var.mutable_local.source)
+                    cg.extend_output(create_call_function(1, True))
+                    cg.append_output(create_instruction("POP_TOP"))
             else:
                 raise AssertionError(type(var))
 
