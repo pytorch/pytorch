@@ -38,6 +38,7 @@ from typing import (
 from unittest import mock
 
 import sympy
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
@@ -382,20 +383,21 @@ def tuple_sorted(x):
     return sorted(x, key=sort_func)
 
 
+P = ParamSpec("P")
 RV = TypeVar("RV", covariant=True)
 
 
-# FIXME this should take in a ParamSpec too
-class CachedFunction(Generic[RV], Protocol):
+class CachedMethod(Generic[P, RV], Protocol):
     @staticmethod
     def clear_cache(self) -> None:
         ...
 
-    def __call__(self, *args, **kwargs) -> RV:
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV:
         ...
 
 
-def cache_on_self(fn: Callable[..., RV]) -> CachedFunction[RV]:
+# See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
+def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
     key = f"__{fn.__name__}_cache"
 
     @functools.wraps(fn)
@@ -1111,13 +1113,25 @@ def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
+    if torch.version.hip:
+        if dtype in (torch.float16, torch.bfloat16):
+            return get_max_tensorcore_tflops(dtype)
+
+        if torch.backends.cuda.matmul.allow_tf32:
+            return get_max_tensorcore_tflops(torch.float32)
+        else:
+            return get_max_simd_tflops(torch.float32)
+
+    from triton.testing import nvsmi
+
+    cur_sm_clock = nvsmi(["clocks.current.sm"])[0]
     if dtype in (torch.float16, torch.bfloat16):
-        return get_max_tensorcore_tflops(dtype)
+        return get_max_tensorcore_tflops(dtype, cur_sm_clock)
 
     if torch.backends.cuda.matmul.allow_tf32:
-        return get_max_tensorcore_tflops(torch.float32)
+        return get_max_tensorcore_tflops(torch.float32, cur_sm_clock)
     else:
-        return get_max_simd_tflops(torch.float32)
+        return get_max_simd_tflops(torch.float32, cur_sm_clock)
 
 
 @functools.lru_cache(None)
