@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Any, Dict, List
 
-from torch._inductor.metrics import get_metric_table
+from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 
 from .. import config
 from ..codecache import PyCodeCache, TritonFuture
@@ -229,9 +229,9 @@ class MultiKernelCall:
         self._kernels = kernels
 
         self._run = PyCodeCache.load(src_code).run
-        self.disable_cache = (
-            os.environ.get("TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE") == "1"
-        )
+        self.disable_cache = os.environ.get(
+            "TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE"
+        ) == "1" or is_metric_table_enabled("persistent_red_perf")
 
         self.picked_kernel = None
         if config.triton.multi_kernel > 1:
