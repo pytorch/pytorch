@@ -132,13 +132,6 @@ jobs:
           test-matrix: ${{ inputs.test-matrix }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
 
-      - name: Download pytest cache
-        uses: ./.github/actions/pytest-cache-download
-        continue-on-error: true
-        with:
-          cache_dir: .pytest_cache
-          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
-
       - name: Test
         id: test
         shell: bash
@@ -146,8 +139,6 @@ jobs:
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           INSTALL_WINDOWS_SDK: 1
           PYTHON_VERSION: 3.8
-          PYTORCH_RETRY_TEST_CASES: 1
-          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
@@ -190,7 +181,9 @@ jobs:
         with:
           cache_dir: .pytest_cache
           shard: ${{ matrix.shard }}
-          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
+          sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          test_config: ${{ matrix.config }}
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
       - name: Print remaining test logs
         shell: bash

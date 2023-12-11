@@ -455,7 +455,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         self._device_to_params_per_rank_cache.clear()
         self._bucket_assignments_per_rank_cache.clear()
 
-    def add_param_group(self, param_group: dict) -> None:
+    def add_param_group(self, param_group: Dict[str, Any]) -> None:
         r"""
         Add a parameter group to the :class:`Optimizer` 's ``param_groups``.
 

@@ -865,10 +865,10 @@ class FSDPTestMultiThread(MultiThreadedTestCase):
 class FSDPTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
-        # Set NCCL_DESYNC_DEBUG=0 to disable the NCCL `workCleanupLoop()`,
+        # Set TORCH_NCCL_DESYNC_DEBUG=0 to disable the NCCL `workCleanupLoop()`,
         # which can cause unit test flakiness:
         # https://github.com/pytorch/pytorch/issues/90848
-        os.environ["NCCL_DESYNC_DEBUG"] = "0"
+        os.environ["TORCH_NCCL_DESYNC_DEBUG"] = "0"
         self._spawn_processes()
 
     @property

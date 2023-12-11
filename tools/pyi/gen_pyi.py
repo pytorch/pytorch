@@ -74,7 +74,7 @@ def get_py_torch_functions(
 # TODO: Consider defining some aliases for our Union[...] types, to make
 # the stubs to read on the human eye.
 
-DEVICE_PARAM = "device: Device = None"
+DEVICE_PARAM = "device: Optional[DeviceLikeType] = None"
 FACTORY_PARAMS = f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False, pin_memory: _bool = False"
 
 # NOTE: specifying indices for Tensor.__getitem__
@@ -624,7 +624,7 @@ def gen_pyi(
                                 "size: Optional[_size] = None",
                                 "*",
                                 "dtype: Optional[_dtype] = None",
-                                "device: Union[_device, str, None] = None",
+                                "device: Optional[DeviceLikeType] = None",
                                 "requires_grad: _bool = False",
                                 "check_invariants: Optional[_bool] = None",
                             ]
@@ -645,7 +645,7 @@ def gen_pyi(
                             "obj: Any",
                             "*",
                             "dtype: Optional[_dtype] = None",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "copy: Optional[_bool] = None",
                             "requires_grad: _bool = False",
                         ]
@@ -662,7 +662,7 @@ def gen_pyi(
                             "dtype: _dtype",
                             "count: int = -1",
                             "offset: int = 0",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                         ]
                     )
@@ -700,7 +700,7 @@ def gen_pyi(
                             "size: Optional[_size] = None",
                             "*",
                             "dtype: Optional[_dtype] = None",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                             "check_invariants: Optional[_bool] = None",
                             "is_coalesced: Optional[_bool] = None",
@@ -719,7 +719,7 @@ def gen_pyi(
                             "*",
                             "dtype: Optional[_dtype] = None",
                             "layout: Optional[_layout] = None",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                             "check_invariants: Optional[_bool] = None",
                         ]
@@ -747,6 +747,9 @@ def gen_pyi(
             ],
             "_functionalize_are_all_mutations_hidden_from_autograd": [
                 "def _functionalize_are_all_mutations_hidden_from_autograd(t: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_are_all_mutations_under_no_grad_or_inference_mode": [
+                "def _functionalize_are_all_mutations_under_no_grad_or_inference_mode(t: Tensor) -> _bool: ..."
             ],
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_enable_functionalization": [
@@ -1100,7 +1103,7 @@ def gen_pyi(
                 )
                 for args in [
                     "dtype: _dtype",
-                    "device: Optional[Union[_device, str]] = None, dtype: Optional[_dtype] = None",
+                    "device: Optional[DeviceLikeType] = None, dtype: Optional[_dtype] = None",
                     "other: Tensor",
                 ]
             ],
@@ -1264,6 +1267,11 @@ def gen_pyi(
             "bool",
             "quint4x2",
             "quint2x4",
+            "bits1x8",
+            "bits2x4",
+            "bits4x2",
+            "bits8",
+            "bits16",
         ]
     ]
 

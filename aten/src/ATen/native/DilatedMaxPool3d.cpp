@@ -3,7 +3,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Pool.h>
-#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -12,7 +11,6 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/max_pool3d_with_indices_backward_native.h>
 #include <ATen/ops/max_pool3d_with_indices_native.h>
-#include <ATen/ops/zeros_like.h>
 #endif
 
 namespace at {

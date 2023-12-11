@@ -400,7 +400,7 @@ def write_record_to_file(filename, exec_record):
             with open(filename, "wb") as f:
                 exec_record.dump(f)
     except Exception:
-        log.error("Unable to write execution record %s", filename, exc_info=True)
+        log.exception("Unable to write execution record %s", filename)
 
 
 def count_calls(g: fx.Graph):
@@ -512,6 +512,19 @@ def is_numpy_float_type(value):
     )
 
 
+def is_function(value):
+    return istype(
+        value,
+        (
+            types.FunctionType,
+            types.MethodType,
+            types.BuiltinFunctionType,
+            types.MethodDescriptorType,
+            types.WrapperDescriptorType,
+        ),
+    )
+
+
 def is_numpy_ndarray(value):
     if not np:
         return False
@@ -580,6 +593,7 @@ class CompilationMetrics:
     backend_compile_time_s: Optional[float]
     fail_reason: Optional[str]
     non_compliant_ops: Set[str]
+    compliant_custom_ops: Set[str]
 
 
 @dataclasses.dataclass
@@ -925,6 +939,9 @@ def product(it):
 def tuple_iterator_getitem(it, index):
     _, (obj,), start = it.__reduce__()
     return obj[start + index]
+
+
+iter_next = next
 
 
 def enum_repr(value, local):
@@ -1445,6 +1462,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         If `True`, you must be prepared to deal with such return values, ideally
         by further wrapping them as this graph's fakes.
     """
+    from torch.utils._sympy.value_ranges import ValueRangeError
     from .exc import (
         TorchRuntimeError,
         unimplemented,
@@ -1518,7 +1536,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                 f"constrain_as_value OR constrain_as_size APIs.  {cause}",
                 case_name="constrain_as_size_example",
             )
-        elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
+        elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
@@ -2266,11 +2284,14 @@ def get_static_address_type(t):
 
 def is_rng_state_getter_or_setter(value):
     getters = (
+        # The following two functions are not identical, so don't remove anyone!
+        torch._C.Generator.get_state,
         torch.default_generator.get_state,
         torch.get_rng_state,
         torch.cuda.get_rng_state,
     )
     setters = (
+        torch._C.Generator.set_state,
         torch.default_generator.set_state,
         torch.set_rng_state,
         torch.cuda.set_rng_state,
@@ -2293,4 +2314,18 @@ def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bo
     return isinstance(vt, TensorWithTFOverrideVariable) or (
         isinstance(vt, UserDefinedObjectVariable)
         and hasattr(vt.value, "__torch_function__")
+    )
+
+
+# see note [Tensor Fakification and Symbol Caching]
+def to_fake_tensor(t, fake_mode):
+    symbolic_context = None
+    source = None
+    if tracing_context := torch._guards.TracingContext.try_get():
+        if t in tracing_context.tensor_to_context:
+            symbolic_context = tracing_context.tensor_to_context[t]
+            source = symbolic_context.tensor_source
+
+    return fake_mode.from_tensor(
+        t, static_shapes=False, symbolic_context=symbolic_context, source=source
     )
