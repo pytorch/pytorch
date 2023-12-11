@@ -136,6 +136,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (tensor_x,), input_kwargs={"b": torch.tensor(5.0)}
         )
 
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "torch._export.verifier.SpecViolationError: Operator '<built-in function pow>' is not an allowed operator type:"
+        "(<class 'torch._ops.OpOverload'>, <class 'torch._ops.HigherOrderOperator'>)"
+        "Valid builtin ops: [<built-in function getitem>, <built-in function add>, <built-in function mul>,"
+        "<built-in function sub>, <built-in function truediv>, <built-in function ge>, <built-in function le>,"
+        "<built-in function gt>, <built-in function lt>, <built-in function eq>, <built-in function ne>,"
+        "<built-in function floordiv>, <built-in function mod>, <built-in function and_>, <built-in function or_>,"
+        "<built-in function not_>]"
+        " Github issue: https://github.com/pytorch/pytorch/issues/113778"
+    )
     @pytorch_test_common.skip_dynamic_fx_test(
         "sympy operation tests don't need dynamic shape"
     )
@@ -545,6 +555,24 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             (x,),
             additional_test_inputs=[((x2,),)],
         )
+
+    def test__scaled_dot_product_flash_attention(self):
+        def func(x):
+            (
+                output,
+                _,
+                _,
+                _,
+                _,
+                _,
+                _,
+                _,
+                _,
+            ) = torch.ops.aten._scaled_dot_product_flash_attention(x, x, x)
+            return output
+
+        x = torch.randn(1, 1, 1, 32)
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (x,))
 
     # NOTE:The test was meant to test the empty bounding box case, but it is not
     # supported. When we have vision model examples, we will have a better test case
@@ -1107,7 +1135,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "AssertionError: Dynamic shape check failed for graph inputs",
         skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
-    def test_large_scale_exporter_with_tiny_gpt2(self):
+    def test_fake_tensor_mode_huggingface_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
         device = "cpu"
 
@@ -1126,6 +1154,42 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_fake_tensor_mode_exporter(
             "tiny_gpt2",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+            model_type=self.model_type,
+        )
+
+    @pytorch_test_common.xfail(
+        "Github issue: https://github.com/pytorch/pytorch/issues/115552"
+    )
+    def test_fake_tensor_mode_huggingface_open_llama(self):
+        config = transformers.OpenLlamaConfig(
+            vocab_size=8096, hidden_size=256, num_hidden_layers=2, num_attention_heads=2
+        )
+        batch, seq = 4, 256
+
+        def create_model() -> nn.Module:
+            return transformers.OpenLlamaModel(config).eval()
+
+        def create_args():
+            return tuple()
+
+        def create_kwargs():
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            position_ids = torch.arange(0, seq, dtype=torch.long)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq)
+            return {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "position_ids": position_ids,
+            }
+
+        self._test_fake_tensor_mode_exporter(
+            "huggingface_open_llama",
             create_model,
             create_args,
             create_kwargs,
