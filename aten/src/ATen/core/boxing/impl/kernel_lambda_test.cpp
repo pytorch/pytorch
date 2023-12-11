@@ -195,7 +195,7 @@ TEST(OperatorRegistrationTestLambdaBasedKernel, givenKernelWithMultipleOutputs_w
            dummyTensor(DispatchKey::CUDA),
            5,
            c10::List<Tensor>({dummyTensor(DispatchKey::CPU), dummyTensor(DispatchKey::CUDA)}),
-           c10::optional<int64_t>(c10::in_place, 0),
+           c10::optional<int64_t>(std::in_place, 0),
            dict
          );
        }));

@@ -38,6 +38,7 @@ void AdaptiveLogSoftmaxWithLossImpl::reset() {
                   .size() == options.cutoffs().size(),
       "cutoffs should be a sequence of unique, positive integers sorted in an increasing order, ",
       "where each value is between 1 and n_classes-1");
+  TORCH_CHECK(options.div_value() != 0, "div_value should not be equal to 0");
 
   cutoffs = options.cutoffs();
   cutoffs.push_back(options.n_classes());
@@ -53,8 +54,8 @@ void AdaptiveLogSoftmaxWithLossImpl::reset() {
   tail = this->register_module("tail", ModuleList());
 
   for (const auto i : c10::irange(n_clusters)) {
-    int64_t hsz = options.in_features() /
-        static_cast<int64_t>(std::pow(options.div_value(), (i + 1)));
+    int64_t hsz = static_cast<int64_t>(std::floor(
+        options.in_features() / std::pow(options.div_value(), (i + 1))));
     int64_t osz = cutoffs[i + 1] - cutoffs[i];
 
     Sequential projection(
