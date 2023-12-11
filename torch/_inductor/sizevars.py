@@ -1,13 +1,14 @@
 import functools
 import itertools
 import logging
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import sympy
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.value_ranges import bound_sympy
 
 from .utils import sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
@@ -231,7 +232,7 @@ class SizeVarAllocator:
     # Note - [On Statically Known]
     #
     # The statically_known_* family of functions below replaces a prior system, called maybe_guard_*. The prior system
-    # operated by providing esentially a question, where the size hinted values were evaluted. If the condition was
+    # operated by providing essentially a question, where the size hinted values were evaluated. If the condition was
     # true, we add a guard and return True, otherwise, False.
     #
     # def maybe_guard_foo(args):
@@ -343,13 +344,11 @@ class SizeVarAllocator:
         """return the smaller of left and right, and guard on that choice"""
         lv = self.size_hint(left)
         rv = self.size_hint(right)
-        if lv == rv:
-            return self.guard_equals(left, right)
-        elif lv < rv:
-            self.guard_lt(left, right)
+        if lv <= rv:
+            self.guard_leq(left, right)
             return left
         else:
-            self.guard_lt(right, left)
+            self.guard_leq(right, left)
             return right
 
     def evaluate_static_shape(self, left: Expr) -> int:
@@ -373,16 +372,32 @@ class SizeVarAllocator:
             free_symbols = expr.free_symbols
         return sympy_subs(expr, self.var_to_val)
 
-    def size_hint(self, expr: Expr) -> int:
+    def size_hint(self, expr: Expr, *, fallback: Optional[int] = None) -> int:
         out = self.symbolic_hint(expr)
+        if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
+            # Use the provided heuristic fallback hint
+            sym_vrs = {
+                s: self.shape_env.var_to_range.get(s, None) for s in expr.free_symbols
+            }
+            if all(vr is not None for vr in sym_vrs.values()):
+                expr_vr = bound_sympy(expr, sym_vrs)
+                lower = self.size_hint(expr_vr.lower)
+                upper = self.size_hint(expr_vr.upper)
+                fallback = min(max(fallback, lower), upper)
+            return fallback
         try:
             return int(out)
         except Exception:
             log.debug("failed on: %s", out)
             raise
 
-    def size_hints(self, exprs: List[Expr]) -> Tuple[int, ...]:
-        return tuple(self.size_hint(x) for x in exprs)
+    def size_hints(
+        self,
+        exprs: Iterable[Expr],
+        *,
+        fallback: Optional[int] = None,
+    ) -> Tuple[int, ...]:
+        return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -476,9 +491,7 @@ class SizeVarAllocator:
         return result
 
     def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
-        strides = tuple(
-            map(abs, self.stride_hints(index, vars))  # type: ignore[arg-type]
-        )
+        strides = tuple(map(abs, self.stride_hints(index, vars)))
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
         return order

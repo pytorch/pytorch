@@ -97,6 +97,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual SymNode sym_not() {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymNode sym_ite(const SymNode& then_val, const SymNode& else_val) {
+    TORCH_CHECK(false, "NYI");
+  };
   // NB: self is ignored here, only the arguments are used
   virtual SymNode is_contiguous(
       ArrayRef<SymNode> sizes,
@@ -175,6 +178,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(false, "NYI");
   };
   virtual c10::optional<int64_t> singleton_int() {
+    return c10::nullopt;
+  }
+  virtual c10::optional<int64_t> singleton_coeff() {
     return c10::nullopt;
   }
   virtual c10::optional<int64_t> constant_int() {

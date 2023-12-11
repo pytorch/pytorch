@@ -41,7 +41,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
     for (const auto thread_id : c10::irange(config.num_calling_threads)) {
       // Just in case we generate num_iters inputs for each of the threads
       // This was if one thread does all the work we will be fine
-      for (const auto i :
+      for (const auto i [[maybe_unused]] :
            c10::irange(config.num_iters + config.num_warmup_iters)) {
         thread_inputs[thread_id].push_back(cloneInput(inputs_[dist(engine)]));
       }

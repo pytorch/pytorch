@@ -115,8 +115,8 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
     auto impl = c10::make_intrusive<SparseCsrTensorImpl>(
         key_set(), device(), layout_impl(), dtype());
     copy_tensor_metadata(
-        /*src_impl=*/this,
-        /*dest_impl=*/impl.get(),
+        /*src_sparse_impl=*/this,
+        /*dest_sparse_impl=*/impl.get(),
         /*version_counter=*/version_counter,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     impl->refresh_numel();
@@ -135,9 +135,9 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
     auto impl = c10::make_intrusive<SparseCsrTensorImpl>(
         key_set(), device(), layout_impl(), dtype());
     copy_tensor_metadata(
-        /*src_impl=*/this,
-        /*dest_impl=*/impl.get(),
-        /*version_counter=*/std::move(version_counter),
+        /*src_sparse_impl=*/this,
+        /*dest_sparse_impl=*/impl.get(),
+        /*version_counter=*/version_counter,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     impl->refresh_numel();
     return impl;

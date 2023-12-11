@@ -3,8 +3,7 @@
 #include <c10/util/Exception.h>
 #include <cstdint>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 int64_t slice_indices_adjust(
     int64_t length,
@@ -53,5 +52,4 @@ int64_t slice_indices_adjust(
   return 0;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

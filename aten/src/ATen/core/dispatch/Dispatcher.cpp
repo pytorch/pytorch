@@ -265,6 +265,15 @@ AbstractImplPyStubsType& abstractImplPyStubsSingleton() {
 
 }
 
+c10::optional<std::pair<const char*, const char*>> Dispatcher::getAbstractImplPyStub(OperatorName op_name) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  auto found = abstractImplPyStubsSingleton().find(op_name);
+  if (found == abstractImplPyStubsSingleton().end()) {
+    return c10::nullopt;
+  }
+  return found->second;
+}
+
 RegistrationHandleRAII Dispatcher::registerAbstractImplPyStub(
   const OperatorName& op_name,
   const char* pymodule,
@@ -305,9 +314,9 @@ void Dispatcher::throwIfHasAbstractImplPyStub(OperatorName op_name) {
       interpreter != nullptr,
       op_name,
       ": while attempting to run this operator with Meta Tensors: "
-      "the abstract impl for this operator (necessary for Meta Tensors) "
-      "was declared to exist in the Python module ", pymodule,
-      " but Python is not available.");
+      "Either there is no meta kernel for this operator, or it is located "
+      "in the python module ", pymodule, " which is not available "
+      "because Python isn't available.")
   (*interpreter)->throw_abstract_impl_not_imported_error(toString(op_name), pymodule, context);
 }
 

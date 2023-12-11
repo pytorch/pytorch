@@ -514,7 +514,7 @@ For C++ documentation (https://pytorch.org/cppdocs), we use
 [Sphinx](http://www.sphinx-doc.org/) via
 [Breathe](https://github.com/michaeljones/breathe) and
 [Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
-reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
+reference](https://www.doxygen.nl/manual/) for more
 information on the documentation syntax.
 
 We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen

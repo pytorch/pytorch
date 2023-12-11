@@ -21,12 +21,12 @@ class TestSparseToDenseMask(TestCase):
             np.array([2, 4, 6, 1, 2, 999999999, 2], dtype=np.int32))
         workspace.FeedBlob(
             'values',
-            np.array([1, 2, 3, 4, 5, 6, 7], dtype=np.float))
-        workspace.FeedBlob('default', np.array(-1, dtype=np.float))
+            np.array([1, 2, 3, 4, 5, 6, 7], dtype=np.float64))
+        workspace.FeedBlob('default', np.array(-1, dtype=np.float64))
         workspace.FeedBlob('lengths', np.array([3, 4], dtype=np.int32))
         workspace.RunOperatorOnce(op)
         output = workspace.FetchBlob('output')
-        expected = np.array([[-1, 1, 3], [6, 7, -1]], dtype=np.float)
+        expected = np.array([[-1, 1, 3], [6, 7, -1]], dtype=np.float64)
         self.assertEqual(output.shape, expected.shape)
         np.testing.assert_array_equal(output, expected)
 
@@ -42,8 +42,8 @@ class TestSparseToDenseMask(TestCase):
             np.array([2000000000000, 999999999, 2, 3, 4, 5], dtype=np.int32))
         workspace.FeedBlob(
             'values',
-            np.array([1, 2, 3, 4, 5, 6], dtype=np.float))
-        workspace.FeedBlob('default', np.array(-1, dtype=np.float))
+            np.array([1, 2, 3, 4, 5, 6], dtype=np.float64))
+        workspace.FeedBlob('default', np.array(-1, dtype=np.float64))
         workspace.FeedBlob('lengths', np.array([6], dtype=np.int32))
         try:
             workspace.RunOperatorOnce(op)
@@ -69,14 +69,14 @@ class TestSparseToDenseMask(TestCase):
         workspace.FeedBlob(
             'values',
             np.array([[[1, -1]], [[2, -2]], [[3, -3]], [[4, -4]], [[5, -5]]],
-                     dtype=np.float))
-        workspace.FeedBlob('default', np.array([[-1, 0]], dtype=np.float))
+                     dtype=np.float64))
+        workspace.FeedBlob('default', np.array([[-1, 0]], dtype=np.float64))
         workspace.FeedBlob('lengths', np.array([2, 3], dtype=np.int32))
         workspace.RunOperatorOnce(op)
         output = workspace.FetchBlob('output')
         expected = np.array([
             [[[-1, 0]], [[1, -1]], [[-1, 0]], [[-1, 0]]],
-            [[[4, -4]], [[5, -5]], [[-1, 0]], [[3, -3]]]], dtype=np.float)
+            [[[4, -4]], [[5, -5]], [[-1, 0]], [[3, -3]]]], dtype=np.float64)
         self.assertEqual(output.shape, expected.shape)
         np.testing.assert_array_equal(output, expected)
 
@@ -108,11 +108,11 @@ class TestSparseToDenseMask(TestCase):
             ['output'],
             mask=[1, 2, 6])
         workspace.FeedBlob('indices', np.array([2, 4, 6], dtype=np.int32))
-        workspace.FeedBlob('values', np.array([1, 2, 3], dtype=np.float))
-        workspace.FeedBlob('default', np.array(-1, dtype=np.float))
+        workspace.FeedBlob('values', np.array([1, 2, 3], dtype=np.float64))
+        workspace.FeedBlob('default', np.array(-1, dtype=np.float64))
         workspace.RunOperatorOnce(op)
         output = workspace.FetchBlob('output')
-        expected = np.array([-1, 1, 3], dtype=np.float)
+        expected = np.array([-1, 1, 3], dtype=np.float64)
         self.assertEqual(output.shape, expected.shape)
         np.testing.assert_array_equal(output, expected)
 
@@ -123,11 +123,11 @@ class TestSparseToDenseMask(TestCase):
             ['output'],
             mask=[1, 2, 6])
         workspace.FeedBlob('indices', np.array([2, 4, 6], dtype=np.int32))
-        workspace.FeedBlob('values', np.array([1, 2, 3], dtype=np.float))
-        workspace.FeedBlob('default', np.array(-1, dtype=np.float))
+        workspace.FeedBlob('values', np.array([1, 2, 3], dtype=np.float64))
+        workspace.FeedBlob('default', np.array(-1, dtype=np.float64))
         workspace.RunOperatorOnce(op)
         output = workspace.FetchBlob('output')
-        expected = np.array([-1, 1, 3], dtype=np.float)
+        expected = np.array([-1, 1, 3], dtype=np.float64)
         self.assertEqual(output.shape, expected.shape)
         np.testing.assert_array_equal(output, expected)
 
@@ -139,18 +139,18 @@ class TestSparseToDenseMask(TestCase):
             mask=[11, 12],
             return_presence_mask=True)
         workspace.FeedBlob('indices', np.array([11, 12, 13], dtype=np.int32))
-        workspace.FeedBlob('values', np.array([11, 12, 13], dtype=np.float))
-        workspace.FeedBlob('default', np.array(-1, dtype=np.float))
+        workspace.FeedBlob('values', np.array([11, 12, 13], dtype=np.float64))
+        workspace.FeedBlob('default', np.array(-1, dtype=np.float64))
         workspace.FeedBlob('lengths', np.array([1, 2], dtype=np.int32))
 
         workspace.RunOperatorOnce(op)
 
         output = workspace.FetchBlob('output')
         presence_mask = workspace.FetchBlob('presence_mask')
-        expected_output = np.array([[11, -1], [-1, 12]], dtype=np.float)
+        expected_output = np.array([[11, -1], [-1, 12]], dtype=np.float64)
         expected_presence_mask = np.array(
             [[True, False], [False, True]],
-            dtype=np.bool)
+            dtype=bool)
         self.assertEqual(output.shape, expected_output.shape)
         np.testing.assert_array_equal(output, expected_output)
         self.assertEqual(presence_mask.shape, expected_presence_mask.shape)
