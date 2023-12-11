@@ -44,6 +44,69 @@ def _assign_attr(
         to_module.register_buffer(field, from_obj)
 
 
+class InterpreterModule(torch.nn.Module):
+    """A module that uses torch.fx.Interpreter to execute instead of the usual
+    codegen that GraphModule uses. This provides better stack trace information
+    and makes it easier to debug execution.
+    """
+
+    def __init__(
+        self,
+        graph: torch.fx.Graph,
+        module_call_signature: Optional[ModuleCallSignature],
+    ):
+        super().__init__()
+        self.graph = graph
+        self.graph.owning_module = self
+        self.module_call_signature = module_call_signature
+
+    def forward(self, *args, **kwargs):
+        assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
+        if torch._dynamo.is_compiling():
+            # Dynamo cannot trace through torch.fx.Interpreter, so fall back to
+            # GraphModule codegen in this instance.
+            return self.graph_module(*args, **kwargs)
+        else:
+            if kwargs:
+                # Handle **kwargs. FX only natively supports positional
+                # arguments (through placeholders). So in order to pass in
+                # kwargs, we must correspond the names of the placeholders with
+                # the keys in the kwarg dict.
+                arg_list = list(args)
+                kwarg_names = self.arg_names[len(arg_list) :]
+                for kwarg_name in kwarg_names:
+                    if kwarg_name in kwargs:
+                        arg_list.append(kwargs[kwarg_name])
+
+                # Assert that the kwargs passed in exactly match the positional
+                # arguments specified by the GraphModule. This should be
+                # guaranteed by the unflattening process.
+                assert len(kwarg_names) == len(kwargs)
+                assert len(arg_list) == len(self.arg_names)
+                args = tuple(arg_list)
+
+            return torch.fx.Interpreter(self, graph=self.graph).run(
+                *args, enable_io_processing=False
+            )
+
+    def finalize(self):
+        # We need to "finalize" because GraphModule populates its own state_dict
+        # based on the get_attrs observed in the graph. So we need to fully
+        # construct the graph and call _sink_params before generating this
+        # GraphModule.
+
+        # need to set `graph_module` directly on the dict to avoid it getting
+        # registered as a submodule.
+        self.__dict__["graph_module"] = torch.fx.GraphModule(self, self.graph)
+        self.graph.lint()
+
+        # Cache arg names for kwarg handling (see forward())
+        self.arg_names = []
+        for node in self.graph.nodes:
+            if node.op == "placeholder":
+                self.arg_names.append(node.target)
+
+
 class _UnflattenedModule(torch.nn.Module):
     def __init__(self, export_module: ExportedProgram):
         super().__init__()
@@ -269,19 +332,9 @@ class ModuleFrame:
         if module is not None:
             self.module = module
         else:
-            # InterpreterModule doesn't work with torch.compile:
-            # 1. in-place compile: nn.Module compile the forward function, and if we overwrite __call__,
-            # in-place compile will not be effective
-            # 2. out-of-place compile: there are a lot of graph guard failures on "self" in the
-            # InterpreterModule
-            # self.module = InterpreterModule(
-            self.module = torch.fx.GraphModule(
-                {},
-                torch.fx.Graph(),
-                self.fqn,
+            self.module = InterpreterModule(
+                torch.fx.Graph(), module_call_graph.get(self.fqn)
             )
-            self.module.meta["module_call_signature"] = module_call_graph.get(self.fqn)
-
         if self.module_id in self.seen_modules:
             self.cached_graph_module = self.seen_modules[self.module_id]
         else:
@@ -441,11 +494,6 @@ class ModuleFrame:
         assert isinstance(graph_outputs, (list, torch.fx.Node))
 
         self.graph.output(graph_outputs)
-
-        # lint to ensure correctness
-        self.graph.lint()
-        if isinstance(self.module, torch.fx.GraphModule):
-            self.module.recompile()
 
         # Rewrite outputs in parent module
         if parent_out is None:
@@ -637,9 +685,8 @@ def _sink_params(
 
             node.replace_all_uses_with(new_node, propagate_meta=True)
         graph.erase_node(node)
-    if isinstance(module, torch.fx.GraphModule):
-        module.graph.lint()
-        module.recompile()
+    if isinstance(module, InterpreterModule):
+        module.finalize()
 
 
 def _recursive_getattr(obj, attr_path):
