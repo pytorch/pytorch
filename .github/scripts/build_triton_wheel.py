@@ -130,7 +130,7 @@ def build_triton(
                 cwd=triton_basedir,
                 env=env,
             )
-            conda_path = next(iter(Path(tmpdir).glob("linux-64/torchtriton*.bz2")))
+            conda_path = list(Path(tmpdir).glob("linux-64/torchtriton*.bz2"))[0]
             shutil.copy(conda_path, Path.cwd())
             return Path.cwd() / conda_path.name
 
@@ -156,7 +156,7 @@ def build_triton(
             [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
         )
 
-        whl_path = next(iter((triton_pythondir / "dist").glob("*.whl")))
+        whl_path = list((triton_pythondir / "dist").glob("*.whl"))[0]
         shutil.copy(whl_path, Path.cwd())
 
         if build_rocm:
