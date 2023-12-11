@@ -842,11 +842,50 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
+class HelperFunctions:
+    """An ordered set of helper functions."""
+
+    _templates_seen: Dict[str, str]  # Template code to function name
+    finalized_helpers: List[str]
+
+    def __init__(self):
+        self._templates_seen = {}
+        self.finalized_helpers = []
+
+    def add(self, template_code: str) -> str:
+        """This accepts a function definition with the function name
+        left as a format specifier e.g.
+
+            @triton.jit
+            def {name}(arg0, arg1):
+                return arg0 + arg1
+
+        We add the templated code to the function set and return the name
+        assigned to that function.
+
+        """
+        existing_name = self._templates_seen.get(template_code)
+        if existing_name is not None:
+            # Don't duplicate existing helpers
+            return existing_name
+
+        name = f"_triton_helper_fn{len(self.finalized_helpers)}"
+        self._templates_seen[template_code] = name
+        self.finalized_helpers.append(template_code.format(name=name))
+        return name
+
+    def __iter__(self):
+        return iter(self.finalized_helpers)
+
+    def __getitem__(self, idx):
+        return self.finalized_helpers[idx]
+
+
 class TritonKernel(Kernel):
     overrides = TritonKernelOverrides  # type: ignore[assignment]
     sexpr = pexpr
 
-    helper_functions: List[IndentedBuffer]
+    helper_functions: HelperFunctions
 
     def __init__(
         self,
@@ -884,8 +923,7 @@ class TritonKernel(Kernel):
         )
         self.initialize_range_tree(pid_cache)
 
-        # TODO: make this a dict keyed on the function IR?
-        self.helper_functions = []
+        self.helper_functions = HelperFunctions()
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints: Set[AutotuneHint] = set()
@@ -1755,12 +1793,11 @@ class TritonKernel(Kernel):
 
     def _lift_helper(self, fn, num_args) -> str:
         # Lift IR function into a triton function in the global namespace
-        name = f"_triton_helper_fn{len(self.helper_functions)}"
         helper = IndentedBuffer()
         helper.writeline("@triton.jit")
         args = [f"arg{n}" for n in range(num_args)]
         signature = ", ".join(args)
-        helper.writeline(f"def {name}({signature}):")
+        helper.writeline(f"def {{name}}({signature}):")
 
         cse = CSE(prefix="", suffix="")
         overrides = TritonOverrides(V.MockHandler())
@@ -1779,8 +1816,7 @@ class TritonKernel(Kernel):
             outputs = fn(*args)
             helper.writeline(f"return {outputs}")
 
-        self.helper_functions.append(helper)
-        return name
+        return self.helper_functions.add(helper.getvalue())
 
     def scan(self, dtype, combine_fn, value, init):
         assert self.inside_reduction
