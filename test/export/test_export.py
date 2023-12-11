@@ -10,14 +10,7 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch.export import (
-    Constraint,
-    Dim,
-    dynamic_dim,
-    export,
-)
-from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
-from torch._export import capture_pre_autograd_graph
+from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
 from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
     get_buffer,
@@ -1312,7 +1305,7 @@ class TestExport(TestCase):
     def test_constraint_directly_construct(self):
         with self.assertRaisesRegex(
             TypeError,
-            "Constraint has no public constructor. Please use torch.export.dynamic_dim"
+            "torch.export.Constraint has no public constructor. Please use torch.export.dynamic_dim"
         ):
             _ = Constraint()
 
@@ -1559,32 +1552,6 @@ def forward(self, l_x_):
         ep_v2 = torch.export.export(foo, (torch.randn(4, 4), torch.randn(4, 4)), dynamic_shapes=(None, None))
         with self.assertRaisesRegex(RuntimeError, "shape\[0\] is specialized at 4"):
             ep_v2(*test_inp)
-
-    def test_constant_output(self):
-        class ModuleConstant(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.b = torch.randn(3, 2)
-
-            def forward(self):
-                return self.b
-
-        # class ModuleNestedConstant(torch.nn.Module):
-        #     def __init__(self):
-        #         super().__init__()
-        #         self.bff = torch.randn(3, 2)
-
-        #     def forward(self, x, y):
-        #         return {"prediction": (x + y, self.bff)}
-
-        mod = ModuleConstant()
-        ep = torch.export.export(mod, ())
-        self.assertEqual(ep(), mod())
-
-        # args = (torch.randn(3, 2), torch.randn(3, 2))
-        # mod = ModuleNestedConstant()
-        # ep = torch.export.export(mod, args)
-        # self.assertEqual(ep(*args), mod(*args))
 
     def test_non_arg_name_dynamic_shapes_api_with_kwarg(self):
         def foo(a, b, kw1, kw2):
