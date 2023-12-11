@@ -1283,13 +1283,12 @@ if(USE_ROCM)
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
 
     # ---[ Kernel asserts
-    # Kernel asserts is disabled for ROCm.
+    # Kernel asserts is disabled for ROCm by default.
+    # It can be turned on by turning on the env USE_ROCM_KERNEL_ASSERT to the build system.
     if(USE_ROCM_KERNEL_ASSERT)
       message(STATUS "Enabling Kernel Assert for ROCm")
-      caffe2_update_option(USE_ROCM_KERNEL_ASSERT ON)
     else()
       message(STATUS "Disabling Kernel Assert for ROCm")
-      caffe2_update_option(USE_ROCM_KERNEL_ASSERT OFF)
     endif()
 
   else()
