@@ -62,6 +62,14 @@ def _nonduplicate_append(dest_list: List[str], src_list: List[str]):
             dest_list.append(item)
 
 
+def _remove_duplication_in_list(orig_list: List[str]) -> List[str]:
+    new_list: List[str] = []
+    for item in orig_list:
+        if item not in new_list:
+            new_list.append(item)
+    return new_list
+
+
 def _create_if_dir_not_exist(path_dir):
     if not os.path.exists(path_dir):
         try:
@@ -154,6 +162,14 @@ class BuildOptionsBase:
         self._libraries_dirs = libraries_dirs
         self._libraries = libraries
         self._passthough_args = passthough_args
+
+        self._definations = _remove_duplication_in_list(self._definations)
+        self._include_dirs = _remove_duplication_in_list(self._include_dirs)
+        self._cflags = _remove_duplication_in_list(self._cflags)
+        self._ldflags = _remove_duplication_in_list(self._ldflags)
+        self._libraries_dirs = _remove_duplication_in_list(self._libraries_dirs)
+        self._libraries = _remove_duplication_in_list(self._libraries)
+        self._passthough_args = _remove_duplication_in_list(self._passthough_args)
 
     def __init__(self) -> None:
         pass
