@@ -930,6 +930,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     TORCH_CHECK(max_seqlen_q_.has_value());
     max_seqlen_q = *max_seqlen_q_;
     max_seqlen_k = 0; // TODO: is this actually being set inside the kernel anywhere?
+                      // see https://github.com/pytorch/pytorch/issues/115590s
   } else {
     max_seqlen_q = query.size(1);
     max_seqlen_k = key.size(1);
