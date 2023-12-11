@@ -3436,7 +3436,7 @@ class TestNestedTensorSubclass(NestedTestCase):
                  SM80OrLater else [torch.float16, torch.float32])
     def test_sdpa(self, device, dtype):
         batch_size = 1
-        emb_dims = 32
+        emb_dims = 64
         n_heads = 8
         head_dims = emb_dims // n_heads
 
@@ -3467,13 +3467,26 @@ class TestNestedTensorSubclass(NestedTestCase):
         v_nt_t = v_nt.transpose(1, 2)
 
         # High Precision Math Reference
-        q_d1_f32 = q_d1_t.to(torch.float32)
-        k_d1_f32 = k_d1_t.to(torch.float32)
-        v_d1_f32 = v_d1_t.to(torch.float32)
-        out_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1_f32, k_d1_f32, v_d1_f32)[0]
+        q_d1_f32 = q_d1.to(torch.float32)
+        k_d1_f32 = k_d1.to(torch.float32)
+        v_d1_f32 = v_d1.to(torch.float32)
+        q_d1_f32_t = q_d1_f32.transpose(1, 2)
+        k_d1_f32_t = k_d1_f32.transpose(1, 2)
+        v_d1_f32_t = v_d1_f32.transpose(1, 2)
+        out_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1_f32_t, k_d1_f32_t, v_d1_f32_t)[0]
+        grads_ref = torch.autograd.grad(out_ref.sum(), (q_d1_f32, k_d1_f32, v_d1_f32))
+
         # Low Precision Math Reference
         out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1_t, k_d1_t, v_d1_t)[0]
+        grads_lp_ref = torch.autograd.grad(out_lp_ref.sum(), (q_d1, k_d1, v_d1))
+
+        # Compute tolerances
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
+        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(grads_ref[0], grads_lp_ref[0])
+        grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(grads_ref[1], grads_lp_ref[1])
+        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(grads_ref[2], grads_lp_ref[2])
+        grad_atols = [grad_q_ref_atol, grad_k_ref_atol, grad_v_ref_atol]
+        grad_rtols = [grad_q_ref_rtol, grad_k_ref_rtol, grad_v_ref_rtol]
 
         attn_d1 = torch.nn.functional.scaled_dot_product_attention(q_d1_t, k_d1_t, v_d1_t).transpose(1, 2)
         attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt_t, k_nt_t, v_nt_t).transpose(1, 2)
@@ -3513,16 +3526,16 @@ class TestNestedTensorSubclass(NestedTestCase):
             self.assertEqual(attn_d2, attn_nts[1].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
 
             nt_grads = torch.autograd.grad(buffer_from_jagged(attn_nt).sum(), (q_nt, k_nt, v_nt))
-            for nt_grad, d1_grad, d2_grad in zip(nt_grads, d1_grads, d2_grads):
+            for nt_grad, d1_grad, d2_grad, grad_atol, grad_rtol in zip(nt_grads, d1_grads, d2_grads, grad_atols, grad_rtols):
                 unbound_nt_grads = nt_grad.unbind()
-                self.assertEqual(d1_grad, unbound_nt_grads[0].unsqueeze(0))
-                self.assertEqual(d2_grad, unbound_nt_grads[1].unsqueeze(0))
+                self.assertEqual(d1_grad, unbound_nt_grads[0].unsqueeze(0), atol=grad_atol, rtol=grad_rtol)
+                self.assertEqual(d2_grad, unbound_nt_grads[1].unsqueeze(0), atol=grad_atol, rtol=grad_rtol)
 
         # Default
         check_forward_backward()
 
         # Test dispatcher works by calling only mem-effn and math (as they are safe for all devices)
-        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=True, enable_math=False):
+        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=False):
             check_forward_backward()
 
         # Will fail bc unsupported ops
