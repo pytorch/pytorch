@@ -46,6 +46,7 @@ py::handle type_caster<c10::SymInt>::cast(
     }
   } else {
     auto m = si.maybe_as_int();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return py::cast(*m).release();
   }
 }

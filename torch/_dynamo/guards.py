@@ -18,7 +18,7 @@ import textwrap
 import types
 import weakref
 from inspect import currentframe, getframeinfo
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from weakref import ReferenceType
 
 
@@ -100,9 +100,9 @@ CLOSURE_VARS = {
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend
     ),
     "___lookup_backend": (
-        lambda backend_obj_id: torch._dynamo.eval_frame.guarded_backend_cache.cached_backends[
-            backend_obj_id
-        ]
+        lambda backend_obj_id: torch._dynamo.eval_frame.cached_backends.get(
+            backend_obj_id, None
+        )
     ),
     "___skip_backend_check": (
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
@@ -110,7 +110,6 @@ CLOSURE_VARS = {
     "___compile_config_hash": (
         lambda: torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex()
     ),
-    "___needs_nopython": (lambda: torch._dynamo.eval_frame.config_cache.nopython),
     "___odict_getitem": collections.OrderedDict.__getitem__,
     "___tensor_to_id": tensor_to_id,
     "___dict_version": dict_version,
@@ -211,7 +210,7 @@ class GuardBuilder(GuardBuilderBase):
         ) in torch.package.package_importer._package_imported_modules.items():
             name = name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             # Write the package module into the scope so that we can import it
-            self.scope["__builtins__"][name] = package_module  # type: ignore[index]
+            self.scope["__builtins__"][name] = package_module
             # Write the demangled name to the scope so that we can use it
             self.scope[name] = package_module
 
@@ -255,14 +254,7 @@ class GuardBuilder(GuardBuilderBase):
     # (like its type) which is what you permanently install into the
     # guard code.
     def get(self, name: str) -> Any:
-        try:
-            return eval(name, self.scope, CLOSURE_VARS)
-        except:
-            print(name)
-            print(self.scope)
-            print(CLOSURE_VARS)
-            raise
-
+        return eval(name, self.scope, CLOSURE_VARS)
 
     # Registers the usage of the source name referenced by the
     # string (or stored in the Guard) as being guarded upon.  It's important
@@ -375,7 +367,7 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard.name)
         t = type(val)
         if np:
-            np_types = (
+            np_types: Tuple[Type[Any], ...] = (
                 np.int8,
                 np.int16,
                 np.int32,
@@ -389,7 +381,7 @@ class GuardBuilder(GuardBuilderBase):
                 np.float64,
             )
         else:
-            np_types = ()  # type: ignore[assignment]
+            np_types = ()
         ok_types = (
             int,
             float,
@@ -618,13 +610,6 @@ class GuardBuilder(GuardBuilderBase):
         self.config_hash = config_hash
         self._produce_guard_code(guard, code)
 
-    def HAS_GRAPH_BREAK(self, guard: Guard):
-        # If this compiled entry has a graph break / is not a single graph, it is a cache miss
-        # if the compiled object needs nopython. We only need to install this guard if
-        # there is a graph break.
-        code = ["not ___needs_nopython()"]
-        self._produce_guard_code(guard, code)
-
     def SHAPE_ENV(self, guard: Guard):
         # Let's handle ShapeEnv guards.  To do this, we will resolve
         # shape variables to sources from tracked_fakes.  This must happen after
@@ -633,7 +618,7 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
-        constraint_inputs = [a.constraint_dims for a in fs]
+        input_contexts = [a.symbolic_context for a in fs]
 
         def get_sources(t_id, dim):
             # Looks up base sources mapped to a tensor id and uses them to create
@@ -676,7 +661,7 @@ class GuardBuilder(GuardBuilderBase):
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
-            constraint_inputs=constraint_inputs,
+            input_contexts=input_contexts,
             equalities_inputs=equalities_inputs,
             source_ref=self.source_ref,
             # Export keeps static.
