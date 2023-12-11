@@ -956,7 +956,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   //    completedWorkList_ before it finishes.
   // 3. We have three threads and two locks.
   //      a. main thread (this function) grabs two locks atomically
-  //      b. watchdog thread (workCleanupLoop function) always grabs
+  //      b. watchdog thread (watchdogHandler function) always grabs
   //      workMetaListMutex_
   //         first and then grabs completedWorkListMutex_.
   //      c. hook thread (runHookLoop function) only grabs
@@ -1220,7 +1220,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
       ncclHeartbeatMonitorThread_ =
           std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
     }
-    workCleanupLoop();
+    watchdogHandler();
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
@@ -1232,7 +1232,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
           << " (Watchdog caught exception: " << e.what();
 
     } else {
-      // Append error message reported from workCleanupLoop
+      // Append error message reported from watchdogHandler
       const auto exitMsg = c10::str(
           "[Rank ",
           rank_,
@@ -1336,7 +1336,7 @@ struct DumpPipe {
 };
 #endif
 
-void ProcessGroupNCCL::workCleanupLoop() {
+void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   auto lastTimePollStore = std::chrono::steady_clock::now();
