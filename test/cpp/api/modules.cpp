@@ -2679,6 +2679,18 @@ TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
     ASSERT_TRUE(
         torch::allclose(asfm(x, y).output.squeeze(0), asfm(x2, y2).output));
   }
+  {
+    // test div_value
+    auto options =
+        AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(0.);
+    ASSERT_THROWS_WITH(
+        AdaptiveLogSoftmaxWithLoss(options),
+        "div_value should not be equal to 0");
+
+    options =
+        AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(0.25);
+    ASSERT_TRUE(AdaptiveLogSoftmaxWithLoss(options));
+  }
 }
 
 TEST_F(ModulesTest, Softmax2d) {

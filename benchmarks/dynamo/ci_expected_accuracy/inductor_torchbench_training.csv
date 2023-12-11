@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,pass,6
+torchrec_dlrm,pass,8
 
 
 
@@ -227,6 +227,10 @@ timm_vision_transformer_large,pass_due_to_skip,0
 
 
 timm_vovnet,pass,8
+
+
+
+torch_multimodal_clip,pass,8
 
 
 

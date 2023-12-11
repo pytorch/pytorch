@@ -392,6 +392,7 @@ class TestOperators(TestCase):
         # query: last dimension must be contiguous
         # Fused attention kernels require last dim to be contiguous
         xfail('nn.functional.scaled_dot_product_attention'),
+        xfail("torch.ops.aten._flash_attention_forward"),
         xfail("torch.ops.aten._efficient_attention_forward"),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
@@ -475,6 +476,7 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),    # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
 
         xfail('nn.functional.scaled_dot_product_attention'),
+        xfail('torch.ops.aten._flash_attention_forward'),
         xfail('torch.ops.aten._efficient_attention_forward'),
 
         xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
@@ -603,6 +605,7 @@ class TestOperators(TestCase):
         # RuntimeError: query: last dimension must be contiguous
         # The fused attention kernels require the last dim to be contiguous
         xfail('nn.functional.scaled_dot_product_attention'),
+        xfail('torch.ops.aten._flash_attention_forward'),
         xfail('torch.ops.aten._efficient_attention_forward'),
         # BUG
         # AssertionError: Tensor-likes are not close!
@@ -682,6 +685,7 @@ class TestOperators(TestCase):
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
         xfail('sparse.mm', 'reduce'),  # sparse tensors have no strides
         skip('nn.functional.scaled_dot_product_attention'),
+        xfail('torch.ops.aten._flash_attention_forward'),
         xfail('torch.ops.aten._efficient_attention_forward'),
         # AssertionError: Tensor-likes are not close!
         # Mismatched elements: 1 / 15 (6.7%)
@@ -1808,6 +1812,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=2e-04, rtol=1e-04)}, device_type='cuda'),
         tol2('linalg.pinv', 'hermitian',
              {torch.float32: tol(atol=5e-06, rtol=5e-06)}),
+        tol1('nn.functional.conv3d',
+             {torch.float32: tol(atol=5e-04, rtol=9e-03)}),
     ))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):
