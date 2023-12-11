@@ -322,7 +322,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                const bool return_softmax,
                c10::optional<at::Generator> gen_) {
 
-  TORCH_WARN("[mha_varlen_fwd not supported on ROCm");
+  TORCH_CHECK(false, "mha_varlen_fwd not supported on ROCm");
 
   at::Tensor softmax_lse = at::empty({}, at::dtype(at::kFloat));
   at::Tensor p = at::empty({}, at::dtype(at::kFloat));
@@ -640,7 +640,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                int window_size_right,
                const at::Tensor philox_seed,
                const at::Tensor philox_offset) {
-  TORCH_WARN("[mha_varlen_bwd not supported on ROCm");
+  TORCH_CHECK(false, "mha_varlen_bwd not supported on ROCm");
 
   at::Tensor softmax_d = at::empty({}, at::dtype(at::kFloat));
 
