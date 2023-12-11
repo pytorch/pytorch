@@ -81,6 +81,8 @@ using DeleterFnPtr = void (*)(void*);
 namespace torch {
 namespace aot_inductor {
 
+inline void noop_deleter(void*) {}
+
 inline void delete_tensor_object(void* ptr) {
   AOTI_TORCH_ERROR_CODE_CHECK(
       aoti_torch_delete_tensor_object(reinterpret_cast<AtenTensorHandle>(ptr)));
@@ -89,7 +91,7 @@ inline void delete_tensor_object(void* ptr) {
 // RAIIAtenTensorHandle steals the tensor objects created by the libtorch C ABI
 class RAIIAtenTensorHandle {
  public:
-  RAIIAtenTensorHandle() = delete;
+  RAIIAtenTensorHandle() : handle_(nullptr, noop_deleter) {}
   RAIIAtenTensorHandle(const RAIIAtenTensorHandle& other) = delete;
   RAIIAtenTensorHandle& operator=(const RAIIAtenTensorHandle& other) = delete;
 
