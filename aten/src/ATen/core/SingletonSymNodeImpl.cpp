@@ -20,11 +20,13 @@ bool _ge(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
       }
       TORCH_CHECK(false, "Singleton int ", op, ": Relation is indeterminate");
     }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (rhs->constant_int() && *rhs->constant_int() <= 2) {
       return true;
     }
     TORCH_CHECK(false, "Singleton int ", op, ": Relation is indeterminate");
   } else if (rhs->singleton_int()) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (lhs->constant_int() && *lhs->constant_int() < 2) {
       return false;
     }
@@ -70,7 +72,7 @@ c10::SymNode SingletonSymNodeImpl::mul(const c10::SymNode& other) {
   }
   c10::optional<int64_t> c = other->constant_int();
   TORCH_CHECK(c.has_value());
-  return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c, values_, dummy_, sum_offsets_));
+  return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c, data_, dummy_, sum_offsets_));
 }
 
 std::optional<at::Tensor> try_call_with_dummy(const std::function<at::Tensor(at::Tensor)>& fn, c10::SymIntArrayRef size) {

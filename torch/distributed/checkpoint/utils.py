@@ -1,5 +1,6 @@
 import os
 import io
+import itertools
 from typing import (
     List,
     Callable,
@@ -9,7 +10,7 @@ from typing import (
     Dict,
     Any,
     cast,
-    Sequence,
+    Sequence
 )
 import torch.distributed as dist
 from .api import (
@@ -46,6 +47,13 @@ def _get_failure_dict(
         {i: err for i, err in enumerate(results) if _is_wrapped_exception(err)},
     )
 
+def _all_gather_keys(local_dict: Dict[Any, Any]) -> List[Any]:
+    """Gathers all keys, and returns them sorted."""
+    keys = list(local_dict.keys())
+    gathered_keys: List[List[Any]] = [None] * dist.get_world_size()  # type: ignore[list-item]
+
+    dist.all_gather_object(gathered_keys, keys)
+    return sorted(set(itertools.chain.from_iterable(gathered_keys)))
 
 class _DistWrapper:
     """

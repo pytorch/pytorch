@@ -330,6 +330,7 @@ class OptimizeForInferenceTemplate(TestCase):
 
             self.assertEqual(out_compiled_no_inference, out_compiled)
 
+    @torch._inductor.config.patch(layout_optimization=False)
     def test_folded_conv_bn(self):
         for use_bias, dtype in itertools.product(
             [True, False], [torch.float16, torch.bfloat16, torch.float32]
@@ -375,6 +376,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
 
+    @torch._inductor.config.patch(layout_optimization=False)
     def test_dont_change_dtype_folding(self):
         dtype = torch.float16 if self.device == "cuda" else torch.bfloat16
 

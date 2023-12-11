@@ -1291,11 +1291,11 @@ void initJITBindings(PyObject* module) {
             return node->singleton_int();
           })
       .def(
-          "singleton_values",
+          "singleton_data",
           [](const c10::SymNode& node) {
             TORCH_CHECK(node->singleton_int());
             auto p = dynamic_cast<c10::SingletonSymNodeImpl*>(node.get());
-            return p->singleton_values();
+            return p->singleton_data();
           })
       .def(
           "singleton_sum_offsets",
