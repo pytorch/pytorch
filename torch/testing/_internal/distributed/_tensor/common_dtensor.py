@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import itertools
+import math
 import sys
 from functools import wraps
 from typing import (
@@ -17,6 +18,8 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
+import torch.nn.functional as F
 
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 from torch.testing._internal.common_distributed import (
@@ -47,13 +50,13 @@ if torch.cuda.is_available() and torch.cuda.device_count() > 1:
 T = TypeVar("T")
 
 
-class MLPModule(torch.nn.Module):
+class MLPModule(nn.Module):
     def __init__(self, device):
         super().__init__()
         torch.manual_seed(5)
-        self.net1 = torch.nn.Linear(10, 16, device=device)
-        self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(16, 10, device=device)
+        self.net1 = nn.Linear(10, 16, device=device)
+        self.relu = nn.ReLU()
+        self.net2 = nn.Linear(16, 10, device=device)
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
@@ -61,6 +64,97 @@ class MLPModule(torch.nn.Module):
     def reset_parameters(self):
         self.net1.reset_parameters()
         self.net2.reset_parameters()
+
+
+class Attention(nn.Module):
+    def __init__(self, dim, n_heads, world_size):
+        super().__init__()
+        self.head_dim = dim // n_heads
+        self.n_heads = n_heads
+        self.n_local_heads = n_heads // world_size
+
+        self.wq = nn.Linear(dim, dim, bias=False)
+        self.wk = nn.Linear(dim, dim, bias=False)
+        self.wv = nn.Linear(dim, dim, bias=False)
+        self.wo = nn.Linear(dim, dim, bias=False)
+
+    def forward(self, x, mask=None):
+        bsz, seqlen, _ = x.size()
+        queries, keys, values = self.wq(x), self.wk(x), self.wv(x)
+        queries = queries.view(bsz, seqlen, self.n_local_heads, self.head_dim)
+        keys = keys.view(bsz, seqlen, self.n_local_heads, self.head_dim)
+        values = values.view(bsz, seqlen, self.n_local_heads, self.head_dim)
+
+        queries = queries.transpose(1, 2)  # (bsz, n_local_heads, seqlen, head_dim)
+        keys = keys.transpose(1, 2)  # (bsz, n_local_heads, seqlen, head_dim)
+        values = values.transpose(1, 2)  # (bsz, n_local_heads, seqlen, head_dim)
+        scores = torch.matmul(queries, keys.transpose(2, 3)) / math.sqrt(self.head_dim)
+        if mask is not None:
+            scores = scores + mask  # (bsz, n_local_heads, seqlen, seqlen)
+        scores = F.softmax(scores.float(), dim=-1).type_as(queries)
+        output = torch.matmul(scores, values)  # (bsz, n_local_heads, seqlen, head_dim)
+        output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
+        return self.wo(output)
+
+class FeedForward(nn.Module):
+    def __init__(self, dim, hidden_dim):
+        super().__init__()
+        self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+        self.relu = nn.ReLU()
+        self.w2 = nn.Linear(hidden_dim, dim, bias=False)
+
+    def forward(self, x):
+        return self.w2(self.relu(self.w1(x)))
+
+class TransformerBlock(nn.Module):
+    def __init__(self, layer_id, dim, n_heads, world_size):
+        super().__init__()
+        self.layer_id = layer_id
+        self.n_heads = n_heads
+        self.dim = dim
+        self.head_dim = dim // n_heads
+        self.attention = Attention(dim, n_heads, world_size)
+        # self.attention_norm = nn.LayerNorm(dim)
+        self.feed_forward = FeedForward(dim, hidden_dim=4 * dim)
+        # self.ffn_norm = nn.LayerNorm(dim)
+
+    def forward(self, x, mask=None):
+        # h = x + self.attention.forward(self.attention_norm(x), mask)
+        h = x + self.attention.forward(x, mask)
+        # out = h + self.feed_forward.forward(self.ffn_norm(h))
+        out = h + self.feed_forward.forward(h)
+        return out
+
+# a toy transformer model, without positional encoding or dropout
+class Transformer(nn.Module):
+    def __init__(self, n_layers, vocab_size, dim, n_heads, world_size):
+        super().__init__()
+        torch.manual_seed(5)
+
+        self.tok_embeddings = nn.Embedding(vocab_size, dim)
+        self.layers = torch.nn.ModuleList()
+        for layer_id in range(n_layers):
+            self.layers.append(TransformerBlock(layer_id, dim, n_heads, world_size))
+        # self.norm = nn.LayerNorm(dim)
+        self.output = nn.Linear(dim, vocab_size, bias=False)
+
+    def forward(self, tokens):
+        _bsz, seqlen = tokens.shape
+        h = self.tok_embeddings(tokens)
+
+        mask = None
+        # mask is optional depending on encoder/decoder style
+        if seqlen > 1:
+            mask = torch.full(
+                (seqlen, seqlen), float("-inf"), device=tokens.device
+            )
+            mask = torch.triu(mask, diagonal=1)
+
+        for layer in self.layers:
+            h = layer(h, mask)
+        # h = self.norm(h)
+        output = self.output(h).float()
+        return output
 
 
 def skip_unless_torch_gpu(method: T) -> T:
@@ -328,7 +422,7 @@ class DTensorConverter:
     def to_dist_tensor(
         self, t: torch.Tensor, mesh: DeviceMesh, placements: List[Placement]
     ) -> torch.Tensor:
-        if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
+        if type(t) is torch.Tensor or type(t) is nn.Parameter:
             if self.is_supported_tensor(t):
                 self.hit += 1
                 if t.ndim == 0:
@@ -337,8 +431,8 @@ class DTensorConverter:
                 else:
                     # distribute non-scalar tensors
                     r = distribute_tensor(t, mesh, placements)
-                if type(t) is torch.nn.Parameter:
-                    r = torch.nn.Parameter(  # type: ignore[assignment]
+                if type(t) is nn.Parameter:
+                    r = nn.Parameter(  # type: ignore[assignment]
                         r, requires_grad=r.requires_grad
                     )
                 return r
