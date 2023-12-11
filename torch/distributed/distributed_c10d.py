@@ -1071,7 +1071,7 @@ def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) ->
     if _rank_not_in_group(pg):
         raise ValueError("Invalid process group specified")
     devices = group._device_types
-    backends = {}
+    backends = set()
     if torch.device("cpu") in devices and is_gloo_available():
         backend = pg._get_backend(torch.device("cpu"))
         if isinstance(backend, ProcessGroupGloo):
