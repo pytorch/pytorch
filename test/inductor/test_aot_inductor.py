@@ -1377,6 +1377,24 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(6, 4), ())
 
+    def test_dynamic_scalar(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.criterion_ce = torch.nn.CrossEntropyLoss(reduction="none")
+
+            def forward(self, inputs, targets, split_index=None):
+                statistics = {}
+                total_loss = self.criterion_ce(inputs, targets).sum()
+                statistics["dl"] = total_loss.item()
+                return total_loss, statistics
+
+        inputs = (
+            torch.rand(4, 4, 4, 4, device=self.device),
+            torch.rand(4, 4, 4, 4, device=self.device),
+        )
+        self.check_model(Model(), inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1401,6 +1419,7 @@ CPU_TEST_FAILURES = {
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
     "test_dynamic_cat": fail_with_and_without_stack_allocation(),
+    "test_dynamic_scalar": fail_with_and_without_stack_allocation(),
     "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
     "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
@@ -1443,6 +1462,8 @@ copy_tests(
     # test_failures, xfail by default, set is_skip=True to skip
     {
         "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
+        # will add .item support later
+        "test_dynamic_scalar": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
         # There is a double-free issue which will be fixed in another PR
         "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),
