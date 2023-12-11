@@ -800,6 +800,16 @@ class WrapperCodeGen(CodeGen):
     def codegen_multi_output(self, name, value):
         self.writeline(f"{self.declare}{name} = {value}{self.ending}")
 
+    def codegen_dynamic_scalar(self, node):
+        (data,) = (t.codegen_reference() for t in node.inputs)
+        if node.is_bool:
+            self.writeline(f"{node.sym} = 1 if {data}.item() else 0")
+        else:
+            self.writeline(f"{node.sym} = {data}.item()")
+        # No one should ever use this buffer, but for uniformity
+        # define the variable and assign it None
+        self.writeline(f"{node.get_name()} = None")
+
     def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
@@ -1405,6 +1415,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 #include <ATen/native/BinaryOps.h>
                 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
+                #include <torch/types.h>
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
@@ -1705,7 +1716,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.prefix.splice(
             f"""
             AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
-                                               std::shared_ptr<std::vector<AtenTensorHandle>> constants_array,
+                                               std::shared_ptr<std::vector<ConstantHandle>> constants_array,
                                                std::optional<std::string> cubin_dir)
                 : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, cubin_dir) {{
             """
@@ -2134,6 +2145,18 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if len(parts) == 1:
             return f"{{{parts[0]}, }}"
         return f"{{{', '.join(parts)}}}"
+
+    def codegen_dynamic_scalar(self, node):
+        from .cpp import DTYPE_TO_ATEN
+
+        (data,) = (t.codegen_reference() for t in node.inputs)
+        if node.is_bool:
+            self.writeline(f"bool {node.sym} = {data}.item() ? 1 : 0;")
+        else:
+            convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
+                "at::k", "to"
+            )
+            self.writeline(f"auto {node.sym} = {data}.item().{convert_type}();")
 
     def can_stack_allocate_buffer(self, buffer):
         return (
