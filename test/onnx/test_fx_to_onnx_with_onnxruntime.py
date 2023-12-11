@@ -46,8 +46,8 @@ def _parameterized_class_attrs_and_values():
             (True, False),
             (True, False),
             (
-                onnx_test_common.TorchModelType.TORCH_NN_MODULE,
-                onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+                pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
+                pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
             ),
         )
     )
@@ -76,7 +76,7 @@ def _parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     op_level_debug: bool
     dynamic_shapes: bool
-    model_type: onnx_test_common.TorchModelType
+    model_type: pytorch_test_common.TorchModelType
 
     def setUp(self):
         super().setUp()
@@ -546,6 +546,24 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((x2,),)],
         )
 
+    def test__scaled_dot_product_flash_attention(self):
+        def func(x):
+            (
+                output,
+                _,
+                _,
+                _,
+                _,
+                _,
+                _,
+                _,
+                _,
+            ) = torch.ops.aten._scaled_dot_product_flash_attention(x, x, x)
+            return output
+
+        x = torch.randn(1, 1, 1, 32)
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (x,))
+
     # NOTE:The test was meant to test the empty bounding box case, but it is not
     # supported. When we have vision model examples, we will have a better test case
     # to demonstrate in FX and FX exporter.
@@ -901,8 +919,8 @@ def _parameterized_class_attrs_and_values_with_fake_options():
             (True, False),
             (True, False),
             (
-                onnx_test_common.TorchModelType.TORCH_NN_MODULE,
-                onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+                pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
+                pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
             ),
         )
     )
@@ -932,7 +950,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     dynamic_shapes: bool
     load_checkpoint_during_init: bool
     export_within_fake_mode: bool
-    model_type: onnx_test_common.TorchModelType
+    model_type: pytorch_test_common.TorchModelType
 
     def setUp(self):
         super().setUp()
@@ -947,7 +965,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         create_kwargs: Callable,
         load_checkpoint_during_init: bool,
         export_within_fake_mode: bool,
-        model_type: onnx_test_common.TorchModelType,
+        model_type: pytorch_test_common.TorchModelType,
     ):
         """Test helper for FakeTensorMode-enabled exporter.
 
@@ -977,7 +995,10 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         # Create the toy model with real weight.
         real_model = create_model()
         state_dict = real_model.state_dict()  # concrete (non-fake) state_dict
-        if model_type == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM:
+        if (
+            model_type
+            == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+        ):
             real_model = torch.export.export(
                 real_model, args=create_args(), kwargs=create_kwargs()
             )
@@ -1006,7 +1027,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 if export_within_fake_mode:
                     if (
                         model_type
-                        == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+                        == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
                     ):
                         fake_model = torch.export.export(
                             fake_model, args=fake_args, kwargs=fake_kwargs
@@ -1021,7 +1042,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             if not export_within_fake_mode:
                 if (
                     model_type
-                    == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+                    == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
                 ):
                     fake_model = torch.export.export(
                         fake_model, args=fake_args, kwargs=fake_kwargs
@@ -1063,7 +1084,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
-        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_fake_tensor_mode_simple(self):
         def create_model() -> nn.Module:
@@ -1102,9 +1123,9 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
-        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
-    def test_large_scale_exporter_with_tiny_gpt2(self):
+    def test_fake_tensor_mode_huggingface_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
         device = "cpu"
 
@@ -1131,9 +1152,45 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model_type=self.model_type,
         )
 
+    @pytorch_test_common.xfail(
+        "Github issue: https://github.com/pytorch/pytorch/issues/115552"
+    )
+    def test_fake_tensor_mode_huggingface_open_llama(self):
+        config = transformers.OpenLlamaConfig(
+            vocab_size=8096, hidden_size=256, num_hidden_layers=2, num_attention_heads=2
+        )
+        batch, seq = 4, 256
+
+        def create_model() -> nn.Module:
+            return transformers.OpenLlamaModel(config).eval()
+
+        def create_args():
+            return tuple()
+
+        def create_kwargs():
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            position_ids = torch.arange(0, seq, dtype=torch.long)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq)
+            return {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "position_ids": position_ids,
+            }
+
+        self._test_fake_tensor_mode_exporter(
+            "huggingface_open_llama",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+            model_type=self.model_type,
+        )
+
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
-        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
@@ -1175,7 +1232,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
-        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_fake_tensor_mode_huggingface_google_t5(self):
         config = transformers.T5Config(
@@ -1211,7 +1268,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
-        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_fake_tensor_mode_huggingface_openai_whisper(self):
         config = transformers.WhisperConfig(
@@ -1316,6 +1373,48 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_fake_tensor_mode_exporter(
             "huggingface_bigscience_bloom_560m",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+            model_type=self.model_type,
+        )
+
+    @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
+        "DynamoExport does not support input mutation"
+    )
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "AssertionError: Dynamic shape check failed for graph inputs",
+        skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+    )
+    def test_fake_tensor_mode_huggingface_gpt2(self):
+        config = transformers.GPT2Config(
+            vocab_size=8096, n_positions=256, n_embd=256, n_layer=2, n_head=2
+        )
+
+        def create_model():
+            return transformers.GPT2Model(config).eval()
+
+        def create_args():
+            return tuple()
+
+        def create_kwargs():
+            batch, seq = 4, 256
+
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            position_ids = torch.arange(0, seq, dtype=torch.long)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq)
+
+            return {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "position_ids": position_ids,
+            }
+
+        self._test_fake_tensor_mode_exporter(
+            "huggingface_gpt2",
             create_model,
             create_args,
             create_kwargs,

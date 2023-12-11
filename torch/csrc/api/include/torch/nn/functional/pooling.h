@@ -1093,6 +1093,56 @@ inline Tensor lp_pool2d(
       options.ceil_mode());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+namespace detail {
+inline Tensor lp_pool3d(
+    const Tensor& input,
+    double norm_type,
+    ExpandingArray<3> kernel_size,
+    ExpandingArray<3> stride,
+    bool ceil_mode) {
+  int kd = (*kernel_size)[0];
+  int kw = (*kernel_size)[1];
+  int kh = (*kernel_size)[2];
+  Tensor out = detail::avg_pool3d(
+      input.pow(norm_type),
+      kernel_size,
+      stride,
+      /*padding=*/0,
+      ceil_mode,
+      /*count_include_pad=*/true,
+      /*divisor_override=*/c10::nullopt);
+
+  return (torch::sign(out) * relu(torch::abs(out)))
+      .mul(kd * kw * kh)
+      .pow(1. / norm_type);
+}
+} // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
+
+/// See
+/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.lp_pool3d
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::LPPool3dFuncOptions` class
+/// to learn what optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::lp_pool3d(x, F::LPPool3dFuncOptions(3, {3, 3, 5}).stride(3));
+/// ```
+inline Tensor lp_pool3d(
+    const Tensor& input,
+    const LPPool3dFuncOptions& options) {
+  return detail::lp_pool3d(
+      input,
+      options.norm_type(),
+      options.kernel_size(),
+      options.stride(),
+      options.ceil_mode());
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
