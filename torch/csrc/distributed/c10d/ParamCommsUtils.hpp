@@ -15,8 +15,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   ParamCommsDebugInfo(
       int rank,
       std::string&& colName,
-      int inSize,
-      int outSize,
+      int inNelems,
+      int outNelems,
       at::ScalarType dType,
       std::vector<int64_t> inSplitSizes,
       std::vector<int64_t> outSplitSizes,
@@ -36,12 +36,12 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     return columnName_;
   }
 
-  int getInMessageSize() const {
-    return inMessageSize_;
+  int getInMessageNelems() const {
+    return inMessageNelems_;
   }
 
-  int getOutMessageSize() const {
-    return outMessageSize_;
+  int getOutMessageNelems() const {
+    return outMessageNelems_;
   }
 
   at::ScalarType getDType() const {
@@ -60,8 +60,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   int rank_{};
   int worldSize_{};
   std::string columnName_;
-  int inMessageSize_{};
-  int outMessageSize_{};
+  int inMessageNelems_{};
+  int outMessageNelems_{};
   at::ScalarType dType_ = at::kByte;
   std::vector<int64_t> inputSplitSizes_;
   std::vector<int64_t> outputSplitSizes_;
@@ -72,8 +72,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     pg_ptr,                                                                    \
     rank,                                                                      \
     colName,                                                                   \
-    inSize,                                                                    \
-    outSize,                                                                   \
+    inNelems,                                                                  \
+    outNelems,                                                                 \
     dType,                                                                     \
     inSplitSizes,                                                              \
     outSplitSizes,                                                             \
@@ -81,8 +81,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   auto paramCommsInfo = std::make_shared<torch::ParamCommsDebugInfo>(          \
       rank,                                                                    \
       colName,                                                                 \
-      inSize,                                                                  \
-      outSize,                                                                 \
+      inNelems,                                                                \
+      outNelems,                                                               \
       dType,                                                                   \
       inSplitSizes,                                                            \
       outSplitSizes,                                                           \
@@ -106,8 +106,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     OutputTensors,                                                             \
     rank,                                                                      \
     colName,                                                                   \
-    inSize,                                                                    \
-    outSize,                                                                   \
+    inNelems,                                                                  \
+    outNelems,                                                                 \
     dType,                                                                     \
     inSplitSizes,                                                              \
     outSplitSizes,                                                             \
@@ -115,8 +115,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   auto paramCommsInfo = std::make_shared<torch::ParamCommsDebugInfo>(          \
       rank,                                                                    \
       colName,                                                                 \
-      inSize,                                                                  \
-      outSize,                                                                 \
+      inNelems,                                                                \
+      outNelems,                                                               \
       dType,                                                                   \
       inSplitSizes,                                                            \
       outSplitSizes,                                                           \

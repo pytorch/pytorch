@@ -80,9 +80,19 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   void mark_mutation_hidden_from_autograd() {
     mutation_hidden_from_autograd_counter_++;
   }
+  void mark_mutation_during_no_grad_or_inference_mode() {
+    mutation_during_no_grad_or_inference_mode_++;
+  }
   // Are all the mutations happening to the tensor hidden from autograd
   bool are_all_mutations_hidden_from_autograd() const {
     return mutation_hidden_from_autograd_counter_ == mutation_counter_;
+  }
+  // Did all mutations happen under no_grad or inference_mode
+  // (We also need to ignore mutations fully hidden from autograd here)
+  bool are_all_mutations_under_no_grad_or_inference_mode() const {
+    return mutation_hidden_from_autograd_counter_ +
+        mutation_during_no_grad_or_inference_mode_ ==
+        mutation_counter_;
   }
 
   // Sync's the underlying tensor with its alias, if it's out of date. This
@@ -122,6 +132,18 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // tensor by replaying the views off of the alias.
   void mutate_view_meta(at::functionalization::ViewMeta meta);
 
+  // Custom implementation of self.set_(src)
+  void set__impl(const FunctionalTensorWrapper* other);
+
+  // Returns whether the current tensor's data was ever mutated
+  bool has_data_mutation();
+  //
+  // Returns whether the current FunctionalTensorWrapper
+  // experienced a set_() call.
+  bool was_storage_changed() {
+    return was_storage_changed_;
+  }
+
   // The functionalization pass can be used to remove mutations.
   // It does so by replacing any mutation op with it's corresponding
   // out-of-place op, followed by a call to replace_(). e.g:
@@ -142,6 +164,13 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
 
   // See Note[resize_() in functionalization pass]
   void maybe_replace_storage(const Tensor& other);
+
+  // Replaces the storage with a new functional storage,
+  // and clears the view_metas_ stack.
+  // WARNING: Calling this function will sever the aliasing relationship between
+  // the current FunctionalTensorWrapper and any of its outstanding aliases.
+  // Please only call if you know what you're doing.
+  void _unsafe_reset_storage();
 
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
@@ -193,8 +222,11 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // the copy_() from autograd as well.
   uint64_t mutation_counter_ = 0;
   uint64_t mutation_hidden_from_autograd_counter_ = 0;
+  uint64_t mutation_during_no_grad_or_inference_mode_ = 0;
   bool has_metadata_mutation_ = false;
   bool is_multi_output_view_ = false;
+  // Did the tensor experience a set_() call.
+  bool was_storage_changed_ = false;
 
   size_t generation_ = 0;
   std::vector<at::functionalization::ViewMeta> view_metas_;
@@ -250,10 +282,15 @@ TORCH_API void replace_(
 TORCH_API void commit_update(const Tensor& functional_tensor);
 TORCH_API void commit_update(ITensorListRef functional_tensor);
 
+TORCH_API void unsafe_reset_storage(const Tensor& functional_tensor);
+
 TORCH_API void mark_mutation_hidden_from_autograd(
     const Tensor& functional_tensor);
 
 TORCH_API bool are_all_mutations_hidden_from_autograd(
+    const Tensor& functional_tensor);
+
+TORCH_API bool are_all_mutations_under_no_grad_or_inference_mode(
     const Tensor& functional_tensor);
 
 // These two methods are XLA-specific logic and are no-ops

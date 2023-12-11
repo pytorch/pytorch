@@ -68,6 +68,16 @@ jobs:
             pkill "${PROCESS}" || true
           done
 
+      - name: Clean up leftover local python3 site-packages on MacOS pet runner
+        continue-on-error: true
+        run: |
+          for dir in  ~/.local/lib/python3.*/site-packages; do
+            echo "Cleaning up ${dir}"
+            rm -rf "${dir}"
+          done
+
+
+
       - name: Clean up disk space before running MacOS workflow
         uses: pytorch/test-infra/.github/actions/check-disk-space@main
 
