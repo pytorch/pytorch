@@ -234,6 +234,30 @@ class RedistributeTest(DTensorTestBase):
         reshard_tensor = shard_tensor.redistribute(device_mesh, shard_minus_spec)
         self.assertEqual(shard_tensor.placements[0].dim, 1)
 
+    @with_comms
+    def test_redistribute_uneven_sharding(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
+        data_to_test = [
+            # uneven on last mesh dim
+            torch.randn((10, 5), device=self.device_type),
+            # uneven on both mesh dims
+            torch.randn((9, 5), device=self.device_type),
+            # smaller than mesh dim shape
+            torch.randn((3, 5), device=self.device_type),
+            torch.randn((1, 3), device=self.device_type),
+        ]
+
+        sharding_to_tests = [
+            [Shard(0), Shard(0)],
+            [Shard(0), Shard(1)],
+        ]
+
+        for input_tensor in data_to_test:
+            for placements in sharding_to_tests:
+                dt = distribute_tensor(input_tensor, mesh, placements)
+                dt_full_tensor = dt.full_tensor()
+                self.assertEqual(dt_full_tensor, input_tensor)
+
 
 class MultiDimRedistributeTest(DTensorTestBase):
     @property

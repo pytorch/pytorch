@@ -3,6 +3,7 @@ from typing import cast, Dict, List, Tuple
 
 import torch
 import torch.distributed._tensor.api as dtensor
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import (
     _Partial,
     DTensorSpec,
@@ -10,66 +11,6 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.distributed.device_mesh import DeviceMesh
-
-
-_PlacementItem = Tuple[int, Tuple[Placement, Placement]]
-
-
-def _replicate_then_shard(val: _PlacementItem) -> int:
-    """
-    Replicate from inner to outer dimension.
-    Shard from outer to inner dimension.
-    """
-    i, (current, target) = val
-    if (target.is_replicate() or target.is_partial()) and current.is_shard():
-        return -i
-    elif (current.is_replicate() or current.is_partial()) and target.is_shard():
-        return i
-    else:
-        return 0
-
-
-def _decompose_reshard(val: List[_PlacementItem]) -> List[_PlacementItem]:
-    """
-    Decompose Si -> Sj into Si -> R -> Sj
-    There's 2 ways a shardings can differ within a mesh dimension:
-      1) sharding on different tensor dimensions, e.g. Shard(0) -> Shard(1)
-      2) different sub-shards of a repeated shard ("mis-aligned sharding")
-          (Shard(0), Shard(0)) -> (Replicate(), Shard(0))
-          Here the Shard(0) -> Shard(0) for mesh dimension 2 is actually
-          a reshard, because in the first case it's a sub-sharding of an already tensor dimension 0,
-          and in the second case, it's the first sharding on tensor dimension 0.
-    """
-    # detect mis-aligned repeated shardings
-    from collections import defaultdict
-
-    repeat_dim_current: Dict[int, int] = defaultdict(int)
-    repeat_dim_target: Dict[int, int] = defaultdict(int)
-
-    output: List[_PlacementItem] = []
-
-    for i, (current, target) in val:
-        # detect mis-aligned sharding
-        if current.is_shard():
-            repeat_dim_current[cast(Shard, current).dim] += 1
-        if target.is_shard():
-            repeat_dim_target[cast(Shard, target).dim] += 1
-        if (
-            isinstance(current, Shard)
-            and isinstance(target, Shard)
-            and (
-                current.dim != target.dim
-                or repeat_dim_current[current.dim] != repeat_dim_target[target.dim]
-            )
-        ):
-            # decompose Shard(i) -> Shard(j) into Shard(i) -> Replicate() -> Shard(j)
-            output.append((i, (current, Replicate())))
-            output.append((i, (Replicate(), target)))
-        else:
-            output.append((i, (current, target)))
-
-    return output
 
 
 def redistribute_local_tensor(
@@ -88,23 +29,44 @@ def redistribute_local_tensor(
         raise NotImplementedError("Cross device mesh comm not supported yet!")
 
     new_local_tensor = None
+    device_mesh = current_spec.mesh
+
+    my_coordinate = device_mesh.get_coordinate()
+
+    if my_coordinate is None:
+        # if rank is not part of mesh, we skip redistribute and simply return local_tensor,
+        # which should be an empty tensor
+        return local_tensor
 
     current_placements = current_spec.placements
     target_placements = target_spec.placements
-    sorted_placements = list(enumerate(zip(current_placements, target_placements)))
-    sorted_placements = _decompose_reshard(sorted_placements)
-    sorted_placements.sort(key=_replicate_then_shard)
 
-    device_mesh = current_spec.mesh
+    # logical shape defining the logic tensor shape on the mesh dimension
+    initial_logical_shape = list(current_spec.shape)
+    mesh_dims_to_logical_shape = [initial_logical_shape]
 
-    for i, (current, target) in sorted_placements:
-        my_coordinate = device_mesh.get_coordinate()
+    for i in range(len(current_placements) - 1):
+        current_logical_shape = mesh_dims_to_logical_shape[i]
+        if current_placements[i].is_shard():
+            mesh_dim_size = device_mesh.size(mesh_dim=i)
+            shard_placement = cast(Shard, current_placements[i])
+            local_shard_size, _ = shard_placement._local_shard_size_on_dim(
+                current_logical_shape[shard_placement.dim],
+                mesh_dim_size,
+                my_coordinate[i],
+            )
+            new_logical_shape = list(current_logical_shape)
+            new_logical_shape[shard_placement.dim] = local_shard_size
+            mesh_dims_to_logical_shape.append(new_logical_shape)
+        else:
+            mesh_dims_to_logical_shape.append(current_logical_shape)
+
+    inner_first_sharding_combs = reversed(
+        list(enumerate(zip(current_placements, target_placements)))
+    )
+
+    for i, (current, target) in inner_first_sharding_combs:
         num_chunks = device_mesh.size(mesh_dim=i)
-
-        if my_coordinate is None:
-            # if rank is not part of mesh, we simply return local_tensor,
-            # which should be an empty tensor
-            return local_tensor
 
         if current == target:
             # short cut, just use the original local tensor
@@ -121,7 +83,7 @@ def redistribute_local_tensor(
             elif current.is_shard():
                 current_placement = cast(Shard, current)
                 new_local_tensor = current_placement._to_replicate_tensor(
-                    local_tensor, current_spec.shape, device_mesh, i
+                    local_tensor, device_mesh, i, mesh_dims_to_logical_shape[i]
                 )
             else:
                 raise RuntimeError(
@@ -130,6 +92,7 @@ def redistribute_local_tensor(
         elif target.is_shard():
             # Case 2: target is Shard
             target_placement = cast(Shard, target)
+            target_dim = target_placement.dim
             if current.is_partial():
                 partial_spec = cast(_Partial, current)
                 new_local_tensor = partial_spec._to_shard(
@@ -145,18 +108,23 @@ def redistribute_local_tensor(
                 )
                 new_local_tensor = shards[my_coordinate[i]].clone()
             else:
-                # NOTE: this case shouldn't hit _decompose_sharding, decompose sharding should
-                # decompose Shard(0) -> Shard(1) into Shard(0) -> Replicate -> Shard(1)
+                # NOTE: we don't support this case efficiently yet, the fallback path we are going here is
+                # to decompose Shard(0) -> Shard(1) into Shard(0) -> Replicate -> Shard(1)
+                # TODO: enable this with all_to_all
                 assert (
                     current.is_shard()
                 ), f"Current placement should be shard but found {current}"
                 shard_spec = cast(Shard, current)
                 if shard_spec.dim != target_placement.dim:
-                    # TODO: enable this with all_to_all
-                    raise NotImplementedError(
-                        "Changing sharding dim is not supported yet!"
+                    new_local_tensor = shard_spec._to_replicate_tensor(
+                        local_tensor, device_mesh, i, mesh_dims_to_logical_shape[i]
                     )
-
+                    new_local_tensor = target_placement._split_tensor(
+                        local_tensor,
+                        num_chunks,
+                        with_padding=False,
+                        contiguous=False,
+                    )[my_coordinate[i]]
         elif target.is_partial():
             if current.is_replicate():
                 # For replicate -> partial, we perform division to num of chunks and generate
