@@ -230,6 +230,7 @@ def export(
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     from torch.export._trace import _export
+    warnings.warn("This function is deprecated. Please use torch.export.export instead.")
 
     if constraints is not None:
         warnings.warn(
