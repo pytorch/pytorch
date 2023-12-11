@@ -1362,8 +1362,13 @@ void ProcessGroupNCCL::workCleanupLoop() {
     if (dumpOnTimeout_) {
       auto currentTime = std::chrono::steady_clock::now();
       auto timeSinceLastWorkListUpdate =
-          (currentTime - lastWorkListUpdateTime_).count();
-      auto timeSinceLastPollStore = (currentTime - lastTimePollStore).count();
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastWorkListUpdateTime_))
+              .count();
+      auto timeSinceLastPollStore =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastTimePollStore))
+              .count();
       if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
           timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
         lastTimePollStore = currentTime;
