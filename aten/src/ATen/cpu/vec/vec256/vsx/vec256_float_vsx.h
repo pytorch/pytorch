@@ -239,7 +239,7 @@ class Vectorized<float> {
     return (x == v_inf) | (x == v_minus_inf);
   }
 
-  bool has_infinite() const {
+  bool has_inf_nan() const {
     for (const auto i : c10::irange(size()/2)) {
       if(_isnan(_vec0[i]) || _isinf(_vec0[i])) {
         return true;

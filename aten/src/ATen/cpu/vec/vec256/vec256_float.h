@@ -107,7 +107,7 @@ public:
     return _mm256_cmp_ps(values, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
   }
 
-  bool has_infinite() const {
+  bool has_inf_nan() const {
     __m256 self_sub  = _mm256_sub_ps(values, values);
     return (_mm256_movemask_epi8(_mm256_castps_si256(self_sub)) & 0x77777777) != 0;
   }
