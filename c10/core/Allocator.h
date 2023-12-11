@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cstddef>
+#include <stddef.h>
 #include <memory>
 
 #include <c10/core/Device.h>

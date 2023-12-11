@@ -73,7 +73,7 @@
 "ciflow/trunk":
 - .ci/docker/ci_commit_pins/triton.txt
 
-"oncall: distributed":
+"module: distributed":
 - torch/csrc/distributed/**
 - torch/distributed/**
 - torch/nn/parallel/**

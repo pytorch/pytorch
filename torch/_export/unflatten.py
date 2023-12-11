@@ -243,7 +243,6 @@ class ModuleFrame:
     def __init__(
         self,
         flat_graph,
-        nodes,
         seen_nodes,
         seen_modules,
         parent,
@@ -253,7 +252,6 @@ class ModuleFrame:
         graph_module=None,
     ):
         self.flat_graph = flat_graph
-        self.nodes = nodes
         self.seen_nodes = seen_nodes
         self.seen_modules = seen_modules
         self.parent = parent
@@ -288,6 +286,7 @@ class ModuleFrame:
             self.cached_graph_module = None
             self.seen_modules[self.module_id] = self.graph_module
 
+        self.nodes = list(self.flat_graph.nodes)
         self.graph = self.graph_module.graph
 
         # Mapping of nodes in the flat graph to nodes in this graph.
@@ -342,19 +341,19 @@ class ModuleFrame:
                     self.node_to_placeholder[self.seen_nodes[arg.name]] = flat_arg_node
 
             with self.parent.graph.inserting_before(self.parent_call_module):
-                input_nodes: List[Optional[torch.fx.Node]] = []
+                nodes: List[Optional[torch.fx.Node]] = []
                 for input in signature.inputs:
                     if isinstance(input, ConstantArgument) and input.value is None:
-                        input_nodes.append(None)
+                        nodes.append(None)
                     else:
                         assert isinstance(input, (TensorArgument, SymIntArgument))
-                        input_nodes.append(
+                        nodes.append(
                             self.parent.remap_input(self.seen_nodes[input.name])
                         )
 
                 inputs_node = _generate_unflatten(
                     self.parent.graph_module,
-                    input_nodes,
+                    nodes,
                     signature.in_spec,
                 )
 
@@ -541,7 +540,6 @@ class ModuleFrame:
                 # counter. Once it is complete, continue from that point.
                 node_idx = ModuleFrame(
                     self.flat_graph,
-                    self.nodes,
                     self.seen_nodes,
                     self.seen_modules,
                     self,
@@ -564,7 +562,6 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: torch.fx.GraphM
     seen_modules: Dict[int, torch.nn.Module] = {}
     ModuleFrame(
         orig_graph,
-        tuple(orig_graph.nodes),
         seen_nodes,
         seen_modules,
         None,

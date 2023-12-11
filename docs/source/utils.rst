@@ -11,7 +11,6 @@ torch.utils
     generate_methods_for_privateuse1_backend
     get_cpp_backtrace
     set_module
-    swap_tensors
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes

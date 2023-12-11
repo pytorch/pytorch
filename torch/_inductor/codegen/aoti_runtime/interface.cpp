@@ -1,4 +1,3 @@
-#include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
 #include <torch/csrc/inductor/aoti_runtime/interface.h>
 #include <torch/csrc/inductor/aoti_runtime/model_container.h>
 
