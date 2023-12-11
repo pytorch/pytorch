@@ -63,6 +63,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     skipIfRocm,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 from torch.utils import _pytree as pytree
@@ -639,6 +640,20 @@ class CommonTemplate:
         _, code = run_and_get_code(fn, x, y)
         self.assertEqual(code[0].count("aten.view"), 3)
 
+    def test_add_complex3(self):
+        # fix https://github.com/pytorch/pytorch/issues/115071
+        @torch.compile
+        def fn(*args):
+            a = torch.neg(args[0])
+            b = torch.add(args[0], args[0])
+            return (a, b)
+
+        x = torch.randn(41, dtype=torch.complex64)
+        y = x.clone()
+        # should not inplace write to the input
+        fn(x)
+        self.assertEqual(x, y)
+
     def test_concat_add_inplace(self):
         def fn(x, y, z):
             return torch.cat([x, y], dim=1).add_(z)
@@ -1054,7 +1069,7 @@ class CommonTemplate:
             # make sure things also work if they aren't unrolled
             self.common(fn, (torch.randn(8, 3),))
 
-    def test_multilayer_low_prec(self):
+    def test_multilayer_sum_low_prec(self):
         # fp16 nyi for cpu
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -1163,6 +1178,17 @@ class CommonTemplate:
             return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
 
         self.common(fn, (torch.ones(32, 32) * 70,))
+
+    def test_cumsum(self):
+        def fn(x):
+            return x.cumsum(0), x.cumsum(1)
+
+        # Persistent reductions
+        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
+
+        # Non-persistent reduction
+        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
 
     def test_clamp(self):
         def fn(a, b):

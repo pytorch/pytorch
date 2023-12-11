@@ -279,6 +279,37 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         ):
             opt_model(x)
 
+    def test_enum_arg(self):
+        from enum import Enum
+
+        class SomeEnum(Enum):
+            A = 0
+            B = 1
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, e):
+                if e is SomeEnum.A:
+                    return x.sin()
+                else:
+                    return x.cos()
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x, enum):
+            output = Foo.apply(
+                x,
+                enum,
+            )
+            return output
+
+        x = torch.tensor([[1.0, 2, 3], [4, 5, 6]], requires_grad=True)
+        y = f(x, SomeEnum.A)
+        self.assertEqual(y, x.sin())
+
     def test_save_for_bwd(self):
         model = SaveForBwdModule()
         opt_model = torch._dynamo.optimize("eager", nopython=True)(model)

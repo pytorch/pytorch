@@ -273,6 +273,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def as_proxy(self):
         raise NotImplementedError(str(self))
 
+    def maybe_fx_node(self):
+        try:
+            proxy = self.as_proxy()
+            import torch.fx
+
+            if isinstance(proxy, torch.fx.Proxy):
+                return proxy.node
+            return None
+        except NotImplementedError:
+            return None
+
     def reconstruct(self, codegen):
         raise NotImplementedError()
 

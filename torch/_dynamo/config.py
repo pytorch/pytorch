@@ -325,7 +325,10 @@ only_allow_pt2_compliant_ops = False
 capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
-capture_func_transforms = True
+capture_func_transforms = False
+
+# If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
+log_compilation_metrics = True
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
