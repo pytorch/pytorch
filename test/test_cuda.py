@@ -1,6 +1,6 @@
 # Owner(s): ["module: cuda"]
 
-from itertools import product, chain
+from itertools import product
 import collections
 import contextlib
 from copy import deepcopy

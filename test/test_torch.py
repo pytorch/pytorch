@@ -54,7 +54,8 @@ from typing import Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
-    tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN)
+    tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN, TEST_MULTIGPU,
+    _create_scaling_case, _create_scaling_models_optimizers)
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
@@ -62,9 +63,6 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.two_tensor import TwoTensor
 
-from torch.testing._internal.common_cuda import (
-    _create_scaling_case, _create_scaling_models_optimizers
-)
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -5733,6 +5731,7 @@ else:
 
     @onlyCUDA
     def test_grad_scaling_autocast_fused(self, device):
+        device = torch.device(device)
         for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
             self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
 
