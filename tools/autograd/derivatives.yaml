@@ -1906,10 +1906,7 @@
 - name: values(Tensor(a) self) -> Tensor(a)
   dispatch:
     Default:
-      self: "grad.defined() ? (self.layout() == c10::kSparse) ? at::_sparse_coo_tensor_unsafe_symint(self.indices(), grad, self.sym_sizes(), self.options(), /*is_coalesced=*/true) :
-             (self.layout() == c10::kSparseCsr || self.layout() == c10::kSparseBsr) ? at::_sparse_compressed_tensor_unsafe_symint(self.crow_indices(), self.col_indices(), grad, self.sym_sizes(), self.options()) :
-             (self.layout() == c10::kSparseCsc || self.layout() == c10::kSparseBsc) ? at::_sparse_compressed_tensor_unsafe_symint(self.ccol_indices(), self.row_indices(), grad, self.sym_sizes(), self.options()) :
-             not_implemented(\"values\") : Tensor()"
+      self: values_backward(grad, self)
     AutogradNestedTensor:
       self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_storage_offsets())
 
