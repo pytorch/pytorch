@@ -26,13 +26,13 @@ env:
   DOCKER_REGISTRY: ghcr.io
   NO_BUILD_SUFFIX: true
   USE_BUILDX: 1
-  WITH_PUSH: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
+  WITH_PUSH: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
 
 jobs:
   build:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: [self-hosted, linux.2xlarge]
-    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    environment: ${{ (github.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     timeout-minutes: 240
     strategy:
       matrix:

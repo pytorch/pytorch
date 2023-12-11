@@ -1621,6 +1621,7 @@
 - func: complex.out(Tensor real, Tensor imag, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: complex_out
+    MPS: complex_out_mps
 
 - func: polar(Tensor abs, Tensor angle) -> Tensor
   variants: function
