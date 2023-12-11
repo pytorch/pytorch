@@ -90,6 +90,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         check_against_fx_quant=False,
         fx_qconfig_mapping=None,
         export_with_dynamic_shape=False,
+        is_qat=False,
     ):
         # resetting dynamo cache
         torch._dynamo.reset()
@@ -103,7 +104,10 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             constraints=[dynamic_dim(example_inputs[0], 0)] if export_with_dynamic_shape else [],
         )
 
-        m = prepare_pt2e(m, quantizer)
+        if is_qat:
+            m = prepare_qat_pt2e(m, quantizer)
+        else:
+            m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m, fold_quantize=True)
@@ -1606,11 +1610,11 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             qconfig_mapping,
         )
 
-    def test_move_exported_model_to_eval(self):
+    def _test_move_exported_model_to_eval_dropout(self, inplace=False):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.dropout = torch.nn.Dropout(0.5)
+                self.dropout = torch.nn.Dropout(0.5, inplace=inplace)
 
             def forward(self, x):
                 return self.dropout(x)
@@ -1622,7 +1626,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         # Assert that dropout op exists and is in train mode
         dropout_node = None
         for n in m.graph.nodes:
-            if n.target == torch.ops.aten.native_dropout.default:
+            if n.target == torch.ops.aten.native_dropout.default or n.target == torch.ops.aten.dropout_.default:
                 dropout_node = n
                 break
         self.assertTrue(dropout_node is not None)
@@ -1633,8 +1637,20 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         # Assert that dropout op is now replaced with a clone op
         targets = [n.target for n in m.graph.nodes]
-        self.assertTrue(torch.ops.aten.clone.default in targets)
-        self.assertTrue(torch.ops.aten.native_dropout.default not in targets)
+        if inplace:
+            dropout_eval_node = None
+            for node in m.graph.nodes:
+                if node.target == torch.ops.aten.dropout_.default:
+                    dropout_eval_node = node
+            self.assertTrue(dropout_eval_node is not None)
+            self.assertFalse(dropout_eval_node.args[2])
+        else:
+            self.assertTrue(torch.ops.aten.clone.default in targets)
+            self.assertTrue(torch.ops.aten.native_dropout.default not in targets)
+
+    def test_move_exported_model_to_eval(self):
+        self._test_move_exported_model_to_eval_dropout(inplace=False)
+        self._test_move_exported_model_to_eval_dropout(inplace=True)
 
     def test_disallow_eval_train(self):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
