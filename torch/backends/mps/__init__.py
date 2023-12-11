@@ -23,8 +23,8 @@ def is_available() -> bool:
 
 
 @_lru_cache
-def is_macos_or_newer(major: int = 13, minor: int = 0) -> bool:
-    r"""Return a bool indicating whether MPS is running on gven MacOS or newer."""
+def is_macos_or_newer(major: int, minor: int) -> bool:
+    r"""Return a bool indicating whether MPS is running on given MacOS or newer."""
     return torch._C._mps_is_on_macos_or_newer(major, minor)
 
 
