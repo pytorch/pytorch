@@ -2587,6 +2587,9 @@ class CppKernelProxy(CppKernel):
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
                 if is_lowp_fp_load(_node):
+                    # No need to promote to float if all users are direct stores
+                    if all(user.target == "store" for user in _node.users):
+                        continue
                     ops = _node.args[0]
                     with sub_graph.inserting_after(_node):
                         to_type_node = sub_graph.call_method(
@@ -2598,6 +2601,11 @@ class CppKernelProxy(CppKernel):
                         metrics.cpp_to_dtype_count += 1
                 elif is_lowp_fp_store(_node):
                     ops, name, _, value_var, _ = _node.args
+                    # No need to promote to float if it is a user of a load which are all directly stored
+                    if value_var.target == "load" and all(
+                        user.target == "store" for user in value_var.users
+                    ):
+                        continue
                     dtype = V.graph.get_dtype(name)
                     with sub_graph.inserting_before(_node):
                         to_type_node = sub_graph.call_method(

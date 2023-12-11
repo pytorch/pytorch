@@ -554,6 +554,13 @@ class TritonOverrides(OpOverrides):
 
 
 class TritonKernelOverrides(TritonOverrides):
+    """Map element-wise ops to Triton within a TritonKernel
+
+    Unlike TritonOverrides, these assume the code is going to be inserted into
+    the body of the main triton kernel and so it may use indexing and mask
+    variables which are assumed to already be defined in the current scope.
+    """
+
     @classmethod
     def constant(cls, value, dtype):
         # NOTE: Cannot use shape=[] as it's not supported by triton-rocm
