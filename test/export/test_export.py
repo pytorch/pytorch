@@ -33,10 +33,7 @@ from torch.utils._pytree import (
     treespec_dumps,
     treespec_loads,
 )
-try:
-    from . import testing
-except ImportError:
-    import testing
+import testing
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
