@@ -36,7 +36,6 @@ __all__ = [
     "noop_context_fn",
     "set_checkpoint_early_stop",
     "DefaultDeviceType",
-    "context_fn_gen",
     "set_checkpoint_debug_enabled",
 ]
 
@@ -425,7 +424,8 @@ def checkpoint(
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
         preserve_rng_state(bool, optional):  Omit stashing and restoring
-            the RNG state during each checkpoint.
+            the RNG state during each checkpoint. Note that under torch.compile,
+            this flag doesn't take effect and we always preserve RNG state.
             Default: ``True``
         use_reentrant(bool, optional): Use checkpointing
             implementation that requires re-entrant autograd.
@@ -1243,12 +1243,13 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
             return out
 
 
-def context_fn_gen(policy_fn):
+def _pt2_selective_checkpoint_context_fn_gen(policy_fn):
     """
-    A helper function to generate a pair of contexts to be later passed into
-    `torch.utils.checkpoint` API. Useful for implementing selective checkpointing + torch.compile
-    because the context functions need special logic to work with torch.compile.
-    The generated context functions also work in eager mode.
+    A helper function that generates a pair of contexts to be later passed into
+    `torch.utils.checkpoint` API to implment selective checkpointing.
+
+    .. warning::
+        This is context_fn is intended for use with torch.compile only.
 
     Args:
         policy_fn (Callable[[Callable, List[Any], Dict[str, Any]], bool]): Policy function
@@ -1276,7 +1277,7 @@ def context_fn_gen(policy_fn):
         >>>     return custom_policy
         >>>
         >>> def selective_checkpointing_context_fn():
-        >>>     return context_fn_gen(get_custom_policy())
+        >>>     return _pt2_selective_checkpoint_context_fn_gen(get_custom_policy())
         >>>
         >>> def gn(x, y):
         >>>     return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
