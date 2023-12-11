@@ -29,6 +29,7 @@ from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
+from torch._export.non_strict_utils import make_constraints, make_fake_inputs
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._functorch.eager_transforms import functionalize
@@ -764,7 +765,6 @@ def _export(
     if not strict:
         assert isinstance(f, torch.nn.Module)
         assert len(preserve_module_call_signature) == 0
-        assert len(constraints) == 0, "dynamic shape NYI"
         assert len(kwargs) == 0, "keyword arguments NYI"
         out_spec = None
 
@@ -792,15 +792,19 @@ def _export(
                 sig.buffers_to_mutate = pytree.tree_map(strip_root, sig.buffers_to_mutate)
                 return gm, sig
             return _aot_export_non_strict
-        ep_non_strict = _export_non_strict(f, args, {}, f.state_dict(), transform=_tuplify_outputs)
+
+        fake_mode, fake_args, src_equalities, original_signature = make_fake_inputs(f, args, constraints)
+        ep_non_strict = _export_non_strict(f, fake_args, {}, f.state_dict(), transform=_tuplify_outputs)
+        range_constraints, equality_constraints = make_constraints(fake_mode, src_equalities, original_signature, ep_non_strict.gm)
+
         assert out_spec is not None
         return ExportedProgram(
             ep_non_strict.gm,
             ep_non_strict.gm.graph,
             ep_non_strict.sig,
             _get_params_buffers(f),
-            {},
-            [],
+            range_constraints,
+            equality_constraints,
             [ModuleCallEntry("", ModuleCallSignature([], [], pytree.tree_flatten((args, {}))[1], out_spec))],
             (args, kwargs),
             tensor_constants=ep_non_strict.tensor_constants,
