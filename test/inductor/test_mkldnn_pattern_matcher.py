@@ -673,6 +673,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_qconv2d_add_broadcast_shapes_cpu(self):
         r"""
         This testcase will quantize Conv2d->add pattern using broadcast shape inputs.
+        Conv2d->Add fusion will fail for the broadcast shape inputs case.
         """
 
         class M(torch.nn.Module):
