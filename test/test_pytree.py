@@ -536,6 +536,38 @@ class TestGenericPytree(TestCase):
             subtest(cxx_pytree, name="cxx"),
         ],
     )
+    def test_treemap_multitrees(self, pytree_impl):
+        def run_test(pytree):
+            def f(x, y, z):
+                return x + y + z
+
+            def invf(x):
+                return x // 3
+
+            self.assertEqual(
+                pytree_impl.tree_map(
+                    invf, pytree_impl.tree_map(f, pytree, pytree, pytree)
+                ),
+                pytree,
+            )
+
+        cases = [
+            [()],
+            ([],),
+            {"a": ()},
+            {"a": 1, "b": [{"c": 2}]},
+            {"a": 0, "b": [2, {"c": 3}, 4], "c": (5, 6)},
+        ]
+        for case in cases:
+            run_test(case)
+
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
     def test_tree_only(self, pytree_impl):
         self.assertEqual(
             pytree_impl.tree_map_only(int, lambda x: x + 2, [0, "a"]), [2, "a"]

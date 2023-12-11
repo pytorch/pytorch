@@ -597,14 +597,32 @@ def tree_structure(tree: PyTree) -> TreeSpec:
     return tree_flatten(tree)[1]
 
 
-def tree_map(func: Callable[..., Any], tree: PyTree) -> PyTree:
-    flat_args, spec = tree_flatten(tree)
-    return tree_unflatten([func(i) for i in flat_args], spec)
+def tree_map(func: Callable[..., Any], tree: PyTree, *rest: PyTree) -> PyTree:
+    """Maps a multi-input function over pytree args to produce a new pytree.
+
+    Args:
+      func: function that takes ``1 + len(rest)`` arguments, to be applied at the
+        corresponding leaves of the pytrees.
+      tree: a pytree to be mapped over, with each leaf providing the first
+        positional argument to ``func``.
+      rest: a tuple of pytrees, each of which has the same structure as ``tree``
+        or has ``tree`` as a prefix.
+
+    Returns:
+      A new pytree with the same structure as ``tree`` but with the value at each
+      leaf given by ``f(x, *xs)`` where ``x`` is the value at the corresponding
+      leaf in ``tree`` and ``xs`` is the tuple of values at corresponding nodes in
+      ``rest``.
+
+    """
+    flat_args, specs = zip(*(tree_flatten(tree) for tree in (tree, *rest)))
+    spec = specs[0]
+    return tree_unflatten([func(*args) for args in zip(*flat_args)], spec)
 
 
-def tree_map_(func: Callable[..., Any], tree: PyTree) -> PyTree:
-    flat_args = tree_leaves(tree)
-    deque(map(func, flat_args), maxlen=0)  # consume and exhaust the iterable
+def tree_map_(func, tree, *rest) -> PyTree:
+    flat_args = [tree_leaves(tree) for tree in (tree, *rest)]
+    deque(map(func, *flat_args), maxlen=0)  # consume and exhaust the iterable
     return tree
 
 
@@ -680,6 +698,7 @@ def tree_map_only(
     __type_or_types: Type[T],
     func: Fn[T, Any],
     tree: PyTree,
+    *rest: PyTree,
 ) -> PyTree:
     ...
 
@@ -689,6 +708,7 @@ def tree_map_only(
     __type_or_types: Type2[T, S],
     func: Fn2[T, S, Any],
     tree: PyTree,
+    *rest: PyTree,
 ) -> PyTree:
     ...
 
@@ -698,6 +718,7 @@ def tree_map_only(
     __type_or_types: Type3[T, S, U],
     func: Fn3[T, S, U, Any],
     tree: PyTree,
+    *rest: PyTree,
 ) -> PyTree:
     ...
 
@@ -706,8 +727,9 @@ def tree_map_only(
     __type_or_types: TypeAny,
     func: FnAny[Any],
     tree: PyTree,
+    *rest: PyTree,
 ) -> PyTree:
-    return tree_map(map_only(__type_or_types)(func), tree)
+    return tree_map(map_only(__type_or_types)(func), tree, *rest)
 
 
 @overload
@@ -715,6 +737,7 @@ def tree_map_only_(
     __type_or_types: Type[T],
     func: Fn[T, Any],
     tree: PyTree,
+    *rest: PyTree,
 ) -> PyTree:
     ...
 
@@ -724,6 +747,7 @@ def tree_map_only_(
     __type_or_types: Type2[T, S],
     func: Fn2[T, S, Any],
     tree: PyTree,
+    *rest: PyTree,
 ) -> PyTree:
     ...
 
@@ -733,6 +757,7 @@ def tree_map_only_(
     __type_or_types: Type3[T, S, U],
     func: Fn3[T, S, U, Any],
     tree: PyTree,
+    *rest: PyTree,
 ) -> PyTree:
     ...
 
@@ -741,8 +766,9 @@ def tree_map_only_(
     __type_or_types: TypeAny,
     func: FnAny[Any],
     tree: PyTree,
+    *rest: PyTree,
 ) -> PyTree:
-    return tree_map_(map_only(__type_or_types)(func), tree)
+    return tree_map_(map_only(__type_or_types)(func), tree, *rest)
 
 
 def tree_all(pred: Callable[[Any], bool], tree: PyTree) -> bool:
