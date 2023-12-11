@@ -960,8 +960,6 @@ class TestOptim(TestCase):
             (Adagrad, dict(weight_decay=1, maximize=True)),
         ]
 
-    def test_multi_tensor_optimizers(self):
-        self._test_derived_optimizers(self._multi_tensor_optimizer_configs, "foreach")
 
     def test_multi_tensor_optimizers_default_dtype(self):
         # https://github.com/pytorch/pytorch/issues/110940

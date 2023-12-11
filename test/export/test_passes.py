@@ -12,7 +12,7 @@ import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import export
+from torch.export import export
 from torch._export.passes import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
