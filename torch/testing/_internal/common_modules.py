@@ -3876,7 +3876,7 @@ module_db: List[ModuleInfo] = [
                    # derivative for aten::_ctc_loss_backward is not implemented
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
-                   # FIXME: file an issue about this failure
+                   # https://github.com/pytorch/pytorch/issues/115585
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_non_contiguous_tensors'),)
                ),
     ModuleInfo(torch.nn.GELU,
