@@ -1275,7 +1275,9 @@ class CommonTemplate:
             return torch.arange(0.1, 8.0001, 1, dtype=x.dtype, device=x.device)
 
         # Test that float arguments are truncated to int when dtype is set explicitly
-        make_arg = functools.partial(make_tensor, device=self.device, requires_grad=False)
+        make_arg = functools.partial(
+            make_tensor, device=self.device, requires_grad=False
+        )
         self.common(fn, (make_arg(1, dtype=torch.float32),))
         self.common(fn, (make_arg(1, dtype=torch.int64),))
 
@@ -1658,7 +1660,9 @@ class CommonTemplate:
                 fn,
                 (
                     make_tensor(100, device=self.device, dtype=dtype),
-                    make_tensor(100, device=self.device, dtype=dtype, exclude_zero=True),
+                    make_tensor(
+                        100, device=self.device, dtype=dtype, exclude_zero=True
+                    ),
                 ),
             )
 
@@ -3666,7 +3670,9 @@ class CommonTemplate:
 
         value = make_tensor(10, 10, dtype=torch.float32, device=self.device)
         mask = make_tensor(10, 10, dtype=torch.bool, device=self.device)
-        source = make_tensor(mask.count_nonzero(), dtype=torch.float32, device=self.device)
+        source = make_tensor(
+            mask.count_nonzero(), dtype=torch.float32, device=self.device
+        )
 
         self.common(fn, (value, mask, source))
 
