@@ -16,6 +16,7 @@ on:
   schedule:
     # Run hourly.
     - cron: 30 * * * *
+  workflow_dispatch:
 
 jobs:
   stale:
