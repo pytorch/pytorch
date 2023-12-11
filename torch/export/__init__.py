@@ -3,10 +3,10 @@ import copy
 import dataclasses
 import inspect
 import io
-import math
 import pathlib
 import sys
 import typing
+import warnings
 from enum import auto, Enum
 from typing import (
     Any,
@@ -59,288 +59,12 @@ __all__ = [
 ]
 
 
+from .dynamic_shapes import Constraint, Dim, dims, dynamic_dim
 from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
 from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
-
-
-@dataclasses.dataclass
-class _ConstraintTarget:
-    """
-    This represents input tensor dimensions.  Don't create this
-    class directly; instead, use :func:`dynamic_dim`.
-    """
-
-    w_tensor: Any  # weakref to torch.Tensor
-    # TODO: We don't need t_id; we can get it off of w_tensor
-    t_id: int
-    dim: int
-
-
-class _ConstraintFactory(type):
-    """
-    Metaclass that ensures a private constructor for :class:`Constraint`
-    """
-
-    def __call__(cls, *args, **kwargs):
-        raise TypeError(
-            f"{cls.__module__}.{cls.__qualname__} has no public constructor. "
-            f"Please use torch.export.dynamic_dim() to create one"
-        )
-
-    def _create(
-        cls, w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
-    ):
-        return super().__call__(
-            w_tensor, t_id, dim, constraint_range, shared, debug_name
-        )
-
-
-def _create_constraint(
-    w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
-):
-    return Constraint._create(w_tensor, t_id, dim, constraint_range, shared, debug_name)
-
-
-@dataclasses.dataclass
-class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
-    """
-
-    .. warning::
-        Do not construct :class:`Constraint` directly, use :func:`dynamic_dim` instead.
-
-    This represents constraints on input tensor dimensions, e.g., requiring
-    them to be fully polymorphic or within some range.
-
-    """
-
-    # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
-    constraint_range: "StrictMinMaxConstraint"
-    # Represent that `constraint_range` is shared with another _ConstraintTarget, which
-    # typically arises because of a specified equality with another dynamic dimension.
-    shared: Optional[_ConstraintTarget] = None
-    debug_name: Optional[str] = None
-
-    def _clone_with_range(self, lower=2, upper=math.inf):
-        # Import sympy locally
-        from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-        from torch.utils._sympy.value_ranges import ValueRanges
-
-        constraint_range = StrictMinMaxConstraint(
-            vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
-            warn_only=False,
-        )
-        return _create_constraint(
-            self.w_tensor,
-            self.t_id,
-            self.dim,
-            constraint_range,
-            self.shared,
-            self.debug_name,
-        )
-
-    def __ge__(self, lower):
-        return self._clone_with_range(lower=lower)
-
-    def __gt__(self, lower):
-        return self._clone_with_range(lower=lower + 1)
-
-    def __le__(self, upper):
-        return self._clone_with_range(upper=upper)
-
-    def __lt__(self, upper):
-        return self._clone_with_range(upper=upper - 1)
-
-    def __bool__(self):
-        # NOTE(avik): We do not support compound expressions like a <= x <= b.
-        # This is because Python implicitly desugars them into bool(a <= x) and bool(x <= b),
-        # and moreover, enforces that any overload of __bool__ must return True or False.
-        # FWIW, sympy also raises TypeError in this case.
-        raise TypeError(
-            "Cannot determine truth value of Constraint. "
-            "If you are trying to combine Constraint's with logical connectives, "
-            "you can specify them separately instead."
-        )
-
-    @property
-    def serializable_spec(self):
-        # We need a serialization compatible format of the constraint so that it
-        # can be savedin the graph module w/o breaking the module serialization.
-        # The saved constraints will be used directly for the post-exporting pass
-        # that converts constraints to runtime assertion. The saved constraints
-        # will not be saved in the serialized module.
-        # TODO: A better way is needed. Currently we use 't_id' to map the constraint,
-        # which is not reliable
-        return {
-            "t_id": self.t_id,
-            "dim": self.dim,
-            "min": self.constraint_range.vr.lower,
-            "max": self.constraint_range.vr.upper,
-            "shared": (
-                None
-                if self.shared is None
-                else {
-                    "t_id": self.shared.t_id,
-                    "dim": self.shared.dim,
-                }
-            ),
-        }
-
-    def __eq__(self, other):
-        if not isinstance(other, Constraint):
-            raise TypeError(
-                "A dynamic dim can be specified equal only to another dynamic dim. "
-                f"Equality with {type(other)} is not supported."
-            )
-
-        # import sympy locally
-        from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-
-        constraint_range = StrictMinMaxConstraint(
-            vr=self.constraint_range.vr & other.constraint_range.vr,
-            warn_only=False,
-        )
-        if self.debug_name is None:
-            debug_name = other.debug_name
-        else:
-            assert other.debug_name is None or self.debug_name == other.debug_name
-            debug_name = self.debug_name
-        return _create_constraint(
-            self.w_tensor,
-            self.t_id,
-            self.dim,
-            constraint_range,
-            shared=_ConstraintTarget(other.w_tensor, other.t_id, other.dim),
-            debug_name=debug_name,
-        )
-
-
-def dynamic_dim(t: torch.Tensor, index: int):
-    """
-    .. warning::
-        (This feature is DEPRECATED. See :func:`Dim` instead.)
-
-    :func:`dynamic_dim` constructs a :class:`Constraint` object that describes the dynamism of
-    a dimension ``index`` of tensor ``t``. :class:`Constraint` objects should be passed to
-    ``constraints`` argument of :func:`export`.
-
-    Args:
-        t (torch.Tensor): Example input tensor that have dynamic dimension size(s)
-        index (int): Index of dynamic dimension
-
-    Returns:
-        A :class:`Constraint` object that describes shape dynamism. It can be passed to :func:`export` so
-        that :func:`export` does not assume static size of specified tensor, i.e. keeping it dynamic
-        as a symbolic size rather than specializing according to size of example tracing input.
-
-    Specifically :func:`dynamic_dim` can be used to express following types of dynamism.
-
-    - Size of a dimension is dynamic and unbounded::
-
-        t0 = torch.rand(2, 3)
-        t1 = torch.rand(3, 4)
-
-        # First dimension of t0 can be dynamic size rather than always being static size 2
-        constraints = [dynamic_dim(t0, 0)]
-        ep = export(fn, (t0, t1), constraints=constraints)
-
-    - Size of a dimension is dynamic with a lower bound::
-
-        t0 = torch.rand(10, 3)
-        t1 = torch.rand(3, 4)
-
-        # First dimension of t0 can be dynamic size with a lower bound of 5 (inclusive)
-        # Second dimension of t1 can be dynamic size with a lower bound of 2 (exclusive)
-        constraints = [
-            dynamic_dim(t0, 0) >= 5,
-            dynamic_dim(t1, 1) > 2,
-        ]
-        ep = export(fn, (t0, t1), constraints=constraints)
-
-    - Size of a dimension is dynamic with an upper bound::
-
-        t0 = torch.rand(10, 3)
-        t1 = torch.rand(3, 4)
-
-        # First dimension of t0 can be dynamic size with a upper bound of 16 (inclusive)
-        # Second dimension of t1 can be dynamic size with a upper bound of 8 (exclusive)
-        constraints = [
-            dynamic_dim(t0, 0) <= 16,
-            dynamic_dim(t1, 1) < 8,
-        ]
-        ep = export(fn, (t0, t1), constraints=constraints)
-
-    - Size of a dimension is dynamic and it is always equal to size of another dynamic dimension::
-
-        t0 = torch.rand(10, 3)
-        t1 = torch.rand(3, 4)
-
-        # Sizes of second dimension of t0 and first dimension are always equal
-        constraints = [
-            dynamic_dim(t0, 1) == dynamic_dim(t1, 0),
-        ]
-        ep = export(fn, (t0, t1), constraints=constraints)
-
-    - Mix and match all types above as long as they do not express conflicting requirements
-
-    """
-    from torch._export import dynamic_dim
-
-    return dynamic_dim(t, index)
-
-
-class _Dim(type):
-    """
-    Metaclass for :func:`Dim` types.
-    """
-
-    @staticmethod
-    def readable(name, min_, max_):
-        if min_ == 2:
-            min_ = None
-        if max_ == sys.maxsize - 1:
-            max_ = None
-        if min_ is None and max_ is None:
-            return f"Dim('{name}')"
-        if min_ is None:
-            return f"Dim('{name}', max={max_})"
-        if max_ is None:
-            return f"Dim('{name}', min={min_})"
-        return f"Dim('{name}', min={min_}, max={max_})"
-
-
-def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
-    """
-    :func:`Dim` constructs a type analogous to a named symbolic integer with a range.
-    It can be used to describe multiple possible values of a dynamic tensor dimension.
-    Note that different dynamic dimensions of the same tensor, or of different tensors,
-    can be described by the same type.
-
-    Args:
-        name (str): Human-readable name for debugging.
-        min (Optional[int]): Minimum possible value of given symbol (inclusive)
-        max (Optional[int]): Maximum possible value of given symbol (inclusive)
-
-    Returns:
-        A type that can be used in dynamic shape specifications for tensors.
-    """
-    _min = 2 if min is None else builtins.max(min, 2)
-    _max = sys.maxsize - 1 if max is None else builtins.min(max, sys.maxsize - 1)
-    assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
-    dim = _Dim(name, (int,), {"min": _min, "max": _max})
-    dim.__module__ = getattr(
-        inspect.getmodule(inspect.stack()[1][0]), "__name__", "__main__"
-    )
-    return dim
-
-
-def dims(*names: str, min: Optional[int] = None, max: Optional[int] = None):
-    """
-    Util to create multiple :func:`Dim` types.
-    """
-    return tuple(Dim(name, min=min, max=max) for name in names)
 
 
 def export(
@@ -446,27 +170,27 @@ def export(
       ``OrderedDict`` containing all above types.
 
     """
-
-    from torch._export import export, export__RC__
+    from torch._export import _export
+    from .dynamic_shapes import _process_dynamic_shapes
 
     if constraints is not None:
-        return export(
-            f,
-            args,
-            kwargs,
-            constraints,
-            strict=strict,
-            preserve_module_call_signature=preserve_module_call_signature,
+        warnings.warn(
+            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
+            "and will not be supported in the future. "
+            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
+            DeprecationWarning,
+            stacklevel=2,
         )
     else:
-        return export__RC__(
-            f,
-            args,
-            kwargs,
-            dynamic_shapes=dynamic_shapes,
-            strict=strict,
-            preserve_module_call_signature=preserve_module_call_signature,
-        )
+        constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
+
+    return _export(
+        f,
+        args,
+        kwargs,
+        constraints,
+        preserve_module_call_signature=preserve_module_call_signature,
+    )
 
 
 def save(
