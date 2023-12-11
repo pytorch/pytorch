@@ -22,7 +22,7 @@ class AOTInductorModelContainer {
       bool is_cpu = false,
       std::optional<std::string> cubin_dir = std::nullopt) {
     constants_map_ = std::make_shared<ConstantMap>();
-    constants_array_ = std::make_shared<std::vector<AtenTensorHandle>>();
+    constants_array_ = std::make_shared<std::vector<ConstantHandle>>();
     use_secondary_ = false;
     models_.reserve(num_models);
     available_models_.reserve(num_models);
@@ -166,12 +166,12 @@ class AOTInductorModelContainer {
   }
 
   void update_array_from_map(
-      std::shared_ptr<std::vector<AtenTensorHandle>> constants_array,
+      std::shared_ptr<std::vector<ConstantHandle>> constants_array,
       std::shared_ptr<ConstantMap> constants_map) {
     auto num_constants = models_[0]->num_constants();
     for (size_t idx = 0; idx < num_constants; idx++) {
       constants_array->at(idx) =
-          constants_map->find(models_[0]->constant_name(idx))->second;
+        ConstantHandle(constants_map->find(models_[0]->constant_name(idx))->second);
     }
   }
 
@@ -248,8 +248,8 @@ class AOTInductorModelContainer {
   std::shared_ptr<ConstantMap> constants_map_secondary_;
 
   // Holds the indexed array of constant for faster lookup during runtime.
-  std::shared_ptr<std::vector<AtenTensorHandle>> constants_array_;
-  std::shared_ptr<std::vector<AtenTensorHandle>> constants_array_secondary_;
+  std::shared_ptr<std::vector<ConstantHandle>> constants_array_;
+  std::shared_ptr<std::vector<ConstantHandle>> constants_array_secondary_;
 
   // Holds all the AOTInductorModel instances owned by this container.
   std::vector<std::unique_ptr<AOTInductorModel>> models_;
@@ -309,13 +309,13 @@ class AOTInductorModelContainer {
     }
   }
 
-  std::shared_ptr<std::vector<AtenTensorHandle>> get_inactive_array() {
+  std::shared_ptr<std::vector<ConstantHandle>> get_inactive_array() {
     if (use_secondary_) {
       return constants_array_;
     } else {
       if (!constants_array_secondary_) {
         constants_array_secondary_ =
-            std::make_shared<std::vector<AtenTensorHandle>>(
+            std::make_shared<std::vector<ConstantHandle>>(
                 models_[0]->num_constants());
       }
       return constants_array_secondary_;
