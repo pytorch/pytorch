@@ -42,7 +42,7 @@ class OptionalArrayRef final {
       typename U = ArrayRef<T>,
       std::enable_if_t<
           !std::is_same<std::decay_t<U>, OptionalArrayRef>::value &&
-              !std::is_same<std::decay_t<U>, in_place_t>::value &&
+              !std::is_same<std::decay_t<U>, std::in_place_t>::value &&
               std::is_constructible<ArrayRef<T>, U&&>::value &&
               std::is_convertible<U&&, ArrayRef<T>>::value &&
               !std::is_convertible<U&&, T>::value,
@@ -55,7 +55,7 @@ class OptionalArrayRef final {
       typename U = ArrayRef<T>,
       std::enable_if_t<
           !std::is_same<std::decay_t<U>, OptionalArrayRef>::value &&
-              !std::is_same<std::decay_t<U>, in_place_t>::value &&
+              !std::is_same<std::decay_t<U>, std::in_place_t>::value &&
               std::is_constructible<ArrayRef<T>, U&&>::value &&
               !std::is_convertible<U&&, ArrayRef<T>>::value,
           bool> = false>
@@ -64,7 +64,9 @@ class OptionalArrayRef final {
       : wrapped_opt_array_ref(value) {}
 
   template <typename... Args>
-  constexpr explicit OptionalArrayRef(in_place_t ip, Args&&... args) noexcept
+  constexpr explicit OptionalArrayRef(
+      std::in_place_t ip,
+      Args&&... args) noexcept
       : wrapped_opt_array_ref(ip, args...) {}
 
   template <typename U, typename... Args>
