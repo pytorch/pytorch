@@ -35,7 +35,6 @@ from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.export import _create_constraint, _Dim, Constraint
 from torch.export.exported_program import (
     ExportedProgram,
     ModuleCallEntry,
@@ -54,6 +53,12 @@ from torch.export.graph_signature import (
     SymIntArgument,
     TensorArgument,
 )
+from torch.export.dynamic_shapes import (
+    Constraint,
+    dynamic_dim,
+    _process_constraints,
+    _process_dynamic_shapes,
+)
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
@@ -68,7 +73,6 @@ from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
 from .exported_program import (
     _create_stateful_graph_module,
-    _process_constraints,
     CallSpec,
 )
 from .passes.add_runtime_assertions_for_constraints_pass import (
@@ -82,149 +86,6 @@ from .passes.replace_view_ops_with_view_copy_ops_pass import (
 )
 from .wrappers import _wrap_submodules
 from torch._inductor import config
-
-def _process_dynamic_shapes(
-    f: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
-) -> Optional[List[Constraint]]:
-    if dynamic_shapes is None or len(dynamic_shapes) == 0:
-        return None
-
-    kwargs = kwargs if kwargs is not None else {}
-
-    from collections.abc import Mapping, Sequence
-
-    def tree_zip(combined_args, dynamic_shapes):
-        if isinstance(combined_args, (tuple, list)):
-            if not isinstance(dynamic_shapes, Sequence):
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Expected dynamic_shapes of a {type(combined_args)} to be a Sequence, "
-                    f"got {dynamic_shapes} instead",
-                )
-            if len(combined_args) != len(dynamic_shapes):
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Expected {dynamic_shapes} to have {len(combined_args)} items",
-                )
-            for i, shape in enumerate(dynamic_shapes):
-                yield from tree_zip(combined_args[i], shape)
-        elif isinstance(combined_args, dict):
-            if not isinstance(dynamic_shapes, Mapping):
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Expected dynamic_shapes of a {type(combined_args)} to be a Mapping, "
-                    f"got {dynamic_shapes} instead",
-                )
-            if len(combined_args) != len(dynamic_shapes):
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Expected {dynamic_shapes} to have {len(combined_args)} items",
-                )
-            for k, shape in dynamic_shapes.items():
-                yield from tree_zip(combined_args[k], shape)
-        elif dataclasses.is_dataclass(combined_args):
-            if not type(dynamic_shapes) == type(combined_args):
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Expected dynamic_shapes of a {type(combined_args)} to be a {type(combined_args)}, "
-                    f"got {dynamic_shapes} instead",
-                )
-            for f in dataclasses.fields(combined_args):
-                yield from tree_zip(getattr(combined_args, f.name), getattr(dynamic_shapes, f.name))
-        elif isinstance(combined_args, torch.Tensor):
-            yield (combined_args, dynamic_shapes)
-        else:
-            if dynamic_shapes is not None:
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Expected dynamic_shapes of a {type(combined_args)} to be None, "
-                    f"got {dynamic_shapes} instead",
-                )
-
-    def to_constraint(dim, tensor, i):
-        constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
-        if dim.min != 2:
-            constraint = constraint >= dim.min
-        if dim.max != sys.maxsize - 1:
-            constraint = constraint <= dim.max
-        return constraint
-
-    from collections import defaultdict
-    symbols = defaultdict(list)
-    bounds: Dict[str, Tuple[int, int]] = {}
-
-    def check_same_bounds(dim):
-        if dim.__name__ in symbols:
-            min_, max_ = bounds[dim.__name__]
-            if dim.min != min_ or dim.max != max_:
-                this_ = _Dim.readable(dim.__name__, min_, max_)
-                that_ = _Dim.readable(dim.__name__, dim.min, dim.max)
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Found different definitions {this_} and {that_} "
-                    f"for the same symbolic dimension {dim}!"
-                )
-
-        else:
-            bounds[dim.__name__] = (dim.min, dim.max)
-
-    def update_symbols(tensor, shape):
-        if isinstance(shape, dict):
-            for i, dim in shape.items():
-                if isinstance(dim, _Dim):
-                    check_same_bounds(dim)
-                    symbols[dim.__name__].append(to_constraint(dim, tensor, i))
-                else:
-                    if dim is not None:
-                        raise UserError(
-                            UserErrorType.INVALID_INPUT,
-                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
-                            "try None instead",
-                        )
-        elif isinstance(shape, (tuple, list)):
-            for i, dim in enumerate(shape):
-                if isinstance(dim, _Dim):
-                    check_same_bounds(dim)
-                    symbols[dim.__name__].append(to_constraint(dim, tensor, i))
-                else:
-                    if dim is not None:
-                        raise UserError(
-                            UserErrorType.INVALID_INPUT,
-                            f"Unexpected item #{i} ({dim}) in dynamic_shape {shape} of Tensor, "
-                            "try None instead",
-                        )
-        else:
-            if shape is not None:
-                raise UserError(
-                    UserErrorType.INVALID_INPUT,
-                    f"Unexpected dynamic_shape {shape} of Tensor, "
-                    "try None instead",
-                )
-
-    import inspect
-    if isinstance(f, ExportedProgram):
-        f = f.module()
-    signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
-    combined_args = signature.bind(*args, **kwargs).arguments
-
-    # This means user didn't specify dynamic shapes with argument names.
-    combined_args = combined_args if isinstance(dynamic_shapes, Mapping) else list(combined_args.values())  # type: ignore[assignment]
-    for tensor, shape in tree_zip(combined_args, dynamic_shapes):
-        update_symbols(tensor, shape)
-
-    constraints = []
-    for dynamic_dims in symbols.values():
-        primary, *others = dynamic_dims
-        if others:
-            for other in others:
-                constraints.append(primary == other)
-        else:
-            constraints.append(primary)
-
-    return constraints
 
 
 def export__RC__(
@@ -263,37 +124,6 @@ def export__RC__(
         constraints=constraints,
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature
-    )
-
-
-def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
-    if not isinstance(t, torch.Tensor):
-        raise UserError(
-            UserErrorType.DYNAMIC_DIM,
-            f"Expected tensor as input to dynamic_dim but got {type(t)}"
-        )
-
-    if t.dim() < 1:
-        raise UserError(
-            UserErrorType.DYNAMIC_DIM,
-            "Cannot mark 0-dimension tensors to be dynamic"
-        )
-
-    if index >= t.dim():
-        raise UserError(
-            UserErrorType.DYNAMIC_DIM,
-            f"Expected the dimension passed to dynamic_dim to be in the range [0:{t.dim()-1}]"
-            f" but got {index}, which is out of bounds for the given tensor."
-        )
-
-    return _create_constraint(
-        weakref.ref(t),
-        id(t),
-        index,
-        StrictMinMaxConstraint(
-            vr=ValueRanges(lower=2, upper=sympy.oo), warn_only=False
-        ),
-        debug_name=debug_name,
     )
 
 
