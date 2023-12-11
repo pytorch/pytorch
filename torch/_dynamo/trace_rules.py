@@ -86,8 +86,6 @@ manual_torch_name_rule_map = {
     "torch.manual_seed": SkipFilesVariable,
     # https://github.com/pytorch/pytorch/issues/93501
     "torch.nn.utils.rnn.pack_padded_sequence": SkipFilesVariable,
-    # https://github.com/pytorch/pytorch/issues/99569
-    "torch.nn.Parameter": SkipFilesVariable,
     "torch._nested_tensor_from_mask": SkipFilesVariable,
     "torch._nested_from_padded": SkipFilesVariable,
 }

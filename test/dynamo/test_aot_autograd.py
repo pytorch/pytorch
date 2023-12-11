@@ -749,8 +749,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         x = torch.rand((4, 4))
 
-        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch._dynamo.optimize(cc)(fn)
         self.assertTrue(torch._dynamo.testing.same(fn(x), opt_fn(x)))
+        self.assertEqual(cc.frame_count, 1)
 
     def test_aot_sequence_nr(self):
         class Model(torch.nn.Module):
