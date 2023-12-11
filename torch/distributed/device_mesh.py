@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 import torch
 
 from torch.distributed import is_available
+from ..utils._typing_utils import not_none
 
 __all__ = ["init_device_mesh", "DeviceMesh"]
 
@@ -369,17 +370,21 @@ else:
                 raise RuntimeError("DeviceMesh process groups not initialized!")
 
             if self.mesh.ndim == 1:
-                return _find_pg_by_ranks_and_tag(*self._dim_group_infos[0])
+                return not_none(_find_pg_by_ranks_and_tag(*self._dim_group_infos[0]))
 
             if mesh_dim is not None:
                 if isinstance(mesh_dim, str):
                     mesh_dim = self._get_mesh_dim_by_name(mesh_dim)
-                return _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
+                return not_none(
+                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
+                )
             else:
                 dim_groups = []
                 for ith_dim in range(self.mesh.ndim):
                     dim_groups.append(
-                        _find_pg_by_ranks_and_tag(*self._dim_group_infos[ith_dim])
+                        not_none(
+                            _find_pg_by_ranks_and_tag(*self._dim_group_infos[ith_dim])
+                        )
                     )
                 return dim_groups
 
