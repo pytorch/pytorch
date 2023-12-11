@@ -1,30 +1,62 @@
-#include <type_traits>
-#include <limits>
-#include <c10/core/DeviceType.h>
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/NestedTensorImpl.h>
-#include <ATen/Parallel.h>
 #include <ATen/TensorIndexing.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
-#include <utility>
 #include <c10/util/typeid.h>
+#include <c10/core/DeviceType.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
-#include <c10/util/Exception.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
-#include <ATen/TensorSubclassLikeUtils.h>
+
+#include <type_traits>
+#include <limits>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_fused_sdp_choice_native.h>
+#include <ATen/ops/_masked_softmax.h>
+#include <ATen/ops/_native_multi_head_attention_native.h>
+#include <ATen/ops/_nested_from_padded.h>
+#include <ATen/ops/_nested_tensor_softmax_with_shape.h>
+#include <ATen/ops/_scaled_dot_product_attention_math.h>
+#include <ATen/ops/_scaled_dot_product_attention_math_native.h>
+#include <ATen/ops/_scaled_dot_product_efficient_attention.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_backward_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
+#include <ATen/ops/_softmax.h>
+#include <ATen/ops/_transform_bias_rescale_qkv.h>
+#include <ATen/ops/_transform_bias_rescale_qkv_native.h>
+#include <ATen/ops/_triton_multi_head_attention_native.h>
+#include <ATen/ops/_triton_scaled_dot_attention.h>
+#include <ATen/ops/bmm.h>
 #include <ATen/ops/cat.h>
+#include <ATen/ops/chunk_native.h>
+#include <ATen/ops/dropout.h>
+#include <ATen/ops/linear_native.h>
+#include <ATen/ops/matmul.h>
+#include <ATen/ops/matmul_native.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/pad.h>
+#include <ATen/ops/scaled_dot_product_attention_native.h>
+#include <ATen/ops/softmax.h>
+#include <ATen/ops/split_native.h>
+#include <ATen/ops/split_with_sizes_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
@@ -490,9 +522,14 @@ c10::optional<Tensor> convert_boolean_attn_mask(const c10::optional<Tensor>& att
 // We apply this function to the top level SDPA so that
 // if padding is done it will be tracked for backward automatically
 
-template <int alignment>
-bool is_aligned(const SymInt& size){
-  return size % alignment == 0;
+template<int alignment>
+bool aligned_tensor(const at::Tensor& tensor){
+  for(const auto i : c10::irange(tensor.dim() - 1)){
+    if(tensor.sym_stride(i) % alignment != 0){
+      return false;
+    }
+  }
+  return tensor.sym_stride(-1) == 1;
 }
 
 template <int alignment>
@@ -508,26 +545,16 @@ at::Tensor preprocess_mask(
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value) {
-  constexpr int mem_eff_alignment = 16;
-  // Expand to 4d case
-  at::Tensor attn_mask = mask.expand_symint(
+  constexpr int mem_eff_alignment = 8;
+  at::Tensor result_mask = mask;
+  if (!aligned_tensor<mem_eff_alignment>(mask)) {
+    result_mask = pad_bias<mem_eff_alignment>(mask);
+  }
+  return result_mask.expand_symint(
       {query.sym_size(0),
        query.sym_size(1),
        query.sym_size(2),
        key.sym_size(2)});
-
-  bool aligned_last_dim = is_aligned<mem_eff_alignment>(attn_mask.sym_size(-1));
-  // Apply pad_bias and store the result in attn_mask
-  if (!aligned_last_dim) {
-    return pad_bias<mem_eff_alignment>(attn_mask);
-  }
-  // Check and make the tensor contiguous if needed
-  if (attn_mask.sym_stride(0) % 16 != 0 || attn_mask.sym_stride(1) % 16 != 0 ||
-      attn_mask.sym_stride(2) % 16 != 0 || attn_mask.sym_stride(3) != 1) {
-    return attn_mask.contiguous();
-  }
-
-  return attn_mask;
 }
 // FlashAttentionV2 requires that head dimension be a multiple of 8
 // This was previously done within the kernel, however
@@ -551,12 +578,8 @@ at::Tensor pad_last_dim(const at::Tensor& attn_bias) {
 at::Tensor post_process_flash_output(
     at::Tensor out,
     c10::SymInt const& og_size) {
-  if (!out.is_nested()) {
+  if (!out.is_nested() && out.sym_size(-1) != og_size) {
     out = out.slice_symint(-1, 0, og_size);
-  } else {
-    TORCH_CHECK(
-        out.size(-1) == og_size,
-        "FlashAttentionV2 returned a nested tensor with an incorrect size")
   }
   return out;
 }
@@ -715,8 +738,8 @@ std::tuple<
     at::Tensor,
     at::Tensor,
     at::Tensor,
-    int64_t,
-    int64_t,
+    c10::SymInt,
+    c10::SymInt,
     at::Tensor,
     at::Tensor,
     at::Tensor>

@@ -173,7 +173,7 @@ def _get_dedup_subgraphs(
                 last_node = None
                 for n in nodes:
                     prev_n = n.args[0]
-                    next_n = list(n.users)[0]
+                    next_n = next(iter(n.users))
                     if prev_n not in nodes:
                         first_node = n
                     elif next_n not in nodes:
@@ -418,7 +418,7 @@ def create_submodule_from_subgraph(
         # go to next node
         assert len(cur_node_orig.users.keys()) == 1, \
             f'{cur_node_orig} has more than 1 users, not supported yet'
-        cur_node_orig = list(cur_node_orig.users.keys())[0]
+        cur_node_orig = next(iter(cur_node_orig.users.keys()))
         cur_args_orig = cur_node_orig.args
         cur_kwargs_orig = cur_node_orig.kwargs
 
@@ -821,7 +821,7 @@ def create_add_loggers_graph(
                 # except the last one must have only one user
                 if cur_node_orig != last_node:
                     assert len(cur_node_orig.users.keys()) == 1
-                cur_node_orig = list(cur_node_orig.users.keys())[0]
+                cur_node_orig = next(iter(cur_node_orig.users.keys()))
                 assert not cur_node_orig.name.startswith(SHADOW_NODE_NAME_PREFIX)
                 insertion_point = cur_node_copy
 
@@ -947,7 +947,7 @@ def _get_weight_info_from_shadow_wrapper(shadow_wrapper: torch.nn.Module):
         #  to get `_input_scale_1` and `_input_zero_point_1`
 
         assert len(shadow_n.users) == 1
-        quant_node = list(shadow_n.users.keys())[0]
+        quant_node = next(iter(shadow_n.users.keys()))
         new_args: Any = None
         if quant_node.target == torch.quantize_per_channel:
             _weight, scale_node, zp_node, axis, dtype = quant_node.args
@@ -1145,7 +1145,7 @@ def group_results_by_subgraph(results: NSResultsType) -> Any:
     subgraph_name_to_subgraph_results: Any = collections.defaultdict(dict)
 
     # node_output or weight
-    key_to_use = list(results['model'].keys())[0]
+    key_to_use = next(iter(results['model'].keys()))
 
     for subgraph_name_with_idx, subgraph_candidate_results in \
             results['model'][key_to_use].items():

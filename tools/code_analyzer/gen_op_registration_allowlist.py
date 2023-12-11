@@ -48,7 +48,7 @@ def gen_transitive_closure(
     train: bool = False,
 ) -> List[str]:
     result = set(root_ops)
-    queue = root_ops[:]
+    queue = root_ops.copy()
 
     # The dependency graph might contain a special entry with key = `__BASE__`
     # and value = (set of `base` ops to always include in custom build).

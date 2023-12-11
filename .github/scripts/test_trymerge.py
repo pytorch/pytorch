@@ -12,7 +12,7 @@ import json
 import os
 import warnings
 from hashlib import sha256
-from typing import Any, cast, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
@@ -20,15 +20,15 @@ from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 
 from trymerge import (
     categorize_checks,
+    DRCI_CHECKRUN_NAME,
     find_matching_merge_rule,
-    FlakyRule,
     get_classifications,
     get_drci_classifications,
     get_rockset_results,
     gh_get_team_members,
     gh_graphql,
     GitHubPR,
-    is_broken_trunk,
+    JobCheckState,
     main as trymerge_main,
     MandatoryChecksMissingError,
     MergeRule,
@@ -226,16 +226,6 @@ def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[Mer
     raise RuntimeError("testing")
 
 
-def empty_flaky_rules() -> List[FlakyRule]:
-    return []
-
-
-def xla_is_flaky_rules() -> List[FlakyRule]:
-    return [
-        FlakyRule("xla", ["FAILED: Build did NOT complete successfully"]),
-    ]
-
-
 def xla_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
     return [
         MergeRule(
@@ -247,6 +237,7 @@ def xla_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
                 "EasyCLA",
                 "pull / linux-bionic-py3_8-clang8-xla / build",
                 "pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.4xlarge)",
+                "inductor / cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench_dynamic, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
             ],
             ignore_flaky_failures=False,
         ),
@@ -268,7 +259,6 @@ class DummyGitRepo(GitRepo):
         return "super awsome commit message"
 
 
-@mock.patch("trymerge.read_flaky_rules", side_effect=empty_flaky_rules)
 @mock.patch("trymerge.get_rockset_results", side_effect=empty_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch(
@@ -335,9 +325,6 @@ class TestTryMerge(TestCase):
         flist = pr.get_changed_files()
         self.assertEqual(len(flist), pr.get_changed_files_count())
 
-    @skip(
-        "Internal check detection is broken, see https://github.com/pytorch/pytorch/issues/110218"
-    )
     def test_internal_changes(self, *args: Any) -> None:
         "Tests that PR with internal changes is detected"
         pr = GitHubPR("pytorch", "pytorch", 110140)
@@ -410,7 +397,7 @@ class TestTryMerge(TestCase):
 
     def test_cancelled_gets_ignored(self, *args: Any) -> None:
         """Tests that cancelled workflow does not override existing successfull status"""
-        pr = GitHubPR("pytorch", "pytorch", 82169)
+        pr = GitHubPR("pytorch", "pytorch", 110367)
         conclusions = pr.get_checkrun_conclusions()
         lint_checks = [name for name in conclusions.keys() if "Lint" in name]
         self.assertTrue(len(lint_checks) > 0)
@@ -558,102 +545,6 @@ class TestTryMerge(TestCase):
         for case in test_cases:
             self.assertEqual(case["expected"], remove_job_name_suffix(case["name"]))
 
-    def test_is_broken_trunk(self, *args: Any) -> None:
-        test_cases: List[Dict[str, Any]] = [
-            {
-                "head_job": None,
-                "base_jobs": {
-                    "job_a": {
-                        "conclusion": "success",
-                        "failure_captures": ["a", "b"],
-                    },
-                    "job_b": {
-                        "conclusion": "failure",
-                        "failure_captures": ["a", "b"],
-                    },
-                },
-                "expected": False,
-                "description": "Invalid input - head job",
-            },
-            {
-                "head_job": {
-                    "conclusion": "failure",
-                    "failure_captures": ["a", "b"],
-                },
-                "base_jobs": None,
-                "expected": False,
-                "description": "Invalid input - base jobs",
-            },
-            {
-                "head_job": {
-                    "conclusion": "failure",
-                    "failure_captures": ["a", "b"],
-                },
-                "base_jobs": {},
-                "expected": False,
-                "description": "Invalid input - empty base jobs",
-            },
-            {
-                "head_job": {
-                    "conclusion": "failure",
-                    "failure_captures": ["x", "y"],
-                },
-                "base_jobs": {
-                    "job_a": {
-                        "conclusion": "success",
-                        "failure_captures": ["a", "b"],
-                    },
-                    "job_b": {
-                        "conclusion": "failure",
-                        "failure_captures": ["x", "y"],
-                    },
-                },
-                "expected": True,
-                "description": "Found a match",
-            },
-            {
-                "head_job": {
-                    "conclusion": "success",
-                    "failure_captures": ["x", "y"],
-                },
-                "base_jobs": {
-                    "job_a": {
-                        "conclusion": "success",
-                        "failure_captures": ["a", "b"],
-                    },
-                    "job_b": {
-                        "conclusion": "failure",
-                        "failure_captures": ["x", "y"],
-                    },
-                },
-                "expected": False,
-                "description": "Not found - different conclusion",
-            },
-            {
-                "head_job": {
-                    "conclusion": "failure",
-                    "failure_captures": ["a", "b"],
-                },
-                "base_jobs": {
-                    "job_a": {
-                        "conclusion": "success",
-                        "failure_captures": ["a", "b"],
-                    },
-                    "job_b": {
-                        "conclusion": "failure",
-                        "failure_captures": ["x", "y"],
-                    },
-                },
-                "expected": False,
-                "description": "Not found - different captured failures",
-            },
-        ]
-
-        for case in test_cases:
-            self.assertEqual(
-                case["expected"], is_broken_trunk(case["head_job"], case["base_jobs"])
-            )
-
     def test_get_merge_base(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 104121)
 
@@ -677,55 +568,102 @@ class TestTryMerge(TestCase):
 )
 class TestBypassFailures(TestCase):
     def test_get_classifications(self, *args: Any) -> None:
-        flaky_rules = [
-            # Try a regex rule
-            FlakyRule("distributed", ["##\\[error\\]The operation [wW]as .+"])
-        ]
-        pr = GitHubPR("pytorch", "pytorch", 92863)
+        pr = GitHubPR("pytorch", "pytorch", 109584)
         checks = pr.get_checkrun_conclusions()
         checks = get_classifications(
             pr.pr_num,
             pr.project,
             checks,
-            pr.last_commit()["oid"],
-            pr.get_merge_base(),
-            flaky_rules,
             [],
         )
         self.assertTrue(
             checks[
-                "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.4xlarge)"
+                "pull / linux-focal-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)"
             ].classification
             == "BROKEN_TRUNK"
         )
         self.assertTrue(
             checks[
-                "pull / linux-focal-py3.7-gcc7 / test (distributed, 1, 2, linux.2xlarge)"
+                "trunk / win-vs2019-cpu-py3 / test (default, 2, 3, windows.4xlarge.nonephemeral)"
             ].classification
             == "FLAKY"
         )
+        self.assertTrue(
+            checks[
+                "pull / linux-jammy-py3.8-gcc11 / test (distributed, 1, 2, linux.2xlarge)"
+            ].classification
+            == "FLAKY"
+        )
+        self.assertTrue(
+            checks[
+                "pull / linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)"
+            ].classification
+            == "FLAKY"
+        )
+
+        # Set the threshold larger or equal to the number of ok failures
         pending, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=2
+            checks, list(checks.keys()), ok_failed_checks_threshold=6
         )
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
-        self.assertTrue(len(ignorable["FLAKY"]) == 1)
-        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+        self.assertTrue(len(ignorable["FLAKY"]) == 4)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 2)
 
         # Not set any threshold, defaults to -1 to ignore all flaky and broken trunk failures
         pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
-        self.assertTrue(len(ignorable["FLAKY"]) == 1)
-        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+        self.assertTrue(len(ignorable["FLAKY"]) == 4)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 2)
 
+        # Set the threshold lower than the number of ok failures
         pending, failed, ignorable = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=1
         )
         self.assertTrue(len(pending) == 0)
-        self.assertTrue(len(failed) == 2)
+        self.assertTrue(len(failed) == 6)
+        self.assertTrue(len(ignorable["FLAKY"]) == 4)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 2)
+
+        # Set the threshold to 0 like when ignore_flaky_failures is on
+        pending, failed, ignorable = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 6)
+        self.assertTrue(len(ignorable["FLAKY"]) == 4)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 2)
+
+    def test_get_classifications_flaky_fullname(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 110362)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["FLAKY"]) == 1)
-        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+
+    def test_get_classifications_invalid_cancel(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 110367)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 0)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 0)
+        self.assertTrue(len(ignorable["UNSTABLE"]) == 3)
 
     def test_get_classifications_similar_failures(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 109750)
@@ -734,9 +672,6 @@ class TestBypassFailures(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            pr.last_commit()["oid"],
-            pr.get_merge_base(),
-            [],
             [],
         )
         pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
@@ -751,9 +686,6 @@ class TestBypassFailures(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            pr.last_commit()["oid"],
-            pr.get_merge_base(),
-            [],
             [],
         )
         workflow_name = "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test"
@@ -775,13 +707,13 @@ class TestBypassFailures(TestCase):
                 # This PR had one broken trunk failure but it was run on a different shard
                 # than the one on the base commit. This should still count as broken trunk
                 "pr_num": 104214,
-                "mock_merge_base": "436d035dc74db9c703297a62163b0cad0c546665",
+                "related_failure_count": 0,
                 "unrelated_failure_count": 1,
             },
             {
                 # This PR had one broken trunk failure and it used ghstack
                 "pr_num": 105145,
-                "mock_merge_base": "194fe1d12f9860734cc28ed21bdabda2fbb06336",
+                "related_failure_count": 0,
                 "unrelated_failure_count": 1,
             },
             {
@@ -790,80 +722,57 @@ class TestBypassFailures(TestCase):
                 # keep the failure record from the merge base so that it can
                 # be used to detect broken trunk
                 "pr_num": 107160,
-                "mock_merge_base": "a5d841ef01e615e2a654fb12cf0cd08697d12ccf",
+                "related_failure_count": 0,
                 "unrelated_failure_count": 4,
+            },
+            {
+                # This PR used Dr.CI broken trunk classification
+                "pr_num": 111253,
+                "related_failure_count": 1,
+                "unrelated_failure_count": 2,
             },
         ]
 
         for case in test_cases:
             pr_num = case["pr_num"]
-            mock_merge_base = case["mock_merge_base"]
+            related_failure_count = case["related_failure_count"]
             unrelated_failure_count = case["unrelated_failure_count"]
 
-            pr = GitHubPR("pytorch", "pytorch", cast(int, pr_num))
-            with mock.patch(
-                "trymerge.gh_fetch_merge_base", return_value=mock_merge_base
-            ) as mocked_gh_fetch_merge_base:
-                checks = pr.get_checkrun_conclusions()
-                checks = get_classifications(
-                    pr.pr_num,
-                    pr.project,
-                    checks,
-                    pr.last_commit()["oid"],
-                    pr.get_merge_base(),
-                    [],
-                    [],
-                )
+            pr = GitHubPR("pytorch", "pytorch", pr_num)
+            checks = pr.get_checkrun_conclusions()
+            checks = get_classifications(
+                pr.pr_num,
+                pr.project,
+                checks,
+                [],
+            )
 
-                pending, failed, _ = categorize_checks(checks, list(checks.keys()))
-                self.assertTrue(len(pending) == 0)
-                self.assertTrue(len(failed) == 0)
+            pending, failed, _ = categorize_checks(checks, list(checks.keys()))
+            self.assertTrue(len(pending) == 0)
+            self.assertTrue(len(failed) == related_failure_count)
 
-                # When the ok_failed_checks_threshold is set to 0, the broken trunk failure
-                # won't be ignored
-                pending, failed, _ = categorize_checks(
-                    checks, list(checks.keys()), ok_failed_checks_threshold=0
-                )
-                self.assertTrue(len(pending) == 0)
-                self.assertTrue(len(failed) == unrelated_failure_count)
+            # When the ok_failed_checks_threshold is set to 0, the broken trunk failure
+            # won't be ignored
+            pending, failed, _ = categorize_checks(
+                checks, list(checks.keys()), ok_failed_checks_threshold=0
+            )
+            self.assertTrue(len(pending) == 0)
+            self.assertTrue(
+                len(failed) == unrelated_failure_count + related_failure_count
+            )
 
     def test_ignore_current(self, *args: Any) -> None:
         # Test various interactions of the failure classifier to ensure that ignore
         # current checks takes place after other classifications: flaky, unstable,
         # or broken trunk. Only actual new failures should be kept in the list of
         # ignore current checks to use to record force merge with actual failures
-        flaky_rules = [
-            FlakyRule("distributed", ["##\\[error\\]The operation was canceled."])
-        ]
-        flaky = (
-            "pull / linux-focal-py3.7-gcc7 / test (distributed, 1, 2, linux.2xlarge)"
-        )
+        flaky = "pull / linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)"
         broken_trunk = (
-            "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.4xlarge)"
+            "pull / linux-focal-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)"
         )
 
-        pr = GitHubPR("pytorch", "pytorch", 92863)
+        pr = GitHubPR("pytorch", "pytorch", 109584)
         checks = pr.get_checkrun_conclusions()
-
-        # No broken trunk or flaky rules, then all failures are ignored when ic is used
-        checks = get_classifications(
-            pr.pr_num,
-            pr.project,
-            checks,
-            pr.last_commit()["oid"],
-            None,
-            [],
-            [broken_trunk, flaky],
-        )
-        self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
-        self.assertTrue(checks[broken_trunk].classification == "IGNORE_CURRENT_CHECK")
-        _, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=2
-        )
-        self.assertTrue(len(failed) == 0)
-        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 2)
-        self.assertTrue(len(ignorable["FLAKY"]) == 0)
-        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 0)
 
         # Known flaky failure takes precedence over ignore current (need to set the
         # merge base here to get the results from Rockset, and that categorize the
@@ -872,48 +781,22 @@ class TestBypassFailures(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            pr.last_commit()["oid"],
-            pr.get_merge_base(),
-            flaky_rules,
             [broken_trunk, flaky],
         )
         self.assertTrue(checks[flaky].classification == "FLAKY")
         self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
-        _, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=2
-        )
+        _, failed, ignorable = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 0)
-        self.assertTrue(len(ignorable["FLAKY"]) == 1)
-        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+        self.assertTrue(len(ignorable["FLAKY"]) == 4)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 2)
 
-        # Broken trunk takes precedence over ignore current (no flaky rule is set here)
-        checks = get_classifications(
-            pr.pr_num,
-            pr.project,
-            checks,
-            pr.last_commit()["oid"],
-            pr.get_merge_base(),
-            [],
-            [broken_trunk, flaky],
-        )
-        self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
-        self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
-        _, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=2
-        )
-        self.assertTrue(len(failed) == 0)
-        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 1)
-        self.assertTrue(len(ignorable["FLAKY"]) == 0)
-        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
-
-    @mock.patch("trymerge.read_flaky_rules", side_effect=xla_is_flaky_rules)
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
     def test_dont_ignore_flaky_failures(self, *args: Any) -> None:
         """
         Regression test for https://github.com/pytorch/test-infra/issues/4126
         """
-        pr = GitHubPR("pytorch", "pytorch", 100369)
+        pr = GitHubPR("pytorch", "pytorch", 105312)
         repo = DummyGitRepo()
         # Check that failure is classified as flaky but still raises exception
         with warnings.catch_warnings(record=True) as w, self.assertRaises(RuntimeError):
@@ -928,10 +811,89 @@ class TestBypassFailures(TestCase):
 @mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 @mock.patch("trymerge.gh_fetch_merge_base", return_value="")
+@mock.patch("trymerge.get_drci_classifications", return_value={})
+class TestBypassFailuresOnSandCastle(TestCase):
+    def test_get_classifications(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 111467)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+
+    def test_get_classifications_drci_checkrun_not_found(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 111467)
+
+        # No summary
+        checks = pr.get_checkrun_conclusions()
+        checks[DRCI_CHECKRUN_NAME] = JobCheckState(
+            DRCI_CHECKRUN_NAME,
+            "",
+            "NEUTRAL",
+            None,
+            1,
+            "",
+            None,
+        )
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 2)
+
+        # Empty summary
+        checks = pr.get_checkrun_conclusions()
+        checks[DRCI_CHECKRUN_NAME] = JobCheckState(
+            DRCI_CHECKRUN_NAME,
+            "",
+            "NEUTRAL",
+            None,
+            1,
+            "",
+            "",
+        )
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 2)
+
+        # No Dr.CI checkrun
+        checks = pr.get_checkrun_conclusions()
+        del checks[DRCI_CHECKRUN_NAME]
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 2)
+
+
+@mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+@mock.patch("trymerge.gh_fetch_merge_base", return_value="")
 @mock.patch(
     "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
 )
-class TestGitHubPRGhstackDependencies2(TestCase):
+class TestGitHubPRGhstackDependencies(TestCase):
     def test_pr_dependencies(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 106068)
         msg = pr.gen_commit_message(filter_ghstack=True)

@@ -68,6 +68,8 @@ torch.backends.cuda
 
 .. autoclass:: torch.backends.cuda.SDPBackend
 
+.. autoclass:: torch.backends.cuda.SDPAParams
+
 .. autofunction:: torch.backends.cuda.flash_sdp_enabled
 
 .. autofunction:: torch.backends.cuda.enable_mem_efficient_sdp
@@ -79,6 +81,10 @@ torch.backends.cuda
 .. autofunction:: torch.backends.cuda.math_sdp_enabled
 
 .. autofunction:: torch.backends.cuda.enable_math_sdp
+
+.. autofunction:: torch.backends.cuda.can_use_flash_attention
+
+.. autofunction:: torch.backends.cuda.can_use_efficient_attention
 
 .. autofunction:: torch.backends.cuda.sdp_kernel
 
@@ -117,6 +123,7 @@ torch.backends.cudnn
     available algorithm. Note that this setting only affects convolutions dispatched via the
     cuDNN v8 API.
 
+.. py:module:: torch.backends.cudnn.rnn
 
 torch.backends.mps
 ^^^^^^^^^^^^^^^^^^
@@ -187,3 +194,4 @@ torch.backends.opt_einsum
 torch.backends.xeon
 ^^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.xeon
+.. py:module:: torch.backends.xeon.run_cpu

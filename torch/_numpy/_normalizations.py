@@ -17,7 +17,7 @@ ArrayLikeOrScalar = typing.Union[ArrayLike, Scalar]
 
 DTypeLike = typing.TypeVar("DTypeLike")
 AxisLike = typing.TypeVar("AxisLike")
-NDArray = typing.TypeVar("NDarray")
+NDArray = typing.TypeVar("NDArray")
 CastingModes = typing.TypeVar("CastingModes")
 KeepDims = typing.TypeVar("KeepDims")
 
@@ -139,7 +139,7 @@ normalizers = {
 
 
 def maybe_normalize(arg, parm):
-    """Normalize arg if a normalizer is registred."""
+    """Normalize arg if a normalizer is registered."""
     normalizer = normalizers.get(parm.annotation, None)
     return normalizer(arg, parm) if normalizer else arg
 

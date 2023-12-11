@@ -6292,7 +6292,7 @@ TEST(LoopNest, areLoopsPerfectlyNested) {
   ASSERT_FALSE(LoopNest::areLoopsPerfectlyNested({forI, forK, forJ}));
   ASSERT_FALSE(LoopNest::areLoopsPerfectlyNested({forK, forJ, forI}));
 
-  // Adding a statment to forK body should be OK.
+  // Adding a statement to forK body should be OK.
   auto init = Store::make(a_buf, {i, j}, 0);
   forK->body()->insert_stmt_before(init, store);
   ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forI, forJ, forK}));
