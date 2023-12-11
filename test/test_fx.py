@@ -2324,7 +2324,7 @@ class TestFX(JitTestCase):
         combined_graph = torch.fx.Graph()
         output_node = combined_graph.graph_copy(inline_into.graph, {})
 
-        input_node = list(to_inline.graph.nodes)[0]
+        input_node = next(iter(to_inline.graph.nodes))
         assert input_node and input_node.op == 'placeholder'
 
         val_map = {input_node : output_node}
@@ -3842,12 +3842,12 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         self.assertEqual(len(output_node.args), r + 1)
         self.assertEqual(len(a.users), 1)
         self.assertIs(output_node.args[0], a)
-        self.assertIs(list(a.users.keys())[0], output_node)
+        self.assertIs(next(iter(a.users.keys())), output_node)
         output_node.insert_arg(2, a)
         self.assertEqual(len(output_node.args), r + 2)
         self.assertEqual(len(a.users), 1)
         self.assertIs(output_node.args[2], a)
-        self.assertIs(list(a.users.keys())[0], output_node)
+        self.assertIs(next(iter(a.users.keys())), output_node)
         m.graph.lint()
 
 
@@ -4256,6 +4256,7 @@ class TestFunctionalTracing(JitTestCase):
         "max_pool3d": PROXY_ITERABLE,
 
         "lp_pool2d": PROXY_ITERATED,
+        "lp_pool3d": PROXY_ITERATED,
         "max_unpool1d": PROXY_ITERATED,
         "max_unpool2d": PROXY_ITERATED,
         "max_unpool3d": PROXY_ITERATED,
