@@ -180,6 +180,11 @@ class _UnflattenedModule(torch.nn.Module):
                     continue
                 assert node.name not in inputs_to_state
 
+        # Import here to avoid an unfortunate circular dependency.
+        from torch._export.utils import _check_input_constraints_pre_hook
+
+        self.register_forward_pre_hook(_check_input_constraints_pre_hook)
+
     def forward(self, *args, **kwargs):
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
@@ -365,6 +370,7 @@ class ModuleFrame:
     def __init__(
         self,
         flat_graph,
+        nodes,
         seen_nodes,
         seen_modules,
         parent,
@@ -374,6 +380,7 @@ class ModuleFrame:
         module: Optional[torch.nn.Module] = None,
     ):
         self.flat_graph = flat_graph
+        self.nodes = nodes
         self.seen_nodes = seen_nodes
         self.seen_modules = seen_modules
         self.parent = parent
@@ -396,7 +403,6 @@ class ModuleFrame:
             self.cached_graph_module = None
             self.seen_modules[self.module_id] = self.module
 
-        self.nodes = list(self.flat_graph.nodes)
         self.graph = self.module.graph
 
         # Mapping of nodes in the flat graph to nodes in this graph.
@@ -449,19 +455,19 @@ class ModuleFrame:
                     self.node_to_placeholder[self.seen_nodes[arg.name]] = flat_arg_node
 
             with self.parent.graph.inserting_before(self.parent_call_module):
-                nodes: List[Optional[torch.fx.Node]] = []
+                input_nodes: List[Optional[torch.fx.Node]] = []
                 for input in signature.inputs:
                     if isinstance(input, ConstantArgument) and input.value is None:
-                        nodes.append(None)
+                        input_nodes.append(None)
                     else:
                         assert isinstance(input, (TensorArgument, SymIntArgument))
-                        nodes.append(
+                        input_nodes.append(
                             self.parent.remap_input(self.seen_nodes[input.name])
                         )
 
                 inputs_node = _generate_unflatten(
                     self.parent.module,
-                    nodes,
+                    input_nodes,
                     signature.in_spec,
                 )
 
@@ -644,6 +650,7 @@ class ModuleFrame:
                 # counter. Once it is complete, continue from that point.
                 node_idx = ModuleFrame(
                     self.flat_graph,
+                    self.nodes,
                     self.seen_nodes,
                     self.seen_modules,
                     self,
@@ -666,6 +673,7 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: _UnflattenedMod
     seen_modules: Dict[int, torch.nn.Module] = {}
     ModuleFrame(
         orig_graph,
+        tuple(orig_graph.nodes),
         seen_nodes,
         seen_modules,
         None,

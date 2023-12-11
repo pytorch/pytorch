@@ -173,7 +173,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ):
         """
         Walk this object and call fn on all the VariableTracker
-        instances to produce a new VariableTracker with the results.
+        instances
         """
         if cache is None:
             cache = dict()
@@ -187,14 +187,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
                 def update_object_dict(v):
                     changed = False
-                    rv = dict(v.__dict__)
+                    rv = v.__dict__
                     for key in rv.keys():
                         if key not in v._nonvar_fields:
                             prior = rv[key]
                             rv[key] = cls.apply(fn, prior, cache, skip_fn)
                             changed = changed or prior is not rv[key]
-                    if changed:
-                        return v.clone(**rv)
+
                     return v
 
                 value = value.unwrap()
@@ -341,13 +340,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def rename(self, tx, name):
-        new_name = tx.output.new_var(name)
-        if not self.mutable_local or not isinstance(self.mutable_local, MutableLocal):
-            # This is fine for objects that are not mutable locals
-            self.user_code_variable_name = new_name
-            return self
-        new_vt = self.clone(user_code_variable_name=new_name)
-        return tx.replace_all(self, new_vt)
+        self.user_code_variable_name = tx.output.new_var(name)
+        return self
 
     def realize(self) -> "VariableTracker":
         """Used by LazyVariableTracker to build the real VariableTracker"""
