@@ -3788,6 +3788,7 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # derivative for aten::multilabel_margin_loss_backward is not implemented
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),)
                ),
     ModuleInfo(torch.nn.MultiMarginLoss,
@@ -3796,6 +3797,7 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # RuntimeError: derivative for aten::multi_margin_loss_backward is not implemented
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),)
                ),
     ModuleInfo(torch.nn.SoftMarginLoss,
@@ -3803,8 +3805,7 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.MultiLabelSoftMarginLoss,
                module_inputs_func=module_inputs_torch_nn_MultiLabelSoftMarginLoss,
