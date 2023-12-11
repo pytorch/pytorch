@@ -1553,7 +1553,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             if V.graph.aot_mode:
                 self.prefix.writeline("inputs.clear();")
                 self.prefix.writeline(
-                    "auto& kernels = *dynamic_cast<AOTInductorModelKernels*>(this->kernels_.get());"
+                    "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
