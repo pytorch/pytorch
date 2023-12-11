@@ -7,7 +7,6 @@ from os.path import abspath, dirname
 from typing import Any, Dict, Set, Type, TYPE_CHECKING
 
 import torch
-from . import external_utils
 
 # to configure logging for dynamo, aot, and inductor
 # use the following API in the torch._logging module
@@ -49,17 +48,6 @@ accumulated_cache_size_limit = 64
 # specialized, so this is mostly useful for export, where we want inputs
 # to be dynamic, but accesses to ints should NOT get promoted into inputs.
 specialize_int = False
-
-# Assume these functions return constants
-constant_functions = {
-    torch.jit.is_scripting: False,
-    torch.jit.is_tracing: False,
-    torch._C._get_tracing_state: None,
-    torch.fx._symbolic_trace.is_fx_tracing: False,
-    torch.onnx.is_in_onnx_export: False,
-    external_utils.is_compiling: True,
-    torch._utils.is_compiling: True,
-}
 
 # legacy config, does nothing now!
 dynamic_shapes = True
