@@ -2781,6 +2781,9 @@ coverage_ignore_classes = [
     # torch.export.exported_program
     "ConstantArgument",
     "ExportedProgram",
+    # torch.export.dynamic_shapes
+    "Dim",
+    "dynamic_dim",
     # torch.fx.experimental.accelerator_partitioner
     "DAG",
     "DAGNode",
