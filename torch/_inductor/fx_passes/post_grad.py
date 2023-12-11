@@ -704,7 +704,10 @@ def reinplace_inplaceable_ops(graph):
 
             copy_args_to_copy_nodes[(dst, src)] = node
 
-            assert node.args[0].op == "placeholder"
+            # "graph inputs" can come from a get_attr instead of a placeholder,
+            # if we have "unlifted" params/buffers back into state on the GraphModule
+            # (we currently do this in the export flow)
+            assert node.args[0].op == "placeholder" or node.args[0].op == "get_attr"
             mutated_inputs.add(node.args[0])
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
