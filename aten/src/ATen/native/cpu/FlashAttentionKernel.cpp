@@ -255,7 +255,7 @@ void cpu_flash_attention(
             kvBlockSize,
             qBlockSize,
             headSize,
-            scaling_factor,
+            static_cast<accum_t>(1),
             k_data + i * kStrideB + j * kStrideH +
                 n * kStrideN,
             kStrideN,
@@ -280,7 +280,7 @@ void cpu_flash_attention(
         for (int64_t row = 0; row < qBlockSize; ++row) {
           sum_old = qk_sum_data[row];
           // scale and max per row
-          _mul_reduce_max_fusion_kernel(qk_data + row * kvBlockSize, static_cast<accum_t>(1), kvBlockSize,
+          _mul_reduce_max_fusion_kernel(qk_data + row * kvBlockSize, scaling_factor, kvBlockSize,
                 qk_data + row * kvBlockSize, tmp_max);
           tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
           // qk <- exp(qk - max) and sum per row
