@@ -36,15 +36,6 @@ from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 log = logging.getLogger(__name__)
 
 
-def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
-    # Will raise if not sound
-    try:
-        f.call_function(tx, sub_args, {})
-    finally:
-        tx.output.graph = graph_checkpoint
-        tx.restore_graphstate(checkpoint)
-
-
 def raise_hard_error_if_graph_break(reason):
     def deco(fn):
         @functools.wraps(fn)
@@ -300,6 +291,7 @@ def speculate_subgraph(
                 output_proxies = pytree.tree_map(
                     subtracer.maybe_lift_tracked_freevar_to_input, output_proxies
                 )
+
                 tx.output.create_node(
                     "output",
                     "output",
@@ -711,8 +703,12 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
-        from .builder import wrap_fx_proxy_cls
+        from . import (
+            ConstantVariable,
+            NestedUserFunctionVariable,
+            TensorVariable,
+            UserFunctionVariable,
+        )
 
         if len(kwargs) > 0:
             unimplemented(
@@ -735,8 +731,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # To get the example output from map() we will need to provide at least one sample to
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
-        first_dim = wrap_fx_proxy_cls(
-            target_cls=TensorVariable, tx=tx, proxy=args[1].as_proxy()[0]
+        first_dim = args[1].call_method(
+            tx, "__getitem__", args=[ConstantVariable.create(0)], kwargs={}
         )
 
         # TODO: Support kwargs
@@ -769,12 +765,11 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         body_node = make_attr(tx, body_name)
         p_args = (
             body_node,
-            1,  # right now we only supports num_mapped = 1
             *(arg.as_proxy() for arg in args[1:]),
             *(arg for arg in body_lifted_freevars.keys()),
         )
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.map_impl, p_args, {}, body_r, body_spec
+            tx, self.value, p_args, {}, body_r, body_spec
         )
 
 
@@ -1228,6 +1223,11 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
                 unimplemented("NYI - New guards discovered in a restoring state")
             # Nothing left to do here
             return None
+
+        # don't add call module to parent graph if speculating forward
+        # return the result directly
+        if self.value.__name__ == "trampoline_autograd_fwd":
+            return body_r
 
         p_args = (
             *(arg.as_proxy() for arg in args),
