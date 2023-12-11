@@ -4309,7 +4309,7 @@ def fn():
         self.assertEqual(exp_out, opt_out)
         self.assertEqual(cnt.frame_count, exp_frame_count)
         self.assertEqual(
-            len(torch._dynamo.eval_frame.guarded_backend_cache.cached_backends),
+            len(torch._dynamo.eval_frame.cached_backends),
             exp_n_cached_backend,
         )
 
@@ -4358,10 +4358,11 @@ def fn():
         def foo(x):
             return x.sin() + x.cos()
 
-        def compile_then_check_exp(*args):
-            self._optimize_then_check_exp(*args)
-            self._optimize_then_check_exp(*args)
-            self._optimize_then_check_exp(*args)
+        def compile_then_check_exp(foo, args, cnt, eager_result, exp_frame_count):
+            for i in range(3):
+                opt_out = torch._dynamo.optimize(backend=cnt)(foo)(*args)
+                self.assertEqual(opt_out, eager_result)
+            self.assertEqual(cnt.frame_count, exp_frame_count)
             thread_success[threading.current_thread()] = True
 
         eager_record_backend = torch._dynamo.testing.EagerAndRecordGraphs()
@@ -4370,7 +4371,6 @@ def fn():
         # Test dynamo recompiles but only caches a single backend for each thread
         eager_result = foo(x)
         # cnt and None
-        exp_n_cached_backend = 2
         exp_frame_count = 1
         threads = []
         thread_success = {}
@@ -4384,7 +4384,6 @@ def fn():
                     cnt,
                     eager_result,
                     exp_frame_count,
-                    exp_n_cached_backend,
                 ),
             )
             threads.append(thread)
@@ -4393,6 +4392,12 @@ def fn():
         # Wait for all threads to finish
         for thread in threads:
             thread.join()
+
+        # Threads are sharing the backend cache. We see two cnt backends and one None backend
+        self.assertEqual(
+            len(torch._dynamo.eval_frame.cached_backends),
+            3,
+        )
 
         self.assertEqual(len(thread_success), len(threads))
 
@@ -7743,6 +7748,62 @@ def ___make_guard_fn():
         # assert no recompile
         self.assertEqual(counter.frame_count, 6)
 
+    def test_str_format_return1(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(img):
+            x = torch.sin(img)
+            y = f"shape {img.shape[-2:]} batch size {img.shape[0]}"
+            return img + x, y
+
+        img1 = torch.randn(1, 1, 8, 8)
+        res, msg = fn(img1)
+        self.assertEqual(msg, "shape torch.Size([8, 8]) batch size 1")
+        self.assertEqual(res, img1 + torch.sin(img1))
+
+    def test_str_format_return2(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(img):
+            x = torch.sin(img)
+            y = "shape {} batch size {y:.2f}".format(img.shape[-2:], y=img.shape[0])
+            return img + x, y
+
+        img1 = torch.randn(1, 1, 8, 8)
+        res, msg = fn(img1)
+        self.assertEqual(msg, "shape torch.Size([8, 8]) batch size 1.00")
+        self.assertEqual(res, img1 + torch.sin(img1))
+
+    def test_str_format_assert1(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(img):
+            x = torch.sin(img)
+            val = x.shape[-2:]
+            torch._assert(len(val) == 2, f"shape {img.shape}")
+            return img + x
+
+        img1 = torch.randn(1, 1, 8, 8)
+        res = fn(img1)
+        self.assertEqual(res, img1 + torch.sin(img1))
+
+    def test_str_format_assert2(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(img):
+            x = torch.sin(img)
+            torch._assert(
+                img.shape[-2] == 8 and img.shape[-1] == 16, f"shape {img.shape}"
+            )
+            return img + x
+
+        img1 = torch.randn(1, 3, 8, 16)
+        res = fn(img1)
+        self.assertEqual(res, img1 + torch.sin(img1))
+        self.assertEqual(cnt.frame_count, 1)
+
+        # trigger a recompile and graph break
+        img2 = torch.randn(1, 3, 8, 15)
+        self.assertRaises(AssertionError, lambda: fn(img2))
+
     def test_tolist_scalar(self):
         def fn(x):
             new_list = []
@@ -8354,6 +8415,19 @@ def ___make_guard_fn():
 
         self.assertEqual(eager, compiled)
         self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_list_iterator_contains(self):
+        def fn(x):
+            it = iter(["my_weight", "not_my_weight"])
+            next(it)
+            if "my_weight" in it:
+                return x + 2
+            return x + 1
+
+        x = torch.zeros(3)
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+
+        self.assertEqual(fn(x), compiled_fn(x))
 
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)

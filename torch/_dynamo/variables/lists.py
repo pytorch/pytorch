@@ -678,6 +678,20 @@ class ListIteratorVariable(VariableTracker):
         tx.replace_all(self, next_iter)
         return self.items[self.index], next_iter
 
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ):
+        if name == "__contains__":
+            assert len(args) == 1
+            assert not kwargs
+            return iter_contains(self.items[self.index :], args[0], tx)
+
+        return super().call_method(tx, name, args, kwargs)
+
     def as_python_constant(self):
         if self.index > 0:
             raise NotImplementedError()

@@ -52,6 +52,9 @@ Pooling functions
 Attention Mechanisms
 -------------------------------
 
+The :mod:`torch.nn.attention.bias` module contains attention_biases that are designed to be used with
+scaled_dot_product_attention.
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
