@@ -5010,7 +5010,7 @@ Args:
         A boolean mask where a value of True indicates that the element *should* take part in attention.
         A float mask of the same type as query, key, value that is added to the attention score.
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-    is_causal (bool): If true, assumes causal attention masking and errors if both attn_mask and is_causal
+    is_causal (bool): If true, assumes upper left causal attention masking and errors if both attn_mask and is_causal
         are set.
     scale (optional float): Scaling factor applied prior to softmax. If None, the default value is set
         to :math:`\frac{1}{\sqrt{E}}`.
@@ -5026,7 +5026,7 @@ Shape legend:
     - :math:`E: \text{Embedding dimension of the query and key}`
     - :math:`Ev: \text{Embedding dimension of the value}`
 
-Examples::
+Examples:
 
     >>> # Optionally use the context manager to ensure one of the fused kernels is run
     >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
@@ -5034,6 +5034,7 @@ Examples::
     >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
     >>>     F.scaled_dot_product_attention(query,key,value)
+
 
 .. _FlashAttention-2\: Faster Attention with Better Parallelism and Work Partitioning:
     https://arxiv.org/abs/2307.08691
