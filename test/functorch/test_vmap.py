@@ -2828,7 +2828,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         res = vmap(foo)(x)
         self.assertEqual(res, x.conj())
 
-    @xfailIfTorchDynamo
     def test_mode_key(self):
         def vmap_f(x):
             return x + torch.randn(())
