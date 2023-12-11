@@ -513,6 +513,19 @@ def is_numpy_float_type(value):
     )
 
 
+def is_function(value):
+    return istype(
+        value,
+        (
+            types.FunctionType,
+            types.MethodType,
+            types.BuiltinFunctionType,
+            types.MethodDescriptorType,
+            types.WrapperDescriptorType,
+        ),
+    )
+
+
 def is_numpy_ndarray(value):
     if not np:
         return False
@@ -581,6 +594,7 @@ class CompilationMetrics:
     backend_compile_time_s: Optional[float]
     fail_reason: Optional[str]
     non_compliant_ops: Set[str]
+    compliant_custom_ops: Set[str]
 
 
 @dataclasses.dataclass
@@ -933,6 +947,9 @@ def product(it):
 def tuple_iterator_getitem(it, index):
     _, (obj,), start = it.__reduce__()
     return obj[start + index]
+
+
+iter_next = next
 
 
 def dict_keys_getitem(d, n):
@@ -2287,11 +2304,14 @@ def get_static_address_type(t):
 
 def is_rng_state_getter_or_setter(value):
     getters = (
+        # The following two functions are not identical, so don't remove anyone!
+        torch._C.Generator.get_state,
         torch.default_generator.get_state,
         torch.get_rng_state,
         torch.cuda.get_rng_state,
     )
     setters = (
+        torch._C.Generator.set_state,
         torch.default_generator.set_state,
         torch.set_rng_state,
         torch.cuda.set_rng_state,
