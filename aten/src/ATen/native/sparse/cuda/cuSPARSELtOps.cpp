@@ -10,7 +10,6 @@
 #include <c10/util/Half.h>
 #include <cusparse.h>
 #include <cstdint>
-#include <iostream>
 
 #if AT_CUSPARSELT_ENABLED()
 
@@ -363,7 +362,21 @@ int _cslt_sparse_mm_search(
 namespace at::native {
 
 at::Tensor _cslt_compress(const Tensor& sparse_input){
-    TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");
+    TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
+}
+
+std::tuple<int, at::Tensor> _cslt_sparse_mm_impl(
+    const Tensor& compressed_A,
+    const Tensor& dense_B,
+    const c10::optional<Tensor>& bias_opt,
+    const c10::optional<Tensor>& alpha_opt,
+    const c10::optional<c10::ScalarType> out_dtype_opt,
+    bool transpose_result,
+    int alg_id,
+    bool search_alg_id
+)
+{
+    TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
 }
 
 at::Tensor _cslt_sparse_mm(
@@ -375,7 +388,7 @@ at::Tensor _cslt_sparse_mm(
     bool transpose_result,
     long alg_id)
 {
-    TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");
+    TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
 }
 
 int _cslt_sparse_mm_search(
@@ -387,7 +400,7 @@ int _cslt_sparse_mm_search(
     bool transpose_result
 )
 {
-    TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");
+    TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
 }
 
 } // namespace at::native
