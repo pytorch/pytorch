@@ -17,6 +17,7 @@ from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    canonicalize,
     deserialize,
     serialize,
     SerializeError,
@@ -184,6 +185,22 @@ class TestSerialize(TestCase):
         self.assertEqual(node.inputs[2].arg.as_bool, True)
         self.assertEqual(node.inputs[3].name, "side")
         self.assertEqual(node.inputs[3].arg.as_string, "right")
+
+    def test_canonicalize(self) -> None:
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                a = y + x
+                b = x + y
+                return b + a
+
+        ep = torch.export.export(Module(), (torch.randn(3, 2), torch.randn(3, 2)))
+        s = ExportedProgramSerializer().serialize(ep)
+        c = canonicalize(s.exported_program)
+        g = c.graph_module.graph
+        self.assertLess(
+            g.nodes[0].inputs[0].arg.as_tensor.name,
+            g.nodes[1].inputs[0].arg.as_tensor.name
+        )
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
