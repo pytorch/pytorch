@@ -211,9 +211,7 @@ class CachingAutotuner(KernelInterface):
                 and self.size_hints is not None
                 # Disable for AMDGPU as Triton is not ready to return n_regs for a compiled_binary.
                 and torch.version.hip is None
-                # TODO not enable for H100 yet since we haven't got a chance to test this
-                # on H100. Will remove this check once we test on H100
-                and device_prop.major == 8
+                and device_prop.major >= 8
             ):
                 for triton_config, compiled_binary in zip(
                     self.configs, compiled_binaries
