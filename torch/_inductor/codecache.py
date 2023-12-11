@@ -1612,12 +1612,20 @@ class AotCodeCache:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> str:
-        picked_vec_isa = pick_vec_isa()
+        from torch._inductor.cxx_builder.cxx_builder import (
+            CxxBuilder,
+            CxxTorchCudaOptions,
+        )
+
+        """
         cpp_command = repr(
             cpp_compile_command(
                 "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
             )
         )
+        """
+        isa_seed = CxxBuilder("i", ["o"], CxxTorchCudaOptions(aot_mode=graph.aot_mode))
+
         fbcode_aot_cpu_re = False
         use_absolute_path = False
         if config.is_fbcode():
@@ -1639,7 +1647,7 @@ class AotCodeCache:
         key, input_path = write(
             source_code,
             "cpp",
-            extra=cpp_command,
+            extra=isa_seed.get_command_line(),
             specified_dir=specified_output_path,
         )
 
@@ -1668,6 +1676,7 @@ class AotCodeCache:
                 )
 
                 if not os.path.exists(output_so):
+                    """
                     output_o = os.path.splitext(input_path)[0] + ".o"
                     cmd = cpp_compile_command(
                         input=input_path,
@@ -1678,9 +1687,19 @@ class AotCodeCache:
                         compile_only=True,
                         use_absolute_path=use_absolute_path,
                     )
+                    """
+                    output_dir = os.path.dirname(input_path)
+                    builder = CxxBuilder(
+                        key,
+                        [input_path],
+                        CxxTorchCudaOptions(aot_mode=graph.aot_mode),
+                        output_dir,
+                    )
+                    cmd = builder.get_command_line()
                     log.debug("aot compilation command: %s", cmd)
                     if fbcode_aot_cpu_re:
-                        compile_file(input_path, output_o, cmd.split())
+                        # compile_file(input_path, output_o, cmd.split())
+                        status, output_o = builder.build()
                         os.chmod(output_o, 0o644)
                     else:
                         run_command_and_check(cmd)
@@ -1754,6 +1773,7 @@ class AotCodeCache:
                     for cmd in symbol_list:
                         run_command_and_check(cmd)
 
+                    """
                     cmd = cpp_compile_command(
                         input=[output_o, consts_o],
                         output=output_so,
@@ -1762,9 +1782,19 @@ class AotCodeCache:
                         aot_mode=graph.aot_mode,
                         use_absolute_path=use_absolute_path,
                     )
+                    """
+                    output_dir = os.path.dirname(input_path)
+                    builder = CxxBuilder(
+                        key,
+                        [output_o, consts_o],
+                        CxxTorchCudaOptions(aot_mode=graph.aot_mode),
+                        output_dir,
+                    )
+                    cmd = builder.get_command_line()
                     log.debug("aot linkage command: %s", cmd)
                     if fbcode_aot_cpu_re:
-                        compile_file([output_o, consts_o], output_so, cmd.split())
+                        # compile_file([output_o, consts_o], output_so, cmd.split())
+                        status, output_so = builder.build()
                         os.chmod(output_so, 0o755)
                     else:
                         run_command_and_check(cmd)
@@ -1905,32 +1935,12 @@ class CppCodeCache:
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
                 output_dir = os.path.dirname(input_path)
-
-                # print(f"!!! {key}, {input_path}, {output_dir}")
-
                 builder = CxxBuilder(
                     key, [input_path], CxxTorchOptions(picked_vec_isa), output_dir
                 )
                 target_file = builder.get_target_file_path()
                 if not os.path.exists(target_file):
-                    if is_clang():
-                        print(
-                            f"!!!! clang: fb -> {config.is_fbcode()}, CppCodeCache --> cmd: ",
-                            builder.get_command_line(),
-                        )
                     status, target_file = builder.build()
-                    # raise RuntimeError("Debug here.")
-
-                """
-                output_path = input_path[:-3] + "so"
-                if not os.path.exists(output_path):
-                    cmd = shlex.split(
-                        cpp_compile_command(
-                            input=input_path, output=output_path, vec_isa=picked_vec_isa
-                        )
-                    )
-                    compile_file(input_path, output_path, cmd)
-                """
                 cls.cache[key] = cls._load_library(target_file)
                 cls.cache[key].key = key  # type: ignore[attr-defined]
 
