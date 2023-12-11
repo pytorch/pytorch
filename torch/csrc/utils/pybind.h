@@ -324,11 +324,6 @@ struct type_caster<c10::complex<T>> {
   }
 };
 
-// Pybind11 bindings for our optional.
-// http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
-template <typename T>
-struct type_caster<c10::optional<T>> : optional_caster<c10::optional<T>> {};
-
 } // namespace detail
 } // namespace pybind11
 

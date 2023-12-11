@@ -83,6 +83,7 @@ Features described in this documentation are classified by release status:
    torch.func <func>
    futures
    fx
+   holistic_trace_analysis
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>

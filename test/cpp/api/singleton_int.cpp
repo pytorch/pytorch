@@ -122,5 +122,5 @@ TEST(SingletonIntTest, AccessToTensor) {
   auto p = dynamic_cast<c10::SingletonSymNodeImpl*>(a.toSymNode().get());
   ASSERT_TRUE(p != nullptr);
 
-  ASSERT_TRUE(torch::allclose(p->singleton_values(), x));
+  ASSERT_TRUE(torch::allclose(p->singleton_data(), x));
 }
