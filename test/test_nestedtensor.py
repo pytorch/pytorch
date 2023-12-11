@@ -3535,7 +3535,7 @@ class TestNestedTensorSubclass(NestedTestCase):
         check_forward_backward()
 
         # Test dispatcher works by calling only mem-effn and math (as they are safe for all devices)
-        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=False):
+        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=True, enable_math=False):
             check_forward_backward()
 
         # Will fail bc unsupported ops
