@@ -211,8 +211,6 @@
       TEST_CONFIG: << parameters.test-config >>
       SHARD_NUMBER: << parameters.shard-number >>
       NUM_TEST_SHARDS: << parameters.num-test-shards >>
-      PYTORCH_RETRY_TEST_CASES: 1
-      PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
     steps:
       - checkout
       - attach_workspace:

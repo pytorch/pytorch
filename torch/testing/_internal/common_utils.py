@@ -192,10 +192,6 @@ TestEnvironment.def_flag("IS_FBCODE", env_var="PYTORCH_TEST_FBCODE",
 TestEnvironment.def_flag("IS_REMOTE_GPU", env_var="PYTORCH_TEST_REMOTE_GPU",
                          include_in_repro=False)
 
-TestEnvironment.def_flag("RETRY_TEST_CASES", env_var="PYTORCH_RETRY_TEST_CASES",
-                         include_in_repro=False)
-TestEnvironment.def_flag("OVERRIDE_FLAKY_SIGNAL", env_var="PYTORCH_OVERRIDE_FLAKY_SIGNAL",
-                         include_in_repro=False)
 TestEnvironment.def_flag(
     "DISABLE_RUNNING_SCRIPT_CHK",
     env_var="PYTORCH_DISABLE_RUNNING_SCRIPT_CHK",
@@ -793,8 +789,6 @@ else:
     GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
 
 RERUN_DISABLED_TESTS = args.rerun_disabled_tests
-# Rerun disabled tests many more times to make sure that they are not flaky anymore
-MAX_NUM_RETRIES = 3 if not RERUN_DISABLED_TESTS else 50
 
 SLOW_TESTS_FILE = args.import_slow_tests
 DISABLED_TESTS_FILE = args.import_disabled_tests
@@ -2668,63 +2662,8 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
-    # Recursive function that incorporates retry logic when PYTORCH_RETRY_TEST_CASES=1 and enables early test
-    # termination. [DISCLAIMER: ONLY WORKS WITH UNITTEST]
-    # When report_only is True, flaky tests are only reported, but the signal remains the same (the test will still
-    # show up red).
-    # Otherwise, the flaky test will show up green while its stats are captured by test reports.
-    def _run_with_retry(self, result=None, num_runs_left=0, report_only=True, num_red=0, num_green=0):
+    def _run_custom(self, result=None):
         using_unittest = isinstance(result, unittest.TestResult)
-        if num_runs_left == 0:
-            # The logic when RERUN_DISABLED_TESTS is set to true is as follows:
-            # |-if the disabled test passes:
-            # |-- if it's flaky:
-            # |---  Do nothing because it's still flaky
-            # |-- elif it isn't flaky anymore:
-            # |---  Close the disabled ticket (later)
-            # |
-            # |- elif the disabled test fails after n retries:
-            # |--  This is expected, report this but don't fail the job
-            skipped_msg = {
-                "num_red": num_red,
-                "num_green": num_green,
-                "max_num_retries": MAX_NUM_RETRIES,
-                "rerun_disabled_test": RERUN_DISABLED_TESTS,
-            }
-
-            traceback_str = ""
-            if RERUN_DISABLED_TESTS and using_unittest:
-                # Hide all failures and errors when RERUN_DISABLED_TESTS is enabled. This is
-                # a verification check, we don't want more red signals coming from it
-                if result.failures:
-                    _, traceback_str = result.failures.pop(-1)
-                if result.errors:
-                    _, traceback_str = result.errors.pop(-1)
-
-                if traceback_str:
-                    skipped_msg["traceback_str"] = traceback_str
-
-                if num_green == 0:
-                    # The disabled test fails, report as skipped but don't fail the job
-                    result.addSkip(self, json.dumps(skipped_msg))
-
-                if num_red == 0:
-                    # The test passes after re-running multiple times. This acts as a signal
-                    # to confirm that it's not flaky anymore
-                    result.addSuccess(self)
-
-            if num_green > 0 and num_red > 0 and using_unittest:
-                skipped_msg["flaky"] = True
-                # Still flaky, do nothing
-                result.addSkip(self, json.dumps(skipped_msg))
-
-            return
-
-        if using_unittest:
-            # Keep track of the number of tests marked as failures, errors, and skipped before starting
-            failures_before = 0 if result is None else len(result.failures)
-            errors_before = 0 if result is None else len(result.errors)
-            skipped_before = 0 if result is None else len(result.skipped)
 
         super_run = super().run
         test_cls = super_run.__self__
@@ -2759,8 +2698,8 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if strict_mode:
             torch._dynamo.reset()
 
-        # Early terminate test if necessary.
-        if self._should_stop_test_suite():
+        # Early terminate test if necessary.  If using pytest, use the -x flag instead
+        if using_unittest and self._should_stop_test_suite():
             if result.wasSuccessful():
                 case = TestCase()
                 if TEST_SAVE_XML is not None:
@@ -2777,63 +2716,14 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 assert result.wasSuccessful() is False
             result.stop()
 
-        if not RETRY_TEST_CASES or not using_unittest:
-            return
-
-        err = sys.exc_info()
-        num_retries_left = num_runs_left - 1
-        if failures_before < len(result.failures):
-            print(f"    {self._testMethodName} failed - num_retries_left: {num_retries_left}")
-            if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
-                _, traceback_str = result.failures.pop(-1)
-                print(traceback_str)
-                result.addExpectedFailure(self, err)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
-                                 num_red=num_red + 1, num_green=num_green)
-        elif errors_before < len(result.errors):
-            print(f"    {self._testMethodName} errored - num_retries_left: {num_retries_left}")
-            if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
-                _, traceback_str = result.errors.pop(-1)
-                print(traceback_str)
-                result.addExpectedFailure(self, err)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
-                                 num_red=num_red + 1, num_green=num_green)
-        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and skipped_before == len(result.skipped):
-            # Always re-run up to MAX_NUM_RETRIES when running under rerun disabled tests modes if the test successes.
-            # The parameter num_retries_left can be equal to MAX_NUM_RETRIES here because num_runs_left is initially
-            # set to MAX_NUM_RETRIES + 1, i.e. the first run successes
-            #
-            # Also if the result is skipped, this is due to check_if_enable skipping non-disabled tests, thus we
-            # want to ignore them, not retrying and skipping multiple times
-            print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
-            result.addSuccess(self)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
-                                 num_red=num_red, num_green=num_green + 1)
-        elif report_only and num_retries_left < MAX_NUM_RETRIES:
-            # The original logic here is that num_retries_left must be smaller than MAX_NUM_RETRIES indicating
-            # that at least one retry has been spent
-            print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
-            result.addUnexpectedSuccess(self)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
-                                 num_red=num_red, num_green=num_green + 1)
-        elif not report_only and num_retries_left < MAX_NUM_RETRIES:
-            # in this case, our test was rerun (as a retry has been used) and it just passed.
-            # we incur one more recursive call with num_runs_left = 0 to allow for accurate flaky reporting
-            self._run_with_retry(result=result, num_runs_left=0, report_only=report_only,
-                                 num_red=num_red, num_green=num_green + 1)
-
 
     def run(self, result=None):
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:
                 stack.enter_context(CrossRefMode())
-            num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
-            self._run_with_retry(
+            self._run_custom(
                 result=result,
-                num_runs_left=num_runs,
-                report_only=not OVERRIDE_FLAKY_SIGNAL,
-                num_red=0,
-                num_green=0)
+            )
 
     def setUp(self):
         check_if_enable(self)
