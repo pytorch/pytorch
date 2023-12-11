@@ -33,7 +33,8 @@ class InlineStreamGuard : private InlineDeviceGuard<T> {
   /// This constructor exists purely for testing
   template <
       typename U = T,
-      typename = typename std::enable_if_t<std::is_same_v<U, VirtualGuardImpl>>>
+      typename = typename std::enable_if<
+          std::is_same<U, VirtualGuardImpl>::value>::type>
   explicit InlineStreamGuard(
       Stream stream,
       const DeviceGuardImplInterface* impl)
@@ -221,11 +222,9 @@ class InlineMultiStreamGuard {
   InlineMultiStreamGuard(InlineMultiStreamGuard&& other) = delete;
   InlineMultiStreamGuard& operator=(InlineMultiStreamGuard&& other) = delete;
 
-  ~InlineMultiStreamGuard() noexcept {
-    if (this->impl_.has_value()) {
-      for (const Stream& s : original_streams_) {
-        this->impl_->exchangeStream(s);
-      }
+  ~InlineMultiStreamGuard() {
+    for (const Stream& s : original_streams_) {
+      this->impl_->exchangeStream(s);
     }
   }
 

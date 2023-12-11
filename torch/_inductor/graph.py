@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import operator
 import os
@@ -592,11 +593,9 @@ class GraphLowering(torch.fx.Interpreter):
                 name = f"{prefix}_{cnt}"
                 cnt += 1
             self.constants[name] = data
-            self.constant_reprs[name] = (
-                f"{data.device!r} {data.dtype!r} "
-                f"{tuple(data.size())!r} {tuple(data.stride())!r} "
-                f"{hash(data):x}"
-            )
+            self.constant_reprs[name] = hashlib.sha256(
+                repr(data).encode("utf-8")
+            ).hexdigest()
             return name
 
         name = allocate(name)
