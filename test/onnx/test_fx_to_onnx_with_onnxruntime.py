@@ -136,6 +136,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (tensor_x,), input_kwargs={"b": torch.tensor(5.0)}
         )
 
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "torch._export.verifier.SpecViolationError: Operator '<built-in function pow>' is not an allowed operator type:"
+        "(<class 'torch._ops.OpOverload'>, <class 'torch._ops.HigherOrderOperator'>)"
+        "Valid builtin ops: [<built-in function getitem>, <built-in function add>, <built-in function mul>,"
+        "<built-in function sub>, <built-in function truediv>, <built-in function ge>, <built-in function le>,"
+        "<built-in function gt>, <built-in function lt>, <built-in function eq>, <built-in function ne>,"
+        "<built-in function floordiv>, <built-in function mod>, <built-in function and_>, <built-in function or_>,"
+        "<built-in function not_>]"
+        " Github issue: https://github.com/pytorch/pytorch/issues/113778"
+    )
     @pytorch_test_common.skip_dynamic_fx_test(
         "sympy operation tests don't need dynamic shape"
     )
@@ -545,6 +555,24 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             (x,),
             additional_test_inputs=[((x2,),)],
         )
+
+    def test__scaled_dot_product_flash_attention(self):
+        def func(x):
+            (
+                output,
+                _,
+                _,
+                _,
+                _,
+                _,
+                _,
+                _,
+                _,
+            ) = torch.ops.aten._scaled_dot_product_flash_attention(x, x, x)
+            return output
+
+        x = torch.randn(1, 1, 1, 32)
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (x,))
 
     # NOTE:The test was meant to test the empty bounding box case, but it is not
     # supported. When we have vision model examples, we will have a better test case
