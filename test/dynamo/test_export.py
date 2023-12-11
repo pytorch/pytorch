@@ -2244,9 +2244,8 @@ def forward(self, x):
             return Tensors(x=x.sin(), y=y.cos())
 
         with self.assertRaisesRegex(
-            AssertionError,
-            "original output #1 is .*Tensors.*, "
-            "but only the following types are supported",
+            torch._dynamo.exc.Unsupported,
+            "reconstruct: UserDefinedObjectVariable",
         ):
             torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
 
@@ -2399,7 +2398,7 @@ def forward(self, x):
 
         example_inputs = (copy(x), y)
         ep = torch._export._export(foo, example_inputs, constraints=constraints)
-        with self.assertRaisesRegex(RuntimeError, "Input.*shape.*specialized at 2"):
+        with self.assertRaisesRegex(RuntimeError, "input.*shape.*to be equal to 2"):
             ep(torch.randn(3), y)
 
         dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y")
