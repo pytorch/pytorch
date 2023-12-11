@@ -4,6 +4,7 @@ with test_functionalization_with_native_python_assertion)
 """
 
 # Owner(s): ["module: dynamo"]
+import math
 import unittest
 from typing import List, Set
 import operator
