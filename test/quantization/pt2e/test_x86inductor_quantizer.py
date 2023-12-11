@@ -42,11 +42,11 @@ class TestHelperModules:
                 x = self.bn(x)
             return x
 
-    class Conv2dReLUModule(torch.nn.Module):
-        def __init__(self, inplace_relu: bool = False, use_bias: bool = False, with_bn=False) -> None:
+    class Conv2dUnaryModule(torch.nn.Module):
+        def __init__(self, post_op, use_bias: bool = False, with_bn=False) -> None:
             super().__init__()
             self.conv = nn.Conv2d(3, 6, (2, 2), stride=(1, 1), padding=(1, 1), bias=use_bias)
-            self.relu = nn.ReLU(inplace=inplace_relu)
+            self.post_op = post_op
             self.bn = torch.nn.BatchNorm2d(6)
             self.with_bn = with_bn
 
@@ -54,7 +54,7 @@ class TestHelperModules:
             x = self.conv(x)
             if self.with_bn:
                 x = self.bn(x)
-            x = self.relu(x)
+            x = self.post_op(x)
             return x
 
     class Conv2dAddModule(torch.nn.Module):
@@ -358,14 +358,20 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_conv2d_unary(self):
         """
-        Test pattern of conv2d with unary post ops (such as relu, sigmoid) with X86InductorQuantizer.
-        Currently, only relu as unary post op is supported.
+        Test pattern of conv2d with unary post ops (such as relu, hardtanh, relu6) with X86InductorQuantizer.
         """
-        inplace_relu_list = [True, False]
+        unary_map = {
+            "relu": [torch.nn.ReLU(inplace=False), torch.ops.aten.relu.default],
+            "relu_inplace": [torch.nn.ReLU(inplace=True), torch.ops.aten.relu_.default],
+            "hardtanh": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False), torch.ops.aten.hardtanh.default],
+            "hardtanh_inplace": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True), torch.ops.aten.hardtanh_.default],
+            "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
+            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default]
+        }
         use_bias_list = [True, False]
         with override_quantized_engine("x86"), torch.no_grad():
-            for inplace_relu, use_bias in itertools.product(inplace_relu_list, use_bias_list):
-                m = TestHelperModules.Conv2dReLUModule(inplace_relu=inplace_relu, use_bias=use_bias).eval()
+            for unary_op, use_bias in itertools.product(unary_map.keys(), use_bias_list):
+                m = TestHelperModules.Conv2dUnaryModule(unary_map[unary_op][0], use_bias=use_bias).eval()
                 example_inputs = (torch.randn(2, 3, 16, 16),)
                 quantizer = X86InductorQuantizer().set_global(
                     xiq.get_default_x86_inductor_quantization_config()
@@ -382,7 +388,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
-                    torch.ops.aten.relu_.default if inplace_relu else torch.ops.aten.relu.default,
+                    unary_map[unary_op][1],
                 ]
                 self._test_quantizer(
                     m,
@@ -1026,10 +1032,18 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Test QAT pattern of conv2d_bn with unary post ops (such as relu, sigmoid) with X86InductorQuantizer.
         Currently, only relu as unary post op is supported.
         """
-        inplace_relu_list = [True, False]
+        unary_map = {
+            "relu": [torch.nn.ReLU(inplace=False), torch.ops.aten.relu.default],
+            "relu_inplace": [torch.nn.ReLU(inplace=True), torch.ops.aten.relu_.default],
+            "hardtanh": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False), torch.ops.aten.hardtanh.default],
+            "hardtanh_inplace": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True), torch.ops.aten.hardtanh_.default],
+            "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
+            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default]
+        }
+
         with override_quantized_engine("x86"):
-            for inplace_relu in itertools.product(inplace_relu_list):
-                m = TestHelperModules.Conv2dReLUModule(inplace_relu=inplace_relu, with_bn=True)
+            for unary_op in unary_map.keys():
+                m = TestHelperModules.Conv2dUnaryModule(unary_map[unary_op][0], with_bn=True)
                 example_inputs = (torch.randn(2, 3, 16, 16),)
                 quantizer = X86InductorQuantizer().set_global(
                     xiq.get_default_x86_inductor_quantization_config(is_qat=True)
@@ -1048,7 +1062,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
-                    torch.ops.aten.relu_.default if inplace_relu else torch.ops.aten.relu.default,
+                    unary_map[unary_op][1],
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]
