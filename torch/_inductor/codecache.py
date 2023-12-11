@@ -1624,7 +1624,9 @@ class AotCodeCache:
             )
         )
         """
-        isa_seed = CxxBuilder("i", ["o"], CxxTorchCudaOptions(aot_mode=graph.aot_mode))
+        isa_seed = CxxBuilder(
+            "i", ["o"], CxxTorchCudaOptions(aot_mode=graph.aot_mode), compile_only=True
+        )
 
         fbcode_aot_cpu_re = False
         use_absolute_path = False
@@ -1694,6 +1696,7 @@ class AotCodeCache:
                         [input_path],
                         CxxTorchCudaOptions(aot_mode=graph.aot_mode),
                         output_dir,
+                        compile_only=True,
                     )
                     cmd = builder.get_command_line()
                     log.debug("aot compilation command: %s", cmd)
