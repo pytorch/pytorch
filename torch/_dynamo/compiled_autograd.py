@@ -21,9 +21,11 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.proxy import Proxy
+from torch._functorch.aot_autograd import AOT_COUNTER
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 
+COMPILED_AUTOGRAD_ID = 0
 
 def maybe_clone(x):
     if x is not None:
@@ -55,6 +57,7 @@ class AutogradCompilerInstance:
         return GetItemSource(LocalSource(name), idx)
 
     def begin_capture(self, inputs: List[torch.Tensor], sizes: List[int]):
+        COMPILED_AUTOGRAD_ID = next(AOT_COUNTER)
         counters["compiled_autograd"]["captures"] += 1
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
