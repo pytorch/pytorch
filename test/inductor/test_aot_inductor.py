@@ -9,17 +9,15 @@ from typing import Dict
 import torch
 import torch._export
 import torch._inductor
-import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
-from torch._inductor.utils import aot_inductor_launcher, cache_dir
+from torch._inductor.utils import cache_dir
 
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_quantization import skip_if_no_torchvision
-
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
@@ -50,115 +48,15 @@ if IS_WINDOWS and IS_CI:
 
 try:
     try:
+        from .test_aot_inductor_utils import AOTInductorModelRunner
         from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
     except ImportError:
+        from test_aot_inductor_utils import AOTInductorModelRunner
         from test_torchinductor import copy_tests, requires_multigpu, TestFailure
 except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
     raise
-
-
-class AOTInductorModelRunner:
-    @classmethod
-    def compile(
-        cls,
-        model,
-        example_inputs,
-        options=None,
-        constraints=None,
-        disable_constraint_solver=False,
-    ):
-        # The exact API is subject to change
-        so_path = torch._export.aot_compile(
-            model,
-            example_inputs,
-            options=options,
-            constraints=constraints,
-            remove_runtime_assertions=True,
-            disable_constraint_solver=disable_constraint_solver,
-        )
-        return so_path
-
-    @classmethod
-    def load(cls, device, so_path, example_inputs):
-        if IS_FBCODE:
-            from .fb import test_aot_inductor_model_runner_pybind
-
-            module = test_aot_inductor_model_runner_pybind.Runner(
-                so_path, device == "cpu"
-            )
-
-            call_spec = module.get_call_spec()
-            in_spec = pytree.treespec_loads(call_spec[0])
-            out_spec = pytree.treespec_loads(call_spec[1])
-
-            def optimized(*args):
-                flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
-                flat_outputs = module.run(flat_inputs)
-                return pytree.tree_unflatten(flat_outputs, out_spec)
-
-        else:
-            module = torch.utils.cpp_extension.load_inline(
-                name="aot_inductor",
-                cpp_sources=[aot_inductor_launcher(so_path, device)],
-                # use a unique build directory to avoid test interference
-                build_directory=tempfile.mkdtemp(dir=cache_dir()),
-                functions=["run", "get_call_spec"],
-                with_cuda=(device == "cuda"),
-            )
-
-            call_spec = module.get_call_spec()
-            in_spec = pytree.treespec_loads(call_spec[0])
-            out_spec = pytree.treespec_loads(call_spec[1])
-
-            def optimized(*args):
-                flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
-                flat_outputs = module.run(flat_inputs)
-                return pytree.tree_unflatten(flat_outputs, out_spec)
-
-        return optimized
-
-    @classmethod
-    def run(
-        cls,
-        device,
-        model,
-        example_inputs,
-        options=None,
-        constraints=None,
-        disable_constraint_solver=False,
-    ):
-        so_path = AOTInductorModelRunner.compile(
-            model,
-            example_inputs,
-            options=options,
-            constraints=constraints,
-            disable_constraint_solver=disable_constraint_solver,
-        )
-        optimized = AOTInductorModelRunner.load(device, so_path, example_inputs)
-        return optimized(example_inputs)
-
-    @classmethod
-    def run_multiple(
-        cls,
-        device,
-        model,
-        list_example_inputs,
-        options=None,
-        constraints=None,
-    ):
-        so_path = AOTInductorModelRunner.compile(
-            model,
-            list_example_inputs[0],
-            options=options,
-            constraints=constraints,
-        )
-        optimized = AOTInductorModelRunner.load(device, so_path, list_example_inputs[0])
-        list_output_tensors = []
-        for example_inputs in list_example_inputs:
-            list_output_tensors.append(optimized(example_inputs))
-        return list_output_tensors
 
 
 def check_model(
@@ -1465,6 +1363,38 @@ class AOTInductorTestsTemplate:
         inputs = (torch.rand(4, 4, 4, 4, device=self.device),)
         self.check_model(Model(4), inputs)
 
+    def test_no_args(self):
+        class Model(torch.nn.Module):
+            def __init__(self, m, n):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    torch.randn(m, n),
+                )
+                self.alpha = torch.nn.Parameter(torch.randn(m, n))
+
+            def forward(self):
+                return self.weight * self.alpha
+
+        self.check_model(Model(6, 4), ())
+
+    def test_dynamic_scalar(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.criterion_ce = torch.nn.CrossEntropyLoss(reduction="none")
+
+            def forward(self, inputs, targets, split_index=None):
+                statistics = {}
+                total_loss = self.criterion_ce(inputs, targets).sum()
+                statistics["dl"] = total_loss.item()
+                return total_loss, statistics
+
+        inputs = (
+            torch.rand(4, 4, 4, 4, device=self.device),
+            torch.rand(4, 4, 4, 4, device=self.device),
+        )
+        self.check_model(Model(), inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1476,35 +1406,45 @@ class AOTInductorTestABICompatibleCpu(TestCase):
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
 
 
+def fail_with_and_without_stack_allocation(is_skip=False):
+    return TestFailure(
+        ("abi_compatible_cpu", "abi_compatible_cpu_with_stack_allocation"),
+        is_skip=is_skip,
+    )
+
+
+# test_failures, xfail by default, set is_skip=True to skip
+CPU_TEST_FAILURES = {
+    "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
+    "test_dynamic_cat": fail_with_and_without_stack_allocation(),
+    "test_dynamic_scalar": fail_with_and_without_stack_allocation(),
+    "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
+    "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
+    #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
+    "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    # FIXME: failed with Segfault while exiting the Python runtime
+    "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_normal_functional": fail_with_and_without_stack_allocation(),
+    "test_poi_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    # There is a double-free issue which will be fixed in another PR
+    "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
+    # the test segfaults
+    "test_scatter_fallback": fail_with_and_without_stack_allocation(is_skip=True),
+    # error: could not find s0
+    "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
+    "test_simple_dynamic": fail_with_and_without_stack_allocation(),
+}
+
 copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleCpu,
     "abi_compatible_cpu",
-    # test_failures, xfail by default, set is_skip=True to skip
-    {
-        "test_addmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        "test_bmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        "test_dynamic_cat": TestFailure(("abi_compatible_cpu",)),
-        "test_dynamic_smem_above_default_limit": TestFailure(("abi_compatible_cpu",)),
-        "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cpu",)),
-        "test_foreach_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
-        #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
-        "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
-        # FIXME: failed with Segfault while exiting the Python runtime
-        "test_missing_cubin": TestFailure(("abi_compatible_cpu",), is_skip=True),
-        "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
-        "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        # There is a double-free issue which will be fixed in another PR
-        "test_repeat_output": TestFailure(("abi_compatible_cpu",), is_skip=True),
-        "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        # error: could not find s0
-        "test_shifted_constraint_ranges": TestFailure(
-            ("abi_compatible_cpu",), is_skip=True
-        ),
-        # the test segfaults
-        "test_scatter_fallback": TestFailure(("abi_compatible_cpu",), is_skip=True),
-    },
+    CPU_TEST_FAILURES,
 )
 
 
@@ -1522,6 +1462,8 @@ copy_tests(
     # test_failures, xfail by default, set is_skip=True to skip
     {
         "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
+        # will add .item support later
+        "test_dynamic_scalar": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
         # There is a double-free issue which will be fixed in another PR
         "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),

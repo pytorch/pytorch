@@ -4325,10 +4325,8 @@ class DeviceCopy(ExternKernelOut):
         ):
             return x.constant_to_device(device)
 
-        V.graph.device_types.add(device.type)
-        V.graph.add_device_idx(device.index)
-        V.graph.device_types.add(x.get_device().type)
-        V.graph.add_device_idx(x.get_device().index)
+        V.graph.add_device_info(device)
+        V.graph.add_device_info(x.get_device())
 
         developer_warning("DeviceCopy in input program")
         return DeviceCopy(
@@ -4383,14 +4381,7 @@ class DynamicScalar(ExternKernel):
         return {self.sym}
 
     def codegen(self, wrapper):
-        (data,) = (t.codegen_reference() for t in self.inputs)
-        if self.is_bool:
-            wrapper.writeline(f"{self.sym} = 1 if {data}.item() else 0")
-        else:
-            wrapper.writeline(f"{self.sym} = {data}.item()")
-        # No one should ever use this buffer, but for uniformity
-        # define the variable and assign it None
-        wrapper.writeline(f"{self.get_name()} = None")
+        wrapper.codegen_dynamic_scalar(self)
 
 
 @dataclasses.dataclass
@@ -5005,6 +4996,7 @@ def _prepare_convolution_fusion_create(
     if bias is not None:
         bias.realize()
     with V.graph.fake_mode:
+        # TODO <Leslie> cleaned up the fake_tensor trace as Linear implementation
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
         dims = len(x_fake.size()) - 2
@@ -5092,37 +5084,25 @@ def _prepare_linear_fusion_create(
     weight.realize()
     if bias is not None:
         bias.realize()
-    with V.graph.fake_mode:
-        x_fake = ir_node_to_tensor(x, guard_shape=True)
-        weight_fake = ir_node_to_tensor(weight, guard_shape=True)
-        bias_fake = (
-            ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
-        )
-        if bias is not None:
-            output = torch.ops.aten.addmm.default(
-                bias_fake,
-                x_fake,
-                weight_fake,
-            )
-        else:
-            output = torch.ops.aten.mm.default(
-                x_fake,
-                weight_fake,
-            )
-        output_size = output.size()
 
-        req_stride_order = [1, 0]
-        output_stride = make_contiguous_strides_for(output_size)
+    *m, _ = x.get_size()
+    # The weight has been transposed during the qlinear weight prepack process.
+    # https://github.com/pytorch/pytorch/blob/4979f9c0d72490970e2019bb1d2284f83d93f76b/
+    # aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp#L291
+    _, oc = weight.get_size()
+    output_size = list(m) + [oc]
+    req_stride_order = list(reversed(range(len(x.get_size()))))
 
     x = cls.require_stride_order(x, req_stride_order)
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
 
+    output_stride = make_contiguous_strides_for(output_size)
     kernel_layout = FixedLayout(
         x.get_device(),
         x.get_dtype(),
-        convert_shape_to_inductor(output_size),
-        convert_shape_to_inductor(output_stride),
+        output_size,
+        output_stride,
     )
     constant_args: List[Any] = []
 
@@ -6687,10 +6667,6 @@ class LoopBodyBlock:
             def output(result):
                 tracer.create_proxy("output", "output", (result,), {})
 
-            @staticmethod
-            def placeholder(name):
-                return tracer.create_proxy("placeholder", name, (), {})
-
         tracer = torch.fx.Tracer()
         tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
         proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
@@ -6769,6 +6745,10 @@ class Wait(ExternKernelAlloc):
 
     def get_alias_names(self):
         # Signal to codegen that our output buffer isn't safe to reuse
+        return [self.inputs[0].codegen_reference()]
+
+    def get_mutation_names(self):
+        # The generated `_wait_tensor` op mutates the input tensor
         return [self.inputs[0].codegen_reference()]
 
 
