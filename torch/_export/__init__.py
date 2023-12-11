@@ -6,7 +6,7 @@ import json
 import pathlib
 import re
 import sys
-
+import os
 import types
 import warnings
 import weakref
@@ -81,7 +81,7 @@ from .passes.replace_view_ops_with_view_copy_ops_pass import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
 from .wrappers import _wrap_submodules
-
+from torch._inductor import config
 
 def _process_dynamic_shapes(
     f: Callable,
@@ -1138,15 +1138,18 @@ def aot_compile(
     if constraints is None:
         constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
 
-    # We want to export to Torch IR here to utilize the pre_grad passes in
-    # inductor, which run on Torch IR.
-    gm = _export_to_torch_ir(
-        f,
-        args,
-        kwargs,
-        constraints,
-        disable_constraint_solver=disable_constraint_solver
-    )
+    if config.is_predispatch:
+        gm = capture_pre_autograd_graph(f, args, kwargs, constraints)
+    else:
+        # We want to export to Torch IR here to utilize the pre_grad passes in
+        # inductor, which run on Torch IR.
+        gm = _export_to_torch_ir(
+            f,
+            args,
+            kwargs,
+            constraints,
+            disable_constraint_solver=disable_constraint_solver
+        )
     flat_example_inputs = pytree.arg_tree_leaves(*args, **(kwargs or {}))
 
     with torch.no_grad():
