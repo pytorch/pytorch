@@ -7,7 +7,8 @@ import torch
 from torch import nn
 
 from torch.sparse.semi_structured import (
-    _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG,
+    _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG_CUTLASS,
+    _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG_CUSPARSELT,
     SparseSemiStructuredTensor,
     to_sparse_semi_structured,
 )
@@ -34,7 +35,8 @@ from torch.testing._internal.common_utils import (
 from torch.utils._triton import has_triton
 
 CUSPARSELT_NUM_ALG_IDS = 4
-SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG.keys()
+
+SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG_CUTLASS.keys()
 SEMI_STRUCTURED_SUPPORTED_BACKENDS = []
 
 _IS_SM8X = False
@@ -342,9 +344,16 @@ class TestSparseSemiStructured(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_cutlass_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B.t())
             else:
-                with self.assertRaisesRegex(RuntimeError,
-                                            "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
+                # special case since cuSPARSELt has different shape constraints vs CUTLASS
+                # We expect to error for then (1, 128) case but not the (64, 128) case
+                if dense_input_shape == (1, 128):
+                    with self.assertRaisesRegex(RuntimeError,
+                                                "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
+                        sparse_result = torch.mm(A_sparse, B.t())
+                else:
+                    dense_result = torch.mm(A.cpu(), B.t().cpu()).to(device, dtype=torch.int32 if backend == "cutlass" else torch.int8)
                     sparse_result = torch.mm(A_sparse, B.t())
+                    assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
         elif dtype is torch.int8:
             # test transpose
             # NOTE: CUTLASS and cuSPARSELt have slightly different int8 behavior.
@@ -506,7 +515,8 @@ class TestSparseSemiStructured(TestCase):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype, device=device)
 
-        if dtype not in SEMI_STRUCTURED_SUPPORTED_DTYPES:
+        cusparselt_float32 = (backend == "cusparselt") and dtype == torch.float32
+        if dtype not in SEMI_STRUCTURED_SUPPORTED_DTYPES and not cusparselt_float32:
             with self.assertRaisesRegex(RuntimeError, "Error original_tensor.dtype"):
                 A_sparse = to_sparse_semi_structured(A)
         else:
