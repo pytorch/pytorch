@@ -339,6 +339,17 @@ class TestPasses(TestCase):
             "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
         ).run(gm.code)
 
+    def test_math_ops(self):
+        def func(x):
+            return (
+                torch.tensor([math.ceil(x.item())]),
+                torch.tensor([math.floor(x.item())]),
+            )
+
+        x = torch.randn(1, dtype=torch.float32)
+        ep = torch.export.export(func, args=(x,))
+        _ExportPassBase()(ep.graph_module)
+
 
 if __name__ == '__main__':
     run_tests()
