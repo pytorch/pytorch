@@ -1590,7 +1590,7 @@ namespace {
             << "Test failed for uint16 to float " << u16 << "\n";
       }
     }
-    TYPED_TEST(InfiniteTests, Has_infinite) {
+    TYPED_TEST(InfiniteTests, HasInfNan) {
       using vec = TypeParam;
       using VT = UholdType<TypeParam>;
       auto vec_size = vec::size();
@@ -1615,10 +1615,10 @@ namespace {
       values[index] = v_ninf;
       auto vec_ninf = vec::loadu(values);
 
-      ASSERT_TRUE(!(vec_val.has_infinite())) << "Test failed for normal value\n";
-      ASSERT_TRUE(vec_nan.has_infinite()) << "Test failed for NAN\n";
-      ASSERT_TRUE(vec_pinf.has_infinite()) << "Test failed for positive Infinity\n";
-      ASSERT_TRUE(vec_ninf.has_infinite()) << "Test failed for negative Infinity\n";
+      ASSERT_TRUE(!(vec_val.has_inf_nan())) << "Test failed for normal value\n";
+      ASSERT_TRUE(vec_nan.has_inf_nan()) << "Test failed for NAN\n";
+      ASSERT_TRUE(vec_pinf.has_inf_nan()) << "Test failed for positive Infinity\n";
+      ASSERT_TRUE(vec_ninf.has_inf_nan()) << "Test failed for negative Infinity\n";
     }
 
 #else

@@ -307,7 +307,7 @@ public:
     }
     return loadu(res);
   };
-  bool has_infinite() const {
+  bool has_inf_nan() const {
     __at_align__ float tmp[size()];
     store(tmp);
     for (const auto i : c10::irange(size())) {
