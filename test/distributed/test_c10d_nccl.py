@@ -53,6 +53,8 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
+    parametrize,
+    instantiate_parametrized_tests,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
 )
@@ -3542,6 +3544,7 @@ class SparseCollective(MultiProcessTestCase):
 class NCCLTraceTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
+        os.environ["TORCH_NCCL_ENABLE_TIMING"] = '0'
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '10'
         os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = '1'
         self.tempdir = tempfile.TemporaryDirectory()
@@ -3608,6 +3611,9 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 
     def _trace_name(self, rank):
         return self._trace_basename() + str(rank)
+
+    def started_or_scheduled(self, timing_enabled):
+        return "started" if timing_enabled else "scheduled"
 
 class NCCLTraceTest(NCCLTraceTestBase):
 
@@ -3705,7 +3711,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
-    def test_trace_while_active(self):
+    @parametrize("timing_enabled", [True, False])
+    def test_trace_while_active(self, timing_enabled):
         if self.rank == self.MAIN_PROCESS_RANK:
             for c in self.children_pipes:
                 self.assertEqual(c.recv(), 'next')
@@ -3714,6 +3721,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
             return
 
         pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
         device = self.local_device
         with torch.cuda.device(device):
             a = torch.full((3, 4), float(self.rank), device=device)
@@ -3730,7 +3739,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertEqual(t[-1]['state'], 'completed')
             else:
                 self.assertEqual(t[-1]['seq_id'], 2)
-                self.assertEqual(t[-1]['state'], 'started')
+                self.assertEqual(t[-1]['state'], self.started_or_scheduled(timing_enabled))
 
             self.parent.send('next')
             self.assertEqual('next', self.parent.recv())
@@ -3740,7 +3749,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
-    def test_trace_while_stuck(self):
+    @parametrize("timing_enabled", [True, False])
+    def test_trace_while_stuck(self, timing_enabled):
         if self.rank == self.MAIN_PROCESS_RANK:
             for c in self.children_pipes:
                 self.assertEqual(c.recv(), 'next')
@@ -3749,6 +3759,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
             return
 
         pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+
         device = self.local_device
         with torch.cuda.device(device):
             a = torch.full((3, 4), float(self.rank), device=device)
@@ -3767,7 +3780,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     self.assertEqual(t[-1]['state'], 'completed')
                 else:
                     self.assertEqual(t[-1]['seq_id'], 2)
-                    self.assertEqual(t[-1]['state'], 'started')
+                    self.assertEqual(t[-1]['state'], self.started_or_scheduled(timing_enabled))
                 # this will eventually cause the missing rank 0
                 # to continue which will unblock the non-zero ranks
                 self.parent.send('next')
@@ -3789,7 +3802,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 pg.allreduce(a).wait()
             torch.cuda.synchronize(device=device)
 
-class NCCLTraceTestDumpOnTimeout(NCCLTraceTestBase):
+class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
     timeout_sec = 1
 
     def _create_process_group_nccl(self):
@@ -3799,7 +3812,7 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestBase):
             world_size=self.world_size,
             rank=self.rank,
             store=store,
-            timeout=timedelta(seconds=NCCLTraceTestDumpOnTimeout.timeout_sec))
+            timeout=timedelta(seconds=NCCLTraceTestDumpOnTimeoutBase.timeout_sec))
         pg = c10d.distributed_c10d._get_default_group()
         return pg
 
@@ -3816,9 +3829,12 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestBase):
         except TimeoutError:
             return None
 
+class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
-    def test_timeout_dumps(self):
+    @parametrize("timing_enabled", [True, False])
+    def test_timeout_dumps(self, timing_enabled):
+
         if self.rank == self.MAIN_PROCESS_RANK:
             # wait for rank0 to crash before looking for its output file
             # we rely on rank0 holding off its abort long enough to dump the debug info
@@ -3829,13 +3845,17 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestBase):
                 self.assertEqual(t[0]['seq_id'], 1)
                 self.assertEqual(t[0]['state'], 'completed')
                 self.assertEqual(t[1]['seq_id'], 2)
-                self.assertEqual(t[1]['state'], 'started')
+                self.assertEqual(t[1]['state'], self.started_or_scheduled(timing_enabled))
 
             self.assertFalse(os.path.exists(self._trace_name(rank=1)))
 
             return
 
         pg = self._create_process_group_nccl()
+        if timing_enabled:
+            # we force disabled timing in setup, since there is no 'disable' function
+            pg._enable_collectives_timing()
+
         device = self.local_device
         with torch.cuda.device(device):
             a = torch.full((3, 4), float(self.rank), device=device)
@@ -3847,6 +3867,57 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestBase):
             # rank 0 will crash before it passes the sync, but rank1 will exit quickly and cleanly
             torch.cuda.synchronize()
 
+instantiate_parametrized_tests(NCCLTraceTestDumpOnTimeout)
+instantiate_parametrized_tests(NCCLTraceTest)
+
+class NCCLTraceTestTimeoutDumpOnIdleRanks(NCCLTraceTestDumpOnTimeoutBase):
+    def _check_return_codes(self, elapsed_time):
+        # the base test infra assumes processes exit with matching return codes,
+        # but we want rank0 to abort and rank1 to exit cleanly in this test
+        self.assertEqual(self.processes[0].exitcode, -6)
+        self.assertEqual(self.processes[1].exitcode, -6)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_timeout_dumps_on_idle_ranks(self):
+
+        if self.rank == self.MAIN_PROCESS_RANK:
+            # wait for rank0 to crash and rank 1 to finish sleeping before looking for rank 1's output
+            # file, and we rely on rank1 to sleep long enough to dump the debug info.
+            self.assertEqual(self._wait_process(0, timeout=90), -6)
+            self.assertEqual(self._wait_process(1, timeout=90), -6)
+            self.assertTrue(os.path.exists(self._trace_name(rank=1)))
+            self.assertTrue(os.path.exists(self._trace_name(rank=0)))
+            with open(self._trace_name(rank=0), 'rb') as f:
+                t = pickle.load(f)
+                self.assertEqual(len(t), 2)
+            with open(self._trace_name(rank=1), 'rb') as f:
+                t = pickle.load(f)
+                self.assertEqual(len(t), 1)
+                self.assertEqual(t[0]['seq_id'], 1)
+                self.assertEqual(t[0]['state'], 'completed')
+            return
+
+        # Set heartbeat timeout to a shorter one (default timeout is 2 min).
+        os.environ[
+            "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"
+        ] = f"{NCCLTraceTestDumpOnTimeoutBase.timeout_sec * 2}"
+        pg = self._create_process_group_nccl()
+
+        device = self.local_device
+        with torch.cuda.device(device):
+            a = torch.full((3, 4), float(self.rank), device=device)
+
+            pg.allreduce(a).wait()
+            if self.rank == 0:
+                pg.allreduce(a).wait()
+
+            # rank 0 will crash before it passes the sync, but rank1 will exit quickly and cleanly
+            torch.cuda.synchronize()
+
+            # Force rank 1 to idle so that it also gets debug info dump triggered.
+            if self.rank == 1:
+                time.sleep(6)
 
 if __name__ == "__main__":
     assert (

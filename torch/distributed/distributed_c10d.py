@@ -1071,17 +1071,19 @@ def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) ->
     if _rank_not_in_group(pg):
         raise ValueError("Invalid process group specified")
     devices = group._device_types
-    backends = []
+    backends = {}
     if torch.device("cpu") in devices and is_gloo_available():
         backend = pg._get_backend(torch.device("cpu"))
         if isinstance(backend, ProcessGroupGloo):
-            backends.append(backend)
-    elif torch.device("cuda") in devices and is_nccl_available():
+            backends.add(backend)
+    elif torch.device("cuda") in devices:
         backend = pg._get_backend(torch.device("cuda"))
-        if isinstance(backend, ProcessGroupNCCL):
-            backends.append(backend)
+        if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+            backends.add(backend)
+        elif is_gloo_available() and isinstance(backend, ProcessGroupGloo):
+            backends.add(backend)
     if len(backends) == 0:
-        raise NotImplementedError("Set timeout is now only supported for either nccl or gloo.")
+        warnings.warn("Set timeout is now only supported for either nccl or gloo.")
     for backend in backends:
         backend._set_default_timeout(timeout)
 
