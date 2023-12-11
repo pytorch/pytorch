@@ -955,7 +955,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   //    completedWorkList_ before it finishes.
   // 3. We have three threads and two locks.
   //      a. main thread (this function) grabs two locks atomically
-  //      b. watchdog thread (workCleanupLoop function) always grabs
+  //      b. watchdog thread (watchdogHandler function) always grabs
   //      workMetaListMutex_
   //         first and then grabs completedWorkListMutex_.
   //      c. hook thread (runHookLoop function) only grabs
@@ -1173,8 +1173,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       rank_,
       "] NCCL monitor thread timeout. Basically, this could ",
       "be due to CUDA or NCCL calls being unexpectedly blocking, ",
-      "especially when your program enters a deadlock state in watchdog"
-      "or destructors. If you see this error, please file a bug to pytorch.");
+      "especially when your program enters a deadlock state in watchdog "
+      "or destructors. If you see this error, please file a bug to PyTorch.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
@@ -1223,7 +1223,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
       ncclHeartbeatMonitorThread_ =
           std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
     }
-    workCleanupLoop();
+    watchdogHandler();
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
@@ -1235,7 +1235,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
           << " (Watchdog caught exception: " << e.what();
 
     } else {
-      // Append error message reported from workCleanupLoop
+      // Append error message reported from watchdogHandler
       const auto exitMsg = c10::str(
           "[Rank ",
           rank_,
@@ -1339,7 +1339,7 @@ struct DumpPipe {
 };
 #endif
 
-void ProcessGroupNCCL::workCleanupLoop() {
+void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   auto lastTimePollStore = std::chrono::steady_clock::now();
@@ -1365,8 +1365,13 @@ void ProcessGroupNCCL::workCleanupLoop() {
     if (dumpOnTimeout_) {
       auto currentTime = std::chrono::steady_clock::now();
       auto timeSinceLastWorkListUpdate =
-          (currentTime - lastWorkListUpdateTime_).count();
-      auto timeSinceLastPollStore = (currentTime - lastTimePollStore).count();
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastWorkListUpdateTime_))
+              .count();
+      auto timeSinceLastPollStore =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastTimePollStore))
+              .count();
       if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
           timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
         lastTimePollStore = currentTime;
@@ -1376,9 +1381,10 @@ void ProcessGroupNCCL::workCleanupLoop() {
           optAsyncDebugDump->wait_for(
               std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
           const auto exitMsg = c10::str(
-              "[Rank ",
+              "Some other rank's watchdog thread detected a timeout and notified ",
+              "all other ranks, so we're dumping debug info and aborting [Rank ",
               rank_,
-              "] NCCL watchdog thread detected timeout from Store");
+              "] as well.");
           LOG(ERROR) << exitMsg;
           C10_THROW_ERROR(DistBackendError, exitMsg);
         }
