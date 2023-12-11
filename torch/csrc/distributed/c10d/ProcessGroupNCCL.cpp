@@ -721,7 +721,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   dumpOnTimeout_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
-  monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, false));
+  monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
