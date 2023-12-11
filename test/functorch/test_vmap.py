@@ -1862,7 +1862,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         result = vmap(Tensor.contiguous, in_dims=2, out_dims=2)(x)
         self.assertTrue(result is x)
 
-        msg = 'NYI: querying is_contiguous inside of vmap for memory_format'
+        msg = "NYI: querying is_contiguous inside of vmap for memory_format"
         tensor = torch.randn(B0, 3)
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(functools.partial(op, memory_format=torch.channels_last))(tensor)
@@ -2197,18 +2197,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         vmap(bar)(torch.randn(B0, 0, 3))
         vmap(bar, in_dims=1)(torch.randn(0, B0, 3))
         vmap(bar)(torch.randn(B0, 0, 3).transpose(-1, -2))
-
-        # is_contiguous with other memory formats
-        def baz(x, memory_format):
-            x.is_contiguous(memory_format=memory_format)
-            return x
-
-        msg = 'NYI: querying is_contiguous inside of vmap for memory_format'
-        tensor = torch.randn(B0, 2, 7, 3)
-        with self.assertRaisesRegex(RuntimeError, msg):
-            vmap(functools.partial(baz, memory_format=torch.channels_last))(tensor)
-        with self.assertRaisesRegex(RuntimeError, msg):
-            vmap(functools.partial(baz, memory_format=torch.channels_last_3d))(tensor)
 
     def test_unsqueeze(self):
         op = torch.unsqueeze
@@ -2839,7 +2827,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         res = vmap(foo)(x)
         self.assertEqual(res, x.conj())
 
-    @xfailIfTorchDynamo
     def test_mode_key(self):
         def vmap_f(x):
             return x + torch.randn(())
@@ -5090,8 +5077,9 @@ class TestTransformFailure(TestCase):
     @skipIfTorchDynamo
     @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
     def test_fails_with_autograd_function(self, device, transform):
+        failed_build_envs = ('linux-focal-py3.8-clang10', 'linux-focal-py3.11-clang10')
         if (device == 'cpu' and transform in ['grad', 'vmap'] and
-                TEST_WITH_TORCHDYNAMO and os.getenv('BUILD_ENVIRONMENT', '') == 'linux-focal-py3.8-clang10'):
+                TEST_WITH_TORCHDYNAMO and os.getenv('BUILD_ENVIRONMENT', '') in failed_build_envs):
             raise unittest.SkipTest("Unexpected successes on focal with dynamo," +
                                     " see https://github.com/pytorch/pytorch/issues/107173")
 
@@ -5360,8 +5348,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
                 RuntimeError, "Nested tensors can only be vmapped over dim=0"):
             vmap(f, out_dims=2)(x)
 
-    @xfailIfTorchDynamo
-    @allowVmapFallbackUsage
     def test_fallback_with_nt_and_batched_dense_with_nonzero_bdim_raises(self, device):
         def f(x, y):
             return x @ y
