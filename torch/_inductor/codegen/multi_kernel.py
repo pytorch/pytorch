@@ -301,10 +301,13 @@ class MultiKernelCall:
                 timings,
             )
 
+            def get_kernel_path(k):
+                return k.fn.fn.__code__.co_filename
+
             get_metric_table("persistent_red_perf").add_row(
                 lambda: {
-                    "kernel1_name": self.kernels[0].inductor_meta.get("kernel_name"),
-                    "kernel2_name": self.kernels[1].inductor_meta.get("kernel_name"),
+                    "kernel1_name": get_kernel_path(self.kernels[0]),
+                    "kernel2_name": get_kernel_path(self.kernels[1]),
                     "kernel1_latency": timings[0],
                     "kernel2_latency": timings[1],
                     "size_hints": k0.size_hints,
