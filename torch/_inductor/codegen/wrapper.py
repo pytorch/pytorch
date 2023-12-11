@@ -2048,7 +2048,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return DTYPE_TO_ATEN[dtype]
 
     @functools.lru_cache(None)
-    def codegen_int_array_var(self, int_array: str, writer=None):
+    def codegen_int_array_var(
+        self, int_array: str, writer=None, known_statically=False
+    ):
         # Because the memory planning is done in two passes (see the implementation
         # of self.generate), the writeline behavior is different in the two passes.
         # As a result, the emitted int array declarations may appear in a later
@@ -2061,7 +2063,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         var = f"int_array_{next(self.int_array_id)}"
         if var not in self.declared_int_array_vars:
             self.declared_int_array_vars.add(var)
-            writer.writeline(f"int64_t {var}[] = {int_array};")
+            if known_statically:
+                writer.writeline(f"static constexpr int64_t {var}[] = {int_array};")
+            else:
+                writer.writeline(f"int64_t {var}[] = {int_array};")
         return var
 
     def make_buffer_allocation(self, buffer):
@@ -2077,13 +2082,22 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def make_allocation(
         self, name, device, dtype, shape, stride, buffer_if_can_stack_allocate=None
     ):
+        orig_stride = stride
         device = self.codegen_device(device)
         dtype_code = self.codegen_dtype(dtype)
         size = self.codegen_shape_tuple(shape)
-        stride = self.codegen_shape_tuple(stride)
+        stride = self.codegen_shape_tuple(orig_stride)
         if config.aot_inductor.abi_compatible:
-            size_array_var = self.codegen_int_array_var(size, self.wrapper_call)
-            stride_array_var = self.codegen_int_array_var(stride, self.wrapper_call)
+            size_array_var = self.codegen_int_array_var(
+                size,
+                self.wrapper_call,
+                known_statically=self.is_statically_known_list_of_ints(shape),
+            )
+            stride_array_var = self.codegen_int_array_var(
+                stride,
+                self.wrapper_call,
+                known_statically=self.is_statically_known_list_of_ints(orig_stride),
+            )
             device_type, device_id = device.split(",")
             device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
             if buffer_if_can_stack_allocate is not None:
@@ -2181,8 +2195,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             args = [
                 f"{data.get_name()}",
                 dim,
-                self.codegen_int_array_var(size, writer),
-                self.codegen_int_array_var(stride, writer),
+                self.codegen_int_array_var(
+                    size,
+                    writer,
+                    known_statically=self.is_statically_known_list_of_ints(size_list),
+                ),
+                self.codegen_int_array_var(
+                    stride,
+                    writer,
+                    known_statically=self.is_statically_known_list_of_ints(stride_list),
+                ),
                 offset,
             ]
 
@@ -2521,8 +2543,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             # FIXME handle embedded optional types?
             result = f"{{{', '.join(self.val_to_arg_str(x) for x in val)}}}"
             if config.aot_inductor.abi_compatible:
+                static = self.is_statically_known_list_of_ints(val)
                 # Need to pass the array length because we can't use std::vector
-                return f"{self.codegen_int_array_var(result)}, {len(val)}"
+                return f"{self.codegen_int_array_var(result, known_statically=static)}, {len(val)}"
             else:
                 return result
         else:
