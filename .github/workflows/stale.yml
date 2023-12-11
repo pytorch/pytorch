@@ -13,16 +13,9 @@
 name: Close stale pull requests
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/stale.yml
   schedule:
     # Run hourly.
     - cron: 30 * * * *
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: false
 
 jobs:
   stale:
