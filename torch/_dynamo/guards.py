@@ -100,9 +100,9 @@ CLOSURE_VARS = {
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend
     ),
     "___lookup_backend": (
-        lambda backend_obj_id: torch._dynamo.eval_frame.guarded_backend_cache.cached_backends[
-            backend_obj_id
-        ]
+        lambda backend_obj_id: torch._dynamo.eval_frame.cached_backends.get(
+            backend_obj_id, None
+        )
     ),
     "___skip_backend_check": (
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
