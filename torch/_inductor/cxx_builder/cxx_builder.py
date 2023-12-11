@@ -138,6 +138,24 @@ class BuildOptionsBase:
     _libraries: List[str] = []
     _passthough_args: List[str] = []
 
+    def _set_options(
+        self,
+        definations,
+        include_dirs,
+        cflags,
+        ldflags,
+        libraries_dirs,
+        libraries,
+        passthough_args,
+    ):
+        self._definations = definations
+        self._include_dirs = include_dirs
+        self._cflags = cflags
+        self._ldflags = ldflags
+        self._libraries_dirs = libraries_dirs
+        self._libraries = libraries
+        self._passthough_args = passthough_args
+
     def __init__(self) -> None:
         pass
 
@@ -166,21 +184,21 @@ class BuildOptionsBase:
         return self._passthough_args
 
 
-def get_warning_all_flag(warning_all: bool = True) -> List[str]:
+def _get_warning_all_cflag(warning_all: bool = True) -> List[str]:
     if not _IS_WINDOWS:
         return ["Wall"] if warning_all else []
     else:
         return []
 
 
-def get_cxx_std(std_num: str = "c++17") -> List[str]:
+def _get_cxx_std_cflag(std_num: str = "c++17") -> List[str]:
     if _IS_WINDOWS:
         return [f"std:{std_num}"]
     else:
         return [f"std={std_num}"]
 
 
-def get_linux_cpp_cflags(cpp_compiler) -> List[str]:
+def _get_linux_cpp_cflags(cpp_compiler) -> List[str]:
     if not _IS_WINDOWS:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
         if is_clang(cpp_compiler):
@@ -190,7 +208,7 @@ def get_linux_cpp_cflags(cpp_compiler) -> List[str]:
         return []
 
 
-def optimization_cflags() -> List[str]:
+def _get_optimization_cflags() -> List[str]:
     if _IS_WINDOWS:
         return ["O2"]
     else:
@@ -224,6 +242,39 @@ def optimization_cflags() -> List[str]:
         return cflags
 
 
+def _get_shared_cflag() -> List[str]:
+    SHARED_FLAG = ["DLL"] if _IS_WINDOWS else ["shared", "fPIC"]
+    return SHARED_FLAG
+
+
+def get_cxx_options(cpp_compiler):
+    definations: List[str] = []
+    include_dirs: List[str] = []
+    cflags: List[str] = []
+    ldflags: List[str] = []
+    libraries_dirs: List[str] = []
+    libraries: List[str] = []
+    passthough_args: List[str] = []
+
+    cflags = (
+        _get_shared_cflag()
+        + _get_optimization_cflags()
+        + _get_warning_all_cflag()
+        + _get_cxx_std_cflag()
+        + _get_linux_cpp_cflags(cpp_compiler)
+    )
+
+    return (
+        definations,
+        include_dirs,
+        cflags,
+        ldflags,
+        libraries_dirs,
+        libraries,
+        passthough_args,
+    )
+
+
 class CxxOptions(BuildOptionsBase):
     """
     This class is inherited from BuildOptionsBase, and as cxx build options.
@@ -238,35 +289,46 @@ class CxxOptions(BuildOptionsBase):
     2. This Options is good for assist modules build, such as x86_isa_help.
     """
 
-    def _get_shared_cflag(self) -> List[str]:
-        SHARED_FLAG = ["DLL"] if _IS_WINDOWS else ["shared", "fPIC"]
-        return SHARED_FLAG
-
     def __init__(self) -> None:
-        super().__init__()
         self._compiler = _get_cxx_compiler()
-        _nonduplicate_append(self._cflags, self._get_shared_cflag())
 
-        _nonduplicate_append(self._cflags, optimization_cflags())
-        _nonduplicate_append(self._cflags, get_warning_all_flag())
-        _nonduplicate_append(self._cflags, get_cxx_std())
+        (
+            definations,
+            include_dirs,
+            cflags,
+            ldflags,
+            libraries_dirs,
+            libraries,
+            passthough_args,
+        ) = get_cxx_options(self._compiler)
 
-        _nonduplicate_append(self._cflags, get_linux_cpp_cflags(self._compiler))
+        self._set_options(
+            definations,
+            include_dirs,
+            cflags,
+            ldflags,
+            libraries_dirs,
+            libraries,
+            passthough_args,
+        )
 
 
-def get_glibcxx_abi_build_flags() -> List[str]:
-    return ["-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
+def _get_glibcxx_abi_build_flags() -> List[str]:
+    if not _IS_WINDOWS:
+        return ["-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
+    else:
+        return []
 
 
-def get_torch_cpp_wrapper_defination() -> List[str]:
+def _get_torch_cpp_wrapper_defination() -> List[str]:
     return ["TORCH_INDUCTOR_CPP_WRAPPER"]
 
 
-def use_custom_generated_macros() -> List[str]:
+def _use_custom_generated_macros() -> List[str]:
     return [" C10_USING_CUSTOM_GENERATED_MACROS"]
 
 
-def use_fb_internal_macros() -> List[str]:
+def _use_fb_internal_macros() -> List[str]:
     if not _IS_WINDOWS:
         if config.is_fbcode():
             # openmp_lib = build_paths.openmp_lib()
@@ -285,7 +347,7 @@ def use_fb_internal_macros() -> List[str]:
         return []
 
 
-def use_standard_sys_dir_headers() -> List[str]:
+def _use_standard_sys_dir_headers() -> List[str]:
     if _IS_WINDOWS:
         return []
 
@@ -309,7 +371,7 @@ def _cpp_prefix_path() -> str:
     return filename
 
 
-def get_build_args_of_chosen_isa(chosen_isa: VecISA):
+def _get_build_args_of_chosen_isa(chosen_isa: VecISA):
     cap = str(chosen_isa).upper()
     macros = [
         f"CPU_CAPABILITY={cap}",
@@ -322,7 +384,7 @@ def get_build_args_of_chosen_isa(chosen_isa: VecISA):
     return macros, build_flags
 
 
-def get_torch_related_args():
+def _get_torch_related_args():
     from torch.utils.cpp_extension import _TORCH_PATH, TORCH_LIB_PATH
 
     include_dirs = [
@@ -338,7 +400,7 @@ def get_torch_related_args():
     return include_dirs, libraries_dirs, libraries
 
 
-def get_python_related_args():
+def _get_python_related_args():
     python_include_dirs = []
     python_include_path = sysconfig.get_path(
         "include", scheme="nt" if _IS_WINDOWS else "posix_prefix"
@@ -355,7 +417,7 @@ def get_python_related_args():
     return python_include_dirs, python_lib_path
 
 
-def get_openmp_args(cpp_compiler):
+def _get_openmp_args(cpp_compiler):
     cflags: List[str] = []
     ldflags: List[str] = []
     include_dir_paths: List[str] = []
@@ -430,6 +492,68 @@ def get_openmp_args(cpp_compiler):
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs
 
 
+def get_torch_cxx_options(cpp_compiler, chosen_isa: VecISA):
+    definations: List[str] = []
+    include_dirs: List[str] = []
+    cflags: List[str] = []
+    ldflags: List[str] = []
+    libraries_dirs: List[str] = []
+    libraries: List[str] = []
+    passthough_args: List[str] = []
+
+    torch_cpp_wrapper_definations = _get_torch_cpp_wrapper_defination()
+    use_custom_generated_macros_definations = _use_custom_generated_macros()
+
+    sys_dir_header_cflags = _use_standard_sys_dir_headers()
+
+    isa_macros, isa_ps_args_build_flags = _get_build_args_of_chosen_isa(chosen_isa)
+
+    (
+        torch_include_dirs,
+        torch_libraries_dirs,
+        torch_libraries,
+    ) = _get_torch_related_args()
+
+    python_include_dirs, python_libraries_dirs = _get_python_related_args()
+
+    # cpp_prefix_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
+    # _nonduplicate_append(self._include_dirs, cpp_prefix_dir)
+
+    (
+        omp_cflags,
+        omp_ldflags,
+        omp_include_dir_paths,
+        omp_lib_dir_paths,
+        omp_lib,
+    ) = _get_openmp_args(cpp_compiler)
+
+    cxx_abi_passthough_args = _get_glibcxx_abi_build_flags()
+    fb_macro_passthough_args = _use_fb_internal_macros()
+
+    definations = (
+        torch_cpp_wrapper_definations
+        + use_custom_generated_macros_definations
+        + isa_macros
+        + fb_macro_passthough_args
+    )
+    include_dirs = python_include_dirs + torch_include_dirs + omp_include_dir_paths
+    cflags = sys_dir_header_cflags + omp_cflags
+    ldflags = omp_ldflags
+    libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
+    libraries = torch_libraries + omp_lib
+    passthough_args = isa_ps_args_build_flags + cxx_abi_passthough_args
+
+    return (
+        definations,
+        include_dirs,
+        cflags,
+        ldflags,
+        libraries_dirs,
+        libraries,
+        passthough_args,
+    )
+
+
 class CxxTorchOptions(CxxOptions):
     """
     This class is inherited from CxxTorchOptions, which automatic contains
@@ -443,49 +567,45 @@ class CxxTorchOptions(CxxOptions):
     """
 
     def __init__(self, chosen_isa: VecISA) -> None:
-        super().__init__()
-        _nonduplicate_append(self._definations, get_torch_cpp_wrapper_defination())
-        _nonduplicate_append(self._definations, use_custom_generated_macros())
-
-        _nonduplicate_append(self._cflags, use_standard_sys_dir_headers())
-
-        macros, build_flags = get_build_args_of_chosen_isa(chosen_isa)
-        _nonduplicate_append(self._definations, macros)
-        _nonduplicate_append(self._passthough_args, build_flags)
+        self._compiler = _get_cxx_compiler()
 
         (
+            cxx_definations,
+            cxx_include_dirs,
+            cxx_cflags,
+            cxx_ldflags,
+            cxx_libraries_dirs,
+            cxx_libraries,
+            cxx_passthough_args,
+        ) = get_cxx_options(self._compiler)
+
+        (
+            torch_definations,
             torch_include_dirs,
+            torch_cflags,
+            torch_ldflags,
             torch_libraries_dirs,
             torch_libraries,
-        ) = get_torch_related_args()
-        _nonduplicate_append(self._include_dirs, torch_include_dirs)
-        _nonduplicate_append(self._libraries_dirs, torch_libraries_dirs)
-        _nonduplicate_append(self._libraries, torch_libraries)
+            torch_passthough_args,
+        ) = get_torch_cxx_options(self._compiler, chosen_isa)
 
-        python_include_dirs, python_libraries_dirs = get_python_related_args()
-        _nonduplicate_append(self._include_dirs, python_include_dirs)
-        _nonduplicate_append(self._libraries_dirs, python_libraries_dirs)
+        definations = cxx_definations + torch_definations
+        include_dirs = cxx_include_dirs + torch_include_dirs
+        cflags = cxx_cflags + torch_cflags
+        ldflags = cxx_ldflags + torch_ldflags
+        libraries_dirs = cxx_libraries_dirs + torch_libraries_dirs
+        libraries = cxx_libraries + torch_libraries
+        passthough_args = cxx_passthough_args + torch_passthough_args
 
-        # cpp_prefix_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
-        # _nonduplicate_append(self._include_dirs, cpp_prefix_dir)
-
-        (
-            omp_cflags,
-            omp_ldflags,
-            omp_include_dir_paths,
-            omp_lib_dir_paths,
-            omp_lib,
-        ) = get_openmp_args(self._compiler)
-        _nonduplicate_append(self._cflags, omp_cflags)
-        _nonduplicate_append(self._ldflags, omp_ldflags)
-        _nonduplicate_append(self._include_dirs, omp_include_dir_paths)
-        _nonduplicate_append(self._libraries_dirs, omp_lib_dir_paths)
-        _nonduplicate_append(self._libraries, omp_lib)
-
-        if not _IS_WINDOWS:
-            # glibcxx is not available in Windows.
-            _nonduplicate_append(self._passthough_args, get_glibcxx_abi_build_flags())
-            _nonduplicate_append(self._passthough_args, use_fb_internal_macros())
+        self._set_options(
+            definations,
+            include_dirs,
+            cflags,
+            ldflags,
+            libraries_dirs,
+            libraries,
+            passthough_args,
+        )
 
 
 def _cuda_compiler() -> Optional[str]:
@@ -622,6 +742,7 @@ class CxxTorchCudaOptions(CxxTorchOptions):
     """
 
     def __init__(self) -> None:
+        """
         super().__init__()
         # re-setup to cuda compiler
         nvcc = _cuda_compiler()
@@ -639,6 +760,7 @@ class CxxTorchCudaOptions(CxxTorchOptions):
         _nonduplicate_append(self._cflags, cuda_cflags)
         _nonduplicate_append(self._cflags, cuda_defines)
         _nonduplicate_append(self._cflags, cuda_pass_args)
+        """
 
 
 class CxxBuilder:

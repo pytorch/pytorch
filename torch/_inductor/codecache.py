@@ -1144,21 +1144,7 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-
-
-# supported_vec_isa_list = [VecAVX512(), VecAVX2()]
-
-
-def check_if_isa_support(isa: VecISA):
-    isa_name = isa
-    del isa
-    return isa_name
-
-
-supported_vec_isa_list = [
-    check_if_isa_support(VecAVX512()),
-    check_if_isa_support(VecAVX2()),
-]
+supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 
 
 def x86_isa_checker() -> List[str]:
