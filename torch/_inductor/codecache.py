@@ -1702,7 +1702,8 @@ class AotCodeCache:
                         status, output_o = builder.build()
                         os.chmod(output_o, 0o644)
                     else:
-                        run_command_and_check(cmd)
+                        # run_command_and_check(cmd)
+                        status, output_o = builder.build()
 
                     def _to_bytes(t: torch.Tensor) -> bytes:
                         # This serializes the tensor's untyped_storage to bytes by accessing
@@ -1797,7 +1798,8 @@ class AotCodeCache:
                         status, output_so = builder.build()
                         os.chmod(output_so, 0o755)
                     else:
-                        run_command_and_check(cmd)
+                        # run_command_and_check(cmd)
+                        status, output_so = builder.build()
                 else:
                     log.debug(
                         "aot_inductor dynamic library already exist: %s", output_so
