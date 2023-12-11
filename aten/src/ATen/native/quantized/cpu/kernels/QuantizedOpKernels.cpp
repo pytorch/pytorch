@@ -836,7 +836,6 @@ void qsigmoid_kernel(
   float scale = qx.q_scale();
   auto scale_vec = Vectorized<float>(scale);
   auto zero_point_vec = Vectorized<float>((float)zero_point);
-  auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qsigmoid", [&]() {
     float inv_output_scale = 1.0 / output_scale;
@@ -861,8 +860,7 @@ void qsigmoid_kernel(
               output_scale, output_zero_point, value_dy);
         },
         [&](Vec value_qx) -> Vec {
-          auto value_dx = value_qx.dequantize(
-              scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
+          auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec);
           for (auto & value : value_dx) {
             value = value.neg();
             value = value.exp();

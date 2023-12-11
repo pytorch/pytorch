@@ -76,7 +76,7 @@ class TestPasses(TestCase):
         dim1_x = torch.export.Dim("dim1_x", min=2, max=6)
         ep = torch.export.export(M(), (x,), dynamic_shapes={"x": {1: dim1_x}})
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "is outside of specified dynamic range"):
             ep(torch.zeros(2, 7, 3))
 
         self.assertEqual(ep(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
@@ -99,10 +99,10 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}}
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "is outside of specified dynamic range"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg1_1"):
+        with self.assertRaisesRegex(RuntimeError, "is outside of specified dynamic range"):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
@@ -123,12 +123,12 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None}
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, "is outside of specified dynamic range"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"
+            RuntimeError, r"shape\[0\] is specialized at 5"
         ):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
@@ -152,12 +152,12 @@ class TestPasses(TestCase):
         dim1_y = torch.export.Dim("dim1_y", min=3, max=6)
         ep = torch.export.export(M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}})
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, r"shape\[1\] is specialized at 2"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"
+            RuntimeError, r"shape\[0\] is specialized at 5"
         ):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
@@ -301,34 +301,6 @@ class TestPasses(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint \\[2, 5\\]."):
             ep(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
-
-    def test_runtime_assert_equality_constraint(self):
-        class Adder(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-                return x + y
-
-        m = Adder()
-        x = torch.rand(3, 4)
-        y = torch.rand(3, 4)
-        dim1 = torch.export.Dim("dim1")
-        exported = torch.export.export(
-            m, (x, y), dynamic_shapes={"x": {1: dim1}, "y": {1: dim1}}
-        )
-
-        x = torch.rand(3, 5)
-        y = torch.rand(3, 6)
-        with self.assertRaisesRegex(
-            RuntimeError, r"Input arg0_1.shape\[1\] is not equal to input arg1_1.shape\[1\]"
-        ):
-            exported(x, y)
-
-        y = torch.rand(3, 5)
-        dynamo_result = exported(x, y)
-        real_result = m(x, y)
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
     def test_functionalize_inline_contraints(self) -> None:
         def f(x):

@@ -4,6 +4,7 @@
 #include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
 #include <ATen/core/TensorBody.h>
+#include <optional>
 
 namespace c10 {
 
@@ -34,8 +35,8 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
  public:
   // CAUTION: you should probably not be constructing these directly; please
   // the higher-level API in python instead (TODO: actually introduce that).
-  explicit SingletonSymNodeImpl(int64_t val, int64_t coeff, at::Tensor values, at::Tensor dummy, int64_t sum_offsets)
-      : val_(val), coeff_(coeff), values_(std::move(values)), dummy_(std::move(dummy)), sum_offsets_(sum_offsets) {}
+  explicit SingletonSymNodeImpl(int64_t val, int64_t coeff, at::Tensor data, at::Tensor dummy, int64_t sum_offsets)
+      : val_(val), coeff_(coeff), data_(std::move(data)), dummy_(std::move(dummy)), sum_offsets_(sum_offsets) {}
 
   bool bool_() override {
     return false;
@@ -138,8 +139,8 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
     return coeff_;
   }
 
-  const at::Tensor& singleton_values() {
-    return values_;
+  const at::Tensor& singleton_data() {
+    return data_;
   }
 
   void* singleton_dummy() override {
@@ -189,7 +190,7 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
  private:
   int64_t val_;
   int64_t coeff_;
-  at::Tensor values_;
+  at::Tensor data_;
   at::Tensor dummy_;
   int64_t sum_offsets_;
 };
