@@ -255,7 +255,7 @@ public:
     }
     return vector;
   }
-  bool has_infinite() const {
+  bool has_inf_nan() const {
     for (int64_t i = 0; i != size(); i++) {
       if(_isnan(values[i]) || _isinf(values[i])) {
         return true;

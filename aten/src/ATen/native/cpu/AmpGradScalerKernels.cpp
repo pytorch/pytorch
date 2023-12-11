@@ -15,7 +15,7 @@
 namespace at::native {
 
 namespace {
-// Follow the implements of CUDA.
+// Follow the implementations of CUDA.
 // Multiplies each tensor in scaled_grads by inv_scale in-place.
 // If any element of any tensor in scaled_grads is inf or NaN, sets found_inf
 // to 1.0.
@@ -53,9 +53,6 @@ void _amp_foreach_non_finite_check_and_unscale_cpu_kernel(
   for (const at::Tensor& t : scaled_grads) {
     TORCH_CHECK(t.is_cpu(), "one of scaled_grads was not a CPU tensor.");
     TORCH_CHECK(
-        t.device() == expected_device,
-        "scaled_grads must be on the same device.");
-    TORCH_CHECK(
         t.layout() == at::kStrided,
         "one of scaled_grads was not a strided tensor.");
     auto iter = at::TensorIterator::unary_op(
@@ -85,7 +82,7 @@ void _amp_foreach_non_finite_check_and_unscale_cpu_kernel(
               [found_inf_ptr, inv_scale_ptr](Vectorized<scalar_t> val_vec) -> Vectorized<scalar_t>{
                 Vectorized<opmath_t> val_vec0, val_vec1;
                 std::tie(val_vec0, val_vec1) = convert_to_float<scalar_t>(val_vec);
-                if (val_vec0.has_infinite() || val_vec1.has_infinite()) {
+                if (val_vec0.has_inf_nan() || val_vec1.has_inf_nan()) {
                   *found_inf_ptr = 1.f;
                 }
                 // Every thread accesses inv_scale, but it will hit in cache.
@@ -114,7 +111,7 @@ void _amp_foreach_non_finite_check_and_unscale_cpu_kernel(
                     inv_scale_val == 1.f ? val_in : val_in * inv_scale_val);
               },
               [found_inf_ptr, inv_scale_ptr](Vectorized<scalar_t> val_vec) -> Vectorized<scalar_t>{
-                if (val_vec.has_infinite()) {
+                if (val_vec.has_inf_nan()) {
                   *found_inf_ptr = 1.f;
                 }
                 // Every thread accesses inv_scale, but it will hit in cache.
