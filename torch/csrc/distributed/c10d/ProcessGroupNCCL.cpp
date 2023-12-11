@@ -727,8 +727,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
-      ncclTraceBufferSize_ > 0);
+      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
 #endif
   avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
@@ -957,7 +956,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   //    completedWorkList_ before it finishes.
   // 3. We have three threads and two locks.
   //      a. main thread (this function) grabs two locks atomically
-  //      b. watchdog thread (watchdogLoopHandler function) always grabs
+  //      b. watchdog thread (watchdogHandler function) always grabs
   //      workMetaListMutex_
   //         first and then grabs completedWorkListMutex_.
   //      c. hook thread (runHookLoop function) only grabs
@@ -1221,7 +1220,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
       ncclHeartbeatMonitorThread_ =
           std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
     }
-    watchdogLoopHandler();
+    watchdogHandler();
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
@@ -1233,7 +1232,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
           << " (Watchdog caught exception: " << e.what();
 
     } else {
-      // Append error message reported from watchdogLoopHandler
+      // Append error message reported from watchdogHandler
       const auto exitMsg = c10::str(
           "[Rank ",
           rank_,
@@ -1337,7 +1336,7 @@ struct DumpPipe {
 };
 #endif
 
-void ProcessGroupNCCL::watchdogLoopHandler() {
+void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   auto lastTimePollStore = std::chrono::steady_clock::now();
@@ -1373,10 +1372,9 @@ void ProcessGroupNCCL::watchdogLoopHandler() {
           optAsyncDebugDump->wait_for(
               std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
           const auto exitMsg = c10::str(
-              "Some other rank's watchdog thread detected a timeout and notified ",
-              "all other ranks, so we're dumping debug info and aborting [Rank ",
+              "[Rank ",
               rank_,
-              "] as well.");
+              "] NCCL watchdog thread detected timeout from Store");
           LOG(ERROR) << exitMsg;
           C10_THROW_ERROR(DistBackendError, exitMsg);
         }
@@ -1474,8 +1472,7 @@ void ProcessGroupNCCL::watchdogLoopHandler() {
     }
     // process a request to dump the trace
     if (dumpPipe.shouldDump()) {
-      std::thread dump_thread(&ProcessGroupNCCL::dumpDebuggingInfo, this);
-      dump_thread.detach();
+      launchAsyncDebugDump();
     }
     done = workMetaList_.empty();
   }
