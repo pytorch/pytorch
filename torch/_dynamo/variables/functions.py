@@ -82,8 +82,8 @@ class BaseUserFunctionVariable(VariableTracker):
             self, list(self.self_args()) + list(args), kwargs
         )
 
-    def num_parameters(self):
-        return len(inspect.signature(self.get_function()).parameters)
+    def inspect_parameter_names(self):
+        return list(inspect.signature(self.get_function()).parameters)
 
     def closure_vars(self, tx):
         return {}
@@ -293,8 +293,8 @@ class UserMethodVariable(UserFunctionVariable):
                 )
         return super().call_function(tx, args, kwargs)
 
-    def num_parameters(self):
-        return super().num_parameters() - 1
+    def inspect_parameter_names(self):
+        return super().inspect_parameter_names()[1:]
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
@@ -364,7 +364,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         annotations,
         closure,
         closure_scope,
-        wraps_source=None,
+        wrapped_reconstructible=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -381,7 +381,10 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if closure is None:
             closure_scope = None
         self.closure_scope = closure_scope
-        self.wraps_source = wraps_source
+        # Either a source or a VT with .can_reconstruct() == True
+        self.wrapped_reconstructible: Optional[
+            Union[Source, VariableTracker]
+        ] = wrapped_reconstructible
 
     def self_args(self):
         return []
@@ -511,9 +514,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         codegen.extend_output(create_call_function(7, push_null=True))
 
-        if self.wraps_source:
+        if self.wrapped_reconstructible:
             codegen.load_import_from("functools", "wraps")
-            codegen(self.wraps_source)
+            codegen(self.wrapped_reconstructible)
             codegen.extend_output(create_call_function(1, True))
             codegen.extend_output(create_rot_n(2))
             codegen.extend_output(create_call_function(1, True))

@@ -7,6 +7,8 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/SingletonSymNodeImpl.h>
+
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <torch/library.h>
 
@@ -15,7 +17,6 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-#include <c10/core/SingletonSymNodeImpl.h>
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
@@ -805,9 +806,9 @@ void initDispatchBindings(PyObject* module) {
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
   });
 
-  m.def("_get_singleton_int", [](int64_t data, int64_t coeff) {
+  m.def("_get_singleton_int", [](int64_t data, int64_t coeff, at::Tensor values, at::Tensor dummy, int64_t sum_offsets) {
     return c10::SymInt(c10::SymNode(
-        c10::make_intrusive<c10::SingletonSymNodeImpl>(data, coeff)));
+        c10::make_intrusive<c10::SingletonSymNodeImpl>(data, coeff, values, dummy, sum_offsets)));
   });
 
   m.def("_get_constant_bool_symnode", [](int64_t data) {

@@ -77,6 +77,14 @@ class SymNode:
     ):
         self._expr = expr
         self.shape_env = shape_env
+        # Symbolic SingletonInt have pytype int, but will return true for
+        # is_singleton. All SingletonInt hold a singleton_dummy which is a
+        # global instance to a NestedTensor class necessary for dispatch to
+        # the python dispatch of NestedTensor because only python NT can be
+        # compiled.
+        self._singleton_data = None
+        self._singleton_dummy = None
+        self._singleton_sum_offsets = None
         self.pytype = pytype
         # What's the difference between hint and constant?
         #
@@ -170,6 +178,22 @@ class SymNode:
 
     def is_bool(self):
         return self.pytype is bool
+
+    def is_singleton(self):
+        return self._is_singleton
+
+    def singleton_dummy(self):
+        return self._singleton_dummy
+
+    def singleton_data(self):
+        assert self._singleton_data is not None
+        # assert that this is fake?
+        return self._singleton_data
+
+    def singleton_sum_offsets(self):
+        assert self._singleton_sum_offsets is not None
+        # assert that this is fake?
+        return self._singleton_sum_offsets
 
     def wrap_int(self, num):
         assert type(num) is int
@@ -445,6 +469,8 @@ unary_magic_methods = {
 # Most methods are only registered on SymInt and SymFloat
 # Some methods are only be registered on SymBool
 only_bool_magic_methods = {"and", "or", "sym_not", "sym_ite"}
+# Methods that implicitly convert SymBool into SymInt
+bool_becomes_int_magic_methods = {"add", "sub", "mul"}
 # Methods that are also on SymBool, in addition to on SymInt and SymFloat
 also_bool_magic_methods = {"eq"}
 bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
@@ -1053,6 +1079,19 @@ def _make_user_magic(method, user_type):
             return x.node.is_constant()
         return False
 
+    if method in bool_becomes_int_magic_methods:
+
+        def promote(x):
+            """Implements True+True=2, which works in python but not sympy"""
+            if isinstance(x, SymBool):
+                return SymInt(x.node.wrap_int(int(x)))
+            return x
+
+    else:
+
+        def promote(x):
+            return x
+
     # Before and after performing the operation, check if any operands are constant.
     # If so, extract out the constant values first. If `self` itself is a
     # constant, then "redispatch" by calling back into the operator. Sometimes
@@ -1061,11 +1100,14 @@ def _make_user_magic(method, user_type):
     # implementing wrap_bool in ConstantSymNodeImpl), but we're not doing that
     # today for no particular reason.
     def unary_magic_impl(self):
+        self = promote(self)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self))
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        self = promote(self)
+        other = promote(other)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self), other)
         if is_constant(other):
@@ -1077,6 +1119,8 @@ def _make_user_magic(method, user_type):
         return get_constant(ret) if is_constant(ret) else ret
 
     def rbinary_magic_impl(self, other):
+        self = promote(self)
+        other = promote(other)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self), other)
         if is_constant(other):
@@ -1116,7 +1160,7 @@ for method, func in magic_methods.items():  # type: ignore[assignment]
     if method in only_bool_magic_methods:
         _make_user_magic(method, SymBool)
         continue
-    if method in also_bool_magic_methods:
+    if method in also_bool_magic_methods or method in bool_becomes_int_magic_methods:
         _make_user_magic(method, SymBool)
     _make_user_magic(method, SymInt)
     _make_user_magic(method, SymFloat)
