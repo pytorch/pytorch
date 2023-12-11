@@ -272,7 +272,9 @@ class ExportedProgram:
             )
         else:
             ordered_tensor_constants = ()
-        self._check_input_constraints(*args)
+        self._check_input_constraints(
+            *ordered_params, *ordered_buffers, *ordered_tensor_constants, *args
+        )
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
@@ -348,11 +350,11 @@ class ExportedProgram:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """
+        from torch._export.exported_program import unlift_exported_program_lifted_states
         from torch._export.unflatten import unflatten
-        from ._unlift import _unlift_exported_program_lifted_states
 
         if flat:
-            return _unlift_exported_program_lifted_states(self)
+            return unlift_exported_program_lifted_states(self)
         else:
             return unflatten(self)
 
@@ -566,15 +568,9 @@ class ExportedProgram:
     def _check_input_constraints(self, *args):
         from torch._export.utils import _check_input_constraints_for_graph
 
-        placeholders = [p for p in self.graph.nodes if p.op == "placeholder"]
-        input_placeholders = [
-            p
-            for p, s in zip(placeholders, self.graph_signature.input_specs)
-            if s.kind == InputKind.USER_INPUT
-        ]
         _check_input_constraints_for_graph(
-            input_placeholders, args, self.range_constraints
-        )
+            self.graph, self.range_constraints, self.equality_constraints
+        )(*args)
 
     def _validate(self):
         self.verifier().check(self)
