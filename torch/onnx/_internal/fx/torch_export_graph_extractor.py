@@ -55,11 +55,29 @@ class TorchExport(exporter.FXGraphExtractor):
         # are removed. Here we register this step to input adapter.
         options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNoneInputStep())
 
+        # NOTE: temp workaround for https://github.com/pytorch/pytorch/issues/99534
+        # Dynamo doesn't support non-tensor inputs.
+        options.fx_tracer.input_adapter.append_step(
+            io_adapter.RemoveNonTensorInputStep()
+        )
+
+        # ONNX does not support complex inputs. During graph building, all complex inputs
+        # are converted to real representation inputs. Here we register this step to
+        # input/output adapter.
+        options.fx_tracer.input_adapter.append_step(
+            io_adapter.ConvertComplexToRealRepresentationInputStep()
+        )
+
         updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)
 
         # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
         # tensor, etc), we flatten the collection and register each element as output.
         options.fx_tracer.output_adapter.append_step(io_adapter.FlattenOutputStep())
+
+        # Output post-processing steps should happen after `FlattenOutputStep`.
+        options.fx_tracer.output_adapter.append_step(
+            io_adapter.ConvertComplexToRealRepresentationOutputStep()
+        )
 
         options.fx_tracer.output_adapter.append_step(
             io_adapter.PrependParamsAndBuffersAotAutogradOutputStep(model)

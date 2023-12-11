@@ -30,6 +30,10 @@ BertForQuestionAnswering,pass,6
 
 
 
+BlenderbotForCausalLM,eager_fail_to_run,0
+
+
+
 BlenderbotSmallForCausalLM,pass,14
 
 

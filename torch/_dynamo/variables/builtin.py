@@ -1457,6 +1457,10 @@ class BuiltinVariable(VariableTracker):
         # None no-ops this handler and lets the driving function proceed
         return None
 
+    def call_format(self, tx, _format_string, *args, **kwargs):
+        format_string = _format_string.as_python_constant()
+        return variables.StringFormatVariable.create(format_string, args, kwargs)
+
     def call_id(self, tx, *args):
         if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
             nn_mod_variable = args[0]
