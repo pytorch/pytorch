@@ -598,7 +598,7 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
         for idx, placement in enumerate(spec.placements):
             if placement.is_shard():
                 placement = cast(Shard, placement)
-                num_chunks = spec.mesh.size(dim=idx)
+                num_chunks = spec.mesh.size(mesh_dim=idx)
                 my_coord = spec.mesh.get_coordinate()
                 assert my_coord is not None, "current rank not in mesh!"
                 my_coord_on_mesh_dim = my_coord[idx]

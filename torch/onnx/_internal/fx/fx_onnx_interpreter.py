@@ -243,20 +243,20 @@ def _fill_tensor_shape_type(
             continue
         elif fx_type_utils.is_torch_symbolic_type(expected_value):
             # aten::sym_size output is a int, not a tensor, which stands
-            # for the size of one dim. We treat it as 0-D tensor.
+            # for the size of one dim. We treat it as 1-D tensor.
             onnxscript_value.dtype = fx_type_utils.from_sym_value_to_torch_dtype(
                 expected_value
             )
+            onnxscript_value.shape = torch.Size([1])
+        elif isinstance(expected_value, (int, float, bool)):
+            onnxscript_value.dtype = fx_type_utils.from_scalar_type_to_torch_dtype(
+                type(expected_value)
+            )
+            onnxscript_value.shape = torch.Size([])
         elif fx_type_utils.is_torch_complex_dtype(expected_value.dtype):
             # Like torch.view_as_real, we flatten complex tensors to real tensors with
             # additional last dimension of 2
-            onnxscript_value.shape = (
-                *[
-                    dim if isinstance(dim, int) else None
-                    for dim in expected_value.size()
-                ],
-                2,
-            )
+            onnxscript_value.shape = torch.Size((*expected_value.size(), 2))
             # complex64 -> float32, complex128 -> float64, etc.
             onnxscript_value.dtype = fx_type_utils.from_complex_to_float(
                 expected_value.dtype
@@ -266,10 +266,9 @@ def _fill_tensor_shape_type(
         else:
             # We set node output sizes to be dynamic to continue the model conversion,
             # and inputs are also set to be dynamic in add_input().
-            onnxscript_value.shape = tuple(
-                [dim if isinstance(dim, int) else None for dim in expected_value.size()]
-            )
+            onnxscript_value.shape = expected_value.size()
             onnxscript_value.dtype = expected_value.dtype
+
         # naming
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
@@ -574,7 +573,7 @@ class FxOnnxInterpreter:
         # or nodes with node.meta['val'] being a builtin value (ExportedProgram to dynamo_export).
         # Nonethless, the nodes are not consumed by others, so we don't need to
         # create a TorchScriptTensor for them.
-        if fake_tensor is None or isinstance(fake_tensor, (int, float, bool)):
+        if fake_tensor is None or isinstance(fake_tensor, (int, float, bool, str)):
             output = onnxscript_graph.add_input(
                 input_name=None,
             )
@@ -592,7 +591,7 @@ class FxOnnxInterpreter:
         elif fx_type_utils.is_torch_symbolic_type(fake_tensor):
             output = onnxscript_graph.add_input(
                 input_name=node.name,
-                shape=[],
+                shape=torch.Size([]),
                 dtype=fx_type_utils.from_sym_value_to_torch_dtype(fake_tensor),
             )
         else:

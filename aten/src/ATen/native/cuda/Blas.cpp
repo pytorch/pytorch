@@ -16,6 +16,7 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_scaled_mm_native.h>
+#include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/baddbmm_native.h>
@@ -369,12 +370,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 }
 
 const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  IntArrayRef batch1_sizes = batch1.sizes();
-
   // handle pathological cases that blas may not like
   if (result.numel() == 0) {
     return result;
-  } else if (batch1_sizes[2] == 0) {
+  } else if (batch1.size(2) == 0) {
     if (beta.to<c10::complex<double>>() == 0.0) {
       return result.zero_();
     } else {
@@ -421,17 +420,30 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
     const scalar_t* batch1_ptr = batch1_->const_data_ptr<scalar_t>();
     const scalar_t* batch2_ptr = batch2_->const_data_ptr<scalar_t>();
     scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
-    at::cuda::blas::bgemm<scalar_t>(
-      transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
-      transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
-      m, n, k,
-      alpha_val,
-      batch1_ptr, lda, batch1_->strides()[0],
-      batch2_ptr, ldb, batch2_->strides()[0],
-      beta_val,
-      result_ptr, ldc, result_->strides()[0],
-      num_batches
-    );
+    const auto transa = transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n';
+    const auto transb = transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n';
+    // If batch is 1 call gemm rather than bgemm
+    if (num_batches == 1) {
+      at::cuda::blas::gemm<scalar_t>(
+          transa, transb,
+          m, n, k,
+          alpha_val,
+          batch1_ptr, lda,
+          batch2_ptr, ldb,
+          beta_val,
+          result_ptr, ldc);
+    } else {
+      at::cuda::blas::bgemm<scalar_t>(
+        transa, transb,
+        m, n, k,
+        alpha_val,
+        batch1_ptr, lda, batch1_->strides()[0],
+        batch2_ptr, ldb, batch2_->strides()[0],
+        beta_val,
+        result_ptr, ldc, result_->strides()[0],
+        num_batches
+      );
+   }
   });
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
