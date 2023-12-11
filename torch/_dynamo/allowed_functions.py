@@ -246,13 +246,13 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = [
-            "torch.optim",
-            "torch.nn.modules.rnn",
-            "torch._dynamo",
-            "torch._C._dynamo",
-            "torch._inductor",
-            "torch._C.inductor",
-            "torch.fx",
+            "torch.optim.",
+            "torch.nn.modules.rnn.",
+            "torch._dynamo.",
+            "torch._C._dynamo.",
+            "torch._inductor.",
+            "torch._C.inductor.",
+            "torch.fx.",
             "torch._C._autograd",
             "torch._C._cudart",
             "torch._C._distributed_autograd",
@@ -265,6 +265,7 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
             "torch._C._profiler",
             "torch.__config__",
             "torch._custom_op",
+            "torch._decomp",
             "torch._dispatch",
             "torch._export",
             "torch._functorch.make_functional",
@@ -440,8 +441,13 @@ def _builtin_function_ids() -> Dict[int, str]:
     rv.update(
         {id(v): f"functools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
     )
-    rv.update({id(cast): "typing.cast"})
-    rv[id(functools.reduce)] = "functools.reduce"
+    rv.update(
+        {
+            id(cast): "typing.cast",
+            id(functools.reduce): "functools.reduce",
+            id(copy.deepcopy): "copy.deepcopy",
+        }
+    )
     return rv
 
 
