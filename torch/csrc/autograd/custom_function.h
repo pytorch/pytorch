@@ -305,8 +305,8 @@ auto Function<T>::apply(Args&&... args)
     outputs = T::forward(&node->ctx_, std::forward<Args>(args)...);
   }
 
-  _jvp_fn_t jvp_fn = [](variable_list inputs,
-                        variable_list gI) -> variable_list {
+  _jvp_fn_t jvp_fn = [](const variable_list& inputs,
+                        const variable_list& gI) -> variable_list {
     TORCH_CHECK(
         false,
         "jvp is not implemented for the c++ API of custom Function yet.",
