@@ -121,13 +121,13 @@ class TestExpand(MultiThreadedTestCase):
     def test_expand_device_mesh(self):
         mesh = dt.DeviceMesh("cpu", torch.arange(4))
         tag, rankset, group_size = ft_c._expand_group(mesh)
-        self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
+        self.assertEqual(c10d._get_group_tag(mesh.get_group(mesh_dim=0)), tag)
         self.assertEqual([0, 1, 2, 3], rankset)
         self.assertEqual(4, group_size)
 
         mesh = dt.DeviceMesh("cpu", torch.arange(4))
         tag, rankset, group_size = ft_c._expand_group(mesh)
-        self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
+        self.assertEqual(c10d._get_group_tag(mesh.get_group(mesh_dim=0)), tag)
         self.assertEqual([0, 1, 2, 3], rankset)
         self.assertEqual(4, group_size)
 
@@ -137,14 +137,14 @@ class TestExpand(MultiThreadedTestCase):
             tag, rankset, group_size = ft_c._expand_group(mesh)
 
         tag, rankset, group_size = ft_c._expand_group((mesh, 0))
-        self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
+        self.assertEqual(c10d._get_group_tag(mesh.get_group(mesh_dim=0)), tag)
         expected_rankset = [0, 2] if dist.get_rank() in [0, 2] else [1, 3]
         self.assertEqual(expected_rankset, rankset)
         self.assertEqual(2, group_size)
 
         tag, rankset, group_size = ft_c._expand_group((mesh, 1))
         expected_rankset = [0, 1] if dist.get_rank() in [0, 1] else [2, 3]
-        self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[1]), tag)
+        self.assertEqual(c10d._get_group_tag(mesh.get_group(mesh_dim=1)), tag)
         self.assertEqual(expected_rankset, rankset)
         self.assertEqual(2, group_size)
 

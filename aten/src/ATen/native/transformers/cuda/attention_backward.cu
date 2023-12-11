@@ -71,7 +71,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   c10::optional<at::Tensor> dk{c10::nullopt};
   c10::optional<at::Tensor> dv{c10::nullopt};
 
-  //  The kernel computes irregadless we will drop for this functions return
+  //  The kernel computes irregardless we will drop for this functions return
   Tensor grad_softmax;
 
   // We check the whether the cumulative_sequence_length_q is defined

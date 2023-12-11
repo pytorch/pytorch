@@ -3,6 +3,7 @@
 #ifdef USE_C10D_NCCL
 
 #include <chrono>
+#include <future>
 #include <iostream>
 #include <list>
 #include <mutex>
@@ -43,6 +44,12 @@ static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
     "TORCH_NCCL_ASYNC_ERROR_HANDLING",
     "NCCL_ASYNC_ERROR_HANDLING"};
 
+// Environment Variable to control whether dumping debug info on watchdog
+// timeout is enabled. This variable must be set together with
+// TORCH_NCCL_ENABLE_MONITORING=1 and TORCH_NCCL_TRACE_BUFFER_SIZE > 0.
+static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
+    "TORCH_NCCL_DUMP_ON_TIMEOUT"};
+
 // Environment Variable to control whether Desync Debug is enabled.
 // This variable must be set together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
 static std::vector<std::string> TORCH_NCCL_DESYNC_DEBUG = {
@@ -59,7 +66,12 @@ static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
 static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
     "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"};
 
+static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
+    "TORCH_NCCL_TRACE_BUFFER_SIZE"};
+
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
+
+constexpr const char* TIMEOUT_DUMP = "timeout_dump";
 
 constexpr auto kProcessGroupNCCLDefaultTimeout =
     std::chrono::milliseconds(10 * 60 * 1000);
@@ -389,6 +401,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return std::string(NCCL_BACKEND_NAME);
   }
 
+  bool supportsSplitting() const override {
+    return true;
+  }
+
   void startCoalescing() override;
 
   c10::intrusive_ptr<Work> endCoalescing() override;
@@ -533,6 +549,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void shutdown();
 
+  void eagerConnectSingleDevice(at::Device device) override;
+
+  void performNocolorSplit(at::Device device);
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
@@ -635,6 +655,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // object might get destroyed before the WorkNCCL object.
   void ncclCommWatchdog();
 
+  // Return the CUDA device most likely associated with this backend.
+  // If we aren't bound to a specific device, there is no strict
+  // guarantee that this heuristic is the correct assignment of ranks
+  // to GPUs that Python layers use, but in practice it tends to be.
+  // Fortunately we don't rely on this for correctness of any tensor
+  // operations, just for ancillary uses like health checks and
+  // barriers.
+  at::Device guessDeviceForRank() const;
+
   // Performs a health check by initializing dummy NCCL communicators and then
   // destroying them. This will help indicate and signal any NCCL-related issues
   // prior to the first collective. The actual initialization and subsequent
@@ -657,7 +686,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // In the timeout case and we will dump debug info such as the NCCL flight
   // recorder to storage. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
-  void dumpDebuggingInfo();
+  bool dumpDebuggingInfo();
 
   // Desync debug helper
   void logWorkStart(WorkNCCL& work);
@@ -676,10 +705,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // gets terminated.
   virtual void terminateProcess(std::string errMsg);
 
-  // Check the writeDebugInfo_ flag and if it is true, we do nothing.
-  // If not, we first set the flag to be true and return a thread which will
-  // get and write the debug info into storage.
-  c10::optional<std::thread> tryWriteDebugInfo();
+  // Create a thread that dumps debug info to the file specified as
+  // ${TORCH_NCCL_DEBUG_INFO_TEMP_FILE}{$RANK}
+  // Serializes all dumping activity, but allows concurrent calls.
+  // Each call returns a future, which can be checked or waited on
+  // for dump completion.
+  std::future<bool> launchAsyncDebugDump();
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
@@ -755,6 +786,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
 
+  // Size of ring buffer where we store NCCL Traces for debugging.
+  int ncclTraceBufferSize_;
+
   // We gate the heartbeat monitor thread so that we can roll it out gradually.
   std::atomic<bool> monitorThreadEnabled_;
 
@@ -800,6 +834,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Vector to Store WorkNCCL pointers
   std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;
+
+  std::chrono::time_point<std::chrono::steady_clock> lastWorkListUpdateTime_;
 
   // Mutex to Guard workMetaList_
   std::mutex completedWorkListMutex_;
@@ -865,6 +901,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
+
+  // Whether or not to dump debug info on timeout
+  bool dumpOnTimeout_;
 
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_

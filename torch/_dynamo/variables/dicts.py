@@ -20,7 +20,7 @@ from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource
-from ..utils import dict_keys, dict_values, specialize_symnode
+from ..utils import dict_keys, dict_values, istype, specialize_symnode
 from .base import VariableTracker
 from .constant import ConstantVariable
 
@@ -193,15 +193,20 @@ class ConstDictVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable, TupleVariable
+        from . import (
+            ConstantVariable,
+            ListIteratorVariable,
+            ListVariable,
+            TupleVariable,
+        )
 
         Hashable = ConstDictVariable._HashableTracker
 
         arg_hashable = args and is_hashable(args[0])
 
         if name == "__getitem__":
+            assert len(args) == 1
             return self.getitem_const(args[0])
-
         elif name == "items":
             assert not (args or kwargs)
             return TupleVariable(
@@ -213,6 +218,9 @@ class ConstDictVariable(VariableTracker):
         elif name == "values":
             assert not (args or kwargs)
             return DictValues(self)
+        elif name == "copy":
+            assert not (args or kwargs)
+            return self.modifed(self.items.copy(), mutable_local=MutableLocal())
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable.create(len(self.items))
@@ -220,26 +228,53 @@ class ConstDictVariable(VariableTracker):
             assert not kwargs and len(args) == 2
             k = Hashable(args[0])
 
+            tx.output.side_effects.mutation(self)
             newval = dict(self.items)
             newval[k] = args[1]
-            return tx.replace_all(self, self.clone(items=newval))
-        elif name in ("pop", "get") and args[0] not in self and len(args) == 2:
+            return ConstantVariable.create(None)
+        elif name in ("pop", "get") and len(args) in (1, 2) and args[0] not in self:
             # missing item, return the default value
-            return args[1]
+            if len(args) == 1:
+                return ConstantVariable(None)
+            else:
+                return args[1]
         elif name == "pop" and arg_hashable and self.mutable_local:
-            newval = dict(self.items)
-            result = newval.pop(Hashable(args[0]))
-            tx.replace_all(self, self.clone(items=newval))
-            return result
+            tx.output.side_effects.mutation(self)
+            return self.items.pop(Hashable(args[0]))
         elif (
             name == "update"
-            and args
+            and len(args) == 1
             and isinstance(args[0], ConstDictVariable)
             and self.mutable_local
         ):
-            newval = dict(self.items)
-            newval.update(args[0].items)
-            return tx.replace_all(self, self.clone(items=newval))
+            self.items.update(args[0].items)
+            # all keys in kwargs are valid (`str`s)
+            kwargs = {ConstantVariable.create(k): v for k, v in kwargs.items()}
+            self.items.update(kwargs)
+
+            return ConstantVariable.create(None)
+        elif (
+            name == "update"
+            and len(args) == 1
+            and isinstance(
+                args[0],
+                (
+                    ListVariable,
+                    TupleVariable,
+                    ListIteratorVariable,
+                ),
+            )
+            and self.mutable_local
+        ):
+            tx.output.side_effects.mutation(self)
+            items = dict(
+                x.unpack_var_sequence(tx) for x in args[0].unpack_var_sequence(tx)
+            )
+            self.items.update(items)
+            kwargs = {ConstantVariable.create(k): v for k, v in kwargs.items()}
+            self.items.update(kwargs)  # all keys in kwargs are valid (`str`s)
+            return ConstantVariable.create(None)
+
         elif name in ("get", "__getattr__") and args[0] in self:
             return self.getitem_const(args[0])
         elif name == "__contains__" and len(args) == 1:
@@ -454,6 +489,28 @@ def _is_matching_diffusers_cls(cls) -> bool:
     return mod is not None and issubclass(cls, mod.BaseOutput)
 
 
+def _call_hasattr_customobj(self, tx, name: str) -> "VariableTracker":
+    """Shared method between DataClassVariable and CustomizedDictVariable where items are attrs"""
+    if name in self.items or hasattr(self.user_cls, name):
+        return ConstantVariable(True)
+    elif istype(self.mutable_local, MutableLocal) and self.source is None:
+        # Something created locally can't have any extra fields on it
+        return ConstantVariable(False)
+    elif self.mutable_local is None and self.source:
+        # Maybe add a guard
+        try:
+            example = tx.output.root_tx.get_example_value(self.source)
+            install_guard(
+                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+            )
+            return ConstantVariable(hasattr(example, name))
+        except KeyError:
+            pass
+    unimplemented(
+        f"hasattr({self.__class__.__name__}, {name}) {self.mutable_local} {self.source}"
+    )
+
+
 class DataClassVariable(ConstDictVariable):
     """
     This is a bit of a hack to deal with
@@ -593,6 +650,8 @@ class DataClassVariable(ConstDictVariable):
                 return variables.ConstantVariable.create(defaults[name])
         super().var_getattr(tx, name)
 
+    call_hasattr = _call_hasattr_customobj
+
 
 class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
@@ -708,6 +767,8 @@ class CustomizedDictVariable(ConstDictVariable):
         if name_vt in self:
             return self.call_method(tx, "__getitem__", [name_vt], {})
         super().var_getattr(tx, name)
+
+    call_hasattr = _call_hasattr_customobj
 
 
 @functools.lru_cache(None)
