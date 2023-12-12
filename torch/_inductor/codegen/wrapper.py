@@ -2298,7 +2298,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"{name}_storage",
                     size_array_var,
                     stride_array_var,
-                    dtype_code,
                     device_type,
                     device_idx,
                 ]
