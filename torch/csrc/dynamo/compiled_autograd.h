@@ -435,9 +435,14 @@ class CompiledNodeArgs {
     return std::exchange(_compiler.default_dyn_type, default_dyn_type);
   }
 
-  CompiledNodeArgs(AutogradCompilerCall& compiler, NodeCall& node_call)
+  PyObject* get_py_compiler() {
+    return _py_compiler;
+  }
+
+  CompiledNodeArgs(AutogradCompilerCall& compiler, NodeCall& node_call, PyObject* py_compiler)
       : _compiler(compiler),
         _node_call(node_call),
+        _py_compiler(py_compiler),
         _specialization_key_size(0),
         _specialization_key_storage(1024),
         _specialization_key(
@@ -462,6 +467,9 @@ class CompiledNodeArgs {
 
   AutogradCompilerCall& _compiler;
   NodeCall& _node_call;
+  // This is a borrowed reference, we do not increment ownership, or lower it,
+  // it's lifecycle is entirely longer than this objects.
+  PyObject* _py_compiler;
   size_t _specialization_key_size;
   size_t _specialization_key_storage;
   uint8_t* _specialization_key;

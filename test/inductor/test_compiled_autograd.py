@@ -420,6 +420,28 @@ class TestCompiledAutograd(TestCase):
 
         self.check_output_and_recompiles(fn, 2)
 
+    def test_custom_fn_saved_multiple_tensors(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x, x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    (x1, x2) = ctx.saved_tensors
+                    return gO * torch.cos(x1) * torch.cos(x2)
+
+            for i in [10, 100, 10]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = MyFn.apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn, 2)
+
     def test_custom_fn_saved_shape_tensor(self):
         def fn():
             class MyFn(torch.autograd.Function):

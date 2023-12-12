@@ -564,8 +564,8 @@ class Function(_SingleLevelFunction):
 
     @staticmethod
     def _compiled_autograd_key(cls):
-        from torch._dynamo.compiled_autograd import COMPILED_AUTOGRAD_ID
-        return (COMPILED_AUTOGRAD_ID,)
+        from torch._dynamo.compiled_autograd import CompiledAutogradCustomFunctionKey
+        return CompiledAutogradCustomFunctionKey.get()
 
 
 def once_differentiable(fn):

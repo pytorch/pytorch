@@ -317,6 +317,8 @@ variable_list compiled_autograd(
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call;
+  ClosingTHPObjectPtr py_compiler(
+      check(PyObject_CallNoArgs((the_autograd_compiler))));
 
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls.lookup(output_edges[i].function)
@@ -335,7 +337,7 @@ variable_list compiled_autograd(
     calls.emplace_back(&call);
 
     { // update cache and gather args into `compiler_call`
-      CompiledNodeArgs node_args(compiler_call, call);
+      CompiledNodeArgs node_args(compiler_call, call, py_compiler);
       node_args.collect(call);
       if (node_args.cond(call.needed)) {
         fn->compiled_args(node_args);
@@ -369,8 +371,6 @@ variable_list compiled_autograd(
   // TODO(jansel): some dynamic sizes seem to be ints not symints
   if (!cache->check_dynamic_sizes(compiler_call)) {
     // cache miss, need to capture FX graph
-    ClosingTHPObjectPtr py_compiler(
-        check(PyObject_CallNoArgs((the_autograd_compiler))));
     TraceState state = call_begin_capture(
         py_compiler, *cache, compiler_call, output_edges.size());
     InputBuffers input_buffers;

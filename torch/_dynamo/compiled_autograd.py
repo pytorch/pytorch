@@ -1,6 +1,7 @@
 import contextlib
 import functools
-from typing import List, Optional
+import itertools
+from typing import List, Optional, Tuple
 
 import torch
 from torch._dynamo.external_utils import call_hook, call_backward
@@ -21,17 +22,32 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.proxy import Proxy
-from torch._functorch.aot_autograd import AOT_COUNTER
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
-
-COMPILED_AUTOGRAD_ID = 0
 
 def maybe_clone(x):
     if x is not None:
         return clone_preserve_strides(x)
     return x
 
+class CompiledAutogradCustomFunctionKey:
+    # Used by user-defined autograd function
+    # Additionally guard against their saved tensors shapes
+    COMPILED_AUTOGRAD_ID = None
+    CURRENT_SAVED_TENSORS_SHAPES = ()
+
+    @staticmethod
+    def get() -> Tuple[int]:
+        if CompiledAutogradCustomFunctionKey.COMPILED_AUTOGRAD_ID == None:
+            # one-time id setting
+            from torch._functorch.aot_autograd import AOT_COUNTER
+            CompiledAutogradCustomFunctionKey.COMPILED_AUTOGRAD_ID = next(AOT_COUNTER)
+
+        return (CompiledAutogradCustomFunctionKey.COMPILED_AUTOGRAD_ID, *CompiledAutogradCustomFunctionKey.CURRENT_SAVED_TENSORS_SHAPES)
+
+    @staticmethod
+    def update(saved_tensors_shapes: Tuple[int]):
+        CompiledAutogradCustomFunctionKey.CURRENT_SAVED_TENSORS_SHAPES = saved_tensors_shapes
 
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
@@ -56,8 +72,12 @@ class AutogradCompilerInstance:
     def source(name, idx) -> GetItemSource:
         return GetItemSource(LocalSource(name), idx)
 
+    def update_saved_tensors_shape(self, saved_tensors: List[torch.Tensor]):
+        shapes = [[dim for dim in x.shape] for x in saved_tensors]
+        flat_shapes = tuple(itertools.chain(*shapes))
+        CompiledAutogradCustomFunctionKey.update(flat_shapes)
+
     def begin_capture(self, inputs: List[torch.Tensor], sizes: List[int]):
-        COMPILED_AUTOGRAD_ID = next(AOT_COUNTER)
         counters["compiled_autograd"]["captures"] += 1
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
@@ -68,12 +88,12 @@ class AutogradCompilerInstance:
         self.backward_proxy = self.fx_tracer.create_proxy("placeholder", "backward", (), {})
 
         # tensor inputs to fake tensors
-        inputs = [
+        outputs = [
             self.wrap_fake(x, self.source("inputs", idx))
             for idx, x in enumerate(inputs)
         ]
-        proxies = [args_proxy[i] for i in range(len(inputs))]
-        self.bind_tensors_to_proxies(inputs, proxies)
+        proxies = [args_proxy[i] for i in range(len(outputs))]
+        self.bind_tensors_to_proxies(outputs, proxies)
 
         # size inputs to symints
         sizes = [
@@ -93,10 +113,12 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
         self.stack.enter_context(disable_proxy_modes_tracing(enable_current=True))
-        return inputs, sizes
+        return outputs, sizes
 
     def proxy_call_backward(self, inputs, backward_id: int):
         assert self.backward_proxy is not None
+        assert len(inputs) == 1 # should only be grad_out
+        grad_out = inputs[0]
         backward_fn = self.backward_proxy[backward_id]
         saved_variables = self.backward_proxy[backward_id+1]
         proxies = self.fx_tracer.create_proxy(
@@ -105,15 +127,16 @@ class AutogradCompilerInstance:
             args=(
                 backward_fn,
                 saved_variables,
-                *[self.to_proxy(x) for x in inputs],
+                self.to_proxy(grad_out),
             ),
             kwargs={},
         )
 
         with disable_proxy_modes_tracing():
-            outputs = [maybe_clone(x) for x in inputs]
-            self.bind_tensors_to_proxies(outputs, proxies)
-        return outputs
+            # TODO: require 1 per forward input
+            grad_in = maybe_clone(grad_out)
+            self.bind_tensors_to_proxies([grad_in], proxies)
+        return grad_in
 
     def proxy_call_hook(self, hook, *args):
         return self.fx_tracer.create_proxy(
