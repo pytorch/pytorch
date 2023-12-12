@@ -1940,8 +1940,6 @@ exclude_patterns = [
     'torch/cuda/_memory_viz.py',  # mypy: Value of type "object" is not indexable
     'torch/distributed/__init__.py',
     'torch/distributed/_composable_state.py',
-    'torch/distributed/_functional_collectives.py',
-    'torch/distributed/_functional_collectives_impl.py',
     'torch/distributed/_shard/__init__.py',
     'torch/distributed/_shard/_utils.py',
     'torch/distributed/_shard/api.py',
