@@ -93,17 +93,19 @@ class NestedTensor(torch.Tensor):
         self._offsets = offsets
         self._lengths = lengths
 
-        if is_dummy:
-            # Avoid infinite recursion
-            # Initialize the _values, _offsets, etc because they are checked
-            # when dispatching to jagged funcs in torch dispatch.
-            return
-
         # Query cache for the symint associated with offsets or lengths
         # offsets always exists, though sometimes lengths also exists
         # (create a new one if needed).
         ragged_source = offsets if lengths is None else lengths
-        ragged_size = get_tensor_symint(ragged_source, coeff=1, sum_offsets=values.shape[0])
+        if not is_dummy:
+            ragged_size = get_tensor_symint(
+                ragged_source, coeff=1, sum_offsets=values.shape[0]
+            )
+        else:
+            # Avoid infinite recursion
+            # Initialize the _values, _offsets, etc because they are checked
+            # when dispatching to jagged funcs in torch dispatch.
+            ragged_size = 0
         self._ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
         Ds = values.shape[: self._ragged_idx - 1] + values.shape[self._ragged_idx :]
@@ -267,6 +269,7 @@ class NestedTensor(torch.Tensor):
 
 _nt_dummy = None
 
+
 def get_nt_dummy():
     global _nt_dummy
     if _nt_dummy is None:
@@ -276,6 +279,7 @@ def get_nt_dummy():
             is_dummy=True,
         )
     return _nt_dummy
+
 
 # Not actually a view!
 class ViewBufferFromNested(torch.autograd.Function):
