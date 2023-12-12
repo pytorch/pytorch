@@ -2030,17 +2030,18 @@ def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
     if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
-        return os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc")
+        return os.path.realpath(os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc"))
     return "nvcc"
 
 
 def _cutlass_include_paths() -> List[str]:
     cutlass_path = config.cuda.cutlass_dir
     return [
-        os.path.join(cutlass_path, "include"),
-        os.path.join(cutlass_path, "tools/library/include"),
-        os.path.join(cutlass_path, "tools/library/src"),
-        os.path.join(cutlass_path, "tools/util/include"),
+        # Use realpath to get canonical absolute paths, in order not to mess up cache keys
+        os.path.realpath(os.path.join(cutlass_path, "include")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/library/include")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/library/src")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/util/include")),
     ]
 
 
@@ -2122,7 +2123,7 @@ def cuda_compile_command(
     src_files: List[str],
     dst_file: str,
     dst_file_ext: str,
-    extra_args : Optional[List[str]]=None
+    extra_args: Optional[List[str]] = None,
 ) -> str:
     if extra_args is None:
         extra_args = []
@@ -2242,7 +2243,9 @@ class CUDACodeCache:
         return key, input_path
 
     @classmethod
-    def compile(cls, source_code, dst_file_ext, extra_args : Optional[List[str]]=None) -> Tuple[str, str, str]:
+    def compile(
+        cls, source_code, dst_file_ext, extra_args: Optional[List[str]] = None
+    ) -> Tuple[str, str, str]:
         """
         Compiles CUDA source_code into a file with dst_file_ext extension.
         Returns a tuple of dst_file_path, hash_key, source_code_path
@@ -2259,6 +2262,7 @@ class CUDACodeCache:
                     cmd = cuda_compile_command(
                         [input_path], output_path, dst_file_ext, extra_args
                     )
+                    log.info("CUDA Compilation: %s", cmd)
                     cmd = cmd.split(" ")
                     try:
                         subprocess.check_output(
@@ -2266,6 +2270,11 @@ class CUDACodeCache:
                         )
                     except subprocess.CalledProcessError as error:
                         raise exc.CUDACompileError(cmd, error.output) from error
+                else:
+                    log.info(
+                        "CUDA Compilation skipped: %s since output already exists",
+                        input_path,
+                    )
                 cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path)
 
         return (cls.cache[key].output_path, key, input_path)

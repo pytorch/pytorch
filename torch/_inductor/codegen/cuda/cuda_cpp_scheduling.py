@@ -15,6 +15,8 @@ from ...scheduler import (
     Scheduler,
     SchedulerNode,
 )
+
+from ...select_algorithm import NoValidChoicesError
 from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer
@@ -170,7 +172,6 @@ class CUDACPPScheduling(BaseScheduling):
                     f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950
                 )
                 return False
-        return True
         compilation_result = self.try_fused_template_compilation(
             cuda_template_buffer, epilogue_nodes + [additional_node]
         )

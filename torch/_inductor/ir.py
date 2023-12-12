@@ -3408,7 +3408,7 @@ class CUDATemplateBuffer(TemplateBuffer):
                 ):
                     return
             choices = self.template.generate_retune_choices(self, epilogue_nodes)
-            if choices and len(choices) > 1:
+            if choices and len(choices) > 0:
                 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
                 from torch._inductor.select_algorithm import autotune_select_algorithm
 
