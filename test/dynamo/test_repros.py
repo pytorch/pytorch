@@ -3423,7 +3423,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             compiled_opt_step()
 
         compiled_model_step(x)
-        param_grad_ref = weakref.ref(list(model.parameters())[0].grad)
+        param_grad_ref = weakref.ref(next(iter(model.parameters())).grad)
         optimizer.zero_grad(True)
         self.assertIsNone(param_grad_ref())
 
