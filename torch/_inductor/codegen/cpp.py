@@ -264,6 +264,7 @@ index_value_name_counter = 1
 
 def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     global index_value_name_counter
+    nthds = parallel_num_threads()
     struct_name = f"IndexValue_{index_value_name_counter}"
     index_value_name_counter += 1
 
@@ -272,28 +273,15 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
         f"struct {struct_name} {{size_t index; {DTYPE_TO_CPP[src_dtype]} value;}};",
         f"{struct_name} {tmpvar}{{0, {reduction_init(reduction_type, src_dtype)}}};",
     ]
-    if reduction_type == "argmax":
-        prefix.extend(
-            [
-                "#if !defined(__clang_major__) || __clang_major__ > 9",
-                f"#pragma omp declare reduction(argmax : {struct_name} :\\",
-                "    omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\\",
-                "    omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\\",
-                f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
-                "#endif",
-            ]
-        )
-    elif reduction_type == "argmin":
-        prefix.extend(
-            [
-                "#if !defined(__clang_major__) || __clang_major__ > 9",
-                f"#pragma omp declare reduction(argmin : {struct_name} :\\",
-                "    omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\\",
-                "    omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\\",
-                f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
-                "#endif",
-            ]
-        )
+    tmpvar_per_thd = f"{tmpvar}_arr[{nthds}]"
+    tmpvar_local = tmpvar_per_thd.replace(f"[{nthds}]", "[tid]")
+    prefix.extend(
+        [
+            f"{struct_name} {tmpvar_per_thd};",
+            f"for (int tid = 0; tid < {nthds}; tid++) ",
+            f"    {tmpvar_local} = {{0, {reduction_init(reduction_type, src_dtype)}}};",
+        ]
+    )
     return prefix
 
 
@@ -1337,6 +1325,9 @@ class CppKernel(Kernel):
         acc = self.reduction_cse.generate(
             self.loads, f"reduction {reduction_key}", write=False
         )
+        nthds = parallel_num_threads()
+        acc_per_thd = f"{acc}_arr[{nthds}]"
+        acc_local = acc_per_thd.replace(f"[{nthds}]", "[tid]")
         self.reduction_var_map[acc] = reduction_type
         if argmax_or_argmin:
             self.reduction_prefix.writelines(
@@ -1349,34 +1340,42 @@ class CppKernel(Kernel):
                 index = index * self.ranges[i] + self.itervars[i]
             self.stores.writelines(
                 [
-                    f"if ({acc}.value {compare_op} {value}) {{",
-                    f"    {acc}.index = {cexpr_index(index)}; {acc}.value = {value};",
+                    "int tid = omp_get_thread_num();",
+                    f"if ({acc_local}.value {compare_op} {value}) {{",
+                    f"    {acc_local}.index = {cexpr_index(index)}; {acc_local}.value = {value};",
+                    "}",
+                ],
+            )
+            self.reduction_suffix.writelines(
+                [
+                    f"for (int tid = 0; tid < {nthds}; tid++)",
+                    "{",
+                    f"    if ({acc}.value {compare_op} {acc_local}.value) {{",
+                    f"        {acc}.index = {acc_local}.index; {acc}.value = {acc_local}.value;",
+                    "    }",
                     "}",
                 ],
             )
         else:
             acc_type = reduction_acc_type(reduction_type, dtype)
 
-            if (reduction_type, acc_type) not in self.reduction_omp_dec:
-                if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
-                    # Scalar reduction for other reductions are declared by default
-                    self.reduction_prefix.splice(
-                        f"""\
-    #pragma omp declare reduction(\
-    {RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
-    omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
-    initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
-                """
-                    )
-                self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
-                    reduction_type
-                ]
-
             self.reduction_prefix.writeline(
                 f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
             )
-            self.stores.writeline(
-                f"{acc} = {reduction_combine(reduction_type, acc, value)};"
+            self.reduction_prefix.writeline(f"{acc_type} {acc_per_thd};")
+            self.reduction_prefix.writelines(
+                [
+                    f"for (int tid = 0; tid < {nthds}; tid++) ",
+                    "{",
+                    f"    {acc_local} = {reduction_init(reduction_type, dtype)};",
+                    "}",
+                ]
+            )
+            self.stores.writelines(
+                [
+                    "int tid = omp_get_thread_num();",
+                    f"{acc_local} = {reduction_combine_vec(reduction_type, acc_local, value)};",
+                ]
             )
 
         result = reduction_project(reduction_type, acc)
@@ -1713,34 +1712,6 @@ class CppVecKernel(CppKernel):
         acc_type = reduction_acc_type(reduction_type, dtype)
         acc_type_vec = reduction_acc_type_vec(reduction_type, dtype)
 
-        if (reduction_type, acc_type) not in self.reduction_omp_dec:
-            if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
-                # Scalar reduction for other reductions are declared by default
-                self.reduction_prefix.splice(
-                    f"""\
-#pragma omp declare reduction(\
-{RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
-omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
-initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
-            """
-                )
-            self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
-                reduction_type
-            ]
-
-        if (reduction_type, acc_type_vec) not in self.reduction_omp_dec:
-            self.reduction_prefix.splice(
-                f"""\
-#pragma omp declare reduction(\
-{RTYPE_TO_CPP[reduction_type]}:{acc_type_vec}:\
-omp_out = {reduction_combine_vec(reduction_type, "omp_out", "omp_in")}) \
-initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
-            """
-            )
-            self.reduction_omp_dec[reduction_type, acc_type_vec] = RTYPE_TO_CPP[
-                reduction_type
-            ]
-
         reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
@@ -1749,7 +1720,9 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             self.loads, f"reduction {reduction_key}", write=False
         )
         acc_vec = f"{acc}_vec"
-
+        nthds = parallel_num_threads()
+        acc_per_thd = f"{acc}_arr[{nthds}]"
+        acc_vec_per_thd = f"{acc}_vec_arr[{nthds}]"
         self.reduction_var_map[acc_vec] = reduction_type
         self.reduction_prefix.writeline(
             f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
@@ -1757,10 +1730,34 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
         self.reduction_prefix.writeline(
             f"{acc_type_vec} {acc_vec} = {reduction_init_vec(reduction_type, dtype)};"
         )
-        self.stores.writeline(
-            f"{acc_vec} = {reduction_combine_vec(reduction_type, acc_vec, value)};"
+        self.reduction_prefix.writeline(f"{acc_type} {acc_per_thd};")
+        self.reduction_prefix.writeline(f"{acc_type_vec} {acc_vec_per_thd};")
+        acc_local = acc_per_thd.replace(f"[{nthds}]", "[tid]")
+        acc_vec_local = acc_vec_per_thd.replace(f"[{nthds}]", "[tid]")
+        self.reduction_prefix.writelines(
+            [
+                f"for (int tid = 0; tid < {nthds}; tid++) ",
+                "{",
+                f"    {acc_local} = {reduction_init(reduction_type, dtype)};",
+                f"    {acc_vec_local} = {reduction_init_vec(reduction_type, dtype)};",
+                "}",
+            ]
         )
-
+        self.stores.writelines(
+            [
+                "int tid = omp_get_thread_num();",
+                f"{acc_vec_local} = {reduction_combine_vec(reduction_type, acc_vec_local, value)};",
+            ]
+        )
+        self.reduction_suffix.writelines(
+            [
+                f"for (int tid = 0; tid < {nthds}; tid++)",
+                "{",
+                f"    {acc} = {reduction_combine_vec(reduction_type, acc, acc_local)};",
+                f"    {acc_vec} = {reduction_combine_vec(reduction_type, acc_vec, acc_vec_local)};",
+                "}",
+            ],
+        )
         tmpvar: Union[str, CSEVariable]
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
@@ -3259,13 +3256,6 @@ class LoopLevel:
         size_expr = cexpr_index(self.size)
         if config.cpp.no_redundant_loops and offset_expr == size_expr:
             return None
-        if self.reduction_var_map:
-            reduction = " " + " ".join(
-                f"reduction({RTYPE_TO_CPP[rtype]}:{var})"
-                for var, rtype in self.reduction_var_map.items()
-            )
-        else:
-            reduction = ""
         simd = (
             f"simd simdlen({self.simd_nelements}) "
             if self.simd_omp and self.simd_nelements > 1
@@ -3273,7 +3263,7 @@ class LoopLevel:
         )
         if self.parallel:
             # TODO(jansel): look into chunk size and other schedules
-            line1 = f"#pragma omp for{reduction} "
+            line1 = "#pragma omp for"
             if self.parallel > 1:
                 line1 += f" collapse({self.parallel})"
             if self.simd_omp:
@@ -3281,7 +3271,7 @@ class LoopLevel:
         elif self.simd_vec:
             line1 = ""
         elif self.simd_omp:
-            line1 = f"#pragma omp {simd}{reduction}"
+            line1 = f"#pragma omp {simd}"
         elif not self.reduction_var_map and codecache.is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
