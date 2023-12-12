@@ -35,11 +35,16 @@ def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
     requires_grad = result.requires_grad
     stride = result.stride()
 
-    memory_formats = {
-        torch.contiguous_format,
-        torch.channels_last,
-        torch.channels_last_3d,
-    }
+    if torch._C._functorch.is_batchedtensor(result):
+        memory_formats = {
+            torch.contiguous_format,
+        }
+    else:
+        memory_formats = {
+            torch.contiguous_format,
+            torch.channels_last,
+            torch.channels_last_3d,
+        }
 
     memory_format = None
 
