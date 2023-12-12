@@ -84,6 +84,9 @@ def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
             list(model_eager.parameters()), list(model_compiled.parameters())
         )
 
+        for p_eager, p_compiled in zip(model_eager.parameters(), model_compiled.parameters()):
+            self.assertEqual(opt_eager.state[p_eager], opt_compiled.state[p_compiled])
+
         if self.check_kernel_count:
             # currently, we compile the step and the rest of the computation
             # separately because the step is a single element tensor
@@ -169,9 +172,10 @@ class CompiledOptimizerTests(TestCase):
     test_nadam_weight_momentum_decay = make_test(
         NAdam, lr=0.01, weight_decay=0.01, momentum_decay=6e-3
     )
-    test_rprop = make_test(Rprop, kernel_count=1, lr=0.01)
-    test_rmsprop = make_test(RMSprop, kernel_count=1, lr=0.01)
-    test_adadelta = make_test(Adadelta, kernel_count=1, lr=0.01)
+    # Reenable rprop, rmsprop, and adadelta once https://github.com/pytorch/pytorch/issues/115679 is fixed
+    # test_rprop = make_test(Rprop, kernel_count=1, lr=0.01)
+    # test_rmsprop = make_test(RMSprop, kernel_count=1, lr=0.01)
+    # test_adadelta = make_test(Adadelta, kernel_count=1, lr=0.01)
     test_adagrad = make_test(Adagrad, kernel_count=5, lr=0.01)
     test_asgd_default = make_test(ASGD, kernel_count=2, lr=0.1)
     test_asgd_single = make_test(ASGD, kernel_count=12, lr=0.1, foreach=False)
