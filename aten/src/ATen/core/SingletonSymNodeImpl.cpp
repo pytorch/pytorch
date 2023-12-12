@@ -81,7 +81,7 @@ std::optional<at::Tensor> try_call_with_dummy(const std::function<at::Tensor(at:
     if (!s.is_heap_allocated()) {
       continue;
     }
-    auto _ptr = reinterpret_cast<at::TensorImpl*>(s.toSymNode()->singleton_dummy());
+    auto _ptr = s.toSymNode()->singleton_dummy();
     if (_ptr != nullptr) {
       TORCH_CHECK(ptr == nullptr, "Only one singleton dimension supported");
       ptr = _ptr;
@@ -89,7 +89,7 @@ std::optional<at::Tensor> try_call_with_dummy(const std::function<at::Tensor(at:
   }
   if (ptr != nullptr) {
     auto p = c10::intrusive_ptr<at::TensorImpl>(ptr, c10::raw::DontIncreaseRefcount{});
-    auto dummy = at::Tensor(p);
+    auto dummy = at::Tensor(std::move(p));
     auto ret = fn(dummy);
     dummy.unsafeReleaseTensorImpl();
     return ret;

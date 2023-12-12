@@ -143,7 +143,7 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
     return data_;
   }
 
-  void* singleton_dummy() override {
+  c10::TensorImpl* singleton_dummy() override {
     return dummy_.unsafeGetTensorImpl();
   }
 
