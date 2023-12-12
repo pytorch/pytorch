@@ -29,9 +29,8 @@ Note:
 from __future__ import annotations
 
 import copy
-import contextlib
 import itertools
-from typing import Any, Callable, Collection, Mapping, Optional, Tuple, Type, Union, Sequence
+from typing import Any, Callable, Collection, Mapping, Optional, Tuple, Type, Union
 
 import onnx_test_common
 
@@ -40,16 +39,14 @@ import pytest
 
 import torch
 from onnx_test_common import skip, xfail
+from torch.onnx._internal.diagnostics import _rules
 from torch.testing._internal import (
     common_device_type,
     common_methods_invocations,
     common_utils,
 )
 from torch.testing._internal.opinfo import core as opinfo_core
-from torch.onnx._internal.fx import analysis, passes, decomposition_table, diagnostics, onnxfunction_dispatcher
-from torch.onnx._internal import io_adapter
-from torch.onnx._internal.diagnostics import _rules
-from torch.onnx._internal.diagnostics import infra
+
 
 # NOTE: For ATen signature modifications that will break ONNX export,
 # use **xfail_torchlib_forward_compatibility** and **skip_torchlib_forward_compatibility** instead of xfail or skip
@@ -117,6 +114,10 @@ def skip_torchlib_forward_compatibility(
 #     are now fixed, removed the corresponding xfail.
 #     2b. If a test is not failing consistently, use skip.
 EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
+    xfail(
+        "__getitem__",
+        reason="io_adaper doesn't support __getitem__ input slice(0, 3, None)",
+    ),
     xfail(
         "add", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Add")
@@ -194,6 +195,14 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     xfail(
+        "bfloat16",
+        reason="fixme: ORT errors with RuntimeError: No corresponding Numpy type for Tensor Type.",
+    ),
+    xfail(
+        "bincount",
+        reason=onnx_test_common.reason_dynamo_does_not_support("aten.bincount.default"),
+    ),
+    xfail(
         "bmm",
         dtypes=(
             torch.uint8,
@@ -203,6 +212,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support(
             "Matmul", "uint8, int8, int16"
         ),
+    ),
+    xfail(
+        "bernoulli",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
     skip(
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
@@ -284,6 +297,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("MatMul", "uint8, int8, int16")
     ),
     xfail(
+        "empty_strided",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
         "eq",
         dtypes=(torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Equal", "uint8, int8, int16"),
@@ -291,6 +308,26 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "equal",
         reason=onnx_test_common.reason_dynamo_does_not_support("aten.equal.default")
+    ),
+    xfail(
+        "exponential",
+        reason=onnx_test_common.reason_dynamo_does_not_support("exponential"),
+    ),
+    xfail(
+        "fft.irfftn",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten._fft_r2c.default"),
+    ),
+    xfail(
+        "fft.rfft",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten._fft_r2c.default"),
+    ),
+    xfail(
+        "fft.rfftn",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten._fft_r2c.default"),
+    ),
+    xfail(
+        "fft.rfft2",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten._fft_r2c.default"),
     ),
     xfail(
         "floor",
@@ -306,6 +343,53 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "index_put",
         dtypes=(torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
+    ),
+    xfail(
+        "item",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
+        "log_normal",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
+        "masked.amax",
+        reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/18781",
+    ),
+    xfail(
+        "masked.amin",
+        reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/18781",
+    ),
+    xfail(
+        "masked.argmin",
+        dtypes=(torch.int64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ArgMin", "int64"),
+    ),
+    xfail(
+        "masked.argmax",
+        dtypes=(torch.int64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ArgMax", "int64"),
+    ),
+    xfail(
+        "masked.log_softmax",
+        reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/18781",
+    ),
+    xfail(
+        "masked.mean",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("ReduceMean", "bool"),
+    ),
+    xfail(
+        "masked_select",
+        reason=onnx_test_common.reason_dynamo_does_not_support("aten.masked_select.default"),
+    ),
+    xfail(
+        "masked.softmax",
+        reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/18781",
+    ),
+    xfail(
+        "masked.softmin",
+        reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/18781",
     ),
     xfail(
         "nn.functional.adaptive_avg_pool2d",
@@ -461,12 +545,39 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     ),
     xfail(
+        "index_add",
+        matcher=lambda sample: len(sample.input.shape) < 2,
+        reason="fixme: https://github.com/microsoft/onnxscript/issues/1212",
+    ),
+    xfail(
+        "index_add",
+        matcher=lambda sample: isinstance(sample.args[0], int) and sample.args[0] == -1,
+        reason="fixme: aten::index_put indices contains None when dim is -1",
+    ),
+    xfail(
+        "index_copy",
+        matcher=lambda sample: len(sample.input.shape) < 2,
+        reason="fixme: https://github.com/microsoft/onnxscript/issues/1212",
+    ),
+    xfail(
+        "index_copy",
+        matcher=lambda sample: isinstance(sample.args[0], int) and sample.args[0] == -1,
+        reason="fixme: aten::index_put indices contains None when dim is -1",
+    ),
+    xfail(
         "index_put",
         matcher=lambda sample: (sample.args[0][0].dtype == torch.bool)
         and (sample.kwargs.get("accumulate") is False),
         reason=onnx_test_common.reason_dynamo_does_not_support(
             "https://github.com/pytorch/pytorch/issues/101150"
         ),
+    ),
+    xfail(
+        "log_softmax",
+        matcher=lambda sample: len(sample.input.shape) != 1
+        and sample.args[0] != 0
+        and sample.kwargs.get("dtype") is None,
+        reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/18781",
     ),
     xfail(
         "native_batch_norm",
@@ -588,7 +699,6 @@ OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_S
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 
 
-
 class SingleOpModel(torch.nn.Module):
     """Test model to wrap around a single op for export."""
 
@@ -605,9 +715,9 @@ def _should_skip_xfail_test_sample(
     op_name: str, sample, model_type: onnx_test_common.TorchModelType
 ) -> Tuple[Optional[str], Optional[str]]:
     """Check if the test sample should be skipped or xfailed.
-    
-    If the xfail/skip decorator meta is matched with its op_name and model_type, 
-    return the test_behavior and reason. Otherwise, return None, None. Note that 
+
+    If the xfail/skip decorator meta is matched with its op_name and model_type,
+    return the test_behavior and reason. Otherwise, return None, None. Note that
     if the matcher is None, the test is decorator_meta is meant to skip/xfail all model types.
 
     Args:
@@ -639,6 +749,7 @@ def _should_skip_xfail_test_sample(
                 return decorator_meta.test_behavior, decorator_meta.reason
     return None, None
 
+
 def _compare_onnx_and_torch_exported_program(
     torch_exported_program,
     onnx_exported_program,
@@ -646,6 +757,7 @@ def _compare_onnx_and_torch_exported_program(
     input_kwargs=None,
     rtol=1e-03,
     atol=1e-07,
+    only_check_shape=False,
 ):
     # avoid mutable default argument
     if input_kwargs is None:
@@ -663,10 +775,15 @@ def _compare_onnx_and_torch_exported_program(
         raise AssertionError(
             f"Expected {len(torch_outputs_onnx_format)} outputs, got {len(onnx_outputs)}"
         )
+
     for torch_output, onnx_output in zip(torch_outputs_onnx_format, onnx_outputs):
-        torch.testing.assert_close(
-            torch_output, torch.tensor(onnx_output), rtol=rtol, atol=atol
-        )
+        if only_check_shape:
+            assert torch_output.shape == onnx_output.shape
+        else:
+            torch.testing.assert_close(
+                torch_output, torch.tensor(onnx_output), rtol=rtol, atol=atol
+            )
+
 
 def _run_test_output_match(
     test_suite: onnx_test_common._TestONNXRuntime,
@@ -676,13 +793,11 @@ def _run_test_output_match(
 ):
     # device is provided by instantiate_device_type_tests, but we only want to run in cpu.
     assert device == "cpu"
-
     samples = op.sample_inputs(
         device,
         dtype,
         requires_grad=False,
     )
-
     for i, cpu_sample in enumerate(samples):
         inputs = (cpu_sample.input, *cpu_sample.args)
         # Provide the repr to subtest because tensors are not serializable in parallel test runs
@@ -716,13 +831,18 @@ def _run_test_output_match(
                     rtol = None
                     atol = None
 
-                if test_suite.model_type == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM:
+                if (
+                    test_suite.model_type
+                    == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+                ):
                     try:
                         model = torch.export.export(model, inputs)
                     except AssertionError as e:
                         # TODO: avoid fake_mode detection bug in torch.export.export
-                        pytest.xfail(onnx_test_common.reason_dynamo_does_not_support(str(e)))
-                
+                        pytest.xfail(
+                            onnx_test_common.reason_dynamo_does_not_support(str(e))
+                        )
+
                 try:
                     onnx_program = torch.onnx.dynamo_export(
                         model,
@@ -730,16 +850,26 @@ def _run_test_output_match(
                     )
                 except torch.onnx.OnnxExporterError as e:
                     # NOTE: If the model has unsupported nodes, we will skip the test
-                    # with non-strict xfail. Otherwise, we will raise the error. 
-                    if hasattr(e.__cause__, "diagnostic") and e.__cause__.diagnostic.rule in (
+                    # with non-strict xfail. Otherwise, we will raise the error.
+                    if hasattr(
+                        e.__cause__, "diagnostic"
+                    ) and e.__cause__.diagnostic.rule in (
                         _rules._POERules.no_symbolic_function_for_call_function,
-                        _rules._POERules.unsupported_fx_node_analysis
+                        _rules._POERules.unsupported_fx_node_analysis,
                     ):
-                        pytest.xfail(onnx_test_common.reason_onnx_script_does_not_support(str(e)))
+                        pytest.xfail(
+                            onnx_test_common.reason_onnx_script_does_not_support(str(e))
+                        )
                     else:
                         raise e
+
                 _compare_onnx_and_torch_exported_program(
-                    model, onnx_program, inputs, rtol=rtol, atol=atol
+                    model,
+                    onnx_program,
+                    inputs,
+                    rtol=rtol,
+                    atol=atol,
+                    only_check_shape=(op.name in test_suite.only_shape_check_list),
                 )
 
 
@@ -789,6 +919,15 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         onnx_test_common.TorchModelType.TORCH_NN_MODULE
     )
 
+    # TODO: Shape only tests are not supported yet.
+    only_shape_check_list = [
+        "empty",
+        "empty_like",
+        "empty_strided",
+        "new_empty",
+        "new_empty_strided",
+    ]
+
     # TODO: Make op have their own tolerance?
     fp16_low_precision_list = [
         "addbmm",
@@ -814,6 +953,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         """Test the ONNX exporter."""
         _run_test_output_match(self, device, dtype, op)
 
+
 for opset in onnx_test_common.FX_TESTED_OPSETS:
     for model_type in onnx_test_common.TorchModelType:
         # The name needs to match the parameterized_class name.
@@ -825,7 +965,7 @@ for opset in onnx_test_common.FX_TESTED_OPSETS:
             opset=opset,
             skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
         )
-        
+
         common_device_type.instantiate_device_type_tests(
             globals()[test_class_name], globals(), only_for="cpu"
         )
