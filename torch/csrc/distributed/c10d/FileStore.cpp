@@ -139,6 +139,7 @@ class File {
       const std::string& path,
       int flags,
       std::chrono::milliseconds timeout) {
+    LOG(ERROR) << "Opening file " << timeout.count();
     const auto start = std::chrono::steady_clock::now();
     while (true) {
 #ifdef _WIN32
@@ -444,8 +445,8 @@ bool FileStore::deleteKey(const std::string& key) {
 }
 
 bool FileStore::check(const std::vector<std::string>& keys) {
-  std::unique_lock<std::mutex> l(activeFileOpLock_);
-  File file(path_, O_RDONLY, timeout_);
+  // std::unique_lock<std::mutex> l(activeFileOpLock_);
+  File file(path_, O_RDONLY, std::chrono::milliseconds(2));
   auto lock = file.lockShared();
   pos_ = refresh(file, pos_, cache_, deletePrefix_);
 

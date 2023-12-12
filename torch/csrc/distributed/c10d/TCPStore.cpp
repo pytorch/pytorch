@@ -471,7 +471,7 @@ int64_t TCPStore::getNumKeys() {
 
 bool TCPStore::check(const std::vector<std::string>& keys) {
   detail::timing_guard tguard(clientCounters_["check"]);
-  const std::lock_guard<std::mutex> lock(activeOpLock_);
+  // const std::lock_guard<std::mutex> lock(activeOpLock_);
   detail::SendBuffer buffer(*client_, detail::QueryType::CHECK);
   buffer.appendValue(keys.size());
 
