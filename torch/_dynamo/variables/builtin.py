@@ -944,15 +944,9 @@ class BuiltinVariable(VariableTracker):
             return DictVariableType(
                 dict.fromkeys(arg, value), user_cls, mutable_local=MutableLocal()
             )
-        elif isinstance(
-            arg,
-            (
-                ConstDictVariable,
-                ListVariable,
-                TupleVariable,
-                ListIteratorVariable,
-            ),
-        ) and all(is_hashable(v) for v in arg.unpack_var_sequence(tx)):
+        elif arg.has_unpack_var_sequence(tx) and all(
+            is_hashable(v) for v in arg.unpack_var_sequence(tx)
+        ):
             keys = arg.unpack_var_sequence(tx)
             return DictVariableType(
                 dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
