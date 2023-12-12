@@ -270,7 +270,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
         load_state_dict(state_dict, FaultyStorageReader(metadata, {}))
 
     def _test_dist_failure(self, callback, kwargs):
-        bad_ranks = list(kwargs.values())[0] if len(kwargs) > 0 else []
+        bad_ranks = next(iter(kwargs.values())) if len(kwargs) > 0 else []
 
         # Empty bad_ranks means it must work
         if len(bad_ranks) == 0:
