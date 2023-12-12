@@ -1,5 +1,7 @@
 import base64
+import copy
 import dataclasses
+import heapq
 import io
 import json
 import logging
@@ -8,9 +10,10 @@ import operator
 import typing
 
 from contextlib import contextmanager
+from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Union
+from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -19,6 +22,7 @@ import torch.export.exported_program as ep
 from torch._export.verifier import load_verifier
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
+from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -963,14 +967,19 @@ class ExportedProgramSerializer:
             assert n not in constants
             constants[n] = t
 
+        serialized_ep = ExportedProgram(
+            graph_module=serialized_graph_module,
+            opset_version=self.opset_version,
+            range_constraints=serialized_range_constraints,
+            schema_version=SCHEMA_VERSION,
+            dialect=exported_program.dialect,
+        )
+
+        # Test canonical form is well defined.
+        canonicalize(serialized_ep)
+
         return SerializedArtifact(
-            ExportedProgram(
-                graph_module=serialized_graph_module,
-                opset_version=self.opset_version,
-                range_constraints=serialized_range_constraints,
-                schema_version=SCHEMA_VERSION,
-                dialect=exported_program.dialect,
-            ),
+            serialized_ep,
             serialize_torch_artifact(exported_program.state_dict),
             serialize_torch_artifact(constants),
         )
@@ -1719,4 +1728,314 @@ def deserialize(
                 artifact.constants
             )
         )
+    )
+
+
+def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Graph:
+    def _get_argument(a: Argument):
+        if a.as_none is not None:
+            return None
+        elif a.as_tensor is not None:
+            return a.as_tensor
+        elif a.as_tensors is not None:
+            return a.as_tensors
+        elif a.as_int is not None:
+            return None
+        elif a.as_ints is not None:
+            return None
+        elif a.as_float is not None:
+            return None
+        elif a.as_floats is not None:
+            return None
+        elif a.as_string is not None:
+            return None
+        elif a.as_strings is not None:
+            return None
+        elif a.as_sym_int is not None:
+            return a.as_sym_int
+        elif a.as_sym_ints is not None:
+            return a.as_sym_ints
+        elif a.as_scalar_type is not None:
+            return None
+        elif a.as_memory_format is not None:
+            return None
+        elif a.as_device is not None:
+            return None
+        elif a.as_bool is not None:
+            return None
+        elif a.as_bools is not None:
+            return None
+        elif a.as_sym_bool is not None:
+            return a.as_sym_bool
+        elif a.as_sym_bools is not None:
+            return a.as_sym_bools
+        elif a.as_graph is not None:
+            return None
+        elif a.as_optional_tensors is not None:
+            return a.as_optional_tensors
+        elif a.as_custom_obj is not None:
+            return None
+        else:
+            raise AssertionError(f"Unknown argument type: {a}")
+
+    # Stage 1: Reorder named items.
+    def for_args(f, a):
+        assert isinstance(a, Argument)
+        pytree.tree_map(f, _get_argument(a))
+
+    def sort_nodes(nodes):
+        @dataclass
+        class Edges:
+            outs: List[int]
+            ins: int
+
+        graph_inputs: Set[str] = set()
+        def_table: Dict[str, int] = {}
+        edges: Dict[int, Edges] = defaultdict(lambda: Edges([], 0))
+        candidates: List[Tuple[str, List[Tuple[str, List[int]]], int]] = []
+        rank: Dict[str, int] = {}
+        ret: List[Node] = []
+
+        def get_name(a) -> Optional[str]:
+            if a is None:
+                return None
+            if isinstance(a, TensorArgument):
+                return a.name
+            elif isinstance(a, (SymIntArgument, SymBoolArgument)):
+                return a.as_name
+            elif isinstance(a, OptionalTensorArgument):
+                if a.as_tensor is not None:
+                    assert isinstance(a.as_tensor, str)
+                    return a.as_tensor
+            else:
+                raise AssertionError(f"Unknown argument type: {a}")
+
+        for i in sorted_inputs:
+            def add_input(a):
+                if s := get_name(a):
+                    graph_inputs.add(s)
+
+            for_args(add_input , i)
+
+        for idx, node in enumerate(nodes):
+            def add_def(a):
+                if s := get_name(a):
+                    assert s not in def_table
+                    def_table[s] = idx
+
+            for o in node.outputs:
+                for_args(add_def, o)
+
+        for idx, user in enumerate(nodes):
+            def add_edge(a):
+                if s := get_name(a):
+                    if s not in def_table:
+                        assert s in graph_inputs
+                        return
+                    src = def_table[s]
+                    edges[src].outs.append(idx)
+                    edges[idx].ins += 1
+
+            for i in user.inputs:
+                for_args(add_edge, i.arg)
+
+        def add_rank(a):
+            if s := get_name(a):
+                assert s not in rank
+                rank[s] = len(rank)
+
+        def get_rank(a):
+            if s := get_name(a):
+                return rank[s]
+            else:
+                return -1
+
+        for i in sorted_inputs:
+            for_args(add_rank, i)
+
+        def add_candidate(idx: int):
+            def get_ranks(i):
+                ranks = []
+                for_args(lambda x: ranks.append(get_rank(x)), i)
+                return ranks
+            node = nodes[idx]
+            args_rank = [(a.name, get_ranks(a.arg)) for a in node.inputs]
+            heapq.heappush(candidates, (node.target, args_rank, idx))
+
+        for idx, e in edges.items():
+            if e.ins == 0:
+                add_candidate(idx)
+
+        while len(candidates) > 0:
+            _, _, idx = heapq.heappop(candidates)
+            node = nodes[idx]
+            for o in node.outputs:
+                for_args(add_rank, o)
+            ret.append(node)
+            assert idx in edges
+            for user in edges[idx].outs:
+                e = edges[user]
+                assert e.ins > 0
+                e.ins -= 1
+                if e.ins == 0:
+                    add_candidate(user)
+            edges[idx].outs.clear()
+
+        return ret
+
+    sorted_nodes = sort_nodes(graph.nodes)
+
+    # Stage 2: Rename nodes.
+    name_table: Dict[str, str] = {}
+
+    def rename_def(a):
+        def _rename(arg_name, values):
+            new_name = f"_{len(name_table)}"
+            assert arg_name not in name_table
+            name_table[arg_name] = new_name
+            assert arg_name in values
+            values[new_name] = values.pop(arg_name)
+            return new_name
+
+        if a is None:
+            return
+        if isinstance(a, TensorArgument):
+            a.name = _rename(a.name, graph.tensor_values)
+        elif isinstance(a, SymIntArgument):
+            if a.as_name is not None:
+                a.as_name = _rename(a.as_name, graph.sym_int_values)
+        elif isinstance(a, SymBoolArgument):
+            if a.as_name is not None:
+                a.as_name = _rename(a.as_name, graph.sym_bool_values)
+        else:
+            raise AssertionError(f"Unknown argument type: {a}")
+
+    def replace_use(a):
+        if a is None:
+            return
+        if isinstance(a, TensorArgument):
+            a.name = name_table.get(a.name, a.name)
+        elif isinstance(a, SymIntArgument):
+            if a.as_name is not None:
+                a.as_name = name_table.get(a.as_name, a.as_name)
+        elif isinstance(a, SymBoolArgument):
+            if a.as_name is not None:
+                a.as_name = name_table.get(a.as_name, a.as_name)
+        elif isinstance(a, OptionalTensorArgument):
+            if a.as_tensor is not None:
+                assert isinstance(a.as_tensor, str)
+                a.as_tensor = name_table.get(a.as_tensor, a.as_tensor)
+        else:
+            raise AssertionError(f"Unknown argument type: {a}")
+
+    for i in sorted_inputs:
+        for_args(rename_def, i)
+
+    for n in sorted_nodes:
+        for o in n.outputs:
+            for_args(rename_def, o)
+
+    for n in sorted_nodes:
+        for i in n.inputs:
+            for_args(replace_use, i.arg)
+
+    for o in sorted_outputs:
+        for_args(replace_use, o)
+
+    # Stage 3: Remove unstable fields.
+    for n in sorted_nodes:
+        n.metadata.clear()
+
+    # Stage 4: Aggregate values.
+    sorted_tensor_values = dict(sorted(graph.tensor_values.items(), key=lambda x: x[0]))
+    sorted_sym_int_values = dict(sorted(graph.sym_int_values.items(), key=lambda x: x[0]))
+    sorted_sym_bool_values = dict(sorted(graph.sym_bool_values.items(), key=lambda x: x[0]))
+
+    # Stage 5: Recurse in subgraphs.
+    counter = 0
+    for node in sorted_nodes:
+        for i in node.inputs:
+            a = i.arg
+            if a.as_graph is not None:
+                a.as_graph.graph = _canonicalize_graph(
+                    a.as_graph.graph.inputs,
+                    a.as_graph.graph.outputs,
+                    a.as_graph.graph
+                )
+                a.as_graph.name = f"_g{counter}"
+                counter += 1
+
+    return Graph(
+        inputs=sorted_inputs,
+        outputs=sorted_outputs,
+        nodes=sorted_nodes,
+        tensor_values=sorted_tensor_values,
+        sym_int_values=sorted_sym_int_values,
+        sym_bool_values=sorted_sym_bool_values,
+        is_single_tensor_return=graph.is_single_tensor_return,
+    )
+
+
+def canonicalize(ep: ExportedProgram) -> ExportedProgram:
+    ep = copy.deepcopy(ep)
+
+    opset_version = dict(sorted(ep.opset_version.items(), key=lambda x: x[0]))
+    range_constraints = dict(sorted(ep.range_constraints.items(), key=lambda x: x[0]))
+    module_call_graph = sorted(ep.graph_module.module_call_graph, key=lambda x: x.fqn)
+    signature = ep.graph_module.signature
+    graph = ep.graph_module.graph
+
+    assert len(graph.inputs) == len(signature.input_specs)
+    assert len(graph.outputs) == len(signature.output_specs)
+
+    def rank_input(inp):
+        idx, (arg, spec) = inp
+        assert isinstance(spec, InputSpec)
+        if spec.user_input is not None:
+            rank = 4, None, idx
+        elif spec.parameter is not None:
+            rank = 1, spec.parameter.parameter_name, idx
+        elif spec.buffer is not None:
+            rank = 2, spec.buffer.buffer_name, idx
+        elif spec.tensor_constant is not None:
+            rank = 3, spec.tensor_constant.tensor_constant_name, idx
+        else:
+            raise AssertionError(f"Unknown input type: {spec}")
+        return rank
+
+    def rank_output(out):
+        idx, (arg, spec) = out
+        assert isinstance(spec, OutputSpec)
+        if spec.user_output is not None:
+            rank = 2, None, idx
+        elif spec.loss_output is not None:
+            rank = 2, None, idx
+        elif spec.buffer_mutation is not None:
+            rank = 1, spec.buffer_mutation.buffer_name, idx
+        elif spec.gradient_to_parameter is not None:
+            rank = 3, spec.gradient_to_parameter.parameter_name, idx
+        elif spec.gradient_to_user_input is not None:
+            rank = 4, None, idx
+        else:
+            raise AssertionError(f"Unknown output type: {spec}")
+        return rank
+
+    sorted_ins = sorted(enumerate(zip(graph.inputs, signature.input_specs)), key=rank_input)
+    sorted_inputs, signature.input_specs = zip(*(i for idx, i in sorted_ins))  # type: ignore[assignment]
+
+    sorted_outs = sorted(enumerate(zip(graph.outputs, signature.output_specs)), key=rank_output)
+    sorted_outputs, signature.output_specs = zip(*(i for idx, i in sorted_outs))  # type: ignore[assignment]
+
+    sorted_graph = _canonicalize_graph(sorted_inputs, sorted_outputs, graph)
+
+    return ExportedProgram(
+        graph_module=GraphModule(
+            graph=sorted_graph,
+            signature=signature,
+            module_call_graph=module_call_graph,
+        ),
+        opset_version=opset_version,
+        range_constraints=range_constraints,
+        schema_version=ep.schema_version,
+        dialect=ep.dialect,
     )
