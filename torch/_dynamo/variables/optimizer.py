@@ -8,7 +8,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
 from ..utils import global_key_name
 
-from .base import MutableLocal, VariableTracker
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import ListVariable
@@ -188,11 +188,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
             if isinstance(arg, ListVariable) and all(
                 isinstance(t, torch.Tensor) for t in py_arg
             ):
-                tensor_vars = ListVariable(
-                    [self.wrap_tensor(tx, t) for t in py_arg],
-                    mutable_local=MutableLocal(),
-                )
-                tx.replace_all(arg, tensor_vars)
+                tx.output.side_effects.mutation(arg)
+                arg.items.extend([self.wrap_tensor(tx, t) for t in py_arg])
 
     def create_finalizer(self, tx):
         names_to_delete = self.static_tensor_names
