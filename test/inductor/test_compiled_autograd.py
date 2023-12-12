@@ -521,6 +521,7 @@ known_failing_tests = {
     "test_inplace_on_view_backward",  # RuntimeError: compiled_autograd does not support create_graph
     "test_lobpcg",  # AttributeError: type object 'LOBPCGAutogradFunction' has no attribute '_compiled_autograd_key'
     "test_multi_grad_hooks",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
+    "test_any_hook",  # torch._dynamo.exc.Unsupported: 'call_function _register_any_hook.<locals>.wrapped_fn in
     "test_naughty_autograd_function_stashing_ctx",  # AttributeError: type object 'Id' has no attribute '_compiled_autograd_key'
     "test_nested_anomaly_detect_nan",  # RuntimeError: compiled_autograd does not support create_graph
     "test_nested_anomaly_printstack_cleanup",  # RuntimeError: compiled_autograd does not support create_graph
