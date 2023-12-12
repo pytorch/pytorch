@@ -23,6 +23,7 @@ from torch.distributed.distributed_c10d import (
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    skip_if_lt_x_gpu,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -48,10 +49,7 @@ def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0):
 
 
 class DeviceMeshTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
-
+    @skip_if_lt_x_gpu(4)
     def test_init_process_group(self):
         device_type = _get_device_type(self.world_size)
         mesh_tensor = torch.arange(4).reshape(2, 2)
@@ -62,6 +60,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.destroy_pg()
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_get_group(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
@@ -82,6 +81,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(mesh_2d.get_group("tp"), tp_mesh.get_group())
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_get_local_rank_raises_exception(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
@@ -109,6 +109,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(tp_mesh.get_local_rank(), mesh_2d.get_local_rank("tp"))
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_device_mesh_2d(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
         # construct a cuda device mesh
@@ -194,14 +195,13 @@ class DeviceMeshTestNDim(DTensorTestBase):
 
 
 class InitDeviceMeshTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 8
-
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_init_device_mesh(self):
-        mesh_shape = (2, 4)
-        ref_mesh = DeviceMesh(self.device_type, torch.arange(8).view(mesh_shape))
+        mesh_shape = (2, self.world_size // 2)
+        ref_mesh = DeviceMesh(
+            self.device_type, torch.arange(self.world_size).view(mesh_shape)
+        )
 
         # test init_device_mesh with mesh_dim_names
         mesh_dim_names = ("DP", "TP")
@@ -216,6 +216,7 @@ class InitDeviceMeshTest(DTensorTestBase):
         self.assertEqual(mesh_2d, ref_mesh)
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_raises_duplicate_mesh_dim_names(self):
         with self.assertRaisesRegex(
             RuntimeError,
@@ -223,7 +224,7 @@ class InitDeviceMeshTest(DTensorTestBase):
         ):
             mesh = init_device_mesh(
                 self.device_type,
-                (2, 4),
+                (2, self.world_size // 2),
                 mesh_dim_names=["dp", "dp"],
             )
 
@@ -235,29 +236,27 @@ class InitDeviceMeshTest(DTensorTestBase):
         ):
             mesh = init_device_mesh(
                 self.device_type,
-                (8,),
+                (self.world_size,),
                 mesh_dim_names=["dp", "tp"],
             )
 
 
 class TestDeviceMeshGetItem(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 8
-
     @with_comms
     def test_raises_mesh_dim_less_than_2(self):
         with self.assertRaisesRegex(RuntimeError, "Cannot slice a DeviceMesh"):
-            mesh = init_device_mesh(self.device_type, (8,))
+            mesh = init_device_mesh(self.device_type, (self.world_size,))
             child_mesh = mesh["DP"]
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_raises_no_mesh_dim_found(self):
         with self.assertRaisesRegex(KeyError, "No `mesh_dim_names` found."):
-            mesh = init_device_mesh(self.device_type, (2, 4))
+            mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
             child_mesh = mesh["DP"]
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_raises_invalid_mesh_dim_name(self):
         child_mesh_dim_name = "PP"
         with self.assertRaisesRegex(
@@ -265,13 +264,18 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         ):
             mesh_dim_names = ("DP", "TP")
             mesh = init_device_mesh(
-                self.device_type, (2, 4), mesh_dim_names=mesh_dim_names
+                self.device_type,
+                (2, self.world_size // 2),
+                mesh_dim_names=mesh_dim_names,
             )
             child_mesh = mesh[child_mesh_dim_name]
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_get_item(self):
-        mesh_shape = (2, 4)
+        dp_size = 2
+        tp_size = self.world_size // 2
+        mesh_shape = (dp_size, tp_size)
         mesh_dim_names = ("DP", "TP")
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
@@ -285,16 +289,17 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             ).reshape(-1, mesh_2d.mesh.size(mesh_dim))
 
         tp_mesh = mesh_2d["TP"]
-        tp_group_idx = self.rank // 4
+        tp_group_idx = self.rank // tp_size
         self.assertEqual(tp_mesh.mesh, pg_ranks_by_dim_name["TP"][tp_group_idx])
 
         dp_mesh = mesh_2d["DP"]
-        dp_group_idx = self.rank % 4
+        dp_group_idx = self.rank % tp_size
         self.assertEqual(mesh_2d["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx])
 
 
 class TestMeshEnv(DTensorTestBase):
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_get_parent_mesh(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_dim_names = ("DP", "TP")
@@ -314,6 +319,7 @@ class TestMeshEnv(DTensorTestBase):
         self.assertEqual(_mesh_resources.get_parent_mesh(mesh_1_3), None)
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_get_parent_mesh_dim_exist(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_dim_names = ("DP", "TP")
