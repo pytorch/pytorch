@@ -665,7 +665,6 @@ def mps_ops_modifier(ops):
         'bfloat16': None,
         'cdouble': None,
         'cfloat': None,
-        'complex': None,
         'double': None,
         'chalf': None,
         'nn.functional.softminwith_dtype': None,
@@ -820,6 +819,9 @@ def mps_ops_modifier(ops):
     SKIPLIST = {
         'all': None,
         'any': None,
+        # Unsupported
+        # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
+        'nn.functional.avg_pool2d': [torch.float16],
     }
 
     def addDecorator(op, d) -> None:
