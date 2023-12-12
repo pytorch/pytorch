@@ -982,7 +982,7 @@ def module_inputs_torch_nn_CosineEmbeddingLoss(module_info, device, dtype, requi
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
                         forward_input=FunctionInput(make_input((15, 10)), make_input((15, 10)),
-                                                    make_target((15)).sign()),
+                                                    make_target((15,)).sign()),
                         desc=desc,
                         reference_fn=reference_fn)
         )
@@ -1651,7 +1651,8 @@ def module_inputs_torch_nn_CTCLoss(module_info, device, dtype, requires_grad, tr
                 constructor_input=FunctionInput(**constructor_kwargs),
                 forward_input=FunctionInput(make_input((50, 3, 15)).log_softmax(2),
                                             make_target((3, 30), dtype=target_dtype, low=low, high=high),
-                                            torch.tensor((50, 50, 50)), torch.tensor((30, 25, 20))),
+                                            torch.tensor((50, 50, 50), device=device),
+                                            torch.tensor((30, 25, 20), device=device)),
                 desc=f'{desc}_lengths_tensors',
                 reference_fn=reference_fn)
         )
@@ -1669,7 +1670,8 @@ def module_inputs_torch_nn_CTCLoss(module_info, device, dtype, requires_grad, tr
                 constructor_input=FunctionInput(**constructor_kwargs),
                 forward_input=FunctionInput(make_input((50, 3, 15)).log_softmax(2),
                                             make_target((30 + 25 + 20,), dtype=target_dtype, low=low, high=high),
-                                            torch.tensor((50, 50, 50)), torch.tensor((30, 25, 20))),
+                                            torch.tensor((50, 50, 50), device=device),
+                                            torch.tensor((30, 25, 20), device=device)),
                 desc=f'{desc}_1d_target_lengths_tensors',
                 reference_fn=reference_fn)
         )
@@ -1806,8 +1808,8 @@ def module_inputs_torch_nn_HingeEmbeddingLoss(module_info, device, dtype, requir
 
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
-                        forward_input=FunctionInput(make_input((10)),
-                                                    make_target((10)).gt(0).to(dtype).mul_(2).sub_(1)),
+                        forward_input=FunctionInput(make_input((10,)),
+                                                    make_target((10,)).gt(0).to(dtype).mul_(2).sub_(1)),
                         desc=desc,
                         reference_fn=reference_fn)
         )
@@ -2177,8 +2179,8 @@ def module_inputs_torch_nn_MarginRankingLoss(module_info, device, dtype, require
 
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
-                        forward_input=FunctionInput(make_input((50)), make_input((50)),
-                                                    make_target((50)).sign()),
+                        forward_input=FunctionInput(make_input((50,)), make_input((50,)),
+                                                    make_target((50,)).sign()),
                         desc=desc,
                         reference_fn=reference_fn)
         )
@@ -2204,7 +2206,7 @@ def module_inputs_torch_nn_MultiLabelMarginLoss(module_info, device, dtype, requ
 
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
-                        forward_input=FunctionInput(make_input((10)),
+                        forward_input=FunctionInput(make_input((10,)),
                                                     make_target((10), low=0, high=10)),
                         desc=desc,
                         reference_fn=reference_fn)
@@ -3873,7 +3875,8 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # The operator aten::_ctc_loss is not currently implemented for the MPS device.
+                   DecorateInfo(skipIfMps, 'TestModule'),
                    # derivative for aten::_ctc_loss_backward is not implemented
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
