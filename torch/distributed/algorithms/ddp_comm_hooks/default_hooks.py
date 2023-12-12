@@ -1,4 +1,4 @@
-from typing import Any, Callable, Tuple, Union
+from typing import Any, Callable, cast, Tuple
 
 import torch
 import torch.distributed as dist
@@ -49,7 +49,7 @@ def allreduce_hook(
 
 def fp16_compress_hook(
     process_group: dist.ProcessGroup,
-    bucket: Union[dist.GradBucket, Tuple[torch.Tensor, ...]],
+    bucket: dist.GradBucket,
 ) -> torch.futures.Future[torch.Tensor]:
     """
     This DDP communication hook implements a simple gradient compression
@@ -65,7 +65,11 @@ def fp16_compress_hook(
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = group_to_use.size()
 
-    buffer = bucket[0] if isinstance(bucket, tuple) else bucket.buffer()
+    buffer = (
+        cast(Tuple[torch.Tensor, ...], bucket[0])
+        if isinstance(bucket, tuple)
+        else bucket.buffer()
+    )
     compressed_tensor = buffer.to(torch.bfloat16).div_(world_size)
 
     def decompress(fut):
@@ -91,7 +95,7 @@ def fp16_compress_hook(
 # TODO: create an internal helper function and extract the duplicate code in FP16_compress and BF16_compress.
 def bf16_compress_hook(
     process_group: dist.ProcessGroup,
-    bucket: Union[dist.GradBucket, Tuple[torch.Tensor, ...]],
+    bucket: dist.GradBucket,
 ) -> torch.futures.Future[torch.Tensor]:
     """
     Warning: This API is experimental, and it requires NCCL version later than 2.9.6.
@@ -110,7 +114,11 @@ def bf16_compress_hook(
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = group_to_use.size()
 
-    buffer = bucket[0] if isinstance(bucket, tuple) else bucket.buffer()
+    buffer = (
+        cast(Tuple[torch.Tensor, ...], bucket[0])
+        if isinstance(bucket, tuple)
+        else bucket.buffer()
+    )
     compressed_tensor = buffer.to(torch.bfloat16).div_(world_size)
 
     def decompress(fut):
