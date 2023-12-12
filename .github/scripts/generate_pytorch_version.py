@@ -86,6 +86,10 @@ class PytorchVersion:
         build_suffix = self.get_post_build_suffix()
         return f"{get_base_version()}.dev{date_str}{build_suffix}"
 
+    def get_test_version(self) -> str:
+        date_str = datetime.today().strftime("%Y%m%d")
+        build_suffix = self.get_post_build_suffix()
+        return f"{get_base_version()}{build_suffix}"
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -109,6 +113,12 @@ def main() -> None:
         help="GPU arch version, typically (10.2, 4.0), leave blank for CPU",
         default=os.environ.get("GPU_ARCH_VERSION", ""),
     )
+    parser.add_argument(
+        "--channel",
+        type=str,
+        help="Channel for the version",
+        default="release",
+    )
     args = parser.parse_args()
     version_obj = PytorchVersion(
         args.gpu_arch_type, args.gpu_arch_version, args.no_build_suffix
@@ -116,7 +126,10 @@ def main() -> None:
     try:
         print(version_obj.get_release_version())
     except NoGitTagException:
-        print(version_obj.get_nightly_version())
+        if args.channel == "test":
+            print(version_obj.get_test_version())
+        else
+            print(version_obj.get_nightly_version())
 
 
 if __name__ == "__main__":

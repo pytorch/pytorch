@@ -33,6 +33,7 @@ BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg CUDA_CHANNEL=$(CUDA_CHANNEL) \
 							--build-arg PYTORCH_VERSION=$(PYTORCH_VERSION) \
 							--build-arg INSTALL_CHANNEL=$(INSTALL_CHANNEL) \
+							--build-arg WHL_INSTALL_PATH=$(WHL_INSTALL_PATH) \
 							--build-arg TRITON_VERSION=$(TRITON_VERSION) \
 							--build-arg CMAKE_VARS="$(CMAKE_VARS)"
 EXTRA_DOCKER_BUILD_FLAGS ?=
