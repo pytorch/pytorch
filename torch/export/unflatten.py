@@ -7,13 +7,14 @@ import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch.export.exported_program import (
-    ConstantArgument,
     ExportedProgram,
+    ConstantArgument,
     ModuleCallSignature,
     SymIntArgument,
     TensorArgument,
 )
 
+__all__ = ["InterpreterModule", "UnflattenedModule", "unflatten"]
 
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
 # This installs empty Modules where none exist yet if they are subpaths of target
@@ -157,7 +158,6 @@ class _UnflattenedModule(torch.nn.Module):
 
         # Import here to avoid an unfortunate circular dependency.
         from torch._export.utils import _check_input_constraints_pre_hook
-
         self.register_forward_pre_hook(_check_input_constraints_pre_hook)
 
     def forward(self, *args, **kwargs):
