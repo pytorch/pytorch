@@ -8,8 +8,10 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
-from torch.distributed._tensor._collective_utils import mesh_broadcast
-from torch.distributed._tensor._collective_utils import check_tensor_meta
+from torch.distributed._tensor._collective_utils import (
+    check_tensor_meta,
+    mesh_broadcast,
+)
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed._tensor.placement_types import (
@@ -108,6 +110,7 @@ class _ToTorchTensor(torch.autograd.Function):
             None,
         )
 
+
 class _FromTorchTensor(torch.autograd.Function):
     @staticmethod
     def forward(  # type: ignore[override]
@@ -147,8 +150,11 @@ class _FromTorchTensor(torch.autograd.Function):
             # TODO: See if we need to make this run_check logic
             # have a corresponding backward.
 
-            if not check_tensor_meta(input, check_shape_stride=True):
-                    raise ValueError("Inconsistent tensor metadata (including shape and stride) across ranks.")
+            check_shape_stride = not shape and not stride
+            if not check_tensor_meta(input, check_shape_stride=check_shape_stride):
+                raise ValueError(
+                    "Inconsistent tensor metadata (including shape and stride) across ranks."
+                )
 
             for idx, placement in enumerate(placements):
                 if placement.is_replicate():
