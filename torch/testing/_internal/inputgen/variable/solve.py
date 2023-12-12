@@ -3,8 +3,8 @@ from typing import Any, List, Union
 
 from torch.testing._internal.inputgen.variable.space import Discrete, VariableSpace
 from torch.testing._internal.inputgen.variable.type import (
-    check_vtype,
     convert_to_vtype,
+    invalid_vtype,
     is_integer,
 )
 
@@ -15,7 +15,8 @@ class SolvableVariable:
         self.space = VariableSpace(vtype)
 
     def Eq(self, v: Any) -> None:
-        check_vtype(self.vtype, v)
+        if invalid_vtype(self.vtype, v):
+            raise TypeError("Variable type mismatch")
         if self.space.empty():
             return
         if self.space.contains(v):
@@ -24,14 +25,16 @@ class SolvableVariable:
             self.space.discrete = Discrete([])
 
     def Ne(self, v: Any) -> None:
-        check_vtype(self.vtype, v)
+        if invalid_vtype(self.vtype, v):
+            raise TypeError("Variable type mismatch")
         if self.space.empty():
             return
         self.space.remove(v)
 
     def In(self, values: List[Any]) -> None:
         for v in values:
-            check_vtype(self.vtype, v)
+            if invalid_vtype(self.vtype, v):
+                raise TypeError("Variable type mismatch")
         if self.space.empty():
             return
         self.space.discrete = Discrete(
@@ -40,7 +43,8 @@ class SolvableVariable:
 
     def NotIn(self, values: List[Any]) -> None:
         for v in values:
-            check_vtype(self.vtype, v)
+            if invalid_vtype(self.vtype, v):
+                raise TypeError("Variable type mismatch")
         if self.space.empty():
             return
         for v in values:
@@ -49,7 +53,8 @@ class SolvableVariable:
     def Le(self, upper: Union[bool, int, float]) -> None:
         if self.vtype not in [bool, int, float]:
             raise Exception(f"Le is not valid constraint on {self.vtype}")
-        check_vtype(self.vtype, upper)
+        if invalid_vtype(self.vtype, upper):
+            raise TypeError("Variable type mismatch")
         if self.space.empty():
             return
         elif self.space.discrete.initialized:
@@ -65,7 +70,8 @@ class SolvableVariable:
     def Lt(self, upper: Union[bool, int, float]) -> None:
         if self.vtype not in [bool, int, float]:
             raise Exception(f"Lt is not valid constraint on {self.vtype}")
-        check_vtype(self.vtype, upper)
+        if invalid_vtype(self.vtype, upper):
+            raise TypeError("Variable type mismatch")
         if self.space.empty():
             return
         elif self.space.discrete.initialized:
@@ -83,7 +89,8 @@ class SolvableVariable:
     def Ge(self, lower: Union[bool, int, float]) -> None:
         if self.vtype not in [bool, int, float]:
             raise Exception(f"Ge is not valid constraint on {self.vtype}")
-        check_vtype(self.vtype, lower)
+        if invalid_vtype(self.vtype, lower):
+            raise TypeError("Variable type mismatch")
         if self.space.empty():
             return
         elif self.space.discrete.initialized:
@@ -99,7 +106,8 @@ class SolvableVariable:
     def Gt(self, lower: Union[bool, int, float]) -> None:
         if self.vtype not in [bool, int, float]:
             raise Exception(f"Gt is not valid constraint on {self.vtype}")
-        check_vtype(self.vtype, lower)
+        if invalid_vtype(self.vtype, lower):
+            raise TypeError("Variable type mismatch")
         if self.space.empty():
             return
         elif self.space.discrete.initialized:
