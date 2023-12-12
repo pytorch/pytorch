@@ -850,6 +850,25 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS
   endforeach()
 endif()
 
+option(TORCH_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
+if(TORCH_USE_IWYU)
+  find_program(iwyu NAMES include-what-you-use)
+  if(iwyu)
+    set(iwyu_cmd
+        "include-what-you-use"
+        "-Xiwyu"
+        "--transitive_includes_only"
+        "-Xiwyu"
+        "--no_fwd_decls"
+        "-Xiwyu"
+        "--prefix_header_includes=keep"
+        "-Xiwyu"
+        "--mapping_file=${CMAKE_CURRENT_LIST_DIR}/../tools/iwyu/all.imp"
+        )
+    set_property(TARGET torch_cpu PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_cmd})
+  endif()
+endif()
+
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
 set_property(SOURCE ${ATen_ATTENTION_KERNEL_SRCS} APPEND
@@ -1311,9 +1330,6 @@ if(USE_DISTRIBUTED)
       target_compile_definitions(torch_hip PUBLIC USE_C10D_NCCL)
     else()
       target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
-      if(USE_NCCL_WITH_UCC)
-        target_compile_definitions(torch_cuda PUBLIC USE_NCCL_WITH_UCC)
-      endif()
     endif()
   endif()
   if(USE_MPI AND USE_C10D_MPI)

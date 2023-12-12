@@ -161,7 +161,8 @@ struct TensorArgs {
 
 struct AutogradCompilerCall {
   void add_size_input(const c10::SymInt& s) {
-    all_size_inputs.emplace_back(SizeInput(default_dyn_type, s.expect_int()));
+    all_size_inputs.emplace_back(
+        SizeInput(default_dyn_type, s.guard_int(__FILE__, __LINE__)));
   }
 
   int emplace_hook(c10::SafePyObject&& fn) {
@@ -692,10 +693,6 @@ class SwapSavedVariables {
   StashedVars<SavedVariable> stashed_variables;
   StashedVars<at::Tensor> stashed_tensors;
   StashedVars<c10::SymInt> stashed_symints;
-
-  // This gradient allows us to later fetch the result of AccumulateGrad as
-  // AccumulateGrad is an inplace action.
-  at::Tensor gradient;
 };
 
 } // namespace torch::dynamo::autograd

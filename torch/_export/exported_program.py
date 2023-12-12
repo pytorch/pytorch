@@ -1,23 +1,13 @@
 import copy
-from collections import defaultdict
 import dataclasses
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 import warnings
 
-import sympy
 
 import torch
 import torch.fx
-
 import torch.utils._pytree as pytree
-from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.symbolic_shapes import SymInt
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from torch.utils._sympy.value_ranges import ValueRanges
-
-from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-    InputDim,
-)
 
 
 # TODO(ycao): This is added to avoid breaking existing code temporarily.
@@ -52,7 +42,7 @@ class CallSpec:
     out_spec: Optional[pytree.TreeSpec]
 
 
-def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buffers_to_mutate, user_outputs):
+def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, tensor_constants, buffers_to_mutate):
     count = 0
     buffer_name_to_node = {}
     # Step 1: make lifted params as get_attr
@@ -84,7 +74,7 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
                     assert buffer_node_name in buffer_name_to_node
                     buffer_node = buffer_name_to_node[buffer_node_name]
                     with gm.graph.inserting_before(node):
-                        buffer_update_node = gm.graph.call_function(
+                        gm.graph.call_function(
                             torch.ops.aten.copy_.default, (buffer_node, return_node)
                         )
                 else:
@@ -137,8 +127,14 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
             for ix, operand in enumerate(operands):
                 if operand.target in inp_pos_to_param_buffer_name.values():
                     inp_pos_to_param_buffer_name_for_submod[ix] = operand.target
-                    true_gm.register_buffer(operand.target, state_dict[operand.target])
-                    false_gm.register_buffer(operand.target, state_dict[operand.target])
+                    if operand.target in state_dict:
+                        value = state_dict[operand.target]
+                    elif operand.target in tensor_constants:
+                        value = tensor_constants[operand.target]
+                    else:
+                        raise RuntimeError("Unable to find value for ", operand.target)
+                    true_gm.register_buffer(operand.target, value)
+                    false_gm.register_buffer(operand.target, value)
                 else:
                     real_operands.append(operand)
             node.args = (pred, true_graph, false_graph, real_operands)
@@ -151,8 +147,8 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
                 in_spec,
                 None,
                 state_dict,
+                tensor_constants,
                 buffers_to_mutate,
-                user_outputs,
             )
             _unlift(
                 false_gm,
@@ -160,8 +156,8 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
                 in_spec,
                 None,
                 state_dict,
+                tensor_constants,
                 buffers_to_mutate,
-                user_outputs,
             )
         if node.op == "call_function" and node.target.__name__ == "map_impl":
             body_graph, num_mapped, *operands = node.args
@@ -176,7 +172,13 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
             for ix, operand in enumerate(operands):
                 if operand.target in inp_pos_to_param_buffer_name.values():
                     inp_pos_to_buffer_name_for_submod[ix] = operand.target
-                    body_gm.register_buffer(operand.target, state_dict_for_lookup[operand.target])
+                    if operand.target in state_dict_for_lookup:
+                        value = state_dict_for_lookup[operand.target]
+                    elif operand.target in tensor_constants:
+                        value = tensor_constants[operand.target]
+                    else:
+                        raise RuntimeError(f"Unable to find value for {operand.target}")
+                    body_gm.register_buffer(operand.target, value)
                 else:
                     real_operands.append(operand)
             node.args = (body_graph, num_mapped, *real_operands)
@@ -189,15 +191,15 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
                 in_spec,
                 None,
                 state_dict,
+                tensor_constants,
                 buffers_to_mutate,
-                user_outputs,
             )
     gm.graph.lint()
     gm.graph.eliminate_dead_code()
     gm.recompile()
     return gm
 
-def _construct_inp_pos_to_param_buffer_name(new_gm, graph_signature, state_dict):
+def _construct_inp_pos_to_param_buffer_name(new_gm, graph_signature, state_dict, tensor_constants=None):
     # TODO Fix the period in params/buffers names later
     # maybe a pass to replace graph signature with fixed names
     param_buffer_name_to_corrected_name = {}
@@ -215,6 +217,13 @@ def _construct_inp_pos_to_param_buffer_name(new_gm, graph_signature, state_dict)
                 param_buffer_name_to_corrected_name[name] = name.replace(".", "_")
             else:
                 new_gm.register_parameter(name, value)
+
+    if tensor_constants is not None and len(tensor_constants) > 0:
+        assert hasattr(graph_signature, "lifted_tensor_constants")
+        for name, value in tensor_constants.items():
+            if name in graph_signature.lifted_tensor_constants:
+                new_gm.register_buffer(name, value)
+                param_buffer_name_to_corrected_name[name] = name
 
     count = 0
     inp_pos_to_param_buffer_name = {}
@@ -236,6 +245,11 @@ def _construct_inp_pos_to_param_buffer_name(new_gm, graph_signature, state_dict)
                     ] = param_buffer_name_to_corrected_name[param_name]
                 else:
                     inp_pos_to_param_buffer_name[count] = param_name
+            if hasattr(graph_signature, "inputs_to_lifted_tensor_constants"):
+                if node.name in graph_signature.inputs_to_lifted_tensor_constants:
+                    inp_pos_to_param_buffer_name[
+                        count
+                    ] = graph_signature.inputs_to_lifted_tensor_constants[node.name]
             count += 1
 
     return inp_pos_to_param_buffer_name
@@ -281,7 +295,7 @@ def _create_stateful_graph_module(plain_graph_module: torch.fx.GraphModule, rang
 def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> torch.nn.Module:
     new_gm = copy.deepcopy(ep.graph_module)
     inp_pos_to_param_buffer_name = _construct_inp_pos_to_param_buffer_name(
-        new_gm, ep.graph_signature, ep.state_dict
+        new_gm, ep.graph_signature, ep.state_dict, ep.tensor_constants
     )
     new_gm = _unlift(
         new_gm,
@@ -289,8 +303,8 @@ def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> t
         ep.call_spec.in_spec,
         ep.call_spec.out_spec,
         ep.state_dict,
+        ep.tensor_constants,
         ep.graph_signature.buffers_to_mutate,
-        ep.graph_signature.user_outputs,
     )
     unlift_gm = _create_stateful_graph_module(new_gm, ep.range_constraints, ep.equality_constraints)
     unlift_gm.meta.update(ep.graph_module.meta)
@@ -316,96 +330,3 @@ def _create_graph_module_for_export(root, graph):
         gm._graph = graph
 
     return gm
-
-
-def _process_constraints(
-    graph_module: torch.fx.GraphModule,
-    num_lifted_params_buffers: int,
-    example_inputs: List[torch.Tensor],
-) -> Tuple[Dict[sympy.Symbol, ValueRanges], List[Tuple[InputDim, InputDim]]]:
-    """
-    Process the constraints stored in the graph module to return something more readable.
-
-    Args:
-        graph_module (torch.fx.GraphModule): GraphModule returned from
-            dynamo.export, which contains the "input_shape_constraints" and
-            "inline_constraints" metadata
-
-        example_inputs: Flattened list of example inputs used to export the graph module
-
-    Returns:
-        range_constraints (Dict[sympy.Symbol, ValueRanges]): Mapping of
-            symbols (from SymInts) appearing in the fake tensors in
-            node.meta["val"] to their range constraints, which are a tuple
-            containing (lower, upper) constraints.
-
-        equality_constraints (List[Tuple[InputDim, InputDim]]): List of tuples
-            of (node, dim) to mark that these dimensions are equal.
-    """
-    input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
-    inline_constraints = graph_module.meta.get("inline_constraints", [])
-
-    # Create dict mapping tensor_id to node names
-    tensor_id_to_nodes: Dict[int, List[str]] = defaultdict(list)
-    # Create dict mapping placeholder node names to their nodes
-    placeholder_nodes: Dict[str, torch.fx.Node] = {}
-    for i, node in enumerate(graph_module.graph.nodes):
-        if node.op != "placeholder":
-            # All placeholder nodes should be together in the beginning of the
-            # graph
-            break
-        if i >= num_lifted_params_buffers:
-            example_input = example_inputs[i - num_lifted_params_buffers]
-            tensor_id_to_nodes[id(example_input)].append(node.name)
-            placeholder_nodes[node.name] = node
-
-    # Create list of (node name, dim) tuples to mark that they are equal
-    equality_constraints: List[Tuple[InputDim, InputDim]] = []
-    # Create dict mapping (node name, dim) a list of range (lower, upper)
-    # constraints
-    multi_range_constraints: Dict[InputDim, List[ValueRanges]] = defaultdict(list)
-    for constraint in input_shape_constraints:
-        for node in tensor_id_to_nodes[constraint["t_id"]]:
-            node_dim = InputDim(node, constraint["dim"])
-
-            # Accumulate range constraints
-            multi_range_constraints[node_dim].append(
-                ValueRanges(constraint["min"], constraint["max"])
-            )
-
-            # Accumulate equality constraints
-            if shared := constraint.get("shared", None):
-                for other_node in tensor_id_to_nodes[shared["t_id"]]:
-                    other_node_dim = InputDim(other_node, shared["dim"])
-                    equality_constraints.append((node_dim, other_node_dim))
-
-    # Create dict mapping symbol to a singular range (lower, upper)
-    range_constraints: Dict[sympy.Symbol, ValueRanges] = {}
-
-    # Add inline constraints to range_constraints
-    range_constraints = {symbol: inline_constraints[symbol] for symbol in inline_constraints}
-
-    # Add input range constraints to range_constraints
-    for input_dim, multi_range_constraint in multi_range_constraints.items():  # type: ignore[assignment]
-        # Simplify the range constraints into a single range constraint
-        # Ex. ranges [2, 10] and [3, 11] would get merged to [3, 10]
-        min_vals = [rc.lower for rc in multi_range_constraint]
-        max_vals = [rc.upper for rc in multi_range_constraint]
-        min_val = max(min_vals)  # type: ignore[type-var]
-        max_val = min(max_vals)  # type: ignore[type-var]
-        assert min_val <= max_val  # type: ignore[operator]
-
-        # Add input node range constraints
-        val = placeholder_nodes[input_dim.input_name].meta["val"]
-        assert isinstance(val, FakeTensor)
-        symint = val.shape[input_dim.dim]
-        assert isinstance(symint, SymInt), f"Expected SymInt but got {symint}: {type(symint)}"
-        symbol = symint.node._expr
-        range_constraints[symbol] = ValueRanges(min_val, max_val)
-
-    return range_constraints, equality_constraints
-
-
-def combine_args_kwargs(args, kwargs):
-    kwargs = kwargs or {}
-    return (args, kwargs)
