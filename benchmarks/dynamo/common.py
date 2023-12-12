@@ -1578,6 +1578,12 @@ def optimize_onnx_ctx(
                 output_csv(
                     output_error_filename, parsed_error.headers, parsed_error.row
                 )
+            nonlocal context
+            if context.onnx_model is not None:
+                e.onnx_program.save_diagnostics(
+                    f"{context.onnx_model.model_dir}/"
+                    f"{current_onnx_compiler}_{current_name}_{current_device}.sarif"
+                )
 
             # Check also the raw exception that caused export failure.
             # Skip if it is already analyzed by diagnostics.
