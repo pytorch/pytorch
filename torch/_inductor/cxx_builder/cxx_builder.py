@@ -409,7 +409,7 @@ def _get_torch_related_args(aot_mode: bool):
         os.path.join(_TORCH_PATH, "include", "THC"),
     ]
     libraries_dirs = [TORCH_LIB_PATH]
-    libraries = ["torch", "torch_cpu"]
+    libraries = ["torch", "torch_cpu", "c10"]
     if not aot_mode:
         libraries.append("torch_python")
     return include_dirs, libraries_dirs, libraries
