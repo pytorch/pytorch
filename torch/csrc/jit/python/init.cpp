@@ -101,11 +101,11 @@
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
 
+#include <ATen/core/SingletonSymNodeImpl.h>
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 #include <c10/util/signal_handler.h>
 #include <caffe2/serialize/inline_container.h>
-#include <ATen/core/SingletonSymNodeImpl.h>
 
 #include <pybind11/cast.h>
 #include <pybind11/functional.h>
