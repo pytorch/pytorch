@@ -7,6 +7,7 @@ import copy
 import functools
 import inspect
 import io
+import operator
 import unittest
 from enum import Enum
 from typing import Dict, List, Sequence
