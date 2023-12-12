@@ -580,3 +580,5 @@ API Reference
 .. autoclass:: ExportGraphSignature
 
     .. automethod:: replace_all_uses
+
+.. automodule:: torch.export.unflatten
