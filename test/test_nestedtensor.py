@@ -3369,6 +3369,11 @@ class TestNestedTensorSubclass(NestedTestCase):
             self.assertEqual(nt.dtype, empty.dtype)
             self.assertEqual(nt.requires_grad, empty.requires_grad)
 
+            transposed_shape = nt.transpose(1, 2).shape
+            with self.assertRaisesRegex(
+                    ValueError, "only supports shapes of form"):
+                torch.zeros(transposed_shape, **kwargs)
+
     @torch._dynamo.config.patch(suppress_errors=True)
     def test_layer_norm_2(self, device):
         test_tensor_list = self._get_list_for_jagged_tensor(
