@@ -130,11 +130,13 @@ void main() {
         uBlock.scales.z,
         uBlock.zero_points.z);
 
+    vec4 in_tex[4];
     for (int i = 0; i < 4; ++i) {
-      const vec4 in_tex = dequantize(
+      in_tex[i] = dequantize(
           texelFetch(uInput, ivec3(ipos[i], z4), 0),
           uBlock.scales.y,
           uBlock.zero_points.y);
+    }
 
       // To explain the calculations below, the contents one in_tex and the
       // group of 4 texels loaded from uKernel are shown:
@@ -169,10 +171,11 @@ void main() {
       //  which is what is expressed in the following calculations. This is done
       //  for each output position.
 
-      sum[i] = fma(in_tex.xxxx, ktex_0, sum[i]);
-      sum[i] = fma(in_tex.yyyy, ktex_1, sum[i]);
-      sum[i] = fma(in_tex.zzzz, ktex_2, sum[i]);
-      sum[i] = fma(in_tex.wwww, ktex_3, sum[i]);
+    for (int i = 0; i < 4; ++i) {
+      sum[i] = fma(in_tex[i].xxxx, ktex_0, sum[i]);
+      sum[i] = fma(in_tex[i].yyyy, ktex_1, sum[i]);
+      sum[i] = fma(in_tex[i].zzzz, ktex_2, sum[i]);
+      sum[i] = fma(in_tex[i].wwww, ktex_3, sum[i]);
     }
   }
 
