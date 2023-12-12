@@ -26,6 +26,10 @@ namespace intra_node_comm {
 
 static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
     "ENABLE_INTRA_NODE_COMM"};
+// Forces detectedTopology() to return Topology::FULLY_CONNECTED, so
+// IntraNodeComm can be used even without NVLink connection. This is only used
+// for testing purposes.
+static std::vector<std::string> TEST_INTRA_NODE_COMM = {"TEST_INTRA_NODE_COMM"};
 
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA Functions
@@ -187,6 +191,9 @@ static bool isHybridCubeMesh(const NvlMesh nvlMesh) {
  * Detech topology given a NvlMesh.
  */
 static Topology detectTopology(const NvlMesh nvlMesh, size_t worldSize) {
+  if (getCvarBool(TEST_INTRA_NODE_COMM, false)) {
+    return Topology::FULLY_CONNECTED;
+  }
   bool fullyConnected = true;
   for (size_t i = 0; i < worldSize - 1; ++i) {
     for (size_t j = i + 1; j < worldSize; ++j) {
@@ -417,14 +424,23 @@ AllReduceAlgo IntraNodeComm::selectAllReduceAlgo(const at::Tensor& input) {
       input, topology_, worldSize_);
 }
 
+static int64_t usageCounter = 0;
+
 at::Tensor IntraNodeComm::allReduce(
     const at::Tensor& input,
     AllReduceAlgo algo) {
+  // Report usage for testing purposes.
+  // We don't care about overflowing.
+  ++usageCounter;
   auto stream = at::cuda::getCurrentCUDAStream();
   c10::cuda::CUDACachingAllocator::recordStream(
       input.storage().data_ptr(), stream);
   return c10d::intra_node_comm::allReduce(
       input, p2pStates_, buffers_, topoInfo_, rank_, worldSize_, algo, stream);
+}
+
+int64_t getIntraNodeCommUsageCounter() {
+  return usageCounter;
 }
 
 } // namespace intra_node_comm

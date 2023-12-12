@@ -21,6 +21,7 @@
 #ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -831,6 +832,10 @@ This class does not support ``__members__`` property.)");
         return ::c10d::resolve_process_group(group_name);
       },
       py::arg("group_name"));
+
+  module.def(
+      "_get_intra_node_comm_usage_counter",
+      &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())

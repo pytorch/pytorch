@@ -656,7 +656,8 @@ AllReduceAlgo selectAllReduceAlgo(
     Topology topology,
     size_t worldSize) {
   // Only support bf16 for now
-  if (input.dtype() != at::kBFloat16) {
+  if (input.dtype() != at::kBFloat16 ||
+      input.numel() * input.element_size() > kMaxIntraNodeSize) {
     return AllReduceAlgo::NONE;
   }
   const auto numel = input.numel();

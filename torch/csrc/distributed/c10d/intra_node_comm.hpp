@@ -96,5 +96,7 @@ class IntraNodeCommWork : public c10d::Work {
   at::cuda::CUDAEvent event_;
 };
 
+TORCH_API int64_t getIntraNodeCommUsageCounter();
+
 } // namespace intra_node_comm
 } // namespace c10d

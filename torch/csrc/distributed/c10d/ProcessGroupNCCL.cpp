@@ -2587,7 +2587,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
-  if (intraNodeComm_ != nullptr && tensors.size() == 1) {
+  if (intraNodeComm_ != nullptr && tensors.size() == 1 &&
+      opts.reduceOp == ReduceOp::SUM) {
     using namespace intra_node_comm;
     auto algo = intraNodeComm_->selectAllReduceAlgo(tensors[0]);
     if (algo != intra_node_comm::AllReduceAlgo::NONE) {
