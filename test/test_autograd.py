@@ -1,6 +1,7 @@
 # Owner(s): ["module: autograd"]
 
 import contextlib
+import functools
 import gc
 import io
 import math
@@ -20,6 +21,7 @@ from collections import OrderedDict
 from itertools import product
 from operator import mul
 from functools import reduce, partial
+from typing import List, Tuple
 import torch
 
 from torch import nn
@@ -8610,6 +8612,42 @@ for shape in [(1,), ()]:
         handle.remove()
         out.sum().backward(inputs=(t1, t3), retain_graph=True)
         self.assertEqual(count[0], 2)
+
+    def test_any_hook(self):
+        hook_id = 0
+
+        class MultiOutputModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(3, 3)
+
+            def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                z = self.lin(x)
+                out = torch.sin(z), torch.cos(z)
+                nonlocal hook_id
+                z.register_hook(functools.partial(hook, hook_id))
+                hook_id += 1
+                torch.autograd.graph._register_any_hook(out, functools.partial(hook, hook_id))
+                hook_id += 1
+                return out[0] + out[1]
+
+        hook_order: List[int] = []
+        hook_count = 0
+
+        def hook(hook_id: int, *unused):
+            nonlocal hook_count
+            nonlocal hook_order
+            hook_count += 1
+            hook_order.append(hook_id)
+
+        # Any hooks: IDs 1 and 3; regular hooks: IDs 0 and 2
+        model = nn.Sequential(MultiOutputModule(), MultiOutputModule())
+        inp = torch.randn((2, 3))
+        out = model(inp)
+        (out[0] + out[1]).sum().backward()
+        # Check that the any-hook runs only once and before the regular hook
+        # for each module
+        self.assertEqual(hook_order, [3, 2, 1, 0])
 
     def test_pynode_destruction_deadlock(self):
         script = """

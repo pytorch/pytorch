@@ -1,5 +1,6 @@
 import abc
 import contextlib
+import functools
 import weakref
 from collections import defaultdict, namedtuple
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
@@ -439,27 +440,60 @@ def register_multi_grad_hook(
 
         return inner_hook
 
-    class Handle(RemovableHandle):
-        handles: Tuple[RemovableHandle, ...]
-
-        def __init__(self, handles: Tuple[RemovableHandle, ...]):
-            self.handles = handles
-
-        def remove(self):
-            for handle in self.handles:
-                handle.remove()
-
-        def __getstate__(self):
-            return self.handles
-
-        def __setstate__(self, state):
-            self.handles = state
-
     handles: List[RemovableHandle] = []
     for i, t in enumerate(tensors):
         handles.append(t.register_hook(get_inner_hook(i)))
 
-    return Handle(tuple(handles))
+    return _MultiHandle(tuple(handles))
+
+
+def _register_any_hook(
+    tensors: Sequence[torch.Tensor],
+    fn: Callable[[Any], None],
+):
+    """
+    Register an "any" backward hook.
+
+    The hook is called exactly once when the gradient with respect to *any* of
+    the tensors in :attr:`tensors` is computed and does not run thereafter. It
+    is a wrapper over :meth:`torch.Tensor.register_hook` that ensure that only
+    the first hook that fires actually runs.
+
+    The hook should not modify its arguments.
+
+    This function returns a handle with a method ``handle.remove()`` that removes the hook.
+    """
+    ran_hook = False
+
+    @functools.wraps(fn)
+    def wrapped_fn(*args, **kwargs):
+        nonlocal ran_hook
+        if not ran_hook:
+            ran_hook = True
+            fn(*args, **kwargs)
+        return
+
+    handles = tuple(
+        tensor.register_hook(wrapped_fn) for tensor in tensors if tensor.requires_grad
+    )
+    return _MultiHandle(handles)
+
+
+class _MultiHandle(RemovableHandle):
+    handles: Tuple[RemovableHandle, ...]
+
+    def __init__(self, handles: Tuple[RemovableHandle, ...]):
+        self.handles = handles
+
+    def remove(self):
+        for handle in self.handles:
+            handle.remove()
+
+    def __getstate__(self):
+        return self.handles
+
+    def __setstate__(self, state):
+        self.handles = state
 
 
 # NOTE [Allow mutation on tensors saved for backward]
