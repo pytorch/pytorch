@@ -3,7 +3,7 @@
 # This writes one file: variable_factories.h
 
 import re
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torchgen.api.python as python
 from torchgen.api import cpp
@@ -45,6 +45,7 @@ def gen_variable_factories(
 
     def _process_function(fn: NativeFunction) -> Optional[str]:
         return process_function(fn, native_functions)
+
     factory_functions = [fn for fn in native_functions if is_factory_function(fn)]
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write_with_template(
@@ -56,7 +57,9 @@ def gen_variable_factories(
             "ops_headers": [
                 f"#include <ATen/ops/{fn.root_name}.h>" for fn in factory_functions
             ],
-            "function_definitions": list(mapMaybe(_process_function, factory_functions)),
+            "function_definitions": list(
+                mapMaybe(_process_function, factory_functions)
+            ),
         },
     )
 
@@ -103,7 +106,10 @@ def process_function(f: NativeFunction, all_fns: List[NativeFunction]) -> Option
         sigs.append(cpp_sigs.symint_signature)
     r = ""
     for i, sig in enumerate(sigs):
-        def get_formals_and_exprs(include_memory_format):
+
+        def get_formals_and_exprs(
+            include_memory_format: bool,
+        ) -> Tuple[List[str], List[str], str, str]:
             # Generate formals (used for the signature) and exprs
             # (used for the call). In order to perform the new_* call, we need
             # to remove the memory_format argument from the exprs.
@@ -131,7 +137,9 @@ def process_function(f: NativeFunction, all_fns: List[NativeFunction]) -> Option
                 else:
                     if arg.name == "memory_format" and not include_memory_format:
                         # skip memory_format argument
-                        check_memory_format = "TORCH_CHECK(memory_format == c10::nullopt);"
+                        check_memory_format = (
+                            "TORCH_CHECK(memory_format == c10::nullopt);"
+                        )
                         continue
                     exprs.append(arg.name)
 
@@ -141,7 +149,7 @@ def process_function(f: NativeFunction, all_fns: List[NativeFunction]) -> Option
         formals, exprs_w_mf, requires_grad, _ = get_formals_and_exprs(True)
         _, exprs_wo_mf, _, check_memory_format = get_formals_and_exprs(False)
 
-        def get_return_stmt(name, exprs):
+        def get_return_stmt(name: str, exprs: List[str]) -> str:
             return f"return autograd::make_variable({name}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});"
 
         if i == 1 and new_fn is not None:
@@ -165,6 +173,7 @@ inline at::Tensor {sig.name()}({', '.join(formals)}) {{
 }}
 """
     return r
+
 
 if __name__ == "__main__":
     out = "torch/csrc/autograd/generated"
