@@ -276,6 +276,7 @@ def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
 
     from torch._dynamo import disable
 
+    # remove @disable once #114306 is fixed
     @disable
     def wrapper():
         # If chunk_size is not specified.

@@ -5339,7 +5339,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
                 RuntimeError, "Nested tensors can only be vmapped over dim=0"):
             vmap(f, in_dims=2)(x)
 
-    @xfailIfTorchDynamo
     def test_nt_with_nonzero_out_dim_raises(self, device):
         def f(x):
             return x
