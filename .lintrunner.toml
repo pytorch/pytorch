@@ -134,7 +134,6 @@ exclude_patterns = [
     'torch/distributed/elastic/agent/server/api.py',
     'torch/testing/_internal/**',
     'torch/distributed/fsdp/fully_sharded_data_parallel.py',
-    'torch/distributed/distributed_c10d.py',
     # TODO(suo): these exclusions were added just to get lint clean on master.
     # Follow up to do more target suppressions and remove them.
     'torch/ao/quantization/fx/convert.py',
@@ -878,11 +877,7 @@ exclude_patterns = [
     'test/jit/**',  # should be run through test/test_jit.py
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
     'test/fx/**',  # should be run through test/test_fx.py
-    'test/bottleneck_test/test_args.py',
-    'test/bottleneck_test/test_cuda.py',
-    'test/distributed/_shard/test_sharder.py',
-    'test/distributed/_tensor/experimental/test_tp_transform.py',
-    'test/distributed/_tensor/test_optimizers.py',
+    'test/bottleneck_test/**',  # excluded by test/run_test.py
     'test/distributed/argparse_util_test.py',
     'test/distributed/bin/test_script.py',
     'test/distributed/checkpoint/e2e/test_pipeline.py',
@@ -919,6 +914,7 @@ exclude_patterns = [
     'test/dynamo/test_compile.py',
     'test/dynamo/test_sources.py',
     'test/functorch/test_logging.py',
+    'test/inductor/test_aot_inductor_utils.py',
     'test/lazy/test_bindings.py',
     'test/lazy/test_extract_compiled_graph.py',
     'test/lazy/test_meta_kernel.py',
@@ -2728,7 +2724,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.6',
+    'ruff==0.1.7',
 ]
 is_formatter = true
 

@@ -199,8 +199,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
-        "_max_seqlen": arg._max_seqlen,
-        "_min_seqlen": arg._min_seqlen,
+        "_metadata_cache": arg._metadata_cache,
     }
     return kwargs
 
@@ -216,20 +215,17 @@ def jagged_binary_pointwise(func, *args, **kwargs):
     assert isinstance(a, NestedTensor) or isinstance(b, NestedTensor)
 
     mismatch_error_msg = (
-        f"cannot call binary pointwise function {func.__name__} with inputs of shapes "
-        f"{a.shape} and {b.shape}"
+        "cannot call binary pointwise function {} with inputs of shapes {} and {}"
     )
-
     # a is NT, b is NT
     if isinstance(a, NestedTensor) and isinstance(b, NestedTensor):
         # ex: (B, j0, D) + (B, j0, D)
         # ex: (B, j0, D) + (B, j0, 1)
-        if raggedness_matches(a, b.shape):
+        if raggedness_matches(a, b._size):
             return NestedTensor(
                 func(a._values, b._values, *args[2:], **kwargs), **extract_kwargs(a)
             )
-        raise RuntimeError(mismatch_error_msg)
-
+        raise RuntimeError(mismatch_error_msg.format(func.__name__, a._size, b._size))
     # either a is NT or b is NT at this point
     a_is_nt = isinstance(a, NestedTensor)
     extracted_kwargs = extract_kwargs(a) if a_is_nt else extract_kwargs(b)
@@ -256,7 +252,9 @@ def jagged_binary_pointwise(func, *args, **kwargs):
         # ex: (B, j0, D_0, D_1) + (1, 1, D_0, D_1) -> should
         # be (B, j0, D_0, D_1) but not yet supported
         if a.shape[0] != b.shape[0]:
-            raise RuntimeError(mismatch_error_msg)
+            raise RuntimeError(
+                mismatch_error_msg.format(func.__name__, a.shape, b.shape)
+            )
 
         # need to use offsets to broadcast across ragged dim properly
         # NB: inefficient fallback here; Triton codegen can help this
@@ -269,7 +267,7 @@ def jagged_binary_pointwise(func, *args, **kwargs):
 
     # ex: (B, j0, D_0, D_1) + (A, B, 1, D_0, D_1) -> error because this breaks the invariant
     # that ragged dim is wrt left-most batch dim
-    raise RuntimeError(mismatch_error_msg)
+    raise RuntimeError(mismatch_error_msg.format(func.__name__, a.shape, b.shape))
 
 
 def jagged_torch_function(func, *args, **kwargs):
@@ -412,8 +410,6 @@ def linear_default(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
-    weight = new_kwargs["weight"]
-    bias = new_kwargs["bias"]
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -515,7 +511,7 @@ def prod_dim_int(func, *args, **kwargs):
     if not new_kwargs["keepdim"]:
         raise RuntimeError("prod(): keepdim=True must be set for NestedTensor")
     dim = new_kwargs["dim"]
-    new_kwargs["dim"] = _wrap_jagged_dim(len(inp.shape), dim, "prod")
+    new_kwargs["dim"] = _wrap_jagged_dim(len(inp._size), dim, "prod")
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(args[0]))
 
@@ -594,11 +590,10 @@ def unsqueeze_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     values = inp._values
-    offsets = inp.offsets
 
     # Account for collapsed jagged dim
     dim = new_kwargs["dim"]
-    new_kwargs["dim"] = _wrap_jagged_dim(len(inp.shape) + 1, dim, "unsqueeze")
+    new_kwargs["dim"] = _wrap_jagged_dim(len(inp._size) + 1, dim, "unsqueeze")
     return NestedTensor(func(values, **new_kwargs), **extract_kwargs(inp))
 
 
@@ -640,11 +635,11 @@ def matmul_default(func, *args, **kwargs):
         )
     elif inp.is_nested and other.is_nested:
         # BMM with equivalent ragged dims between the two inputs
-        if inp.dim() > 3 and other.dim() > 3 and raggedness_matches(inp, other.shape):
+        if inp.dim() > 3 and other.dim() > 3 and raggedness_matches(inp, other._size):
             return NestedTensor(func(inp._values, other._values), **extract_kwargs(inp))
 
     raise RuntimeError(
-        f"matmul(): not supported between inputs of shapes {inp.shape} and {other.shape}"
+        f"matmul(): not supported between inputs of shapes {inp._size} and {other.shape}"
     )
 
 
@@ -661,7 +656,7 @@ def expand_default(func, *args, **kwargs):
 
     assert ("implicit" not in new_kwargs) or (not new_kwargs.pop("implicit"))
     if not raggedness_matches(inp, size):
-        raise RuntimeError(f"expand(): cannot expand shape {inp.shape} -> {size}")
+        raise RuntimeError(f"expand(): cannot expand shape {inp._size} -> {size}")
 
     expand_arg = [-1, *size[2:]]
     return NestedTensor(func(inp._values, expand_arg), **extract_kwargs(inp))
@@ -689,7 +684,7 @@ def where_self(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("other")
 
-    assert condition.shape == other.shape == inp.shape
+    assert condition._size == other._size == inp._size
 
     return NestedTensor(
         func(condition._values, inp._values, other._values, **new_kwargs),
@@ -805,7 +800,7 @@ def view_default(func, *args, **kwargs):
 
     # Ensure specified size still includes batch and ragged dims
     if len(size) < 3 or not raggedness_matches(inp, size):
-        raise RuntimeError(f"view(): cannot view shape {inp.shape} as {size}")
+        raise RuntimeError(f"view(): cannot view shape {inp._size} as {size}")
 
     jagged_size = [inp._values.shape[0]] + size[2:]
     return NestedTensor(func(inp._values, jagged_size), **extract_kwargs(inp))
