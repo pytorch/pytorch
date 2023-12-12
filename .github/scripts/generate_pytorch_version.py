@@ -26,11 +26,16 @@ def get_pytorch_root() -> Path:
     )
 
 
-def get_tag() -> str:
+def get_tag(channel: str = "release") -> str:
     root = get_pytorch_root()
     try:
+        # For test channel we want to get last tag available on branch
+        exact_param = "--exact"
+        if(channel == "test"):
+            exact_param = ""
+
         dirty_tag = (
-            subprocess.check_output(["git", "describe", "--tags", "--exact"], cwd=root)
+            subprocess.check_output(["git", "describe", "--tags", exact_param], cwd=root)
             .decode("ascii")
             .strip()
         )
