@@ -2124,7 +2124,7 @@ class TritonKernel(Kernel):
             triton=True,
         )
 
-    def codegen_nan_check(self):
+    def codegen_nan_check(self, *, before_calling_kernel=False):
         if not config.nan_asserts:
             return
 
@@ -2132,10 +2132,22 @@ class TritonKernel(Kernel):
         _, call_args, arg_types = self.args.python_argdefs()
         for arg, arg_type in zip(call_args, arg_types):
             if isinstance(arg_type, TensorArg):
-                line = f"assert not {arg}.isnan().any().item()"
-                wrapper.writeline(line)
-                line = f"assert not {arg}.isinf().any().item()"
-                wrapper.writeline(line)
+                is_read = 'in_ptr' in arg_type.name or 'in_out_ptr' in arg_type.name
+                if before_calling_kernel and not is_read:
+                    continue
+                before_or_after = 'before' if before_calling_kernel else 'after'
+                wrapper.writeline(
+                    f"if {arg}.isnan().any().item():"
+                )
+                wrapper.writeline(
+                    f"    assert False, '{before_or_after} {arg} was NaN'"
+                )
+                wrapper.writeline(
+                    f"if {arg}.isinf().any().item():"
+                )
+                wrapper.writeline(
+                    f"    assert False, '{before_or_after} {arg} was inf'"
+                )
 
     def warn_mix_layout(self, kernel_name):
         """
@@ -2567,8 +2579,9 @@ class TritonScheduling(BaseScheduling):
         kernel_name = self.define_kernel(src_code, node_schedule)
         log.debug("Generating kernel code with kernel_name: %s", kernel_name)
         self.codegen_comment(node_schedule)
+        kernel.codegen_nan_check(before_calling_kernel=True)
         kernel.call_kernel(kernel_name)
-        kernel.codegen_nan_check()
+        kernel.codegen_nan_check(before_calling_kernel=False)
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 

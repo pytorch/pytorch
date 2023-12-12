@@ -6965,6 +6965,19 @@ class ReduceScatterTensor(OutOfPlaceCollectiveKernel):
         return cls.create_output_nodes(packed, outputs)[0]
 
     def codegen_collective(self, wrapper, output_name, input_names):
+
+        wrapper.writeline(
+            f"if {output_name}_inputs[0].isnan().any().item():"
+        )
+        wrapper.writeline(
+            f"    assert False, 'input to reduce_scatter was NaN'"
+        )
+        wrapper.writeline(
+            f"if {output_name}_inputs[0].isnan().any().item():"
+        )
+        wrapper.writeline(
+            f"    assert False, 'input to reduce_scatter was inf'"
+        )
         wrapper.writeline(
             f"{output_name}_work = dist.reduce_scatter_tensor("
             f"{output_name}[0], {output_name}_inputs[0], "
