@@ -546,7 +546,7 @@ class TreeSpec:
             if node_type != self.type and not both_standard_dict:
                 raise ValueError(
                     f"Node type mismatch; "
-                    f"expected {self.type}, but got {node_type!r}.",
+                    f"expected {self.type!r}, but got {node_type!r}.",
                 )
             if len(tree) != self.num_children:
                 raise ValueError(
@@ -583,7 +583,7 @@ class TreeSpec:
                 ):
                     raise ValueError(
                         f"Node context mismatch for node type {self.type!r}; "
-                        f"expected {self.context}, but got {context!r}.",  # namedtuple type mismatch
+                        f"expected {self.context!r}, but got {context!r}.",  # namedtuple type mismatch
                     )
 
         for child_pytree, child_spec in zip(child_pytrees, self.children_specs):
