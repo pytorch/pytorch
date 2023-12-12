@@ -1804,6 +1804,24 @@ class TestFX(JitTestCase):
         self.assertEqual(interpreter.run(input), gm(input))
         self.assertEqual(interpreter.run(input), m(input))
 
+    def test_interpreter_other_graph(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x):
+                return self.linear(x + self.param).clamp(min=0.0, max=1.0)
+
+        m = MyModule()
+        gm = torch.fx.symbolic_trace(m)
+
+        interpreter = Interpreter(gm, graph=gm.graph)
+        input = torch.randn(3, 4)
+        self.assertEqual(interpreter.run(input), gm(input))
+        self.assertEqual(interpreter.run(input), m(input))
+
     def test_interpreter_run_node_override(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
