@@ -345,8 +345,8 @@ report(f"Building wheel {package_name}-{version}")
 cmake = CMake()
 
 
-def is_source_hipified():
-    with open("torch/csrc/utils/cuda_enabled.h") as f:
+def is_source_hipified() -> bool:
+    with os.path.join(cwd, "torch/csrc/utils/cuda_enabled.h") as f:
         # The original content is USE_CUDA but replaced as USE_ROCM during
         # hipification
         return "USE_ROCM" in f.read()
