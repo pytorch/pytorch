@@ -223,8 +223,7 @@ class NestedTensor(torch.Tensor):
             #   with factory functions, so we can get away with not propagating.
             # - We don't guard explicitly even as we enter code paths that
             #   rely on this being the case. We assume that specializing on the
-            #   Subclass-ness of the inputs and the fact that ragged_idx is
-            #   constant are enough.
+            #   Subclass-ness of the inputs is enough.
             ragged_size.node._singleton_data = offsets
             ragged_size.node._singleton_dummy = get_nt_dummy()
             ragged_size.node._singleton_sum_offsets = values.shape[0]

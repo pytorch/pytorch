@@ -1286,6 +1286,11 @@ void initJITBindings(PyObject* module) {
             return node->is_symbolic();
           })
       .def(
+          "is_singleton",
+          [](const c10::SymNode& node) {
+            return node->singleton_int().has_value();
+          })
+      .def(
           "singleton_int",
           [](const c10::SymNode& node) {
             return node->singleton_int();
