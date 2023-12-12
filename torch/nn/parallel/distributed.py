@@ -815,6 +815,8 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             static_graph,
         )
+        self._comm_hooks: List[Tuple[Callable, object]] = []
+
         if self.mixed_precision is not None:
             _setup_mixed_precision_params(self.mixed_precision, self.module)
             _cast_buffers(self.mixed_precision, self.module)
@@ -866,7 +868,6 @@ class DistributedDataParallel(Module, Joinable):
 
         # Register the AccumulaGrad post hooks even if we won't compile DDP. This
         # will avoid compiling the hooks twice.
-        self._comm_hooks: List[Tuple[Callable, object]] = []
         self._accum_grad_hooks: List[RemovableHandle] = []
         self._ddp_python_hook = torch._dynamo.config.ddp_python_hook
         if self._ddp_python_hook:
@@ -888,7 +889,7 @@ class DistributedDataParallel(Module, Joinable):
 
             if self._comm_hooks:
                 for hook, state in self._comm_hooks:
-                    hook(state, (param.grad, param, param_index))
+                    hook(state, (param.grad, param))
             else:
                 gradient = param.grad / self.process_group.size()
                 gradient = fcol.all_reduce(gradient, "sum", self.process_group)
@@ -2160,7 +2161,10 @@ class DistributedDataParallel(Module, Joinable):
                 "Communication hook: return annotation should be torch.futures.Future[torch.Tensor].",
             )
 
-        if hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook",] and (
+        if hook.__name__ in [
+            "bf16_compress_hook",
+            "bf16_compress_wrapper_hook",
+        ] and (
             (torch.version.cuda is None and torch.version.hip is None)
             or (
                 torch.version.cuda is not None
