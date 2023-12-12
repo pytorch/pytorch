@@ -42,7 +42,7 @@ def with_temp_dir(
         try:
             func(self, *args, **kwargs)
         finally:
-            if dist.is_initialized() and dist.get_rank() ==0:
+            if dist.is_initialized() and dist.get_rank() == 0:
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
             else:
                 shutil.rmtree(self.temp_dir, ignore_errors=True)

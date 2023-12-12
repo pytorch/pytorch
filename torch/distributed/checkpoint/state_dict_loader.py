@@ -108,7 +108,7 @@ def load(
     """
 
     if no_dist:
-        keys = state_dict.keys()
+        keys = list(state_dict.keys())
     else:
         keys = _all_gather_keys(state_dict)
         if keys != sorted(state_dict.keys()):

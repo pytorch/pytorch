@@ -249,7 +249,6 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         checkpointer.load({})
 
 
-
 instantiate_parametrized_tests(TestE2ESaveAndLoad)
 if __name__ == "__main__":
     run_tests()
