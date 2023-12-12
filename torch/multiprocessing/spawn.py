@@ -1,11 +1,8 @@
 import logging
 import multiprocessing
 import multiprocessing.connection
-import os
-import pickle
 import signal
 import sys
-import tempfile
 import time
 import warnings
 from typing import Optional
@@ -64,7 +61,7 @@ class ProcessExitedException(ProcessException):
         )
 
 
-def _wrap(fn, i, args, error_file):
+def _wrap(fn, i, args, error_queue):
     # prctl(2) is a Linux specific system call.
     # On other systems the following function call has no effect.
     # This is set to ensure that non-daemonic child processes can
@@ -79,14 +76,13 @@ def _wrap(fn, i, args, error_file):
         # Propagate exception to parent process, keeping original traceback
         import traceback
 
-        with open(error_file, "wb") as fh:
-            pickle.dump(traceback.format_exc(), fh)
+        error_queue.put(traceback.format_exc())
         sys.exit(1)
 
 
 class ProcessContext:
-    def __init__(self, processes, error_files):
-        self.error_files = error_files
+    def __init__(self, processes, error_queues):
+        self.error_queues = error_queues
         self.processes = processes
         self.sentinels = {
             process.sentinel: index for index, process in enumerate(processes)
@@ -157,9 +153,9 @@ class ProcessContext:
                 process.kill()
             process.join()
 
-        # The file will only be created if the process crashed.
+        # There won't be an error on the queue if the process crashed.
         failed_process = self.processes[error_index]
-        if not os.access(self.error_files[error_index], os.R_OK):
+        if self.error_queues[error_index].empty():
             exitcode = self.processes[error_index].exitcode
             if exitcode < 0:
                 try:
@@ -181,17 +177,16 @@ class ProcessContext:
                     exit_code=exitcode,
                 )
 
-        with open(self.error_files[error_index], "rb") as fh:
-            original_trace = pickle.load(fh)
+        original_trace = self.error_queues[error_index].get()
         msg = "\n\n-- Process %d terminated with the following error:\n" % error_index
         msg += original_trace
         raise ProcessRaisedException(msg, error_index, failed_process.pid)
 
 
 class SpawnContext(ProcessContext):
-    def __init__(self, processes, error_files):
+    def __init__(self, processes, error_queues):
         warnings.warn("SpawnContext is renamed to ProcessContext since 1.4 release.")
-        super().__init__(processes, error_files)
+        super().__init__(processes, error_queues)
 
 
 # Note: [start_processes]
@@ -206,30 +201,20 @@ def start_processes(
     fn, args=(), nprocs=1, join=True, daemon=False, start_method="spawn"
 ):
     mp = multiprocessing.get_context(start_method)
-    error_files = []
+    error_queues = []
     processes = []
     for i in range(nprocs):
-        # Each process is assigned a file to write tracebacks to.  We
-        # use the file being non-empty to indicate an exception
-        # occurred (vs an expected shutdown).  Note: this previously
-        # used a multiprocessing.Queue but that can be prone to
-        # deadlocks, so we went with a simpler solution for a one-shot
-        # message between processes.
-        tf = tempfile.NamedTemporaryFile(
-            prefix="pytorch-errorfile-", suffix=".pickle", delete=False
-        )
-        tf.close()
-        os.unlink(tf.name)
+        error_queue = mp.SimpleQueue()
         process = mp.Process(
             target=_wrap,
-            args=(fn, i, args, tf.name),
+            args=(fn, i, args, error_queue),
             daemon=daemon,
         )
         process.start()
-        error_files.append(tf.name)
+        error_queues.append(error_queue)
         processes.append(process)
 
-    context = ProcessContext(processes, error_files)
+    context = ProcessContext(processes, error_queues)
     if not join:
         return context
 
