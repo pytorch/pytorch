@@ -179,11 +179,17 @@ class SymNode:
         return self.pytype is bool
 
     def is_singleton(self):
-        return self._singleton_dummy is not None
+        return self._singleton_dummy is not None or (
+            # In case singleton SymNode is not fully initialized.
+            self.hint is not None
+            and isinstance(self.hint, SymInt)
+            and self.hint.node.is_singleton()
+        )
 
     def singleton_dummy(self):
-        # During metafication empty_strided is called, triggering this logic
-        # to be run before this singleton SymNode is fully initialized.
+        # Factory functions call this without checking is_singleton first.
+        # Even if we know this is a singleton SymNode, we do not if we are fully
+        # initialized.
         return self._singleton_dummy
 
     def singleton_data(self):
