@@ -1597,11 +1597,11 @@ class TestSparse(TestSparseBase):
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @coalescedonoff
+    @precisionOverride({torch.bfloat16: 5e-2})
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     def test_sparse_addmm(self, device, dtype, coalesced):
-        if dtype is torch.bfloat16:
-            # RuntimeError: "addmm_sparse_dense" not implemented for 'BFloat16'
-            self.skipTest('See https://github.com/pytorch/pytorch/issues/73145')
+        if dtype is torch.bfloat16 and device.startswith("cuda"):
+            self.skipTest('addmm_sparse_cuda is not implemented for BFloat16')
 
         def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
             if alpha_beta is None:
@@ -1620,6 +1620,10 @@ class TestSparse(TestSparseBase):
             Y = torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
             Y_dense = torch.addmm(D1, S_dense, D2, beta=beta, alpha=alpha)
             self.assertEqual(Y, Y_dense)
+
+            if dtype not in {torch.double, torch.cdouble}:
+                # gradcheck will likely fail with low-precision input dtypes.
+                return
 
             def fn(S, D1, D2, beta=beta, alpha=alpha):
                 return torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)

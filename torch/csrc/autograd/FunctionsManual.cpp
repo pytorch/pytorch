@@ -7115,7 +7115,7 @@ Tensor values_backward(const Tensor& grad, const Tensor& self) {
       Tensor compressed_indices, plain_indices;
       std::tie(compressed_indices, plain_indices) =
           at::sparse_csr::getCompressedPlainIndices(self);
-      return at::_sparse_compressed_tensor_unsafe(
+      return at::_sparse_compressed_tensor_unsafe_symint(
           compressed_indices,
           plain_indices,
           grad,
