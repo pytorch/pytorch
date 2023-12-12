@@ -236,5 +236,13 @@ RAIIAtenTensorHandle convert_arrayref_tensor_to_tensor(
   return art.expensiveCopyToTensor();
 }
 
+template <typename T>
+void assert_numel(const ArrayRefTensor<T>& tensor, int64_t numel) {
+  if (tensor.numel() != numel) {
+    std::stringstream err;
+    err << "incorrect numel for input tensor. expected " << numel << ", got " << tensor.numel();
+    throw std::runtime_error(err.str());
+  }
+}
 } // namespace aot_inductor
 } // namespace torch
