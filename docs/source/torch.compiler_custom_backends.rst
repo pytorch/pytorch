@@ -98,7 +98,7 @@ This is useful for 2 main reasons:
   custom backends only need to support the canonical Aten opset, which is a significantly smaller opset than the entire torch/Aten opset.
 
 Wrap your backend with
-``torch._dynamo.optimizations.training.aot_autograd`` and use ``torch.compile`` with the ``backend`` kwarg as before.
+``torch._dynamo.backends.common.aot_autograd`` and use ``torch.compile`` with the ``backend`` kwarg as before.
 Backend functions wrapped by ``aot_autograd`` should have the same contract as before.
 
 Backend functions are passed to ``aot_autograd`` through the ``fw_compiler`` (forward compiler)
@@ -264,9 +264,8 @@ And then you should be able to optimize any existing code with:
 Composable Backends
 ^^^^^^^^^^^^^^^^^^^
 
-TorchDynamo includes many backends, which can be found in
-`backends.py <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/optimizations/backends.py>`__
-or ``torch._dynamo.list_backends()``. You can combine these backends
+TorchDynamo includes many backends, which can be listed with
+``torch._dynamo.list_backends()``. You can combine these backends
 together with the following code:
 
 .. code-block:: python
