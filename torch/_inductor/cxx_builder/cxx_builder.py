@@ -655,6 +655,11 @@ def _get_cuda_related_args(aot_mode: bool):
         else:
             libraries.append("cudart_static")
 
+    # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
+    if not config.aot_inductor.abi_compatible:
+        libraries += ["c10"]
+        libraries_dirs += [cpp_extension.TORCH_LIB_PATH]
+
     return (
         definations,
         include_dirs,
