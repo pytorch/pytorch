@@ -1,6 +1,8 @@
 #pragma once
 
+#include <functional>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -113,7 +115,7 @@ class RAIIAtenTensorHandle {
     return handle_.release();
   }
 
-  AtenTensorHandle get() {
+  AtenTensorHandle get() const {
     return handle_.get();
   }
 
