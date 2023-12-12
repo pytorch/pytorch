@@ -527,6 +527,7 @@ for_each_ops = [
     aten._foreach_addcmul_.Scalar,
     aten._foreach_addcmul_.ScalarList,
     aten._foreach_addcmul_.Tensor,
+    aten._foreach_div_.List,
     aten._foreach_div_.ScalarList,
     aten._foreach_lerp_.Scalar,
     aten._foreach_maximum_.List,
@@ -545,6 +546,7 @@ for_each_ops = [
 ]
 
 for_each_linearity_ops = [
+    aten._foreach_add.Scalar,
     aten._foreach_add_.Scalar,
     aten._foreach_add.List,
     aten._foreach_add_.List,
