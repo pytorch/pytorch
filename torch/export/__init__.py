@@ -170,7 +170,7 @@ def export(
       ``OrderedDict`` containing all above types.
 
     """
-    from torch._export import _export
+    from ._trace import _export
     from .dynamic_shapes import _process_dynamic_shapes
 
     if constraints is not None:
@@ -189,7 +189,6 @@ def export(
         args,
         kwargs,
         constraints,
-        strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
     )
 
