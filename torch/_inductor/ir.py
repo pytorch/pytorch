@@ -2333,6 +2333,15 @@ class IndexingConstant(BaseConstant):
         return IndexingConstant(self.index, self.dtype, device)
 
 
+def is_contiguous_strides_for_shape(stride, shape):
+    return all(
+        size == 1 or left == right
+        for left, right, size in zip(
+            stride, FlexibleLayout.contiguous_strides(shape), shape
+        )
+    )
+
+
 @dataclasses.dataclass
 class Layout(IRNode):
     def __init__(
@@ -2369,12 +2378,7 @@ class Layout(IRNode):
     __repr__ = __str__
 
     def is_contiguous(self):
-        for left, right, size in zip(
-            self.stride, FlexibleLayout.contiguous_strides(self.size), self.size
-        ):
-            if size != 1 and left != right:
-                return False
-        return True
+        return is_contiguous_strides_for_shape(self.stride, self.size)
 
     def is_channels_last_contiguous(self):
         ndim = len(self.size)
@@ -4368,14 +4372,7 @@ class DynamicScalar(ExternKernel):
         return {self.sym}
 
     def codegen(self, wrapper):
-        (data,) = (t.codegen_reference() for t in self.inputs)
-        if self.is_bool:
-            wrapper.writeline(f"{self.sym} = 1 if {data}.item() else 0")
-        else:
-            wrapper.writeline(f"{self.sym} = {data}.item()")
-        # No one should ever use this buffer, but for uniformity
-        # define the variable and assign it None
-        wrapper.writeline(f"{self.get_name()} = None")
+        wrapper.codegen_dynamic_scalar(self)
 
 
 @dataclasses.dataclass
