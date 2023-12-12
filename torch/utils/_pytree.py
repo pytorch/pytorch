@@ -520,6 +520,7 @@ class TreeSpec:
 
         node_type = _get_node_type(tree)
         if self.type not in BUILTIN_TYPES:
+            # Always require custom node types to match exactly
             if node_type != self.type:
                 raise ValueError(
                     f"Type mismatch; "
@@ -537,6 +538,8 @@ class TreeSpec:
                     f"Node context mismatch for custom node type {self.type!r}.",
                 )
         else:
+            # For builtin dictionary types, we allow some flexibility
+            # Otherwise, we require exact matches
             both_standard_dict = (
                 self.type in STANDARD_DICT_TYPES and node_type in STANDARD_DICT_TYPES
             )
@@ -553,14 +556,23 @@ class TreeSpec:
 
             if both_standard_dict:  # dictionary types are compatible with each other
                 dict_context = (
-                    self.context if self.type is not defaultdict else self.context[1]
+                    self.context
+                    if self.type is not defaultdict
+                    # ignore mismatch of `default_factory` for defaultdict
+                    else self.context[1]
                 )
                 expected_keys = dict_context
-                if set(tree) != set(expected_keys):
-                    raise ValueError(
-                        f"Node keys mismatch; "
-                        f"expected {set(expected_keys)}, but got {set(tree)}.",
-                    )
+                got_key_set = set(tree)
+                expected_key_set = set(expected_keys)
+                if got_key_set != expected_key_set:
+                    missing_keys = expected_key_set.difference(got_key_set)
+                    extra_keys = got_key_set.difference(expected_key_set)
+                    message = ""
+                    if missing_keys:
+                        message += f"; missing key(s): {missing_keys}"
+                    if extra_keys:
+                        message += f"; extra key(s): {extra_keys}"
+                    raise ValueError(f"Node keys mismatch{message}.")
                 child_pytrees = [tree[key] for key in expected_keys]
             else:
                 flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
