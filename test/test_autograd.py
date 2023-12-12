@@ -8615,6 +8615,7 @@ for shape in [(1,), ()]:
 
     def test_any_hook(self):
         hook_id = 0
+        any_hook_handles = []
 
         class MultiOutputModule(nn.Module):
             def __init__(self):
@@ -8627,7 +8628,9 @@ for shape in [(1,), ()]:
                 nonlocal hook_id
                 z.register_hook(functools.partial(hook, hook_id))
                 hook_id += 1
-                torch.autograd.graph._register_any_hook(out, functools.partial(hook, hook_id))
+                any_hook_handles.append(
+                    torch.autograd.graph._register_any_hook(out, functools.partial(hook, hook_id))
+                )
                 hook_id += 1
                 return out[0] + out[1]
 
@@ -8647,7 +8650,18 @@ for shape in [(1,), ()]:
         (out[0] + out[1]).sum().backward()
         # Check that the any-hook runs only once and before the regular hook
         # for each module
+        self.assertEqual(len(any_hook_handles), 2)
         self.assertEqual(hook_order, [3, 2, 1, 0])
+
+        hook_id = 0
+        hook_order.clear()
+        any_hook_handles.clear()
+        out = model(inp)
+        for handle in any_hook_handles:
+            handle.remove()
+        (out[0] + out[1]).sum().backward()
+        # Check that the any-hook does not run if removed
+        self.assertEqual(hook_order, [2, 0])
 
     def test_pynode_destruction_deadlock(self):
         script = """
