@@ -1949,7 +1949,6 @@ def gradcheck(
     atol: float = 1e-5,
     rtol: float = 1e-3,
     raise_exception: bool = True,
-    check_sparse_nnz: Optional[bool] = None,
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
@@ -2004,12 +2003,6 @@ def gradcheck(
         raise_exception (bool, optional): indicating whether to raise an exception if
             the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
-        check_sparse_nnz (bool, optional): if ``True``, gradcheck allows
-            for SparseTensor input, and for any SparseTensor inputs,
-            gradcheck will perform its check at ``nnz`` positions only.
-            The ``check_sparse_nnz`` argument is deprecated, use the
-            ``masked`` argument instead. If ``check_sparse_nnz != masked``, an
-            exception is raised.
         nondet_tol (float, optional): tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
@@ -2033,22 +2026,6 @@ def gradcheck(
         ``True`` if all differences satisfy allclose condition
 
     """
-    if check_sparse_nnz is None:
-        if masked is None:
-            check_sparse_nnz = masked = False
-        else:
-            check_sparse_nnz = masked
-    else:
-        warnings.warn(
-            "Backwards compatibility: check_sparse_nnz is deprecated, it will be removed in a future version of PyTorch."
-            f" Use masked={check_sparse_nnz} instead."
-        )
-        if masked is None:
-            masked = check_sparse_nnz
-        elif check_sparse_nnz != masked:
-            raise ValueError(
-                f"Expected specified check_sparse_nnz (={check_sparse_nnz}) to be equal to masked (={masked})."
-            )
     assert (
         check_forward_ad or check_backward_ad
     ), "Expected at least one of check_forward_ad or check_backward_ad to be True"
@@ -2060,7 +2037,6 @@ def gradcheck(
     ), "Setting check_batched_forward_grad=True requires check_forward_ad to be True"
     args = locals().copy()
     args.pop("raise_exception")
-    args.pop("check_sparse_nnz")
     if not raise_exception:
         try:
             return _gradcheck_helper(**args)

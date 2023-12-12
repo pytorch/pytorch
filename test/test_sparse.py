@@ -162,58 +162,6 @@ class TestSparseLegacyAndDeprecation(TestCase):
             # Check warn-once:
             self.assertEqual(len(cm.warnings), 1)
 
-    @parametrize('fast_mode', (True, False))
-    def test_gradcheck_check_sparse_nnz(self, fast_mode):
-        """Tests for deprecated check_sparse_nnz keyword argument of gradcheck.
-
-        Deprecation steps:
-        2.1: Specification of check_sparse_nnz triggers a warning.
-        2.2: Specification of check_sparse_nnz triggers an
-             exception. Remove all check_sparse_nnz usages from
-             gradcheck and delete this test.
-        """
-        def fn(x, masked_grad):
-            return x.to_dense(masked_grad=masked_grad)
-
-        def test(x, masked_grad, masked, check_sparse_nnz):
-            x = x.detach().clone().requires_grad_()
-            torch.autograd.gradcheck(fn, (x, masked_grad), masked=masked, check_sparse_nnz=check_sparse_nnz, fast_mode=fast_mode)
-
-        x = torch.tensor([[0, 2], [3, 4]], dtype=torch.float64).to_sparse()
-
-        for masked_grad, masked, check_sparse_nnz in itertools.product(*[(True, False, None)] * 3):
-            effective_masked_grad = True if masked_grad is None else masked_grad
-            effective_check_sparse_nnz = False if check_sparse_nnz is None else check_sparse_nnz
-            # For BC, the effective masked depends on the value of specified check_sparse_nnz:
-            effective_masked = (check_sparse_nnz if check_sparse_nnz is not None else False) if masked is None else masked
-
-            warn_using_check_sparse_nnz = self.assertWarns(
-                UserWarning,
-                msg=('Backwards compatibility: check_sparse_nnz is deprecated, it will be removed in a future version of PyTorch.'
-                     f' Use masked={effective_check_sparse_nnz} instead.'))
-            raise_on_non_equal_masked_and_check_sparse_nnz = self.assertRaisesRegex(
-                ValueError,
-                f"Expected specified check_sparse_nnz [(]={effective_check_sparse_nnz}[)]"
-                f" to be equal to masked [(]={effective_masked}[)]")
-            raise_jacobian_mismatch = self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 0")
-
-            def run_test():
-                if effective_masked_grad != effective_masked and not fast_mode:
-                    with raise_jacobian_mismatch:
-                        test(x, masked_grad, masked, check_sparse_nnz)
-                else:
-                    test(x, masked_grad, masked, check_sparse_nnz)
-
-            if masked != check_sparse_nnz and None not in {masked, check_sparse_nnz}:
-                # the specified masked and check_sparse_nnz must match
-                with warn_using_check_sparse_nnz:
-                    with raise_on_non_equal_masked_and_check_sparse_nnz:
-                        test(x, masked_grad, masked, check_sparse_nnz)
-            elif check_sparse_nnz is not None:
-                with warn_using_check_sparse_nnz:
-                    run_test()
-            else:
-                self.assertNotWarn(run_test)
 
 class TestSparseBase(TestCase):
     def run(self, result=None):
