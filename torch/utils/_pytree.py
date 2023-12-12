@@ -597,15 +597,21 @@ def tree_structure(tree: PyTree) -> TreeSpec:
     return tree_flatten(tree)[1]
 
 
-def tree_map(func: Callable[..., Any], tree: PyTree) -> PyTree:
+def tree_map(func: Callable[..., Any], tree: PyTree, *rest: PyTree) -> PyTree:
     flat_args, spec = tree_flatten(tree)
-    return tree_unflatten([func(i) for i in flat_args], spec)
+    all_flat_args = [flat_args] + [tree_flatten(t)[0] for t in rest]
+    return tree_unflatten([func(*xs) for xs in zip(*all_flat_args)], spec)
 
 
-def tree_map_(func: Callable[..., Any], tree: PyTree) -> PyTree:
+def tree_map_(
+    func: Callable[..., Any], tree: PyTree, *rest: PyTree
+) -> Tuple[PyTree, ...]:
     flat_args = tree_leaves(tree)
-    deque(map(func, flat_args), maxlen=0)  # consume and exhaust the iterable
-    return tree
+    all_flat_args = [flat_args] + [tree_flatten(t)[0] for t in rest]
+    deque(
+        map(func, *all_flat_args), maxlen=len(rest)
+    )  # consume and exhaust the iterable
+    return tree, *rest
 
 
 Type2 = Tuple[Type[T], Type[S]]
