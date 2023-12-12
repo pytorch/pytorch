@@ -3444,12 +3444,11 @@ class TestNestedTensorSubclass(NestedTestCase):
     # Note 3: ROCm only supports the math kernel, which doesn't work with jagged NTs
     @onlyCUDA
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
-    @torch.set_grad_enabled(False)
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
                  SM80OrLater else [torch.float16, torch.float32])
     def test_sdpa(self, device, dtype):
         batch_size = 1
-        emb_dims = 1024
+        emb_dims = 64
         n_heads = 8
         head_dims = emb_dims // n_heads
 
@@ -3464,25 +3463,45 @@ class TestNestedTensorSubclass(NestedTestCase):
         x_d1 = sen1.unsqueeze(0)
         x_nt = torch.nested.as_nested_tensor([sen1], layout=torch.jagged)
 
-        q_d1 = query(x_d1).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
-        k_d1 = key(x_d1).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
-        v_d1 = value(x_d1).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        # See note below for why we detach here.
+        q_d1 = query(x_d1).view(batch_size, -1, n_heads, head_dims).detach().requires_grad_(True)
+        q_d1_t = q_d1.transpose(1, 2)
+        k_d1 = key(x_d1).view(batch_size, -1, n_heads, head_dims).detach().requires_grad_(True)
+        k_d1_t = k_d1.transpose(1, 2)
+        v_d1 = value(x_d1).view(batch_size, -1, n_heads, head_dims).detach().requires_grad_(True)
+        v_d1_t = v_d1.transpose(1, 2)
 
-        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
-        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
-        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().requires_grad_(True)
+        q_nt_t = q_nt.transpose(1, 2)
+        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().requires_grad_(True)
+        k_nt_t = k_nt.transpose(1, 2)
+        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().requires_grad_(True)
+        v_nt_t = v_nt.transpose(1, 2)
 
         # High Precision Math Reference
         q_d1_f32 = q_d1.to(torch.float32)
         k_d1_f32 = k_d1.to(torch.float32)
         v_d1_f32 = v_d1.to(torch.float32)
-        out_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1_f32, k_d1_f32, v_d1_f32)[0]
-        # Low Precision Math Reference
-        out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1, k_d1, v_d1)[0]
-        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
+        q_d1_f32_t = q_d1_f32.transpose(1, 2)
+        k_d1_f32_t = k_d1_f32.transpose(1, 2)
+        v_d1_f32_t = v_d1_f32.transpose(1, 2)
+        out_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1_f32_t, k_d1_f32_t, v_d1_f32_t)[0]
+        grads_ref = torch.autograd.grad(out_ref.sum(), (q_d1_f32, k_d1_f32, v_d1_f32))
 
-        attn_d1 = torch.nn.functional.scaled_dot_product_attention(q_d1, k_d1, v_d1).transpose(1, 2)
-        attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt, k_nt, v_nt).transpose(1, 2)
+        # Low Precision Math Reference
+        out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(q_d1_t, k_d1_t, v_d1_t)[0]
+        grads_lp_ref = torch.autograd.grad(out_lp_ref.sum(), (q_d1, k_d1, v_d1))
+
+        # Compute tolerances
+        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
+        grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(grads_ref[0], grads_lp_ref[0])
+        grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(grads_ref[1], grads_lp_ref[1])
+        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(grads_ref[2], grads_lp_ref[2])
+        grad_atols = [grad_q_ref_atol, grad_k_ref_atol, grad_v_ref_atol]
+        grad_rtols = [grad_q_ref_rtol, grad_k_ref_rtol, grad_v_ref_rtol]
+
+        attn_d1 = torch.nn.functional.scaled_dot_product_attention(q_d1_t, k_d1_t, v_d1_t).transpose(1, 2)
+        attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt_t, k_nt_t, v_nt_t).transpose(1, 2)
 
         self.assertEqual(attn_d1, attn_nt.unbind()[0].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
 
@@ -3490,39 +3509,57 @@ class TestNestedTensorSubclass(NestedTestCase):
         x_d2 = sen2.unsqueeze(0)
         x_nt = torch.nested.as_nested_tensor([sen1, sen2], layout=torch.jagged)
 
-        q_d2 = query(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
-        k_d2 = key(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
-        v_d2 = value(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
+        # NB: we make sure the leaf tensor we compute gradients for is the view-ed tensor before
+        # it is transposed. This is because today we cannot backward through view or unbind a
+        # transposed tensor.
+        q_d2 = query(x_d2).view(batch_size, -1, n_heads, head_dims).detach().requires_grad_(True)
+        q_d2_t = q_d2.transpose(1, 2)
+        k_d2 = key(x_d2).view(batch_size, -1, n_heads, head_dims).detach().requires_grad_(True)
+        k_d2_t = k_d2.transpose(1, 2)
+        v_d2 = value(x_d2).view(batch_size, -1, n_heads, head_dims).detach().requires_grad_(True)
+        v_d2_t = v_d2.transpose(1, 2)
 
-        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
-        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
-        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().requires_grad_(True)
+        q_nt_t = q_nt.transpose(1, 2)
+        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().requires_grad_(True)
+        k_nt_t = k_nt.transpose(1, 2)
+        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().requires_grad_(True)
+        v_nt_t = v_nt.transpose(1, 2)
 
-        attn_d2 = torch.nn.functional.scaled_dot_product_attention(q_d2, k_d2, v_d2).transpose(1, 2)
-        attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt, k_nt, v_nt).transpose(1, 2)
+        attn_d2 = torch.nn.functional.scaled_dot_product_attention(q_d2_t, k_d2_t, v_d2_t).transpose(1, 2)
+        d1_grads = torch.autograd.grad(attn_d1.sum(), (q_d1, k_d1, v_d1))
+        d2_grads = torch.autograd.grad(attn_d2.sum(), (q_d2, k_d2, v_d2))
 
-        attn_nts = attn_nt.unbind()
-        self.assertEqual(attn_d1, attn_nts[0].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
-        self.assertEqual(attn_d2, attn_nts[1].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
-
-        # Test dispatcher works by calling only mem-effn and math (as they are safe for all devices)
-        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=True, enable_math=False):
-            attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt, k_nt, v_nt).transpose(1, 2)
+        def check_forward_backward():
+            attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt_t, k_nt_t, v_nt_t).transpose(1, 2)
 
             attn_nts = attn_nt.unbind()
             self.assertEqual(attn_d1, attn_nts[0].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
             self.assertEqual(attn_d2, attn_nts[1].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
 
+            nt_grads = torch.autograd.grad(buffer_from_jagged(attn_nt).sum(), (q_nt, k_nt, v_nt))
+            for nt_grad, d1_grad, d2_grad, grad_atol, grad_rtol in zip(nt_grads, d1_grads, d2_grads, grad_atols, grad_rtols):
+                unbound_nt_grads = nt_grad.unbind()
+                self.assertEqual(d1_grad, unbound_nt_grads[0].unsqueeze(0), atol=grad_atol, rtol=grad_rtol)
+                self.assertEqual(d2_grad, unbound_nt_grads[1].unsqueeze(0), atol=grad_atol, rtol=grad_rtol)
+
+        # Default
+        check_forward_backward()
+
+        # Test dispatcher works by calling only mem-effn and math (as they are safe for all devices)
+        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=True, enable_math=False):
+            check_forward_backward()
+
         # Will fail bc unsupported ops
         # TODO: Add remaining ops, or implement a different math dispatch for jagged
         with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True):
             with self.assertRaises(RuntimeError):
-                attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt, k_nt, v_nt).transpose(1, 2)
+                attn_nt = torch.nn.functional.scaled_dot_product_attention(q_nt_t, k_nt_t, v_nt_t).transpose(1, 2)
+
 
     # This requires NT -> NT views to work in inductor, which is a TODO
-    @unittest.expectedFailure
+    @unittest.expectedFailure  # noqa: E301
     @onlyCUDA
-    @torch.set_grad_enabled(False)
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
                  SM80OrLater else [torch.float16, torch.float32])
     def test_sdpa_compile(self, device, dtype):
