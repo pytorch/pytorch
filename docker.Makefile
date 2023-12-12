@@ -18,6 +18,7 @@ CMAKE_VARS               ?=
 CUDA_CHANNEL              = nvidia
 # The conda channel to use to install pytorch / torchvision
 INSTALL_CHANNEL          ?= pytorch
+WHL_INSTALL_PATH         ?= "whl/cpu/"
 
 PYTHON_VERSION           ?= 3.10
 PYTORCH_VERSION          ?= $(shell git describe --tags --always)

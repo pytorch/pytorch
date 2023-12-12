@@ -29,6 +29,7 @@ FROM dev-base as conda
 ARG PYTHON_VERSION=3.8
 # Automatically set by buildx
 ARG TARGETPLATFORM
+
 # translating Docker's TARGETPLATFORM into miniconda arches
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  MINICONDA_ARCH=aarch64  ;; \
@@ -66,15 +67,17 @@ ARG PYTHON_VERSION=3.8
 ARG CUDA_VERSION=11.7
 ARG CUDA_CHANNEL=nvidia
 ARG INSTALL_CHANNEL=pytorch-nightly
+ARG WHL_INSTALL_PATH="whl/cpu/"
 ARG PYTORCH_VERSION
 # Automatically set by buildx
 # Note conda needs to be pinned to 23.5.2 see: https://github.com/pytorch/pytorch/issues/106470
 RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION} conda=23.5.2
 ARG TARGETPLATFORM
 
+
 # On arm64 we can only install wheel packages.
 RUN case ${TARGETPLATFORM} in \
-         "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ "torch==${PYTORCH_VERSION}" torchvision torchaudio ;; \
+         "linux/arm64")  pip install --extra-index-url "https://download.pytorch.org/${WHL_INSTALL_PATH}" "torch==${PYTORCH_VERSION}" torchvision torchaudio ;; \
          *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" "pytorch=${PYTORCH_VERSION}" torchvision torchaudio "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
     esac && \
     /opt/conda/bin/conda clean -ya

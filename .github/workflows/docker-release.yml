@@ -98,8 +98,10 @@ jobs:
         run: |
           {
             echo "INSTALL_CHANNEL=pytorch-test";
+            echo "WHL_INSTALL_PATH=whl/test/cpu/";
             if [[ ${CHANNEL} == "release" ]]; then
               echo "INSTALL_CHANNEL=pytorch";
+              echo "WHL_INSTALL_PATH=whl/cpu/";
             fi
             echo "TRITON_VERSION=$(cut -f 1 .ci/docker/triton_version.txt)+$(cut -c -10 .ci/docker/ci_commit_pins/triton.txt)";
           } >> "${GITHUB_ENV}"
