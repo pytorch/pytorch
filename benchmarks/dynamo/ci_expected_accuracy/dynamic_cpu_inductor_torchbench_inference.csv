@@ -10,10 +10,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,model_fail_to_load,0
-
-
-
 LearningToPaint,pass,0
 
 
@@ -114,10 +110,6 @@ hf_T5_large,pass_due_to_skip,0
 
 
 
-hf_clip,eager_fail_to_run,0
-
-
-
 lennard_jones,pass,0
 
 
@@ -138,15 +130,7 @@ mobilenet_v2,pass,0
 
 
 
-mobilenet_v2_quantized_qat,eager_fail_to_run,0
-
-
-
 mobilenet_v3_large,pass,0
-
-
-
-moco,model_fail_to_load,0
 
 
 
@@ -202,10 +186,6 @@ resnet50,pass,0
 
 
 
-resnet50_quantized_qat,eager_fail_to_run,0
-
-
-
 resnext50_32x4d,pass,0
 
 
@@ -227,10 +207,6 @@ squeezenet1_1,pass,0
 
 
 stable_diffusion_unet,pass_due_to_skip,0
-
-
-
-timm_efficientdet,model_fail_to_load,0
 
 
 
