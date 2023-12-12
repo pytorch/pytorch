@@ -1,11 +1,13 @@
+# Owner(s): ["module: tests"]
+
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.inputgen.variable.type import (
-    ScalarDtype,
-    VariableType,
     check_vtype,
     convert_to_vtype,
     is_integer,
+    ScalarDtype,
+    VariableType,
 )
 
 

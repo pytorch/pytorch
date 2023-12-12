@@ -1,4 +1,6 @@
-from torch.testing._internal.common_utils import TestCase, run_tests
+# Owner(s): ["module: tests"]
+
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.inputgen.variable.space import (
     Discrete,
     Interval,

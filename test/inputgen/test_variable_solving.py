@@ -1,13 +1,12 @@
+# Owner(s): ["module: tests"]
+
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing._internal.inputgen.variable.constants import (
-    INT64_MAX,
-    INT64_MIN,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.inputgen.variable.constants import INT64_MAX, INT64_MIN
 from torch.testing._internal.inputgen.variable.solve import SolvableVariable
 from torch.testing._internal.inputgen.variable.type import (
-    SUPPORTED_TENSOR_DTYPES,
     ScalarDtype,
+    SUPPORTED_TENSOR_DTYPES,
 )
 
 

@@ -3,11 +3,11 @@ from typing import Any, List, Optional, Union
 
 from torch.testing._internal.inputgen.variable.constants import INT64_MAX, INT64_MIN
 from torch.testing._internal.inputgen.variable.type import (
-    SUPPORTED_TENSOR_DTYPES,
-    ScalarDtype,
-    VariableType,
     check_vtype,
     is_integer,
+    ScalarDtype,
+    SUPPORTED_TENSOR_DTYPES,
+    VariableType,
 )
 
 

@@ -1,10 +1,7 @@
 import math
 from typing import Any, List, Union
 
-from torch.testing._internal.inputgen.variable.space import (
-    Discrete,
-    VariableSpace,
-)
+from torch.testing._internal.inputgen.variable.space import Discrete, VariableSpace
 from torch.testing._internal.inputgen.variable.type import (
     check_vtype,
     convert_to_vtype,
