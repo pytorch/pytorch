@@ -17,7 +17,7 @@ namespace detail {
 template <
     typename I,
     bool one_sided = false,
-    std::enable_if_t<std::is_integral_v<I>, int> = 0>
+    typename std::enable_if<std::is_integral<I>::value, int>::type = 0>
 struct integer_iterator {
   using iterator_category = std::input_iterator_tag;
   using value_type = I;
@@ -78,7 +78,7 @@ struct integer_iterator {
 template <
     typename I,
     bool one_sided = false,
-    std::enable_if_t<std::is_integral_v<I>, bool> = true>
+    typename std::enable_if<std::is_integral<I>::value, bool>::type = true>
 struct integer_range {
  public:
   integer_range(I begin, I end) : begin_(begin), end_(end) {}
@@ -102,8 +102,10 @@ struct integer_range {
 template <
     typename Integer1,
     typename Integer2,
-    std::enable_if_t<std::is_integral_v<Integer1>, bool> = true,
-    std::enable_if_t<std::is_integral_v<Integer2>, bool> = true>
+    typename std::enable_if<std::is_integral<Integer1>::value, bool>::type =
+        true,
+    typename std::enable_if<std::is_integral<Integer2>::value, bool>::type =
+        true>
 integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
   // If end<=begin then the range is empty; we can achieve this effect by
   // choosing the larger of {begin, end} as the loop terminator
@@ -116,7 +118,8 @@ integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
 /// If end<=begin, then the range is empty
 template <
     typename Integer,
-    std::enable_if_t<std::is_integral_v<Integer>, bool> = true>
+    typename std::enable_if<std::is_integral<Integer>::value, bool>::type =
+        true>
 integer_range<Integer, true> irange(Integer end) {
   return {Integer(), end};
 }

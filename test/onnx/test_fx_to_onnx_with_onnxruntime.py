@@ -46,8 +46,8 @@ def _parameterized_class_attrs_and_values():
             (True, False),
             (True, False),
             (
-                pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
-                pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+                onnx_test_common.TorchModelType.TORCH_NN_MODULE,
+                onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
             ),
         )
     )
@@ -76,7 +76,7 @@ def _parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     op_level_debug: bool
     dynamic_shapes: bool
-    model_type: pytorch_test_common.TorchModelType
+    model_type: onnx_test_common.TorchModelType
 
     def setUp(self):
         super().setUp()
@@ -136,6 +136,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (tensor_x,), input_kwargs={"b": torch.tensor(5.0)}
         )
 
+    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
+        "torch._export.verifier.SpecViolationError: Operator '<built-in function pow>' is not an allowed operator type:"
+        "(<class 'torch._ops.OpOverload'>, <class 'torch._ops.HigherOrderOperator'>)"
+        "Valid builtin ops: [<built-in function getitem>, <built-in function add>, <built-in function mul>,"
+        "<built-in function sub>, <built-in function truediv>, <built-in function ge>, <built-in function le>,"
+        "<built-in function gt>, <built-in function lt>, <built-in function eq>, <built-in function ne>,"
+        "<built-in function floordiv>, <built-in function mod>, <built-in function and_>, <built-in function or_>,"
+        "<built-in function not_>]"
+        " Github issue: https://github.com/pytorch/pytorch/issues/113778"
+    )
     @pytorch_test_common.skip_dynamic_fx_test(
         "sympy operation tests don't need dynamic shape"
     )
@@ -188,15 +198,23 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             ),
         )
         onnx_test_common.assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
-        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, b=8.0)
-        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 8.0))
+        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(
+            tensor_x, model=func, b=8.0
+        )
+        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
+            func, func(tensor_x, 8.0)
+        )
         ort_outputs = onnx_test_common.run_ort(onnx_program, onnx_format_args)
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
         # test on different non-tensor input - xfail
-        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, b=9.0)
-        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 9.0))
+        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(
+            tensor_x, model=func, b=9.0
+        )
+        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
+            func, func(tensor_x, 9.0)
+        )
         _ = onnx_test_common.run_ort(onnx_program, onnx_format_args)
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_close(ref_output, torch.tensor(ort_output))
@@ -821,10 +839,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             kwargs = create_pytorch_only_kwargs()
             # Original outputs.
             ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
-                model(*args, **kwargs)
+                model, model(*args, **kwargs)
             )
             # ORT outputs.
-            args_not_none = onnx_program.adapt_torch_inputs_to_onnx(*args)
+            args_not_none = onnx_program.adapt_torch_inputs_to_onnx(*args, model=model)
 
             # Drop Parameters and buffers added by fx_serialization.save_model_with_external_data
             args_not_none = args_not_none[: len(args) - len(kwargs)]
@@ -919,8 +937,8 @@ def _parameterized_class_attrs_and_values_with_fake_options():
             (True, False),
             (True, False),
             (
-                pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
-                pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+                onnx_test_common.TorchModelType.TORCH_NN_MODULE,
+                onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
             ),
         )
     )
@@ -950,7 +968,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     dynamic_shapes: bool
     load_checkpoint_during_init: bool
     export_within_fake_mode: bool
-    model_type: pytorch_test_common.TorchModelType
+    model_type: onnx_test_common.TorchModelType
 
     def setUp(self):
         super().setUp()
@@ -965,7 +983,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         create_kwargs: Callable,
         load_checkpoint_during_init: bool,
         export_within_fake_mode: bool,
-        model_type: pytorch_test_common.TorchModelType,
+        model_type: onnx_test_common.TorchModelType,
     ):
         """Test helper for FakeTensorMode-enabled exporter.
 
@@ -995,10 +1013,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         # Create the toy model with real weight.
         real_model = create_model()
         state_dict = real_model.state_dict()  # concrete (non-fake) state_dict
-        if (
-            model_type
-            == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
-        ):
+        if model_type == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM:
             real_model = torch.export.export(
                 real_model, args=create_args(), kwargs=create_kwargs()
             )
@@ -1027,7 +1042,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 if export_within_fake_mode:
                     if (
                         model_type
-                        == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+                        == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
                     ):
                         fake_model = torch.export.export(
                             fake_model, args=fake_args, kwargs=fake_kwargs
@@ -1042,7 +1057,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             if not export_within_fake_mode:
                 if (
                     model_type
-                    == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+                    == onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
                 ):
                     fake_model = torch.export.export(
                         fake_model, args=fake_args, kwargs=fake_kwargs
@@ -1062,14 +1077,12 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 args = create_args()
                 kwargs = create_kwargs()
                 # Original outputs.
-                # model_with_state_dict=real_model is used to create non-fake weights
                 ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
-                    real_model(*args, **kwargs), model_with_state_dict=real_model
+                    fake_model, real_model(*args, **kwargs)
                 )
                 # ORT outputs.
-                # model_with_state_dict=real_model is used to create non-fake weights
                 args_not_none = onnx_program.adapt_torch_inputs_to_onnx(
-                    *args, model_with_state_dict=real_model, **kwargs
+                    *args, model=real_model, **kwargs
                 )
 
                 ort_outputs = onnx_test_common.run_ort(
@@ -1084,7 +1097,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
-        skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_fake_tensor_mode_simple(self):
         def create_model() -> nn.Module:
@@ -1123,7 +1136,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
-        skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
@@ -1154,7 +1167,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
-        skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
@@ -1196,7 +1209,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
-        skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_fake_tensor_mode_huggingface_google_t5(self):
         config = transformers.T5Config(
@@ -1232,7 +1245,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
-        skip_model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        skip_model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     )
     def test_fake_tensor_mode_huggingface_openai_whisper(self):
         config = transformers.WhisperConfig(
