@@ -221,7 +221,7 @@ auto build_graph_and_tensors(int64_t b,
 
 
     auto [O, Stats] = mha_graph->scaled_dot_product_flash_attention(Q, K, V, scaled_dot_product_flash_attention_options);
-    O->set_output(true).set_stride(std::vector<int64_t>(o.strides().data(), o.strides().data() + o.strides().size()));
+    O->set_output(true).set_dim(std::vector<int64_t>(o.sizes().data(), o.sizes().data() + o.sizes().size())).set_stride(std::vector<int64_t>(o.strides().data(), o.strides().data() + o.strides().size()));
 
     // Check that Stats tensor is real, which is only when its training step
     if (Stats) {
