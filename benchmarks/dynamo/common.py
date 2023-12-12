@@ -131,8 +131,8 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
 }
 
 # These models currently fail accuracy with eager Adam optimizer
-# so we use SGD
-CI_USE_SGD = {
+# so we use SGD when running the full benchmarks
+BENCHMARK_USE_SGD = {
     # TorchBench
     "BERT_pytorch",
     "LearningToPaint",
@@ -193,6 +193,34 @@ CI_USE_SGD = {
     "sebotnet33ts_256",
     "swsl_resnext101_32x16d",
     "tf_efficientnet_b0",
+}
+
+# These models OOM in CI
+# due to the extra memory of Adam optimizer states,
+# so we fall back to SGD in CI
+CI_USE_SGD = {
+    "torchrec_dlrm",
+    "demucs",
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "hf_T5_base",
+    "hf_clip",
+    "llama_v2_7b_16h",
+    "mobilenet_v2_quantized_qat",
+    "phi_1_5 resnet50_quantized_qat",
+    "BlenderbotForCausalLM",
+    "cait_m36_384",
+    "DALLE2_pytorch",
+    "moco",
+    "timm_efficientdet",
 }
 
 
@@ -1860,7 +1888,7 @@ class BenchmarkRunner:
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            if name in CI_USE_SGD:
+            if name in CI_USE_SGD or name in BENCHMARK_USE_SGD:
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
             else:
                 self.optimizer = torch.optim.Adam(params, lr=0.01, foreach=True)
