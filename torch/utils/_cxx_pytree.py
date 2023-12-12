@@ -345,7 +345,7 @@ def tree_structure(tree: PyTree) -> TreeSpec:
     )
 
 
-def tree_map(func: Callable[..., Any], tree: PyTree) -> PyTree:
+def tree_map(func: Callable[..., Any], tree: PyTree, *rests: PyTree) -> PyTree:
     """Map a function over leaves in a pytree to produce a new pytree.
 
     See also :func:`tree_map_`.
@@ -368,12 +368,13 @@ def tree_map(func: Callable[..., Any], tree: PyTree) -> PyTree:
     return optree.tree_map(
         func,
         tree,
+        *rests,
         none_is_leaf=True,
         namespace="torch",
     )
 
 
-def tree_map_(func: Callable[..., Any], tree: PyTree) -> PyTree:
+def tree_map_(func: Callable[..., Any], tree: PyTree, *rests: PyTree) -> PyTree:
     """Like :func:`tree_map`, but do an inplace call on each leaf and return the original tree.
 
     See also :func:`tree_map`.
@@ -392,6 +393,7 @@ def tree_map_(func: Callable[..., Any], tree: PyTree) -> PyTree:
     return optree.tree_map_(
         func,
         tree,
+        *rests,
         none_is_leaf=True,
         namespace="torch",
     )
