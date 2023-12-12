@@ -548,6 +548,7 @@ for_each_ops = [
 for_each_linearity_ops = [
     aten._foreach_add.Scalar,
     aten._foreach_add_.Scalar,
+    aten._foreach_add_.ScalarList,
     aten._foreach_add.List,
     aten._foreach_add_.List,
 ]
