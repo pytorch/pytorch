@@ -4266,8 +4266,8 @@ def matmul(tensor1, tensor2, *, is_out=False):
 
 @register_decomposition([aten.upsample_bicubic2d.default, aten.upsample_bicubic2d.out])
 @aten.upsample_bicubic2d.default.py_impl(DispatchKey.Autograd)
-@pw_cast_for_opmath
 @out_wrapper()
+@pw_cast_for_opmath
 def upsample_bicubic2d_default(
     input: Tensor,
     output_size: Tuple[int, int],
