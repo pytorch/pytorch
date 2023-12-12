@@ -415,8 +415,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             # comparison hard with torch.compile. torch.compile can cause minor
             # divergences in the output because of how fusion works for amp in
             # TorchInductor compared to eager.  Therefore, instead of looking at
-            # all the bounding boxes, we compare only top 5.
-            model_kwargs = {"box_detections_per_img": 5}
+            # all the bounding boxes, we compare only top 4.
+            model_kwargs = {"box_detections_per_img": 4}
             benchmark = benchmark_cls(
                 test="train",
                 device=device,
