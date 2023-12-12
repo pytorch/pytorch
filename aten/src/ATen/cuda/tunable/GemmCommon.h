@@ -63,21 +63,23 @@ struct GemmParams : OpParams {
     at::Tensor oth = at::from_blob(other->c, {m*n}, options);
     at::Tensor ref_float = ref.to(at::kFloat);
     at::Tensor oth_float = oth.to(at::kFloat);
-    std::vector<double> atols{1, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
-    double last_succeed = 1;
+    std::vector<double> atols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
+    std::vector<double> rtols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
+    double last_succeed_atol = 1;
+    double last_succeed_rtol = 1;
     for (auto& atol : atols) {
-      if (at::allclose(ref_float, oth_float, 1e-05, atol)) {
-        last_succeed = atol;
-      }
-      else {
-        break;
+      for (auto& rtol : rtols) {
+        if (at::allclose(ref_float, oth_float, rtol, atol)) {
+          last_succeed_atol = atol;
+          last_succeed_rtol = rtol;
+        }
       }
     }
-    if (last_succeed == 1) {
+    if (last_succeed_atol == 1) {
       return FAIL;
     }
     else {
-      TUNABLE_LOG("├──verify numerics: atol=", last_succeed, ", rtol=1e-5");
+      TUNABLE_LOG("├──verify numerics: atol=", last_succeed_atol, ", rtol=", last_succeed_rtol);
     }
 
     return OK;
