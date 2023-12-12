@@ -385,6 +385,8 @@ def linear_default(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
+    weight = new_kwargs["weight"]
+    bias = new_kwargs["bias"]
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -565,6 +567,7 @@ def unsqueeze_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     values = inp._values
+    offsets = inp.offsets
 
     # Account for collapsed jagged dim
     dim = new_kwargs["dim"]
