@@ -6,8 +6,8 @@
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/SingletonSymNodeImpl.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <torch/library.h>
@@ -787,6 +787,9 @@ void initDispatchBindings(PyObject* module) {
   });
   m.def("_commit_update", [](const at::Tensor& a) {
     return at::functionalization::impl::commit_update(a);
+  });
+  m.def("_unsafe_reset_storage", [](const at::Tensor& a) {
+    return at::functionalization::impl::unsafe_reset_storage(a);
   });
 
   m.def("_dispatch_key_for_device", [](const std::string& device_type) {

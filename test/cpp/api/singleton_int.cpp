@@ -1,12 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <torch/torch.h>
 #include <ATen/core/SingletonSymNodeImpl.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
-
 
 TEST(SingletonIntTest, Comparisons) {
   auto a = c10::SymInt(

@@ -104,6 +104,7 @@ select = [
     "PT025",
     "PT026",
     "PYI",
+    "RUF015", # access first ele in constant time
     "RUF017",
     "TRY200",
     "TRY302",
@@ -115,11 +116,13 @@ select = [
 "test/jit/**" = [
     "PLR0133", # tests require this for JIT
     "PYI",
+    "RUF015",
     "UP", # We don't want to modify the jit test as they test specify syntax
 ]
 "test/test_jit.py" = [
     "PLR0133", # tests require this for JIT
     "PYI",
+    "RUF015",
     "UP", # We don't want to modify the jit test as they test specify syntax
 ]
 
