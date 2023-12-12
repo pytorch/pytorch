@@ -21,7 +21,7 @@ from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource
 from ..utils import dict_keys, dict_values, istype, specialize_symnode
-from .base import VariableTracker
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 
