@@ -4,6 +4,17 @@
 #include <c10/util/TypeSafeSignMath.h>
 #include <cmath>
 
+#if defined(__CUDA_ARCH__)
+#include <c10/cuda/CUDAMathCompat.h>
+#define compat_copysign c10::cuda::compat::copysign
+#elif defined(__HIPCC__)
+#include <c10/hip/HIPMathCompat.h>
+#define compat_copysign c10::hip::compat::copysign
+#else
+#include <c10/util/copysign.h>
+#define compat_copysign c10::copysign
+#endif
+
 // The functions in this file should be header-only as it is used under
 // ABI-compatibility mode.
 
