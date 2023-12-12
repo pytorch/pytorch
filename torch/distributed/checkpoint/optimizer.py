@@ -5,7 +5,6 @@ from typing import cast, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.distributed as dist
-import torch.distributed.checkpoint as dist_cp
 from torch._utils import _get_device_module
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
@@ -27,6 +26,8 @@ from torch.distributed.checkpoint.planner_helpers import (
     _create_read_items,
     create_read_items_for_chunk_list,
 )
+from torch.distributed.checkpoint.state_dict_loader import load_state_dict
+from torch.distributed.checkpoint.storage import StorageReader
 from torch.distributed.checkpoint.utils import (
     _element_wise_add,
     _element_wise_sub,
@@ -202,7 +203,7 @@ class _ReaderWithOffset(DefaultLoadPlanner):
 def load_sharded_optimizer_state_dict(
     model_state_dict: STATE_DICT_TYPE,
     optimizer_key: str,
-    storage_reader: dist_cp.StorageReader,
+    storage_reader: StorageReader,
     planner: Optional[LoadPlanner] = None,
 ) -> STATE_DICT_TYPE:
     """
@@ -326,7 +327,7 @@ def load_sharded_optimizer_state_dict(
             state_dict[key] = st
 
     # Whether we unflatten before or after doesn't matter
-    dist_cp.load_state_dict(
+    load_state_dict(
         state_dict=state_dict,
         storage_reader=storage_reader,
         # FIXME the type of planner is wrong in load_state_dict
