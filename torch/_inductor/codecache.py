@@ -2262,7 +2262,7 @@ class CUDACodeCache:
                     cmd = cuda_compile_command(
                         [input_path], output_path, dst_file_ext, extra_args
                     )
-                    log.info("CUDA Compilation: %s", cmd)
+                    log.warning("CUDA Compilation: %s", cmd)
                     cmd = cmd.split(" ")
                     try:
                         subprocess.check_output(

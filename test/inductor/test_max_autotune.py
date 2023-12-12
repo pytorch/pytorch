@@ -321,6 +321,7 @@ class TestMaxAutotune(TestCase):
         expected_fuse_count=1,
         mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
         with_bias=False,
+        bias_broadcast=[False, False],
         with_aux=False,
         m=1024,
         n=1024,
@@ -349,7 +350,13 @@ class TestMaxAutotune(TestCase):
             a = torch.randn(batch_size, m, k).mul(1.0 / 32).cuda()
             b = torch.randn(batch_size, k, n).mul(1.0 / 32).cuda()
             if with_bias:
-                bias = torch.randn(batch_size, m, n).mul(1.0 / 32).cuda()
+                bias_m = m
+                bias_n = n
+                if bias_broadcast[0]:
+                    bias_m = 1
+                if bias_broadcast[1]:
+                    bias_n = 1
+                bias = torch.randn(batch_size, bias_m, bias_n).mul(1.0 / 32).cuda()
             if with_aux:
                 if aux_shape is None:
                     aux_shape = (batch_size, m, n)
@@ -383,11 +390,11 @@ class TestMaxAutotune(TestCase):
             mm_jit = torch.compile(mm, dynamic=dynamic)
             Y_compiled = mm_jit(*args)
             actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
+            torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
             if expected_fuse_count is not None:
                 assert (
                     actual_count == expected_fuse_count
                 ), f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
-            torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
@@ -703,6 +710,135 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_addmm_broadcasted_row(self):
+        def mm(a, b, bias):
+            bias_slice = bias[0:1, :]
+            return torch.addmm(bias_slice, a, b)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=mm,
+            with_bias=True,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_addmm_broadcasted_col(self):
+        def mm(a, b, bias):
+            bias_slice = bias[:, 0:1]
+            return torch.addmm(bias_slice, a, b)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=mm,
+            with_bias=True,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_addmm_broadcasted_row2(self):
+        def mm(a, b, bias):
+            bias_slice = bias[0:1, :]
+            return (a @ b) + bias_slice
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=mm,
+            with_bias=True,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_addmm_broadcasted_col2(self):
+        def mm(a, b, bias):
+            bias_slice = bias[:, 0:1]
+            return (a @ b) + bias_slice
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=mm,
+            with_bias=True,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_aux_broadcasted_row(self):
+        def mm(a, b, bias):
+            bias_slice = bias[0:1, :]
+            return (a @ b) - torch.relu(bias_slice)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=1,
+            mm=mm,
+            with_bias=True,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_aux_broadcasted_col(self):
+        def mm(a, b, bias):
+            bias_slice = bias[:, 0:1]
+            return (a @ b) - torch.relu(bias_slice * 1.2)
+
+        # This is not fused, because the aux argument requires to be contiguous in the non-broadcasted dim
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=0,
+            mm=mm,
+            with_bias=True,
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_aux_broadcasted_col2(self):
+        def mm(a, b, bias):
+            return (a @ b) - torch.relu(bias * 1.2)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=1,
+            mm=mm,
+            with_bias=True,
+            bias_broadcast=(True, False),
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_aux_broadcasted_row2(self):
+        def mm(a, b, bias):
+            return (a @ b) - torch.relu(bias * 1.2)
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=1,
+            mm=mm,
+            with_bias=True,
+            bias_broadcast=(False, True),
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_relu_fusion_fp16_fp32acc(self):
         def mm(a, b):
             return torch.nn.functional.relu((a @ b) * 3.3 - 1.234)
@@ -865,7 +1001,9 @@ class TestMaxAutotune(TestCase):
     @parametrize("cutlass_prefer_evt_capable_ops", (True, False))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
-        self, dynamic=False, max_autotune_gemm_backends="CUTLASS",
+        self,
+        dynamic=False,
+        max_autotune_gemm_backends="CUTLASS",
         cutlass_prefer_evt_capable_ops=True,
     ):
         """

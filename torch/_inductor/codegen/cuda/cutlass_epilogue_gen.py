@@ -267,6 +267,14 @@ class CutlassEVTEpilogueTypeFormatter:
             aux_load_template_args = (
                 f"0, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride"
             )
+        elif (
+            strides_mnl in ((0, 0, 0), (1, 1, 0), (0, 0, 1), (1, 1, 1))
+            or (strides_mnl[1] == 0 and strides_mnl[0] > 1)
+            or (strides_mnl[0] == 0 and strides_mnl[1] > 1)
+        ):
+            raise CUTLASSEVTOpNotImplementedError(
+                f"Unsupported broadcast strides for aux input {name}: {strides_mnl=}"
+            )
         else:
             aux_load_op = "Sm90AuxLoad"
             aux_load_template_args = f"{ALD}::Stages, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride, typename {ALD}::SmemLayoutAtom, typename {ALD}::CopyOpS2R"

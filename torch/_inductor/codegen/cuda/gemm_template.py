@@ -1,4 +1,5 @@
 import copy
+import enum
 import logging
 import re
 from typing import cast, Dict, List, Optional, Sequence, Set, Tuple
@@ -589,6 +590,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             if use_evt:
                 emitter = EmitGemmUniversal3xInstanceWithEVT()
                 assert gemm_output_layout is not None
+                op = copy.deepcopy(op)
                 op.epilogue_functor = lambda epilogue_functor_type_name: self.render_evt_epilogue_declaration(
                     output_buffer_name,
                     epilogue_functor_type_name,
@@ -599,6 +601,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 )
             else:
                 emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()
+                if not hasattr(op, "epilogue_functor") or not isinstance(
+                    op.epilogue_functor, enum.Enum
+                ):
+                    op = copy.deepcopy(op)
+                    op.epilogue_functor = cutlass_lib.EpilogueFunctor.LinearCombination
             op_def = emitter.emit(op)
             pattern = re.compile(r"\s*struct\s(.*?)\s:")
             decl = [line for line in op_def.split("\n") if "struct " in line][-1]
@@ -1085,7 +1092,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 ir.ComputedBuffer
             ] = template_buffer_node.get_additional_input_nodes(epilogue_nodes)
             aux_input_nodes = additional_input_nodes
-            if Bias is None:
+            # Disabling the following code block, since it doesn't use the correct layout for the Bias
+            # given that a reinterpretation of dimensions could be happening. We deal with this
+            # correctly for aux nodes, but not here.
+            if False and Bias is None:
                 # If we want to cast one of the additional inputs as Bias
                 for i in range(len(additional_input_nodes)):
                     MaybeBias = additional_input_nodes[i]
