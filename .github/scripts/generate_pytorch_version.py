@@ -128,7 +128,7 @@ def main() -> None:
     except NoGitTagException:
         if args.channel == "test":
             print(version_obj.get_test_version())
-        else
+        else:
             print(version_obj.get_nightly_version())
 
 
