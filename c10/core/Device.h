@@ -5,7 +5,6 @@
 #include <c10/util/Exception.h>
 
 #include <cstddef>
-#include <cstdint>
 #include <functional>
 #include <iosfwd>
 #include <string>

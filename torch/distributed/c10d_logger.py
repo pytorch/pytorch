@@ -9,8 +9,7 @@
 import functools
 import logging
 import time
-from typing import Any, Callable, Dict, List, Tuple, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any, Dict, List, Tuple
 
 import torch
 import torch.distributed as dist
@@ -65,12 +64,10 @@ def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
         }
     return msg_dict
 
-_T = TypeVar('_T')
-_P = ParamSpec('_P')
 
-def _exception_logger(func: Callable[_P, _T]) -> Callable[_P, _T]:
+def _exception_logger(func):
     @functools.wraps(func)
-    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+    def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
         except Exception as error:
@@ -82,9 +79,9 @@ def _exception_logger(func: Callable[_P, _T]) -> Callable[_P, _T]:
     return wrapper
 
 
-def _time_logger(func: Callable[_P, _T]) -> Callable[_P, _T]:
+def _time_logger(func):
     @functools.wraps(func)
-    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+    def wrapper(*args, **kwargs):
         t1 = time.time_ns()
         func_return = func(*args, **kwargs)
         time_spent = time.time_ns() - t1

@@ -46,11 +46,6 @@ load(
     "PROD_XOP_MICROKERNEL_SRCS",
 )
 
-# HACK fix when XNNPACK Library fixes
-# CMAKE does not seperate the NEONFMA AARCH64 sources and NEON AARCH64 sources
-PROD_NEONFMA_AARCH64_MICROKERNEL_SRCS = PROD_NEON_AARCH64_MICROKERNEL_SRCS[1:]
-PROD_NEON_AARCH64_MICROKERNEL_SRCS = PROD_NEON_AARCH64_MICROKERNEL_SRCS[0:1]
-
 # This defines XNNPACK targets for both fbsource BUCK and OSS BUCK
 # Note that the file path is relative to the BUCK file that called from, not to this bzl file.
 # So for fbsource build it points to xplat/third-party/XNNPACK/XNNPACK,
@@ -1552,7 +1547,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_neon_aarch64",
         srcs = select({
             "DEFAULT": [],
-            "ovr_config//cpu:arm64": PROD_NEON_MICROKERNEL_SRCS + PROD_NEON_AARCH64_MICROKERNEL_SRCS,
+            "ovr_config//cpu:arm64": PROD_NEON_MICROKERNEL_SRCS + [PROD_NEON_AARCH64_MICROKERNEL_SRCS[0]],
         }) if is_arvr_mode() else [],
         headers = subdir_glob([
             ("XNNPACK/src", "**/*.c"),
@@ -1570,7 +1565,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         platform_srcs = [
             (
                 "(aarch64|arm64)",
-                PROD_NEON_MICROKERNEL_SRCS + PROD_NEON_AARCH64_MICROKERNEL_SRCS,
+                PROD_NEON_MICROKERNEL_SRCS + [PROD_NEON_AARCH64_MICROKERNEL_SRCS[0]],
             )
         ] if not is_arvr_mode() else [],
         labels = labels,
@@ -1654,7 +1649,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         name = "ukernels_neonfma_aarch64",
         srcs = select({
             "DEFAULT": [],
-            "ovr_config//cpu:arm64": PROD_NEONFMA_MICROKERNEL_SRCS + PROD_NEONFMA_AARCH64_MICROKERNEL_SRCS,
+            "ovr_config//cpu:arm64": PROD_NEONFMA_MICROKERNEL_SRCS + [PROD_NEON_AARCH64_MICROKERNEL_SRCS[1]],
         }) if is_arvr_mode() else [],
         headers = subdir_glob([
             ("XNNPACK/src", "**/*.h"),
@@ -1673,7 +1668,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         platform_srcs = [
             (
                 "(arm64|aarch64)$",
-                PROD_NEONFMA_MICROKERNEL_SRCS + PROD_NEONFMA_AARCH64_MICROKERNEL_SRCS,
+                PROD_NEONFMA_MICROKERNEL_SRCS + [PROD_NEON_AARCH64_MICROKERNEL_SRCS[1]],
             ),
         ] if not is_arvr_mode() else [],
         platforms = (APPLE, ANDROID, CXX, WINDOWS),
