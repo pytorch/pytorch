@@ -4,6 +4,9 @@ import unittest
 from typing import NamedTuple
 
 from torch._inductor import config
+from torch.testing._internal.common_device_type import (
+    get_desired_device_type_test_bases,
+)
 from torch.testing._internal.common_utils import (
     slowTest,
     TEST_WITH_ASAN,
@@ -34,7 +37,12 @@ except unittest.SkipTest:
     raise
 
 
-RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN
+_desired_test_bases = get_desired_device_type_test_bases()
+RUN_CUDA = (
+    HAS_CUDA
+    and any(getattr(x, "device_type", "") == "cuda" for x in _desired_test_bases)
+    and not TEST_WITH_ASAN
+)
 
 
 class CudaWrapperTemplate:

@@ -841,6 +841,14 @@ class GraphLowering(torch.fx.Interpreter):
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
+            if (
+                is_output
+                and isinstance(result, TensorBox)
+                and isinstance(result.data, ir.BaseView)
+            ):
+                # Realize so that outputs are correctly aliased
+                result.realize()
+
             if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):

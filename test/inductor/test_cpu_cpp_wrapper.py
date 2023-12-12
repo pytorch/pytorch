@@ -5,6 +5,9 @@ from typing import NamedTuple
 
 import torch
 from torch._inductor import config
+from torch.testing._internal.common_device_type import (
+    get_desired_device_type_test_bases,
+)
 from torch.testing._internal.common_utils import (
     IS_MACOS,
     slowTest,
@@ -32,7 +35,12 @@ except unittest.SkipTest:
     raise
 
 
-RUN_CPU = HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS
+_desired_test_bases = get_desired_device_type_test_bases()
+RUN_CPU = (
+    HAS_CPU
+    and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+    and not IS_MACOS
+)
 
 
 class CppWrapperTemplate:
