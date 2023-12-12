@@ -1121,13 +1121,14 @@ def hipify(
         preprocess_file_and_save_result(output_directory, filepath, all_files, header_include_dirs,
                                         stats, hip_clang_launch, is_pytorch_extension, clean_ctx, show_progress)
 
-    num_skipped_no_permissions = len(stats["skipped_no_permissions"])
-    if num_skipped_no_permissions:
-        print(f"{bcolors.WARNING}Could not hipify {num_skipped_no_permissions} files due to no write permissions")
+    if stats["skipped_no_permissions"]:
+        print(bcolors.WARNING + f"Could not hipify {len(stats['skipped_no_permissions'])} files due to no write permissions" + bcolors.ENDC, file=sys.stderr)
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
 
     # Show detailed summary
     if show_detailed:
         compute_stats(stats)
+        # Print the list of files that couldn't be hipified due to missing write permission
+        print(bcolors.WARNING + f"The following files could not be hipified due to no write permissions: {', '.join(stats['skipped_no_permissions'])}")
 
     return HIPIFY_FINAL_RESULT
