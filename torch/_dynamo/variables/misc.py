@@ -274,7 +274,7 @@ class InspectSignatureVariable(VariableTracker):
         if name == "parameters":
             return variables.ConstDictVariable(
                 {
-                    name: InspectParameterVariable()
+                    variables.ConstantVariable.create(name): InspectParameterVariable()
                     for name in self.inspected.inspect_parameter_names()
                 },
                 user_cls=dict,
@@ -1151,10 +1151,9 @@ class StringFormatVariable(VariableTracker):
         codegen.extend_output(
             variables.TupleVariable(self.sym_args).reconstruct(codegen)
         )
-        codegen.extend_output(
-            variables.ConstDictVariable(self.sym_kwargs, user_cls=dict).reconstruct(
-                codegen
-            )
-        )
+        kwargs = {
+            variables.ConstantVariable.create(k): v for k, v in self.sym_kwargs.items()
+        }
+        codegen.extend_output(variables.ConstDictVariable(kwargs).reconstruct(codegen))
         codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
         return []
