@@ -594,6 +594,31 @@ class TreeSpec:
         self._flatten_up_to_helper(tree, subtrees)
         return subtrees
 
+    def unflatten(self, leaves: Iterable[Any]) -> PyTree:
+        if not isinstance(leaves, (list, tuple)):
+            leaves = list(leaves)
+        if len(leaves) != self.num_leaves:
+            raise ValueError(
+                f"treespec.unflatten(leaves): `leaves` has length {len(leaves)} "
+                f"but the spec refers to a pytree that holds {self.num_leaves} "
+                f"items ({self}).",
+            )
+        if self.is_leaf():
+            return leaves[0]
+
+        unflatten_fn = SUPPORTED_NODES[self.type].unflatten_fn
+
+        # Recursively unflatten the children
+        start = 0
+        end = 0
+        child_pytrees = []
+        for child_spec in self.children_specs:
+            end += child_spec.num_leaves
+            child_pytrees.append(child_spec.unflatten(leaves[start:end]))
+            start = end
+
+        return unflatten_fn(child_pytrees, self.context)
+
 
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:
@@ -644,29 +669,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
             f"tree_unflatten(leaves, treespec): Expected `treespec` to be "
             f"instance of TreeSpec but got item of type {type(treespec)}.",
         )
-    if not isinstance(leaves, (list, tuple)):
-        leaves = list(leaves)
-    if len(leaves) != treespec.num_leaves:
-        raise ValueError(
-            f"tree_unflatten(leaves, treespec): `leaves` has length {len(leaves)} "
-            f"but the spec refers to a pytree that holds {treespec.num_leaves} "
-            f"items ({treespec}).",
-        )
-    if isinstance(treespec, LeafSpec):
-        return leaves[0]
-
-    unflatten_fn = SUPPORTED_NODES[treespec.type].unflatten_fn
-
-    # Recursively unflatten the children
-    start = 0
-    end = 0
-    child_pytrees = []
-    for child_spec in treespec.children_specs:
-        end += child_spec.num_leaves
-        child_pytrees.append(tree_unflatten(leaves[start:end], child_spec))
-        start = end
-
-    return unflatten_fn(child_pytrees, treespec.context)
+    return treespec.unflatten(leaves)
 
 
 def _tree_leaves_helper(tree: PyTree, leaves: List[Any]) -> None:
@@ -726,7 +729,7 @@ def tree_map(func: Callable[..., Any], tree: PyTree, *rests: PyTree) -> PyTree:
     """
     leaves, treespec = tree_flatten(tree)
     flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
-    return tree_unflatten(map(func, *flat_args), treespec)
+    return treespec.unflatten(map(func, *flat_args))
 
 
 def tree_map_(func: Callable[..., Any], tree: PyTree, *rests: PyTree) -> PyTree:
