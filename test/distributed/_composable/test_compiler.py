@@ -2,6 +2,7 @@
 
 import contextlib
 import os
+import unittest
 from copy import deepcopy
 from typing import Callable, Optional
 
@@ -21,6 +22,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import run_tests
+from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
 
 
@@ -140,10 +142,12 @@ class ReplicateTest(MultiProcessTestCase):
     def test_compile_cpu_no_sync(self):
         self._test_compile(use_gpu=False, no_sync=True)
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_compile_gpu(self):
         self._test_compile(use_gpu=True, no_sync=False)
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self):
         def setup(model, compiled_model) -> None:
@@ -157,6 +161,7 @@ class ReplicateTest(MultiProcessTestCase):
 
         self._test_compile(use_gpu=True, no_sync=False, setup_func=setup)
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_compile_fp16(self):
         def setup(model, compiled_model) -> None:
