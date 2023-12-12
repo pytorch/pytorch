@@ -2,7 +2,7 @@
 #include <torch/library.h>
 
 #ifdef USE_CUDA
-void fsdpAllGatherCopyOut(
+void fsdpAllGatherCopyOut_no_align(
     std::vector<at::Tensor> params,
     at::Tensor allGatherRes,
     int64_t worldSize);
@@ -50,7 +50,7 @@ void fsdp_all_gather_copy_out(
     at::Tensor all_gather_res,
     int64_t world_size) {
 #ifdef USE_CUDA
-  return fsdpAllGatherCopyOut(params, all_gather_res, world_size);
+  return fsdpAllGatherCopyOut_no_align(params, all_gather_res, world_size);
 #else
   C10_THROW_ERROR(NotImplementedError, "Not implemented for CPU");
 #endif
