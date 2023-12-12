@@ -70,6 +70,16 @@ AOTIRuntimeError AOTInductorModelContainerRun(
     AOTInductorStreamHandle stream_handle,
     AOTIProxyExecutorHandle proxy_executor_handle);
 
+// Setup the inactive constant buffer in model container with provided
+// ConstantMap
+AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle);
+
+// Swap the constant buffer being used to the inactive one.
+AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
+    AOTInductorModelContainerHandle container_handle);
+
 // Retrieves the number of inputs for the model.
 AOTIRuntimeError AOTInductorModelContainerGetNumInputs(
     AOTInductorModelContainerHandle container_handle,
@@ -118,6 +128,10 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
 
 // Delete an AOTInductorModel created by AOTInductorModelCreate.
 AOTIRuntimeError AOTInductorModelDelete(AOTInductorModelHandle model_handle);
+
+AOTIRuntimeError AOTInductorModelGetNumOutputs(
+    AOTInductorModelHandle model_handle,
+    size_t* ret_num_outputs);
 
 AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
     AOTInductorModelContainerHandle container_handle,

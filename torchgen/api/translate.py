@@ -350,12 +350,12 @@ Check this module for more information.
             return f"{argname}.has_value() ? c10::make_optional(c10::SymInt(*{argname})) : c10::nullopt"
         elif goal.type == BaseCType(longT):
             symInt_type = direct_solve(NamedCType(goal.name, BaseCType(SymIntT)))
-            return f"{symInt_type}.expect_int()"
+            return f"{symInt_type}.guard_int(__FILE__, __LINE__)"
         elif goal.type == OptionalCType(BaseCType(longT)):
             argname = direct_solve(
                 NamedCType(goal.name, OptionalCType(BaseCType(SymIntT)))
             )
-            return f"{argname}.has_value() ? c10::make_optional({argname}->expect_int()) : c10::nullopt"
+            return f"{argname}.has_value() ? c10::make_optional({argname}->guard_int(__FILE__, __LINE__)) : c10::nullopt"
         elif goal.type == BaseCType(optionalIntArrayRefT):
             try:
                 return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))

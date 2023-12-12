@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <ATen/cuda/PhiloxUtils.cuh>
+
 #include <cute/algorithm/copy.hpp>
 #include <cute/algorithm/gemm.hpp>
 
@@ -447,7 +449,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     constexpr bool Double_buffer = !Kernel_traits::No_double_buffer;
 
     const BlockInfo</*Varlen=*/!Is_even_MN> binfo(params, bidb);
-    if (n_block * kBlockN >= binfo.actual_seqlen_k || binfo.actual_seqlen_q == 0) return;
+    if (n_block * kBlockN >= binfo.actual_seqlen_k) return;
 
     int m_block_max = cute::ceil_div(binfo.actual_seqlen_q, kBlockM);
     if (Is_local) {
@@ -675,7 +677,8 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
     // We might need to exit early and write 0 to dK and dV for those blocks.
     // Otherwise we get wrong result for the case where we don't enter the for loop.
     // And we might read OOB elements from gQ and gdO.
-    if (Is_local && m_block < m_block_min) {
+    // This also covers the case where actual_seqlen_q == 0
+    if ((Is_local || !Is_even_MN) && m_block < m_block_min) {
         const index_t row_offset_dk = binfo.k_offset(params.dk_batch_stride, params.dk_row_stride, bidb)
           + n_block * kBlockN * params.dk_row_stride + bidh * params.dk_head_stride;
         const index_t row_offset_dv = binfo.k_offset(params.dv_batch_stride, params.dv_row_stride, bidb)
