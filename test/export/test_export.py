@@ -120,8 +120,6 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
-    # TODO: torch._dynamo.exc.Unsupported: call_function UserDefinedObjectVariable(add) [TensorVariable()] {}
-    @unittest.expectedFailure
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
