@@ -4,7 +4,7 @@
 #include <c10/cuda/CUDAGuard.h>
 
 constexpr int64_t BYTES_PER_THREAD = 16;
-constexpr int64_t MAX_NUM_FEATURES = 512;
+constexpr int64_t MAX_NUM_PARAMS = 1024;
 constexpr int64_t MAX_NUM_THREADS = 1024;
 constexpr int64_t WARP_SIZE = 32;
 
@@ -34,23 +34,26 @@ __device__ inline void streamStore128(T* addr, const uint4& val) {
 #endif
 }
 
-static __global__ void fsdpCopyOutKernel(
-    at::BFloat16** outputPtrs,
-    at::BFloat16* inputPtr,
+static inline int64_t divUp(int64_t a, int64_t b) {
+  return (a + b - 1) / b;
+}
+
+template <typename T>
+static __global__ void fsdpAllGatherCopyOutKernel(
+    T** paramPtrs,
+    T* allGatherResPtr,
     int64_t numel,
     int64_t* shardDimCumSums,
     int64_t numParams,
     int64_t worldSize,
     int64_t shardDimSum) {
-  // TODO: support all types
-  const auto numelPerThread = BYTES_PER_THREAD / 2;
-  auto tid = blockIdx.x * blockDim.x + threadIdx.x;
-  auto srcOff = tid * numelPerThread;
-  // Offset within the rank
-  auto rankOff = srcOff % shardDimSum;
-  auto rank = srcOff / shardDimSum;
+  const auto numelPerThread = BYTES_PER_THREAD / sizeof(T);
+  const auto tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const auto srcOff = tid * numelPerThread;
+  const auto rankOff = srcOff % shardDimSum; // Offset within the rank
+  const auto rank = srcOff / shardDimSum;
 
-  __shared__ int64_t dimCumSums[MAX_NUM_FEATURES + 1];
+  __shared__ int64_t dimCumSums[MAX_NUM_PARAMS + 1];
   if (threadIdx.x < numParams + 1) {
     dimCumSums[threadIdx.x] = shardDimCumSums[threadIdx.x];
   }
@@ -65,83 +68,66 @@ static __global__ void fsdpCopyOutKernel(
     }
     paramIdx += 1;
   }
-  auto shardBegin = dimCumSums[paramIdx];
-  auto shardEnd = dimCumSums[paramIdx + 1];
-  auto shardLen = shardEnd - shardBegin;
-  auto paramOff = shardLen * rank + rankOff - shardBegin;
+  const auto shardBegin = dimCumSums[paramIdx];
+  const auto shardEnd = dimCumSums[paramIdx + 1];
+  const auto shardLen = shardEnd - shardBegin;
+  const auto paramOff = shardLen * rank + rankOff - shardBegin;
 
   if (srcOff < numel) {
     uint4 val;
-    streamLoad128(val, inputPtr + srcOff);
-    streamStore128(&outputPtrs[paramIdx][paramOff], val);
+    streamLoad128(val, allGatherResPtr + srcOff);
+    streamStore128(&paramPtrs[paramIdx][paramOff], val);
   }
 }
 
-static inline std::vector<int64_t> makeCumSums(
-    std::vector<int64_t> seq,
-    int worldSize) {
-  std::vector<int64_t> cumSums = {0};
-  int64_t acc = 0;
-  for (const auto& n : seq) {
-    acc += n;
-    cumSums.push_back(acc);
-  }
-  return cumSums;
-}
-
-static inline int64_t divUp(int64_t a, int64_t b) {
-  return (a + b - 1) / b;
-}
-
-template <typename T>
-at::Tensor toTensor(const std::vector<T>& vec) {
-  static_assert(sizeof(T) == sizeof(int64_t));
-  auto tensor = at::empty({static_cast<int64_t>(vec.size())}, at::kLong);
-  std::memcpy(tensor.data_ptr(), vec.data(), sizeof(T) * vec.size());
-  return tensor;
-}
-
-void fsdpCopyOut(
-    std::vector<at::Tensor> outputs,
-    at::Tensor input,
+void fsdpAllGatherCopyOut(
+    std::vector<at::Tensor> params,
+    at::Tensor allGatherRes,
     int64_t worldSize) {
-  const auto numelPerThread = BYTES_PER_THREAD / input.element_size();
+  const auto numelPerThread = BYTES_PER_THREAD / allGatherRes.element_size();
+  const auto device = allGatherRes.device();
+  const auto scalarType = allGatherRes.scalar_type();
 
-  TORCH_CHECK(input.is_cuda());
-  TORCH_CHECK(input.is_non_overlapping_and_dense());
+  TORCH_CHECK(allGatherRes.is_cuda());
+  TORCH_CHECK(allGatherRes.is_non_overlapping_and_dense());
+  TORCH_CHECK(allGatherRes.numel() % worldSize == 0);
+  TORCH_CHECK(params.size() <= MAX_NUM_PARAMS);
 
-  int64_t outputNumel = 0;
-  std::vector<void*> outputPtrs;
-  std::vector<int64_t> shardDims;
-  for (auto& output : outputs) {
-    TORCH_CHECK(output.is_cuda());
-    TORCH_CHECK(output.is_non_overlapping_and_dense());
-    TORCH_CHECK(output.device() == input.device());
+  std::vector<void*> paramPtrs;
+  std::vector<int64_t> shardDimCumSums{0};
+  for (size_t i = 0; i < params.size(); ++i) {
+    const auto& param = params[i];
+    TORCH_CHECK(param.is_non_overlapping_and_dense());
+    TORCH_CHECK(param.device() == device);
+    TORCH_CHECK(param.scalar_type() == scalarType);
     TORCH_CHECK(
-        output.numel() % (worldSize * numelPerThread) == 0,
+        param.numel() % (worldSize * numelPerThread) == 0,
         "Shard must be 128-bit aligned");
-    outputNumel += output.numel();
-    outputPtrs.push_back(output.data_ptr());
-    shardDims.push_back(output.numel() / worldSize);
+    paramPtrs.push_back(param.data_ptr());
+    shardDimCumSums.push_back(shardDimCumSums[i] + param.numel() / worldSize);
   }
 
   TORCH_CHECK(
-      outputNumel == input.numel(),
-      "Input and output must contain the same number of elements.");
-  TORCH_CHECK(input.numel() % worldSize == 0);
-  TORCH_CHECK(outputs.size() <= MAX_NUM_FEATURES);
+      shardDimCumSums.back() * worldSize == allGatherRes.numel(),
+      "allGatherRes and params must contain the same number of elements.");
 
-  const auto shardDimSum = std::accumulate(shardDims.begin(), shardDims.end(), 0);
-
-  // Instead of using cudaMalloc, put these in GPU tensors and leverage the
-  // caching allocator to manage their lifetime.
-  auto outputPtrsTensor = toTensor(outputPtrs).cuda();
-  auto shardDimCumSums = toTensor(makeCumSums(shardDims, worldSize)).cuda();
+  auto packed = at::empty(
+      {static_cast<int64_t>(paramPtrs.size() + shardDimCumSums.size())},
+      at::TensorOptions().dtype(at::kLong).pinned_memory(true));
+  memcpy(
+      packed.data_ptr(), paramPtrs.data(), sizeof(int64_t) * paramPtrs.size());
+  memcpy(
+      packed.data_ptr<int64_t>() + paramPtrs.size(),
+      shardDimCumSums.data(),
+      sizeof(int64_t) * shardDimCumSums.size());
+  packed = packed.to(device, /*non_blocking=*/true);
+  auto paramPtrsDev = packed.data_ptr();
+  auto shardDimCumSumsDev = packed.data_ptr<int64_t>() + paramPtrs.size();
 
   dim3 blocks(0, 1, 1);
   dim3 threads(0, 1, 1);
 
-  auto numThreadsRequired = input.numel() / numelPerThread;
+  auto numThreadsRequired = allGatherRes.numel() / numelPerThread;
   if (numThreadsRequired <= MAX_NUM_THREADS) {
     blocks.x = 1;
     threads.x = divUp(numThreadsRequired, WARP_SIZE) * WARP_SIZE;
@@ -152,12 +138,17 @@ void fsdpCopyOut(
 
   TORCH_WARN_ONCE("blocks: ", blocks.x, ", threads: ", threads.x);
 
-  fsdpCopyOutKernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-      reinterpret_cast<at::BFloat16**>(outputPtrsTensor.data_ptr()),
-      input.data_ptr<at::BFloat16>(),
-      input.numel(),
-      shardDimCumSums.data_ptr<int64_t>(),
-      outputs.size(),
-      worldSize,
-      shardDimSum);
+  AT_DISPATCH_ALL_TYPES_AND(
+      at::ScalarType::BFloat16, scalarType, "fsdp_all_gather_copy_out", [&] {
+        fsdpAllGatherCopyOutKernel<scalar_t>
+            <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                reinterpret_cast<scalar_t**>(paramPtrsDev),
+                allGatherRes.data_ptr<scalar_t>(),
+                allGatherRes.numel(),
+                shardDimCumSumsDev,
+                params.size(),
+                worldSize,
+                shardDimCumSums.back());
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      });
 }
