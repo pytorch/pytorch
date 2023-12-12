@@ -10,6 +10,7 @@ from torch.distributed._tensor.op_schema import (
     OutputSharding,
     PlacementStrategy,
     RuntimeSchemaInfo,
+    TupleStrategy,
 )
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import (
@@ -348,6 +349,164 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
         )
 
     return output_strategy
+
+
+@register_op_strategy(
+    [aten.native_layer_norm_backward.default],
+    schema_info=RuntimeSchemaInfo(2),
+)
+def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrategy:
+    # args must be: grad_out, input, normalized_shape, mean, rstd,
+    # weight, bias, output_mask. For None weight and bias, their
+    # corresponding objects will be None as well.
+    assert len(op_schema.args_schema) == 8
+    (
+        grad_out_strategy,
+        input_strategy,
+        normalized_shape,
+        mean_strategy,
+        rstd_strategy,
+        weight_strategy,
+        bias_strategy,
+        output_mask,
+    ) = op_schema.args_schema
+
+    assert isinstance(grad_out_strategy, OpStrategy)
+    assert isinstance(input_strategy, OpStrategy)
+    assert isinstance(mean_strategy, OpStrategy)
+    assert isinstance(rstd_strategy, OpStrategy)
+
+    assert isinstance(normalized_shape, (int, Sequence, torch.Size))
+    normalized_size = normalize_to_torch_size(normalized_shape)
+    input_ndim = input_strategy.output_ndim
+    axis = input_ndim - len(normalized_size)
+
+    assert isinstance(output_mask, List) and len(output_mask) == 3
+
+    # output triple: (d_input, d_weight, d_bias)
+    d_input_strategy = OpStrategy([])
+    d_weight_strategy = OpStrategy([])
+    d_bias_strategy = OpStrategy([])
+    for idx, _ in enumerate(input_strategy.strategies):
+        input_src_spec = input_strategy.strategies[idx].output_spec
+        op_args_target_specs = []
+        redistribute_costs = []
+
+        # arg: grad_out
+        # grad_out =
+        # TODO: d_input should follow x_hat(input) * grad_out sharding
+        # temp: follow x_hat sharding. This would lose some sharding
+        # opportunities e.g. if the input is sharded by row and the
+        # grad_out is replicated, we could shard the grad_out instead
+        # of replicating the input tensor.
+        if output_mask[0]:
+            grad_out_src_spec = grad_out_strategy.strategies[idx].output_spec
+            grad_out_target_spec = DTensorSpec(
+                mesh=mesh,
+                placements=_replicate_dims_start_at(input_src_spec.placements, axis),
+                tensor_meta=input_src_spec.tensor_meta,
+            )
+            op_args_target_specs.append(grad_out_target_spec)
+            redistribute_costs.append(
+                generate_redistribute_costs(grad_out_strategy, grad_out_target_spec)
+            )
+            d_input_strategy.strategies.append(
+                PlacementStrategy(
+                    output_spec=grad_out_target_spec,
+                    input_specs=[],  # this will be filled in later
+                    redistribute_cost=redistribute_costs,
+                )
+            )
+
+        # arg: input
+        input_target_spec = DTensorSpec(
+            mesh=mesh,
+            placements=_replicate_dims_start_at(input_src_spec.placements, axis),
+            tensor_meta=input_src_spec.tensor_meta,
+        )
+        op_args_target_specs.append(input_target_spec)
+        redistribute_costs.append(
+            generate_redistribute_costs(input_strategy, input_target_spec)
+        )
+
+        # arg: mean, rstd
+        mean_target_spec = mean_strategy.strategies[idx].output_spec
+        op_args_target_specs.append(mean_target_spec)
+        redistribute_costs.append(
+            generate_redistribute_costs(mean_strategy, mean_target_spec)
+        )
+        rstd_target_spec = rstd_strategy.strategies[idx].output_spec
+        op_args_target_specs.append(rstd_target_spec)
+        redistribute_costs.append(
+            generate_redistribute_costs(rstd_strategy, rstd_target_spec)
+        )
+
+        # arg: weight
+        # d_weight = sum(grad_out * (input - mean) / rstd, outer_dim, keepdim=False)
+        if output_mask[1]:
+            assert isinstance(weight_strategy, OpStrategy)
+            weight_src_spec = weight_strategy.strategies[idx].output_spec
+            weight_target_spec = DTensorSpec(
+                mesh=mesh,
+                placements=_replicate_dims_start_at(weight_src_spec.placements),
+                tensor_meta=weight_src_spec.tensor_meta,
+            )
+            op_args_target_specs.append(weight_target_spec)
+            redistribute_costs.append(
+                generate_redistribute_costs(weight_strategy, weight_target_spec)
+            )
+            d_weight_strategy.strategies.append(
+                PlacementStrategy(
+                    output_spec=weight_target_spec,
+                    input_specs=[],
+                    redistribute_cost=redistribute_costs,
+                )
+            )
+
+        # arg: bias
+        # d_bias = sum(grad_out, outer_dim, keepdim=False)
+        if output_mask[2]:
+            assert isinstance(bias_strategy, OpStrategy)
+            bias_src_spec = bias_strategy.strategies[idx].output_spec
+            bias_target_spec = DTensorSpec(
+                mesh=mesh,
+                placements=_replicate_dims_start_at(bias_src_spec.placements),
+                tensor_meta=bias_src_spec.tensor_meta,
+            )
+            op_args_target_specs.append(bias_target_spec)
+            redistribute_costs.append(
+                generate_redistribute_costs(bias_strategy, bias_target_spec)
+            )
+            d_bias_strategy.strategies.append(
+                PlacementStrategy(
+                    output_spec=bias_target_spec,
+                    input_specs=[],
+                    redistribute_cost=redistribute_costs,
+                )
+            )
+
+        if output_mask[0]:
+            # d_input is basically a product of element-wise mul of
+            # grad_out, rstd, and normalized input, among which rstd
+            # and normalized input (x_hat) should have the same sharding
+            # placements, and grad_out's sharding is determined by the
+            # pointwise result of x_hat and weight/bias.
+            d_input_strategy.strategies[-1].input_specs = op_args_target_specs
+
+        if output_mask[1]:
+            d_weight_strategy.strategies[-1].input_specs = op_args_target_specs
+
+        if output_mask[2]:
+            d_bias_strategy.strategies[-1].input_specs = op_args_target_specs
+
+    return TupleStrategy(
+        (
+            d_input_strategy if output_mask[0] else None,
+            d_weight_strategy if output_mask[1] else None,
+            d_bias_strategy if output_mask[2] else None,
+        ),
+        op_type=1,
+    )
 
 
 def _replicate_dims_start_at(

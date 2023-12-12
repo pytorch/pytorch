@@ -536,8 +536,6 @@ skip_bw = [
     "torch.eq",
     "torch.isfinite",
     "torch.isnan",
-    "torch.native_layer_norm",
-    "torch.nn.functional.layer_norm",
 ]
 
 

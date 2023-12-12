@@ -131,14 +131,24 @@ class TupleStrategy(StrategyType):
     with possibly different placement strategies, we should return a TupleStrategy that
     contains a tuple of OpStrategy. For None return value, the corresponding OpStrategy
     object in childs should also be None.
+    For operators that return a tuple of tensors which may or may not share the same
+    placement strategy, there're two cases and we have different logics for them in
+    sharding propagation:
+    1. The output list has a 1:1 mapping to the input. E.g. foreach_list ops
+    2. The output list has no mapping to the input. E.g. native_layer_norm_backward
 
     NOTE: if the output of the op is a List[Tensor] and they share the same placement
     strategy, then we should return a single OpStrategy instead of a TupleStrategy
     """
 
-    def __init__(self, childs: Sequence[Optional[StrategyType]]) -> None:
+    def __init__(
+        self, childs: Sequence[Optional[StrategyType]], op_type: int = 0
+    ) -> None:
         super().__init__()
         self.childs: Sequence[Optional[StrategyType]] = childs
+        # TODO: change op_type to enum type
+        # op type: FOREACH_LIST=0; MULTI_OUTPUT=1.
+        self.op_type = op_type
 
     def __str__(self) -> str:
         child_strategies_str = ", ".join(
