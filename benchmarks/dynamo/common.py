@@ -789,6 +789,9 @@ def speedup_experiment_onnx(
             if should_randomize_input
             else example_inputs
         )
+        if torch.cuda.device_count() > 1:
+            # Manually set correct torch.cuda.current_device to ensure torch.cuda.synchronize() works as intended.
+            torch.cuda.set_device(0)
         timings[rep, 0], expected_output = timed(
             model,
             model_iter_fn,
@@ -797,7 +800,9 @@ def speedup_experiment_onnx(
             times=times,
             collect_outputs=args.collect_outputs,
         )
-
+        if torch.cuda.device_count() > 1:
+            # Manually set correct torch.cuda.current_device to ensure torch.cuda.synchronize() works as intended.
+            torch.cuda.set_device(1)
         timings[rep, 1], actual_output = timed_onnx(model, onnx_model, inputs)
 
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
