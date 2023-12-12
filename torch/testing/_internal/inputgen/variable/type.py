@@ -45,7 +45,7 @@ def check_vtype(vtype, v):
     if v is None:
         return
     if vtype in [bool, int, float]:
-        if not type(v) in [bool, int, float]:
+        if type(v) not in [bool, int, float]:
             raise TypeError("Variable type mismatch")
     else:
         if not isinstance(v, vtype):
