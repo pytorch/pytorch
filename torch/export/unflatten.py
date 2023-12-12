@@ -15,6 +15,7 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 
+__all__ = ["InterpreterModule", "UnflattenedModule", "unflatten"]
 
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
 # This installs empty Modules where none exist yet if they are subpaths of target
@@ -179,11 +180,6 @@ class _UnflattenedModule(torch.nn.Module):
                 if node.op != "placeholder":
                     continue
                 assert node.name not in inputs_to_state
-
-        # Import here to avoid an unfortunate circular dependency.
-        from torch._export.utils import _check_input_constraints_pre_hook
-
-        self.register_forward_pre_hook(_check_input_constraints_pre_hook)
 
     def forward(self, *args, **kwargs):
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
