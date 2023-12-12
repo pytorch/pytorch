@@ -297,7 +297,7 @@ def lift(self):
 @register_decomposition([aten.bernoulli.default])
 def bernoulli(self, *, generator=None):
     assert generator is None
-    return torch.rand_like(self, dtype=torch.float32) < self
+    return (torch.rand_like(self, dtype=torch.float32) < self).to(self.dtype)
 
 
 @register_decomposition([aten.fmin, prims.fmin])
