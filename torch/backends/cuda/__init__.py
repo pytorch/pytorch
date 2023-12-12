@@ -1,6 +1,4 @@
 import contextlib
-import sys
-from enum import IntEnum
 
 from typing import Union
 
@@ -16,12 +14,15 @@ __all__ = [
     "cufft_plan_cache",
     "matmul",
     "SDPBackend",
+    "SDPAParams",
     "enable_flash_sdp",
     "flash_sdp_enabled",
     "enable_mem_efficient_sdp",
     "mem_efficient_sdp_enabled",
     "math_sdp_enabled",
     "enable_math_sdp",
+    "can_use_flash_attention",
+    "can_use_efficient_attention",
     "sdp_kernel",
 ]
 
@@ -203,19 +204,11 @@ def preferred_linalg_library(
     return torch._C._get_linalg_preferred_backend()
 
 
-class SDPBackend(IntEnum):
-    r"""Enum class for the scaled dot product attention backends.
+from torch._C import _SDPAParams as SDPAParams, _SDPBackend as SDPBackend
 
-    .. warning:: This class is in beta and subject to change.
-
-    This class needs to stay aligned with the enum defined in:
-    pytorch/aten/src/ATen/native/transformers/sdp_utils_cpp.h
-    """
-
-    ERROR = -1
-    MATH = 0
-    FLASH_ATTENTION = 1
-    EFFICIENT_ATTENTION = 2
+# Set the __module__ attribute
+SDPBackend.__module__ = "torch.backends.cuda"
+SDPAParams.__module__ = "torch.backends.cuda"
 
 
 def flash_sdp_enabled():
@@ -270,6 +263,46 @@ def enable_math_sdp(enabled: bool):
     Enables or disables math scaled dot product attention.
     """
     torch._C._set_sdp_use_math(enabled)
+
+
+def can_use_flash_attention(params: SDPAParams, debug: bool = False) -> bool:
+    r"""Check if FlashAttention can be utilized in scaled_dot_product_attention.
+
+    Args:
+        params: An instance of SDPAParams containing the tensors for query,
+                key, value, an optional attention mask, dropout rate, and
+                a flag indicating if the attention is causal.
+        debug: Whether to logging.warn debug information as to why FlashAttention could not be run.
+            Defaults to False.
+
+    Returns:
+        True if FlashAttention can be used with the given parameters; otherwise, False.
+
+    Note:
+        This function is dependent on a CUDA-enabled build of PyTorch. It will return False
+        in non-CUDA environments.
+    """
+    return torch._C._can_use_flash_attention(params, debug)
+
+
+def can_use_efficient_attention(params: SDPAParams, debug: bool = False) -> bool:
+    r"""Check if efficient_attention can be utilized in scaled_dot_product_attention.
+
+    Args:
+        params: An instance of SDPAParams containing the tensors for query,
+                key, value, an optional attention mask, dropout rate, and
+                a flag indicating if the attention is causal.
+        debug: Whether to logging.warn with information as to why efficient_attention could not be run.
+            Defaults to False.
+
+    Returns:
+        True if efficient_attention can be used with the given parameters; otherwise, False.
+
+    Note:
+        This function is dependent on a CUDA-enabled build of PyTorch. It will return False
+        in non-CUDA environments.
+    """
+    return torch._C._can_use_mem_efficient_attention(params, debug)
 
 
 @contextlib.contextmanager

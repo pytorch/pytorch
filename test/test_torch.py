@@ -23,6 +23,7 @@ import textwrap
 import subprocess
 import weakref
 import sys
+import copyreg
 from torch import inf, nan
 from itertools import product, combinations, permutations
 from functools import partial
@@ -38,7 +39,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like,
-    AlwaysWarnTypedStorageRemoval)
+    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -59,6 +60,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
     get_all_qint_dtypes,
 )
+from torch.testing._internal.two_tensor import TwoTensor
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -1255,7 +1257,7 @@ else:
                         + e.output.decode("utf-8")))
 
     @onlyCPU
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @dtypes(*get_all_qint_dtypes())
     def test_nondeterministic_resize_quantized(self, device, dtype):
         a = torch.tensor([-1, 0, 1, 2, 3], dtype=torch.float, device=device)
@@ -1265,7 +1267,7 @@ else:
             'quantized_resize_cpu_')
 
     @skipXLA
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_deterministic_resize(self, device, dtype):
         test_cases = [
@@ -1323,7 +1325,7 @@ else:
     # When deterministic algorithms are enabled, `torch.empty` should fill floating
     # point tensors with NaN and integer tensors with MAX_INT
     @skipXLA
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_deterministic_empty(self, device, dtype):
         gen_fns = [
@@ -1351,7 +1353,7 @@ else:
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_AvgPool3d(self, device):
         module = torch.nn.AvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1364,7 +1366,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_AdaptiveAvgPool2d(self, device):
         module = torch.nn.AdaptiveAvgPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
@@ -1377,7 +1379,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_AdaptiveAvgPool3d(self, device):
         module = torch.nn.AdaptiveAvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1390,7 +1392,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_MaxPool3d(self, device):
         module = torch.nn.MaxPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1403,7 +1405,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_AdaptiveMaxPool2d(self, device):
         module = torch.nn.AdaptiveMaxPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
@@ -1416,7 +1418,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_FractionalMaxPool2d(self, device):
         module = torch.nn.FractionalMaxPool2d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1429,7 +1431,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_FractionalMaxPool3d(self, device):
         module = torch.nn.FractionalMaxPool3d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, 3, requires_grad=True, device=device)
@@ -1484,7 +1486,7 @@ else:
             'max_unpooling3d_forward_out')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_linear(self, device):
         input = torch.randn(1, 2, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1499,7 +1501,7 @@ else:
             'upsample_linear1d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1515,6 +1517,37 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("aot-autograd issue")
+    def test_deterministic_replication_pad2d(self, device):
+        test_cases = [
+            # size, padding
+            [(1, 2, 4, 4), (0, 0, 0, 0)],
+            [(1, 2, 4, 4), (3, 4, 5, 6)],
+            [(3, 8, 7), (0, 0, 0, 0)],
+            [(3, 8, 7), (4, 3, 2, 7)],
+        ]
+
+        if torch.device(device).type != 'xla':
+            test_cases += [
+                [(4, 3, 5, 10), (-9, 4, 5, 6)],
+                [(3, 8, 7), (-4, -2, -2, -3)],
+            ]
+
+        for size, padding in test_cases:
+            input = torch.randn(*size, device=device, requires_grad=True)
+            grad = None
+            with DeterministicGuard(True):
+                res = torch.nn.functional.pad(
+                    input,
+                    padding,
+                    mode='replicate')
+                res.backward(torch.ones_like(res))
+                if grad is None:
+                    grad = input.grad
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                input.grad = None
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_deterministic_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         grad = None
@@ -1533,7 +1566,7 @@ else:
                 input.grad = None
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1549,7 +1582,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_trilinear(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1565,7 +1598,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReflectionPad1d(self, device):
         module = torch.nn.ReflectionPad1d((1, 2))
         input = torch.randn(2, 3, 8, device=device, requires_grad=True)
@@ -1577,7 +1610,7 @@ else:
             'reflection_pad1d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReflectionPad2d(self, device):
         module = torch.nn.ReflectionPad2d((1, 2, 3, 4))
         input = torch.randn(2, 3, 8, 8, device=device, requires_grad=True)
@@ -1590,7 +1623,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReflectionPad3d(self, device):
         module = torch.nn.ReflectionPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 8, 8, 8, device=device, requires_grad=True)
@@ -1603,7 +1636,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReplicationPad1d(self, device):
         module = torch.nn.ReplicationPad1d((1, 2))
         input = torch.randn(2, 3, 4, device=device, requires_grad=True)
@@ -1615,20 +1648,34 @@ else:
             'replication_pad1d_backward_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReplicationPad2d(self, device):
         module = torch.nn.ReplicationPad2d((1, 2, 3, 4))
         input = torch.randn(2, 3, 4, 4, device=device, requires_grad=True)
         res = module(input)
         grad = torch.ones_like(res)
 
+        # Nondeterministic alert should only be raised if the forward call was
+        # nondeterministic
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
             'replication_pad2d_backward_cuda',
             torch.device(device).type == 'cuda')
 
+        with DeterministicGuard(True):
+            res = module(input)
+
+        grad = torch.ones_like(res)
+
+        # If the forward call was deterministic, nondeterministic alert should
+        # not be raised
+        self.check_nondeterministic_alert(
+            lambda: res.backward(grad, retain_graph=True),
+            'replication_pad2d_backward_cuda',
+            False)
+
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReplicationPad3d(self, device):
         module = torch.nn.ReplicationPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 4, 4, 4, device=device, requires_grad=True)
@@ -1652,7 +1699,7 @@ else:
             'nll_loss2d_forward_out_cuda_template',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_CTCLoss(self, device):
         module = torch.nn.CTCLoss()
         input = torch.randn(50, 3, 15, device=device, requires_grad=True)
@@ -1667,7 +1714,7 @@ else:
             'ctc_loss_backward_gpu',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_EmbeddingBag_max(self, device):
         module = torch.nn.EmbeddingBag(
             4, 3, None, 2., False, 'max',
@@ -1682,7 +1729,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @dtypes(*all_types_and_complex_and(torch.bool))
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_cumsum(self, device, dtype):
         input = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
         should_alert = torch.device(device).type == 'cuda' and (dtype.is_floating_point or dtype.is_complex)
@@ -1772,7 +1819,7 @@ else:
                 torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_grid_sample_2d(self, device):
         input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -1785,7 +1832,7 @@ else:
             torch.device(device).type == 'cuda')
 
     @skipIfMps
-    @skipIfTorchInductor("aot-autograd issue")
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_grid_sample_3d(self, device):
         input = torch.empty(1, 1, 2, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, 3, device=device)
@@ -6067,6 +6114,17 @@ class TestTorch(TestCase):
                 index = (torch.ones(256) * 257).to(dtype=torch.long)
                 self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
 
+    def test_index_add_cornercase(self):
+        for device in get_all_device_types():
+            dest = torch.randn((), device=device)
+            index = torch.tensor([0], device=device)
+            source = torch.randn(1, 1, 1, device=device)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"source tensor shape must match self tensor shape, excluding the specified dimension",
+            ):
+                dest.index_add(0, index, source)
+
     def test_linspace_logspace(self):
         # Ensure the output does not require grad regardless of inputs requiring gard or not.
         # The output of factory functions should not be part of any computational graph.
@@ -6782,33 +6840,6 @@ class TestTorch(TestCase):
         self.assertEqual(bytes.nbytes(), 4)
         self.assertEqual(bytes.tolist(), [1, 2, 3, 4])
         self.assertTrue(isinstance(bytes, torch.ByteStorage))
-
-    # Check that after `UntypedStorage.resize_` is called, the storage remains
-    # on the same CUDA device index it was initialized on, regardless of the
-    # default index
-    @unittest.skipIf(torch.cuda.device_count() < 2, "Requires 2 GPUs")
-    def test_untyped_storage_resize_cuda_device(self):
-        test_cases = [
-            # start_size, storage_resize
-            ((2, 3), 0),
-            ((2, 3), 100),
-            ((2, 3), 10),
-            (0, 10),
-            (0, 0),
-        ]
-        default_indices = [0, 1]
-        devices = [
-            torch.device('cuda:0'),
-            torch.device('cuda:1')]
-
-        for default_idx, device, (start_size, storage_resize) in product(default_indices, devices, test_cases):
-            with torch.cuda.device(default_idx):
-                a = torch.zeros(start_size, device=device)
-                a.untyped_storage().resize_(storage_resize)
-
-            self.assertEqual(a.device, device)
-            self.assertEqual(a.untyped_storage().device, device)
-            self.assertEqual(a.untyped_storage().nbytes(), storage_resize)
 
     def test_storage_error(self):
         quantized_storages = [
@@ -9635,6 +9666,96 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(t.size(dim=None), torch.Size([2, 3]))
         self.assertEqual(t.stride(dim=None), torch.Size([3, 1]))
         self.assertEqual(t.t().stride(), torch.Size([1, 3]))
+
+    def test_invalid_arg_error_handling(self) -> None:
+        """ Tests that errors from old TH functions are propagated back """
+        for invalid_val in [-1, 2**65]:
+            self.assertRaises(RuntimeError, lambda: torch.set_num_threads(invalid_val))
+            self.assertRaises(RuntimeError, lambda: torch.set_num_interop_threads(invalid_val))
+
+    def _get_tensor_prop(self, t):
+        preserved = (
+            id(t),
+            # Refcount values get modified by Dynamo resume frames
+            0 if TEST_WITH_TORCHDYNAMO else sys.getrefcount(t),
+        )
+        moved = (
+            copyreg._slotnames(t.__class__),
+            id(t.__dict__),
+            tuple(t.__dict__.keys()),
+        )
+        return preserved, moved
+
+    def _checked_swap(self, t1, t2):
+        t1_pres, t1_moved = self._get_tensor_prop(t1)
+        t2_pres, t2_moved = self._get_tensor_prop(t2)
+
+        torch.utils.swap_tensors(t1, t2)
+
+        new_t1_pres, new_t1_moved = self._get_tensor_prop(t1)
+        new_t2_pres, new_t2_moved = self._get_tensor_prop(t2)
+        self.assertEqual(t1_pres, new_t1_pres)
+        self.assertEqual(t2_pres, new_t2_pres)
+        self.assertEqual(t1_moved, new_t2_moved)
+        self.assertEqual(t2_moved, new_t1_moved)
+
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
+    def test_swap_basic(self):
+        ts = [
+            torch.rand(2),
+            torch.rand(3, 3),
+            torch.empty(3, dtype=torch.int),
+            TwoTensor(torch.rand(4), torch.rand(4))
+        ]
+
+        for t1, t2 in itertools.combinations(ts, 2):
+            t1 = t1.clone()
+            t2 = t2.clone()
+            t2.foo = "bar"
+            holder = []
+            holder.append(t1)
+
+            self._checked_swap(t1, t2)
+
+            self.assertIs(holder[0], t1)
+            self.assertEqual(t1.foo, "bar")
+
+            wr = weakref.ref(t1)
+            with self.assertRaisesRegex(RuntimeError, "has weakref"):
+                torch.utils.swap_tensors(t1, t2)
+
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo adds weakrefs")
+    def test_swap_fail_slots(self):
+        class MyTwoTensor(TwoTensor):
+            __slots__ = ("a", "b")
+
+        class MyTwoTensor2(TwoTensor):
+            __slots__ = ("b", "a")
+
+        class MyTwoTensor3(TwoTensor):
+            __slots__ = ("a", "b", "c")
+
+        t1 = torch.rand(4)
+        t2 = TwoTensor(torch.rand(4), torch.rand(4))
+        t3 = MyTwoTensor(torch.rand(4), torch.rand(4))
+        t4 = MyTwoTensor(torch.rand(4), torch.rand(4))
+        t5 = MyTwoTensor2(torch.rand(4), torch.rand(4))
+        t6 = MyTwoTensor3(torch.rand(4), torch.rand(4))
+
+        self._checked_swap(t1, t2)
+        with self.assertRaisesRegex(TypeError, "object layout differs"):
+            torch.utils.swap_tensors(t1, t3)
+        with self.assertRaisesRegex(TypeError, "object layout differs"):
+            torch.utils.swap_tensors(t2, t3)
+        self._checked_swap(t3, t4)
+        self._checked_swap(t3, t5)
+        with self.assertRaisesRegex(TypeError, "object layout differs"):
+            torch.utils.swap_tensors(t3, t6)
+        t3.c = "foo"
+        t4.d = "bar"
+        self._checked_swap(t3, t4)
+        self.assertEqual(t4.c, "foo")
+        self.assertEqual(t3.d, "bar")
 
 
 # The following block extends TestTorch with negative dim wrapping tests

@@ -626,7 +626,7 @@ Tensor linalg_matrix_power_impl(
   if (_out.has_value()) {
     checkSameDevice("matrix_power", out, self);
     checkLinalgCompatibleDtype("matrix_power", out, self);
-    at::native::resize_output(out, self.sizes());
+    at::native::resize_output_symint(out, self.sym_sizes());
   }
 
   // For n=0 we return the identity matrix of the same shape as input.

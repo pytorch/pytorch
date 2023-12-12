@@ -17,10 +17,8 @@
 
 #include <ATen/Context.h>
 #include <ATen/record_function.h>
-#include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
-#include <c10/util/hash.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/profiler/data_flow.h>
@@ -202,7 +200,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
     std::vector<op_input_t> out;
     auto push_value = [&out, io_type](const Tag& tag, op_input_t input) {
       if (io_type == tagToIOType(tag)) {
-        out.push_back(std::move(input));
+        out.emplace_back(std::move(input));
       } else {
         out.emplace_back(c10::nullopt);
       }

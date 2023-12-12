@@ -335,7 +335,7 @@ class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
 
 
 # TODO: implement dtype validation here, too, or on the corresponding refs
-def _elementwise_meta(
+def _prim_elementwise_meta(
     *args,
     type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND,
     args_with_fixed_dtypes: Optional[Tuple[TensorLikeType, ...]] = None,
@@ -434,7 +434,7 @@ def _complex_only_elementwise_meta(*args, **kwargs):
     torch._check(
         utils.is_complex_dtype(args[0].dtype), lambda: "Only complex dtype is supported"
     )
-    return _elementwise_meta(*args, **kwargs)
+    return _prim_elementwise_meta(*args, **kwargs)
 
 
 def _make_elementwise_unary_prim(
@@ -446,7 +446,7 @@ def _make_elementwise_unary_prim(
 
     return _make_prim(
         schema=f"{name}(Tensor self) -> Tensor",
-        meta=partial(_elementwise_meta, type_promotion=type_promotion),
+        meta=partial(_prim_elementwise_meta, type_promotion=type_promotion),
         return_type=RETURN_TYPE.NEW,
         **kwargs,
     )
@@ -461,7 +461,7 @@ def _make_elementwise_binary_prim(
 
     return _make_prim(
         schema=f"{name}(Tensor self, Tensor other) -> Tensor",
-        meta=partial(_elementwise_meta, type_promotion=type_promotion),
+        meta=partial(_prim_elementwise_meta, type_promotion=type_promotion),
         return_type=RETURN_TYPE.NEW,
         **kwargs,
     )
@@ -724,7 +724,7 @@ exp2 = _make_elementwise_unary_prim(
 
 
 def _fill_meta(a: TensorLikeType, value: NumberType) -> TensorLikeType:
-    return _elementwise_meta(
+    return _prim_elementwise_meta(
         a, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
     )
 
@@ -1988,7 +1988,7 @@ rev = _make_prim(
 def _where_meta(
     pred: TensorLikeType, a: TensorLikeType, b: TensorLikeType
 ) -> TensorLikeType:
-    return _elementwise_meta(
+    return _prim_elementwise_meta(
         a,
         b,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
