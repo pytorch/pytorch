@@ -950,9 +950,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # Filter out id-matches that won't reproduce run to run
         guard_code = filter(
-            lambda line: not any(
-                banned in line for banned in ["id", "lookup_backend", "config_hash"]
-            ),
+            lambda line: "id" not in line and "lookup_backend" not in line,
             sorted(guard_code),
         )
         guard_code_str = "\n".join(guard_code)
