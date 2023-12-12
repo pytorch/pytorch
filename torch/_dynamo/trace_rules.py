@@ -2,6 +2,7 @@ import functools
 import importlib
 import sys
 import types
+from typing import Any, Dict
 
 import torch
 
@@ -14,6 +15,8 @@ from .variables import (
     TorchCtxManagerClassVariable,
     TorchInGraphFunctionVariable,
 )
+
+from .variables.base import VariableTracker
 
 
 """
@@ -2711,12 +2714,12 @@ torch_non_c_binding_in_graph_functions = {
 }
 
 
-torch_name_rule_map = {
-    **manual_torch_name_rule_map,
-    **torch_ctx_manager_classes,
-    **torch_c_binding_in_graph_functions,
-    **torch_non_c_binding_in_graph_functions,
-}
+torch_name_rule_map = [
+    manual_torch_name_rule_map,
+    torch_ctx_manager_classes,
+    torch_c_binding_in_graph_functions,
+    torch_non_c_binding_in_graph_functions,
+]
 
 """
 Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
@@ -2725,11 +2728,17 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 
 @functools.lru_cache(None)
 def get_torch_obj_rule_map():
-    d = dict()
-    for k, v in torch_name_rule_map.items():
-        obj = load_object(k)
-        if obj is not None:
-            d[obj] = v
+    d: Dict[Any, VariableTracker] = dict()
+    for m in torch_name_rule_map:
+        for k, v in m.items():
+            obj = load_object(k)
+            if obj is not None:
+                if obj in d and d[obj] != v:
+                    raise AssertionError(
+                        f"Duplicate torch object {obj} with different rules: {v}, {d[obj]}"
+                    )
+                else:
+                    d[obj] = v
     return d
 
 
