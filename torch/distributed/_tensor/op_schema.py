@@ -129,15 +129,16 @@ class TupleStrategy(StrategyType):
     TupleStrategy represents the output strategy of this op is a tuple
     of strategy, i.e. If the output of this op is a tuple of tensors or list of tensors
     with possibly different placement strategies, we should return a TupleStrategy that
-    contains a tuple of OpStrategy.
+    contains a tuple of OpStrategy. For None return value, the corresponding OpStrategy
+    object in childs should also be None.
 
     NOTE: if the output of the op is a List[Tensor] and they share the same placement
     strategy, then we should return a single OpStrategy instead of a TupleStrategy
     """
 
-    def __init__(self, childs: Sequence[StrategyType]) -> None:
+    def __init__(self, childs: Sequence[Optional[StrategyType]]) -> None:
         super().__init__()
-        self.childs: Sequence[StrategyType] = childs
+        self.childs: Sequence[Optional[StrategyType]] = childs
 
     def __str__(self) -> str:
         child_strategies_str = ", ".join(
