@@ -150,10 +150,7 @@ def _unlift_graph(mod, gm, graph_signature):
     for name, param in mod.named_buffers(remove_duplicate=False):
         state_dict[name] = param
 
-    from torch._export.exported_program import (
-        _construct_inp_pos_to_param_buffer_name,
-        _unlift,
-    )
+    from torch.export._unlift import _construct_inp_pos_to_param_buffer_name, _unlift
 
     inp_pos_to_param_buffer_name = _construct_inp_pos_to_param_buffer_name(
         gm,
