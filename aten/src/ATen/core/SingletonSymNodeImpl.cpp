@@ -75,7 +75,27 @@ c10::SymNode SingletonSymNodeImpl::mul(const c10::SymNode& other) {
   return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c, data_, dummy_, sum_offsets_));
 }
 
+namespace {
+class BorrowedTensor {
+  // Useful if I want a Tensor but only have a TensorImpl*
+  // The user of this class is responsible for ensuring that the TensorImpl*
+  // lifetime is longer than the BorrowedTensor.
+public:
+  BorrowedTensor(at::TensorImpl* ptr)
+      : tensor(c10::intrusive_ptr<at::TensorImpl>(ptr, c10::raw::DontIncreaseRefcount{})) {}
+  ~BorrowedTensor() {
+      tensor.unsafeReleaseTensorImpl();
+  }
+  at::Tensor get() const {
+      return tensor;
+  }
+private:
+  at::Tensor tensor;
+};
+} // namespace
+
 std::optional<at::Tensor> try_call_with_dummy(const std::function<at::Tensor(at::Tensor)>& fn, c10::SymIntArrayRef size) {
+  // See Note [ NestedTensor factory functions ]
   at::TensorImpl* ptr = nullptr;
   for (const auto& s : size) {
     if (!s.is_heap_allocated()) {
@@ -88,10 +108,8 @@ std::optional<at::Tensor> try_call_with_dummy(const std::function<at::Tensor(at:
     }
   }
   if (ptr != nullptr) {
-    auto p = c10::intrusive_ptr<at::TensorImpl>(ptr, c10::raw::DontIncreaseRefcount{});
-    auto dummy = at::Tensor(std::move(p));
-    auto ret = fn(dummy);
-    dummy.unsafeReleaseTensorImpl();
+    BorrowedTensor borrowed_tensor(ptr);
+    auto ret = fn(borrowed_tensor.get());
     return ret;
   }
   return std::nullopt;  // Return std::nullopt if no singleton dimension is found
