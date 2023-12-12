@@ -1,7 +1,6 @@
 import contextlib
 import functools
-import itertools
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import torch
 from torch._dynamo.external_utils import call_hook
@@ -22,33 +21,15 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.proxy import Proxy
-from torch._functorch.aot_autograd import AOT_COUNTER
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
+
 
 def maybe_clone(x):
     if x is not None:
         return clone_preserve_strides(x)
     return x
 
-class CompiledAutogradCustomFunctionKey:
-    # Used by user-defined autograd function
-    # Additionally guard against their saved tensors shapes
-    COMPILED_AUTOGRAD_ID = None
-    CURRENT_SAVED_TENSORS_SHAPES = ()
-
-    @staticmethod
-    def get() -> Tuple[int]:
-        if CompiledAutogradCustomFunctionKey.COMPILED_AUTOGRAD_ID == None:
-            # one-time id setting
-            from torch._functorch.aot_autograd import AOT_COUNTER
-            CompiledAutogradCustomFunctionKey.COMPILED_AUTOGRAD_ID = next(AOT_COUNTER)
-
-        return (CompiledAutogradCustomFunctionKey.COMPILED_AUTOGRAD_ID, *CompiledAutogradCustomFunctionKey.CURRENT_SAVED_TENSORS_SHAPES)
-
-    @staticmethod
-    def update(saved_tensors_shapes: Tuple[int]):
-        CompiledAutogradCustomFunctionKey.CURRENT_SAVED_TENSORS_SHAPES = saved_tensors_shapes
 
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
@@ -73,13 +54,7 @@ class AutogradCompilerInstance:
     def source(name, idx) -> GetItemSource:
         return GetItemSource(LocalSource(name), idx)
 
-    def update_saved_tensors_shape(self, saved_tensors: List[torch.Tensor]):
-        shapes = [[dim for dim in x.shape] for x in saved_tensors if x is not None]
-        flat_shapes = tuple(itertools.chain(*shapes))
-        CompiledAutogradCustomFunctionKey.update(flat_shapes)
-
     def begin_capture(self, inputs: List[torch.Tensor], sizes: List[int]):
-        COMPILED_AUTOGRAD_ID = next(AOT_COUNTER)
         counters["compiled_autograd"]["captures"] += 1
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
@@ -89,12 +64,12 @@ class AutogradCompilerInstance:
         self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
 
         # tensor inputs to fake tensors
-        outputs = [
+        inputs = [
             self.wrap_fake(x, self.source("inputs", idx))
             for idx, x in enumerate(inputs)
         ]
-        proxies = [args_proxy[i] for i in range(len(outputs))]
-        self.bind_tensors_to_proxies(outputs, proxies)
+        proxies = [args_proxy[i] for i in range(len(inputs))]
+        self.bind_tensors_to_proxies(inputs, proxies)
 
         # size inputs to symints
         sizes = [
@@ -114,7 +89,7 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
         self.stack.enter_context(disable_proxy_modes_tracing(enable_current=True))
-        return outputs, sizes
+        return inputs, sizes
 
     def proxy_call_hook(self, hook, *args):
         return self.fx_tracer.create_proxy(
