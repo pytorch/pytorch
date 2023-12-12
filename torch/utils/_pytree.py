@@ -511,37 +511,44 @@ class TreeSpec:
         return repr_prefix + repr_suffix
 
     def is_leaf(self) -> bool:
-        return isinstance(self, LeafSpec)
+        return self.num_nodes == 1 and self.num_leaves == 1
 
-    def flatten_up_to(self, tree: PyTree) -> List[PyTree]:
+    def _flatten_up_to_helper(self, tree: PyTree, subtrees: List[PyTree]) -> None:
         if self.is_leaf():
-            return [tree]
+            subtrees.append(tree)
+            return
 
         node_type = _get_node_type(tree)
         if self.type not in BUILTIN_TYPES:
             if node_type != self.type:
                 raise ValueError(
-                    f"Type mismatch; expected {self.type!r}, but got {node_type!r}."
+                    f"Type mismatch; "
+                    f"expected {self.type!r}, but got {node_type!r}.",
                 )
             flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
             child_pytrees, context = flatten_fn(tree)
             if len(child_pytrees) != self.num_children:
                 raise ValueError(
-                    f"Node arity mismatch; expected {self.num_children}, but got {len(child_pytrees)}."
+                    f"Node arity mismatch; "
+                    f"expected {self.num_children}, but got {len(child_pytrees)}.",
                 )
             if context != self.context:
-                raise ValueError("Node context mismatch for custom node type.")
+                raise ValueError(
+                    f"Node context mismatch for custom node type {self.type!r}.",
+                )
         else:
             both_standard_dict = (
                 self.type in STANDARD_DICT_TYPES and node_type in STANDARD_DICT_TYPES
             )
-            if self.type != node_type and not both_standard_dict:
+            if node_type != self.type and not both_standard_dict:
                 raise ValueError(
-                    f"Node type mismatch; expected {self.type}, but got {node_type!r}."
+                    f"Node type mismatch; "
+                    f"expected {self.type}, but got {node_type!r}.",
                 )
             if len(tree) != self.num_children:
                 raise ValueError(
-                    f"Node arity mismatch; expected {self.num_children}, but got {len(tree)}."
+                    f"Node arity mismatch; "
+                    f"expected {self.num_children}, but got {len(tree)}.",
                 )
 
             if both_standard_dict:  # dictionary types are compatible with each other
@@ -551,7 +558,8 @@ class TreeSpec:
                 expected_keys = dict_context
                 if set(tree) != set(expected_keys):
                     raise ValueError(
-                        f"Node keys mismatch; expected {set(expected_keys)}, but got {set(tree)}."
+                        f"Node keys mismatch; "
+                        f"expected {set(expected_keys)}, but got {set(tree)}.",
                     )
                 child_pytrees = [tree[key] for key in expected_keys]
             else:
@@ -562,13 +570,17 @@ class TreeSpec:
                     and self.type is not deque  # ignore mismatch of `maxlen` for deque
                 ):
                     raise ValueError(
-                        f"Node context mismatch for node type; expected {self.context}, but got {context!r}."
+                        f"Node context mismatch for node type {self.type!r}; "
+                        f"expected {self.context}, but got {context!r}.",  # namedtuple type mismatch
                     )
 
-        results = []
         for child_pytree, child_spec in zip(child_pytrees, self.children_specs):
-            results.extend(child_spec.flatten_up_to(child_pytree))
-        return results
+            child_spec._flatten_up_to_helper(child_pytree, subtrees)
+
+    def flatten_up_to(self, tree: PyTree) -> List[PyTree]:
+        subtrees: List[PyTree] = []
+        self._flatten_up_to_helper(tree, subtrees)
+        return subtrees
 
 
 class LeafSpec(TreeSpec):
