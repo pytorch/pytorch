@@ -70,6 +70,41 @@ void throw_python_error() {
   throw std::move(err);
 }
 
+static PyObject* unpack_saved_variables(
+    THPFunction* self,
+    const std::function<PyObject*(const Variable&)>& unpack_fn) {
+  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
+  auto& saved_variables = self->saved_variables;
+  if (saved_variables.empty())
+    return PyTuple_New(0);
+
+  auto num_saved = saved_variables.size();
+  THPObjectPtr saved(PyTuple_New(static_cast<Py_ssize_t>(num_saved)));
+  if (!saved)
+    return nullptr;
+  auto saved_for = self->cdata.lock();
+  // This is really a true assert, because we've already tested for the
+  // self->has_freed_buffers case at the beginning of this function:
+  // buffers are freed when PyNode dies; if the buffers are not freed,
+  // PyNode must be live.  (Note that the buffers could be freed
+  // even though the PyNode is live, but that doesn't matter here
+  // because we will never hit this line of code if the buffers are freed--
+  // and in any case saved_for will be non-NULL.)
+  TORCH_INTERNAL_ASSERT(saved_for);
+  for (const auto i : c10::irange(num_saved)) {
+    auto unpacked_var = saved_variables[i].unpack(saved_for);
+    THPObjectPtr value;
+    if (!unpacked_var.defined()) {
+      Py_INCREF(Py_None);
+      value = Py_None;
+    } else {
+      value = unpack_fn(unpacked_var);
+    }
+    PyTuple_SET_ITEM(saved.get(), i, value.release());
+  }
+  return saved.release();
+}
+
 } // namespace
 
 namespace torch {
@@ -1278,41 +1313,6 @@ int THPFunction_set_materialize_non_diff_grads(
   self->materialize_non_diff_grads = (value == Py_True);
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
-}
-
-static PyObject* unpack_saved_variables(
-    THPFunction* self,
-    const std::function<PyObject*(const Variable&)>& unpack_fn) {
-  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
-  auto& saved_variables = self->saved_variables;
-  if (saved_variables.empty())
-    return PyTuple_New(0);
-
-  auto num_saved = saved_variables.size();
-  THPObjectPtr saved(PyTuple_New(static_cast<Py_ssize_t>(num_saved)));
-  if (!saved)
-    return nullptr;
-  auto saved_for = self->cdata.lock();
-  // This is really a true assert, because we've already tested for the
-  // self->has_freed_buffers case at the beginning of this function:
-  // buffers are freed when PyNode dies; if the buffers are not freed,
-  // PyNode must be live.  (Note that the buffers could be freed
-  // even though the PyNode is live, but that doesn't matter here
-  // because we will never hit this line of code if the buffers are freed--
-  // and in any case saved_for will be non-NULL.)
-  TORCH_INTERNAL_ASSERT(saved_for);
-  for (const auto i : c10::irange(num_saved)) {
-    auto unpacked_var = saved_variables[i].unpack(saved_for);
-    THPObjectPtr value;
-    if (!unpacked_var.defined()) {
-      Py_INCREF(Py_None);
-      value = Py_None;
-    } else {
-      value = unpack_fn(unpacked_var);
-    }
-    PyTuple_SET_ITEM(saved.get(), i, value.release());
-  }
-  return saved.release();
 }
 
 PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {

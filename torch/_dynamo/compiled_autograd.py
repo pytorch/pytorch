@@ -74,7 +74,7 @@ class AutogradCompilerInstance:
         return GetItemSource(LocalSource(name), idx)
 
     def update_saved_tensors_shape(self, saved_tensors: List[torch.Tensor]):
-        shapes = [[dim for dim in x.shape] for x in saved_tensors]
+        shapes = [[dim for dim in x.shape] for x in saved_tensors if x is not None]
         flat_shapes = tuple(itertools.chain(*shapes))
         CompiledAutogradCustomFunctionKey.update(flat_shapes)
 
