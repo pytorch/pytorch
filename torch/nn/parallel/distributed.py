@@ -866,8 +866,9 @@ class DistributedDataParallel(Module, Joinable):
 
         self._lazy_init_ran = False
 
-        # Register the AccumulaGrad post hooks even if we won't compile DDP. This
-        # will avoid compiling the hooks twice.
+        # Register the AccumulaGrad post hooks even if DDP is not compiled. This
+        # can avoid compiling the hooks twice. The Python hooks will be
+        # deregistered later if DDP is not compiled.
         self._accum_grad_hooks: List[RemovableHandle] = []
         self._ddp_python_hook = torch._dynamo.config.ddp_python_hook
         if self._ddp_python_hook:
@@ -1433,7 +1434,7 @@ class DistributedDataParallel(Module, Joinable):
         if self._ddp_python_hook and torch._utils.is_compiling():
             return inputs, kwargs
 
-        # Remove the acc_gradient hooks as we are not compiling DDP.
+        # Remove the acc_gradient hooks because we are not compiling DDP.
         if self._accum_grad_hooks:
             for index, h in enumerate(self._accum_grad_hooks):
                 h.remove()
@@ -1930,9 +1931,10 @@ class DistributedDataParallel(Module, Joinable):
         """
         self._check_comm_hook(hook)
         if hook.__name__ in ["bf16_compress_hook", "fp16_compress_hook"]:
-            # TODO: Dynamo does not support dist.group.WORLD.size(). It is not
-            # clear this is intended or a bug. We should figure out how to avoid
-            # getting the WORLD variable here.
+            # If we pass None, then the hook will try to get the world size
+            # by calling `dist.group.WORLD.size()`, which causes compilation
+            # errors. So we pre-decode the process group and pass it to the
+            # hook.
             if state is None:
                 state = dist.group.WORLD
         assert self.logger is not None

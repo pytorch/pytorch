@@ -188,6 +188,8 @@ if torch.distributed.is_available():
         "torch.distributed.tensor.parallel._data_parallel_utils",
         "torch.distributed.tensor.parallel._utils",
         "torch.distributed.tensor.parallel.style",
+        # we have to add replicate to LEGACY_MOD_INLINELIST to ensure
+        # the forward_hook won't be ignored.
         "torch.distributed._composable.replicate",
     }
 
