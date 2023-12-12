@@ -294,7 +294,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
 
 class TestMeshEnv(DTensorTestBase):
-
     @with_comms
     def test_get_parent_mesh(self):
         mesh_shape = (2, self.world_size // 2)
