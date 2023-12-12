@@ -1507,6 +1507,17 @@ def register_onednn_fusion_ops():
             unary_scalars,
             unary_algorithmm,
         ):
+            assert binary_attr == "sum", "Only post op sum is supported here"
+            if (
+                binary_attr == "sum"
+                and output_dtype in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() in [torch.float32, torch.bfloat16]
+                and accum.get_dtype() != output_dtype
+            ):
+                # For int8-mixed-bf16 quantization (inplace add) and inplace post op sum,
+                # there is case when accum is float32 but output dtype if bfloat16
+                # since the accum will be inplaced changed, we will do accum copy to_bf16 here.
+                accum = to_dtype(accum, output_dtype)
             return TensorBox.create(
                 ir.QConvPointWiseBinaryPT2E.create(
                     x,

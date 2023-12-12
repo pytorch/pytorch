@@ -6093,16 +6093,15 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
-        if output_dtype is not None:
-            # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
-            # if output_dtype is not None, the output buf should be dtype output_dtype instead of uint8.
-            kernel_layout.dtype = output_dtype
 
-        return QConvPointWiseBinaryPT2E(
-            layout=kernel_layout,
+        packed = QConvPointWiseBinaryPT2E(
+            layout=NoneLayout(accum.get_device()),
             inputs=inputs,
             constant_args=constant_args,
         )
+        mark_node_as_mutating(packed, accum)
+
+        return packed.inputs[2] if bias is None else packed.inputs[3]
 
 
 class QLinearPointwisePT2E(ExternKernelAlloc):
