@@ -1,5 +1,6 @@
 import math
 from enum import Enum
+from typing import Any
 
 import torch
 
@@ -37,28 +38,29 @@ class VariableType(Enum):
     Tuple = tuple
 
     @staticmethod
-    def contains(v):
+    def contains(v) -> bool:
         return v in [member.value for member in VariableType]
 
 
-def check_vtype(vtype, v):
+def invalid_vtype(vtype, v) -> bool:
     if v is None:
-        return
+        return False
     if vtype in [bool, int, float]:
         if type(v) not in [bool, int, float]:
-            raise TypeError("Variable type mismatch")
+            return True
     else:
         if not isinstance(v, vtype):
-            raise TypeError("Variable type mismatch")
+            return True
+    return False
 
 
-def is_integer(v):
+def is_integer(v) -> bool:
     if math.isnan(v) or not math.isfinite(v):
         return False
     return int(v) == v
 
 
-def convert_to_vtype(vtype, v) -> None:
+def convert_to_vtype(vtype, v) -> Any:
     if vtype == bool:
         return bool(v)
     if vtype == int:

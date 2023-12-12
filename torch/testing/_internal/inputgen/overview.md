@@ -8,18 +8,28 @@ Before giving an overview of the specifications and the generation engine, let's
 
 ### ArgType
 
-To being describing an argument, we first need to declare its type. An argument might be a Tensor, an Optional Tensor, a List of Tensors, a Scalar. It could also be just a boolean, or a float, or an int, or a list of int, etc. However, there a "different types" of int. For example, an int argument might be a dimension, or could be an index, or could be how much pad to add on each side. There are different constraints imposed on the "int" depending on the case. Therefore, we decided to introduce the ArgType abstraction. Different ArgTypes are: Tensor, Scalar, Dim, DimList, Index, Length, etc.
-
-### MetaArg
-
-When generating an argument, we first generate *everything except the tensor data* (if we are dealing with a tensor or a list of tensors). That "everything except the tensor data" is what we call the meta argument. For an int, or a boolean or a Scalar, the meta argument contains all of the same information that the argument contains, but organized a bit differently.
-
-A meta argument contains the *structure* of the argument (think about rank, and sizes in the case of a tensor, or the length of a list of integers). It also contains the dtype of the argument (if talking about tensors or scalars). It also contains the value of the argument (if talking about anything except a tensor or list of tensors)
+In order to describe an argument, we first need to declare its type. An argument could be either a Tensor, an Optional Tensor, a List of Tensors, a Scalar. It could also be just a boolean, or a float, or an int, or a list of int, etc. Also notice that, integer arguments have different semantics in operator schema which may affect input generation. For example, an int argument might be a dimension, or could be an index, or could be how much pad to add on each side. There are different constraints imposed on the "int" in different cases. Therefore, we decided to introduce the `ArgType` abstraction. Different `ArgType`s are: `Tensor`, `Scalar`, `Dim`, `DimList`, `Index`, `Length`, etc.
 
 ### Attributes
 
-Arguments have attributes. A tensor has dtype, rank, sizes and values. A list of integers has length and values. A scalar has dtype and value. A list of tensors has length, dtypes, ranks, sizes and values. We have consolidated argument qualities behind 6 attributes: Optional, Dtype, Length, Rank, Size, Value.
+Arguments have attributes. A tensor has dtype, rank, sizes and values. A list of integers has length and values. A scalar has dtype and value. A list of tensors has length, dtypes, ranks, sizes and values. We have consolidated argument qualities behind 6 attributes: `Optional`, `Dtype`, `Length`, `Rank`, `Size`, `Value`.
 (Optional is a boolean specifying if the argument is null or not.)
+
+Notice that a tensor has a single `Rank` and multiple `Size` attributes (as many as the value of `Rank`). A list of integers has a single `Length` and multiple `Value` attributes. A dimension has a single `Value` attribute. A list of optional tensors has multiple `Optional` and `Dtype` attributes.
+
+### MetaArg
+
+Generating arguments consist of generating its attributes. Our approach is to first generate *everything except the data inside tensors*. That "everything except tensor data" is what we call the meta argument. For an int, or a boolean or a scalar, the meta argument contains all of the same information that the argument contains, but organized a bit differently.
+
+A meta argument object is actually a container to be filled. In the generation process we begin with an empty meta argument. Eventually, the meta argument will contain information pertaining to all of the argument attributes.
+
+A meta argument object contains five fields: `argtype`, `optional`, `dtype`, `structure` and `value`.
+The `argtype` field just contains the argument's `ArgType`.
+The `optional` field contains the `Optional` attributes of the argument (a single boolean in the case of an optional scalar, or a list of booleans in the case of a list of optional tensors).
+Similarly the `dtype` field contains the `Dtype` attributes of the argument (could be a single value or a list of values)
+The `structure` of the meta argument consolidates the information pertaining to the `Length`, `Rank` and `Size` (and `Value` if the argument doesn't have a dtype). For example, the structure of a tensor is a tuple of integers, the length of the tuple is the `Rank` of the tensor, and the integer values are the `Size`s of the tensors. The structure of a list of integers is also a tuple of integers, the length of the tuple is the `Length` of the list, and the integers values are the `Value`s of the integers. The structure of a single int, say, a dimension, is a single integer, containing the `Value` of the dimension.
+Most notably, a scalar doesn't have any structure. It is pure data. The value of a scalar is data, because it depends on the scalar dtype.
+The `value` field of the meta argument contains the information necessary to generate the "data" of the argument. In the case of a scalar, the `value` field contains just its value. However, in the case of a tensor, the `value` field contains the *space* of values that it can contain (see `VariableSpace` below).
 
 ## Specifications
 
