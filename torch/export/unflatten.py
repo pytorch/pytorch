@@ -15,7 +15,8 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 
-__all__ = ["InterpreterModule", "UnflattenedModule", "unflatten"]
+__all__ = ["InterpreterModule", "UnflattenedModule", "unflatten", "FlatArgsAdapter"]
+
 
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
 # This installs empty Modules where none exist yet if they are subpaths of target
@@ -298,12 +299,12 @@ def _inplace_buffer_mutations(graph: torch.fx.Graph, graph_signature) -> None:
     output_node.args = ((user_outputs),)
 
 
-def is_prefix(candidate, target):
+def _is_prefix(candidate, target):
     """Check whether `candidate` is a prefix of `target`."""
     return len(candidate) < len(target) and target[: len(candidate)] == candidate
 
 
-def compute_accessor(parent_fqn: str, child_fqn: str) -> str:
+def _compute_accessor(parent_fqn: str, child_fqn: str) -> str:
     if parent_fqn == "":
         # Handle the root module correctly.
         return child_fqn
@@ -362,7 +363,7 @@ def _generate_unflatten(gm: torch.nn.Module, nodes, spec) -> torch.fx.Node:
     return gm.graph.call_function(pytree.tree_unflatten, (nodes, spec_node))
 
 
-class ModuleFrame:
+class _ModuleFrame:
     def __init__(
         self,
         flat_graph,
@@ -407,7 +408,7 @@ class ModuleFrame:
 
         self.parent_call_module: Optional[torch.fx.Node] = None
         if parent is not None:
-            accessor = compute_accessor(parent.fqn, self.fqn)
+            accessor = _compute_accessor(parent.fqn, self.fqn)
             parent.module.add_module(
                 accessor,
                 self.module
@@ -637,14 +638,14 @@ class ModuleFrame:
 
             assert node_module_stack is not None
 
-            if is_prefix(self.module_stack, node_module_stack):
+            if _is_prefix(self.module_stack, node_module_stack):
                 # This means that the current node represents the execution of a new
                 # module.
                 next_module = node_module_stack[len(self.module_stack)]
                 self.print("Creating new stack frame for", next_module)
                 # Run a nested version of module outliner from the current node
                 # counter. Once it is complete, continue from that point.
-                node_idx = ModuleFrame(
+                node_idx = _ModuleFrame(
                     self.flat_graph,
                     self.nodes,
                     self.seen_nodes,
@@ -667,7 +668,7 @@ class ModuleFrame:
 def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModule):
     seen_nodes: Dict[str, torch.fx.Node] = {}
     seen_modules: Dict[int, torch.nn.Module] = {}
-    ModuleFrame(
+    _ModuleFrame(
         orig_graph,
         tuple(orig_graph.nodes),
         seen_nodes,
