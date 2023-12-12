@@ -9,7 +9,6 @@ CPUINFO_SOURCES = {
         "init.c",
         "api.c",
         "cache.c",
-        "log.c",
     ],
     "defined(__linux__)": [
         "linux/multiline.c",

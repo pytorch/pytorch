@@ -236,7 +236,6 @@ ContextConv2D create(
       output_max,                                                     // output_max
       0u,                                                             // flags
       nullptr,                                                        // xnn_caches_t
-      nullptr,                                                        // xnn_weights_cache_t
       &convolution_op);                                               // operator
   } else {
     for (const auto i : c10::irange(4)) {
@@ -266,7 +265,6 @@ ContextConv2D create(
       output_max,                                                     // output_max
       0u,                                                             // flags
       nullptr,                                                        // xnn_caches_t
-      nullptr,                                                        // xnn_weights_cache_t
       &convolution_op);                                               // operator
   }
 
@@ -340,41 +338,26 @@ Tensor run(
    */
 
   if (context.transposed_) {
-    setup_status = xnn_reshape_deconvolution2d_nhwc_f32(
-      context.op.get(),
+    setup_status = xnn_setup_deconvolution2d_nhwc_f32(
+      context.op.get(),                                      // operator
       padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
       padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
       padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
       context.output_padding_[0],                            // adjustment_height
       context.output_padding_[1],                            // adjustment_width
-      nullptr,                                               // output_height_out
-      nullptr,                                               // output_width_out
+      padded_input_nhwc.data_ptr<float>(),                   // input
+      output.data_ptr<float>(),                              // output
       caffe2::pthreadpool_());                               // threadpool
 
-    setup_status = xnn_setup_deconvolution2d_nhwc_f32(
-      context.op.get(),                                      // operator
-      padded_input_nhwc.data_ptr<float>(),                   // input
-      output.data_ptr<float>());                             // output
   } else {
-    size_t workspace_size = SIZE_MAX;
-    size_t workspace_alignment = SIZE_MAX;
-
-    setup_status = xnn_reshape_convolution2d_nhwc_f32(
-      context.op.get(),
+    setup_status = xnn_setup_convolution2d_nhwc_f32(
+      context.op.get(),                                      // operator
       padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
       padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
       padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
-      &workspace_size,                                       // workspace_size
-      &workspace_alignment,                                  // workspace_alignment
-      nullptr,                                               // output_height_out
-      nullptr,                                               // output_width_out
-      caffe2::pthreadpool_());
-
-    setup_status = xnn_setup_convolution2d_nhwc_f32(
-      context.op.get(),                                      // operator
-      nullptr,                                               // workspace
       padded_input_nhwc.data_ptr<float>(),                   // input
-      output.data_ptr<float>());                             // output
+      output.data_ptr<float>(),                              // output
+      caffe2::pthreadpool_());
   }
 
   TORCH_CHECK(
