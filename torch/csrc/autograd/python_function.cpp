@@ -425,8 +425,6 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   PyObject* backward(PyObject_GetAttr(forward_cls, backward_name));
 
   args.add_backward(c10::SafePyObject(backward, getPyInterpreter()));
-  PyObject* saved_variables = unpack_saved_variables(
-        f, [](const Variable& var) { return THPVariable_Wrap(var); });
   args.add_backward(c10::SafePyObject(saved_variables, getPyInterpreter()));
 }
 
@@ -1439,7 +1437,6 @@ int THPFunction_set_materialize_non_diff_grads(
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
-
 
 PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
   HANDLE_TH_ERRORS
