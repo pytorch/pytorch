@@ -1,13 +1,12 @@
 #include <gtest/gtest.h>
 
-#include <torch/torch.h>
 #include <ATen/core/SingletonSymNodeImpl.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 #include "c10/util/intrusive_ptr.h"
-
 
 TEST(SingletonIntTest, Comparisons) {
   auto x = torch::randn({2, 2});
