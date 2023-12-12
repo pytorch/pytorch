@@ -10,7 +10,14 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
+from torch.export import (
+    Constraint,
+    Dim,
+    dynamic_dim,
+    export,
+)
+from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch._export import capture_pre_autograd_graph
 from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
     get_buffer,
@@ -1047,6 +1054,7 @@ class TestExport(TestCase):
             )
         )
 
+    @testing.expectedFailureNonStrict
     def test_mixed_input(self):
         def func(a, b, alpha: int):
             return torch.add(a, b, alpha=alpha)
@@ -1055,7 +1063,7 @@ class TestExport(TestCase):
         b = torch.rand(1, 2)
         alpha = 10
 
-        exported = torch._export.export(func, (a, b, alpha))
+        exported = export(func, (a, b, alpha))
         for node in exported.graph_module.graph.nodes:
             if node.op == "placeholder":
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
@@ -1106,7 +1114,7 @@ class TestExport(TestCase):
                 self.buf.add_(1)
                 return x.sum() + self.buf.sum()
 
-        exported = torch._export.export(Foo(), (torch.ones(5, 5),))
+        exported = export(Foo(), (torch.ones(5, 5),))
         stateful_gm = exported.module()
         export_return_val = stateful_gm(torch.ones(5, 5))
         eager = Foo()
@@ -1146,7 +1154,7 @@ class TestExport(TestCase):
                 bar = self.bar(x)
                 return bar.sum() + self.buf.sum()
 
-        exported = torch._export.export(Foo(), (torch.ones(5, 5),))
+        exported = export(Foo(), (torch.ones(5, 5),))
         stateful_gm = exported.module()
         export_return_val = stateful_gm(torch.ones(5, 5))
         eager = Foo()
@@ -1191,13 +1199,14 @@ class TestExport(TestCase):
         ):
             _ = exported(torch.ones(7, 5), 6.0)
 
+    @testing.expectedFailureNonStrict
     def test_runtime_assert_for_prm_str(self):
 
         def g(a, b, mode):
             return torch.div(a, b, rounding_mode=mode)
 
         inps = (torch.randn(4, 4), torch.randn(4), "trunc")
-        exported = torch._export.export(g, inps)
+        exported = export(g, inps)
         with self.assertRaisesRegex(RuntimeError, "is specialized to be trunc at"):
             _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported(*inps), g(*inps)))
@@ -1225,7 +1234,7 @@ class TestExport(TestCase):
                 self.bar.buf.add_(2)
                 return bar.sum() + self.buf.sum()
 
-        exported = torch._export.export(Foo(), (torch.ones(5, 5),))
+        exported = export(Foo(), (torch.ones(5, 5),))
         stateful_gm = exported.module()
         export_return_val = stateful_gm(torch.ones(5, 5))
         eager = Foo()
@@ -1291,6 +1300,7 @@ class TestExport(TestCase):
         with self.assertRaisesRegex(RuntimeError, "shape\[1\] is specialized at 5"):
             torch.export.export(exported_v2, (torch.randn(2, 2),))
 
+    @testing.expectedFailureNonStrict
     def test_retrace_graph_level_meta_preservation(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -1307,13 +1317,13 @@ class TestExport(TestCase):
         stateful_module = exported.module()
         self.assertTrue(len(stateful_module.meta["input_shape_constraints"]), 1)
 
-        re_exported = torch._export.export(stateful_module, (inp,), constraints=[dynamic_dim(inp, 0) > 5])
+        re_exported = export(stateful_module, (inp,), constraints=[dynamic_dim(inp, 0) > 5])
         self.assertTrue(len(re_exported.graph_module.meta["input_shape_constraints"]) == 1)
         self.assertTrue(
             torch.allclose(exported(torch.ones(7, 5)), re_exported(torch.ones(7, 5)))
         )
 
-        re_exported_v2 = torch._export.export(exported, (inp,))
+        re_exported_v2 = export(exported, (inp,))
         self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]) == 0)
         self.assertTrue(
             torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5)))
