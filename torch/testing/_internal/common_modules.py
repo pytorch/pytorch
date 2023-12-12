@@ -1498,7 +1498,7 @@ def module_inputs_torch_nn_BCEWithLogitsLoss(module_info, device, dtype, require
         ('scalar_weights', {'weight': make_weight(())})
     ]
 
-    def bce_withlogitsoss_reference_fn(m, p, i, t, reduction='mean', weight=None):
+    def bce_withlogitsloss_reference_fn(m, p, i, t, reduction='mean', weight=None):
         # TODO: add pos_weight to the definition here and corresponding SampleInputs
         max_val = (-i).clamp(min=0)
         result = (1 - t).mul_(i).add_(max_val).add_((-max_val).exp_().add_((-i - max_val).exp_()).log_())
@@ -1520,7 +1520,7 @@ def module_inputs_torch_nn_BCEWithLogitsLoss(module_info, device, dtype, require
                         forward_input=FunctionInput(make_input((15, 10), low=1e-2, high=1 - 1e-2),
                                                     make_target((15, 10)).gt(0).to(dtype)),
                         desc=desc,
-                        reference_fn=partial(bce_withlogitsoss_reference_fn, **constructor_kwargs))
+                        reference_fn=partial(bce_withlogitsloss_reference_fn, **constructor_kwargs))
         )
 
     return module_inputs
@@ -2208,6 +2208,14 @@ def module_inputs_torch_nn_MultiLabelMarginLoss(module_info, device, dtype, requ
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
                         forward_input=FunctionInput(make_input((10,)),
                                                     make_target((10), low=0, high=10)),
+                        desc=f'1d_{desc}',
+                        reference_fn=reference_fn)
+        )
+
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
+                        forward_input=FunctionInput(make_input((5, 10)),
+                                                    make_target((5, 10), low=0, high=10)),
                         desc=desc,
                         reference_fn=reference_fn)
         )
@@ -3789,8 +3797,7 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   # RuntimeError: derivative for aten::multilabel_margin_loss_backward
-                   # is not implemented for the MPS device
+                   # 'aten::multilabel_margin_loss_forward' is not currently implemented for the MPS device.
                    DecorateInfo(skipIfMps, 'TestModule'),
                    # derivative for aten::multilabel_margin_loss_backward is not implemented
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),)
@@ -3800,7 +3807,8 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # 'aten::multi_margin_loss' is not currently implemented for the MPS device.
+                   DecorateInfo(skipIfMps, 'TestModule'),
                    # RuntimeError: derivative for aten::multi_margin_loss_backward is not implemented
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),)
                ),

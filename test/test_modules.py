@@ -304,7 +304,7 @@ class TestModule(TestCase):
             return {name: self._traverse_obj(o, func) for name, o in obj.items()}
         elif isinstance(obj, (torch.Tensor, torch.nn.Parameter)):
             return func(obj)
-        elif isinstance(obj, (int, float, bool, complex, str)):
+        else:
             return obj
 
     def _retain_grad(self, obj):
