@@ -794,7 +794,11 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         # TODO: Support kwargs
-        (body_r, _), body_graph, body_lifted_freevars = speculate_subgraph(
+        (
+            (body_r, body_spec),
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
             tx,
             args[0],
             [
@@ -920,11 +924,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # with no_grad():  # This will not disable grad tracking inside of grad(f).
         #     grad_o = torch.func.grad(f)(x)
         # TODO: Support kwargs
-        (
-            (body_r, _),
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
+        (body_r, _), body_graph, body_lifted_freevars = speculate_subgraph(
             tx,
             func,
             args[3].items,
