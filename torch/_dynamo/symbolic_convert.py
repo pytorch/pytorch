@@ -2097,7 +2097,10 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def match_nested_cell(self, name, cell):
         """Match a cell in this method to one in a function we are inlining"""
-        value = cell.cell_contents
+        try:
+            value = cell.cell_contents
+        except ValueError:
+            return None
         # TODO(jansel): check the id of the cell rather than the contents
         if id(value) != self._freevars_ids.get(name):
             return None
