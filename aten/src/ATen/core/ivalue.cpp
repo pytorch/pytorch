@@ -985,6 +985,7 @@ void IValue::reportToTensorTypeError() const {
 }
 
 std::string ivalue::Object::name() const {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return type()->name()->qualifiedName();
 }
 

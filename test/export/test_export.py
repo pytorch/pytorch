@@ -8,10 +8,16 @@ from dataclasses import dataclass
 
 import torch
 import torch._dynamo as torchdynamo
-from functorch.experimental.control_flow import map, cond
+from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch.export import Constraint, Dim, export
-from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
+from torch.export import (
+    Constraint,
+    Dim,
+    dynamic_dim,
+    export,
+)
+from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch._export import capture_pre_autograd_graph
 from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
     get_buffer,
@@ -20,6 +26,8 @@ from torch._export.utils import (
     is_param,
     register_dataclass_as_pytree_node,
 )
+from torch._subclasses import FakeTensorMode
+from torch.export import Constraint, Dim, export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -29,8 +37,8 @@ from torch.utils._pytree import (
     tree_map,
     tree_unflatten,
     TreeSpec,
+    treespec_dumps,
     treespec_loads,
-    treespec_dumps
 )
 
 
@@ -111,6 +119,57 @@ class TestExport(TestCase):
 
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
+
+    # TODO: torch._dynamo.exc.Unsupported: call_function UserDefinedObjectVariable(add) [TensorVariable()] {}
+    @unittest.expectedFailure
+    def test_external_call_non_strict_real_tensor(self):
+        class ExternalMethod:
+            def add(self, x):
+                return x + x
+
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.external_add = ExternalMethod().add
+
+            def forward(self, x):
+                return self.external_add(x)
+
+        f = Basic()
+        args = (torch.randn(1, 3), )
+        ep = export(f, args, strict=False)
+        self.assertEqual(ep(*args), f(*args))
+
+    def test_basic_non_strict_real_tensor(self):
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(1, 3))
+
+            def forward(self, x, y):
+                return x[0] + y - self.param
+
+        f = Basic()
+        args = ([torch.randn(1, 3)], torch.randn(1, 3))
+        ep = export(f, args, strict=False)
+        self.assertEqual(ep(*args), f(*args))
+
+    def test_basic_non_strict_fake_tensor(self):
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3, 2))
+
+            def forward(self, x, y):
+                return x[0] + y - self.param
+
+        fake_mode = FakeTensorMode()
+        f = Basic()
+        with fake_mode:
+            args = ([torch.empty(3, 2)], torch.empty(3, 2))
+        ep = export(f, args, strict=False)
+        inputs = ([torch.randn(3, 2)], torch.randn(3, 2))
+        self.assertEqual(ep(*inputs), f(*inputs))
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         def fn_ddo(x):
@@ -976,7 +1035,7 @@ class TestExport(TestCase):
         b = torch.rand(1, 2)
         alpha = 10
 
-        exported = torch._export.export(func, (a, b, alpha))
+        exported = export(func, (a, b, alpha))
         for node in exported.graph_module.graph.nodes:
             if node.op == "placeholder":
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
@@ -1025,7 +1084,7 @@ class TestExport(TestCase):
                 self.buf.add_(1)
                 return x.sum() + self.buf.sum()
 
-        exported = torch._export.export(Foo(), (torch.ones(5, 5),))
+        exported = export(Foo(), (torch.ones(5, 5),))
         stateful_gm = exported.module()
         export_return_val = stateful_gm(torch.ones(5, 5))
         eager = Foo()
@@ -1065,7 +1124,7 @@ class TestExport(TestCase):
                 bar = self.bar(x)
                 return bar.sum() + self.buf.sum()
 
-        exported = torch._export.export(Foo(), (torch.ones(5, 5),))
+        exported = export(Foo(), (torch.ones(5, 5),))
         stateful_gm = exported.module()
         export_return_val = stateful_gm(torch.ones(5, 5))
         eager = Foo()
@@ -1116,7 +1175,7 @@ class TestExport(TestCase):
             return torch.div(a, b, rounding_mode=mode)
 
         inps = (torch.randn(4, 4), torch.randn(4), "trunc")
-        exported = torch._export.export(g, inps)
+        exported = export(g, inps)
         with self.assertRaisesRegex(RuntimeError, "is specialized to be trunc at"):
             _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported(*inps), g(*inps)))
@@ -1144,7 +1203,7 @@ class TestExport(TestCase):
                 self.bar.buf.add_(2)
                 return bar.sum() + self.buf.sum()
 
-        exported = torch._export.export(Foo(), (torch.ones(5, 5),))
+        exported = export(Foo(), (torch.ones(5, 5),))
         stateful_gm = exported.module()
         export_return_val = stateful_gm(torch.ones(5, 5))
         eager = Foo()
@@ -1226,13 +1285,13 @@ class TestExport(TestCase):
         stateful_module = exported.module()
         self.assertTrue(len(stateful_module.meta["input_shape_constraints"]), 1)
 
-        re_exported = torch._export.export(stateful_module, (inp,), constraints=[dynamic_dim(inp, 0) > 5])
+        re_exported = export(stateful_module, (inp,), constraints=[dynamic_dim(inp, 0) > 5])
         self.assertTrue(len(re_exported.graph_module.meta["input_shape_constraints"]) == 1)
         self.assertTrue(
             torch.allclose(exported(torch.ones(7, 5)), re_exported(torch.ones(7, 5)))
         )
 
-        re_exported_v2 = torch._export.export(exported, (inp,))
+        re_exported_v2 = export(exported, (inp,))
         self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]) == 0)
         self.assertTrue(
             torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5)))
@@ -1255,7 +1314,7 @@ class TestExport(TestCase):
     def test_constraint_directly_construct(self):
         with self.assertRaisesRegex(
             TypeError,
-            "torch.export.Constraint has no public constructor. Please use torch.export.dynamic_dim"
+            "Constraint has no public constructor. Please use torch.export.dynamic_dim"
         ):
             _ = Constraint()
 
@@ -1637,7 +1696,6 @@ def forward(self, l_x_):
             x = torch.rand(5, 2, 2)
             model = Model()
 
-        def check_device_and_fake_mode():
             exported_program = torch.export.export(model, (x,))
             export_res = exported_program(x)
             exp_res = model(x)
@@ -1645,8 +1703,9 @@ def forward(self, l_x_):
             self.assertTrue(export_res.size() == exp_res.size())
             self.assertTrue(all(val.device == x.device for val in all_meta_val))
             self.assertTrue(all(val.fake_mode is all_meta_val[0].fake_mode for val in all_meta_val))
-
-        check_device_and_fake_mode()
+            decomposed_ep = exported_program.run_decompositions()
+            export_res = decomposed_ep(x)
+            self.assertTrue(export_res.size() == exp_res.size())
 
     def test_export_with_fake_tensor_inputs_on_cuda_devices(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
@@ -1765,6 +1824,28 @@ def forward(self, l_x_):
         self.assertEqual(ep(*inputs_export), model(*inputs_model))
         self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
         self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
+
+    def test_check_specialized_int(self):
+        class SingleOp(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.op = torch.ops.aten.scatter_add
+
+            def forward(self, t, dim, index, src, **kwargs):
+                return self.op(t, dim, index, src, **kwargs)
+
+
+        t = torch.randn(10, 5)
+        dim = -1
+        index = torch.tensor([[2, 4, 3, 1, 0],[0, 2, 1, 4, 3],[3, 1, 4, 2, 0],[4, 0, 3, 1, 2],[3, 0, 4, 1, 2]])
+        src = torch.randn(5, 5)
+
+        model = SingleOp()
+        output = model(t, dim, index, src)
+
+        ep = torch.export.export(model, args=(t, dim, index, src))
+        ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
+        self.assertEqual(ep(t, dim, index, src), output)
 
 if __name__ == '__main__':
     run_tests()

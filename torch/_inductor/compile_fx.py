@@ -150,10 +150,7 @@ def _unlift_graph(mod, gm, graph_signature):
     for name, param in mod.named_buffers(remove_duplicate=False):
         state_dict[name] = param
 
-    from torch._export.exported_program import (
-        _construct_inp_pos_to_param_buffer_name,
-        _unlift,
-    )
+    from torch.export._unlift import _construct_inp_pos_to_param_buffer_name, _unlift
 
     inp_pos_to_param_buffer_name = _construct_inp_pos_to_param_buffer_name(
         gm,
@@ -878,7 +875,7 @@ def fw_compiler_freezing(
     # partition_fn won't be called
     joint_graph_passes(aot_autograd_model)
 
-    layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model)
+    layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
     if layout_opt:
         # make sure meta['val'] is properly setup
         fake_tensor_prop(aot_autograd_model, aot_example_inputs, True)

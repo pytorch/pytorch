@@ -446,7 +446,7 @@ struct TORCH_API Node {
     return callstack_;
   }
   void setCallStack(InlinedCallStackPtr cs) {
-    callstack_ = cs;
+    callstack_ = std::move(cs);
   }
 
   // NB: This returns an ArrayRef; that means that it will

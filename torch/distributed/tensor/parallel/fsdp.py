@@ -16,7 +16,7 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed._shard.sharding_spec import ShardMetadata
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
-from torch.distributed._tensor.device_mesh import _mesh_resources
+from torch.distributed.device_mesh import _mesh_resources
 
 from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
@@ -36,7 +36,7 @@ def _get_box(tensor: DTensor) -> Tuple[torch.Size, torch.Size]:
 
     placement = tensor.placements[0]
     offsets = [0] * len(tensor.size())
-    num_chunks = device_mesh.size(dim=0)
+    num_chunks = device_mesh.size(mesh_dim=0)
 
     if tensor.placements[0].is_shard():
         shard_dim = cast(DShard, placement).dim
@@ -112,7 +112,7 @@ def _create_sharded_tensor_md_from_dt(
 def _get_dt_pg(dt: DTensor) -> c10d.ProcessGroup:
     mesh = dt.device_mesh
     assert mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
-    dim_groups = mesh.get_dim_groups()
+    dim_groups = mesh.get_group()
     assert isinstance(dim_groups, list)
     return dim_groups[0]
 

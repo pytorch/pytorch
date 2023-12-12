@@ -19,7 +19,7 @@ import torch.export.exported_program as ep
 from torch._export.verifier import load_verifier
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
-from torch.utils._pytree import tree_map_only, treespec_dumps, treespec_loads
+from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .schema import (  # type: ignore[attr-defined]
@@ -225,15 +225,6 @@ def serialize_torch_artifact(artifact) -> bytes:
     # on the designated device.
     # For now, we simply move the tensor to cpu before saving.
     # TODO: this should be fixed by deserialization instead.
-
-    def _tensor_to_cpu(t: torch.Tensor):
-        if t.is_meta:
-            return t
-        elif isinstance(t, torch.nn.Parameter):
-            return torch.nn.Parameter(t.cpu())
-        else:
-            return t.cpu()
-    artifact = tree_map_only(torch.Tensor, _tensor_to_cpu, artifact)
     torch.save(artifact, buffer)
     return buffer.getvalue()
 
@@ -951,6 +942,10 @@ class ExportedProgramSerializer:
             self.opset_version["aten"] = torch._C._get_max_operator_version()
 
     def serialize(self, exported_program: ep.ExportedProgram) -> SerializedArtifact:
+        """
+        Args:
+            exported_program: Exported Program to serialize
+        """
         gm_serializer = GraphModuleSerializer(
             exported_program.graph_signature,
             exported_program.module_call_graph
