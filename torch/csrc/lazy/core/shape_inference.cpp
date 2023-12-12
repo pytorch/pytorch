@@ -62,11 +62,10 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorConversions.h>
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/api/include/torch/enum.h>
+#include <torch/csrc/lazy/core/dynamic_ir.h>
 #include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/util.h>
-#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 #include <ostream>
 #include <vector>
 
@@ -160,7 +159,7 @@ TORCH_API std::vector<Shape> compute_shape_arange_out(
   // From torch.arange docs:
   // dtype (torch.dtype, optional) – the desired data type of returned tensor.
   // Default: if None, uses a global default (see
-  // torch.set_default_tensor_type()). If dtype is not given, infer the data
+  // torch.set_default_dtype()). If dtype is not given, infer the data
   // type from the other input arguments. If any of start, end, or stop are
   // floating-point, the dtype is inferred to be the default dtype, see
   // get_default_dtype(). Otherwise, the dtype is inferred to be torch.int64.

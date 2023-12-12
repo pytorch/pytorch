@@ -30,7 +30,7 @@ from torch.utils._traceback import report_compile_source_on_error, format_traceb
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS
+from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS  # type: ignore[attr-defined]
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -842,14 +842,14 @@ class TestExtensionUtils(TestCase):
         self.assertEqual(custom_backend_name, 'foo')
 
         with self.assertRaises(AttributeError):
-            torch.foo.is_available()
+            torch.foo.is_available()  # type: ignore[attr-defined]
 
         with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
             with torch.autocast(device_type=custom_backend_name):
                 pass
         torch._register_device_module('foo', DummyXPUModule)
 
-        torch.foo.is_available()
+        torch.foo.is_available()  # type: ignore[attr-defined]
         with torch.autocast(device_type=custom_backend_name):
             pass
 

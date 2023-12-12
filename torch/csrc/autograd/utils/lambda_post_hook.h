@@ -28,7 +28,7 @@ class LambdaPostHook : public torch::autograd::FunctionPostHook {
     return fn_(outputs, inputs);
   }
 
-  void compiled_args(CompiledNodeArgs& args) {
+  void compiled_args(CompiledNodeArgs& args) override {
     TORCH_CHECK(
         compiled_fn_ != nullptr,
         "LambdaPostHook compiled_fn_ is not defined. Either disable "

@@ -444,25 +444,16 @@ class TorchVariable(VariableTracker):
                 unimplemented("torch.from_numpy. config.trace_numpy is False")
             if not np:
                 unimplemented("torch.from_numpy. NumPy is not available")
-            assert len(args) == 1, f"Got arguments {args}"
-            assert not kwargs
-            t = args[0]
-            from .tensor import NumpyNdarrayVariable
-
-            if isinstance(t, NumpyNdarrayVariable):
-                # TODO: mark the tensor as non-resizable
-                return wrap_fx_proxy_cls(
-                    target_cls=TensorVariable,
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        torch.detach,
-                        *proxy_args_kwargs(args, {}),
-                    ),
-                    example_value=None,
-                )
-            else:
-                unimplemented(f"torch.from_numpy(<{type(t)}>)")
+            return wrap_fx_proxy_cls(
+                target_cls=TensorVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.as_tensor,
+                    *proxy_args_kwargs(args, {}),
+                ),
+                example_value=None,
+            )
         elif can_dispatch_torch_function(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
         elif self.value is torch.autograd._profiler_enabled:
@@ -549,6 +540,18 @@ class TorchVariable(VariableTracker):
                 tx, [result, kwargs["value"]], {}
             )
             return TorchVariable(torch.add).call_function(tx, [args[0], result], {})
+        elif (
+            self.value is torch._assert
+            and len(args) >= 1
+            and (
+                (args[0].is_python_constant() and args[0].as_python_constant())
+                or (
+                    isinstance(args[0], variables.SymNodeVariable)
+                    and args[0].evaluate_expr()
+                )
+            )
+        ):
+            return ConstantVariable(None)
         elif is_constant_pg_functions(self.value):
             # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
             # ID_MATCH based on how it was constructed.
@@ -688,6 +691,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
             )
 
+            if (
+                isinstance(tensor_variable, TensorVariable)
+                and "requires_grad" in kwargs
+                and kwargs["requires_grad"].as_python_constant()
+            ):
+                unimplemented(
+                    """factory functions that return tensors that require grad are not supported.
+Either create the tensor outside the compiled region, or do not set the tensor to require_grad"""
+                )
+
             if "out" in kwargs and not (
                 isinstance(kwargs["out"], variables.ConstantVariable)
                 and kwargs["out"].as_python_constant() is None
@@ -713,6 +726,15 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
                         unimplemented("out variants with resizing on graph inputs")
+                    assert "example_value" in kwargs["out"].proxy.node.meta
+                    if not torch._prims_common.is_contiguous(
+                        kwargs["out"].proxy.node.meta["example_value"]
+                    ):
+                        # It's difficult to handle strides correctly in functionalization
+                        # when calling an out= op with a non-contiguous out argument
+                        unimplemented(
+                            "out= op was called where output tensor was non-contiguous"
+                        )
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable

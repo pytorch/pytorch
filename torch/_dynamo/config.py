@@ -15,7 +15,8 @@ from . import external_utils
 # or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
 # see this design doc for more detailed info
 # Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
-# the name of a file to write the logs to
+# the name of a file to write the logs to (currently unused)
+# TODO(jon-chuang): use setup_log_file in setup_compile_debug
 # [@compile_ignored: debug]
 log_file_name = None
 
@@ -328,7 +329,10 @@ only_allow_pt2_compliant_ops = False
 capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
-capture_func_transforms = True
+capture_func_transforms = False
+
+# If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
+log_compilation_metrics = True
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
@@ -352,7 +356,7 @@ _autograd_backward_strict_mode_banned_ops.extend(
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
 
 if TYPE_CHECKING:
-    from .config_typing import *  # noqa: F401, F403
+    from torch.utils._config_typing import *  # noqa: F401, F403
 
 from torch.utils._config_module import install_config_module
 
