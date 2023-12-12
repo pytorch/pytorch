@@ -71,6 +71,8 @@ static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
+constexpr const char* TIMEOUT_DUMP = "timeout_dump";
+
 constexpr auto kProcessGroupNCCLDefaultTimeout =
     std::chrono::milliseconds(10 * 60 * 1000);
 
@@ -832,6 +834,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Vector to Store WorkNCCL pointers
   std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;
+
+  std::chrono::time_point<std::chrono::steady_clock> lastWorkListUpdateTime_;
 
   // Mutex to Guard workMetaList_
   std::mutex completedWorkListMutex_;
