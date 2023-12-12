@@ -3,7 +3,7 @@ from typing import Any, List, Optional, Union
 
 from torch.testing._internal.inputgen.variable.constants import INT64_MAX, INT64_MIN
 from torch.testing._internal.inputgen.variable.type import (
-    check_vtype,
+    invalid_vtype,
     is_integer,
     ScalarDtype,
     SUPPORTED_TENSOR_DTYPES,
@@ -209,7 +209,8 @@ class VariableSpace:
         return False
 
     def contains(self, v) -> bool:
-        check_vtype(self.vtype, v)
+        if invalid_vtype(self.vtype, v):
+            raise TypeError("Variable type mismatch")
         if self.discrete.initialized:
             return self.discrete.contains(v)
         elif self.vtype == int:
@@ -221,7 +222,8 @@ class VariableSpace:
         return True
 
     def remove(self, v) -> None:
-        check_vtype(self.vtype, v)
+        if invalid_vtype(self.vtype, v):
+            raise TypeError("Variable type mismatch")
         if self.discrete.initialized:
             self.discrete.remove(v)
         elif self.vtype == int:
