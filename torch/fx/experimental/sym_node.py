@@ -1002,9 +1002,16 @@ def _make_node_magic(method, func):
             if self.hint is not None:
                 out_hint = op(self.hint, ndigits)
 
-            fx_node, _ = self.shape_env.create_fx_call_function(
-                op, (self.fx_node, ndigits)
-            )
+            # Internally, None is used as sentinel to indicate that a something is not a node on an FX graph. At the
+            # same time, there is no way to wrap a plain None into an FX node. Thus, there is no way to pass None here
+            # without triggering some asserts that check whether we are mixing FX nodes with untracked arguments. The
+            # hack down below works, because all round function down the line all take ndigits=None as default in their
+            # signature.
+            # TODO: Remove the args construction below if a different sentinel is used by FX.
+            args = [self.fx_node]
+            if ndigits is not None:
+                args.append(ndigits)
+            fx_node, _ = self.shape_env.create_fx_call_function(op, tuple(args))
             return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
         setattr(SymNode, f"_{method_attr}", round_impl)
