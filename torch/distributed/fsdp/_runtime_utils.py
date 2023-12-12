@@ -1377,7 +1377,7 @@ def _register_pre_backward_hooks(
     # Extract the tensors that require gradient to register the any hook
     tensors: List[torch.Tensor] = []
     _apply_to_tensors(functools.partial(_record_tensor, tensors), outputs)
-    if tensors:
+    if tensors and handle:
         handle._needs_pre_backward_unshard = True
     hook = functools.partial(_pre_backward_hook, state, module, handle)
     torch.autograd.graph._register_any_hook(tensors, hook)
