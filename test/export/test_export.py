@@ -10,7 +10,14 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
+from torch.export import (
+    Constraint,
+    Dim,
+    dynamic_dim,
+    export,
+)
+from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch._export import capture_pre_autograd_graph
 from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
     get_buffer,
@@ -112,6 +119,24 @@ class TestExport(TestCase):
 
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
+
+    def test_external_call_non_strict_real_tensor(self):
+        class ExternalMethod:
+            def add(self, x):
+                return x + x
+
+        class Basic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.external_add = ExternalMethod().add
+
+            def forward(self, x):
+                return self.external_add(x)
+
+        f = Basic()
+        args = (torch.randn(1, 3), )
+        ep = export(f, args, strict=False)
+        self.assertEqual(ep(*args), f(*args))
 
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
@@ -1008,7 +1033,7 @@ class TestExport(TestCase):
         b = torch.rand(1, 2)
         alpha = 10
 
-        exported = torch._export.export(func, (a, b, alpha))
+        exported = export(func, (a, b, alpha))
         for node in exported.graph_module.graph.nodes:
             if node.op == "placeholder":
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
@@ -1057,7 +1082,7 @@ class TestExport(TestCase):
                 self.buf.add_(1)
                 return x.sum() + self.buf.sum()
 
-        exported = torch._export.export(Foo(), (torch.ones(5, 5),))
+        exported = export(Foo(), (torch.ones(5, 5),))
         stateful_gm = exported.module()
         export_return_val = stateful_gm(torch.ones(5, 5))
         eager = Foo()
@@ -1097,7 +1122,7 @@ class TestExport(TestCase):
                 bar = self.bar(x)
                 return bar.sum() + self.buf.sum()
 
-        exported = torch._export.export(Foo(), (torch.ones(5, 5),))
+        exported = export(Foo(), (torch.ones(5, 5),))
         stateful_gm = exported.module()
         export_return_val = stateful_gm(torch.ones(5, 5))
         eager = Foo()
@@ -1148,7 +1173,7 @@ class TestExport(TestCase):
             return torch.div(a, b, rounding_mode=mode)
 
         inps = (torch.randn(4, 4), torch.randn(4), "trunc")
-        exported = torch._export.export(g, inps)
+        exported = export(g, inps)
         with self.assertRaisesRegex(RuntimeError, "is specialized to be trunc at"):
             _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported(*inps), g(*inps)))
@@ -1176,7 +1201,7 @@ class TestExport(TestCase):
                 self.bar.buf.add_(2)
                 return bar.sum() + self.buf.sum()
 
-        exported = torch._export.export(Foo(), (torch.ones(5, 5),))
+        exported = export(Foo(), (torch.ones(5, 5),))
         stateful_gm = exported.module()
         export_return_val = stateful_gm(torch.ones(5, 5))
         eager = Foo()
@@ -1258,13 +1283,13 @@ class TestExport(TestCase):
         stateful_module = exported.module()
         self.assertTrue(len(stateful_module.meta["input_shape_constraints"]), 1)
 
-        re_exported = torch._export.export(stateful_module, (inp,), constraints=[dynamic_dim(inp, 0) > 5])
+        re_exported = export(stateful_module, (inp,), constraints=[dynamic_dim(inp, 0) > 5])
         self.assertTrue(len(re_exported.graph_module.meta["input_shape_constraints"]) == 1)
         self.assertTrue(
             torch.allclose(exported(torch.ones(7, 5)), re_exported(torch.ones(7, 5)))
         )
 
-        re_exported_v2 = torch._export.export(exported, (inp,))
+        re_exported_v2 = export(exported, (inp,))
         self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]) == 0)
         self.assertTrue(
             torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5)))
@@ -1287,7 +1312,7 @@ class TestExport(TestCase):
     def test_constraint_directly_construct(self):
         with self.assertRaisesRegex(
             TypeError,
-            "torch.export.Constraint has no public constructor. Please use torch.export.dynamic_dim"
+            "Constraint has no public constructor. Please use torch.export.dynamic_dim"
         ):
             _ = Constraint()
 
@@ -1535,6 +1560,32 @@ def forward(self, l_x_):
         with self.assertRaisesRegex(RuntimeError, "shape\[0\] is specialized at 4"):
             ep_v2(*test_inp)
 
+    def test_constant_output(self):
+        class ModuleConstant(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.b = torch.randn(3, 2)
+
+            def forward(self):
+                return self.b
+
+        class ModuleNestedConstant(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bff = torch.randn(3, 2)
+
+            def forward(self, x, y):
+                return {"prediction": (x + y, self.bff)}
+
+        mod = ModuleConstant()
+        ep = torch.export.export(mod, ())
+        self.assertEqual(ep(), mod())
+
+        args = (torch.randn(3, 2), torch.randn(3, 2))
+        mod = ModuleNestedConstant()
+        ep = torch.export.export(mod, args)
+        self.assertEqual(ep(*args), mod(*args))
+
     def test_non_arg_name_dynamic_shapes_api_with_kwarg(self):
         def foo(a, b, kw1, kw2):
             return a.sum() + b.sum() + kw1.sum() - kw2.sum()
@@ -1761,6 +1812,28 @@ def forward(self, l_x_):
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 
+    def test_export_mkldnn_disabled(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(input_size=4, hidden_size=5, num_layers=1)
+
+            def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+                return self.lstm(inputs)
+
+        inp = (torch.ones(3, 4),)
+        torch._C._set_mkldnn_enabled(False)
+        ep = torch.export.export(M(), inp)
+        FileCheck().check_count(
+            "torch.ops.aten.mkldnn_rnn_layer.default", 0, exactly=True
+        ).run(ep.graph_module.code)
+
+        torch._C._set_mkldnn_enabled(True)
+        ep = torch.export.export(M(), inp)
+        FileCheck().check_count(
+            "torch.ops.aten.mkldnn_rnn_layer.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+
     def test_export_input_mutation_static_shape(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x, y):
@@ -1797,6 +1870,28 @@ def forward(self, l_x_):
         self.assertEqual(ep(*inputs_export), model(*inputs_model))
         self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
         self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
+
+    def test_check_specialized_int(self):
+        class SingleOp(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.op = torch.ops.aten.scatter_add
+
+            def forward(self, t, dim, index, src, **kwargs):
+                return self.op(t, dim, index, src, **kwargs)
+
+
+        t = torch.randn(10, 5)
+        dim = -1
+        index = torch.tensor([[2, 4, 3, 1, 0],[0, 2, 1, 4, 3],[3, 1, 4, 2, 0],[4, 0, 3, 1, 2],[3, 0, 4, 1, 2]])
+        src = torch.randn(5, 5)
+
+        model = SingleOp()
+        output = model(t, dim, index, src)
+
+        ep = torch.export.export(model, args=(t, dim, index, src))
+        ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
+        self.assertEqual(ep(t, dim, index, src), output)
 
 if __name__ == '__main__':
     run_tests()
