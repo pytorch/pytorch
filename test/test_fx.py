@@ -273,6 +273,21 @@ class TestFX(JitTestCase):
         t = T()
         self.checkGraphModule(t, (torch.rand(1), torch.rand(1)), {'foo': torch.rand(1)})
 
+    def test_varargs_concrete(self):
+        class T(torch.nn.Module):
+            def forward(self, *args, **kwargs):
+                x = args[0] + args[1]
+                return x
+
+        args = (torch.rand(1), torch.rand(1))
+
+        t = T()
+        ref_outs = t(*args)
+        gm = symbolic_trace(t, concrete_args=(torch.fx.PH, torch.fx.PH))
+        gm.graph.lint()
+        test_outs = gm(*args)
+        self.assertEqual(ref_outs, test_outs)
+
     def test_args_kwargs_no_self(self):
         class T(torch.nn.Module):
             def forward(*args, **kwargs):  # noqa: B902

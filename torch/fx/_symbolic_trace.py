@@ -657,6 +657,19 @@ class Tracer(TracerBase):
                 type_expr=fn_for_analysis.__annotations__.get(name, None)
             )
 
+        # This covers the very specific case where we are passing in flat
+        # concrete_args as a tuple, but our traced fn takes (*args, **kwargs).
+        # In this case, just take the concrete_args and pass them through.
+        name_idx = 0
+        if isinstance(concrete_args, tuple) and \
+                len(concrete_args) > 0 and \
+                (co.co_flags & HAS_VARSTUFF) and \
+                total_args == 1:
+            for _ in concrete_args:
+                args.append(self.create_proxy("placeholder", f"input_{name_idx}", (), {}))
+                name_idx += 1
+            return root_fn, args
+
         arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
         if isinstance(concrete_args, tuple):
             if len(arg_names) != len(concrete_args):
