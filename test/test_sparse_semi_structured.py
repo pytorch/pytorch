@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import (
 
 from torch.utils._triton import has_triton
 
-
+CUSPARSELT_NUM_ALG_IDS = 4
 SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG.keys()
 SEMI_STRUCTURED_SUPPORTED_BACKENDS = []
 
@@ -187,6 +187,87 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         for dense_input_shape in [(1, 128), (64, 128), (128, 128), (64, 128, 128)]:
             SparseSemiStructuredTensorCompileTest._test_mlp_contiguous_relu_compile("cutlass", dense_input_shape)
 
+
+class TestCUSPARSELT(TestCase):
+    """
+    This contains cuSPARSELt specific tests.
+    """
+    def setUp(self):
+        if not _IS_SM8X:
+            self.skipTest('Only runs on SM80')
+        if "cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
+            self.skipTest('cuSPARSELt not enabled')
+
+
+    @parametrize("dense_input_shape", [(128, 128)])
+    def test_cslt_sparse_mm_int8_in_fp16_out(self, dense_input_shape, device):
+        A = rand_sparse_semi_structured_mask(128, 128, dtype=torch.int8)
+        A_compressed = torch._cslt_compress(A)
+
+        B = torch.rand(dense_input_shape, device=device).to(torch.int8)
+
+        dense_result = torch.mm(A.cpu().to(torch.int64), B.t().cpu().to(torch.int64)).to(device, dtype=torch.float16)
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), out_dtype=torch.float16)
+        assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_cslt_sparse_mm_alpha(self, dtype, device):
+        A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(dtype).cuda()
+        B = torch.ones((256, 128), device=device).to(dtype)
+        alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
+
+        A_compressed = torch._cslt_compress(A)
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B, alpha=alpha)
+
+        alpha_scaled = torch.stack([alpha] * 128).t()
+        dense_result = alpha_scaled * torch.mm(A.to(torch.float32), B.to(torch.float32))
+        dense_result = dense_result.to(dtype)
+
+        assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
+
+    def test_cslt_sparse_mm_alpha_int8_in_f16_out(self, device):
+        A = torch.Tensor([0, 0, 10, 10]).tile((128, 64)).to(torch.int8).cuda()
+        B = torch.ones((128, 256), device=device).to(torch.int8).t()
+        alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
+
+        A_compressed = torch._cslt_compress(A)
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B, alpha=alpha, out_dtype=torch.float16).cpu()
+
+        alpha_scaled = torch.stack([alpha] * 128).t()
+        dense_result = alpha_scaled.cpu() * torch.mm(A.to(torch.int32).cpu(), B.to(torch.int32).cpu())
+        dense_result = dense_result.to(torch.float16)
+
+        assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
+
+    @parametrize("alg_id", range(CUSPARSELT_NUM_ALG_IDS))
+    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    def test_cslt_sparse_mm_alg_id(self, device, dtype, alg_id):
+        A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
+        A_compressed = torch._cslt_compress(A)
+        B = torch.ones((128, 128), device=device).to(dtype)
+
+        A_compressed = torch._cslt_compress(A)
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), alg_id=alg_id)
+
+        dense_result = torch.mm(A.to(torch.float32), B.to(torch.float32))
+        dense_result = dense_result.to(dtype)
+
+        assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
+
+    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    def test_cslt_sparse_mm_search(self, device, dtype):
+        A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
+        A_compressed = torch._cslt_compress(A)
+        B = torch.ones((128, 128), device=device).to(dtype)
+
+        A_compressed = torch._cslt_compress(A)
+        alg_id = torch._cslt_sparse_mm_search(A_compressed, B.t())
+        # for cuSPARSELt v0.4.0 there is a bug where although there are 5 alg_ids, we run into an error
+        # when setting using the last one (4)
+        # in cuSPARSELt v0.5.0 there are only 4 alg_ids total, so we should remove the +1 here when we update.
+        assert alg_id in range(CUSPARSELT_NUM_ALG_IDS + 1)
+
+
 class TestSparseSemiStructured(TestCase):
 
     def setUp(self):
@@ -337,53 +418,6 @@ class TestSparseSemiStructured(TestCase):
             r"arg1: SparseSemiStructuredTensor\(.*transposed=False",
         ):
             sparse_result = torch.mm(A, B_sparse)
-
-    @parametrize("dense_input_shape", [(128, 128)])
-    @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cuSPARSELT is not enabled")
-    def test_cslt_sparse_mm_int8_in_fp16_out(self, dense_input_shape, device):
-        SparseSemiStructuredTensor._FORCE_CUTLASS = False
-        A = rand_sparse_semi_structured_mask(128, 128, dtype=torch.int8)
-        A_sparse = to_sparse_semi_structured(A)
-
-        B = torch.rand(dense_input_shape, device=A_sparse.device).to(torch.int8)
-
-        dense_result = torch.mm(A.cpu().to(torch.int64), B.t().cpu().to(torch.int64)).to(device, dtype=torch.float16)
-        sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.float16)
-        assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
-
-    @dtypes(torch.float16, torch.bfloat16)
-    @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cuSPARSELT is not enabled")
-    def test_cslt_sparse_mm_alpha(self, dtype, device):
-        A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(dtype).cuda()
-        B = torch.ones((256, 128), device=device).to(dtype)
-        alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
-
-        A_compressed = torch._cslt_compress(A)
-        sparse_result = torch._cslt_sparse_mm(A_compressed, B, alpha=alpha)
-
-        alpha_scaled = torch.stack([alpha] * 128).t()
-        dense_result = alpha_scaled * torch.mm(A.to(torch.float32), B.to(torch.float32))
-        dense_result = dense_result.to(dtype)
-
-        assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
-
-    @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cuSPARSELT is not enabled")
-    def test_cslt_sparse_mm_alpha_int8_in_f16_out(self, device):
-        torch.set_printoptions(edgeitems=8)
-        A = torch.Tensor([0, 0, 10, 10]).tile((128, 64)).to(torch.int8).cuda()
-        B = torch.ones((128, 256), device=device).to(torch.int8).t()
-        alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
-
-        A_compressed = torch._cslt_compress(A)
-        sparse_result = torch._cslt_sparse_mm(A_compressed, B, alpha=alpha, out_dtype=torch.float16).cpu()
-
-
-        alpha_scaled = torch.stack([alpha] * 128).t()
-        dense_result = alpha_scaled.cpu() * torch.mm(A.to(torch.int32).cpu(), B.to(torch.int32).cpu())
-        dense_result = dense_result.to(torch.float16)
-
-
-        assert torch.allclose(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
     @parametrize("dense_input_shape", [(1, 128), (64, 128), (128, 128), (64, 128, 128)])
     @parametrize("inference_mode", [subtest(True), subtest(False)])
@@ -580,6 +614,7 @@ class TestSparseSemiStructured(TestCase):
 
 
 instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
+instantiate_device_type_tests(TestCUSPARSELT, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
