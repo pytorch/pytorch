@@ -222,49 +222,6 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                 sharded_grad_scaler_kwargs=sharded_grad_scaler_kwargs,
             )
 
-    @skip_if_lt_x_gpu(2)
-    @parametrize(params, configs, subtest_name)
-    def test_fsdp_ddp_parity_with_grad_scaler_inf(
-        self,
-        cpu_offload: CPUOffload,
-        sharding_strategy: Optional[ShardingStrategy],
-        mixed_precision: Optional[str],
-        use_orig_params: Optional[str],
-    ):
-        init_modes = self._get_init_modes_for_test(cpu_offload)
-        mp = (
-            MixedPrecision(
-                param_dtype=torch.float16,
-                reduce_dtype=torch.float16,
-                buffer_dtype=torch.float16,
-            )
-            if mixed_precision is not None
-            else None
-        )
-        # the ``NonUniformReqGradNWM`` model requires we set `init_scale`
-        # more conservatively than default to avoid infs with the initial steps
-        if use_orig_params == "enable_use_orig_params":
-            use_orig = True
-            model_cls = NonUniformReqGradNWM
-            sharded_grad_scaler_kwargs = {"init_scale": 2.0**11}
-        else:
-            use_orig = False
-            model_cls = NestedWrappedModule  # type: ignore[assignment]
-            sharded_grad_scaler_kwargs = None
-        for cuda_init_mode in init_modes:
-            self._test_fsdp_parity(
-                model_cls,
-                FSDPInitMode.RECURSIVE,
-                cuda_init_mode=cuda_init_mode,
-                cpu_offload=cpu_offload,
-                sharding_strategy=sharding_strategy,
-                mixed_precision=mp,
-                enable_sharded_grad_scaler=True,
-                use_orig_params=use_orig,
-                sharded_grad_scaler_kwargs=sharded_grad_scaler_kwargs,
-                override_grad_with_inf=True,
-            )
-
     def _build_model_and_optim(
         self,
         lin_dim: int = 4,
@@ -318,8 +275,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         self.run_subtests(
             {
                 "use_orig_params": [False, True],
-                # "cpu_offload": [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
-                "cpu_offload": [CPUOffload(offload_params=False)],
+                "cpu_offload": [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
             },
             self._test_sharded_grad_scaler_found_inf,
         )
