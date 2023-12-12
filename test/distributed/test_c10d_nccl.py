@@ -1197,6 +1197,26 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         with self.assertRaises(dist.DistBackendError):
             pg.allreduce([t])
 
+    @requires_nccl()
+    def test_close_pg_tcpstore(self):
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        os.environ["TORCH_NCCL_ENABLE_MONITORING"] = "0"
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "1"
+        os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "0"
+        with tempfile.NamedTemporaryFile() as f:
+            store = dist.FileStore(f.name, self.world_size)
+            dist.init_process_group(
+                backend="nccl",
+                rank=self.rank,
+                world_size=self.world_size,
+                store=store
+            )
+            pg = dist.distributed_c10d._get_default_group()
+            self.assertEqual(pg.rank(), self.rank)
+            self.assertEqual(pg.size(), self.world_size)
+            time.sleep(2)
+            dist.destroy_process_group()
+
     def _check_nccl_timeout(self, expected_timeout):
         pg = dist.distributed_c10d._get_default_group()
         options = pg._get_backend(torch.device(f"cuda:{self.rank}")).options
