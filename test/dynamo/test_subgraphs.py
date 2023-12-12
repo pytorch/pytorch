@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import unittest
 from unittest.mock import patch
 
 import torch
@@ -493,7 +492,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self._common(fn, 2, 9)
         torch._dynamo.reset()
         with torch.no_grad():
-            self._common(fn, 2, 9)
+            self._common(fn, 2, 5)
 
     def test_resume_with_no_grad2(self):
         def fn(a, b):
@@ -522,7 +521,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 4
             return x
 
-        self._common(fn, 2, 19)
+        self._common(fn, 2, 11)
 
     def test_resume_tuple_iterator(self):
         def fn(a, b):
@@ -565,7 +564,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 6)
 
-    @unittest.skip("not working yet")
     def test_tuple_iterator_mutate(self):
         def fn(x, it):
             x = x + next(it)

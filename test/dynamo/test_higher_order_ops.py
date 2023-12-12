@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import enum
 import functools
 import pprint
 import re
@@ -114,6 +115,8 @@ def default_args_generator(seed_value):
                 new_val = val + 1 * i
             elif isinstance(val, float):
                 new_val = val + 0.1 * i
+            elif isinstance(val, enum.Enum):
+                new_val = val
             else:
                 raise AssertionError("unexpected arg type")
 
@@ -205,6 +208,22 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         self._test_wrap_simple(f, default_args_generator((x,)), 2)
+
+    def test_enum_arg(self):
+        class SomeEnum(enum.Enum):
+            A = 0
+            B = 1
+
+        def g(x, val):
+            if val == SomeEnum.A:
+                return torch.sin(x)
+            return torch.cos(x)
+
+        def f(x, val):
+            return wrap(g, x, val)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(f, default_args_generator((x, SomeEnum.A)), 2)
 
     def test_return_captured_var(self):
         freevar = torch.randn(3)
@@ -407,7 +426,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.tensor(1.2)
         y = MyClass(torch.tensor(3.4))
-        self._assert_wrap_fallback(f, (x, y))
+        self._test_wrap_simple(f, [(x, y)], 3)
 
     def test_capture_constants(self):
         x = torch.randn(3, 3)
@@ -1112,7 +1131,25 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         result = f(x)
         self.assertEqual(result, (x.sin(), x.sin()))
-        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_map_pytree_return(self):
+        cnt = CompileCounter()
+
+        def _construct_pytree(a):
+            return (a, [[[a]]], a, (a, (a,), a), {"a": a})
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            def inner_f(xs):
+                return _construct_pytree(xs)
+
+            return control_flow.map(inner_f, x)
+
+        x = torch.randn(3)
+        result = f(x)
+        self.assertEqual(result, _construct_pytree(x))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_map_kwargs(self):
         cnt = CompileCounter()
@@ -1144,7 +1181,10 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(ref, res)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdynstaticdefault(2, 3))
+
+        # We increase the number of ops to 3 and 4 for top-level graph because of an additional
+        # get_item call created by the flatten/unflatten logic in HOP speculation.
+        self.assertEqual(cnt.op_count, ifdynstaticdefault(3, 4))
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
@@ -1263,10 +1303,8 @@ class GraphModule(torch.nn.Module):
                 and node.target == torch.ops.higher_order.cond
             ):
                 _, _, _, operands = node.args
-                # Each branch takes 4 inputs (x, z, buffer_true_branch, buffer_false_branch)
-                # TODO: we should be able to de-duplicate the buffer accessed from two branches so that
-                # operands become (x, z, buffer)
-                self.assertEqual(len(operands), 4)
+                # Each branch takes 3 inputs (buffer, x, z)
+                self.assertEqual(len(operands), 3)
             if node.op == "get_attr":
                 if str(node.target) in ("cond_true_0, cond_false_0"):
                     num_placeholders = len(
@@ -1278,7 +1316,7 @@ class GraphModule(torch.nn.Module):
                             if node.op == "placeholder"
                         ]
                     )
-                    self.assertEqual(num_placeholders, 4)
+                    self.assertEqual(num_placeholders, 3)
 
     def _check_cond_graph_and_extract(self, fn, args):
         backend = EagerAndRecordGraphs()
@@ -1321,7 +1359,8 @@ def forward(self, L_x_ : torch.Tensor):
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [l_x_]);  gt = cond_true_0 = cond_false_0 = l_x_ = None
-    return (cond,)""",
+    getitem = cond[0];  cond = None
+    return (getitem,)""",
             )
             self.assertExpectedInline(
                 true_graph,
@@ -1329,7 +1368,7 @@ def forward(self, L_x_ : torch.Tensor):
 def forward(self, l_x_):
     l_x__1 = l_x_
     sin = torch.sin(l_x__1);  l_x__1 = None
-    return sin""",
+    return (sin,)""",
             )
             self.assertExpectedInline(
                 false_graph,
@@ -1337,7 +1376,7 @@ def forward(self, l_x_):
 def forward(self, l_x_):
     l_x__1 = l_x_
     cos = torch.cos(l_x__1);  l_x__1 = None
-    return cos""",
+    return (cos,)""",
             )
 
     def test_cond_branches_no_arguments_no_closure(self):
@@ -1364,14 +1403,15 @@ def forward(self, L_x_ : torch.Tensor):
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, []);  gt = cond_true_0 = cond_false_0 = None
-    return (cond,)""",
+    getitem = cond[0];  cond = None
+    return (getitem,)""",
             )
             self.assertExpectedInline(
                 true_graph,
                 """\
 def forward(self):
     ones = torch.ones(3, 4)
-    return ones""",
+    return (ones,)""",
             )
             self.assertExpectedInline(
                 false_graph,
@@ -1379,7 +1419,7 @@ def forward(self):
 def forward(self):
     ones = torch.ones(3, 4)
     sin = ones.sin();  ones = None
-    return sin""",
+    return (sin,)""",
             )
 
     def test_cond_side_effect_in_one_branches(self):
@@ -2078,6 +2118,7 @@ class GraphModule(torch.nn.Module):
             """{'add': ['map', 'map', 'add'], 'cos': ['map', 'cos'], 'sin': ['sin']}""",
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_source_fn_stack(self):
         backend = EagerAndRecordGraphs()
 
@@ -2100,6 +2141,7 @@ class GraphModule(torch.nn.Module):
  'sum_1': ['grad_impl', 'grad_impl', 'sum_1']}""",
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_source_fn_stack(self):
         backend = EagerAndRecordGraphs()
 
@@ -2122,15 +2164,96 @@ class GraphModule(torch.nn.Module):
  'sum_2': ['vmap_impl', 'vmap_impl', 'sum_2']}""",
         )
 
+    def test_cond_pytree_operands(self):
+        def _construct_pytree():
+            a = torch.randn(3, 3)
+            b = torch.randn(3, 3)
+            c = torch.randn(3, 3)
+            d = torch.randn(3, 3)
+            e = torch.randn(3, 3)
+            f = torch.randn(3, 3)
+            g = torch.randn(3, 3)
+            return (a, [[[b]]], c, (d, (e,), f), {"g": g})
+
+        pred = torch.tensor(True)
+        inp = _construct_pytree()
+
+        def _reduce_sum(flattened):
+            init = 0
+            for val in flattened:
+                init += val
+            return init
+
+        def _reduce_max(flattened):
+            init = flattened[0]
+            for val in flattened:
+                init = max(val, init)
+            return init
+
+        def true_fn(pytree_in):
+            flattened, spec = pytree.tree_flatten(pytree_in)
+            return _reduce_sum(flattened)
+
+        def false_fn(pytree_in):
+            flattened, spec = pytree.tree_flatten(pytree_in)
+            return _reduce_max(flattened)
+
+        def fn(pred, pytree_in):
+            return torch.cond(pred, true_fn, false_fn, [pytree_in])
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+        compiled_res = torch.compile(fn, backend=backend)(pred, inp)
+        eager_res = fn(pred, inp)
+        self.assertEqual(compiled_res, eager_res)
+        graph = backend.graphs[0]
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        self.assertExpectedInline(
+            graph.code.strip(),
+            """\
+def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytree_in_1_0_0_0_ : torch.Tensor, L_pytree_in_2_ : torch.Tensor, L_pytree_in_3_0_ : torch.Tensor, L_pytree_in_3_1_0_ : torch.Tensor, L_pytree_in_3_2_ : torch.Tensor, L_pytree_in_4_g_ : torch.Tensor):
+    l_pred_ = L_pred_
+    l_pytree_in_0_ = L_pytree_in_0_
+    l_pytree_in_1_0_0_0_ = L_pytree_in_1_0_0_0_
+    l_pytree_in_2_ = L_pytree_in_2_
+    l_pytree_in_3_0_ = L_pytree_in_3_0_
+    l_pytree_in_3_1_0_ = L_pytree_in_3_1_0_
+    l_pytree_in_3_2_ = L_pytree_in_3_2_
+    l_pytree_in_4_g_ = L_pytree_in_4_g_
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_, l_pytree_in_4_g_]);  l_pred_ = cond_true_0 = cond_false_0 = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = l_pytree_in_4_g_ = None
+    getitem = cond[0];  cond = None
+    return (getitem,)""",  # noqa: B950
+        )
+
+    def test_cond_pytree_operands_with_non_tensor_leaves(self):
+        def fn(pred, pytree_in):
+            return torch.cond(
+                pred, lambda x: x[0] + 1, lambda x: x[0] * 2, (pytree_in,)
+            )
+
+        pred = torch.tensor(True)
+        for pytree_in in [(1,), ("string",), (1.0,)]:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Expect operands to be a tuple of possibly nested dict/list/tuple",
+            ):
+                fn(pred, pytree_in)
+
+        for pytree_in in [(1,), ("string",), (1.0,)]:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                r"Cond doesn't work unless it is captured completely with torch.compile",
+            ):
+                torch.compile(fn, backend="eager")(pred, pytree_in)
+
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
-    def run(self, result=None):
-        # capture_func_transform will be set to False (for 2.1) till we
-        # support all transforms, so manually patch it to `True`` for
-        # testing on release branch.
-        with config.patch(capture_func_transforms=True):
-            super().run(result)
-
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
         actual = fn(*inputs)
@@ -2141,6 +2264,7 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         wrapped_gm = backend.graphs[graph_idx]
         return wrapped_gm
 
+    @config.patch(capture_func_transforms=True)
     def test_grad(self):
         counters.clear()
 
@@ -2173,16 +2297,13 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
-            _set_grad_enabled = torch._C._set_grad_enabled(True)
-
             sin = l_x_.sin();  l_x_ = None
             sum_1 = sin.sum();  sin = None
-
-            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_freevar_tensor(self):
         counters.clear()
         y = torch.randn(3, 3)
@@ -2198,6 +2319,7 @@ class GraphModule(torch.nn.Module):
         actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_freevar_python_scalar(self):
         counters.clear()
         y = 3
@@ -2231,17 +2353,14 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
-            _set_grad_enabled = torch._C._set_grad_enabled(True)
-
             sin = l_x_.sin();  l_x_ = None
             add = sin + 3;  sin = None
             sum_1 = add.sum();  add = None
-
-            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_capture_tensor(self):
         counters.clear()
 
@@ -2255,12 +2374,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3, 3)
 
-        # Graph break because dynamo is unable to get source `fn` and
-        # functools.wraps in `grad` leads to graph-break
-        # There are two graphs, first for generating `y` and
-        # second for application of `grad`.
-        # We are interested in the second graph.
-        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False, graph_idx=1)
+        wrapped_gm = self._compile_check(wrapper_fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -2271,29 +2385,27 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+    def forward(self, L_x_ : torch.Tensor):
         l_x_ = L_x_
-        l_y_ = L_y_
+
+        y = torch.randn(3)
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
+        call = grad_proxy.__call__(l_x_, y);  grad_proxy = l_x_ = None
         contiguous = call.contiguous();  call = None
-        return (contiguous,)
+        return (y, contiguous)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, l_y_):
-            _set_grad_enabled = torch._C._set_grad_enabled(True)
-
+        def forward(self, l_x_, y):
             sin = l_x_.sin();  l_x_ = None
-            add = sin + l_y_;  sin = l_y_ = None
+            add = sin + y;  sin = y = None
             sum_1 = add.sum();  add = None
-
-            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_closure_scalar(self):
         counters.clear()
 
@@ -2331,17 +2443,14 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
-            _set_grad_enabled = torch._C._set_grad_enabled(True)
-
             sin = l_x_.sin();  l_x_ = None
             add = sin + 3.14;  sin = None
             sum_1 = add.sum();  add = None
-
-            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_has_aux(self):
         counters.clear()
 
@@ -2378,18 +2487,15 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
-            _set_grad_enabled = torch._C._set_grad_enabled(True)
-
             sin = l_x_.sin()
             add = sin + 3.14;  sin = None
             sum_1 = add.sum();  add = None
             cos = l_x_.cos();  l_x_ = None
-
-            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_two_tensor_has_aux(self):
         counters.clear()
 
@@ -2426,18 +2532,15 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, l_y_):
-            _set_grad_enabled = torch._C._set_grad_enabled(True)
-
             sin = l_x_.sin()
             add = sin + l_y_;  sin = l_y_ = None
             sum_1 = add.sum();  add = None
             cos = l_x_.cos();  l_x_ = None
-
-            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_two_tensor_all_grad_has_aux(self):
         counters.clear()
 
@@ -2488,14 +2591,10 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, l_y_):
-            _set_grad_enabled = torch._C._set_grad_enabled(True)
-
             sin = l_x_.sin()
             add = sin + l_y_;  sin = l_y_ = None
             sum_1 = add.sum();  add = None
             cos = l_x_.cos();  l_x_ = None
-
-            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
 """,
         )
@@ -2520,18 +2619,15 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, l_y_):
-            _set_grad_enabled = torch._C._set_grad_enabled(True)
-
             sin = l_x_.sin()
             add = sin + l_y_;  sin = l_y_ = None
             sum_1 = add.sum();  add = None
             cos = l_x_.cos();  l_x_ = None
-
-            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_over_grad(self):
         counters.clear()
 
@@ -2563,28 +2659,21 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
-            _set_grad_enabled = torch._C._set_grad_enabled(True)
-
             grad_body_0 = self.grad_body_0
             grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
             call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
             contiguous = call.contiguous();  call = None
-
-            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return contiguous
 
         class GraphModule(torch.nn.Module):
             def forward(self, l_x_):
-                _set_grad_enabled = torch._C._set_grad_enabled(True)
-
                 sin = l_x_.sin();  l_x_ = None
                 sum_1 = sin.sum();  sin = None
-
-                _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
                 return sum_1
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_with_graph_break(self):
         counters.clear()
 
@@ -2601,6 +2690,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_with_side_effect(self):
         counters.clear()
 
@@ -2621,11 +2711,12 @@ class GraphModule(torch.nn.Module):
             self,
             dict(counters["graph_break"]),
             {
-                r".*HigherOrderOperator: Mutating a variable not in the current scope \(replace_all\)": 2
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 2
             },
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_pytree(self):
         counters.clear()
 
@@ -2646,10 +2737,11 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
+            {".*torch.func.grad with body that accepts non-Tensors as input": 2},
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_non_tensor_input(self):
         counters.clear()
 
@@ -2683,17 +2775,14 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, const):
-            _set_grad_enabled = torch._C._set_grad_enabled(True)
-
             sin = l_x_.sin();  l_x_ = None
             sum_1 = sin.sum();  sin = None
             add = sum_1 + 3.0;  sum_1 = None
-
-            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return add
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_disable_capture(self):
         counters.clear()
 
@@ -2721,6 +2810,7 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_grad_fn_with_kwargs(self):
         def fn(x, y):
             return (x + y).sum()
@@ -2739,6 +2829,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap(self):
         def fn(x):
             return torch.func.vmap(lambda x: x.sum(0) + x.sum(1))(x)
@@ -2775,6 +2866,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_free_const(self):
         y = 3
 
@@ -2814,6 +2906,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_free_tensor(self):
         y = torch.randn(3, 3)
 
@@ -2854,6 +2947,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_two_inputs(self):
         def fn(x, y):
             return torch.func.vmap(
@@ -2896,6 +2990,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_two_inputs_tuple_in_dims(self):
         in_dims = (0, 1)
 
@@ -2940,6 +3035,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_over_vmap_two_inputs(self):
         def fn(x, y):
             return torch.func.vmap(torch.func.vmap(lambda x, y: x + y, in_dims=1))(x, y)
@@ -2987,6 +3083,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_over_vmap_captured(self):
         x = torch.ones(2, 3)
         y = torch.ones(5, 3)
@@ -3033,6 +3130,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_multiple_outputs(self):
         x = torch.ones(2, 4, 3)
 
@@ -3071,6 +3169,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_multiple_outputs_diff_dims(self):
         x = torch.ones(2, 4, 3)
 
@@ -3109,6 +3208,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_multiple_outputs_out_dims_tuple(self):
         x = torch.ones(2, 4, 3)
         out_dims = (1, 0)
@@ -3148,6 +3248,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_kwargs(self):
         counters.clear()
         x = torch.ones(2, 3)
@@ -3165,6 +3266,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_pytree_inputs(self):
         counters.clear()
         x = torch.ones(2, 3)
@@ -3185,12 +3287,13 @@ class GraphModule(torch.nn.Module):
             self,
             dict(counters["graph_break"]),
             {
-                ".*HigherOrderOperator with body that accepts non-Tensors as input": 2,
+                ".*torch.vmap with body that accepts non-Tensors as input": 2,
                 "Unsupported: meta converter nyi with fake tensor propagation.": 1,
             },
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_side_effects(self):
         counters.clear()
         x = torch.ones(2, 3)
@@ -3212,11 +3315,12 @@ class GraphModule(torch.nn.Module):
             self,
             dict(counters["graph_break"]),
             {
-                r".*HigherOrderOperator: Mutating a variable not in the current scope \(replace_all\)": 2
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 2
             },
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_disable_capture(self):
         counters.clear()
 
@@ -3241,6 +3345,7 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_illegal_op_graph_break(self):
         counters.clear()
 
@@ -3262,6 +3367,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_multiple_invocation_in_dims(self):
         counters.clear()
 
@@ -3278,6 +3384,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 9)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_multiple_invocation_out_dims(self):
         counters.clear()
 
@@ -3294,6 +3401,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 9)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_new_tensor_in_body(self):
         def fn(x):
             return x + torch.ones(3)
@@ -3309,6 +3417,7 @@ class GraphModule(torch.nn.Module):
         actual = opt(x)
         self.assertEqual(expected, actual)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_new_tensor_unused_in_body(self):
         def fn(x):
             return torch.tensor(0.5)
@@ -3322,6 +3431,7 @@ class GraphModule(torch.nn.Module):
         actual = opt(x)
         self.assertEqual(expected, actual)
 
+    @config.patch(capture_func_transforms=True)
     def test_vmap_new_tensor_implicit_via_op(self):
         def wrapper_fn(x):
             return torch.func.vmap(lambda t: torch.add(t, 0.5))(x)
@@ -3561,6 +3671,18 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaises(AssertionError):
             opt_test(True, False, inp)
+
+    def test_non_aliasing_util(self):
+        from torch._dynamo.variables.higher_order_ops import _assert_tensors_nonaliasing
+
+        a = [torch.tensor(1), {"a": torch.tensor(1)}]
+        b = (torch.tensor(1),)
+        _assert_tensors_nonaliasing(a, b)
+
+        with self.assertRaisesRegex(
+            AssertionError, "inputs to function body cannot alias outputs"
+        ):
+            _assert_tensors_nonaliasing(a, a)
 
 
 if __name__ == "__main__":

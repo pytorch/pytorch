@@ -12,6 +12,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/native/FractionalMaxPooling.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -136,13 +137,13 @@ __global__ void fractional_max_pool3d_backward_out_frame(
                       gradOutput.size(4));
 
     int64_t index = indices[batch][plane][outputT][outputH][outputW];
-    assert(index >= 0);
+    CUDA_KERNEL_ASSERT(index >= 0);
     int64_t inputW = index % gradInput.size(4);
     int64_t inputH = (index / gradInput.size(4)) %
       gradInput.size(3);
     int64_t inputT = index / (gradInput.size(3) *
       gradInput.size(4));
-    assert(inputT < gradInput.size(2));
+    CUDA_KERNEL_ASSERT(inputT < gradInput.size(2));
 
     gpuAtomicAddNoReturn(
       &gradInput[batch][plane][inputT][inputH][inputW],

@@ -523,12 +523,13 @@ class CodeGen:
 
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
 
+                # use string as annotation, to make it valid python code
                 if isinstance(meta_val, FakeTensor):
-                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
+                    maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
                 elif isinstance(meta_val, py_sym_types):
-                    maybe_type_annotation = f': Sym({meta_val})'
+                    maybe_type_annotation = f': "Sym({meta_val})"'
                 elif isinstance(meta_val, TensorMetadata):
-                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
+                    maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
 
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
@@ -713,8 +714,16 @@ class _PyTreeCodeGen(CodeGen):
                                   self.pytree_info.orig_args[count_args:])) + '}'
                 fn_signature = f"([{', '.join(fn_args)}], {fn_kwargs}), self._in_spec"
 
+            # in Python, `var1: annotation1, var2: annotation2 = function_call()` is invalid.
+            # we need to split it to two lines:
+            # one for annotation: `var1: annotation1; var2: annotation2;` (note the semicolon)
+            # one for code: `var1, var2, = function_call()`
+            without_annotation = [x.split(":")[0] for x in free_vars]
+            has_annotation = [x + "; " for x in free_vars if ":" in x]
+            if len(has_annotation) > 0:
+                fn_definition += "\n    " + "".join(has_annotation) + "\n"
             fn_definition += f"""
-    {', '.join(free_vars)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
+    {', '.join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
         return fn_definition
 
     def generate_output(self, output_args):

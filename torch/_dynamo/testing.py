@@ -8,10 +8,7 @@ import re
 import sys
 import types
 import unittest
-from importlib.machinery import SourceFileLoader
-from pathlib import Path
 from typing import List, Optional, Sequence, Union
-from unittest import mock
 from unittest.mock import patch
 
 np: Optional[types.ModuleType] = None
@@ -374,31 +371,3 @@ def reset_rng_state(use_xla=False):
         import torch_xla.core.xla_model as xm
 
         xm.set_rng_state(1337, str(xm.xla_device()))
-
-
-def load_test_module(from_test_file, wanted_module):
-    """
-    Import a module from pytorch/test/* in a robust way.
-
-    Args:
-        from_test_file: filename of the test calling this, used to file root path
-        wanted_module: module name to import
-
-    Returns:
-        a Python module
-    """
-    if wanted_module in sys.modules:
-        return sys.modules[wanted_module]
-
-    testdir = Path(from_test_file).absolute().parent
-    # go up at most 3 directories to find the test root
-    for _ in range(3):
-        if (testdir / "run_test.py").exists():
-            break
-        testdir = testdir.parent
-    assert (testdir / "run_test.py").exists(), testdir
-
-    with mock.patch("sys.path", [str(testdir), *sys.path]):
-        return SourceFileLoader(
-            wanted_module, str(testdir / f"{wanted_module.replace('.', '/')}.py")
-        ).load_module()
