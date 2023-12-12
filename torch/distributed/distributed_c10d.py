@@ -844,18 +844,24 @@ def _check_single_tensor(param, param_name) -> None:
     """Check that the parameter ``param_name`` is a single tensor."""
     if not isinstance(param, torch.Tensor):
         raise TypeError(
-            f"Invalid function argument. Expected parameter `{param_name}` to be of type torch.Tensor."
+            f"""Invalid function argument. Expected parameter `{param_name}` of type torch.Tensor
+             but got {type(param)} instead."""
         )
 
 
 def _check_tensor_list(param, param_name) -> None:
     """Check that the parameter ``param_name`` is a list of tensors."""
-    if not isinstance(param, list) or not all(
-        isinstance(p, torch.Tensor) for p in param
-    ):
+    if not isinstance(param, list):
         raise TypeError(
-            f"Invalid function argument. Expected parameter `{param_name}` to be of type List[torch.Tensor]."
+            f"""Invalid function argument. Expected parameter `{param_name}` of type List[torch.Tensor]
+             but got {type(param)} instead."""
         )
+    elif not all(isinstance(p, torch.Tensor) for p in param):
+        raise TypeError(
+            f"""Invalid function argument. Expected parameter `{param_name}` of type List[torch.Tensor]
+             but got {type(param)} with elements of type {[type(p) for p in param]}."""
+        )
+
 
 def _as_iterable(obj) -> collections.abc.Iterable:
     return obj if isinstance(obj, list) else (obj,)
