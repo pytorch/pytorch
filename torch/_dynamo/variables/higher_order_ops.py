@@ -235,8 +235,6 @@ def speculate_subgraph(
     # across fwd-bwd for autograd.Function
     tracer=None,
 ):
-    from . import TensorVariable
-
     if sub_kwargs is None:
         sub_kwargs = {}
 
@@ -302,12 +300,10 @@ def speculate_subgraph(
             # like bwd.
             if always_restore:
                 # Nothing left to do here
-                return (
-                    (output, treespec),
-                    tx.output.graph,
-                    subtracer.lifted_freevars,
-                )
+                return (output, treespec), tx.output.graph, subtracer.lifted_freevars
             else:
+                from . import TensorVariable
+
                 if not only_consist_of(output, TensorVariable):
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
@@ -798,11 +794,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         # TODO: Support kwargs
-        (
-            (body_r, body_spec),
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
+        (body_r, _), body_graph, body_lifted_freevars = speculate_subgraph(
             tx,
             args[0],
             [
