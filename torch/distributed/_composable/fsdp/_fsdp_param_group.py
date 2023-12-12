@@ -79,17 +79,17 @@ class FSDPParamGroup:
         ]
         self._module_to_fsdp_param_refs = self._get_module_to_fsdp_params(
             self.fsdp_params
-        )  # used for state dict
+        )  # used for resharding before state dict save/load
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
-        self._device: torch.device = device
+        self._device = device
         self._training_state = TrainingState.IDLE
 
         # - Mixed precision
         self._orig_dtype, self._reduce_dtype = self._get_mp_dtypes()
         # TODO: Only support fp8/non-fp8 mixing for now.
         self._use_uint8_all_gather = any(
-            fsdp_param._is_float8tensor for fsdp_param in self.fsdp_params
+            fsdp_param.is_float8tensor for fsdp_param in self.fsdp_params
         )
         if not self._use_uint8_all_gather:
             unsharded_param_dtypes = {
@@ -101,9 +101,6 @@ class FSDPParamGroup:
                 )
 
         # - Hook state
-        self._pre_forward_hook_handle: Optional[RemovableHandle] = None
-        self._post_forward_hook_handle: Optional[RemovableHandle] = None
-        self._post_backward_reshard_hook_handle: Optional[RemovableHandle] = None
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._register_state_dict_hooks()
@@ -117,7 +114,6 @@ class FSDPParamGroup:
         self.all_gather_state = AllGatherStateHolder()
         self.post_forward_order: List[weakref.ref[FSDPParamGroup]] = []
         self._post_forward_index: Optional[int] = None
-        self._prefetched: bool = False
         # Used to avoid mistargeted backward prefetches in the case that some
         # module is used in forward but not in backward
         self.expected_backward_unshard_count: int = 0
@@ -155,7 +151,7 @@ class FSDPParamGroup:
         self, params: List[nn.Parameter], module: nn.Module
     ) -> List[ParamModuleInfo]:
         params_set = set(params)
-        param_to_module_info = {}
+        param_to_module_info: Dict[nn.Parameter, ParamModuleInfo] = {}
         for _, submodule in module.named_modules(remove_duplicate=False):
             for param_name, param in _named_parameters_with_duplicates(
                 submodule, recurse=False
@@ -293,13 +289,11 @@ class FSDPParamGroup:
             if not self._reshard_after_forward:
                 return
             if self._use_post_forward_mesh:
-                self._prefetched = False
                 for fsdp_param in self.fsdp_params:
                     fsdp_param.to_sharded_post_forward()
                 self._reshard_after_forward_event = torch.cuda.Event()
                 self._reshard_after_forward_event.record()
                 return
-        self._prefetched = False
         for fsdp_param in self.fsdp_params:
             fsdp_param.to_sharded()
 
@@ -339,8 +333,7 @@ class FSDPParamGroup:
         log.info("pre-backward for %s", self._module_fqn)
         with torch.profiler.record_function("FSDP::pre_backward"):
             self._training_state = TrainingState.PRE_BACKWARD
-            if not self._prefetched:
-                self._unshard()
+            self._unshard()  # no-op if prefetched
             self._wait_for_unshard()
             self._prefetch_unshard()
             self.expected_backward_unshard_count -= 1
@@ -416,27 +409,19 @@ class FSDPParamGroup:
         self.expected_backward_unshard_count = 0
 
     def _prefetch_unshard(self):
-        if self._training_state in (
-            TrainingState.PRE_BACKWARD,
-            TrainingState.POST_BACKWARD,
-        ):
+        if self._training_state == TrainingState.PRE_BACKWARD:
             if self._post_forward_index is None:
                 return
-            target_index = self._post_forward_index - 1
-            if target_index < 0:
+            if (target_index := self._post_forward_index - 1) < 0:
                 return
             target_fsdp_param_group = self.post_forward_order[target_index]()
-            assert target_fsdp_param_group is not None, "Weakref deallocated"
-            if (
-                target_fsdp_param_group.expected_backward_unshard_count > 0
-                and not target_fsdp_param_group._prefetched
-            ):
+            assert target_fsdp_param_group is not None, "FSDPParamGroup deallocated"
+            if target_fsdp_param_group.expected_backward_unshard_count > 0:
                 with torch.profiler.record_function("FSDP::backward_prefetch"):
                     with target_fsdp_param_group.use_training_state(
                         TrainingState.PRE_BACKWARD
                     ):
                         target_fsdp_param_group._unshard()
-                target_fsdp_param_group._prefetched = True
 
     # State Dict #
     def _pre_save_state_dict_hook(

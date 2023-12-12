@@ -95,8 +95,12 @@ def fully_shard(
     state._module = module
     state._mp_policy = mp_policy
     state._device = device
-    state._register_pre_forward_hook()  # prepend
-    state._register_post_forward_hook()  # append
+    state._pre_forward_hook_handle = state._module.register_forward_pre_hook(
+        state._pre_forward, prepend=True, with_kwargs=True
+    )
+    state._post_forward_hook_handle = state._module.register_forward_hook(
+        state._post_forward, prepend=False
+    )
 
     managed_modules = _get_managed_modules(module)
     _materialize_meta_modules(managed_modules, init_policy.param_init_fn, state._device)

@@ -121,7 +121,7 @@ class FSDPParam:
         self._init_offload_attrs(offload_policy)
         self._init_dtensor_attrs(param)
         self._init_float8tensor_attrs(param)
-        if self._is_dtensor and self._is_float8tensor:
+        if self.is_dtensor and self.is_float8tensor:
             # TODO: DTensor should wrap Float8Tensor, and we need to make sure
             # to unwrap twice to get the underlying data.
             raise NotImplementedError("DTensor + Float8Tensor is not supported yet")
@@ -159,15 +159,15 @@ class FSDPParam:
         # None indicates that the mixed precision is not enabled
 
     def _init_dtensor_attrs(self, param: nn.Parameter):
-        self._is_dtensor = isinstance(param, DTensor)  # assume TP
+        self.is_dtensor = isinstance(param, DTensor)  # assume TP
         # These TP attributes are used for the unsharded parameter
-        if self._is_dtensor:
+        if self.is_dtensor:
             self._tp_spec = cast(DTensor, param)._spec
             self._tp_global_size = param.size()
             self._tp_global_stride = param.stride()
 
     def _init_float8tensor_attrs(self, param: nn.Parameter):
-        self._is_float8tensor = getattr(param, "_is_fp8_weight", False)
+        self.is_float8tensor = getattr(param, "_is_fp8_weight", False)
         module = self._module_info.module
         # TODO: Leave this warning for now since we only integrate with
         # float8-experimental. We need to figure out meta-device story, where
@@ -175,9 +175,9 @@ class FSDPParam:
         if (
             "Float8Linear" in str(type(module))
             and "weight" in self._module_info.param_name
-        ) and not self._is_float8tensor:
-            warnings.warn("Float8Linear.weight has _is_float8tensor == False")
-        if self._is_float8tensor:
+        ) and not self.is_float8tensor:
+            warnings.warn("Float8Linear.weight has is_float8tensor == False")
+        if self.is_float8tensor:
             float8_scale_name = "fp8_scale_w"
             float8_tensor_ctor_name = "_float8_tensor_ctor"
             cast_w_to_float8_fn_name = "cast_w_to_float8"
@@ -203,7 +203,7 @@ class FSDPParam:
         Initializes attributes related to the global device mesh for the
         *sharded* parameter.
         """
-        is_2d = self._is_dtensor
+        is_2d = self.is_dtensor
         assert (
             self.mesh_info.shard_mesh_dim == 0
             and self.mesh_info.replicate_mesh_dim is None
@@ -331,7 +331,7 @@ class FSDPParam:
     def _init_unsharded_param(self):
         unsharded_param_dtype = (
             torch.float8_e4m3fn
-            if self._is_float8tensor
+            if self.is_float8tensor
             else (self.param_dtype or self.sharded_param.dtype)
         )
         self._unsharded_param_data = torch.empty(
@@ -346,7 +346,7 @@ class FSDPParam:
         ].view(self._unsharded_size)
         # TODO: Support DTensor + Float8Tensor, where we expect DTensor to wrap
         # Float8Tensor.
-        if self._is_dtensor:
+        if self.is_dtensor:
             self._unsharded_param = nn.Parameter(
                 from_local_no_grad(
                     self._unsharded_param_view,
@@ -357,7 +357,7 @@ class FSDPParam:
                 )
             )
             self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
-        elif self._is_float8tensor:
+        elif self.is_float8tensor:
             # `orig_dtype` should be the dtype for autograd-computed gradients
             orig_dtype = self.param_dtype or self.orig_dtype
             emulate = getattr(self._module_info.module, self._float8_emulate_attr_name)
@@ -388,7 +388,7 @@ class FSDPParam:
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
-        if self._is_float8tensor:
+        if self.is_float8tensor:
             self._delattr_on_modules("_w_fp8")
         unsafe_free_storage(self._unsharded_param_data)
         self.state = ShardedState.SHARDED
@@ -409,7 +409,7 @@ class FSDPParam:
         # NOTE: This constructs a new Tensor object.
         self._sharded_post_forward_param_data = chunks[shard_rank].clone()
         self._setattr_on_modules(self._sharded_post_forward_param_data, as_param=False)
-        if self._is_float8tensor:
+        if self.is_float8tensor:
             self._delattr_on_modules("_w_fp8")
         # Do not strip padding here since this resharded parameter should never
         # be used in any ops and is only meant as a temporary storage
@@ -420,7 +420,7 @@ class FSDPParam:
         # Assume that the data has been allocated and all-gathered (e.g. from
         # the foreach all-gather)
         set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
-        if self._is_float8tensor:
+        if self.is_float8tensor:
             self._setattr_on_modules(
                 self._unsharded_param, name_override="_w_fp8", as_param=False
             )
@@ -515,7 +515,7 @@ class FSDPParam:
                 sharded_param_data = sharded_param_data.to(
                     self.device, non_blocking=True
                 )
-            if self._is_float8tensor:
+            if self.is_float8tensor:
                 # Unlike normal mixed precision, for fp8, we must explicitly
                 # call a function to cast from fp32 -> fp8 rather than relying
                 # on the cast from implicitly copying from e.g. fp32 -> bf16
@@ -557,7 +557,7 @@ class FSDPParam:
     def unsharded_grad_data(self) -> torch.Tensor:
         grad = self.unsharded_param.grad
         assert grad is not None, "Expects unsharded_param.grad to not be None"
-        if self._is_dtensor:
+        if self.is_dtensor:
             grad = cast(DTensor, grad)._local_tensor
         return grad
 
@@ -565,7 +565,7 @@ class FSDPParam:
     def unsharded_accumulated_grad_data(self) -> torch.Tensor:
         grad = self.unsharded_accumulated_grad
         assert grad is not None, "Expects unsharded_accumulated_grad to not be None"
-        if self._is_dtensor:
+        if self.is_dtensor:
             grad = cast(DTensor, grad)._local_tensor
         return grad
 
@@ -575,7 +575,7 @@ class FSDPParam:
         # all-gathering. For fp8 weight matrices, this is e4m3fn. For non-fp8
         # parameters, this is `param_dtype` if it was specified and the
         # original dtype otherwise.
-        if self._is_float8tensor:
+        if self.is_float8tensor:
             return self._unsharded_param._data.dtype  # type: ignore[attr-defined]
         return self._unsharded_param.dtype
 

@@ -65,29 +65,26 @@ class FSDPState(_State):
 
     def _root_pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ):
+    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         self._lazy_init()
         if not self._is_root:
             return args, kwargs
         log.info("root pre-forward")
         with torch.profiler.record_function("FSDP::root_pre_forward"):
             self._training_state = TrainingState.FORWARD
-            # Wait for optimizer computation before issuing all-gathers
+            # Wait for optimizer before implicitly prefetched all-gathers
             current_stream = torch.cuda.current_stream()
             self._all_gather_copy_in_stream.wait_stream(current_stream)
             self._all_gather_stream.wait_stream(current_stream)
             if self._device.type == "cuda":
                 with torch.profiler.record_function("FSDP::inputs_to_gpu"):
-                    # Assume that the current device is the correct device to which
-                    # to copy inputs
                     args_tuple, kwargs_tuple = _to_kwargs(
                         args, kwargs, self._device, False
                     )
-                args = args_tuple[0]
-                kwargs = kwargs_tuple[0]
+                args, kwargs = (args_tuple[0], kwargs_tuple[0])
         return args, kwargs
 
-    def _lazy_init(self):
+    def _lazy_init(self) -> None:
         if self._is_root is not None:
             return  # no-op: already initialized
         log.info("_lazy_init")
@@ -100,8 +97,8 @@ class FSDPState(_State):
                     state._is_root = False
                 self._all_state_refs.append(weakref.ref(state))
         if self._fsdp_param_group:
-            # For the root, do not reshard after forward since in the typical
-            # case, the parameters would be freed and all-gathered immediately
+            # For the root, do not reshard after forward since for training,
+            # the parameters would be freed and all-gathered immediately
             self._fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
         self._init_shared_state()
@@ -141,12 +138,10 @@ class FSDPState(_State):
         for state_ref in self._all_state_refs:
             state = state_ref()
             assert state is not None, "FSDPState deallocated"
-            if state._fsdp_param_group:
-                for fsdp_param in state._fsdp_param_group.fsdp_params:
+            if fsdp_param_group := state._fsdp_param_group:
+                for fsdp_param in fsdp_param_group.fsdp_params:
                     param_to_fsdp_param[fsdp_param.sharded_param] = fsdp_param
-                module_to_fsdp_param_group[
-                    state._fsdp_param_group.module
-                ] = state._fsdp_param_group
+                module_to_fsdp_param_group[fsdp_param_group.module] = fsdp_param_group
         for param_name, param in root_module.named_parameters():
             if param in param_to_fsdp_param:
                 param_to_fsdp_param[param]._param_fqn = param_name
@@ -168,8 +163,7 @@ class FSDPState(_State):
                 cast_fn = functools.partial(
                     _cast_floating_point_tensor, self._mp_policy.param_dtype
                 )
-                args = tree_map(cast_fn, args)
-                kwargs = tree_map(cast_fn, kwargs)
+                args, kwargs = (tree_map(cast_fn, args), tree_map(cast_fn, kwargs))
         if self._fsdp_param_group:
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
         return args, kwargs
@@ -206,10 +200,10 @@ class FSDPState(_State):
             self._fsdp_param_group._pre_backward(*unused)
 
     def _root_post_backward_final_callback(self) -> None:
-        self._training_state = TrainingState.IDLE
         if not self._is_root:
             return
         log.info("root post-backward final callback")
+        self._training_state = TrainingState.IDLE
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state_ref in self._all_state_refs:
                 state = state_ref()
@@ -223,20 +217,6 @@ class FSDPState(_State):
             self._post_forward_order.clear()
 
     # Hook Registration #
-    def _register_pre_forward_hook(self) -> None:
-        if self._pre_forward_hook_handle is not None:
-            self._pre_forward_hook_handle.remove()
-        self._pre_forward_hook_handle = self._module.register_forward_pre_hook(
-            self._pre_forward, prepend=True, with_kwargs=True
-        )
-
-    def _register_post_forward_hook(self) -> None:
-        if self._post_forward_hook_handle is not None:
-            self._post_forward_hook_handle.remove()
-        self._post_forward_hook_handle = self._module.register_forward_hook(
-            self._post_forward, prepend=False
-        )
-
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
