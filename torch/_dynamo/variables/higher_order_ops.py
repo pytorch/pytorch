@@ -116,6 +116,31 @@ def _call_function_and_unflatten_output(tx, fn, args, kwargs, ret_vt, ret_treesp
     )
 
 
+def _detect_input_mutations_and_aliasing(tx, graph_module, proxy_args):
+    from torch.multiprocessing.reductions import StorageWeakRef
+
+    example_values = [arg.node.meta["example_value"] for arg in proxy_args]
+    _before_versions = [ex._version for ex in example_values]
+    with torch.inference_mode(False), tx.fake_mode, enable_python_dispatcher():
+        res = graph_module(*example_values)
+    mutated_inputs = [
+        proxy_args[i]
+        for i, (val, old_v) in enumerate(zip(example_values, _before_versions))
+        if val._version != old_v
+    ]
+
+    aliased_inputs = []
+    input_storages = {
+        StorageWeakRef(proxy.node.meta["example_value"]._typed_storage()): proxy
+        for proxy in proxy_args
+    }
+    output_storages = [StorageWeakRef(t._typed_storage()) for t in res]
+    aliased_inputs = [
+        input_storages[ref] for ref in output_storages if ref in input_storages
+    ]
+    return mutated_inputs, aliased_inputs
+
+
 def _assert_tensors_nonaliasing(inputs, outputs):
     input_tensor_ids = {
         id(t) for t in pytree.tree_leaves(inputs) if isinstance(t, torch.Tensor)
@@ -249,15 +274,6 @@ def speculate_subgraph(
             if restore_side_effects:
                 prev_side_effects = tx.output.side_effects.clone()
 
-            if manually_set_subgraph_inputs:
-                subtracer.track_mutations_for_tensor_inputs(
-                    [
-                        arg.as_proxy()
-                        for arg in (*args, *sub_kwargs.values())
-                        if isinstance(arg, TensorVariable)
-                    ]
-                )
-
             with autograd_ctx:
                 output = f.call_function(tx, args, sub_kwargs)
 
@@ -290,7 +306,6 @@ def speculate_subgraph(
                     (output, treespec),
                     tx.output.graph,
                     subtracer.lifted_freevars,
-                    subtracer.mutated_inputs,
                 )
             else:
                 if not only_consist_of(output, TensorVariable):
@@ -320,7 +335,6 @@ def speculate_subgraph(
                     (output, treespec),
                     graph,
                     lifted_freevars,
-                    subtracer.mutated_inputs,
                 )
 
     except Unsupported as ex:
@@ -518,7 +532,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 (ret_val, ret_treespec),
                 ret_graph,
                 ret_lifted_freevars,
-                mutated_inputs,
             ) = speculate_subgraph(
                 tx,
                 args[ix],
@@ -533,18 +546,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             if not only_consist_of(ret_val, (TensorVariable,)):
                 unimplemented(
                     "Expected branches to return a possibly nested list/tuple/dict of tensors but it consists of non tensors.",
-                )
-            if len(mutated_inputs) > 0:
-
-                def _fmt(mutated_inputs):
-                    msg = []
-                    for i, proxy in enumerate(mutated_inputs):
-                        msg.append("- " + str(proxy.node.meta))
-                    return "\n".join(msg)
-
-                unimplemented(
-                    "Expected branches to not mutate inputs, buffers, or closures "
-                    f"but found following mutations in {branch} branch:\n{_fmt(mutated_inputs)}"
                 )
             return ret_val, ret_treespec, ret_graph, ret_lifted_freevars
 
@@ -689,29 +690,62 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             false_graph, false_lifted_freevars, false_shared, unique_true, unique_false
         )
 
+        true_graph_module = torch.fx.GraphModule(true_nn_modules, true_graph)
+        false_graph_module = torch.fx.GraphModule(false_nn_modules, false_graph)
         true_name = add_subgraph(
             tx,
             self.source,
             "cond_true",
-            torch.fx.GraphModule(true_nn_modules, true_graph),
+            true_graph_module,
         )
         false_name = add_subgraph(
             tx,
             self.source,
             "cond_false",
-            torch.fx.GraphModule(false_nn_modules, false_graph),
+            false_graph_module,
         )
 
         true_node = make_attr(tx, true_name)
         false_node = make_attr(tx, false_name)
 
+        combined_args = true_shared + unique_true + unique_false
         p_args = (
             args[0].as_proxy(),
             true_node,
             false_node,
             # We pick true_shared but it shouldn't matter
-            true_shared + unique_true + unique_false,
+            combined_args,
         )
+
+        for branch_name, module in (
+            (True, true_graph_module),
+            (False, false_graph_module),
+        ):
+            try:
+                mutated_inputs, aliased_inputs = _detect_input_mutations_and_aliasing(
+                    tx, module, combined_args
+                )
+            except Exception as e:
+                unimplemented(
+                    f"Failed to detect input mutations and aliasing in {branch_name} branch of cond: {e}"
+                )
+
+            def _fmt(proxies):
+                msg = []
+                for i, proxy in enumerate(proxies):
+                    msg.append("- " + str(proxy.node.meta))
+                return "\n".join(msg)
+
+            if len(mutated_inputs) > 0:
+                unimplemented(
+                    "Expected branches to not mutate inputs, buffers, or closures "
+                    f"but found following mutations in {branch_name} branch:\n{_fmt(mutated_inputs)}"
+                )
+            if len(aliased_inputs) > 0:
+                unimplemented(
+                    "Expected branches to not aliase inputs, buffers, or closures "
+                    f"but found following inputs are aliased in {branch_name} branch:\n{_fmt(aliased_inputs)}"
+                )
 
         return _call_function_and_unflatten_output(
             tx, torch.ops.higher_order.cond, p_args, {}, true_r, true_treespec
@@ -731,8 +765,12 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
-        from .builder import wrap_fx_proxy_cls
+        from . import (
+            ConstantVariable,
+            NestedUserFunctionVariable,
+            TensorVariable,
+            UserFunctionVariable,
+        )
 
         if len(kwargs) > 0:
             unimplemented(
@@ -755,8 +793,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # To get the example output from map() we will need to provide at least one sample to
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
-        first_dim = wrap_fx_proxy_cls(
-            target_cls=TensorVariable, tx=tx, proxy=args[1].as_proxy()[0]
+        first_dim = args[1].call_method(
+            tx, "__getitem__", args=[ConstantVariable.create(0)], kwargs={}
         )
 
         # TODO: Support kwargs
@@ -764,7 +802,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             (body_r, body_spec),
             body_graph,
             body_lifted_freevars,
-            mutated_inputs,
         ) = speculate_subgraph(
             tx,
             args[0],
@@ -790,12 +827,11 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         body_node = make_attr(tx, body_name)
         p_args = (
             body_node,
-            1,  # right now we only supports num_mapped = 1
             *(arg.as_proxy() for arg in args[1:]),
             *(arg for arg in body_lifted_freevars.keys()),
         )
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.map_impl, p_args, {}, body_r, body_spec
+            tx, self.value, p_args, {}, body_r, body_spec
         )
 
 
@@ -896,7 +932,6 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             (body_r, _),
             body_graph,
             body_lifted_freevars,
-            mutated_inputs,
         ) = speculate_subgraph(
             tx,
             func,
@@ -1099,7 +1134,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         #       to handle a few of them).
         with tx.strict_translation_mode():
             # trace through the function with unbatched inputs.
-            _, body_graph, body_lifted_freevars, mutated_inputs = speculate_subgraph(
+            _, body_graph, body_lifted_freevars = speculate_subgraph(
                 tx,
                 fn,
                 # Returns a ListVariable, since that's where we started flattening.
@@ -1230,7 +1265,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             (body_r, _),
             body_graph,
             body_lifted_freevars,
-            mutated_inputs,
         ) = speculate_subgraph(
             tx,
             fn,
@@ -1292,7 +1326,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             (body_r, treespec),
             body_graph,
             body_lifted_freevars,
-            mutated_inputs,
         ) = speculate_subgraph(
             tx,
             args[0],  # function

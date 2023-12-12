@@ -2245,7 +2245,8 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "original output #1 is .* only the following types are supported",
+            "original output #1 is .*Tensors.*, "
+            "but only the following types are supported",
         ):
             torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
 
@@ -3162,7 +3163,9 @@ def forward(self, x):
 
     def test_cond_raise_user_error_on_branch_return_multiple_tensors(self):
         def f_branch_return_multiple_tensors(pred, x, y):
-            return cond(pred, lambda x: (x, x), lambda x: (x, x), [y])
+            return cond(
+                pred, lambda x: (x + 1, x - 1), lambda x: (x.sin(), x.cos()), [y]
+            )
 
         example_inputs = (torch.tensor(True), torch.randn(4), torch.randn(2))
         gm, _ = torch._dynamo.export(

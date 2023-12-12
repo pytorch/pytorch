@@ -1182,39 +1182,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(cnt.frame_count, 1)
 
-        # We increase the number of ops to 2 and 3 for top-level graph because of an additional
+        # We increase the number of ops to 3 and 4 for top-level graph because of an additional
         # get_item call created by the flatten/unflatten logic in HOP speculation.
-        self.assertEqual(cnt.op_count, ifdynstaticdefault(2, 3))
-
-    def test_map_lowers_to_graph(self):
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
-        def fn(x, y):
-            def inner(x, y):
-                return torch.sin(x + y)
-
-            return control_flow.map(inner, x, y.size(0))
-
-        x = torch.randn(3, 1)
-        y = torch.randn(3, 1)
-        compiled_fn = torch.compile(fn, backend=backend)(x, y)
-        self.assertEqual(len(backend.graphs), 1)
-        graph = backend.graphs[0]
-        # Dynamic shapes produce a slightly different graph.
-        if check_dynamic_shape_capture():
-            return
-
-        self.assertExpectedInline(
-            graph.code.strip(),
-            """\
-def forward(self, L_x_ : torch.Tensor):
-    l_x_ = L_x_
-    map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
-    getitem_1 = map_impl[0];  map_impl = None
-    return (getitem_1,)""",
-        )
+        self.assertEqual(cnt.op_count, ifdynstaticdefault(3, 4))
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
@@ -1259,7 +1229,7 @@ def forward(self, L_x_ : torch.Tensor):
             },
         )
 
-    def test_cond_mutating_buffer(self):
+    def test_cond_raise_error_when_mutating_buffer(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1289,7 +1259,7 @@ def forward(self, L_x_ : torch.Tensor):
         ):
             M()(inp)
 
-    def test_cond_mutating_input(self):
+    def test_cond_raise_error_when_mutating_input(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1318,7 +1288,7 @@ def forward(self, L_x_ : torch.Tensor):
         ):
             M()(inp)
 
-    def test_cond_mutating_closure(self):
+    def test_cond_raise_error_when_mutating_closure(self):
         t = torch.randn(1)
 
         def fn(x):
@@ -1344,6 +1314,56 @@ def forward(self, L_x_ : torch.Tensor):
             r"Cond doesn't work unless it is captured completely with torch.compile",
         ):
             fn(inp)
+
+    def test_cond_raise_error_when_output_alias_input(self):
+        def alias_input(pred, x, y):
+            def true_fn(x):
+                return x[0] + 1, x[1].view(-1) + 1
+
+            def false_fn(x):
+                return x[0] + 1, x[1].view(-1)
+
+            return torch.cond(pred, true_fn, false_fn, ((x, y),))
+
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
+            torch.compile(alias_input, backend="eager")(
+                torch.tensor(True), torch.ones(3, 3), torch.ones(3, 3)
+            )
+
+    def test_cond_raise_error_when_output_alias_buffer(self):
+        class AliaseBufferM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.randn(4, 4))
+
+            def forward(self, x):
+                def true_fn(x):
+                    return x.cos(), self.buffer.view(-1)
+
+                def false_fn(x):
+                    return x.sin(), self.buffer.view(-1) + 1
+
+                return torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+
+        inp = torch.randn(3, 4)
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
+            torch.compile(AliaseBufferM(), backend="eager")(inp)
+
+    def test_cond_raise_error_when_output_alias_closure(self):
+        y = torch.ones(3, 4)
+
+        def alias_closure(pred, x):
+            def true_fn(x):
+                return x.view(-1) + 1
+
+            def false_fn(x):
+                return y.view(-1)
+
+            return torch.cond(pred, true_fn, false_fn, [x])
+
+        inp = torch.randn(3, 4)
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
+            torch.compile(alias_closure, backend="eager")(torch.tensor(False), inp)
 
     @torch._dynamo.config.patch(
         assume_static_by_default=True,
@@ -1579,7 +1599,7 @@ def forward(self):
     def test_cond_with_constant_pred(self):
         def test(pred, x):
             def true_fn(x):
-                return x
+                return x + 1
 
             def false_fn(x):
                 return -x
@@ -2827,7 +2847,7 @@ class GraphModule(torch.nn.Module):
             self,
             dict(counters["graph_break"]),
             {
-                r".*HigherOrderOperator: Mutating a variable not in the current scope \(replace_all\)": 2
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 2
             },
         )
         self.assertEqual(actual, expected)
@@ -3431,7 +3451,7 @@ class GraphModule(torch.nn.Module):
             self,
             dict(counters["graph_break"]),
             {
-                r".*HigherOrderOperator: Mutating a variable not in the current scope \(replace_all\)": 2
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 2
             },
         )
         self.assertEqual(actual, expected)
@@ -3737,7 +3757,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         def test(pred, x):
             def true_fn(x):
-                return x
+                return x + 1
 
             def false_fn(x):
                 return -x

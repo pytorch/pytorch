@@ -2137,7 +2137,6 @@ make_fallback(aten.addbmm)
 make_fallback(aten.addmv, warn=False)
 make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten.avg_pool3d)
-make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
@@ -2186,8 +2185,6 @@ make_fallback(aten.pixel_shuffle)
 make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
 make_fallback(aten.put)
-make_fallback(aten.reflection_pad1d)
-make_fallback(aten.replication_pad1d)
 make_fallback(aten.resize)
 make_fallback(aten.resize_)
 make_fallback(aten.resize_as)
@@ -3489,36 +3486,6 @@ def upsample_bicubic2d_default(
         dtype=x.get_dtype(),
         inner_fn=fn,
         ranges=[N, C, sympy.Integer(oH), sympy.Integer(oW)],
-    )
-
-
-@register_lowering(aten.reflection_pad2d)
-def reflection_pad2d(x, padding):
-    assert len(padding) == 4
-    left, right, top, bot = padding
-
-    x_loader = x.make_loader()
-    *batch, h, w = x.get_size()
-
-    def reflect(x, size, offset):
-        size_num = size
-        size = ops.index_expr(size - 1, torch.int32)
-        x = ops.index_expr(x, torch.int32)
-        x = ops.sub(x, ops.index_expr(offset, torch.int32))
-        x = ops.sub(size, ops.abs(ops.sub(size, ops.abs(x))))
-        return ops.indirect_indexing(x, size_num, check=False)
-
-    def fn(idx):
-        *b, x, y = idx
-        x = reflect(x, h, top)
-        y = reflect(y, w, left)
-        return x_loader([*b, x, y])
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=fn,
-        ranges=[*batch, h + top + bot, w + left + right],
     )
 
 
@@ -4918,7 +4885,7 @@ def cumsum(x, axis=None, dtype=None):
         dtype = torch.int64
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, scan_op="sum")
+    result = ir.Scan.create(**kwargs, combine_fn=ops.add, init=0)
     if result is None:
         return fallback_cumsum(x, dim=axis, dtype=dtype)
     return result
@@ -4932,7 +4899,7 @@ def cumprod(x, axis=None, dtype=None):
         dtype = torch.int64
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, scan_op="prod")
+    result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)
     if result is None:
         return fallback_cumprod(x, dim=axis, dtype=dtype)
     return result
