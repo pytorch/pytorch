@@ -1008,7 +1008,6 @@ namespace {
   }
 
   cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input, bool forward) {
-    return CUDNN_RNN_ALGO_STANDARD;
     // LSTM with projections only works with standard algorithm
     if (rnn.proj_size != 0) {
       return CUDNN_RNN_ALGO_STANDARD;
