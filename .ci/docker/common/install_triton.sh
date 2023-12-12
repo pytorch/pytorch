@@ -16,7 +16,7 @@ if [ -n "${ROCM_VERSION}" ]; then
   TRITON_REPO="https://github.com/ROCmSoftwarePlatform/triton"
   TRITON_TEXT_FILE="triton-rocm"
 else
-  TRITON_REPO="https://github.com/openai/triton"
+  TRITON_REPO="https://github.com/davidberard98/triton"
   TRITON_TEXT_FILE="triton"
 fi
 
