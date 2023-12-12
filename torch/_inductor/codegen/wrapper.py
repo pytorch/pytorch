@@ -1639,11 +1639,25 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
             if V.graph.aot_mode:
-                if not config.use_minimal_arrayref_interface:
+                if config.use_minimal_arrayref_interface:
+                    # TODO: input shape checking for regular tensor interface as well?
+                    self.codegen_input_numel_asserts()
+                else:
                     self.prefix.writeline("inputs.clear();")
                 self.prefix.writeline(
                     "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
+
+    def codegen_input_numel_asserts(self):
+        for name, buf in V.graph.graph_inputs.items():
+            if isinstance(buf, sympy.Expr):
+                continue
+
+            # comparing strides for 0 size tensor is tricky. Ignore them for now.
+            if sympy_product(buf.get_size()) == 0:
+                continue
+            numel = buf.get_numel()
+            self.prefix.writeline(f"assert_numel({name}, {numel});")
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
         if config.aot_inductor.abi_compatible:
