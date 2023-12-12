@@ -6101,6 +6101,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         )
         mark_node_as_mutating(packed, accum)
 
+        # Return accum since it has been inplace changed.
         return packed.inputs[2] if bias is None else packed.inputs[3]
 
 
