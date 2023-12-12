@@ -498,6 +498,9 @@ class WrapperCodeGen(CodeGen):
     def generate_end(self, result):
         return
 
+    def generate_fallback_kernel(self, fallback_kernel, args):
+        self.generate_extern_kernel_alloc(fallback_kernel, args)
+
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         ending = self.ending
         if config.memory_planning and "view_as_complex" in str(extern_kernel.kernel):
@@ -764,6 +767,16 @@ class WrapperCodeGen(CodeGen):
     def codegen_multi_output(self, name, value):
         self.writeline(f"{self.declare}{name} = {value}{self.ending}")
 
+    def codegen_dynamic_scalar(self, node):
+        (data,) = (t.codegen_reference() for t in node.inputs)
+        if node.is_bool:
+            self.writeline(f"{node.sym} = 1 if {data}.item() else 0")
+        else:
+            self.writeline(f"{node.sym} = {data}.item()")
+        # No one should ever use this buffer, but for uniformity
+        # define the variable and assign it None
+        self.writeline(f"{node.get_name()} = None")
+
     def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
@@ -814,9 +827,8 @@ class WrapperCodeGen(CodeGen):
                     )
 
             call_str = f"call([{', '.join(V.graph.graph_inputs.keys())}])"
-            output.writeline(
-                f"return print_performance(lambda: {call_str}, times=times, repeat=repeat)"
-            )
+            output.writeline(f"fn = lambda: {call_str}")
+            output.writeline("return print_performance(fn, times=times, repeat=repeat)")
 
     def add_benchmark_harness(self, output):
         """
@@ -881,10 +893,8 @@ class WrapperCodeGen(CodeGen):
         signature: List[Union[TensorArg, SizeArg]] = []
         constants = {}
         for key, arg in kwargs.items():
-            if (
-                key in kernel.__annotations__
-                and "constexpr" in kernel.__annotations__[key]
-            ):
+            idx = kernel.arg_names.index(key)
+            if idx in kernel.constexprs:
                 constants[key] = arg
                 continue
             if isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
@@ -1042,6 +1052,9 @@ class WrapperCodeGen(CodeGen):
 
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
+
+    def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
+        raise NotImplementedError()
 
     def val_to_arg_str(self, s):
         if isinstance(s, SymTypes):
@@ -1336,6 +1349,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 #include <ATen/native/BinaryOps.h>
                 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
+                #include <torch/types.h>
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
@@ -1490,12 +1504,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     if config.aot_inductor.abi_compatible:
                         self.prefix.writeline(
-                            f"""auto {constants_key} = constants_.at({idx});"""
+                            f"""auto {constants_key} = constants_->at({idx});"""
                         )
                     else:
                         self.prefix.writeline(
                             f"auto {constants_key} = *tensor_handle_to_tensor_pointer("
-                            + f"""constants_.at({idx}));"""
+                            + f"""constants_->at({idx}));"""
                         )
                 else:
                     # Append constants as inputs to the graph
@@ -1570,7 +1584,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         num_constants = len(V.graph.constants)
         self.prefix.splice(
             f"""
-            AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map, std::optional<std::string> cubin_dir)
+            AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
+                                               std::shared_ptr<std::vector<AtenTensorHandle>> constants_array,
+                                               std::optional<std::string> cubin_dir)
                 : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, cubin_dir) {{
             """
         )
@@ -1604,6 +1620,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
 
             self.prefix.writeline("update_constants_map(std::move(constants_map));")
+            self.prefix.writeline("update_constants_array(std::move(constants_array));")
 
             def escape_string(x):
                 return (
@@ -1676,7 +1693,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             for output_idx, const_idx in enumerate(const_index_mapping):
                 self.prefix.writeline(
-                    f"output_handles[{output_idx}] = constants_.at({const_idx});"
+                    f"output_handles[{output_idx}] = constants_->at({const_idx});"
                 )
 
             self.prefix.writeline(
@@ -1819,11 +1836,28 @@ class CppWrapperCodeGen(WrapperCodeGen):
         shim_fn = f"aoti_torch_{kernel_suffix}"
         self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));")
 
-    def generate_c_shim_extern_kernel_alloc_call(self, extern_kernel, args):
+    def generate_c_shim_extern_kernel_alloc(self, extern_kernel, args):
+        # registered output buffer name
+        name = extern_kernel.name
+        output_handle_name = f"{name}_handle"
+        self.writeline(f"AtenTensorHandle {output_handle_name};")
+        output_arg = f"&{output_handle_name}"
+        self.generate_c_shim_extern_kernel_call(
+            extern_kernel.codegen_kernel_name(), args + [output_arg]
+        )
+        self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
+
+    def generate_extern_kernel_alloc(self, extern_kernel, args):
+        if V.graph.aot_mode and config.aot_inductor.abi_compatible:
+            self.generate_c_shim_extern_kernel_alloc(extern_kernel, args)
+        else:
+            super().generate_extern_kernel_alloc(extern_kernel, args)
+
+    def generate_c_shim_fallback_kernel(self, fallback_kernel, args):
         output_args = []
         output_raii_handles = []
-        output_name_base = extern_kernel.get_name()
-        for idx, output in enumerate(extern_kernel.outputs):
+        output_name_base = fallback_kernel.get_name()
+        for idx, output in enumerate(fallback_kernel.outputs):
             if isinstance(output, ir.MultiOutput):
                 name = f"{output.get_name()}"
                 output_handle_name = f"{name}_handle"
@@ -1845,17 +1879,20 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 raise NotImplementedError("unsupported type of {output=}")
         args = args + output_args
+        assert (
+            fallback_kernel.abi_compatible_kernel is not None
+        ), f"abi_compatible_kernel is None for {fallback_kernel.kernel=}"
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.codegen_kernel_name(), args
+            fallback_kernel.abi_compatible_kernel, args
         )
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
-    def generate_extern_kernel_alloc(self, extern_kernel, args):
+    def generate_fallback_kernel(self, fallback_kernel, args):
         if V.graph.aot_mode and config.aot_inductor.abi_compatible:
-            self.generate_c_shim_extern_kernel_alloc_call(extern_kernel, args)
+            self.generate_c_shim_fallback_kernel(fallback_kernel, args)
         else:
-            super().generate_extern_kernel_alloc(extern_kernel, args)
+            super().generate_fallback_kernel(fallback_kernel, args)
 
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
@@ -1938,6 +1975,18 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if len(parts) == 1:
             return f"{{{parts[0]}, }}"
         return f"{{{', '.join(parts)}}}"
+
+    def codegen_dynamic_scalar(self, node):
+        from .cpp import DTYPE_TO_ATEN
+
+        (data,) = (t.codegen_reference() for t in node.inputs)
+        if node.is_bool:
+            self.writeline(f"bool {node.sym} = {data}.item() ? 1 : 0;")
+        else:
+            convert_type = DTYPE_TO_ATEN[node.inputs[0].get_dtype()].replace(
+                "at::k", "to"
+            )
+            self.writeline(f"auto {node.sym} = {data}.item().{convert_type}();")
 
     def is_statically_known_int(self, x):
         try:
@@ -2456,13 +2505,29 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         self.extern_call_ops.add(cpp_kernel_key)
 
-    def val_to_arg_str(self, val):
+    def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
+        if (
+            config.aot_inductor.abi_compatible
+            and not is_legacy_abi
+            and isinstance(type_, torch.OptionalType)
+        ):
+            if val is None:
+                return "0"  # nullptr is not available in C
+            if isinstance(val, (bool, int, str, float)):
+                var_name = f"var_{next(self.arg_var_id)}"
+                self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
+                return f"&{var_name}"
+            if not isinstance(type_.getElementType(), torch.TensorType):
+                return f"&{self.val_to_arg_str(val)}"
+
+        return self.val_to_arg_str(val)
+
+    def val_to_arg_str(self, val) -> str:
         if val is None:
             # When None is passed as an argument, it represents an optional that does not contain a value.
             if config.aot_inductor.abi_compatible:
-                return "nullptr"
-            else:
-                return "c10::nullopt"
+                return "0"  # nullptr is not available in C
+            return "c10::nullopt"
         elif isinstance(val, bool):
             if config.aot_inductor.abi_compatible:
                 return "1" if val else "0"
@@ -2484,7 +2549,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 return "-std::numeric_limits<float>::infinity()"
         elif isinstance(val, (list, tuple)):
-            result = f"{{{', '.join(list(map(self.val_to_arg_str, val)))}}}"
+            # FIXME handle embedded optional types?
+            result = f"{{{', '.join(self.val_to_arg_str(x) for x in val)}}}"
             if config.aot_inductor.abi_compatible:
                 # Need to pass the array length because we can't use std::vector
                 return f"{self.codegen_int_array_var(result)}, {len(val)}"
