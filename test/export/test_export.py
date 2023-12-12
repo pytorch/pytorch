@@ -1814,6 +1814,28 @@ def forward(self, l_x_):
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 
+    def test_export_mkldnn_disabled(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(input_size=4, hidden_size=5, num_layers=1)
+
+            def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+                return self.lstm(inputs)
+
+        inp = (torch.ones(3, 4),)
+        torch._C._set_mkldnn_enabled(False)
+        ep = torch.export.export(M(), inp)
+        FileCheck().check_count(
+            "torch.ops.aten.mkldnn_rnn_layer.default", 0, exactly=True
+        ).run(ep.graph_module.code)
+
+        torch._C._set_mkldnn_enabled(True)
+        ep = torch.export.export(M(), inp)
+        FileCheck().check_count(
+            "torch.ops.aten.mkldnn_rnn_layer.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+
     def test_export_input_mutation_static_shape(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x, y):
