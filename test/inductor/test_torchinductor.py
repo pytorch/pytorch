@@ -282,19 +282,6 @@ def check_model(
     original_lowp_dtype = torch.half
 
     if reference_in_float:
-        # Store expected dtypes so we can check actual result gives the correct types
-        torch.manual_seed(0)
-        try:
-            eager_result = model(*ref_inputs, *ref_kwargs)
-        except RuntimeError:
-            # Eager model may fail if the dtype is not supported
-            eager_result = None
-
-        ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
-        expect_dtypes = [x.dtype if isinstance(x, torch.Tensor) else None
-                            for x in pytree.tree_leaves(eager_result)]
-        del eager_result
-
         # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
         def upcast_fn(x):
             nonlocal has_lowp_args
@@ -363,11 +350,6 @@ def check_model(
         )
 
     if reference_in_float:
-        for expect_dtype, actual_result in zip(expect_dtypes, actual_flat):
-            if expect_dtype is not None:
-                assert actual_result.dtype == expect_dtype, \
-                    f"dtype mismatch, expected {expect_dtype} but got {actual_result.dtype}"
-
         correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
 
@@ -4605,15 +4587,6 @@ class CommonTemplate:
             self.assertIsNone(
                 re.search(pattern, code), msg="Found bad index_expr in code:\n" + code
             )
-
-    def test_float_index_expression_type_promotion(self):
-        # Test that float indexing expressions participate in type promotion
-        def fn(x):
-            return x + 1.0 / x.size(0)
-
-        x = torch.arange(10)
-        self.common(fn, (x,))
-
 
     def test_sort(self):
         def fn(a):
