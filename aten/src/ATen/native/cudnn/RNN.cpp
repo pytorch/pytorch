@@ -1008,6 +1008,7 @@ namespace {
   }
 
   cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input, bool forward) {
+    return CUDNN_RNN_ALGO_STANDARD;
     // LSTM with projections only works with standard algorithm
     if (rnn.proj_size != 0) {
       return CUDNN_RNN_ALGO_STANDARD;
@@ -1694,7 +1695,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
         x_descs_arr.desc(), x.data_ptr(),
         descs.hx_desc.desc(), hx.data_ptr(),
         y_descs_arr.desc(), y.data_ptr(),
-        weight_buf.numel() * weight_buf.element_size(), weight_buf.data_ptr(),
+        weight_buf.numel() * weight_buf.element_size(), dw.data_ptr(),
         workspace.size(0), workspace.data_ptr(),
         fn_reserve.size(0), fn_reserve.data_ptr()));
 #endif
