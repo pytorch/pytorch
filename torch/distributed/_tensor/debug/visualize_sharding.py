@@ -1,17 +1,18 @@
 from typing import List, Sequence, Tuple
-from torch._prims_common import ShapeType
-from torch.distributed._tensor import DeviceMesh, Shard
-from torch.distributed._tensor.placement_types import (
-    Placement,
-    Shard,
-)
+
 import numpy as np
 
+from torch._prims_common import ShapeType
+from torch.distributed._tensor import DeviceMesh
+
+from torch.distributed._tensor.placement_types import Placement, Shard
+
+
 def _mesh_to_coordinate(mesh, device_type):
-    '''
+    """
     Given a n-dimensional list of device mesh, this function creates a map of
     device and its coordinate
-    '''
+    """
     # Convert the n-dimensional list to a NumPy array
     np_mesh = np.array(mesh.mesh.tolist())
 
@@ -23,11 +24,12 @@ def _mesh_to_coordinate(mesh, device_type):
 
     return device_to_coordinate_map
 
+
 def _convert_offset_to_ranges(all_offsets):
-    '''
+    """
     Using tabulate package to create a table is easier when we specify row and col ranges
     This function converts offsets to ranges.
-    '''
+    """
     converted_blocks = []
 
     for offset in all_offsets:
@@ -39,38 +41,39 @@ def _convert_offset_to_ranges(all_offsets):
 
         # Convert value to string to match your desired format
         converted_block = {
-            'row_range': row_range, 
-            'column_range': column_range, 
-            'value': str(value)
+            "row_range": row_range,
+            "column_range": column_range,
+            "value": str(value),
         }
         converted_blocks.append(converted_block)
 
     return converted_blocks
 
+
 def _create_table(blocks):
-    '''
+    """
     Creates a tabulate table given row and column ranges with device name
-    '''
+    """
     try:
         from tabulate import tabulate
-    except ImportError:
-        raise ImportError("tabulate package is required to visualize sharding")
+    except ImportError as e:
+        raise ImportError("tabulate package is required to visualize sharding") from e
 
     # Extract unique row and column ranges
-    row_ranges = sorted(set([block['row_range'] for block in blocks]))
-    col_ranges = sorted(set([block['column_range'] for block in blocks]))
+    row_ranges = sorted({block["row_range"] for block in blocks})
+    col_ranges = sorted({block["column_range"] for block in blocks})
 
     # Create a matrix initialized with empty strings
-    matrix = [['' for _ in col_ranges] for _ in row_ranges]
+    matrix = [["" for _ in col_ranges] for _ in row_ranges]
 
     # Fill the matrix with values
     for block in blocks:
-        row_index = row_ranges.index(block['row_range'])
-        col_index = col_ranges.index(block['column_range'])
-        if matrix[row_index][col_index] == '':
-            matrix[row_index][col_index] = block['value']
+        row_index = row_ranges.index(block["row_range"])
+        col_index = col_ranges.index(block["column_range"])
+        if matrix[row_index][col_index] == "":
+            matrix[row_index][col_index] = block["value"]
         else:
-            matrix[row_index][col_index] += ', ' + block['value']
+            matrix[row_index][col_index] += ", " + block["value"]
 
     # Prepare headers
     row_headers = [f"Row {r[0]}-{r[1]}" for r in row_ranges]
@@ -78,8 +81,12 @@ def _create_table(blocks):
 
     return tabulate(matrix, headers=col_headers, showindex=row_headers)
 
+
 def compute_local_shape_and_global_offset(
-    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement], my_coordinate: List[int]
+    global_shape: ShapeType,
+    mesh: DeviceMesh,
+    placements: Sequence[Placement],
+    my_coordinate: List[int],
 ) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
     """
     Same as torch.distributed._tensor._utils.compute_local_shape_and_global_offset but
@@ -122,13 +129,16 @@ def compute_local_shape_and_global_offset(
 
         return tuple(local_shape), tuple(global_offset)
 
+
 def visualize_sharding(dtensor):
-    '''
+    """
     Visualizes sharding in 1D-2D dtensors
     Requires tabulate, install with `pip install tabulate`
-    '''
+    """
     if len(dtensor.shape) >= 3:
-        raise RuntimeError("visualize sharding is only implemented for 1D or 2D dtensor")
+        raise RuntimeError(
+            "visualize sharding is only implemented for 1D or 2D dtensor"
+        )
     placements = dtensor.placements
     device_mesh = dtensor.device_mesh
     device_type = dtensor.device_mesh.device_type
@@ -136,9 +146,11 @@ def visualize_sharding(dtensor):
     device_map = _mesh_to_coordinate(device_mesh, device_type)
     all_offsets = []
     for device in device_map:
-        local_shape, global_offset = compute_local_shape_and_global_offset(dtensor.shape, device_mesh, placements, device_map[device])
+        local_shape, global_offset = compute_local_shape_and_global_offset(
+            dtensor.shape, device_mesh, placements, device_map[device]
+        )
         all_offsets.append([local_shape, global_offset, device])
-    
+
     # Convert offsets to blocks with row_ranges for tabulate
     blocks = _convert_offset_to_ranges(all_offsets)
     if device_mesh.get_rank() == 0:
