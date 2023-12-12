@@ -60,12 +60,14 @@ static PyObject* MPSModule_isAvailable(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* MPSModule_isMacOS13orNewer(PyObject* _unused, PyObject* args) {
+static PyObject* MPSModule_isMacOSorNewer(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
-      THPUtils_checkLong(args), "invalid argument to isOnMacOS13orNewer()");
-  auto minor = THPUtils_unpackUInt32(args);
-  if (at::detail::getMPSHooks().isOnMacOS13orNewer(minor)) {
+  size_t major = 0;
+  size_t minor = 0;
+  if (!PyArg_ParseTuple(args, "LL", &major, &minor)) {
+    return nullptr;
+  }
+  if (at::detail::getMPSHooks().isOnMacOSorNewer(major, minor)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -224,9 +226,9 @@ static struct PyMethodDef _MPSModule_methods[] = {
      nullptr},
     {"_mps_is_in_bad_fork", MPSModule_isInBadFork, METH_NOARGS, nullptr},
     {"_mps_is_available", MPSModule_isAvailable, METH_NOARGS, nullptr},
-    {"_mps_is_on_macos_13_or_newer",
-     MPSModule_isMacOS13orNewer,
-     METH_O,
+    {"_mps_is_on_macos_or_newer",
+     MPSModule_isMacOSorNewer,
+     METH_VARARGS,
      nullptr},
     {"_mps_get_default_generator",
      MPSModule_getDefaultMPSGenerator,
