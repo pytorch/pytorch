@@ -20,7 +20,7 @@ from torch._export.utils import (
     register_dataclass_as_pytree_node,
 )
 from torch._subclasses import FakeTensorMode
-from torch.export import Constraint, Dim, export
+from torch.export import Constraint, Dim
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -33,10 +33,11 @@ from torch.utils._pytree import (
     treespec_dumps,
     treespec_loads,
 )
-try:
-    from . import testing
-except ImportError:
-    import testing
+import testing
+# The following import pattern matters as `test_export.export` is patched
+# in other files (like test_export_nonstrict.py). `torch.export.export`
+# will invalidate the patch.
+from torch.export import export
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
