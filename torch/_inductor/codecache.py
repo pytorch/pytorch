@@ -1466,7 +1466,6 @@ def cpp_compile_command(
         assert is_clang()
         # Use clang runtime instead of libgcc
         clang_flags += " --rtlib=compiler-rt"
-        clang_flags += " -fuse-ld=lld"
         linker_paths = "-B" + build_paths.glibc_lib()
         linker_paths += " -L" + build_paths.glibc_lib()
     else:
