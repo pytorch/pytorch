@@ -11,12 +11,12 @@
 TEST(SingletonIntTest, Comparisons) {
   auto x = torch::randn({2, 2});
 
-  auto a = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 1, x, x, 1)));
-  auto b = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 1, x, x, 1)));
-  auto c = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(2, 1, x, x, 1)));
+  auto a = c10::SymInt(c10::SymNode(
+      c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 1, x, x, 1)));
+  auto b = c10::SymInt(c10::SymNode(
+      c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 1, x, x, 1)));
+  auto c = c10::SymInt(c10::SymNode(
+      c10::make_intrusive<c10::SingletonSymNodeImpl>(2, 1, x, x, 1)));
   auto d = c10::SymInt(3);
 
   ASSERT_TRUE(a == a);
@@ -91,10 +91,10 @@ TEST(SingletonIntTest, Comparisons) {
 TEST(SingletonIntTest, WiithFactor) {
   auto x = torch::randn({2, 2});
 
-  auto a = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 5, x, x, 1)));
-  auto b = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 10, x, x, 1)));
+  auto a = c10::SymInt(c10::SymNode(
+      c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 5, x, x, 1)));
+  auto b = c10::SymInt(c10::SymNode(
+      c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 10, x, x, 1)));
   // eq
   ASSERT_FALSE(a == b);
   ASSERT_FALSE(a >= b);
@@ -113,10 +113,10 @@ TEST(SingletonIntTest, AccessToTensor) {
   auto x = torch::randn({2, 2});
   auto y = torch::randn({2, 2});
 
-  auto a = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 5, x, y, 1)));
-  auto b = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 10, x, y, 1)));
+  auto a = c10::SymInt(c10::SymNode(
+      c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 5, x, y, 1)));
+  auto b = c10::SymInt(c10::SymNode(
+      c10::make_intrusive<c10::SingletonSymNodeImpl>(1, 10, x, y, 1)));
 
   auto p = dynamic_cast<c10::SingletonSymNodeImpl*>(a.toSymNode().get());
   ASSERT_TRUE(p != nullptr);
