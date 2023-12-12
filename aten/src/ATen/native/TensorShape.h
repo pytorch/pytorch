@@ -55,4 +55,12 @@ inline int64_t get_num_splits(const Tensor& self, int64_t split_size, int64_t di
   return num_splits;
 }
 
+bool _same_storage(at::Tensor& a, at::Tensor const& b);
+
+bool _data_ptr_allocated(at::Tensor& a);
+
+bool _same_storage_size(at::Tensor&a, int64_t s);
+
+bool _storage_size_allocated(at::Tensor&a);
+
 } // namespace at::native
