@@ -8596,6 +8596,17 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             assert torch.backends.quantized.engine == qe, 'qengine not set successfully'
         torch.backends.quantized.engine = original_qe
 
+    def test_terminate_handler_on_crash(self):
+        cmd = [sys.executable, '-c', "import os; os.environ[\"TORCH_CUSTOM_TERMINATE\"] ='1'; \
+               import torch; import torch._C; torch._C._abort()"]
+        with self.assertRaises(subprocess.CalledProcessError) as cm:
+            subprocess.check_output(cmd, shell=False)
+        e = cm.exception
+        output = e.stdout.decode("utf-8")
+        self.assertNotEqual(e.returncode, 0)
+        self.assertNotEqual(output, None)
+        self.assertIn('Unhandled exception caught in c10/util/AbortHandler.h', output)
+
     # FIXME: port to a distributed test suite -- also... how could this be OOMing on Windows CUDA?
     @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
