@@ -311,7 +311,10 @@ class ShardedGradScaler(GradScaler):
                 if found_inf_on_cuda.device.type == "cpu":
                     found_inf_on_cuda.copy_(found_inf_on_cudas.pop(0).cpu())
 
-        assert not found_inf_on_cudas, f"internal error: expect all found_infs to be copied from gpu to cpu, but got non-empty {found_inf_on_cudas}"
+        if not found_inf_on_cudas:
+            raise AssertionError(
+                f"internal error: expect all found_infs to be copied from gpu to cpu, but got non-empty {found_inf_on_cudas}"
+            )
 
     def _amp_update_scale_cpu_(self, found_inf: torch.Tensor) -> None:
         """

@@ -1,25 +1,24 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import functools
 import itertools
 import sys
 import unittest
-import copy
-from typing import Optional, List
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch import distributed as dist
-from torch.distributed._composable import replicate
 from torch.cuda.amp.common import amp_definitely_not_available
+from torch.distributed._composable import replicate
 from torch.distributed.fsdp import CPUOffload, MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -68,6 +67,7 @@ class ForkedPdb(pdb.Pdb):
             pdb.Pdb.interaction(self, *args, **kwargs)
         finally:
             sys.stdin = _stdin
+
 
 params = "cpu_offload,sharding_strategy,mixed_precision,use_orig_params"
 cpu_offload_config = [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
@@ -275,7 +275,10 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         self.run_subtests(
             {
                 "use_orig_params": [False, True],
-                "cpu_offload": [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
+                "cpu_offload": [
+                    CPUOffload(offload_params=True),
+                    CPUOffload(offload_params=False),
+                ],
             },
             self._test_sharded_grad_scaler_found_inf,
         )
@@ -286,7 +289,12 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         cpu_offload: CPUOffload,
     ):
         lin_dim = 4
-        model, optim, ref_model, ref_optim = self._build_model_and_optim(lin_dim, build_extra_ddp=True, cpu_offload=cpu_offload, use_orig_params=use_orig_params)
+        model, optim, ref_model, ref_optim = self._build_model_and_optim(
+            lin_dim,
+            build_extra_ddp=True,
+            cpu_offload=cpu_offload,
+            use_orig_params=use_orig_params,
+        )
         grad_scaler = ShardedGradScaler(init_scale=2.0)
         ref_grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
         scaled_losses: List[torch.Tensor] = []
@@ -294,7 +302,10 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
 
         for iter in range(10):
             x = torch.rand((32, lin_dim), device="cuda")
-            for _model, _optim, _grad_scaler in ((ref_model, ref_optim, ref_grad_scaler), (model, optim, grad_scaler)):
+            for _model, _optim, _grad_scaler in (
+                (ref_model, ref_optim, ref_grad_scaler),
+                (model, optim, grad_scaler),
+            ):
                 _optim.zero_grad()
                 loss = _model(x).sum()
                 scaled_loss = _grad_scaler.scale(loss)
@@ -302,19 +313,21 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                 scaled_loss.backward()
 
                 orig_params = [
-                    param.detach().clone() for param in _model.parameters() if param.grad is not None
+                    param.detach().clone()
+                    for param in _model.parameters()
+                    if param.grad is not None
                 ]
 
                 should_find_inf = iter % 2 == 0
-                if should_find_inf and (_model == ref_model or (
-                   _model == model and dist.get_rank() != 0
-                )):
+                if should_find_inf and (
+                    _model == ref_model or (_model == model and dist.get_rank() != 0)
+                ):
                     # other ranks should find infs from rank 0
                     # after collectives
                     for param in _model.parameters():
                         if param.grad is None:
                             continue
-                        param.grad.data.fill_(float('inf'))
+                        param.grad.data.fill_(float("inf"))
                         break
 
                 _grad_scaler.step(_optim)
@@ -323,17 +336,53 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                 _grad_scaler.update()
 
                 if should_find_inf:
-                    self.assertEqual(_grad_scaler.get_scale(), orig_scale * _grad_scaler.get_backoff_factor(), f"rank: {self.rank} iter: {iter} expect origin scale {orig_scale} to be backed off by {_grad_scaler.get_backoff_factor()} but got {_grad_scaler.get_scale()}")
+                    self.assertEqual(
+                        _grad_scaler.get_scale(),
+                        orig_scale * _grad_scaler.get_backoff_factor(),
+                        (
+                            f"rank: {self.rank} iter: {iter} expect origin scale {orig_scale} "
+                            f"to be backed off by {_grad_scaler.get_backoff_factor()} "
+                            f"but got {_grad_scaler.get_scale()}"
+                        ),
+                    )
                 else:
-                    self.assertEqual(_grad_scaler.get_scale(), orig_scale, f"rank: {self.rank} iter: {iter} expect same scale {orig_scale} but got {_grad_scaler.get_scale()}")
+                    self.assertEqual(
+                        _grad_scaler.get_scale(),
+                        orig_scale,
+                        (
+                            f"rank: {self.rank} iter: {iter} expect same scale {orig_scale} "
+                            f"but got {_grad_scaler.get_scale()}"
+                        ),
+                    )
 
-                for param, orig_param in zip([param for param in _model.parameters() if param.grad is not None], orig_params):
+                for param, orig_param in zip(
+                    [param for param in _model.parameters() if param.grad is not None],
+                    orig_params,
+                ):
                     if should_find_inf:
-                        self.assertEqual(param, orig_param, f"rank: {self.rank} iter: {iter} expect the same params before and after optim.step but got {param} vs {orig_param}")
+                        self.assertEqual(
+                            param,
+                            orig_param,
+                            (
+                                f"rank: {self.rank} iter: {iter} expect the same params before "
+                                f"and after optim.step but got {param} vs {orig_param}"
+                            ),
+                        )
                     else:
-                        self.assertNotEqual(param, orig_param, f"rank: {self.rank} iter: {iter} expect the updated params after optim.step but got {param} vs {orig_param}")
+                        self.assertNotEqual(
+                            param,
+                            orig_param,
+                            (
+                                f"rank: {self.rank} iter: {iter} expect the updated params after "
+                                f"optim.step but got {param} vs {orig_param}"
+                            ),
+                        )
 
-            self.assertEqual(scaled_losses[0], scaled_losses[1], f"iter: {iter} {scaled_losses[0]} vs {scaled_losses[1]}")
+            self.assertEqual(
+                scaled_losses[0],
+                scaled_losses[1],
+                f"iter: {iter} {scaled_losses[0]} vs {scaled_losses[1]}",
+            )
 
 
 instantiate_parametrized_tests(TestShardGradScaler)
