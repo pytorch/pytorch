@@ -182,6 +182,16 @@ class ConstDictVariable(VariableTracker):
         else:
             return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
+    @staticmethod
+    def _wrap_keys_python_var(d):
+        """Wrap the keys of a dictionary with python objs as keys into Hashable objects"""
+        assert all(is_hashable_python_var(k) for k in d.keys())
+        Hashable = ConstDictVariable._HashableTracker
+        from .builder import SourcelessBuilder
+
+        build = SourcelessBuilder()
+        return {Hashable(build(k)): v for k, v in d.items()}
+
     def getitem_const(self, arg: VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
         return self.items[key]
@@ -194,6 +204,7 @@ class ConstDictVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
+            BuiltinVariable,
             ConstantVariable,
             ListIteratorVariable,
             ListVariable,
@@ -220,17 +231,14 @@ class ConstDictVariable(VariableTracker):
             return DictValues(self)
         elif name == "copy":
             assert not (args or kwargs)
-            return self.modifed(self.items.copy(), mutable_local=MutableLocal())
+            return self.clone(items=self.items.copy(), mutable_local=MutableLocal())
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable.create(len(self.items))
         elif name == "__setitem__" and arg_hashable and self.mutable_local:
             assert not kwargs and len(args) == 2
-            k = Hashable(args[0])
-
             tx.output.side_effects.mutation(self)
-            newval = dict(self.items)
-            newval[k] = args[1]
+            self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)
         elif name in ("pop", "get") and len(args) in (1, 2) and args[0] not in self:
             # missing item, return the default value
@@ -244,21 +252,10 @@ class ConstDictVariable(VariableTracker):
         elif (
             name == "update"
             and len(args) == 1
-            and isinstance(args[0], ConstDictVariable)
-            and self.mutable_local
-        ):
-            self.items.update(args[0].items)
-            # all keys in kwargs are valid (`str`s)
-            kwargs = {ConstantVariable.create(k): v for k, v in kwargs.items()}
-            self.items.update(kwargs)
-
-            return ConstantVariable.create(None)
-        elif (
-            name == "update"
-            and len(args) == 1
             and isinstance(
                 args[0],
                 (
+                    ConstDictVariable,
                     ListVariable,
                     TupleVariable,
                     ListIteratorVariable,
@@ -267,14 +264,15 @@ class ConstDictVariable(VariableTracker):
             and self.mutable_local
         ):
             tx.output.side_effects.mutation(self)
-            items = dict(
-                x.unpack_var_sequence(tx) for x in args[0].unpack_var_sequence(tx)
-            )
-            self.items.update(items)
-            kwargs = {ConstantVariable.create(k): v for k, v in kwargs.items()}
-            self.items.update(kwargs)  # all keys in kwargs are valid (`str`s)
+            if isinstance(args[0], ConstDictVariable):
+                dict_vt = args[0]
+            else:
+                dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
+            self.items.update(dict_vt.items)
+            # all keys in kwargs are valid (`str`s)
+            kwargs = ConstDictVariable._wrap_keys_python_var(kwargs)
+            self.items.update(kwargs)
             return ConstantVariable.create(None)
-
         elif name in ("get", "__getattr__") and args[0] in self:
             return self.getitem_const(args[0])
         elif name == "__contains__" and len(args) == 1:
