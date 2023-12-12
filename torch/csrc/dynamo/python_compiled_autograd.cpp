@@ -436,8 +436,8 @@ variable_list compiled_autograd(
       saved.debug_asserts();
 
       if (!call.post_hooks.empty()) {
-        THPObjectPtr pyoutputs(THPVariable_WrapList(outputs));
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
+        THPObjectPtr pyoutputs(THPVariable_WrapList(outputs));
         for (const auto hook : call.post_hooks) {
           pyoutputs = check(PyObject_CallMethod(
               py_compiler.get(),

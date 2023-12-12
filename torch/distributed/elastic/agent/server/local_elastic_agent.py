@@ -45,9 +45,8 @@ TORCHELASTIC_ENABLE_FILE_TIMER = "TORCHELASTIC_ENABLE_FILE_TIMER"
 TORCHELASTIC_TIMER_FILE = "TORCHELASTIC_TIMER_FILE"
 
 class LocalElasticAgent(SimpleElasticAgent):
-    """
-    An implementation of :py:class:`torchelastic.agent.server.ElasticAgent`
-    that handles host-local workers.
+    """An implementation of :py:class:`torchelastic.agent.server.ElasticAgent` that handles host-local workers.
+
     This agent is deployed per host and is configured to spawn ``n`` workers.
     When using GPUs, ``n`` maps to the number of GPUs available on the host.
 
@@ -261,8 +260,8 @@ class LocalElasticAgent(SimpleElasticAgent):
                 "TORCHELASTIC_MAX_RESTARTS": str(spec.max_restarts),
                 "TORCHELASTIC_RUN_ID": spec.rdzv_handler.get_run_id(),
                 "TORCHELASTIC_USE_AGENT_STORE": str(use_agent_store),
-                "NCCL_ASYNC_ERROR_HANDLING": os.getenv(
-                    "NCCL_ASYNC_ERROR_HANDLING", str(1)
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING": os.getenv(
+                    "TORCH_NCCL_ASYNC_ERROR_HANDLING", str(1)
                 ),
             }
             if "OMP_NUM_THREADS" in os.environ:

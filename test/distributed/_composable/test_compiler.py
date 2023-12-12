@@ -21,18 +21,27 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import run_tests
+from torch.utils.checkpoint import checkpoint
+
+
+DIM = 2000
 
 
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self, checkpoint=False):
         super().__init__()
-        self.fc1 = nn.Linear(2, 2)
-        self.fc2 = nn.Linear(2, 2)
-        self.fc3 = nn.Linear(2, 2)
+        self.fc1 = nn.Linear(DIM, DIM)
+        self.fc2 = nn.Linear(DIM, DIM)
+        self.fc3 = nn.Linear(DIM, DIM)
+        self.fc4 = nn.Linear(DIM, DIM)
+        self.use_checkpoint = checkpoint
 
     def forward(self, x):
-        _fc1 = torch.utils.checkpoint.checkpoint(self.fc1, x, use_reentrant=False)
-        return self.fc3(self.fc2(_fc1))
+        if self.use_checkpoint:
+            _fc1 = checkpoint(self.fc1, x, use_reentrant(False))
+        else:
+            _fc1 = self.fc1(x)
+        return self.fc4(self.fc3(self.fc2(_fc1)))
 
 
 def compiler_fn(gm):
@@ -82,7 +91,7 @@ class ReplicateTest(MultiProcessTestCase):
         torch._dynamo.config.ddp_python_hook = True
         torch.manual_seed(123)
         model = Net().to(device)
-        input = torch.randn([1, 2], device=device)
+        input = torch.randn([1, DIM], device=device)
 
         compiled_model = torch.compile(replicate(deepcopy(model)), fullgraph=True)
         compiled_optim = torch.optim.Adam(compiled_model.parameters())
@@ -95,7 +104,7 @@ class ReplicateTest(MultiProcessTestCase):
         # Run multiple iterations so that we could test no_sync
         for i in range(6):
             torch.manual_seed(123 + self.rank + i)
-            input = torch.randn([1, 2], device=device)
+            input = torch.randn([1, DIM], device=device)
 
             if no_sync and i % 2 == 0:
                 context = replicate.state(model)._ddp.no_sync()
@@ -119,16 +128,16 @@ class ReplicateTest(MultiProcessTestCase):
                 for p1, p2 in zip(model.parameters(), compiled_model.parameters()):
                     self.assertEqual(p1.grad, p2.grad)
                 compiled_optim.step()
-                compiled_optim.zero_grad()
+                compiled_optim.zero_grad(set_to_none=False)
                 optim.step()
                 optim.zero_grad()
 
         self.assertEqual(tuple(model.parameters()), tuple(compiled_model.parameters()))
 
-    def ____test_compile_cpu(self):
+    def test_compile_cpu(self):
         self._test_compile(use_gpu=False, no_sync=False)
 
-    def ____test_compile_cpu_no_sync(self):
+    def test_compile_cpu_no_sync(self):
         self._test_compile(use_gpu=False, no_sync=True)
 
     @skip_if_lt_x_gpu(2)
@@ -136,7 +145,7 @@ class ReplicateTest(MultiProcessTestCase):
         self._test_compile(use_gpu=True, no_sync=False)
 
     @skip_if_lt_x_gpu(2)
-    def ____test_compile_bf16(self):
+    def test_compile_bf16(self):
         def setup(model, compiled_model) -> None:
             replicate.state(model)._ddp.register_comm_hook(
                 None, ddp_default_hooks.bf16_compress_hook
@@ -149,7 +158,7 @@ class ReplicateTest(MultiProcessTestCase):
         self._test_compile(use_gpu=True, no_sync=False, setup_func=setup)
 
     @skip_if_lt_x_gpu(2)
-    def ____test_compile_fp16(self):
+    def test_compile_fp16(self):
         def setup(model, compiled_model) -> None:
             replicate.state(model)._ddp.register_comm_hook(
                 None, ddp_default_hooks.fp16_compress_hook
@@ -160,3 +169,7 @@ class ReplicateTest(MultiProcessTestCase):
             )
 
         self._test_compile(use_gpu=True, no_sync=False, setup_func=setup)
+
+
+if __name__ == "__main__":
+    run_tests()

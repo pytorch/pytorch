@@ -85,7 +85,7 @@ variable_list AccumulateGrad::apply_with_saved(
   }
   TORCH_INTERNAL_ASSERT(!variable.grad_fn() && grads.size() == 1);
   at::Tensor variable_copy = variable;
-  at::Tensor& grad_copy = variable.mutable_grad();
+  at::Tensor grad_copy = variable.grad();
   saved.before(variable_copy);
   saved.before(grad_copy);
   variable_copy.mutable_grad() = grad_copy;
