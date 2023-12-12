@@ -129,6 +129,7 @@ public:
   void set(const at::Tensor &t, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray);
 private:
   void set(cudnnDataType_t dataType, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray) {
+    TORCH_WARN("setting... batchsize ", batchSize, " seqlen ", maxSeqLength);
     AT_CUDNN_CHECK(cudnnSetRNNDataDescriptor(mut_desc(), dataType, layout, maxSeqLength, batchSize, vectorSize, seqLengthArray, NULL));
   }
 };
@@ -274,6 +275,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
   void set(cudnnHandle_t handle, 
 #if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNNV8VERSION
 	   int input_size,
+	   bool packed,
 #endif
 	   int hidden_size, int proj_size, int num_layers, DropoutDescriptor&& dropout_desc,
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
@@ -302,7 +304,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
     }
 #else
     auto md = mut_desc();
-    TORCH_WARN("md nullptr? ", md == nullptr);
+    TORCH_WARN("md nullptr? ", md == nullptr, "input size? " , input_size, " packed? ", packed);
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v8(
           md,
           algo,
@@ -318,7 +320,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
           proj_size ? proj_size : hidden_size,
           num_layers,
           dropout_desc_.desc(),
-          0));
+          packed ? CUDNN_RNN_PADDED_IO_DISABLED : CUDNN_RNN_PADDED_IO_ENABLED));
 #endif
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();

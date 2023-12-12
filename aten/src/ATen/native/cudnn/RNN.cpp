@@ -113,6 +113,7 @@ namespace {
   struct RNNDescriptorParams {
 #if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNNV8VERSION
     int64_t input_size;
+    bool packed;
 #endif
     int64_t hidden_size;
     int64_t proj_size;
@@ -162,10 +163,13 @@ namespace {
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNN_V8_VERSION
     void set(int64_t mode, int64_t hidden_size, int64_t proj_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
 #else
-    void set(int64_t mode, int64_t input_size, int64_t hidden_size, int64_t proj_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
+    void set(int64_t mode, int64_t input_size, bool packed, int64_t hidden_size, int64_t proj_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
 #endif
       this->set_mode(mode);
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNN_V8_VERSION
       this->input_size = input_size;
+      this->packed = packed;
+#endif
       this->hidden_size = hidden_size;
       this->proj_size = proj_size;
       this->num_layers = num_layers;
@@ -179,7 +183,7 @@ namespace {
  #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
       rnn_desc.set(handle, hidden_size, proj_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, input_datatype, algo, at::globalContext().allowTF32CuDNN());
  #else
-      rnn_desc.set(handle, input_size, hidden_size, proj_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, input_datatype, algo, at::globalContext().allowTF32CuDNN());
+      rnn_desc.set(handle, input_size, packed, hidden_size, proj_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, input_datatype, algo, at::globalContext().allowTF32CuDNN());
  #endif
       return rnn_desc;
     }
@@ -224,9 +228,19 @@ namespace {
     return descriptors;
   }
 #else
-  auto rnn_descriptor_sequence(const Tensor& tensor, const int batch_size, const int seq_len, const int vector_size) { // packed case
+  auto rnn_descriptor_sequence(const Tensor& tensor, const int batch_size, IntArrayRef batch_sizes, const int seq_len, const int vector_size) { // packed case
     RNNDataDescriptor r;
-    std::vector<int> seqLengthArray(batch_size, seq_len);
+    std::vector<int> seqLengthArray(batch_size, 1);
+    // TODO(eqy): There's probably a smarter way to do this than O(SN)
+    for (auto it = batch_sizes.begin(); it != batch_sizes.end(); it++) {
+      // everyone starts at sequence length 1 so we skip an iteration
+      if (it == batch_sizes.begin()) {
+        continue;
+      }
+      for (int idx = 0; idx < *it; idx++) {
+        seqLengthArray[idx]++;
+      }
+    }
     r.set(tensor, CUDNN_RNN_DATA_LAYOUT_SEQ_MAJOR_PACKED, seq_len, batch_size, vector_size, seqLengthArray.data());
     return r;
   }
@@ -317,7 +331,7 @@ namespace {
     }
 
 #if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNNV8VERSION
-    bool batch_first;
+    int batch_first = -1;
 #endif
 
     void set(IntArrayRef input_sizes, IntArrayRef batch_sizes_, bool batch_first_) {
@@ -358,9 +372,12 @@ namespace {
     }
 #else
     auto descriptors(Tensor x) const {
+      TORCH_INTERNAL_ASSERT(batch_first >= 0, "batch_first not set!");
+      TORCH_WARN("BATCH FIRST: ", batch_first);
+      TORCH_WARN("??? SETTING RNNDATA BATCH ", mini_batch, "SEQ LEN?? ", seq_length);
       auto is_input_packed = batch_sizes.size() != 0;
       if (is_input_packed) {
-        return rnn_descriptor_sequence(x, mini_batch, seq_length, x.size(-1));
+        return rnn_descriptor_sequence(x, mini_batch, batch_sizes, seq_length, x.size(-1));
       } else {
         return rnn_descriptor(x, batch_first, mini_batch, seq_length, x.size(-1));
       }
@@ -1073,12 +1090,14 @@ copy_weights_to_flat_buf_views(
   TORCH_CHECK(
       weight_arr.size() > 0,
       "copy_weights_to_flat_buf_views: cannot flatten empty weight list");
+  TORCH_WARN("copy input size? ", input_size);
 
   RNNDescriptorParams rnn;
   rnn.set(
       mode,
 #if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNNV8VERSION
       input_size,
+      false, // bogus
 #endif
       hidden_size,
       proj_size,
@@ -1164,7 +1183,7 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t fn_num_layers, bool batch_first,
     bool fn_bidirectional
     ) {
-  TORCH_WARN("COPY WIDTH? ", dataSize(getCudnnDataType(weight_arr[0])));
+  TORCH_WARN("COPY WIDTH? ", dataSize(getCudnnDataType(weight_arr[0])), "input size? " , input_size);
   // returns flat weight_buf
   return std::get<0>(copy_weights_to_flat_buf_views(
       weight_arr,
@@ -1217,7 +1236,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   fn.rnn.set(fn_mode, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
 #else
   auto input_size = input_r.size(-1);
-  fn.rnn.set(fn_mode, input_size, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
+  auto packed = fn_batch_sizes.size() != 0;
+  fn.rnn.set(fn_mode, input_size, packed, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
 #endif
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
@@ -1367,8 +1387,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           reserve.size(0), reserve.mutable_data_ptr()));
 #endif
   } else { // inference
-    workspace = at::empty(workspace_size, input.options().dtype(kByte));
-    reserve = at::empty({0}, input.options().dtype(kByte));
 #if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNNV8VERSION
     AT_CUDNN_CHECK(cudnnGetRNNTempSpaceSizes(
           handle,
@@ -1379,8 +1397,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           NULL
           ));
 #endif
+    workspace = at::empty(workspace_size, input.options().dtype(kByte));
+    reserve = at::empty({0}, input.options().dtype(kByte));
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
-    TORCH_WARN("FORWARD NEW!!!");
     AT_CUDNN_CHECK(cudnnRNNForwardInference(
           handle,
           descs.rnn_desc.desc(),
@@ -1395,6 +1414,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           workspace.data_ptr(), workspace.size(0)
           ));
 #else
+    TORCH_WARN("FORWARD NEW!!!");
     AT_CUDNN_CHECK(cudnnRNNForward(
           handle,
           descs.rnn_desc.desc(),
@@ -1438,7 +1458,8 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   fn.rnn.set(fn_mode, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
 #else
   auto cudnn_input_size = input_r.size(-1);
-  fn.rnn.set(fn_mode, cudnn_input_size, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
+  auto packed = fn_batch_sizes.size() != 0;
+  fn.rnn.set(fn_mode, cudnn_input_size, packed, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
 #endif
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
@@ -1599,7 +1620,8 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   fn.rnn.set(fn_mode, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
 #else
   auto cudnn_input_size = input_r.size(-1);
-  fn.rnn.set(fn_mode, cudnn_input_size, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
+  auto packed = fn_batch_sizes.size() != 0;
+  fn.rnn.set(fn_mode, cudnn_input_size, packed, fn_hidden_size, fn_proj_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
 #endif
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
@@ -1951,7 +1973,8 @@ Tensor try_get_weight_buf(
   rnn.set(mode, hidden_size.guard_int(__FILE__, __LINE__), proj_size.guard_int(__FILE__, __LINE__), num_layers, bidirectional, promote_rnn_math_type(datatype), datatype);
 #else
   auto cudnn_input_size = input.size(-1);
-  rnn.set(mode, cudnn_input_size, hidden_size.guard_int(__FILE__, __LINE__), proj_size.guard_int(__FILE__, __LINE__), num_layers, bidirectional, promote_rnn_math_type(datatype), datatype);
+  auto packed = false; // bogus
+  rnn.set(mode, cudnn_input_size, packed, hidden_size.guard_int(__FILE__, __LINE__), proj_size.guard_int(__FILE__, __LINE__), num_layers, bidirectional, promote_rnn_math_type(datatype), datatype);
 #endif
   RNNDescriptor rnn_desc = rnn.descriptor(handle);
 
