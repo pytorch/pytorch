@@ -177,14 +177,14 @@ Initialization
 --------------
 
 The package needs to be initialized using the :func:`torch.distributed.init_process_group`
-or :func:`torch.distributed.init_device_mesh` function before calling any other methods.
+or :func:`torch.distributed.device_mesh.init_device_mesh` function before calling any other methods.
 Both block until all processes have joined.
 
 .. autofunction:: is_available
 
 .. autofunction:: init_process_group
 
-.. autofunction:: init_device_mesh
+.. autofunction:: torch.distributed.device_mesh.init_device_mesh
 
 .. autofunction:: is_initialized
 
@@ -348,10 +348,10 @@ DeviceMesh
 DeviceMesh is a higher level abstraction that manages process groups (or NCCL communicators).
 It allows user to easily create inter node and intra node process groups without worrying about
 how to set up the ranks correctly for different sub process groups, and it helps manage those
-distributed process group easily. :func:`~torch.distributed.init_device_mesh` function can be
+distributed process group easily. :func:`~torch.distributed.device_mesh.init_device_mesh` function can be
 used to create new DeviceMesh, with a mesh shape describing the device topology.
 
-.. autoclass:: DeviceMesh
+.. autoclass:: torch.distributed.device_mesh.DeviceMesh
 
 Point-to-point communication
 ----------------------------
@@ -466,6 +466,8 @@ Collective functions
 .. autofunction:: barrier
 
 .. autofunction:: monitored_barrier
+
+.. autoclass:: Work
 
 .. autoclass:: ReduceOp
 
@@ -846,6 +848,7 @@ If you are running single node training, it may be convenient to interactively b
 .. py:module:: torch.distributed.argparse_util
 .. py:module:: torch.distributed.c10d_logger
 .. py:module:: torch.distributed.checkpoint.api
+.. py:module:: torch.distributed.checkpoint.checkpointer
 .. py:module:: torch.distributed.checkpoint.default_planner
 .. py:module:: torch.distributed.checkpoint.filesystem
 .. py:module:: torch.distributed.checkpoint.metadata

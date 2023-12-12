@@ -9,6 +9,7 @@ from functools import partial
 import numpy as np
 import torch
 import torch.nn
+import torch.nn.functional as F
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -133,14 +134,14 @@ def random_nt(device, dtype, num_tensors, max_dims, min_dims=None, layout=torch.
 # Alternate approach to generating a random NT.
 # dims should be something like [5, None, 10], with None indicating that a
 # random ragged structure should be used
-def random_nt_from_dims(dims, device=None, dtype=None, requires_grad=False):
+def random_nt_from_dims(dims, device=None, dtype=None, layout=torch.strided, requires_grad=False):
     sizes = [
         [d if d is not None else torch.randint(2, 10, size=(1,)).item() for d in dims[1:]]
         for d in range(dims[0])
     ]
     return torch.nested.nested_tensor([
         torch.randn(*size) for size in sizes
-    ], device=device, dtype=dtype, requires_grad=requires_grad)
+    ], device=device, dtype=dtype, layout=layout, requires_grad=requires_grad)
 
 
 # Creates an NT matching another NT's number of components and
@@ -3573,6 +3574,23 @@ class TestNestedTensorSubclass(NestedTestCase):
         self.assertEqual(attn_d1, attn_nts[0].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
         self.assertEqual(attn_d2, attn_nts[1].unsqueeze(0), atol=output_ref_atol, rtol=output_ref_rtol)
 
+    @dtypes(torch.float32, torch.double, torch.half)
+    def test_sdpa_with_constant_sequence_length(self, device, dtype):
+        # shape (B, P*, S, D)
+        # B: batch size
+        # P*: ragged number of prompts
+        # S: (constant) sequence length
+        # D: embedding size
+        query = random_nt_from_dims(
+            [4, None, 8, 10], device=device, dtype=dtype, layout=torch.jagged)
+        key = random_nt_from_similar(query)
+        value = random_nt_from_similar(query)
+        output = F.scaled_dot_product_attention(query, key, value)
+        self.assertTrue(isinstance(output, NestedTensor))
+
+        # should be equivalent to just running the buffers through
+        output_dense = F.scaled_dot_product_attention(query._values, key._values, value._values)
+        self.assertEqual(output._values, output_dense)
 
 
 instantiate_parametrized_tests(TestNestedTensor)
