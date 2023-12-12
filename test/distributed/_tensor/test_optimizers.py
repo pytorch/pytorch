@@ -14,6 +14,7 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
+from torch.testing._internal.common_utils import run_tests
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -307,3 +308,7 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+
+if __name__ == "__main__":
+    run_tests()

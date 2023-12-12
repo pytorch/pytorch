@@ -136,19 +136,6 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
   });
 }
 
-static void mean_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "mean_cpu", [&] {
-    using acc_t = at::opmath_type<scalar_t>;
-    using factor_t = typename c10::scalar_value_type<acc_t>::type;
-    factor_t factor = static_cast<factor_t>(iter.num_output_elements()) / iter.numel();
-    binary_kernel_reduce(
-      iter,
-      MeanOps<scalar_t, acc_t, factor_t, scalar_t> {factor},
-      acc_t(0)
-    );
-  });
-}
-
 static void std_var_kernel_impl(TensorIterator& iter, double correction, bool take_sqrt) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "std_cpu", [&] {
     binary_kernel_reduce(
@@ -450,7 +437,9 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
-REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
+// mean implementation for CPU is in aten/src/ATen/native/ReduceOps.cpp
+// but mean_stub must be defined for CPU as well
+REGISTER_DISPATCH(mean_stub, nullptr);
 REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
 REGISTER_DISPATCH(and_stub, &and_kernel_impl);
 REGISTER_DISPATCH(or_stub, &or_kernel_impl);

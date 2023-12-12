@@ -43,18 +43,10 @@ class TestGenericPytree(TestCase):
                 cxx_signature = inspect.signature(cxx_api)
                 py_signature = inspect.signature(py_api)
 
-                # The C++ pytree APIs provide more features than the Python APIs.
-                # The Python APIs are a subset of the C++ APIs.
-                # Check the signature of the Python API is a subset of the C++ API.
+                # Check the parameter names are the same.
                 cxx_param_names = list(cxx_signature.parameters)
                 py_param_names = list(py_signature.parameters)
-                self.assertTrue(
-                    set(cxx_param_names).issuperset(py_param_names),
-                    msg=(
-                        f"C++ parameter(s) ({cxx_param_names}) "
-                        f"not in Python parameter(s) ({py_param_names})"
-                    ),
-                )
+                self.assertEqual(cxx_param_names, py_param_names)
 
                 # Check the positional parameters are the same.
                 cxx_positional_param_names = [
