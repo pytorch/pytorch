@@ -83,31 +83,7 @@ def compute_local_shape_and_global_offset(
 ) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
     """
     Same as torch.distributed._tensor._utils.compute_local_shape_and_global_offset but
-    with custom my_coordinate input
-
-    Compute the local tensor shape and the global offsets into the original tensor
-    of a DTensor on its current global rank. This is useful for checkpointing purpose.
-
-    Example (2 host with 4GPUs each):
-    # Below is a DeviceMesh with mesh_shape of (2, 4)
-    mesh = DeviceMesh(device_type="cuda",
-                        mesh=[
-                        [0, 1, 2, 3],
-                        [4, 5, 6, 7]
-                        ],
-    )
-
-    Let's say we distribute a global_tensor of shape (8,4) over the above DeviceMesh
-    with a placements of [Shard(0), Shard(0)].
-    The local shape and global offset will be as follows:
-    rank0 -- local_shape:[1, 4], global_offset:[0, 0]
-    rank1 -- local_shape:[1, 4], global_offset:[1, 0]
-    rank2 -- local_shape:[1, 4], global_offset:[2, 0]
-    rank5 -- local_shape:[1, 4], global_offset:[5, 0]
-    rank3 -- local_shape:[1, 4], global_offset:[3, 0]
-    rank4 -- local_shape:[1, 4], global_offset:[4, 0]
-    rank6 -- local_shape:[1, 4], global_offset:[6, 0]
-    rank7 -- local_shape:[1, 4], global_offset:[7, 0]
+    with custom my_coordinate input. This is the modified implementation for visualize_sharding.
     """
 
     if my_coordinate is None:

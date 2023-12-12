@@ -12,7 +12,7 @@ dtensor = distribute_tensor(tensor, mesh, [Shard(dim=1)])
 if int(os.environ['LOCAL_RANK']) == 0:
     visualize_sharding(dtensor)
     '''
-                Col 0-0    Col 1-1    Col 2-2    Col 3-3
+             Col 0-0    Col 1-1    Col 2-2    Col 3-3
     -------  ---------  ---------  ---------  ---------
     Row 0-3  cuda:0   cuda:1   cuda:2   cuda:3
     '''
@@ -24,7 +24,7 @@ dtensor = distribute_tensor(tensor, mesh, [Shard(dim=0)])
 if int(os.environ['LOCAL_RANK']) == 0:
     visualize_sharding(dtensor)
     '''
-                Col 0-3
+             Col 0-3
     -------  ---------
     Row 0-0  cuda:0
     Row 1-1  cuda:1
@@ -39,7 +39,7 @@ dtensor = distribute_tensor(tensor, mesh, [Shard(dim=0), Replicate()])
 if int(os.environ['LOCAL_RANK']) == 0:
     visualize_sharding(dtensor)
     '''
-                Col 0-3
+             Col 0-3
     -------  ------------------
     Row 0-1  cuda:0, cuda:1
     Row 2-3  cuda:2, cuda:3
@@ -52,7 +52,7 @@ dtensor = distribute_tensor(tensor, mesh, [Replicate(), Shard(dim=0)])
 if int(os.environ['LOCAL_RANK']) == 0:
     visualize_sharding(dtensor)
     '''
-                Col 0-3
+             Col 0-3
     -------  ------------------
     Row 0-1  cuda:0, cuda:2
     Row 2-3  cuda:1, cuda:3
