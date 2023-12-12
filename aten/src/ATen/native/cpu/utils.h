@@ -11,6 +11,16 @@
 namespace at {
 namespace native {
 
+template <typename T>
+inline void _store(T* dst, at::vec::Vectorized<T> src) {
+  src.store(dst);
+}
+
+inline void _store(at::BFloat16* dst, at::vec::Vectorized<float> src) {
+  auto res = at::vec::convert_float_bfloat16(src, src);
+  res.store(dst, at::vec::Vectorized<float>::size());
+}
+
 inline namespace CPU_CAPABILITY {
 
 template <typename T>
