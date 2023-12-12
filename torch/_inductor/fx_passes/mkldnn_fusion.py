@@ -371,62 +371,7 @@ if torch._C._has_mkldnn:
             if not _is_valid_computation_binary(computation_op, binary_op)(match):
                 return False
             binary_nodes = filter_nodes(match.nodes, binary_op)
-
-            def _is_all_users_are_ancestor_node(_binary_node):
-                # Think about this case:
-                #      ReLU
-                #     /   \
-                #  Conv1
-                #   /      \
-                # Conv2
-                #   \      /
-                #      Add
-                # Although, the extra input node (ReLU) has more than 1 users: Conv1 and Add.
-                # The Conv1 is the ancestor node of the current compute node (Conv2).
-                # This indicates that the buffer of ReLU has completed all its usage,
-                # So we can safely make changes to it now by doing Conv2->Add inplace fusion.
-                if len(_binary_node.all_input_nodes) != 2:
-                    # Binary node should have 2 input nodes.
-                    return False
-
-                # Step 1: Get the compute node and othe node of binary node
-                # As above example:
-                #   * binary node is Add
-                #   * compute_node is Conv2
-                #   * other_node is ReLU
-                compute_index = 1 if (other_index == 0) else 0
-                compute_node = _binary_node.args[compute_index]
-                other_node = _binary_node.args[other_index]
-
-                def _is_ancestor_node(_src_node, _check_node):
-                    if _src_node == _check_node:
-                        return True
-                    elif isinstance(_src_node, torch.fx.Node):
-                        if (
-                            _src_node.op == "placeholder"
-                            or _src_node.op == "output"
-                            or _src_node.op == "get_attr"
-                        ):
-                            return False
-                        else:
-                            return any(
-                                _is_ancestor_node(input, _check_node)
-                                for input in _src_node.all_input_nodes
-                            )
-                    else:
-                        return False
-
-                # Step 2: Check all the users of other_node should be ancestor_node of compute node
-                return all(
-                    (user == _binary_node or _is_ancestor_node(compute_node, user))
-                    for user in list(other_node.users)
-                )
-
-            if any(
-                len(n.args[other_index].users) > 1
-                and not _is_all_users_are_ancestor_node(n)
-                for n in binary_nodes
-            ):
+            if any(len(n.args[other_index].users) > 1 for n in binary_nodes):
                 return False
             if any(
                 n.args[other_index].op in ["placeholder", "output"]
@@ -877,9 +822,12 @@ if torch._C._has_mkldnn:
             return False
         batch_size = input_meta_value.shape[0]
         is_bf16_weight = weight_meta_value.dtype == torch.bfloat16
-        # for fp32, mkl should be enabled and batch_size should not be a free symbol.
-        if not is_bf16_weight and (
-            (not torch._C.has_mkl) or has_free_symbols(batch_size)
+        # on x86, for fp32, mkl should be enabled and batch_size should not be a free symbol.
+        # on aarch64, use mkldnn op for fp32 as well if acl is enabled
+        if (
+            not is_bf16_weight
+            and not mkldnn._is_mkldnn_acl_supported()
+            and ((not torch._C.has_mkl) or has_free_symbols(batch_size))
         ):
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
@@ -1054,7 +1002,7 @@ if torch._C._has_mkldnn:
                 batch_size = input.meta.get("val").shape[0]
                 if has_free_symbols(batch_size):
                     assert (
-                        is_bf16_weight
+                        is_bf16_weight or mkldnn._is_mkldnn_acl_supported()
                     ), f"only bf16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
                 # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
                 packed_weight_inputs = (
@@ -1065,7 +1013,7 @@ if torch._C._has_mkldnn:
                 )
                 packed_weight_op = (
                     mkldnn._reorder_linear_weight
-                    if is_bf16_weight
+                    if (is_bf16_weight or mkldnn._is_mkldnn_acl_supported())
                     else torch.ops.mkl._mkl_reorder_linear_weight
                 )
                 packed_weight_node = graph.create_node(
@@ -1073,7 +1021,7 @@ if torch._C._has_mkldnn:
                 )
 
                 packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
-                if is_bf16_weight:
+                if is_bf16_weight or mkldnn._is_mkldnn_acl_supported():
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
                 else:
@@ -1125,7 +1073,13 @@ if torch._C._has_mkldnn:
 
     @functools.lru_cache(None)
     def _mkldnn_fusion_init():
-        if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
+        # TODO: aarch64: enable op fusion for acl once it supports fused operators. Disabling it for now.
+        # Otherwise even the matmul or innerproduct can not be accelerated with acl
+        if (
+            torch.backends.mkldnn.enabled
+            and torch.backends.mkldnn.is_available()
+            and not torch.ops.mkldnn._is_mkldnn_acl_supported()
+        ):
             _register_unary_fusion()
             _register_inplace_fusion()
             _register_binary_unary_fusion()

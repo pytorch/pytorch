@@ -4,6 +4,11 @@ from typing import Any, Dict, TYPE_CHECKING
 
 import torch
 
+
+def is_fbcode():
+    return not hasattr(torch.version, "git_version")
+
+
 # add some debug printouts
 debug = False
 
@@ -167,6 +172,13 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
+# force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
+# when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
+# for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
+# that triton does not use TF32 wherever cublas would not use TF32
+force_same_precision = (
+    True if is_fbcode() else os.environ.get("TORCHINDUCTOR_FORCE_SAME_PRECISION") == "1"
+)
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS.
 # ATen: default Pytorch ATen kernels.
@@ -270,11 +282,6 @@ always_keep_tensor_constants = False
 
 # assert that indirect indexing does not read / write out of bounds
 assert_indirect_indexing = True
-
-
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
-
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
