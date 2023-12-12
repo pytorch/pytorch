@@ -3,8 +3,8 @@
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.inputgen.variable.type import (
-    check_vtype,
     convert_to_vtype,
+    invalid_vtype,
     is_integer,
     ScalarDtype,
     VariableType,
@@ -43,23 +43,23 @@ class TestVariableType(TestCase):
             convert_to_vtype(VariableType.Int.value, float("inf")), float("inf")
         )
 
-    def test_check(self):
-        check_vtype(VariableType.Bool.value, 1.0)
-        check_vtype(VariableType.Int.value, 1.0)
-        check_vtype(VariableType.Float.value, 1.0)
-        check_vtype(VariableType.String.value, "hello")
-        check_vtype(VariableType.Tuple.value, (1, 2))
-        check_vtype(VariableType.ScalarDtype.value, ScalarDtype.bool)
-        check_vtype(VariableType.ScalarDtype.value, ScalarDtype.int)
-        check_vtype(VariableType.ScalarDtype.value, ScalarDtype.float)
-        check_vtype(VariableType.TensorDtype.value, torch.bool)
-
-        with self.assertRaises(Exception):
-            check_vtype(VariableType.Float.value, "1.0")
-        with self.assertRaises(Exception):
-            check_vtype(VariableType.String.value, 1)
-        with self.assertRaises(Exception):
-            check_vtype(VariableType.ScalarDtype.value, torch.int8)
+    def test_invalid_vtype(self):
+        self.assertFalse(invalid_vtype(VariableType.Bool.value, 1.0))
+        self.assertFalse(invalid_vtype(VariableType.Int.value, 1.0))
+        self.assertFalse(invalid_vtype(VariableType.Float.value, 1.0))
+        self.assertFalse(invalid_vtype(VariableType.String.value, "hello"))
+        self.assertFalse(invalid_vtype(VariableType.Tuple.value, (1, 2)))
+        self.assertFalse(
+            invalid_vtype(VariableType.ScalarDtype.value, ScalarDtype.bool)
+        )
+        self.assertFalse(invalid_vtype(VariableType.ScalarDtype.value, ScalarDtype.int))
+        self.assertFalse(
+            invalid_vtype(VariableType.ScalarDtype.value, ScalarDtype.float)
+        )
+        self.assertFalse(invalid_vtype(VariableType.TensorDtype.value, torch.bool))
+        self.assertTrue(invalid_vtype(VariableType.Float.value, "1.0"))
+        self.assertTrue(invalid_vtype(VariableType.String.value, 1))
+        self.assertTrue(invalid_vtype(VariableType.ScalarDtype.value, torch.int8))
 
 
 if __name__ == "__main__":
