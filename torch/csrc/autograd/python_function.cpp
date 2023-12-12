@@ -210,6 +210,23 @@ auto PyNode::name() const -> std::string {
 }
 
 void PyNode::compiled_args(CompiledNodeArgs& args) {
+  pybind11::gil_scoped_acquire gil;
+
+  auto f = (THPFunction*)obj;
+
+  // update global compiled autograd key before fetching it
+  PyObject* saved_variables = unpack_saved_variables(
+        f, [](const Variable& var) { return THPVariable_Wrap(var); });
+  static PyObject* update_saved_tensors_shape =
+      PyUnicode_InternFromString("update_saved_tensors_shape");
+  THPObjectPtr update_result(PyObject_CallMethodOneArg(
+    args.get_py_compiler(),
+    update_saved_tensors_shape,
+    saved_variables));
+
+  if (!update_result)
+    throw_python_error();
+
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
   THPObjectPtr pykey(PyObject_CallMethodNoArgs(obj, method_name));
@@ -229,7 +246,6 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect_size(static_cast<size_t>(key));
   args.collect_size(size);
 
-  auto f = (THPFunction*)obj;
   f->compiled_autograd_symints.clear();
   f->compiled_autograd_symints.reserve(size - 1);
   for (const auto i : c10::irange(1, size)) {
