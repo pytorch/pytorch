@@ -102,6 +102,21 @@ def _convert_input_to_fake(gm, args, kwargs):
     return fake_args, fake_kwargs, fake_params_buffers, fake_mode
 
 
+def _transform_callable_to_nn_module(f: Callable) -> torch.nn.Module:
+    if isinstance(f, torch.nn.Module):
+        return f
+
+    class Wrapper(torch.nn.Module):
+        def __init__(self, f):
+            super().__init__()
+            self.f = f
+
+        def forward(self, *args, **kwargs):
+            return self.f(*args, **kwargs)
+
+    return Wrapper(f)
+
+
 def _replace_param_buffer_names(param_buffer_table, sig):
     for spec in sig.input_specs:
         spec.target = param_buffer_table.get(spec.target, spec.target)
@@ -422,6 +437,7 @@ def _export(
     kwargs = kwargs or {}
 
     if not strict:
+        f = _transform_callable_to_nn_module(f)
         assert isinstance(f, torch.nn.Module)
         assert len(preserve_module_call_signature) == 0
         assert len(constraints) == 0, "dynamic shape NYI"

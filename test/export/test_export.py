@@ -96,7 +96,6 @@ class TestDynamismExpression(TestCase):
         ):
             ep(torch.tensor([3]))
 
-    @testing.expectedFailureNonStrict
     def test_export_assume_static_by_default(self):
         def branch_on_shape(x: torch.Tensor):
             if x.shape[0] == 4:
@@ -120,7 +119,6 @@ class TestExport(TestCase):
         self.assertEqual(exported_program(*args, **kwargs), f(*args, **kwargs))
         self.assertEqual(exported_program(*args, **reversed_kwargs), f(*args, **reversed_kwargs))
 
-    @testing.expectedFailureNonStrict
     def test_basic(self):
         def f(x, y):
             return x[0] + y
@@ -128,7 +126,6 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
-    @testing.expectedFailureRetraceability
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
@@ -162,7 +159,6 @@ class TestExport(TestCase):
         ep = export(f, args, strict=False)
         self.assertEqual(ep(*args), f(*args))
 
-    @testing.expectedFailureRetraceability
     def test_basic_non_strict_fake_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self):
@@ -196,7 +192,6 @@ class TestExport(TestCase):
         ):
             _ = export(fn_ddo, (torch.tensor([2, 3, 5]),))
 
-    @testing.expectedFailureNonStrict
     def test_if_functional(self):
         def foo(x):
             z = x + 4
@@ -268,7 +263,6 @@ class TestExport(TestCase):
             constraints = [dynamic_dim(inp_for_g, 0)]
 
     @testing.expectedFailureRetraceability
-    @testing.expectedFailureNonStrict
     def test_map(self):
         def list_tensor_map(xs, y, z):
             def body(x, y, z):
@@ -318,7 +312,6 @@ class TestExport(TestCase):
         kwargs3 = {"b": 1}
         self._test_export_same_as_eager(kw_func2, args, kwargs3)
 
-    @testing.expectedFailureNonStrict
     def test_export_func_with_var_postional_args(self):
         def kw_func(arg1, arg2, *args):
             return arg1 + args[0], arg2 + args[1]
@@ -1070,7 +1063,6 @@ class TestExport(TestCase):
         )
 
     @testing.expectedFailureSerDer
-    @testing.expectedFailureNonStrict
     def test_mixed_input(self):
         def func(a, b, alpha: int):
             return torch.add(a, b, alpha=alpha)
@@ -1215,7 +1207,6 @@ class TestExport(TestCase):
             _ = exported(torch.ones(7, 5), 6.0)
 
     @testing.expectedFailureSerDer
-    @testing.expectedFailureNonStrict
     def test_runtime_assert_for_prm_str(self):
 
         def g(a, b, mode):
