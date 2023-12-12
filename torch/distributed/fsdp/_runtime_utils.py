@@ -654,9 +654,6 @@ def _pre_backward_hook(
     """
     # Only run the pre-backward hook once per group of handles involved in the
     # same module forward computation
-    if handle and handle._ran_pre_backward_hook:
-        return
-
     with torch.profiler.record_function("FullyShardedDataParallel._pre_backward_hook"):
         # Queue the post-backward callback once for the root FSDP instance to
         # attach it to the outermost backward graph task so that it is called
@@ -697,7 +694,6 @@ def _pre_backward_hook(
         ):
             _prefetch_handle(state, handle, _PrefetchMode.BACKWARD)
         handle.prepare_gradient_for_backward()
-        handle._ran_pre_backward_hook = True
 
 
 @no_type_check
@@ -1099,7 +1095,6 @@ def _post_backward_final_callback(
         fsdp_state.training_state = TrainingState.IDLE
         handle = fsdp_state._handle
         if handle:
-            handle._ran_pre_backward_hook = False
             handle._needs_pre_backward_unshard = False
             handle._post_forward_index = None
             handle._training_state = HandleTrainingState.IDLE
@@ -1370,21 +1365,23 @@ def _register_pre_backward_hooks(
         state._post_backward_callback_queued = False  # only defined on the root
 
     if handle:
-        handle._needs_pre_backward_unshard = False
         # Since these handles' `FlatParameter`s participated in a forward, we
         # conservatively assume that they will be used in the backward
-        handle._ran_pre_backward_hook = False
+        handle._needs_pre_backward_unshard = False
 
-    def _register_hook(t: torch.Tensor) -> torch.Tensor:
+    def _record_tensor(l: List[torch.Tensor], t: torch.Tensor) -> torch.Tensor:
         if t.requires_grad:
-            t.register_hook(
-                functools.partial(_pre_backward_hook, state, module, handle)
-            )
-            if handle:
-                handle._needs_pre_backward_unshard = True
+            l.append(t)
         return t
 
-    return _apply_to_tensors(_register_hook, outputs)
+    # Extract the tensors that require gradient to register the any hook
+    tensors: List[torch.Tensor] = []
+    _apply_to_tensors(functools.partial(_record_tensor, tensors), outputs)
+    if tensors:
+        handle._needs_pre_backward_unshard = True
+    hook = functools.partial(_pre_backward_hook, state, module, handle)
+    torch.autograd.graph._register_any_hook(tensors, hook)
+    return outputs
 
 
 def _register_post_backward_hook(
