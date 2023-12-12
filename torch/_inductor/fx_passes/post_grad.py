@@ -83,14 +83,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     if config.pattern_matcher:
         lazy_init()
 
+        print_graph(gm.graph, "Before group batch fusion in post grad pass.")
         group_batch_fusion_passes(gm.graph, pre_grad=False)
+        print_graph(gm.graph, "After group batch fusion in post grad pass.")
         remove_noop_ops(gm.graph)
         print_graph(gm.graph, "Before split cat in post grad pass.")
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
             print_graph(
                 gm.graph,
-                f"Apply split cat pattern matcher {patterns.__class__.__name__} in post grad.",
+                "Apply split cat pattern matcher PatternMatcherPass in post grad.",
             )
         if is_inference:
             inference_patterns.apply(gm.graph)
@@ -110,7 +112,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     gm.recompile()
     gm.graph.lint()
 
-    print_graph(gm.graph, "Aftre recompile in post grad pass.")
+    print_graph(gm.graph, "After recompile in post grad pass.")
 
 
 @init_once_fakemode
