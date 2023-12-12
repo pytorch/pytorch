@@ -1426,6 +1426,13 @@ def fail_with_and_without_stack_allocation(is_skip=False):
     )
 
 
+def fail_minimal_arrayref_interface(is_skip=False):
+    return TestFailure(
+        ("abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",),
+        is_skip=is_skip,
+    )
+
+
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
@@ -1441,16 +1448,17 @@ CPU_TEST_FAILURES = {
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
-    "test_multi_device": TestFailure(
-        ("abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",),
-        is_skip=True,
-    ),
+    "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
     "test_poi_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
     # the test segfaults
     "test_scatter_fallback": fail_with_and_without_stack_allocation(is_skip=True),
+    # Minimal arrayref interface doesn't support bfloat16 yet.
+    "test_sdpa": fail_minimal_arrayref_interface(is_skip=True),
+    # Minimal arrayref interface doesn't support bfloat16 yet.
+    "test_sdpa_2": fail_minimal_arrayref_interface(is_skip=True),
     # error: could not find s0
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
