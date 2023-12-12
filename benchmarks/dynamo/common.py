@@ -1763,12 +1763,13 @@ class BenchmarkRunner:
         self.optimizer = None
         self._args = None
 
-    def setup_amp(self):
+    def setup_amp(self, current_device=None):
         if self.args.only in self.fp32_only_models:
             return
 
+        devices = [current_device] if current_device else self.args.devices
         if self.args.amp:
-            if self.args.devices == ["cuda"]:
+            if devices == ["cuda"]:
                 # AMP training can lead to small loss values which can undeflow
                 # gradient values returning in zero gradients. To solve this
                 # problem, PyTorch introduces GradScaler. GradScaler is a stateful
@@ -1791,7 +1792,7 @@ class BenchmarkRunner:
                 #  harder.
                 # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
                 self.autocast = torch.cuda.amp.autocast
-            if self.args.devices == ["cpu"]:
+            if devices == ["cpu"]:
                 self.autocast = torch.cpu.amp.autocast
             if self.args.amp_dtype:
                 amp_dtype = (
@@ -3639,6 +3640,7 @@ def run(runner, args, original_dir=None):
 
             else:
                 model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+            runner.setup_amp(current_device)
             runner.run_one_model(
                 name,
                 model,
