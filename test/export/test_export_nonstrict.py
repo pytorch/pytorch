@@ -1,12 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import test_export
+import testing
 from torch.export import export
-
-try:
-    from . import test_export, testing
-except ImportError:
-    import test_export
-    import testing
 
 test_classes = {}
 

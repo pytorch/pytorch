@@ -2,11 +2,8 @@
 
 from torch.export import export
 
-try:
-    from . import test_export, testing
-except ImportError:
-    import test_export
-    import testing
+import test_export
+import testing
 
 test_classes = {}
 
