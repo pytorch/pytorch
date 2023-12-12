@@ -1862,8 +1862,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         result = vmap(Tensor.contiguous, in_dims=2, out_dims=2)(x)
         self.assertTrue(result is x)
 
-        msg = ('.* inside vmap is only supported with memory_format '
-               'torch.preserve_format or torch.contiguous_format .*')
+        msg = 'NYI: querying is_contiguous inside of vmap for memory_format'
         tensor = torch.randn(B0, 3)
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(functools.partial(op, memory_format=torch.channels_last))(tensor)
@@ -2198,6 +2197,18 @@ class TestVmapOperators(Namespace.TestVmapBase):
         vmap(bar)(torch.randn(B0, 0, 3))
         vmap(bar, in_dims=1)(torch.randn(0, B0, 3))
         vmap(bar)(torch.randn(B0, 0, 3).transpose(-1, -2))
+
+        # is_contiguous with other memory formats
+        def baz(x, memory_format):
+            x.is_contiguous(memory_format=memory_format)
+            return x
+
+        msg = 'NYI: querying is_contiguous inside of vmap for memory_format'
+        tensor = torch.randn(B0, 2, 7, 3)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(functools.partial(baz, memory_format=torch.channels_last))(tensor)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(functools.partial(baz, memory_format=torch.channels_last_3d))(tensor)
 
     def test_unsqueeze(self):
         op = torch.unsqueeze

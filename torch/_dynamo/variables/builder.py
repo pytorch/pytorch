@@ -1451,7 +1451,10 @@ def wrap_fx_proxy_cls(
         # tensor, the stored example value will update too!)
         example_value = _clone_input(example_value)
         proxy.node.meta["example_value"] = example_value
-        specialized_props = target_cls.specialize(example_value)
+        specialized_props = target_cls.specialize(
+            example_value,
+            test_is_contiguous=not torch._C._functorch.is_batchedtensor(example_value),
+        )
         # TODO: not sure about this fake mode test
         if (
             isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)

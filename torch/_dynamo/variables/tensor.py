@@ -134,7 +134,7 @@ class TensorVariable(VariableTracker):
         return self.class_type
 
     @staticmethod
-    def specialize(value: torch.Tensor):
+    def specialize(value: torch.Tensor, test_is_contiguous=True):
         props = {
             "dtype": value.dtype,
             "device": value.device,
@@ -158,13 +158,16 @@ class TensorVariable(VariableTracker):
                 [int(s) if is_symbolic(s) else s for s in value.size()]
             )
             props["stride"] = tuple(value.stride())
-            props["is_contiguous"] = tuple(
-                [
-                    x
-                    for x in torch._prims_common._memory_formats
-                    if value.is_contiguous(memory_format=x)
-                ]
-            )
+            if test_is_contiguous:
+                props["is_contiguous"] = tuple(
+                    [
+                        x
+                        for x in torch._prims_common._memory_formats
+                        if value.is_contiguous(memory_format=x)
+                    ]
+                )
+            else:
+                props["is_contiguous"] = ()
         return props
 
     def dynamic_getattr(self, tx, name):
