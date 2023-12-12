@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
+from torch import Tensor
 from torch.fx._compatibility import compatibility
 from torch.fx.node import map_arg
 
@@ -109,12 +110,19 @@ class _MinimizerBase:
             [TensorOrTensors, TensorOrTensors, Names], Tuple[float, bool]
         ],
         settings: _MinimizerSettingBase,
+        module_exporter: Optional[
+            Callable[
+                [List[torch.Tensor], torch.fx.GraphModule, str],
+                None
+            ]
+        ] = None,
     ):
         assert isinstance(module, torch.fx.GraphModule)
 
         self.module = module
         self.sample_input = sample_input
         self.compare_fn = compare_fn
+        self.module_exporter = module_exporter
         self.settings = settings
 
         # Stores outputs of run_a function
@@ -351,9 +359,15 @@ class _MinimizerBase:
             if node.op == "output":
                 result_key = map_arg(node.args, lambda x: x.name)
 
-        a_result = self.run_a(submodule, a_input)
-        b_result = self.run_b(submodule, b_input)
-        self._store_outputs(a_result, b_result, submodule)
+        try:
+            a_result = self.run_a(submodule, a_input)
+            b_result = self.run_b(submodule, b_input)
+            self._store_outputs(a_result, b_result, submodule)
+        except Exception as e:
+            report.append(f"Exception raised when running {submod_name}: {e}")
+            raise FxNetMinimizerRunFuncError(
+                f"Exception raised when running {submod_name}: {e}"
+            )
 
         # Compare results
         names: Names = output_names
@@ -366,6 +380,13 @@ class _MinimizerBase:
         report.append(f"Numerical accuracy = {numeric_result}")
         if not bool_result:
             report.append(f"Result mismatch for {result_key}")
+            if self.module_exporter:
+                self.module_exporter(
+                    a_input, submodule, str(result_key[0]) + "_cpu",
+                )
+                self.module_exporter(
+                    b_input, submodule, str(result_key[0]) + "_acc",
+                )
             raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")
 
     def _binary_search_impl(
