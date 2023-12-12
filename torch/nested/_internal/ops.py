@@ -645,7 +645,7 @@ def _nested_expand(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     size = new_kwargs.pop("size")
     _unused_B, singleton, *Ds = size
-    offsets = singleton.node.singleton_values()
+    offsets = singleton.node.singleton_data()
     sum_offsets = singleton.node.singleton_sum_offsets()
     assert inp.dim() <= len(size)
 
@@ -951,6 +951,7 @@ def embedding_default(func, *args, **kwargs):
         func(weight, indices._values, **new_kwargs), **extract_kwargs(indices)
     )
 
+
 def get_factory_from_new_factory(aten_op):
     factory_map = {
         torch.ops.aten.new_zeros.default: torch.zeros,
@@ -959,6 +960,7 @@ def get_factory_from_new_factory(aten_op):
         torch.ops.aten.new_ones.default: torch.ones,
     }
     return factory_map.get(aten_op, None)
+
 
 # Note [ NestedTensor factory functions ]
 #
@@ -979,12 +981,13 @@ def jagged_new_factory(func, *args, **kwargs):
 
     return NestedTensor(factory_fn([sum_offsets, *Ds], **new_kwargs), offsets)
 
+
 register_jagged_func(
     [
-       torch.ops.aten.new_zeros.default,
-       torch.ops.aten.new_empty.default,
-       torch.ops.aten.new_full.default,
-       torch.ops.aten.new_ones.default,
+        torch.ops.aten.new_zeros.default,
+        torch.ops.aten.new_empty.default,
+        torch.ops.aten.new_full.default,
+        torch.ops.aten.new_ones.default,
     ],
     "self: jt, size: any, dtype: any?, layout: any?, device: any?, pin_memory: any?",
 )(jagged_new_factory)

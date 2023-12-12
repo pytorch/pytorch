@@ -77,11 +77,10 @@ class SymNode:
     ):
         self._expr = expr
         self.shape_env = shape_env
-        # Symbolic SingletonInt have pytype int, but will return true for
-        # is_singleton. All SingletonInt hold a singleton_dummy which is a
-        # global instance to a NestedTensor class necessary for dispatch to
-        # the python dispatch of NestedTensor because only python NT can be
-        # compiled.
+        # Symbolic singleton int have pytype int. The is_singleton-ness of a
+        # SymNode is determined by whether it holds a singleton_dummy.
+        # The fields below are set after the SymNode is created, but before
+        # it is assigned to the size field of a NestedTensor.
         self._singleton_data = None
         self._singleton_dummy = None
         self._singleton_sum_offsets = None
@@ -180,19 +179,19 @@ class SymNode:
         return self.pytype is bool
 
     def is_singleton(self):
-        return self._is_singleton
+        return self._singleton_dummy is not None
 
     def singleton_dummy(self):
+        # During metafication empty_strided is called, triggering this logic
+        # to be run before this singleton SymNode is fully initialized.
         return self._singleton_dummy
 
     def singleton_data(self):
         assert self._singleton_data is not None
-        # assert that this is fake?
         return self._singleton_data
 
     def singleton_sum_offsets(self):
         assert self._singleton_sum_offsets is not None
-        # assert that this is fake?
         return self._singleton_sum_offsets
 
     def wrap_int(self, num):
