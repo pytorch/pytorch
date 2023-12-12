@@ -1340,7 +1340,6 @@ class CppKernel(Kernel):
                 index = index * self.ranges[i] + self.itervars[i]
             self.stores.writelines(
                 [
-                    "int tid = omp_get_thread_num();",
                     f"if ({acc_local}.value {compare_op} {value}) {{",
                     f"    {acc_local}.index = {cexpr_index(index)}; {acc_local}.value = {value};",
                     "}",
@@ -1373,11 +1372,17 @@ class CppKernel(Kernel):
             )
             self.stores.writelines(
                 [
-                    "int tid = omp_get_thread_num();",
-                    f"{acc_local} = {reduction_combine_vec(reduction_type, acc_local, value)};",
+                    f"{acc_local} = {reduction_combine(reduction_type, acc_local, value)};",
                 ]
             )
-
+            self.reduction_suffix.writelines(
+                [
+                    f"for (int tid = 0; tid < {nthds}; tid++)",
+                    "{",
+                    f"    {acc} = {reduction_combine(reduction_type, acc, acc_local)};",
+                    "}",
+                ],
+            )
         result = reduction_project(reduction_type, acc)
         self.reduction_cse.reduction_cache[reduction_key] = result
         return result
@@ -1745,7 +1750,6 @@ class CppVecKernel(CppKernel):
         )
         self.stores.writelines(
             [
-                "int tid = omp_get_thread_num();",
                 f"{acc_vec_local} = {reduction_combine_vec(reduction_type, acc_vec_local, value)};",
             ]
         )
@@ -1753,7 +1757,7 @@ class CppVecKernel(CppKernel):
             [
                 f"for (int tid = 0; tid < {nthds}; tid++)",
                 "{",
-                f"    {acc} = {reduction_combine_vec(reduction_type, acc, acc_local)};",
+                f"    {acc} = {reduction_combine(reduction_type, acc, acc_local)};",
                 f"    {acc_vec} = {reduction_combine_vec(reduction_type, acc_vec, acc_vec_local)};",
                 "}",
             ],
@@ -3105,6 +3109,7 @@ class WorkSharing:
             else:
                 self.code.writeline(f"#pragma omp parallel num_threads({threads})")
             self.stack.enter_context(self.code.indent())
+            self.code.writeline("int tid = omp_get_thread_num();",)
 
     def single(self):
         if self.in_parallel:
