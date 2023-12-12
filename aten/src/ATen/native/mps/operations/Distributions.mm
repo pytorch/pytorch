@@ -24,6 +24,7 @@
 #include <ATen/ops/randperm_native.h>
 #include <ATen/ops/topk.h>
 #include <ATen/ops/uniform_native.h>
+#include <ATen/ops/view_as_real.h>
 #endif
 
 namespace at::native {
@@ -238,6 +239,12 @@ Tensor& uniform_mps_(Tensor& self, double from, double to, c10::optional<Generat
         to = std::max(std::min(to, max), min);
       });
 
+  if (c10::isComplexType(self.scalar_type())) {
+    auto real_view = at::view_as_real(self);
+    mps::random_mps_impl<double>(
+       real_view, from, to, c10::nullopt, c10::nullopt, MPSGraphRandomDistributionUniform, gen, __func__, nullptr);
+    return self;
+  }
   return mps::random_mps_impl<double>(
       self, from, to, c10::nullopt, c10::nullopt, MPSGraphRandomDistributionUniform, gen, __func__, nullptr);
 }
