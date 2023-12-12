@@ -8,7 +8,6 @@ from torch import nn
 
 from torch.sparse.semi_structured import (
     _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG_CUTLASS,
-    _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG_CUSPARSELT,
     SparseSemiStructuredTensor,
     to_sparse_semi_structured,
 )
@@ -365,23 +364,16 @@ class TestSparseSemiStructured(TestCase):
         B = torch.rand(dense_input_shape, device=A_sparse.device).to(dtype)
 
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
-        if dtype is torch.int8 and dense_input_shape in {(1, 128), (64, 128)}:
+        if dtype is torch.int8 and dense_input_shape in {(1, 128)}:
             # padding with int8 throws an error because transposing B yields a contiguous output
             # and row-row 2:4 sparse @ dense with NN is not supported by cuSPARSELt or CUTLASS.
             if backend == "cutlass":
                 with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_cutlass_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B.t())
             else:
-                # special case since cuSPARSELt has different shape constraints vs CUTLASS
-                # We expect to error for then (1, 128) case but not the (64, 128) case
-                if dense_input_shape == (1, 128):
-                    with self.assertRaisesRegex(RuntimeError,
-                                                "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
-                        sparse_result = torch.mm(A_sparse, B.t())
-                else:
-                    dense_result = torch.mm(A.cpu(), B.t().cpu()).to(device, dtype=torch.int32 if backend == "cutlass" else torch.int8)
+                with self.assertRaisesRegex(RuntimeError,
+                                            "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
                     sparse_result = torch.mm(A_sparse, B.t())
-                    assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
         elif dtype is torch.int8:
             # test transpose
             # NOTE: CUTLASS and cuSPARSELt have slightly different int8 behavior.

@@ -10,18 +10,18 @@ __all__ = [
 ]
 
 _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
-    "_SEMI_STRUCTURED_SPARSE_CONFIG", "min_rows min_cols"
+    "_SEMI_STRUCTURED_SPARSE_CONFIG", "sparse_min_rows sparse_min_cols dense_min_rows dense_min_cols"
 )
 _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG_CUTLASS = {
-    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 128),
-    torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 64),
-    torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 64),
+    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
+    torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
+    torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
 }
 _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG_CUSPARSELT = {
-    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16),
-    torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(8, 8),
-    torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(8, 8),
-    torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(4, 4)
+    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
+    torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
+    torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
+    torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(8, 8, 4, 4)
 }
 
 
@@ -192,10 +192,10 @@ class SparseSemiStructuredTensor(torch.Tensor):
             m, n = original_tensor.shape
             min_rows = dtype_to_config[
                 original_tensor.dtype
-            ].min_rows
+            ].sparse_min_rows
             min_cols = dtype_to_config[
                 original_tensor.dtype
-            ].min_cols
+            ].sparse_min_cols
             if m < min_rows or m % min_rows or n < min_cols or n % min_cols:
                 # TODO in the future we can add in padding to support dimensions that aren't perfect multiples
                 raise RuntimeError(
@@ -287,8 +287,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
         else:
             dtype_to_config = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG_CUSPARSELT
 
-        min_rows = dtype_to_config[original_tensor.dtype].min_rows
-        min_cols = dtype_to_config[original_tensor.dtype].min_cols
+        min_rows = dtype_to_config[original_tensor.dtype].dense_min_rows
+        min_cols = dtype_to_config[original_tensor.dtype].dense_min_cols
         to_pad_m = -m % min_rows if m < min_rows or m % min_rows else 0
         to_pad_n = -n % min_cols if n < min_cols or n % min_rows else 0
         if to_pad_m or to_pad_n:
