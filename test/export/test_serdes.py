@@ -2,10 +2,10 @@
 
 import io
 
-from torch.export import export, load, save
-
 import test_export
 import testing
+
+from torch.export import export, load, save
 
 test_classes = {}
 
