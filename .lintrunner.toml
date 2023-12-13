@@ -331,17 +331,6 @@ command = [
 ]
 
 [[linter]]
-code = 'CIRCLECI'
-include_patterns=['.circleci/**']
-command = [
-    'python3',
-    'tools/linter/adapters/circleci_linter.py',
-    '--regen-script-working-dir=.circleci',
-    '--config-yml=.circleci/config.yml',
-    '--regen-script=generate_config_yml.py',
-]
-
-[[linter]]
 code = 'NATIVEFUNCTIONS'
 include_patterns=['aten/src/ATen/native/native_functions.yaml']
 command = [

@@ -68,7 +68,6 @@ from ..utils import (
     get_static_address_type,
     global_key_name,
     is_namedtuple,
-    is_torch_function_object,
     is_typing,
     is_utils_checkpoint,
     istype,
