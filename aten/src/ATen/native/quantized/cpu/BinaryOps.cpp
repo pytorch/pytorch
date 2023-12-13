@@ -259,32 +259,24 @@ enum xnn_status xnnp_create_add_nd(
 }
 
 C10_ALWAYS_INLINE
-enum xnn_status xnnp_reshape_add_nd(
+enum xnn_status xnnp_setup_add_nd(
     xnn_operator_t op,
     const std::vector<size_t>& a_shape,
     const std::vector<size_t>& b_shape,
-    pthreadpool_t pt_pool) {
-  return xnn_reshape_add_nd_qs8(
-      op,             /* xnn_operator_t add_op      */
-      a_shape.size(), /* size_t num_input1_dims     */
-      a_shape.data(), /* const size_t* input1_shape */
-      b_shape.size(), /* size_t num_input2_dims     */
-      b_shape.data(), /* const size_t* input2_shape */
-      pt_pool);       /* pthreadpool_t threadpool   */
-}
-
-C10_ALWAYS_INLINE
-enum xnn_status xnnp_setup_add_nd(
-    xnn_operator_t op,
     const int8_t* da,
     const int8_t* db,
     int8_t* dc,
     pthreadpool_t pt_pool) {
   return xnn_setup_add_nd_qs8(
       op,             /* xnn_operator_t add_op      */
+      a_shape.size(), /* size_t num_input1_dims     */
+      a_shape.data(), /* const size_t* input1_shape */
+      b_shape.size(), /* size_t num_input2_dims     */
+      b_shape.data(), /* const size_t* input2_shape */
       da,             /* const int8_t* input1       */
       db,             /* const int8_t* input2       */
-      dc);            /* int8_t* output             */
+      dc,             /* int8_t* output             */
+      pt_pool);       /* pthreadpool_t threadpool   */
 }
 
 template <typename scalar_t, bool ReLUFused = false>
@@ -356,20 +348,11 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   const auto qa_shape = xnnp_utils::get_mem_format_aware_shape(qa_contig);
   const auto qb_shape = xnnp_utils::get_mem_format_aware_shape(qb_contig);
 
-  // Reshape the operator
-  status = xnnp_reshape_add_nd(
-      xnnp_add_operator.get(),
-      qa_shape,
-      qb_shape,
-      caffe2::pthreadpool_());
-
-  TORCH_CHECK(
-      status == xnn_status_success,
-      func_name, ": xnn reshape operator failed(", status,")!");
-
   // Setup the operator
   status = xnnp_setup_add_nd(
       xnnp_add_operator.get(),
+      qa_shape,
+      qb_shape,
       reinterpret_cast<const underlying_t*>(qa_contig.data_ptr<scalar_t>()),
       reinterpret_cast<const underlying_t*>(qb_contig.data_ptr<scalar_t>()),
       reinterpret_cast<underlying_t*>(qy.data_ptr<scalar_t>()),
