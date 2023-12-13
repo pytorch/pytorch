@@ -274,6 +274,7 @@ def mps_ops_modifier(ops):
         'squeezemultiple',
         'sub',
         't',
+        'T',
         'unflatten',
         'unsafe_split',
         'unsqueeze',
