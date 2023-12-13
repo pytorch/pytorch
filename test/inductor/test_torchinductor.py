@@ -53,12 +53,14 @@ from torch.testing._internal.common_cuda import (
 )
 
 from torch.testing._internal.common_device_type import _has_sufficient_memory
+from torch.testing._internal.common_quantization import _group_quantize_tensor
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
+    IS_REMOTE_GPU,
     IS_WINDOWS,
     IS_X86,
     skipIfRocm,
@@ -1968,6 +1970,32 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(not torch.cuda.is_available(), "need cuda")
+    def test_weight_int4pack_mm_contiguous(self):
+        q_group = 32
+        inner_k_tiles = 2
+
+        def fn(x, w, s):
+            return torch._weight_int4pack_mm(x.to(torch.bfloat16).contiguous(), w, q_group, s.to(torch.bfloat16))
+
+        def get_weight_and_qparams(shape):
+            w = torch.randn(shape, dtype=torch.bfloat16, device="cuda")
+            w_int32, scales_and_zeros = _group_quantize_tensor(w, n_bit=4, q_group_size=q_group)
+            w_int4 = torch._convert_weight_to_int4pack(w_int32, inner_k_tiles)
+            return w_int4, scales_and_zeros
+
+        self.common(
+            fn,
+            (
+                torch.randn((1, 64), device="cuda").t().contiguous().t(),
+                *get_weight_and_qparams((64, 64))
+            ),
+            check_lowp=True,
+        )
     @config.patch(force_mixed_mm=True)
     def test_mixed_mm(self):
         def fn(a, b):
