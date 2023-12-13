@@ -524,7 +524,8 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
 
 
 def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
-    if x.get_dtype() == dtype:
+    x_dtype = x.get_dtype()
+    if x_dtype == dtype:
         return clone(x) if copy else x
 
     def _get_primitive_bitwidth(dtype):
@@ -533,15 +534,20 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
         else:
             return torch.iinfo(dtype).bits
 
-    src_bits = _get_primitive_bitwidth(x.get_dtype())
+    src_bits = _get_primitive_bitwidth(x_dtype)
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
         raise NotImplementedError(
-            f"bitcast {x.get_dtype()} to different bitwidth type {dtype} is not supported yet."
+            f"bitcast {x_dtype} to different bitwidth type {dtype} is not supported yet."
         )
 
     def _to_dtype_bitcast(x):
-        return ops.to_dtype_bitcast(x, dtype)
+        # Because we may promote tensor type from float16 or bfloat16
+        # to float, we will need to pass the original src dtype (i.e. x_dtype),
+        # which is used for correctly constructing type conversion before bitcast,
+        # which requires the bitwidth of the input tensor type is the same as the
+        # target type.
+        return ops.to_dtype_bitcast(x, dtype, x_dtype)
 
     return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
 
