@@ -95,7 +95,6 @@ import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
 
-
 # Class to keep track of test flags configurable by environment variables.
 # Flags set here are intended to be read-only and should not be modified after
 # definition.
@@ -2475,6 +2474,16 @@ def set_warn_always_context(new_val: bool):
     finally:
         torch.set_warn_always(old_val)
 
+dynamo_strict_counter = 0
+dynamo_total_counter = 0
+
+def count_dynamo_test_run(strict=False):
+    global dynamo_total_counter
+    global dynamo_strict_counter
+    dynamo_total_counter = dynamo_total_counter + 1
+    if strict:
+        dynamo_strict_counter = dynamo_strict_counter + 1
+
 
 class NoTest:
     # causes pytest to not recognize this class as a test
@@ -2719,6 +2728,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         # Are we compiling?
         compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR
         # Is the class strict and compiling?
+
         strict_mode = getattr(test_cls, "dynamo_strict", False) and compiled
 
         if strict_mode:
@@ -2738,6 +2748,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition", save_config=False)(super_run)
             elif TEST_WITH_TORCHDYNAMO:
                 # TorchDynamo optimize annotation
+                count_dynamo_test_run(strict=strict_mode)
                 super_run = torch._dynamo.optimize("eager", save_config=False, nopython=strict_mode)(super_run)
 
             super_run(result=result)

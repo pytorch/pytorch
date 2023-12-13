@@ -102,6 +102,18 @@ def parse_test_module(test):
     return test.split(".")[0]
 
 
+def emit_dynamo_test_metric():
+    from torch.testing._internal.common_utils import (
+        dynamo_strict_counter,
+        dynamo_total_counter,
+    )
+
+    emit_metric(
+        "dynamo_strict_stats",
+        {"strict": dynamo_strict_counter, "total": dynamo_total_counter},
+    )
+
+
 class TestChoices(list):
     def __init__(self, *args, **kwargs):
         super().__init__(args[0])
@@ -1856,6 +1868,9 @@ def main():
         all_failures = [failure for batch in test_batches for failure in batch.failures]
 
         if IS_CI:
+            print_to_stderr("Emiting dynamo_strict_stats")
+            emit_dynamo_test_metric()
+
             num_tests = len(selected_tests)
             for test, _ in all_failures:
                 test_stats = aggregated_heuristics.get_test_stats(test)

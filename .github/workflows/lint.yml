@@ -229,7 +229,7 @@ jobs:
       - name: Run run_test.py (nonretryable)
         run: |
           # Run test_vulkan, which is a fast noop on Linux
-          python3 test/run_test.py --include test_vulkan --verbose
+          PYTHONPATH="${PWD}" python3 test/run_test.py --include test_vulkan --verbose
 
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
