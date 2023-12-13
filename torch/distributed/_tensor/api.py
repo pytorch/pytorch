@@ -10,7 +10,6 @@ import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
-from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
     Placement,
@@ -26,6 +25,7 @@ from torch.distributed._tensor.redistribute import (
     Redistribute,
     redistribute_local_tensor,
 )
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 
 
 __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
@@ -473,6 +473,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
         .. note:: `full_tensor` is differentiable.
         """
+
+        # TODO: fix issue with full_tensor() for uneven-sharded tensor
+        # https://github.com/pytorch/pytorch/issues/115310
         redist_res = self.redistribute(placements=[Replicate()] * self.device_mesh.ndim)
         return _ToTorchTensor.apply(redist_res, grad_placements, False)
 

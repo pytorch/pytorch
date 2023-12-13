@@ -150,10 +150,7 @@ def _unlift_graph(mod, gm, graph_signature):
     for name, param in mod.named_buffers(remove_duplicate=False):
         state_dict[name] = param
 
-    from torch._export.exported_program import (
-        _construct_inp_pos_to_param_buffer_name,
-        _unlift,
-    )
+    from torch.export._unlift import _construct_inp_pos_to_param_buffer_name, _unlift
 
     inp_pos_to_param_buffer_name = _construct_inp_pos_to_param_buffer_name(
         gm,
@@ -372,7 +369,7 @@ def compile_fx_inner(
                     len(compiled_graph.device_idxs) == 1
                     or not config.triton.cudagraph_trees
                 ),
-                "multiple device indices without cudagraph_trees",
+                "multiple device indices with cudagraph_trees",
             ),
         ]
         cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
@@ -552,7 +549,7 @@ def fx_codegen_and_compile(
             if V.aot_compilation is True:
                 return compiled_fn
 
-            if graph.disable_cudagraphs:
+            if cudagraphs and graph.disable_cudagraphs:
                 perf_hint_log.warning(
                     "skipping cudagraphs due to %s", V.graph.disable_cudagraphs_reason
                 )
