@@ -94,6 +94,8 @@ from torch.testing._internal.common_dtype import get_all_dtypes
 import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
+from tools.stats.upload_metrics import emit_metric
+
 
 # Class to keep track of test flags configurable by environment variables.
 # Flags set here are intended to be read-only and should not be modified after
@@ -1106,6 +1108,7 @@ def run_tests(argv=UNITTEST_ARGS):
         import pytest
         os.environ["NO_COLOR"] = "1"
         exit_code = pytest.main(args=pytest_args)
+        emit_dynamo_test_metric()
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
 
@@ -2492,6 +2495,18 @@ def count_dynamo_test_run(strict=False):
     dynamo_total_counter = dynamo_total_counter + 1
     if strict:
         dynamo_strict_counter = dynamo_strict_counter + 1
+
+
+def emit_dynamo_test_metric():
+    from torch.testing._internal.common_utils import (
+        dynamo_strict_counter,
+        dynamo_total_counter,
+    )
+
+    emit_metric(
+        "dynamo_strict_stats",
+        {"strict": dynamo_strict_counter, "total": dynamo_total_counter},
+    )
 
 
 class NoTest:
