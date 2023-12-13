@@ -758,9 +758,9 @@ inline static PyObject* eval_custom_code_impl(
   //  1. CPython interpreter first creates an empty frame according to the code object
   //  2. CPython interpreter initializes the frame by filling arguments/free variables into frame and initializing cell variables
   //  3. CPython interpreter executes the code object
-  // 
+  //
   // Dynamo hooks the 3th step: before executing the code object, Dynamo transforms the code object into a new code object. Then, the old frame is not suitable for executing the new code. Therefore, Dynamo needs to manually create and initialize a new frame to execute the new code.
-  // The main task is to copy data in old frame to new frame, concerning a storage space named `localsplus`. 
+  // The main task is to copy data in old frame to new frame, concerning a storage space named `localsplus`.
   //
   // localsplus storage is an array with the following layout:
   // |   args   |   new_locals    |    cell_variables |   free_variables    |
@@ -780,7 +780,7 @@ inline static PyObject* eval_custom_code_impl(
   // for i, name in enumerate(localsplusnames_new):
   //  if name in name_to_idx:
   //    fastlocals_new[i] = fastlocals_old[name_to_idx[name]]
-  // 
+  //
   // The above process of building a `name_to_idx` mapping is expensive.
   // Dynamo makes the following assumptions:
   //  1. new code has the same arguments as the old code (both the number and the order)
@@ -788,12 +788,11 @@ inline static PyObject* eval_custom_code_impl(
   //  3. new code has the same free variables as the old code (both the number and the order)
   //  The only flexibility lies in new local variables: new code can introduce their own variables.
   // With these assumptions, Dynamo can copy data directly by index. Dynamo just needs to take care of copying cell variables correctly.
+  // To avoid runtime cost, the assumptions are checked when we first generate the code object in pytorch/torch/_dynamo/convert_frame.py .
 
 
   // copy args
   Py_ssize_t total_argcount_old = frame->f_code->co_argcount + frame->f_code->co_kwonlyargcount + !!(frame->f_code->co_flags & CO_VARARGS) + !!(frame->f_code->co_flags & CO_VARKEYWORDS);
-  Py_ssize_t total_argcount_new = code->co_argcount + code->co_kwonlyargcount + !!(code->co_flags & CO_VARARGS) + !!(code->co_flags & CO_VARKEYWORDS);
-  DEBUG_CHECK(total_argcount_old == total_argcount_new)
 
   for (Py_ssize_t i = 0; i < total_argcount_old; i++) {
     Py_XINCREF(fastlocals_old[i]);
@@ -802,7 +801,6 @@ inline static PyObject* eval_custom_code_impl(
 
   // copy free vars
   Py_ssize_t nfrees_old = PyCode_GetNFreevars(frame->f_code);
-  DEBUG_CHECK(nfrees_old == PyCode_GetNFreevars(code));
 
   for (Py_ssize_t i = 0; i < nfrees_old; i++) {
     Py_XINCREF(fastlocals_old[n_old - 1 - i]);
