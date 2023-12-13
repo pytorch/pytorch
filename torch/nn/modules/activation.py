@@ -143,8 +143,6 @@ class RReLU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
 
-    .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
-        https://arxiv.org/abs/1505.00853
     """
 
     __constants__ = ['lower', 'upper', 'inplace']
@@ -820,10 +818,10 @@ class LogSigmoid(Module):
 
 
 class Softplus(Module):
-    r"""Applies the Softplus function.
+    r"""Applies the Softplus function element-wise.
 
-    .. :math:`\text{Softplus}(x) = \frac{1}{\beta} *
-    \log(1 + \exp(\beta * x))` element-wise.
+    .. math::
+        \text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))
 
     SoftPlus is a smooth approximation to the ReLU function and can be used
     to constrain the output of a machine to always be positive.
@@ -1077,7 +1075,7 @@ class MultiheadAttention(Module):
 
         Supports optional parameters for padding, masks and attention weights.
 
-        Args:
+    Args:
         query: Query embeddings of shape :math:`(L, E_q)` for unbatched input, :math:`(L, N, E_q)` when ``batch_first=False``
             or :math:`(N, L, E_q)` when ``batch_first=True``, where :math:`L` is the target sequence length,
             :math:`N` is the batch size, and :math:`E_q` is the query embedding dimension ``embed_dim``.
@@ -1119,7 +1117,7 @@ class MultiheadAttention(Module):
             incorrect execution, including forward and backward
             compatibility.
 
-        Outputs:
+    Outputs:
         - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
           :math:`(L, N, E)` when ``batch_first=False`` or :math:`(N, L, E)` when ``batch_first=True``,
           where :math:`L` is the target sequence length, :math:`N` is the batch size, and :math:`E` is the

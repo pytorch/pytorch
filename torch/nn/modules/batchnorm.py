@@ -428,7 +428,7 @@ class BatchNorm2d(_BatchNorm):
 class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm2d` module with lazy initialization.
 
-    Lazy initialization based on the the ``num_features`` argument of the :class:`BatchNorm2d` that is inferred
+    Lazy initialization is done for the ``num_features`` argument of the :class:`BatchNorm2d` that is inferred
     from the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
@@ -539,7 +539,7 @@ class BatchNorm3d(_BatchNorm):
 class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm3d` module with lazy initialization.
 
-    Lazy initialization based on the the ``num_features`` argument of the :class:`BatchNorm3d` that is inferred
+    Lazy initialization is done for the ``num_features`` argument of the :class:`BatchNorm3d` that is inferred
     from the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
@@ -573,7 +573,7 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
 class SyncBatchNorm(_BatchNorm):
     r"""Applies Batch Normalization over a N-Dimensional input.
 
-    N-D a mini-batch of [N-2]D inputs with additional channel dimension) as described in the paper
+    The N-D input is a mini-batch of [N-2]D inputs with additional channel dimension) as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
@@ -787,7 +787,7 @@ class SyncBatchNorm(_BatchNorm):
 
     @classmethod
     def convert_sync_batchnorm(cls, module, process_group=None):
-        r"""Convert all :attr:`BatchNorm*D` layers in the model to :class:`torch.nn.SyncBatchNorm` layers.
+        r"""Converts all :attr:`BatchNorm*D` layers in the model to :class:`torch.nn.SyncBatchNorm` layers.
 
         Args:
             module (nn.Module): module containing one or more :attr:`BatchNorm*D` layers
