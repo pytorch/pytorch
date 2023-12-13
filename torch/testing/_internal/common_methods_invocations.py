@@ -8465,6 +8465,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             cu_seqlens_q=None,
             cu_seqlens_k=None,
             max_seqlen_q=None,
+            max_seqlen_k=None,
             dropout_p=dropout_p,
             custom_mask_type=mask_type,
             compute_log_sumexp=requires_grad,
@@ -8482,6 +8483,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
         cu_seqlens_q=None,
         cu_seqlens_k=None,
         max_seqlen_q=None,
+        max_seqlen_k=None,
         dropout_p=dropout_p,
         custom_mask_type=0,  # No Mask
         compute_log_sumexp=requires_grad,
@@ -8500,6 +8502,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             cu_seqlens_q=None,
             cu_seqlens_k=None,
             max_seqlen_q=None,
+            max_seqlen_k=None,
             dropout_p=dropout_p,
             custom_mask_type=0,  # No Mask
             compute_log_sumexp=requires_grad,
