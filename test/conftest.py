@@ -310,3 +310,7 @@ class StepcurrentPlugin:
     def pytest_runtest_protocol(self, item, nextitem) -> None:
         self.lastrun = item.nodeid
         self.cache.set(self.directory, self.lastrun)
+
+    def pytest_sessionfinish(self, session, exitstatus):
+        if exitstatus == 0:
+            self.cache.set(self.directory, None)
