@@ -2124,30 +2124,42 @@ class TritonKernel(Kernel):
             triton=True,
         )
 
-    def codegen_nan_check(self, *, before_calling_kernel=False):
+    def codegen_nan_check(self, *, before_calling_kernel=False, saved_paths=None):
         if not config.nan_asserts:
             return
 
         wrapper = V.graph.wrapper_code
         _, call_args, arg_types = self.args.python_argdefs()
+        saved_paths = []
         for arg, arg_type in zip(call_args, arg_types):
             if isinstance(arg_type, TensorArg):
                 is_read = 'in_ptr' in arg_type.name or 'in_out_ptr' in arg_type.name
                 if before_calling_kernel and not is_read:
                     continue
                 before_or_after = 'before' if before_calling_kernel else 'after'
+                if before_or_after:
+                    if arg in ['buf100', 'buf95', 'primals_3', 'clone', 'buf4']:
+                        import os
+                        save_path_prefix = os.environ['inductor_nan_dump_dir']
+                        curr_rank = torch.distributed.get_rank() if hasattr(torch, "distributed") and torch.distributed.is_initialized() and hasattr(torch.distributed, "get_rank") else 999
+                        save_path = f'{save_path_prefix}/triton_input_rank_{curr_rank}_name_{arg}_{len(wrapper.lines)}.pt'
+                        saved_paths.append(save_path)
+                        wrapper.writeline(
+                            f"torch.save({arg}, '{save_path}')"
+                        )
                 wrapper.writeline(
                     f"if {arg}.isnan().any().item():"
                 )
                 wrapper.writeline(
-                    f"    assert False, '{before_or_after} {arg} was NaN'"
+                    f"    assert False, '{before_or_after} {arg} was NaN. paths of saved tensors: {',,,'.join(saved_paths)}'"
                 )
                 wrapper.writeline(
                     f"if {arg}.isinf().any().item():"
                 )
                 wrapper.writeline(
-                    f"    assert False, '{before_or_after} {arg} was inf'"
+                    f"    assert False, '{before_or_after} {arg} was inf. paths of saved tensors: {',,,'.join(saved_paths)}'"
                 )
+        return saved_paths
 
     def warn_mix_layout(self, kernel_name):
         """
@@ -2579,9 +2591,9 @@ class TritonScheduling(BaseScheduling):
         kernel_name = self.define_kernel(src_code, node_schedule)
         log.debug("Generating kernel code with kernel_name: %s", kernel_name)
         self.codegen_comment(node_schedule)
-        kernel.codegen_nan_check(before_calling_kernel=True)
+        saved_paths = kernel.codegen_nan_check(before_calling_kernel=True)
         kernel.call_kernel(kernel_name)
-        kernel.codegen_nan_check(before_calling_kernel=False)
+        kernel.codegen_nan_check(before_calling_kernel=False, saved_paths=saved_paths)
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
