@@ -558,3 +558,7 @@ def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> No
     else:
         with no_dispatch():
             tensor.record_stream(stream)
+
+
+def _same_storage_as_data_ptr(x: torch.Tensor, data_ptr: int) -> bool:
+    return x._typed_storage()._data_ptr() == data_ptr
