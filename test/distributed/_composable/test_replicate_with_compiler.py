@@ -8,15 +8,12 @@ from typing import Callable, Optional
 
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
 from torch import _inductor as inductor, nn
 from torch._dynamo import compiled_autograd
 from torch.distributed._composable.replicate import replicate
 from torch.distributed.algorithms.ddp_comm_hooks import (
     default_hooks as ddp_default_hooks,
 )
-from torch.distributed.distributed_c10d import _get_default_group
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
