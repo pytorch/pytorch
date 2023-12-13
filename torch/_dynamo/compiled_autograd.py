@@ -94,7 +94,7 @@ class AutogradCompilerInstance:
 
     def proxy_call_backward(self, inputs, outputGradsInfo: Tuple[bool], backward_id: int):
         assert self.backward_proxy is not None
-        assert len(inputs) == len(outputGradsInfo) # number of inputs to backwards should match number of outputs to backwards
+        assert len(inputs) == len(outputGradsInfo), "number of inputs to backwards should match number of outputs to backwards"
         backward_fn = self.backward_proxy[backward_id]
         saved_variables = self.backward_proxy[backward_id+1]
         proxies = self.fx_tracer.create_proxy(

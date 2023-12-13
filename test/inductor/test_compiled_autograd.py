@@ -649,6 +649,7 @@ known_failing_tests = {
     "test_unrelated_inputs",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_will_engine_execute_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
     "test_backward_to_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
+    # =========== WIP excluding AssertionErrors ============
     "test_callback_propagates_errors_from_device_thread",  # AssertionError: "blah"
     "test_anomaly_detect_nan",  # AssertionError: "Function 'MyFuncBackward' returned nan values in its 0th output." does not match "compiled_autograd does not support AnomalyMode"
     "test_autograd_simple_views_python",  # AssertionError: False is not true
@@ -677,6 +678,62 @@ known_failing_tests = {
     "test_save_output_nr",  # AssertionError: Scalars are not equal!
     "test_simple_reentrant",  # RuntimeError: TorchDispatchMode not yet implemented for compiled autograd
     "test_tensor_hooks_inplace_multiple_outputs",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    # =========== WIP including AssertionErrors ============
+    # "test_accumulate_without_zero",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_custom_fn_saved_attr",  # torch._dynamo.exc.InternalTorchDynamoError: 'type' object is not subscriptable
+    # "test_custom_fn_saved_multiple_tensors",  # AssertionError: Tensor-likes are not close!
+    # "test_custom_fn_saved_tensors",  # AssertionError: Tensor-likes are not close!
+    # "test_dynamic_shapes",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_inplace_grad_update",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_issue106555",  # torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
+    # "test_torch_compile",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_anomaly_detect_nan",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_autograd_multiple_views_python",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_autograd_node_isinstance",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsInstance | assertIsInstance /home/xmfan/.conda/envs/autograd/lib/python3.10/unittest/case.py, skipped according skipfiles.SKIP_DIRS'
+    # "test_autograd_python_custom_function_inplace",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_autograd_simple_views_python",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_callback_adds_callback",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable(queue_callback) __call__ [UserFunctionVariable()] {}
+    # "test_callback_propagates_errors_from_device_thread",  # AssertionError: "blah" does not match "call_method UserDefinedObjectVariable(queue_callback) __call__ [UserFunctionVariable()] {}
+    # "test_custom_autograd_no_early_free",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function <built-in function getitem>(*(FakeTensor(..., size=(), dtype=torch.float64), 0), **{}):
+    # "test_custom_function_cycle",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_custom_function_error",  # AssertionError: "must implement either the backward" does not match "call_function BuiltinVariable(NotImplementedError) [ConstantVariable(str)] {}
+    # "test_custom_function_non_tensor_inputs_outputs",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_custom_function_save_for_forward",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_custom_function_setup_context_multi_input",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_custom_function_setup_context_multi_output",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_custom_function_setup_context_simple",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function <built-in function getitem>(*(FakeTensor(..., size=()), 0), **{}):
+    # "test_deep_reentrant",  # torch._dynamo.exc.InternalTorchDynamoError: '<' not supported between instances of 'type' and 'int'
+    # "test_dep_nograd",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_dont_materialize_grads",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone | assertIsNone /home/xmfan/.conda/envs/autograd/lib/python3.10/unittest/case.py, skipped according skipfiles.SKIP_DIRS'
+    # "test_function_returns_input",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function <built-in function getitem>(*(FakeTensor(..., size=()), 0), **{}):
+    # "test_function_returns_undefined_tensor",  # torch._dynamo.exc.InternalTorchDynamoError: 'NoneType' object is not subscriptable
+    # "test_grad_fn_prehooks",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    # "test_grad_fn_prehooks_multiple_outputs",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone | assertIsNone /home/xmfan/.conda/envs/autograd/lib/python3.10/unittest/case.py, skipped according skipfiles.SKIP_DIRS'
+    # "test_grad_fn_prehooks_remove_hooks",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: RemovableHandle.remove | remove /data/users/xmfan/core/pytorch/torch/utils/hooks.py, skipped according skipfiles.SKIP_DIRS'
+    # "test_grad_mode_restored_reentrant",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertTrue | assertTrue /home/xmfan/.conda/envs/autograd/lib/python3.10/unittest/case.py, skipped according skipfiles.SKIP_DIRS'
+    # "test_hook_none",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNotNone | assertIsNotNone /home/xmfan/.conda/envs/autograd/lib/python3.10/unittest/case.py, skipped according skipfiles.SKIP_DIRS'
+    # "test_invalid_gradients",  # AssertionError: RuntimeError not raised
+    # "test_mark_non_differentiable_mixed",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_materialize_grads",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    # "test_naughty_autograd_function_stashing_ctx",  # AssertionError: RuntimeError not raised by <lambda>
+    # "test_no_grad_copy",  # RuntimeError: [Compiled Autograd Tracing: NonContGradFuncBackward] invalid gradient at index 0 - got [1] but expected shape compatible with [5, 6]
+    # "test_no_grad_copy_sparse",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_reentrant_priority",  # torch._dynamo.exc.InternalTorchDynamoError: '<' not supported between instances of 'type' and 'int'
+    # "test_reentrant_with_callbacks_both_depths",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable(queue_callback) __call__ [UserFunctionVariable()] {}
+    # "test_reentrant_with_callbacks_depth_0",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable(queue_callback) __call__ [UserFunctionVariable()] {}
+    # "test_reentrant_with_callbacks_depth_1",  # torch._dynamo.exc.Unsupported: Tensor.requires_grad_
+    # "test_return_duplicate",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_return_duplicate_inplace",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_return_leaf",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    # "test_save_none_for_backward",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone | assertIsNone /home/xmfan/.conda/envs/autograd/lib/python3.10/unittest/case.py, skipped according skipfiles.SKIP_DIRS'
+    # "test_save_output_nr",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_saved_tensor_hooks_custom_function_intermediates",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function <built-in function getitem>(*(FakeTensor(..., size=()), 0), **{}):
+    # "test_saved_variables_deprecated",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_set_materialize_non_diff_grads",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_setup_context_when_forward_has_default_args",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_simple_reentrant",  # torch._dynamo.exc.Unsupported: call_method SkipFilesVariable() sum [] {}
+    # "test_tensor_hooks_inplace_multiple_outputs",  # AssertionError: number of inputs to backwards should match number of outputs to backwards
+    # "test_type_conversions",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' raised:
 }
 
 if not HAS_CUDA:
