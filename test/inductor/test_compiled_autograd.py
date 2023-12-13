@@ -487,7 +487,7 @@ class TestCompiledAutograd(TestCase):
 
         self.check_output_and_recompiles(fn, 2)
 
-    def test_custom_fns(self):
+    def test_custom_fns_with_same_graph(self):
         def fn():
             class MyFn1(torch.autograd.Function):
                 @staticmethod
