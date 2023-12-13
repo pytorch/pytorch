@@ -1372,9 +1372,18 @@ class Scheduler:
             return reachable_names
 
         def add_user(used_by_name, user_node, can_inplace=False, is_weak=False):
-            name_to_users[rename(used_by_name)].append(
-                NodeUser(user_node, can_inplace, is_weak)
-            )
+            if not any(
+                (
+                    _node.node == user_node
+                    and _node.can_inplace == can_inplace
+                    and _node.is_weak == is_weak
+                )
+                for _node in name_to_users[rename(used_by_name)]
+            ):
+                # Only create and push a NodeUser to name_to_users when it's not in name_to_users
+                name_to_users[rename(used_by_name)].append(
+                    NodeUser(user_node, can_inplace, is_weak)
+                )
 
         unbacked_symbol_to_origin_node = {}
 
