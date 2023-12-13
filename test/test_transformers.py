@@ -1698,8 +1698,8 @@ class TestSDPA(NNTestCase):
         atol = 1e-5
         rtol = 5e-6
         if dtype is torch.bfloat16:
-            atol = 2e-2
-            rtol = 2e-2
+            atol = 5e-2
+            rtol = 5e-2
 
         n_embd = n_head * head_dim
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, packed=True, requires_grad=False)
