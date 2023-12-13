@@ -56,12 +56,12 @@ if is_available():
         _make_nccl_premul_sum,
     )
 
-    class DistributedPdb(pdb.Pdb):
+    class _DistributedPdb(pdb.Pdb):
         """
         Supports using PDB from inside a multiprocessing child process.
 
         Usage:
-        DistributedPdb().set_trace()
+        _DistributedPdb().set_trace()
         """
         def interaction(self, *args, **kwargs):
             _stdin = sys.stdin
@@ -80,8 +80,9 @@ if is_available():
             rank (int): Which rank to break on.  Default: ``0``
         """
         if get_rank() == rank:
-            pdb = DistributedPdb()
-            pdb.message("\n!!! ATTENTION !!!\n\n"
+            pdb = _DistributedPdb()
+            pdb.message(
+                "\n!!! ATTENTION !!!\n\n"
                 f"Type 'up' to get to the frame that called dist.breakpoint(rank={rank})\n"
             )
             pdb.set_trace()
