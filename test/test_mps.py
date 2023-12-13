@@ -237,6 +237,7 @@ def mps_ops_modifier(ops):
         'as_strided_scatter',
         'broadcast_tensors',
         'broadcast_to',
+        'chunk',
         'clone',
         'contiguous',
         'empty',
