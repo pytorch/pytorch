@@ -9,6 +9,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_foreach_add_native.h>
+#include <ATen/ops/_foreach_div_native.h>
 #include <ATen/ops/_foreach_mul_native.h>
 
 #include <ATen/ops/empty_like_native.h>
@@ -98,6 +99,10 @@ void foreach_binary_op_(
 #define FOREACH_BINARY_OP_SCALAR_TENSOR(FUNCTION, NAME, OP, DIVISION_OP) \
   void foreach_tensor_##NAME##_tensor_kernel_cuda_(                      \
       TensorList tensors, const Tensor& scalar) {                        \
+    if (scalar.device().type() == DeviceType::CPU) {                     \
+      return at::native::foreach_tensor_##NAME##_scalar_kernel_cuda_(    \
+          tensors, scalar.item());                                       \
+    }                                                                    \
     check_foreach_api_restrictions(tensors);                             \
     if (!(can_use_fast_route(                                            \
               ArrayRef<TensorList>{tensors}, {}, DIVISION_OP) &&         \
@@ -111,6 +116,10 @@ void foreach_binary_op_(
                                                                          \
   std::vector<Tensor> foreach_tensor_##NAME##_tensor_kernel_cuda(        \
       TensorList tensors, const Tensor& scalar) {                        \
+    if (scalar.device().type() == DeviceType::CPU) {                     \
+      return at::native::foreach_tensor_##NAME##_scalar_kernel_cuda(     \
+          tensors, scalar.item());                                       \
+    }                                                                    \
     check_foreach_api_restrictions(tensors);                             \
     if (!(can_use_fast_route(                                            \
               ArrayRef<TensorList>{tensors}, {}, DIVISION_OP) &&         \
@@ -187,4 +196,11 @@ FOREACH_BINARY_OP_SCALAR_TENSOR(
     mul,
     std::multiplies,
     /* div_op */ false);
+
+FOREACH_BINARY_OP_SCALAR_TENSOR(
+    all_types_complex_bool_half_bfloat16,
+    div,
+    std::divides,
+    /* div_op */ true);
+
 } // namespace at::native

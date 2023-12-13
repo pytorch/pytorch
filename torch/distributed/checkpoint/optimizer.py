@@ -34,6 +34,7 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
 )
+from torch.distributed.checkpoint.planner import LoadPlanner
 
 from torch.distributed.checkpoint._nested_dict import unflatten_state_dict
 from torch.distributed.checkpoint.utils import (
@@ -115,7 +116,8 @@ def _get_state_dict_2d_layout(
     state_dict: STATE_DICT_TYPE,
 ) -> Tuple[STATE_DICT_2D_LAYOUT, Optional[dist.ProcessGroup]]:
     """
-    We have to load the right TP slice of the optimizer state.
+    Load the right TP slice of the optimizer state.
+
     This is not easy since the per-tensor slicing can't be inferred from checkpoint metadata.
     We take advantage of the model state_dict producing a sliced ST to figure out what we need to load.
     This is pretty fragile and it might be easier for FSDP to compute this info for us.
@@ -213,9 +215,11 @@ def load_sharded_optimizer_state_dict(
     model_state_dict: STATE_DICT_TYPE,
     optimizer_key: str,
     storage_reader: dist_cp.StorageReader,
+    planner: Optional[LoadPlanner] = None,
 ) -> STATE_DICT_TYPE:
     """
-    Loads a state_dict in conjunction with FSDP sharded optimizer state.
+    Load a state_dict in conjunction with FSDP sharded optimizer state.
+
     This is the current recommended way to checkpoint FSDP.
     >>> # xdoctest: +SKIP
     >>> import torch.distributed.checkpoint as dist_cp
@@ -342,7 +346,7 @@ def load_sharded_optimizer_state_dict(
         state_dict=state_dict,
         storage_reader=storage_reader,
         # FIXME the type of planner is wrong in load_state_dict
-        planner=_ReaderWithOffset(fqn_to_offset) if dp_pg is not None else None,
+        planner=_ReaderWithOffset(fqn_to_offset) if dp_pg is not None else planner,
     )
 
     state_dict = unflatten_state_dict(state_dict, metadata.planner_data)

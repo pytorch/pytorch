@@ -216,6 +216,26 @@ class ModuleProperty(torch.nn.Module):
         return x * self.scale_alias
 
 
+class NestedModuleList(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList([])
+        for _ in range(3):
+            self.layers.append(
+                torch.nn.ModuleList(
+                    [
+                        torch.nn.Linear(10, 10),
+                        torch.nn.ReLU(),
+                    ]
+                )
+            )
+
+    def forward(self, x):
+        for layer, act in self.layers:
+            x = act(layer(x))
+        return x
+
+
 class ConstLoop(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1046,11 +1066,12 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
-    test_modulelist = make_test(CustomGetItemModuleList())
+    test_modulelist_nested = make_test(NestedModuleList())
+    test_modulelist_custom = make_test(CustomGetItemModuleList())
     test_moduledict = make_test(ModuleDict())
-    test_moduledict = make_test(CustomGetItemModuleDict())
+    test_moduledict_custom = make_test(CustomGetItemModuleDict())
     test_parameterdict = make_test(ParameterDict())
-    test_parameterdict = make_test(CustomGetItemParameterDict())
+    test_parameterdict_custom = make_test(CustomGetItemParameterDict())
     test_super1 = make_test(SuperModule())
     test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
@@ -1527,7 +1548,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod = MockModule()
         opt_mod = torch._dynamo.optimize("eager")(mod)
 
-        # Check parameteres and buffers
+        # Check parameters and buffers
         for p1, p2 in zip(mod.parameters(), opt_mod.parameters()):
             self.assertTrue(id(p1) == id(p2))
         for b1, b2 in zip(mod.buffers(), opt_mod.buffers()):
@@ -1768,7 +1789,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         """
         Summary:
-          - removing a hook doesn't fail a guard, becuase we weren't compiling the hook
+          - removing a hook doesn't fail a guard, because we weren't compiling the hook
             (at least into the same graph) as forward in the first place! We do correctly
             omit calling the removed hook, but since this hook is a post forward hook,
             the 'RETURN' from forward is breaking the graph.
@@ -1842,7 +1863,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
-        self.assertTrue("___check_obj_id(L['m']._forward_hooks" in failure_reason)
+        self.assertRegex(
+            failure_reason, r"^___check_obj_id\(.*\(L\['m'\]\._forward_hooks"
+        )
 
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
     def test_hooks_skip_guards(self):
@@ -2270,6 +2293,51 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod.eval()
         generate(torch.randn(10, 10), 0)
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_state_dict_pass_through(self):
+        mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt)(mod)
+        self.assertIsInstance(opt_mod, torch._dynamo.OptimizedModule)
+
+        # The state-dict doesn't contain the `_orig_mod` prefix
+        self.assertEqual(mod.state_dict(), opt_mod.state_dict())
+        self.assertEqual(opt_mod.state_dict(), opt_mod._orig_mod.state_dict())
+
+        # Load the state-dict of an `OptimizedModule` into a regular `nn.Module`
+        new_mod = MockModule()
+        self.assertNotEqual(list(new_mod.parameters()), list(mod.parameters()))
+        new_mod.load_state_dict(opt_mod.state_dict())
+        self.assertEqual(list(new_mod.parameters()), list(mod.parameters()))
+
+        # Load the state-dict of a regular `nn.Module` into an `OptimizedModule`
+        new_mod = MockModule()
+        self.assertNotEqual(list(new_mod.parameters()), list(opt_mod.parameters()))
+        opt_mod.load_state_dict(new_mod.state_dict())
+        self.assertEqual(list(new_mod.parameters()), list(opt_mod.parameters()))
+        self.assertEqual(
+            list(opt_mod.parameters()), list(opt_mod._orig_mod.parameters())
+        )
+
+        # For backward-compatibility, load a state-dict with keys prefixed with `_orig_mod`
+        old_mod = MockModule()
+        state_dict = old_mod.state_dict()
+        legacy_opt_state_dict = {("_orig_mod." + k): v for k, v in state_dict.items()}
+
+        new_mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt)(new_mod)
+        self.assertNotEqual(list(opt_mod.parameters()), list(old_mod.parameters()))
+        opt_mod.load_state_dict(legacy_opt_state_dict)
+        self.assertEqual(list(opt_mod.parameters()), list(old_mod.parameters()))
+        self.assertEqual(opt_mod.state_dict(), old_mod.state_dict())
+        self.assertEqual(old_mod.state_dict(), new_mod.state_dict())
+
+        # When only a submodule is an `OptimizedModule`
+        mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        mod.linear = torch._dynamo.optimize(cnt)(mod.linear)
+        assert not any("_orig_mod" in key for key in mod.state_dict())
 
 
 if __name__ == "__main__":

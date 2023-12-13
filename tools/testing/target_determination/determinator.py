@@ -1,4 +1,4 @@
-from typing import List
+from typing import Dict, List
 
 from tools.testing.target_determination.heuristics import (
     AggregatedHeuristics as AggregatedHeuristics,
@@ -27,3 +27,11 @@ def get_test_prioritizations(tests: List[str]) -> AggregatedHeuristics:
             new_rankings.print_info()
 
     return aggregated_results
+
+
+def get_prediction_confidences(tests: List[str]) -> Dict[str, Dict[str, float]]:
+    # heuristic name -> test -> rating/confidence
+    rankings: Dict[str, Dict[str, float]] = {}
+    for heuristic in HEURISTICS:
+        rankings[heuristic.name] = heuristic.get_prediction_confidence(tests)
+    return rankings

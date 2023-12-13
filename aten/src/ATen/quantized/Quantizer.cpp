@@ -7,14 +7,12 @@
 #include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/accumulate.h>
 
 #include <cmath>
-#include <typeinfo>
 #include <utility>
 
 namespace at {
@@ -121,6 +119,8 @@ inline Tensor new_qtensor(
     allocator = at::getCPUAllocator();
   } else if (device.is_meta()) {
     allocator = GetAllocator(kMeta);
+  } else if (device.is_privateuseone()) {
+    allocator = GetAllocator(kPrivateUse1);
   } else {
     TORCH_INTERNAL_ASSERT(0, "unrecognized device for new_qtensor: ", device);
   }

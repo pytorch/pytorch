@@ -67,7 +67,7 @@ def compile_model(device, data):
     }
     with torch.no_grad():
         # aot-compile the module into a .so pointed by lib_path
-        lib_path, _ = torch._export.aot_compile(
+        lib_path = torch._export.aot_compile(
             module, inputs, dynamic_shapes=dynamic_shapes
         )
     script_module = make_script_module(lib_path, device, *inputs)
