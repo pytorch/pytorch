@@ -1822,6 +1822,9 @@ class CppVecKernel(CppKernel):
             self.reduction_suffix.writeline(
                 f"{acc} = {reduction_combine(reduction_type, acc, next_value)};"
             )
+            self.parallel_reduction_suffix.writeline(
+                f"{acc} = {reduction_combine(reduction_type, acc, next_value)};"
+            )
             tmpvar = acc
         else:
             tmpvar = acc_vec
@@ -1839,6 +1842,12 @@ class CppVecKernel(CppKernel):
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
             self.reduction_suffix.writeline(
+                DeferredLine(
+                    name,
+                    f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});",
+                )
+            )
+            self.parallel_reduction_suffix.writeline(
                 DeferredLine(
                     name,
                     f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});",
