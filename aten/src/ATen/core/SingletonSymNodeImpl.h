@@ -28,7 +28,7 @@ namespace c10 {
 // During tracing the strides of the outputs need to be a function of the size
 // and strides of the inputs so it is important that SingletonSymNode itself is
 // able to express this.
-class C10_API SingletonSymNodeImpl : public SymNodeImpl {
+class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
  public:
   // CAUTION: you should probably not be constructing these directly; please
   // the higher-level API in python instead (TODO: actually introduce that).
