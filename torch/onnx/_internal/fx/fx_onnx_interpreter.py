@@ -248,6 +248,11 @@ def _fill_tensor_shape_type(
                 expected_value
             )
             onnxscript_value.shape = torch.Size([1])
+        elif isinstance(expected_value, (int, float, bool)):
+            onnxscript_value.dtype = fx_type_utils.from_scalar_type_to_torch_dtype(
+                type(expected_value)
+            )
+            onnxscript_value.shape = torch.Size([])
         elif fx_type_utils.is_torch_complex_dtype(expected_value.dtype):
             # Like torch.view_as_real, we flatten complex tensors to real tensors with
             # additional last dimension of 2
@@ -568,7 +573,7 @@ class FxOnnxInterpreter:
         # or nodes with node.meta['val'] being a builtin value (ExportedProgram to dynamo_export).
         # Nonethless, the nodes are not consumed by others, so we don't need to
         # create a TorchScriptTensor for them.
-        if fake_tensor is None or isinstance(fake_tensor, (int, float, bool)):
+        if fake_tensor is None or isinstance(fake_tensor, (int, float, bool, str)):
             output = onnxscript_graph.add_input(
                 input_name=None,
             )
