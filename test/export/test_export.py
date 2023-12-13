@@ -1479,7 +1479,7 @@ class TestExport(TestCase):
         m = M()
         with unittest.mock.patch("torch._export.DECOMP_TABLE", None):
             ep = export(m, inp)
-
+        state_dict = ep.state_dict
 
         FileCheck().check_count(
             "torch.ops.aten.t.default", 1, exactly=True
@@ -1494,6 +1494,7 @@ class TestExport(TestCase):
             "torch.ops.aten.t.default", 0, exactly=True
         ).run(core_aten_ep.graph_module.code)
         self.assertTrue(torch.allclose(core_aten_ep(*inp), m(*inp)))
+        self.assertEqual(id(state_dict), id(ep.state_dict))
 
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
