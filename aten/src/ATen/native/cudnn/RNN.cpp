@@ -231,6 +231,12 @@ namespace {
   auto rnn_descriptor_sequence(const Tensor& tensor, const int batch_size, IntArrayRef batch_sizes, const int seq_len, const int vector_size) { // packed case
     RNNDataDescriptor r;
     std::vector<int> seqLengthArray(batch_size, 1);
+    // cuDNN wants the sequence lenghts for a packed batch as if they
+    // were unpacked, e.g., for the 
+    // Sequence 1: ABCD
+    // Sequence 2: EF
+    // Sequence 3: G
+    // case below, this would be [4, 2, 1] (has length == mini_batch)
     // TODO(eqy): There's probably a smarter way to do this than O(SN)
     for (auto it = batch_sizes.begin(); it != batch_sizes.end(); it++) {
       // everyone starts at sequence length 1 so we skip an iteration
