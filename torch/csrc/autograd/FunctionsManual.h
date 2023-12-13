@@ -1099,8 +1099,6 @@ mkldnn_rnn_layer_differentiable_backward(
     bool batch_first,
     const at::Tensor& workspace);
 
-Tensor values_backward(const Tensor& grad, const Tensor& self);
-
 } // namespace details
 } // namespace generated
 } // namespace autograd

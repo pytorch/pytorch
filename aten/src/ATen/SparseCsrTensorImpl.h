@@ -46,12 +46,8 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
       const Tensor& crow_indices,
       const Tensor& col_indices,
       const Tensor& values,
-      c10::SymIntArrayRef size);
-  void set_member_tensors(
-      const Tensor& crow_indices,
-      const Tensor& col_indices,
-      const Tensor& values,
       IntArrayRef size);
+
   const Tensor& compressed_indices() const {
     return crow_indices_;
   }

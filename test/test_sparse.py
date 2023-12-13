@@ -1543,7 +1543,6 @@ class TestSparse(TestSparseBase):
         true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @coalescedonoff
     @precisionOverride({torch.bfloat16: 5e-2})
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
@@ -5066,6 +5065,11 @@ class TestSparseAny(TestCase):
                      torch.Tensor.to_sparse,
                      torch.Tensor.values,
                      ):
+            if layout in sparse_compressed_layouts and func.__name__ == 'values':
+                # FIXME: RuntimeError: indices expected sparse
+                # coordinate tensor layout but got SparseCsr. Likely
+                # works when gh-107126 is fixed.
+                continue
             for x in self.generate_simple_inputs(
                     layout,
                     device=device,
