@@ -71,6 +71,7 @@ def check_model(
         {
             "aot_inductor.abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
+            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
     ):
         torch.manual_seed(0)
@@ -1459,11 +1460,23 @@ class AOTInductorTestABICompatibleCpu(TestCase):
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
 
 
 def fail_with_and_without_stack_allocation(is_skip=False):
     return TestFailure(
-        ("abi_compatible_cpu", "abi_compatible_cpu_with_stack_allocation"),
+        (
+            "abi_compatible_cpu",
+            "abi_compatible_cpu_with_stack_allocation",
+            "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
+        ),
+        is_skip=is_skip,
+    )
+
+
+def fail_minimal_arrayref_interface(is_skip=False):
+    return TestFailure(
+        ("abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",),
         is_skip=is_skip,
     )
 
@@ -1482,12 +1495,18 @@ CPU_TEST_FAILURES = {
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
+    # minimal arrayref interface only works with CPU; test crashes.
+    "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
     "test_poi_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
     # the test segfaults
     "test_scatter_fallback": fail_with_and_without_stack_allocation(is_skip=True),
+    # Minimal arrayref interface doesn't support bfloat16 yet.
+    "test_sdpa": fail_minimal_arrayref_interface(is_skip=True),
+    # Minimal arrayref interface doesn't support bfloat16 yet.
+    "test_sdpa_2": fail_minimal_arrayref_interface(is_skip=True),
     # error: could not find s0
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -1509,6 +1528,7 @@ class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = True
+    use_minimal_arrayref_interface = False
 
 
 copy_tests(
@@ -1519,12 +1539,32 @@ copy_tests(
 )
 
 
+class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface(
+    TestCase
+):
+    device = "cpu"
+    abi_compatible = True
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = True
+    use_minimal_arrayref_interface = True
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface,
+    "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
+    CPU_TEST_FAILURES,
+)
+
+
 class AOTInductorTestABICompatibleCuda(TestCase):
     device = "cuda"
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
 
 
 copy_tests(
@@ -1550,6 +1590,7 @@ class AOTInductorTestNonABICompatibleCpu(TestCase):
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
 
 
 copy_tests(
@@ -1577,6 +1618,7 @@ class AOTInductorTestNonABICompatibleCuda(TestCase):
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
 
 
 copy_tests(
