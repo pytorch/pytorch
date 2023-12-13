@@ -1522,7 +1522,7 @@ def error_inputs_multi_margin_loss(op, device, **kwargs):
                      error_regex=r'Expected non-empty vector or matrix with optional 0-dim batch size, but got: \[0\]')
     # invalid target
     yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={}),
-                     error_type=RuntimeError, error_regex=r'inconsistent target size, expected 5 but got \[5, 4\]')
+                     error_type=RuntimeError, error_regex=r'MultiMarginLoss: The size of input tensor, , must match the size of target tensor, \[4, 5\]')
     # invalid target dtype
     yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={}),
                      error_type=RuntimeError, error_regex='expected scalar type Long but found Float')
