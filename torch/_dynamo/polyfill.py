@@ -1,6 +1,7 @@
 """
 Python polyfills for common builtins.
 """
+import math
 
 
 def all(iterator):
@@ -28,3 +29,7 @@ def index(iterator, item, start=0, end=-1):
 def repeat(item, count):
     for i in range(count):
         yield item
+
+
+def radians(x):
+    return math.pi / 180.0 * x
