@@ -132,6 +132,7 @@ if(ANDROID_ABI)
       libpthreadpool
       libeigen_blas
       libcpuinfo
+      libclog
   )
 else()
   # Prefer dynamic linking on the host
@@ -157,6 +158,7 @@ else()
 
   if(USE_PYTORCH_QNNPACK)
     list(APPEND pytorch_jni_LIBS pytorch_qnnpack)
+    list(APPEND pytorch_jni_LIBS clog)
   endif()
 
 endif()
