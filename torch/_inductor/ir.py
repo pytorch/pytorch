@@ -4368,14 +4368,7 @@ class DynamicScalar(ExternKernel):
         return {self.sym}
 
     def codegen(self, wrapper):
-        (data,) = (t.codegen_reference() for t in self.inputs)
-        if self.is_bool:
-            wrapper.writeline(f"{self.sym} = 1 if {data}.item() else 0")
-        else:
-            wrapper.writeline(f"{self.sym} = {data}.item()")
-        # No one should ever use this buffer, but for uniformity
-        # define the variable and assign it None
-        wrapper.writeline(f"{self.get_name()} = None")
+        wrapper.codegen_dynamic_scalar(self)
 
 
 @dataclasses.dataclass

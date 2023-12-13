@@ -1,6 +1,9 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/macros/Macros.h>
+#include <cstddef>
 
 namespace c10 {
 
