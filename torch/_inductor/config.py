@@ -384,6 +384,10 @@ freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
 # of potentially keeping multiple copies of weights.
 freezing_discard_parameters: bool = False
 
+# Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
+# should be run with this flag both on and off to make sure we have coverage.
+allow_stack_allocation: bool = True
+
 
 # config specific to codegen/cpp.py
 class cpp:

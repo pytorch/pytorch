@@ -3143,17 +3143,18 @@ else:
         self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
 
     @onlyCPU
-    def test_bfloat16_float_copy(self, device):
+    @dtypes(torch.bfloat16, torch.half)
+    def test_reduced_type_float_copy(self, device, dtype):
         for shape in [(20, 7), (249, 137), (1029, 917), (1, 7, 19, 17), (3, 77, 1091)]:
             input = torch.randn(shape, dtype=torch.float, device=device)
-            out1 = input.to(torch.bfloat16)
-            self.assertEqual(input, out1, atol=0, rtol=1e-2, exact_dtype=False)
+            out1 = input.to(dtype=dtype)
+            self.assertEqual(input, out1, atol=None, rtol=None, exact_dtype=False)
             out2 = out1.to(torch.float)
             self.assertEqual(out2, out1, atol=0, rtol=0, exact_dtype=False)
 
             input_s = input[..., ::2, :]
-            out1 = input_s.to(torch.bfloat16)
-            self.assertEqual(input_s, out1, atol=0, rtol=1e-2, exact_dtype=False)
+            out1 = input_s.to(dtype=dtype)
+            self.assertEqual(input_s, out1, atol=None, rtol=None, exact_dtype=False)
             out2 = out1.to(torch.float)
             self.assertEqual(out2, out1, atol=0, rtol=0, exact_dtype=False)
 
@@ -5522,7 +5523,7 @@ else:
                 # inf was injected, ensures inf was found.
                 self.assertTrue(sum(v.item() for v in found_inf_per_device.values()) == 1)
 
-    @skipMeta
+    # @skipMeta
     @onlyNativeDeviceTypes
     @dtypes(torch.float)
     def test_grad_scaling_update_scale(self, device, dtype):
@@ -5714,7 +5715,7 @@ else:
             )
 
     @skipMeta
-    @skipIfTorchInductor
+    # @skipIfTorchInductor
     @onlyNativeDeviceTypes
     def test_grad_scaling_autocast(self, device):
         device = torch.device(device)
@@ -5722,7 +5723,7 @@ else:
             self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor)
 
     @skipMeta
-    @skipIfTorchInductor
+    # @skipIfTorchInductor
     @onlyNativeDeviceTypes
     def test_grad_scaling_autocast_foreach(self, device):
         device = torch.device(device)
@@ -5734,7 +5735,6 @@ else:
         device = torch.device(device)
         for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
             self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
-
 
     # Make sure that the parameters become nonsense when scaled gradients are finite
     # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
@@ -5798,7 +5798,7 @@ else:
         assert(scaler._scale != float('inf') and scaler._scale != float('nan'))
 
     @skipMeta
-    @skipIfTorchInductor("No inf checks were recorded for this optimizer")
+    # @skipIfTorchInductor("No inf checks were recorded for this optimizer")
     @onlyNativeDeviceTypes
     def test_grad_scaling_clipping(self, device):
         device = torch.device(device)
@@ -5825,7 +5825,7 @@ else:
         self._run_scaling_case(device.type, run, unskipped=3, skipped=1, atol=1e-5)
 
     @skipMeta
-    @skipIfTorchInductor("No inf checks were recorded for this optimizer")
+    # @skipIfTorchInductor("No inf checks were recorded for this optimizer")
     @onlyNativeDeviceTypes
     def test_grad_scaling_clipping_separate_unscale(self, device):
         device = torch.device(device)
@@ -5853,7 +5853,7 @@ else:
         self._run_scaling_case(device.type, run, unskipped=3, skipped=1)
 
     @skipMeta
-    @skipIfTorchInductor("torch.compile with aot_autograd does not currently support double backward")
+    # @skipIfTorchInductor("torch.compile with aot_autograd does not currently support double backward")
     @onlyNativeDeviceTypes
     @unittest.skipIf(IS_WINDOWS, 'FIXME: fix this test for Windows')
     def test_grad_scaling_penalty(self, device):
@@ -5893,7 +5893,7 @@ else:
         self._run_scaling_case(device.type, run, unskipped=3, skipped=1)
 
     @skipMeta
-    @skipIfTorchInductor("No inf checks were recorded for this optimizer")
+    # @skipIfTorchInductor("No inf checks were recorded for this optimizer")
     @onlyNativeDeviceTypes
     def test_grad_scaling_accumulation(self, device):
         device = torch.device(device)
@@ -5920,7 +5920,7 @@ else:
         self._run_scaling_case(device.type, run, unskipped=2, skipped=0)
 
     @skipMeta
-    @skipIfTorchInductor("No inf checks were recorded for this optimizer")
+    # @skipIfTorchInductor("No inf checks were recorded for this optimizer")
     @onlyNativeDeviceTypes
     def test_grad_scaling_multiple(self, device):
         device = torch.device(device)
@@ -9193,6 +9193,17 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             torch.backends.quantized.engine = qe
             assert torch.backends.quantized.engine == qe, 'qengine not set successfully'
         torch.backends.quantized.engine = original_qe
+
+    def test_terminate_handler_on_crash(self):
+        cmd = [sys.executable, '-c', "import os; os.environ[\"TORCH_CUSTOM_TERMINATE\"] ='1'; \
+               import torch; import torch._C; torch._C._abort()"]
+        with self.assertRaises(subprocess.CalledProcessError) as cm:
+            subprocess.check_output(cmd, shell=False)
+        e = cm.exception
+        output = e.stdout.decode("utf-8")
+        self.assertNotEqual(e.returncode, 0)
+        self.assertNotEqual(output, None)
+        self.assertIn('Unhandled exception caught in c10/util/AbortHandler.h', output)
 
     # FIXME: port to a distributed test suite -- also... how could this be OOMing on Windows CUDA?
     @slowTest

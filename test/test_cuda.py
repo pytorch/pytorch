@@ -1099,6 +1099,7 @@ torch.cuda.synchronize()
 
     # Compare non-fused optimizer vs fused one as the fused one unscales gradients
     # inside its cuda kernel unlike the other.
+
     def test_grad_scaling_autocast_fused_optimizers(self):
         for optimizer_ctor, optimizer_kwargs, separate_unscale in product(
             (torch.optim.Adam, torch.optim.AdamW),
