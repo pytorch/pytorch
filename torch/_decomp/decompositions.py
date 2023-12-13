@@ -3594,6 +3594,23 @@ def _compute_source_index(scale, dst_index, align_corners):
         return scale * (dst_index + 0.5) - 0.5
 
 
+def _sum_tensors_uint8(src, weights, weights_precision):
+    output = _sum_tensors(
+        s.to(torch.int32) * c.to(torch.int32) for s, c in zip(src, weights)
+    ) + (1 << (weights_precision - 1))
+    output = output >> weights_precision
+    return torch.clamp(output, 0, 255).to(torch.uint8)
+
+
+def _compute_weight_precision(weights: Tuple[Tensor]) -> Tensor:
+    max_weight = torch.stack(weights).max()
+    max_weight_precision = 22
+    precisions = torch.arange(max_weight_precision, device=max_weight.device)
+    values = 0.5 + max_weight * (1 << (precisions + 1))
+    mask = values >= (1 << 15)
+    return max_weight_precision - mask.sum()
+
+
 @pw_cast_for_opmath
 def _upsample_linear(
     input: Tensor,
@@ -4248,64 +4265,84 @@ def matmul(tensor1, tensor2, *, is_out=False):
 
 
 @register_decomposition(aten.upsample_bicubic2d.default)
+@aten.upsample_bicubic2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def upsample_bicubic2d_default(
-    a: Tensor,
+    input: Tensor,
     output_size: Tuple[int, int],
     align_corners: bool,
     scale_h: Optional[float] = None,
     scale_w: Optional[float] = None,
 ) -> Tensor:
-    N, C, iH, iW = a.shape
-    oH, oW = output_size
+    # get dimensions of original image
+    _, _, in_h, in_w = input.shape
 
-    def compute_scale(in_size, out_size, align_corners, scale=None):
-        if align_corners:
-            return (in_size - 1) / (out_size - 1) if out_size > 1 else 0
-        else:
-            return 1 / scale if scale is not None and scale > 0 else in_size / out_size
+    # Calculate horizontal and vertical scaling factor
+    h_scale_factor = _compute_scale(in_h, output_size[0], align_corners, scale_h)
+    w_scale_factor = _compute_scale(in_w, output_size[1], align_corners, scale_w)
 
-    def compute_source_index(scale, dst_index, align_corners):
-        if align_corners:
-            return scale * dst_index
-        else:
-            return scale * (dst_index + 0.5) - 0.5
+    _, dtype = utils.elementwise_dtypes(
+        input, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    )
 
-    height_scale = compute_scale(iH, oH, align_corners, scale_h)
-    width_scale = compute_scale(iW, oW, align_corners, scale_w)
+    # We have to create arange with int64 dtype and use .to in order to avoid
+    # additional kernels creation in inductor and get a perf slowdown
+    i = torch.arange(output_size[0], device=input.device).to(dtype=dtype)
+    j = torch.arange(output_size[1], device=input.device).to(dtype=dtype)
 
-    N_idx = torch.arange(N, device=a.device).view(N, 1, 1, 1)
-    C_idx = torch.arange(C, device=a.device).view(1, C, 1, 1)
-    out_y = torch.arange(oH, device=a.device).view((1, 1, oH, 1))
-    out_x = torch.arange(oW, device=a.device).view((1, 1, 1, oW))
+    x_float = _compute_source_index(w_scale_factor, j, align_corners)
+    y_float = _compute_source_index(h_scale_factor, i, align_corners)
+    y_float = y_float.unsqueeze(-1)
 
-    real_x = compute_source_index(width_scale, out_x, align_corners)
-    in_x = real_x.floor()
-    t_x = real_x - in_x
-    ix = in_x.to(dtype=torch.int64)
+    x = x_float.floor()
+    y = y_float.floor()
 
-    real_y = compute_source_index(height_scale, out_y, align_corners)
-    in_y = real_y.floor()
-    t_y = real_y - in_y
-    iy = in_y.to(dtype=torch.int64)
+    # We should also clamp xscale/yscale
+    # See guard_index_and_lambda in UpSample.h
+    yscale = (y_float - y).clamp(0.0, 1.0)
+    xscale = (x_float - x).clamp(0.0, 1.0)
+    x = x.to(torch.int64)
+    y = y.to(torch.int64)
 
-    iys_ofs = (iy - 1, iy, iy + 1, iy + 2)
-    ixs_ofs = (ix - 1, ix, ix + 1, ix + 2)
+    iys_ofs = (y - 1, y, y + 1, y + 2)
+    ixs_ofs = (x - 1, x, x + 1, x + 2)
+
+    weights_x = _upsample_get_cubic_coefficients(xscale)
+    weights_y = _upsample_get_cubic_coefficients(yscale)
+
+    if input.dtype == torch.uint8:
+        weights_precision_x = _compute_weight_precision(weights_x)
+        weights_precision_y = _compute_weight_precision(weights_y)
+
+        weights_x = [
+            (w * (1 << weights_precision_x) + torch.sign(w) * 0.5).to(torch.int16)
+            for w in weights_x
+        ]
+        weights_y = [
+            (w * (1 << weights_precision_y) + torch.sign(w) * 0.5).to(torch.int16)
+            for w in weights_y
+        ]
 
     def load_bounded(ys, xs):
-        y_idx = torch.clamp(ys, 0, iH - 1)
-        x_idx = torch.clamp(xs, 0, iW - 1)
-        return aten._unsafe_index(a, [N_idx, C_idx, y_idx, x_idx])
+        y_idx = torch.clamp(ys, 0, in_h - 1)
+        x_idx = torch.clamp(xs, 0, in_w - 1)
+        v = aten._unsafe_index(input, [None, None, y_idx, x_idx])
+        return v
 
     def get_x_interp(y):
-        coeffs_x = tuple(load_bounded(y, x_ofs) for x_ofs in ixs_ofs)
-        return _upsample_cubic_interp1d(coeffs_x, t_x)
+        src_x = tuple(load_bounded(y, x_ofs) for x_ofs in ixs_ofs)
+        if input.dtype == torch.uint8:
+            return _sum_tensors_uint8(src_x, weights_x, weights_precision_x)
+        return _sum_tensors(c1 * c2 for (c1, c2) in zip(src_x, weights_x))
 
-    coeffs_y = tuple(get_x_interp(y_ofs) for y_ofs in iys_ofs)
-    result = _upsample_cubic_interp1d(coeffs_y, t_y)
+    src_y = tuple(get_x_interp(y_ofs) for y_ofs in iys_ofs)
+    if input.dtype == torch.uint8:
+        result = _sum_tensors_uint8(src_y, weights_y, weights_precision_y)
+    else:
+        result = _sum_tensors(c1 * c2 for (c1, c2) in zip(src_y, weights_y))
 
     # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(a)
+    memory_format = utils.suggest_memory_format(input)
     result = result.contiguous(memory_format=memory_format)
     return result
 

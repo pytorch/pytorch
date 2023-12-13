@@ -3546,43 +3546,41 @@ def upsample_bicubic2d_default(
         else:
             return 1 / scale if scale is not None and scale > 0 else in_size / out_size
 
-    def compute_source_index(scale, dst_index, align_corners):
-        dst_index_ie = ops.index_expr(dst_index, torch.float32)
-        scale = ops.constant(scale, torch.float32)
+    def compute_source_index(scale, dst_index, align_corners, dtype):
+        dst_index_ie = ops.index_expr(dst_index, dtype)
+        scale = ops.constant(scale, dtype)
         if align_corners:
             return ops.mul(scale, dst_index_ie)
         else:
-            half = ops.constant(0.5, torch.float32)
+            half = ops.constant(0.5, dtype)
             return scale * (dst_index_ie + half) - half
 
-    def cubic_convolution1(x, A):
-        _Ap2, _Ap3, _1 = _create_constants(A + 2, A + 3, 1, dtype=torch.float32)
+    def cubic_convolution1(x, A, dtype):
+        _Ap2, _Ap3, _1 = _create_constants(A + 2, A + 3, 1, dtype=dtype)
         return (_Ap2 * x - _Ap3) * x * x + _1
 
-    def cubic_convolution2(x, A):
-        _A, _4A, _5A, _8A = _create_constants(
-            A, 4 * A, 5 * A, 8 * A, dtype=torch.float32
-        )
+    def cubic_convolution2(x, A, dtype):
+        _A, _4A, _5A, _8A = _create_constants(A, 4 * A, 5 * A, 8 * A, dtype=dtype)
         return ((_A * x - _5A) * x + _8A) * x - _4A
 
-    def get_cubic_upsample_coefficients(t):
+    def get_cubic_upsample_coefficients(t, dtype):
         A = -0.75
-        _1 = ops.constant(1.0, torch.float32)
-        c0 = cubic_convolution2(ops.add(t, _1), A)
-        c1 = cubic_convolution1(t, A)
+        _1 = ops.constant(1.0, dtype)
+        c0 = cubic_convolution2(ops.add(t, _1), A, dtype)
+        c1 = cubic_convolution1(t, A, dtype)
 
         x2 = ops.sub(_1, t)
-        c2 = cubic_convolution1(x2, A)
-        c3 = cubic_convolution2(ops.add(x2, _1), A)
+        c2 = cubic_convolution1(x2, A, dtype)
+        c3 = cubic_convolution2(ops.add(x2, _1), A, dtype)
         return (c0, c1, c2, c3)
 
-    def cubic_interp1d(xs, t):
-        cs = get_cubic_upsample_coefficients(t)
+    def cubic_interp1d(xs, t, dtype):
+        cs = get_cubic_upsample_coefficients(t, dtype)
         # dot product between xs and cs
         return xs[0] * cs[0] + xs[1] * cs[1] + xs[2] * cs[2] + xs[3] * cs[3]
 
     height_scale = compute_scale(iH, oH, align_corners, scales_h)
-    width_scale = compute_scale(iW, oW, align_corners, scales_h)
+    width_scale = compute_scale(iW, oW, align_corners, scales_w)
 
     def clamp(v, min, max):
         return ops.maximum(min, ops.minimum(max, v))
@@ -3590,22 +3588,36 @@ def upsample_bicubic2d_default(
     def fn(idx):
         n, c, oy, ox = idx
 
-        real_x = compute_source_index(width_scale, ox, align_corners)
-        in_x = ops.floor(real_x)
-        t_x = ops.sub(real_x, in_x)
+        if x.get_dtype() == torch.uint8:
+            dtype = torch.float32
+        else:
+            dtype = x.get_dtype()
 
-        real_y = compute_source_index(height_scale, oy, align_corners)
+        _0 = ops.constant(0, dtype)
+        _1 = ops.constant(1, dtype)
+        _255 = ops.constant(255, dtype)
+
+        real_x = compute_source_index(width_scale, ox, align_corners, dtype)
+        in_x = ops.floor(real_x)
+        t_x = clamp(ops.sub(real_x, in_x), _0, _1)
+
+        real_y = compute_source_index(height_scale, oy, align_corners, dtype)
         in_y = ops.floor(real_y)
-        t_y = ops.sub(real_y, in_y)
+        t_y = clamp(ops.sub(real_y, in_y), _0, _1)
 
         def load_bounded(fy, fx):
             # TODO(Lezcano) Here we may not need to set-up a device_size
-            _0 = ops.constant(0, torch.int32)
+            _0i = ops.constant(0, torch.int32)
             iHm1 = ops.constant(iH - 1, torch.int32)
             iWm1 = ops.constant(iW - 1, torch.int32)
-            iy = ops.indirect_indexing(clamp(fy, _0, iHm1), iH, check=False)
-            ix = ops.indirect_indexing(clamp(fx, _0, iWm1), iW, check=False)
-            return x_loader([n, c, iy, ix])
+            iy = ops.indirect_indexing(clamp(fy, _0i, iHm1), iH, check=False)
+            ix = ops.indirect_indexing(clamp(fx, _0i, iWm1), iW, check=False)
+            input = x_loader([n, c, iy, ix])
+
+            if x.get_dtype() == torch.uint8:
+                input = ops.to_dtype(input, dtype)
+
+            return input
 
         iy = ops.to_dtype(in_y, get_int_dtype(iH + 1))
         ix = ops.to_dtype(in_x, get_int_dtype(iW + 1))
@@ -3614,10 +3626,22 @@ def upsample_bicubic2d_default(
 
         def get_x_interp(y):
             coeffs_x = tuple(load_bounded(y, x) for x in ixs_ofs)
-            return cubic_interp1d(coeffs_x, t_x)
+            output = cubic_interp1d(coeffs_x, t_x, dtype)
+
+            # this replicates precision loss between horizontal and vertical passes
+            # in bicubic separable implementation with uint8 intermediate buffers
+            if x.get_dtype() == torch.uint8:
+                output = clamp(output, _0, _255)
+            return output
 
         coeffs_y = tuple(get_x_interp(y) for y in iys_ofs)
-        return cubic_interp1d(coeffs_y, t_y)
+        output = cubic_interp1d(coeffs_y, t_y, dtype)
+
+        if x.get_dtype() == torch.uint8:
+            output = clamp(ops.round(output), _0, _255)
+            output = ops.to_dtype(output, torch.uint8)
+
+        return output
 
     return Pointwise.create(
         device=x.get_device(),
