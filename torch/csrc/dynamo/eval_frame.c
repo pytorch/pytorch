@@ -792,6 +792,11 @@ inline static PyObject* eval_custom_code_impl(
 
 
   // copy args
+  // according to https://docs.python.org/3/library/inspect.html , `co_argcount` is the number of arguments (not including keyword only arguments, * or ** args). so we need to add `co_kwonlyargcount` and `co_flags` to get the total number of arguments.
+  // !!(frame->f_code->co_flags & CO_VARARGS) is 1 if the function has *args, 0 otherwise
+  // !!(frame->f_code->co_flags & CO_VARKEYWORDS) is 1 if the function has **kwargs, 0 otherwise
+  // they convert bit flags to 0 or 1, and avoid branching.
+  // This is performance critical code, so we really care about performance.
   Py_ssize_t total_argcount_old = frame->f_code->co_argcount + frame->f_code->co_kwonlyargcount + !!(frame->f_code->co_flags & CO_VARARGS) + !!(frame->f_code->co_flags & CO_VARKEYWORDS);
 
   for (Py_ssize_t i = 0; i < total_argcount_old; i++) {
@@ -810,6 +815,9 @@ inline static PyObject* eval_custom_code_impl(
   // copy cell vars, from high index to low index, until it meets a variable that is not cell variable.
   for (Py_ssize_t i = n_old - nfrees_old - 1, j = n_new - nfrees_old - 1; i >= total_argcount_old; i--, j--) {
 
+  // conditional test to tell if a variable is not a cell variable
+  // this is straightforward in Python 3.11 and higher, as there are bit flags in `co_localspluskinds` to tell if a variable is a cell variable.
+  // in Python 3.10 and lower, essentially we are checking if a variable is a new local variable (because of the layout mentioned above, the first variable that is not cell variable is the first new local variable). the corresponding slot in `flocalsplus` is NULL for new local variables.
   #if IS_PYTHON_3_11_PLUS
     if(!(_PyLocals_GetKind(frame->f_code->co_localspluskinds, i) & CO_FAST_CELL))
     {
