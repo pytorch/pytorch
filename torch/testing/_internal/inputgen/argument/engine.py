@@ -3,8 +3,8 @@ from typing import Any, List, Optional, Tuple, Union
 
 import torch
 from torch.testing._internal.inputgen.argument.type import ArgType
-from torch.testing._internal.inputgen.attribute.model import Attribute
 from torch.testing._internal.inputgen.attribute.engine import AttributeEngine
+from torch.testing._internal.inputgen.attribute.model import Attribute
 from torch.testing._internal.inputgen.attribute.solve import AttributeSolver
 from torch.testing._internal.inputgen.specs.model import Constraint, ConstraintSuffix
 from torch.testing._internal.inputgen.variable.type import ScalarDtype
@@ -30,7 +30,7 @@ class StructuralEngine:
                 self.gen_list_mode.add(constraint.attribute)
 
     @staticmethod
-    def hierarchy(argtype):
+    def hierarchy(argtype) -> List[Attribute]:
         """Return the structural hierarchy for a given argument type"""
         if argtype.is_tensor_list():
             return [Attribute.LENGTH, Attribute.RANK, Attribute.SIZE]
@@ -51,8 +51,7 @@ class StructuralEngine:
         attr = self.hierarchy[-(depth + 1)]
 
         if attr in self.gen_list_mode:
-            for s in self.gen_structure_with_depth(depth, focus, length):
-                yield s
+            yield from self.gen_structure_with_depth(depth, focus, length)
             return
 
         focus_ixs = range(length) if focus == attr else (random.choice(range(length)),)
@@ -67,8 +66,7 @@ class StructuralEngine:
                 for elem in elements:
                     new_values += [t + (elem,) for t in values]
                 values = new_values
-            for v in values:
-                yield v
+            yield from values
 
     def gen_structure_with_depth(
         self,
@@ -97,14 +95,11 @@ class StructuralEngine:
             if depth == 0:
                 yield v
             else:
-                for s in self.gen_structure_with_depth_and_length(depth - 1, v, focus):
-                    yield s
+                yield from self.gen_structure_with_depth_and_length(depth - 1, v, focus)
 
     def gen(self, focus: Attribute):
         depth = len(self.hierarchy) - 1
-
-        for s in self.gen_structure_with_depth(depth, focus):
-            yield s
+        yield from self.gen_structure_with_depth(depth, focus)
 
 
 class MetaArg:
@@ -138,7 +133,7 @@ class MetaArg:
             ):
                 raise ValueError("Only TensorOptList can have None in list of dtypes")
 
-        if not self.optional and not Attribute.DTYPE in Attribute.hierarchy(
+        if not self.optional and Attribute.DTYPE not in Attribute.hierarchy(
             self.argtype
         ):
             if argtype.is_list():
@@ -201,10 +196,9 @@ class MetaArgEngine:
         if self.argtype.is_scalar():
             yield None
         else:
-            for s in StructuralEngine(
+            yield from StructuralEngine(
                 self.argtype, self.constraints, self.deps, self.valid
-            ).gen(focus):
-                yield s
+            ).gen(focus)
 
     def gen_dtypes(self, focus):
         if not Attribute.DTYPE in Attribute.hierarchy(self.argtype):

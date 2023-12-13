@@ -6,12 +6,18 @@ from torch.testing._internal.inputgen.attribute.model import Attribute
 from torch.testing._internal.inputgen.attribute.solve import AttributeSolver
 from torch.testing._internal.inputgen.specs.model import Constraint
 from torch.testing._internal.inputgen.variable.gen import VariableGenerator
-from torch.testing._internal.inputgen.variable.solve import SolvableVariable
 from torch.testing._internal.inputgen.variable.type import ScalarDtype
 
 
 class AttributeEngine(AttributeSolver):
-    def __init__(self, attribute: Attribute, constraints: List[Constraint], valid: bool, argtype: Optional[ArgType] = None, scalar_dtype: Optional[ScalarDtype] = None):
+    def __init__(
+        self,
+        attribute: Attribute,
+        constraints: List[Constraint],
+        valid: bool,
+        argtype: Optional[ArgType] = None,
+        scalar_dtype: Optional[ScalarDtype] = None,
+    ):
         super().__init__(attribute, argtype, scalar_dtype)
         self.constraints = constraints
         self.valid = valid
