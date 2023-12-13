@@ -41,3 +41,9 @@ def _make_fn_with_mocked_export(fn, mocked_export_fn):
 def expectedFailureNonStrict(fn):
     fn._expected_failure_non_strict = True
     return fn
+
+
+# Controls tests generated in test/export/test_retraceability.py
+def expectedFailureRetraceability(fn):
+    fn._expected_failure_retrace = True
+    return fn
