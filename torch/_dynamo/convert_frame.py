@@ -17,7 +17,7 @@ except ModuleNotFoundError:
 import torch
 import torch._logging
 from torch._guards import compile_context, CompileContext, CompileId, tracing
-from torch._utils_internal import log_compilation_event, signpost_event
+from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -59,6 +59,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
+from .metrics import record_compilation_metrics
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator, SpeculationLog
@@ -674,7 +675,7 @@ def _compile(
                     non_compliant_ops,
                     compliant_custom_ops,
                 )
-                log_compilation_event(metrics)
+                record_compilation_metrics(metrics)
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
