@@ -606,7 +606,9 @@ def run_test(
     is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
         "BUILD_ENVRIONMENT", ""
     )
-    is_dynamo_shard = os.environ["PYTORCH_TEST_WITH_DYNAMO"] == 1
+    is_dynamo_shard = False
+    if "PYTORCH_TEST_WITH_DYNAMO" in os.environ:
+        is_dynamo_shard = os.environ["PYTORCH_TEST_WITH_DYNAMO"] == 1
     timeout = (
         THRESHOLD * 6
         if is_slow
