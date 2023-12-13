@@ -52,7 +52,10 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 
-from torch.testing._internal.common_device_type import _has_sufficient_memory
+from torch.testing._internal.common_device_type import (
+    _has_sufficient_memory,
+    get_desired_device_type_test_bases,
+)
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_quantization import _group_quantize_tensor
 from torch.testing._internal.common_utils import (
@@ -94,6 +97,10 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, skipCUDAIf
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
+_desired_test_bases = get_desired_device_type_test_bases()
+RUN_CPU = any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+RUN_CUDA = any(getattr(x, "device_type", "") == "cuda" for x in _desired_test_bases)
+
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
@@ -2345,6 +2352,22 @@ class CommonTemplate:
             return m[:, :2] + x
 
         self.common(fn, (torch.randn(4, 2), torch.randn(4, 2)), check_lowp=False)
+
+    def test_slice_view_with_graph_break(self):
+        def fn():
+            a = torch.tensor([1], device=self.device)
+            a = a[0:1]
+            b = a.squeeze()
+            a[0] = 0
+            if a[0] < 1e5:
+                pass
+            a[0] = 2
+            return b
+
+        expect = fn()
+        opt_fn = torch.compile(fn)
+        actual = opt_fn()
+        self.assertEqual(expect, actual)
 
     def test_view_detach(self):
         def fn(a):
@@ -7413,7 +7436,7 @@ class CommonTemplate:
         x = torch.rand(48, 3, 512, 512)
         self.common(fn, (x,))
 
-    @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
+    @unittest.skipIf(not HAS_CPU or not RUN_CPU, "requires C++ compiler")
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
         from torch._inductor.codegen.common import boolean_ops
@@ -7940,6 +7963,40 @@ class CommonTemplate:
         x = torch.rand([4, 4, 3], dtype=torch.float64)
         self.common(fn, (x,))
 
+    def test_float16_to_int16(self):
+        def fn(x):
+            x_view = x.view(dtype=torch.int16)
+            return x_view.mul(2)
+
+        x = torch.ones(4, dtype=torch.float16, device=self.device)
+        ref = fn(x)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(ref, actual)
+
+    def test_bfloat16_to_int16(self):
+        def fn(a, b):
+            x = a + b
+            x_view = x.view(dtype=torch.int16)
+            return x_view.mul(2)
+
+        a = torch.ones(4, dtype=torch.bfloat16, device=self.device)
+        b = torch.ones(4, dtype=torch.bfloat16, device=self.device)
+        ref = fn(a, b)
+        actual = torch.compile(fn)(a, b)
+        self.assertEqual(ref, actual)
+
+    def test_float32_to_int32(self):
+        def fn(a, b):
+            x = a + b
+            x_view = x.view(dtype=torch.int32)
+            return x_view.mul(2)
+
+        a = torch.ones(4, dtype=torch.float32, device=self.device)
+        b = torch.ones(4, dtype=torch.float32, device=self.device)
+        ref = fn(a, b)
+        actual = torch.compile(fn)(a, b)
+        self.assertEqual(ref, actual)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -7981,7 +8038,7 @@ def copy_tests(
             setattr(other_cls, f"{name}_{suffix}", new_test)
 
 
-if HAS_CPU and not torch.backends.mps.is_available():
+if HAS_CPU and RUN_CPU and not torch.backends.mps.is_available():
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
@@ -7994,7 +8051,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
 
     class SweepInputsCudaTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cuda")
@@ -8663,7 +8720,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 torch.compile(f)(x)
 
 
-if HAS_CPU:
+if HAS_CPU and RUN_CPU:
 
     class TestFull(TestCase):
         def test_full_dtype(self):
