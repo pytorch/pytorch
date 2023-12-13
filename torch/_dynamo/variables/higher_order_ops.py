@@ -127,27 +127,32 @@ def _call_function_and_unflatten_output(tx, fn, args, kwargs, ret_vt, ret_treesp
 def _detect_input_mutations_and_aliasing(tx, graph_module, proxy_args):
     from torch.multiprocessing.reductions import StorageWeakRef
 
-    example_values = [arg.node.meta["example_value"] for arg in proxy_args]
-    _before_versions = [ex._version for ex in example_values]
+    orig_example_values = [arg.node.meta["example_value"] for arg in proxy_args]
     with torch.inference_mode(False), tx.fake_mode, enable_python_dispatcher():
+        # We clone the tensors here because:
+        # 1. if torch.inference_mode(True), the orig_example_values won't have
+        # the _version attribute.
+        # 2. we don't want to mutate the original example values' _version.
+        example_values = [t.clone() for t in orig_example_values]
+        _before_versions = [ex._version for ex in example_values]
         res = graph_module(*example_values)
 
-    mutated_inputs = [
-        proxy_args[i]
-        for i, (val, old_v) in enumerate(zip(example_values, _before_versions))
-        if val._version != old_v
-    ]
+        mutated_inputs = [
+            proxy_args[i]
+            for i, (val, old_v) in enumerate(zip(example_values, _before_versions))
+            if val._version != old_v
+        ]
 
-    aliased_inputs = []
-    input_storages = {
-        StorageWeakRef(proxy.node.meta["example_value"]._typed_storage()): proxy
-        for proxy in proxy_args
-    }
-    assert isinstance(res, (tuple, list))
-    output_storages = [StorageWeakRef(t._typed_storage()) for t in res]
-    aliased_inputs = [
-        input_storages[ref] for ref in output_storages if ref in input_storages
-    ]
+        aliased_inputs = []
+        input_storages = {
+            StorageWeakRef(example_value._typed_storage()): proxy
+            for example_value, proxy in zip(example_values, proxy_args)
+        }
+        assert isinstance(res, (tuple, list))
+        output_storages = [StorageWeakRef(t._typed_storage()) for t in res]
+        aliased_inputs = [
+            input_storages[ref] for ref in output_storages if ref in input_storages
+        ]
     return mutated_inputs, aliased_inputs
 
 
@@ -727,13 +732,19 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             (True, true_graph_module),
             (False, false_graph_module),
         ):
+            from torch._higher_order_ops.cond import UnsupportedAliasMutationException
+
             try:
                 mutated_inputs, aliased_inputs = _detect_input_mutations_and_aliasing(
                     tx, module, combined_args
                 )
-            except Exception as e:
+            except UnsupportedAliasMutationException:
+                # In the case of nested cond, the module input mutation/aliasing might be detected at
+                # the functionalization key of torch.ops.higher_order.cond because the module calls the op
+                # directly instead of torch.cond. We wrap the exception as unimplemented to avoid
+                # throwing an internal dynamo error and keep consistent with other mutation cases..
                 unimplemented(
-                    f"Failed to detect input mutations and aliasing in {branch_name} branch of cond: {e}"
+                    "{branch_name} branch mutates input or its output alias input."
                 )
 
             def _fmt(proxies):
@@ -833,11 +844,12 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         body_node = make_attr(tx, body_name)
         p_args = (
             body_node,
+            1,  # right now we only supports num_mapped = 1
             *(arg.as_proxy() for arg in args[1:]),
             *(arg for arg in body_lifted_freevars.keys()),
         )
         return _call_function_and_unflatten_output(
-            tx, self.value, p_args, {}, body_r, body_spec
+            tx, torch.ops.higher_order.map_impl, p_args, {}, body_r, body_spec
         )
 
 
