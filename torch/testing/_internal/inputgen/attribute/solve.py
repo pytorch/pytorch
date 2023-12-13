@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional
 
 from torch.testing._internal.inputgen.argument.type import ArgType
 from torch.testing._internal.inputgen.attribute.model import Attribute
@@ -23,7 +23,7 @@ class AttributeSolver:
         self.argtype = argtype
         self.vtype = attribute.get_vtype(argtype, scalar_dtype)
 
-    def solve_hard_constraints(self, variable: SolvableVariable):
+    def solve_hard_constraints(self, variable: SolvableVariable) -> None:
         if self.attribute in [Attribute.LENGTH, Attribute.RANK, Attribute.SIZE]:
             variable.Ge(0)
 
@@ -33,7 +33,7 @@ class AttributeSolver:
         suffix: ConstraintSuffix,
         res: Any,
         valid: bool = True,
-    ):
+    ) -> bool:
         if res is None:
             return False
         if suffix == ConstraintSuffix.EQ:
@@ -61,7 +61,9 @@ class AttributeSolver:
                 return False
         return True
 
-    def solve_focus_constraints(self, variable: SolvableVariable, focus: Attribute):
+    def solve_focus_constraints(
+        self, variable: SolvableVariable, focus: Attribute
+    ) -> None:
         if self.attribute in [Attribute.LENGTH, Attribute.RANK, Attribute.SIZE]:
             if focus in [
                 Attribute.LENGTH,

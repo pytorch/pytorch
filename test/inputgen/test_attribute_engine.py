@@ -4,8 +4,8 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.inputgen.argument.type import ArgType
 from torch.testing._internal.inputgen.attribute.engine import AttributeEngine
 from torch.testing._internal.inputgen.attribute.model import Attribute
-from torch.testing._internal.inputgen.variable.type import ScalarDtype
 from torch.testing._internal.inputgen.specs.model import ConstraintProducer as cp
+from torch.testing._internal.inputgen.variable.type import ScalarDtype
 
 
 class TestAttributeEngine(TestCase):

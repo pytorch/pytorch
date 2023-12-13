@@ -1,9 +1,9 @@
 import random
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional
 
 from torch.testing._internal.inputgen.argument.type import ArgType
-from torch.testing._internal.inputgen.attribute.model import Attribute
 from torch.testing._internal.inputgen.attribute.engine import AttributeEngine
+from torch.testing._internal.inputgen.attribute.model import Attribute
 from torch.testing._internal.inputgen.specs.model import Constraint
 
 
@@ -22,7 +22,7 @@ class StructuralEngine:
         self.hierarchy = StructuralEngine.hierarchy(argtype)
 
     @staticmethod
-    def hierarchy(argtype):
+    def hierarchy(argtype) -> List[Attribute]:
         """Return the structural hierarchy for a given argument type"""
         if argtype.is_tensor_list():
             return [Attribute.LENGTH, Attribute.RANK, Attribute.SIZE]
@@ -53,8 +53,7 @@ class StructuralEngine:
                 for elem in elements:
                     new_values += [t + (elem,) for t in values]
                 values = new_values
-            for v in values:
-                yield v
+            yield from values
 
     def gen_structure_with_depth(
         self,
@@ -83,11 +82,8 @@ class StructuralEngine:
             if depth == 0:
                 yield v
             else:
-                for s in self.gen_structure_with_depth_and_length(depth - 1, v, focus):
-                    yield s
+                yield from self.gen_structure_with_depth_and_length(depth - 1, v, focus)
 
     def gen(self, focus: Attribute):
         depth = len(self.hierarchy) - 1
-
-        for s in self.gen_structure_with_depth(depth, focus):
-            yield s
+        yield from self.gen_structure_with_depth(depth, focus)
