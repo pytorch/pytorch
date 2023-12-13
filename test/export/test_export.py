@@ -302,6 +302,7 @@ class TestExport(TestCase):
         kwargs = {"a": {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}, "b": [torch.ones(2, 3), torch.ones(3, 4)]}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_export_func_with_default_kwargs(self):
@@ -359,6 +360,7 @@ class TestExport(TestCase):
                   "kw3": (torch.ones(2, 3), torch.ones(3, 4)), "kw4": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_linear_conv(self):
 
@@ -849,6 +851,7 @@ class TestExport(TestCase):
             ):
                 _ = export(mod, inp)
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_module(self):
 
@@ -885,6 +888,7 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(ep(*inp_test)[0], ep_rexported(*inp_test)[0]))
         self.assertTrue(torch.allclose(ep(*inp_test)[1], ep_rexported(*inp_test)[1]))
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_module_with_dict_container_inp_out(self):
 
@@ -1067,6 +1071,7 @@ class TestExport(TestCase):
             )
         )
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_mixed_input(self):
         def func(a, b, alpha: int):
@@ -1117,7 +1122,6 @@ class TestExport(TestCase):
         ).run(ep.graph_module.code)
 
     def test_to_module_with_mutated_buffer(self):
-
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1212,6 +1216,7 @@ class TestExport(TestCase):
         ):
             _ = exported(torch.ones(7, 5), 6.0)
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_runtime_assert_for_prm_str(self):
 
@@ -1313,6 +1318,7 @@ class TestExport(TestCase):
         with self.assertRaisesRegex(RuntimeError, "shape\[1\] is specialized at 5"):
             torch.export.export(exported_v2, (torch.randn(2, 2),))
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_retrace_graph_level_meta_preservation(self):
         class Foo(torch.nn.Module):
@@ -1583,6 +1589,7 @@ class TestExport(TestCase):
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
 
+    @testing.expectedFailureSerDer
     @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_redundant_asserts(self):
