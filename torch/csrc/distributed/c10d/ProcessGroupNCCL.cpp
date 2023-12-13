@@ -1330,7 +1330,7 @@ struct DumpPipe {
 };
 #else
 struct DumpPipe {
-  DumpPipe(bool enabled, int rank) {}
+  DumpPipe(int rank) {}
   bool shouldDump() {
     return false;
   }
