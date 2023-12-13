@@ -58,6 +58,7 @@ from .common import (
     TensorArg,
 )
 from .triton_utils import config_of, signature_of, signature_to_meta
+from .common import get_api_codegen_for_device
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -1818,7 +1819,7 @@ class TritonKernel(Kernel):
     def codegen_kernel_benchmark(self):
         result = IndentedBuffer()
         argdefs, call_args, signature = self.args.python_argdefs()
-
+        device_api_codegen = get_api_codegen_for_device(V.graph.scheduler.current_device.type)
         result.writelines(["", "", "def get_args():"])
         with result.indent():
             name_cnt = itertools.count()
@@ -1858,10 +1859,10 @@ class TritonKernel(Kernel):
         extra_args_str = None
         index = V.graph.scheduler.current_device.index
         with result.indent():
-            result.writeline(f"with torch.cuda._DeviceGuard({index}):")
+            result.writeline(f"with {device_api_codegen.py_DeviceGuard(index)}:")
             with result.indent():
                 result.writeline(
-                    f"torch.cuda.set_device({index})"
+                    device_api_codegen.py_set_device(index)
                 )  # no-op to ensure context
                 for tree in self.range_trees:
                     expr = pexpr(V.graph.sizevars.size_hint(tree.numel))
@@ -1871,7 +1872,7 @@ class TritonKernel(Kernel):
                         grid.append(expr)
 
                 stream_name = f"stream{index}"
-                result.writeline(f"{stream_name} = get_cuda_stream({index})")
+                result.writeline(f"{stream_name} = get_raw_stream({index})")
 
                 if self.need_numel_args():
                     extra_args_str = ", ".join(map(str, extra_args)) + ", "
@@ -1885,10 +1886,10 @@ class TritonKernel(Kernel):
         # benchmark all configs
         result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
         with result.indent():
-            result.writeline(f"with torch.cuda._DeviceGuard({index}):")
+            result.writeline(f"with {device_api_codegen.py_DeviceGuard(str(index))}:")
             with result.indent():
                 result.writeline(
-                    f"torch.cuda.set_device({index})"
+                    device_api_codegen.py_set_device(index)
                 )  # no-op to ensure context
                 result.writeline(
                     f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"  # noqa: B950 line too long
@@ -1916,13 +1917,14 @@ class TritonKernel(Kernel):
         return result
 
     def imports_for_benchmark_kernel(self):
+        device_api_codegen = get_api_codegen_for_device(V.graph.scheduler.current_device.type)
         return textwrap.dedent(
             """
             from torch._dynamo.testing import rand_strided
-            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+            {}
             import torch
             from torch._inductor.triton_heuristics import grid
-        """
+        """.format(device_api_codegen.py_import_get_raw_stream_as("get_raw_stream"))
         )
 
     def codegen_kernel(self, name=None):
@@ -2775,7 +2777,8 @@ class TritonScheduling(BaseScheduling):
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
-        V.graph.wrapper_code.writeline("torch.cuda.synchronize()")
+        device_api_codegen = get_api_codegen_for_device(V.graph.scheduler.current_device.type)
+        V.graph.wrapper_code.writeline(device_api_codegen.py_synchronize())
 
     def codegen_foreach(self, foreach_node):
         from .triton_foreach import ForeachKernel

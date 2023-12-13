@@ -39,6 +39,7 @@ from ..utils import (
     unique,
 )
 from ..virtualized import ops, OpsValue, V
+from .device_api_codegen import DeviceApiCodeGen
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
@@ -91,6 +92,13 @@ def get_wrapper_codegen_for_device(device: str):
         device_codegens[device].wrapper_codegen if device in device_codegens else None
     )
 
+def get_api_codegen_for_device(device: str):
+
+    if device == 'cuda':
+        from .cuda.device_api_codegen import CUDADeviceApiCodeGen
+        return CUDADeviceApiCodeGen
+
+    return DeviceApiCodegen
 
 def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
     from ..ir import FlexibleLayout
