@@ -17,6 +17,8 @@ from .cutlass_epilogue_gen import (
     CutlassEVTEpilogueTypeFormatter,
 )
 
+from .pointwise_stride_utils import extract_pointwise_load_strides
+
 log = logging.getLogger(__name__)
 
 GEMM_TEMPLATE = r"""
@@ -333,6 +335,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if len(layouts) == 3:
             C_layout = layouts[2]
             C_size = list(C_layout.size)
+            if A_layout.dtype != C_layout.dtype:
+                return False
             while len(C_size) < len(A_size):
                 C_size.insert(0, 1)
             # check batch dims
@@ -644,6 +648,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             and len(bias.get_stride()) >= 2
             and bias.get_stride()[-1] in (0, 1)
         ):
+            log.debug("GEMM Layout swapped X and W -> explicit transpose")
             return True
         return False
 
@@ -978,6 +983,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         Bias, aux_input_nodes = self.determine_additional_inputs(
             epilogue_nodes, template_buffer_node
         )
+        # to make op mutable without affecting others
+        op = copy.deepcopy(op)
+        if Bias is not None:
+            assert Bias.get_layout().dtype == X.get_layout().dtype
+            # This might have been set to void during filtering, when the assumption was still that there's no C
+            # operand
+            op.C.element = op.A.element
 
         # Define Kernel call signature, including potentially auxiliary input nodes
         # required for the fused epilogue nodes
@@ -1009,7 +1021,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         epilogue_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
             if Bias is not None and self.has_tma_epilogue(op):
-                if self.should_swap_XW(X, W, Bias, self.beta):
+                if (
+                    op.epilogue_schedule
+                    != cutlass_lib.EpilogueScheduleType.EpilogueTransposed
+                    and self.should_swap_XW(X, W, Bias, self.beta)
+                ):
                     # TMA epilogue requires bias vector in column major to get best perf.
                     op = self.swap_XW(op)
                     should_swap_xw = True
@@ -1092,19 +1108,80 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 ir.ComputedBuffer
             ] = template_buffer_node.get_additional_input_nodes(epilogue_nodes)
             aux_input_nodes = additional_input_nodes
-            # Disabling the following code block, since it doesn't use the correct layout for the Bias
-            # given that a reinterpretation of dimensions could be happening. We deal with this
-            # correctly for aux nodes, but not here.
-            if False and Bias is None:
+            # If we have additional nodes, their memory layout might be interpreted differently
+            # than in the corresponding input node. We actually need to interpret the (Triton-style)
+            # indexing expressions used within the Pointwise node and map that back to the
+            # dimensions of the GEMM output reference layout in order to arrive at a layout
+            # that we may use for the Bias.
+            if (
+                Bias is None
+                and len(epilogue_nodes) == 1
+                and template_buffer_node is not None
+            ):
+                epilogue_node = epilogue_nodes[0]
+                # Extract strides and offsets, mapped to the GEMM output reference dimensions
+                # of all inputs of the Pointwise op
+                if len(additional_input_nodes) > 0:
+                    pointwise_load_strides: Dict[
+                        str, List[int]
+                    ] = extract_pointwise_load_strides(
+                        epilogue_node, template_buffer_node
+                    )
                 # If we want to cast one of the additional inputs as Bias
                 for i in range(len(additional_input_nodes)):
                     MaybeBias = additional_input_nodes[i]
-                    if len(MaybeBias.get_stride()) < 2:
+                    if MaybeBias.get_name() is None:
                         continue
+                    (
+                        maybe_bias_stride,
+                        maybe_bias_offset,
+                        maybe_bias_size,
+                    ) = pointwise_load_strides.get(MaybeBias.get_name(), None)
+                    if maybe_bias_stride is None:
+                        continue
+                    if len(maybe_bias_stride) < 2:
+                        continue
+                    mbb_layout = MaybeBias.get_layout()
+                    if not isinstance(mbb_layout, FixedLayout):
+                        continue
+                    if (
+                        mbb_layout.stride != maybe_bias_stride
+                        or mbb_layout.offset != maybe_bias_offset
+                    ):
+                        # the Pointwise op implicitly reinterprets this input, we need to wrap it
+                        # in a ReinterpretView to reflect that
+                        reinterpret_mbb_layout = ir.FixedLayout(
+                            device=mbb_layout.device,
+                            dtype=mbb_layout.dtype,
+                            size=maybe_bias_size,
+                            stride=maybe_bias_stride,
+                            offset=maybe_bias_offset,
+                        )
+                        MaybeBiasNew = ir.ReinterpretView(
+                            MaybeBias, reinterpret_mbb_layout
+                        )
+                        assert (
+                            MaybeBiasNew.get_numel() <= MaybeBias.get_storage_numel()
+                        ), "ReinterpretView of potential Bias node would read beyond storage bounds. This indicates a bug."
+                        min_required_storage_size = (
+                            MaybeBiasNew.get_layout().offset
+                            + sum(
+                                (sz - 1) * strid
+                                for strid, sz in zip(
+                                    maybe_bias_stride, template_buffer_node.get_size()
+                                )
+                            )
+                            + 1
+                        )
+                        assert (
+                            min_required_storage_size <= MaybeBias.get_storage_numel()
+                        ), "ReinterpretView of potential Bias node would read beyond storage bounds. This indicates a bug."
+                        MaybeBias = MaybeBiasNew
                     if not self.are_inputs_layout_compatible(
                         [X.get_layout(), W.get_layout(), MaybeBias.get_layout()]
                     ):
                         continue
+                    # remove it from the list of aux inputs, we will add it as Bias
                     aux_input_nodes = (
                         additional_input_nodes[:i] + additional_input_nodes[i + 1 :]
                     )

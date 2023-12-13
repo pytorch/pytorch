@@ -335,66 +335,73 @@ class TestMaxAutotune(TestCase):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
             mixed_precision
         )
+        with torch.no_grad():
+            # Note: The ops that are available
+            # also depend on the alignment of the shapes
+            # so if these shapes don't all align to at least 8 elements
+            # it can happen that no Cutlass 3.x op is available
+            # that allows fusions
+            if batch_size is None:
+                a = torch.randn(m, k).mul(1.0 / 32).cuda()
+                b = torch.randn(k, n).mul(1.0 / 32).cuda()
 
-        # Note: The ops that are available
-        # also depend on the alignment of the shapes
-        # so if these shapes don't all align to at least 8 elements
-        # it can happen that no Cutlass 3.x op is available
-        # that allows fusions
-        if batch_size is None:
-            a = torch.randn(m, k).mul(1.0 / 32).cuda()
-            b = torch.randn(k, n).mul(1.0 / 32).cuda()
+                if with_bias:
+                    bias_m = m
+                    bias_n = n
+                    if bias_broadcast[0]:
+                        bias_m = 1
+                    if bias_broadcast[1]:
+                        bias_n = 1
+                    bias = torch.randn(bias_m, bias_n).mul(1.0 / 32).cuda()
+            else:
+                a = torch.randn(batch_size, m, k).mul(1.0 / 32).cuda()
+                b = torch.randn(batch_size, k, n).mul(1.0 / 32).cuda()
+                if with_bias:
+                    bias_m = m
+                    bias_n = n
+                    if bias_broadcast[0]:
+                        bias_m = 1
+                    if bias_broadcast[1]:
+                        bias_n = 1
+                    bias = torch.randn(batch_size, bias_m, bias_n).mul(1.0 / 32).cuda()
+                if with_aux:
+                    if aux_shape is None:
+                        aux_shape = (batch_size, m, n)
+                    aux = torch.randn(*aux_shape).mul(1.0 / 32).cuda()
+            if fp16:
+                a = a.half()
+                b = b.half()
+                if with_bias:
+                    bias = bias.half()
+                if with_aux:
+                    aux = aux.half()
+            args = [a, b]
             if with_bias:
-                bias = torch.randn(m, n).mul(1.0 / 32).cuda()
-        else:
-            a = torch.randn(batch_size, m, k).mul(1.0 / 32).cuda()
-            b = torch.randn(batch_size, k, n).mul(1.0 / 32).cuda()
-            if with_bias:
-                bias_m = m
-                bias_n = n
-                if bias_broadcast[0]:
-                    bias_m = 1
-                if bias_broadcast[1]:
-                    bias_n = 1
-                bias = torch.randn(batch_size, bias_m, bias_n).mul(1.0 / 32).cuda()
+                args.append(bias)
             if with_aux:
-                if aux_shape is None:
-                    aux_shape = (batch_size, m, n)
-                aux = torch.randn(*aux_shape).mul(1.0 / 32).cuda()
-        if fp16:
-            a = a.half()
-            b = b.half()
-            if with_bias:
-                bias = bias.half()
-            if with_aux:
-                aux = aux.half()
-        args = [a, b]
-        if with_bias:
-            args.append(bias)
-        if with_aux:
-            args.append(aux)
-        conf_patch = {
-            "max_autotune": True,
-            "autotune_in_subproc": False,
-            "benchmark_fusion": False,
-            "max_autotune_gemm_backends": max_autotune_gemm_backends,
-            "cuda.cutlass_dir": _CUTLASS_DIR,
-            "cuda.cutlass_max_profiling_configs": max_profiling_configs,
-            "cuda.cutlass_prefer_evt_capable_ops": evt_only,
-            "cuda.version": "12.1",  # required to enable the Kernels we need
-        }
-        conf_patch.update(config_override)
-        with config.patch(conf_patch):
-            counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
-            Y = mm(*args)
-            mm_jit = torch.compile(mm, dynamic=dynamic)
-            Y_compiled = mm_jit(*args)
-            actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
-            torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
-            if expected_fuse_count is not None:
-                assert (
-                    actual_count == expected_fuse_count
-                ), f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
+                args.append(aux)
+            conf_patch = {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "benchmark_fusion": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": max_profiling_configs,
+                "cuda.cutlass_prefer_evt_capable_ops": evt_only,
+                "cuda.version": "12.1",  # required to enable the Kernels we need
+            }
+            conf_patch.update(config_override)
+            with config.patch(conf_patch):
+                counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
+                Y = mm(*args)
+                mm_jit = torch.compile(mm, dynamic=dynamic)
+                Y_compiled = mm_jit(*args)
+                actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
+                torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
+                if expected_fuse_count is not None:
+                    assert (
+                        actual_count == expected_fuse_count
+                    ), f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
@@ -881,16 +888,19 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_baddbmm(self):
         def mm(a, b, bias):
-            return torch.baddbmm(bias, a, b)
+            # disabled usage of torch.baddbmm because it implicitly casts all inputs to float32
+            # during lowering in inductor for unknown reasons
+            # return torch.baddbmm(bias, a, b)
+            return (a @ b) + bias  # this is equivalent and doesn't cast to float32
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
             mixed_precision=True,
             fp16=True,
-            expected_fuse_count=0,
+            expected_fuse_count=1,
             mm=mm,
             with_bias=True,
             batch_size=31,
-            evt_only=False,
+            evt_only=True,
         )
 
     # TODO: Enable support for typecasts in fused epilogues
