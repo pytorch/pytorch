@@ -646,18 +646,18 @@ class GuardBuilder(GuardBuilderBase):
             )
         else:
             equalities_inputs = None
-        guards = output_graph.shape_env.produce_guards(
-            [a.fake for a in fs],
-            [a.source for a in fs],
-            input_contexts=input_contexts,
-            equalities_inputs=equalities_inputs,
-            source_ref=self.source_ref,
-            # Export keeps static.
-            ignore_static=(not self.check_fn_manager.output_graph.export),
-        )
-        output_graph.shape_env.freeze()
-        for shape_guard in guards:
-            self._produce_guard_code(guard, [shape_guard], shape_env=True)
+        # guards = output_graph.shape_env.produce_guards(
+        #     [a.fake for a in fs],
+        #     [a.source for a in fs],
+        #     input_contexts=input_contexts,
+        #     equalities_inputs=equalities_inputs,
+        #     source_ref=self.source_ref,
+        #     # Export keeps static.
+        #     ignore_static=(not self.check_fn_manager.output_graph.export),
+        # )
+        # output_graph.shape_env.freeze()
+        # for shape_guard in guards:
+        #     self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module():
