@@ -1325,9 +1325,7 @@ TORCH_IMPL_FUNC(mean_out)
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
   // for production workloads. Once that's fixed, the following code can be used
   // in lieu of the sum + divide implementation below.
-  // Note: there has an accuracy loss for half and bfloat16 which has one more type
-  // cast compared with mean_stub path.
-  if (self.device().is_cpu() && dtype != kHalf && dtype != kBFloat16) {
+  if (self.device().is_cpu()) {
     int64_t dim_prod = 1;
     if (!opt_dim.has_value() || opt_dim.value().empty() || self.ndimension() == 0) {
       dim_prod = self.numel();
@@ -1338,8 +1336,30 @@ TORCH_IMPL_FUNC(mean_out)
       }
     }
     auto& result_mut = const_cast<Tensor&>(result);
-    at::sum_out(result_mut, self, opt_dim, keepdim, dtype).div_(dim_prod);
+    // For accuracy reasons, BF16/FP16 mean should be computed via the
+    // following approach:
+    //  cast_fp32 -> sum -> div -> cast_bf16_or_fp16
+    //
+    // Such an approach is necessary because if we were to choose the same
+    // approach for BF16/FP16 as FP32 here, then it would have resulted in
+    // the following code-flow -
+    // cast_fp32 -> sum -> cast_bf16 -> cast_fp32 -> div -> cast_bf16,
+    // which, in turn, does not produce as accurate results.
+    bool is_half_type = (dtype == kHalf || dtype == kBFloat16);
+    auto sum_out_dtype = is_half_type ? ScalarType::Float : dtype;
+    result_mut = is_half_type ? result_mut.to(sum_out_dtype) : result_mut;
+    // If dtype is FP16 or BF16, self (input tensor) will initially be cast to
+    // FP32 in sum_out. This results in having to read that FP32 tensor again,
+    // but maybe in the future, we could revise the implementation to not
+    // materialize that intermediate FP32 tensor. That approach would probably
+    // require some modifications in binary_kernel_reduce_vec(),
+    // TensorIteratorBase::for_each(), and
+    // TensorIteratorBase::serial_for_each(), apart from sum kernel for CPU.
+    at::sum_out(result_mut, self, opt_dim, keepdim, sum_out_dtype).div_(dim_prod);
+    // After sum & div, cast result_mut back to BF16 or FP16, if required.
+    result_mut = is_half_type ? result_mut.to(dtype) : result_mut;
   } else {
+    // device is not CPU
     auto iter = at::meta::make_reduction_from_out_ty(
         self, result, opt_dim, keepdim, dtype);
     if (iter.numel() == 0) {
