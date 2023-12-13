@@ -15,7 +15,8 @@ void fsdpAllGatherCopyOut_no_align(
 void fsdpAllGatherCopyOut_no_align_2(
     std::vector<at::Tensor> params,
     at::Tensor allGatherRes,
-    int64_t worldSize);
+    int64_t worldSize,
+    int64_t warpsPerShard);
 #endif
 
 namespace {
@@ -80,9 +81,11 @@ void fsdp_all_gather_copy_out_no_align(
 void fsdp_all_gather_copy_out_no_align_2(
     std::vector<at::Tensor> params,
     at::Tensor all_gather_res,
-    int64_t world_size) {
+    int64_t world_size,
+    int64_t warps_per_shard) {
 #ifdef USE_CUDA
-  return fsdpAllGatherCopyOut_no_align_2(params, all_gather_res, world_size);
+  return fsdpAllGatherCopyOut_no_align_2(
+      params, all_gather_res, world_size, warps_per_shard);
 #else
   C10_THROW_ERROR(NotImplementedError, "Not implemented for CPU");
 #endif
@@ -113,7 +116,8 @@ TORCH_LIBRARY_FRAGMENT(c10d, m) {
       {at::Tag::pt2_compliant_tag});
 
   m.def(
-      "fsdp_all_gather_copy_out_no_align_2(Tensor[] params, Tensor all_gather_res, int world_size) -> ()",
+      "fsdp_all_gather_copy_out_no_align_2("
+      "Tensor[] params, Tensor all_gather_res, int world_size, int warps_per_shard=4) -> ()",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::fsdp_all_gather_copy_out_no_align_2),

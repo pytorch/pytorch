@@ -34,6 +34,20 @@ __device__ inline void streamStore128(T* addr, const uint4& val) {
 #endif
 }
 
+template <typename T>
+__device__ inline void streamLoad64(uint2& val, const T* addr) {
+  unsigned long long int* valPtr =
+      reinterpret_cast<unsigned long long int*>(&val);
+  asm("ld.global.nc.u64 %0, [%1];" : "=l"(*valPtr) : "l"(addr));
+}
+
+template <typename T>
+__device__ inline void streamStore64(T* addr, const uint2& val) {
+  unsigned long long int data;
+  data = reinterpret_cast<const unsigned long long int*>(&val)[0];
+  asm("st.global.cs.u64 [%0], %1;" : : "l"(addr), "l"(data));
+}
+
 static inline int64_t divUp(int64_t a, int64_t b) {
   return (a + b - 1) / b;
 }
@@ -300,6 +314,11 @@ void fsdpAllGatherCopyOut_no_align(
 ///////////////////////////////////////////////////////////////////////////////
 // No requirement on alignment at any stage.
 ///////////////////////////////////////////////////////////////////////////////
+__device__ inline bool isAligned(const void* ptr, size_t alignment) {
+  uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+  return addr % alignment == 0;
+}
+
 template <typename T>
 static __global__ void fsdpAllGatherCopyOutKernel_no_align_2(
     T** paramPtrs,
@@ -308,43 +327,73 @@ static __global__ void fsdpAllGatherCopyOutKernel_no_align_2(
     int64_t* shardDimCumSums,
     int64_t numParams,
     int64_t worldSize,
-    int64_t shardDimSum) {
-  const auto srcOff = blockIdx.x * blockDim.x + threadIdx.x;
-  const auto rankOff = srcOff % shardDimSum; // Offset within the rank
-  const auto rank = srcOff / shardDimSum;
-
-  __shared__ int64_t dimCumSums[MAX_NUM_PARAMS + 1];
-  if (threadIdx.x < numParams + 1) {
-    dimCumSums[threadIdx.x] = shardDimCumSums[threadIdx.x];
+    int64_t shardDimSum,
+    int64_t groupSize) {
+  const auto tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const auto warpId = tid / groupSize;
+  if (warpId >= numParams * worldSize) {
+    return;
   }
-  __syncthreads();
-
-  int paramIdx = 0;
-  for (size_t i = 1; i < numParams; ++i) {
-    // Threads in a warp are likely to take the same branch.
-    // So branching is beneficial here especially with large numParams.
-    if (rankOff < dimCumSums[i]) {
-      break;
-    }
-    paramIdx += 1;
-  }
-  const auto shardBegin = dimCumSums[paramIdx];
-  const auto shardEnd = dimCumSums[paramIdx + 1];
+  // These values are the same across the group which is warp-aligned,
+  // so we can be
+  const auto memberId = tid % groupSize;
+  const auto rank = warpId / numParams;
+  const auto paramIdx = warpId % numParams;
+  const auto shardBegin = shardDimCumSums[paramIdx];
+  const auto shardEnd = shardDimCumSums[paramIdx + 1];
   const auto shardLen = shardEnd - shardBegin;
-  const auto paramOff = shardLen * rank + rankOff - shardBegin;
+  const auto srcOff = rank * shardDimSum + shardBegin;
+  const auto dstOff = rank * shardLen;
+  const auto srcPtr = allGatherResPtr + srcOff;
+  auto dstPtr = &paramPtrs[paramIdx][dstOff];
 
-  if (srcOff < numel) {
-    paramPtrs[paramIdx][paramOff] = allGatherResPtr[srcOff];
+  using Holder128 = uint4;
+  using Holder64 = uint2;
+
+#define TRY_VECTORIZE(alignment)                                          \
+  do {                                                                    \
+    /* Skip vectorization attempt */                                      \
+    if (sizeof(T) > alignment) {                                          \
+      break;                                                              \
+    }                                                                     \
+    constexpr size_t numelPerThread = alignment / 8 / sizeof(T);          \
+    const size_t stride = groupSize * numelPerThread;                     \
+    const size_t begin = memberId * numelPerThread;                       \
+    /* Check if vectorized store is possible */                           \
+    if (isAligned(dstPtr, alignment) && shardLen % numelPerThread == 0) { \
+      for (size_t i = begin; i < shardLen; i += stride) {                 \
+        Holder##alignment val;                                            \
+        /* Check if vectorized load is possible */                        \
+        if (isAligned(srcPtr, alignment)) {                               \
+          streamLoad##alignment(val, srcPtr + i);                         \
+        } else {                                                          \
+          for (size_t j = 0; j < numelPerThread; ++j) {                   \
+            reinterpret_cast<T*>(&val)[j] = srcPtr[i + j];                \
+          }                                                               \
+        }                                                                 \
+        streamStore##alignment(&dstPtr[i], val);                          \
+      }                                                                   \
+      return;                                                             \
+    }                                                                     \
+  } while (0)
+
+  TRY_VECTORIZE(128);
+  TRY_VECTORIZE(64);
+
+  for (size_t i = memberId; i < shardLen; i += groupSize) {
+    paramPtrs[paramIdx][dstOff + i] = allGatherResPtr[srcOff + i];
   }
 }
 
 void fsdpAllGatherCopyOut_no_align_2(
     std::vector<at::Tensor> params,
     at::Tensor allGatherRes,
-    int64_t worldSize) {
+    int64_t worldSize,
+    int64_t warpsPerShard) {
   const auto device = allGatherRes.device();
   const auto scalarType = allGatherRes.scalar_type();
 
+  TORCH_CHECK(warpsPerShard >= 1);
   TORCH_CHECK(allGatherRes.is_cuda());
   TORCH_CHECK(allGatherRes.is_non_overlapping_and_dense());
   TORCH_CHECK(allGatherRes.numel() % worldSize == 0);
@@ -384,11 +433,15 @@ void fsdpAllGatherCopyOut_no_align_2(
   dim3 blocks(0, 1, 1);
   dim3 threads(0, 1, 1);
 
+  // Each group is responsible for copying one shard
+  const auto groupSize = warpsPerShard * WARP_SIZE;
+  const auto numWarpsRequired = params.size() * worldSize;
+  const auto numThreadsRequired = numWarpsRequired * groupSize;
   if (allGatherRes.numel() <= MAX_NUM_THREADS) {
     blocks.x = 1;
-    threads.x = divUp(allGatherRes.numel(), WARP_SIZE) * WARP_SIZE;
+    threads.x = numThreadsRequired;
   } else {
-    blocks.x = divUp(allGatherRes.numel(), MAX_NUM_THREADS);
+    blocks.x = divUp(numThreadsRequired, MAX_NUM_THREADS);
     threads.x = MAX_NUM_THREADS;
   }
 
@@ -404,7 +457,8 @@ void fsdpAllGatherCopyOut_no_align_2(
                 shardDimCumSumsDev,
                 params.size(),
                 worldSize,
-                dimCumSums.back());
+                dimCumSums.back(),
+                groupSize);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
