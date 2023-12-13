@@ -1343,6 +1343,8 @@ if(USE_NCCL)
   endif()
 endif()
 
+include(${CMAKE_CURRENT_LIST_DIR}/External/xpumkldnn.cmake)
+
 # ---[ UCC
 if(USE_UCC)
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
