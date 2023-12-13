@@ -6,7 +6,6 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 import torch
 
 from torch.distributed import is_available
-
 from ..utils._typing_utils import not_none
 
 __all__ = ["init_device_mesh", "DeviceMesh"]
@@ -298,12 +297,7 @@ else:
             _mesh_resources.mesh_stack.pop()
 
         def __repr__(self) -> str:
-            device_mesh_repr = (
-                f"DeviceMesh({self.mesh.tolist()})"
-                if not self.mesh_dim_names
-                else f"DeviceMesh({self.mesh.tolist()}, mesh_dim_names={self.mesh_dim_names})"
-            )
-            return device_mesh_repr
+            return f"DeviceMesh({self.mesh.tolist()})"
 
         def __hash__(self):
             return self._hash
