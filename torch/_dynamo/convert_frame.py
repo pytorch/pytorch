@@ -629,18 +629,23 @@ def _compile(
 
         total_argcount_old = count_args(code)
         total_argcount_new = count_args(out_code)
+        msg = "arg mismatch: "
+        msg += f"old code object has args {code.co_varnames[:total_argcount_old]}, "
+        msg += f"new code object has args {out_code.co_varnames[:total_argcount_new]}"
         assert (
             code.co_varnames[:total_argcount_old]
             == out_code.co_varnames[:total_argcount_new]
-        ), f"arg mismatch: old code object has args {code.co_varnames[:total_argcount_old]}, new code object has args {out_code.co_varnames[:total_argcount_new]}"
+        ), msg
 
-        assert (
-            code.co_freevars == out_code.co_freevars
-        ), f"free var mismatch: old code object has free var {code.co_freevars}, new code object has free var {out_code.co_freevars}"
+        msg = "free var mismatch: "
+        msg += f"old code object has free var {code.co_freevars}, "
+        msg += f"new code object has free var {out_code.co_freevars}"
+        assert code.co_freevars == out_code.co_freevars, msg
 
-        assert (
-            code.co_cellvars == out_code.co_cellvars
-        ), f"cell var mismatch: old code object has cell var {code.co_cellvars}, new code object has cell var {out_code.co_cellvars}"
+        msg = "cell var mismatch: "
+        msg += f"old code object has cell var {code.co_cellvars}, "
+        msg += f"new code object has cell var {out_code.co_cellvars}"
+        assert code.co_cellvars == out_code.co_cellvars, msg
 
         # Skipping Dynamo on a frame without any extracted graph.
         # This does not affect eager functionality. But this is necessary
