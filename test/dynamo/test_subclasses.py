@@ -23,6 +23,10 @@ from torch.nested._internal.nested_tensor import (
     jagged_from_tensor_and_lengths,
     ViewBufferFromNested,
 )
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -1104,18 +1108,28 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             )
             out = compile_fn(nt_view)
 
-    def test_zeros(self):
+    @dtypes(torch.float, torch.double, torch.half)
+    def test_zeros(self, device, dtype):
+        kwargs = {
+            "device": device,
+            "dtype": dtype,
+        }
         # Need more extensive testing with various settings dtype/device etc.
         x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
 
         def fn(nt):
-            out = torch.zeros(nt.shape)
+            out = torch.zeros(nt.shape, **kwargs)
             return out
 
-        compile_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        compile_fn = torch.compile(
+            fn, fullgraph=True, backend="aot_eager", dynamic=True
+        )
         out = compile_fn(x)
 
-        self.assertEqual(out, torch.zeros(x.shape))
+        self.assertEqual(out, torch.zeros(x.shape, **kwargs))
+
+
+instantiate_device_type_tests(TestNestedTensor, globals())
 
 
 if __name__ == "__main__":
