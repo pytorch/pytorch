@@ -1262,6 +1262,8 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         pg._get_backend(torch.device(f"cuda:{self.rank}"))._set_default_timeout(timedelta(seconds=23))
         self._check_nccl_timeout(timedelta(seconds=23))
         pg.allreduce(torch.rand(10).cuda(self.rank))
+        c10d.distributed_c10d._set_pg_timeout(timedelta(seconds=252), pg)
+        self._check_nccl_timeout(timedelta(seconds=252))
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -3880,7 +3882,7 @@ class NCCLTraceTestTimeoutDumpOnIdleRanks(NCCLTraceTestDumpOnTimeoutBase):
     def test_timeout_dumps_on_idle_ranks(self):
 
         if self.rank == self.MAIN_PROCESS_RANK:
-            # wait for rank0 to crash and rank 1 to finish sleeping before looking for rank 1's output
+            # wait for both rank0 and 1 to crash before looking for both ranks' output
             # file, and we rely on rank1 to sleep long enough to dump the debug info.
             self.assertEqual(self._wait_process(0, timeout=90), -6)
             self.assertEqual(self._wait_process(1, timeout=90), -6)
