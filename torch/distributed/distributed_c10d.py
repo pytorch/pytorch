@@ -2156,7 +2156,7 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
 def _object_to_tensor(obj, device):
     f = io.BytesIO()
     _pickler(f).dump(obj)
-    if dist.get_debug_level() != dist.DebugLevel.DETAIL:
+    if get_debug_level() != DebugLevel.DETAIL:
         logger.warning("_object_to_tensor hash value: {torch._C._distributed_c10d._hash_tensors([f.getvalue()])}")
     byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
     # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
@@ -2168,7 +2168,7 @@ def _object_to_tensor(obj, device):
 
 
 def _tensor_to_object(tensor, tensor_size):
-    if dist.get_debug_level() != dist.DebugLevel.DETAIL:
+    if get_debug_level() != DebugLevel.DETAIL:
         logger.warning("_tensor_to_object hash value: {torch._C._distributed_c10d._hash_tensors([tensor])}")
     tensor = tensor.cpu()
     buf = tensor.numpy().tobytes()[:tensor_size]
