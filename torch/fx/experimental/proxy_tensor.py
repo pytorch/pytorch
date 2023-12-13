@@ -584,7 +584,7 @@ def wrap_key(f, tensors, tracer, pre_dispatch: bool):
         )
         out = pytree.tree_map_only(
             (SymInt, SymFloat, SymBool),
-            lambda t: get_proxy_slot(t.node, tracer)(),
+            lambda t: get_proxy_slot(t, tracer)(),
             out
         )
         return out
