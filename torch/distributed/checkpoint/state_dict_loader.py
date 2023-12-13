@@ -107,12 +107,15 @@ def load(
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
 
-    keys = _all_gather_keys(state_dict)
-    if keys != sorted(state_dict.keys()):
-        warnings.warn(
-            "Detected mismatched keys in state dict after all gather!"
-            " This behavior is unsupported and may cause errors may cause errors."
-        )
+    if no_dist:
+        keys = list(state_dict.keys())
+    else:
+        keys = _all_gather_keys(state_dict)
+        if keys != sorted(state_dict.keys()):
+            warnings.warn(
+                "Detected mismatched keys in state dict after all gather!"
+                " This behavior is unsupported and may cause errors may cause errors."
+            )
 
     statetful_sd = {}
     for key in keys:
