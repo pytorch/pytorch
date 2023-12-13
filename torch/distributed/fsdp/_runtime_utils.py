@@ -246,6 +246,7 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._unshard_stream = root_state._unshard_stream
         fsdp_state._post_backward_stream = root_state._post_backward_stream
         fsdp_state._pre_unshard_stream = root_state._pre_unshard_stream
+        fsdp_state._all_reduce_stream = root_state._all_reduce_stream
         fsdp_state._default_stream = root_state._default_stream
         fsdp_state._exec_order_data = root_state._exec_order_data
         fsdp_state._free_event_queue = root_state._free_event_queue
