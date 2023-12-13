@@ -110,7 +110,6 @@ class TORCH_CUDA_CPP_API Descriptor {
   T* mut_desc() { init(); return desc_.get(); }
 protected:
   void init() {
-    TORCH_WARN("am i nullptr? ", desc_ == nullptr);
     if (desc_ == nullptr) {
       T* raw_desc;
       AT_CUDNN_CHECK(ctor(&raw_desc));
@@ -129,7 +128,6 @@ public:
   void set(const at::Tensor &t, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray);
 private:
   void set(cudnnDataType_t dataType, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray) {
-    TORCH_WARN("setting... batchsize ", batchSize, " seqlen ", maxSeqLength);
     AT_CUDNN_CHECK(cudnnSetRNNDataDescriptor(mut_desc(), dataType, layout, maxSeqLength, batchSize, vectorSize, seqLengthArray, NULL));
   }
 };
@@ -188,7 +186,6 @@ class TORCH_CUDA_CPP_API FilterDescriptor : public Descriptor<
   void print();
 private:
   void set(cudnnDataType_t dataType, int dim, int* size, cudnnTensorFormat_t filter_format) {
-    TORCH_WARN("CALLING CUDNNSET FILTER ND");
     AT_CUDNN_CHECK(cudnnSetFilterNdDescriptor(mut_desc(), dataType, filter_format, dim, size));
   }
 };
@@ -272,7 +269,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
                                              &cudnnCreateRNNDescriptor,
                                              &cudnnDestroyRNNDescriptor> {
   DropoutDescriptor dropout_desc_;
-  void set(cudnnHandle_t handle, 
+  void set(cudnnHandle_t handle,
 #if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNNV8VERSION
 	   int input_size,
 	   bool packed,
@@ -281,8 +278,6 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
            cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnDataType_t input_type, cudnnRNNAlgo_t algo, bool allow_tf32) {
     dropout_desc_ = std::move(dropout_desc);
-    TORCH_WARN("handle == 0? ", handle == nullptr);
-    TORCH_WARN("DATATYPEishalf? ", datatype == CUDNN_DATA_HALF);
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
           handle,
@@ -304,7 +299,6 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
     }
 #else
     auto md = mut_desc();
-    TORCH_WARN("md nullptr? ", md == nullptr, "input size? " , input_size, " packed? ", packed);
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v8(
           md,
           algo,
@@ -314,13 +308,13 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
           input_mode,
           input_type,
           datatype,
-          allow_tf32 ? CUDNN_TENSOR_OP_MATH : CUDNN_DEFAULT_MATH,
+          allow_tf32 ? CUDNN_DEFAULT_MATH : CUDNN_FMA_MATH,
           input_size,
           hidden_size,
           proj_size ? proj_size : hidden_size,
           num_layers,
           dropout_desc_.desc(),
-          packed ? CUDNN_RNN_PADDED_IO_DISABLED : CUDNN_RNN_PADDED_IO_ENABLED));
+          false ? CUDNN_RNN_PADDED_IO_DISABLED : CUDNN_RNN_PADDED_IO_ENABLED));
 #endif
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();

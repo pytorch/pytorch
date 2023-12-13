@@ -247,7 +247,9 @@ namespace {
 
   auto rnn_descriptor(const Tensor& tensor, const bool batch_first, const int batch_size, const int seq_len, const int vector_size) {
     RNNDataDescriptor r;
-    auto layout = batch_first ? CUDNN_RNN_DATA_LAYOUT_BATCH_MAJOR_UNPACKED : CUDNN_RNN_DATA_LAYOUT_SEQ_MAJOR_UNPACKED;
+    // NB: Looks like even if batch_first is true here we always want SEQ_MAJOR_UNPACKED, because the input
+    // appears to be transposed if it is barch-major
+    const auto layout = CUDNN_RNN_DATA_LAYOUT_SEQ_MAJOR_UNPACKED;
     std::vector<int> seqLengthArray(batch_size, seq_len);
     r.set(tensor, layout, seq_len, batch_size, vector_size, seqLengthArray.data());
     return r;
@@ -373,8 +375,6 @@ namespace {
 #else
     auto descriptors(Tensor x) const {
       TORCH_INTERNAL_ASSERT(batch_first >= 0, "batch_first not set!");
-      TORCH_WARN("BATCH FIRST: ", batch_first);
-      TORCH_WARN("??? SETTING RNNDATA BATCH ", mini_batch, "SEQ LEN?? ", seq_length);
       auto is_input_packed = batch_sizes.size() != 0;
       if (is_input_packed) {
         return rnn_descriptor_sequence(x, mini_batch, batch_sizes, seq_length, x.size(-1));
@@ -456,7 +456,6 @@ namespace {
 #endif
     auto elem_size = dataSize(datatype);
     TORCH_INTERNAL_ASSERT(weight_size % elem_size == 0, "cudnnGetRNNParamsSize returned nonsensical weight_size");
-    TORCH_WARN("GET NUM WEIGHTS!!! ", weight_size, " / ", elem_size, " = ", weight_size / elem_size);
     return weight_size / elem_size;
   }
 
@@ -503,7 +502,7 @@ namespace {
         /*linLayerMat=*/&matrix_pointer));
 #else
     void *unused_pointer;
-    TensorDescriptor unused_desc; 
+    TensorDescriptor unused_desc;
     TensorDescriptor lin_layer_mat_desc;
     AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
         /*handle=*/handle,
@@ -683,10 +682,6 @@ namespace {
           auto offset_bytes = (char*)matrix_pointer - (char*)weight_buf.data_ptr();
           TORCH_INTERNAL_ASSERT(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
           size_t offset = offset_bytes / elem_size;
-          TORCH_WARN("NB DIMS? ", nb_dims, " MIN DIM ", min_dim, " INCLUDE_BIAS? ", include_bias, " OFFSET BYTES ", offset_bytes, " ELEM_SIZE", elem_size, " OFFSET: ", offset);
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNNV8VERSION
-          TORCH_WARN("UNUSED OFFSET ", ((char *) unused_pointer - (char *)weight_buf.data_ptr()));
-#endif
           // for all the RNN types provided by CUDNN, all the ih weights
           // are the same size and are allocated in a contiguous chunk
           // (same for the hh weights, and the ih and hh biases).
@@ -699,7 +694,7 @@ namespace {
             // and informative check that all params are laid out the way we think they are.  If include_bias is false,
             // I'd rather keep full cur_offset checks rather than save some CPU overhead by skipping the cudnn_method =
             // cudnnGetRNNLinLayerBiasParams iteration.
-            if (include_bias || 
+            if (include_bias ||
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
                     cudnn_method != cudnnGetRNNLinLayerBiasParams) {
 #else
@@ -784,7 +779,7 @@ namespace {
                 ));
 #else
         void *unused_pointer;
-        TensorDescriptor unused_desc; 
+        TensorDescriptor unused_desc;
         TensorDescriptor lin_layer_mat_desc;
           if (cudnn_method) { // matrix
               AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
@@ -810,7 +805,7 @@ namespace {
                     unused_desc.mut_desc(),
                     &unused_pointer,
                     lin_layer_mat_desc.mut_desc(),
-                    &matrix_pointer 
+                    &matrix_pointer
                     ));
           }
 #endif
@@ -835,7 +830,10 @@ namespace {
               &matrix_pointer
               ));
 #else
+	void *unused_pointer;
+        TensorDescriptor unused_desc;
         TensorDescriptor lin_layer_mat_desc;
+
         AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
               handle,
               rnn_desc.desc(),
@@ -845,7 +843,7 @@ namespace {
               linear_id,
               lin_layer_mat_desc.mut_desc(),
               &matrix_pointer,
-              NULL, NULL));
+              unused_desc.mut_desc(), &unused_pointer));
 #endif
         data_ptrs.push_back(matrix_pointer);
       }
@@ -932,7 +930,6 @@ namespace {
   }
 
   std::vector<int64_t> _output_size(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors) {
-    TORCH_WARN("out sIZZE??", rnn.hidden_size, rnn.hidden_size * rnn.num_directions());
     auto out_size = rnn.hidden_size;
     if (rnn.proj_size != 0) {
       out_size = rnn.proj_size;
@@ -1090,7 +1087,6 @@ copy_weights_to_flat_buf_views(
   TORCH_CHECK(
       weight_arr.size() > 0,
       "copy_weights_to_flat_buf_views: cannot flatten empty weight list");
-  TORCH_WARN("copy input size? ", input_size);
 
   RNNDescriptorParams rnn;
   rnn.set(
@@ -1183,7 +1179,6 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t fn_num_layers, bool batch_first,
     bool fn_bidirectional
     ) {
-  TORCH_WARN("COPY WIDTH? ", dataSize(getCudnnDataType(weight_arr[0])), "input size? " , input_size);
   // returns flat weight_buf
   return std::get<0>(copy_weights_to_flat_buf_views(
       weight_arr,
@@ -1280,7 +1275,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   fn.rnn.set_algo(algo);
   RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
-#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION 
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
   FilterDescriptor w_desc;
 #endif
   if (!weight_buf.defined()) {
@@ -1354,9 +1349,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
 #endif
     workspace = at::empty(workspace_size, input.options().dtype(kByte));
     reserve = at::empty(reserve_size, input.options().dtype(kByte));
-    TORCH_WARN("FORWARD!!!", CUDNN_VERSION);
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
-    TORCH_WARN("FORWARD OLD!!!");
     AT_CUDNN_CHECK(cudnnRNNForwardTraining(
           handle,
           descs.rnn_desc.desc(),
@@ -1372,7 +1365,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           reserve.mutable_data_ptr(), reserve.size(0)
           ));
 #else
-    TORCH_WARN("FORWARD NEW!!!");
     AT_CUDNN_CHECK(cudnnRNNForward(
           handle,
           descs.rnn_desc.desc(),
@@ -1414,7 +1406,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           workspace.data_ptr(), workspace.size(0)
           ));
 #else
-    TORCH_WARN("FORWARD NEW!!!");
     AT_CUDNN_CHECK(cudnnRNNForward(
           handle,
           descs.rnn_desc.desc(),
