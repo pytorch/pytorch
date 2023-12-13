@@ -205,11 +205,7 @@ def is_concrete_bool(a: Union[bool, SymBool]):
     return False
 
 def is_singleton(s):
-    # check for SingletonSymNode
-    if not isinstance(s, torch.SymInt):
-        return False
-    if s.node.singleton_int() is not None:
-        return True
+    return isinstance(s, torch.SymInt) and s.node.is_singleton()
 
     # check for symbolic variable wrapping a SingletonSymNode (fake-ifying causes this)
     return (
