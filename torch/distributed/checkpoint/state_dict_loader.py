@@ -1,19 +1,17 @@
-from typing import Any, Dict, Optional
 import warnings
+from typing import Any, Dict, Optional
 
 import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.stateful import Stateful
 
-from .storage import (
-    StorageReader,
-)
-from .planner import LoadPlanner
 from .default_planner import DefaultLoadPlanner
-
-from .utils import _DistWrapper, _all_gather_keys
+from .planner import LoadPlanner
+from .storage import StorageReader
+from .utils import _all_gather_keys, _DistWrapper
 
 __all__ = ["load_state_dict", "load"]
+
 
 def load_state_dict(
     state_dict: Dict[str, Any],
@@ -28,7 +26,10 @@ def load_state_dict(
         "'load_state_dict' is deprecated and will be removed in future versions. Please use 'load' instead."
     )
     # TODO: test returning `load` here instead.
-    return _load_state_dict(state_dict, storage_reader, process_group, coordinator_rank, no_dist, planner)
+    return _load_state_dict(
+        state_dict, storage_reader, process_group, coordinator_rank, no_dist, planner
+    )
+
 
 def load(
     state_dict: Dict[str, Any],
@@ -124,7 +125,9 @@ def load(
         elem = state_dict[key]
         statetful_sd[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
 
-    _load_state_dict(statetful_sd, storage_reader, process_group, coordinator_rank, no_dist, planner)
+    _load_state_dict(
+        statetful_sd, storage_reader, process_group, coordinator_rank, no_dist, planner
+    )
     for key in keys:
         if key not in state_dict:
             continue
@@ -132,6 +135,7 @@ def load(
         if isinstance(elem, Stateful):
             elem.load_state_dict(statetful_sd[key])
         state_dict[key] = elem
+
 
 def _load_state_dict(
     state_dict: Dict[str, Any],
@@ -141,7 +145,6 @@ def _load_state_dict(
     no_dist: bool = False,
     planner: Optional[LoadPlanner] = None,
 ) -> None:
-
     torch._C._log_api_usage_once("torch.distributed.checkpoint.load_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
