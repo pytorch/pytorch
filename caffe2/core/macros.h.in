@@ -26,7 +26,6 @@
 #cmakedefine CAFFE2_USE_NVTX
 #cmakedefine CAFFE2_USE_ITT
 #cmakedefine CAFFE2_USE_TRT
-#cmakedefine USE_ROCM_KERNEL_ASSERT
 
 #ifndef EIGEN_MPL2_ONLY
 #cmakedefine EIGEN_MPL2_ONLY
