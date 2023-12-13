@@ -16,7 +16,7 @@ def get_tensor_symint(tensor, *, coeff=1, sum_offsets=None):
     tensor_symint = _tensor_symint_registry.get(tensor)
     if tensor_symint is None:
         tensor_symint = torch._C._get_singleton_int(
-            _tensor_id_counter, coeff, tensor, get_nt_dummy(), sum_offsets
+            _tensor_id_counter, coeff, tensor, sum_offsets
         )
         _tensor_id_counter += 1
         _tensor_symint_registry[tensor] = tensor_symint
@@ -59,7 +59,6 @@ class NestedTensor(torch.Tensor):
         offsets,
         *,
         lengths=None,
-        is_dummy=None,
         **kwargs,
     ):
         ks = DispatchKeySet(DispatchKey.NestedTensor)
@@ -82,8 +81,9 @@ class NestedTensor(torch.Tensor):
         )
         return r
 
-    def __init__(self, values, offsets, *, lengths=None, is_dummy=False, **kwargs):
+    def __init__(self, values, offsets, *, lengths=None, **kwargs):
         super().__init__()
+        set_global_dummy_once()
         # Only support jagged for now.
         assert offsets is not None
         assert offsets.ndim == 1
@@ -97,15 +97,9 @@ class NestedTensor(torch.Tensor):
         # offsets always exists, though sometimes lengths also exists
         # (create a new one if needed).
         ragged_source = offsets if lengths is None else lengths
-        if not is_dummy:
-            ragged_size = get_tensor_symint(
-                ragged_source, coeff=1, sum_offsets=values.shape[0]
-            )
-        else:
-            # Avoid infinite recursion
-            # Initialize the _values, _offsets, etc because they are checked
-            # when dispatching to jagged funcs in torch dispatch.
-            ragged_size = 0
+        ragged_size = get_tensor_symint(
+            ragged_source, coeff=1, sum_offsets=values.shape[0]
+        )
         self._ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
         Ds = values.shape[: self._ragged_idx - 1] + values.shape[self._ragged_idx :]
@@ -225,7 +219,6 @@ class NestedTensor(torch.Tensor):
             #   rely on this being the case. We assume that specializing on the
             #   Subclass-ness of the inputs is enough.
             ragged_size.node._singleton_data = offsets
-            ragged_size.node._singleton_dummy = get_nt_dummy()
             ragged_size.node._singleton_sum_offsets = values.shape[0]
             _tensor_symint_registry[ragged_source] = ragged_size
 
@@ -266,18 +259,20 @@ class NestedTensor(torch.Tensor):
             return func(*args, **kwargs)
 
 
-_nt_dummy = None
+_has_set_global_dummy = False
 
 
-def get_nt_dummy():
-    global _nt_dummy
-    if _nt_dummy is None:
-        _nt_dummy = NestedTensor(
-            values=torch.randn(1, 1, device="meta"),
-            offsets=torch.randn(1, device="meta"),
-            is_dummy=True,
-        )
-    return _nt_dummy
+def set_global_dummy_once():
+    # Needs to be done lazily to avoid a circular import
+    global _has_set_global_dummy
+    if _has_set_global_dummy:
+        return
+    _has_set_global_dummy = True
+    _nt_dummy = NestedTensor(
+        values=torch.randn(1, 1, device="meta"),
+        offsets=torch.randn(1, device="meta"),
+    )
+    torch._C._set_global_singleton_dummy(_nt_dummy)
 
 
 # Not actually a view!
