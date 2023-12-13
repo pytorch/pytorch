@@ -224,7 +224,7 @@ try:
     #   2. Calls an operation that corresponds to 'op', but works with Z3
     #      inhabitants (left as is if it works as is)
     def z3op(op: Callable, validator: "TranslationValidator") -> Callable:
-        from torch.fx.experimental.symbolic_shapes import sym_sqrt
+        from torch.fx.experimental.sym_node import sym_sqrt
 
         # Operations that have booleans as their argument.
         # This is needed because the argument of some FX nodes were
@@ -363,6 +363,8 @@ try:
                 "not_": z3.Not,
                 "floor": self._ops.floor,
                 "ceil": self._ops.ceil,
+                "minimum": self._ops.min,
+                "maximum": self._ops.max,
             }
 
             if name in REPLACEMENT:
@@ -546,7 +548,7 @@ else:
         "ValidationException", "BisectValidationException",
     ]
 
-from torch._dynamo import config
+from torch.fx.experimental import _config as config
 
 def translation_validation_enabled() -> bool:
     # Checks everytime this function is called, in case the Dynamo
@@ -603,7 +605,7 @@ class BisectValidationException(TorchDynamoException):
     def __init__(self, validation_exc, expr, failed_action, traced_node):
         self.msg = f"translation validation failed when {failed_action}: {expr}"
         self.details = f"""\
-Failure ocurred while running node:
+Failure occurred while running node:
     {traced_node.format_node()}
 
 {validation_exc.details}"""
@@ -661,7 +663,7 @@ def bisect(shape_env):
             shape_env.produce_guards(
                 [new_with_shape_env(shape_env, a.fake) for a in tracked_fakes],
                 [a.source for a in tracked_fakes],
-                constraint_inputs=[a.constraint_dims for a in tracked_fakes],
+                input_contexts=[a.symbolic_context for a in tracked_fakes],
             )
             return None
         except ValidationException as e:
@@ -684,7 +686,7 @@ def bisect(shape_env):
         log.info("translation validation succeeded: no errors found.")
         return
 
-    if not shape_env.should_record_events or torch._dynamo.config.translation_validation_no_bisect:
+    if not shape_env.should_record_events or config.translation_validation_no_bisect:
         # Bisection is off.
         # Return the last ValidationException we got.
         raise last_exception

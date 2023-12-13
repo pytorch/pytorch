@@ -107,7 +107,7 @@ class _NormBase(Module):
             if num_batches_tracked_key not in state_dict:
                 state_dict[num_batches_tracked_key] = (
                     self.num_batches_tracked
-                    if self.num_batches_tracked is not None
+                    if self.num_batches_tracked is not None and self.num_batches_tracked.device != torch.device('meta')
                     else torch.tensor(0, dtype=torch.long)
                 )
 
@@ -830,6 +830,7 @@ class SyncBatchNorm(_BatchNorm):
             module_output.running_mean = module.running_mean
             module_output.running_var = module.running_var
             module_output.num_batches_tracked = module.num_batches_tracked
+            module_output.training = module.training
             if hasattr(module, "qconfig"):
                 module_output.qconfig = module.qconfig
         for name, child in module.named_children():

@@ -4,8 +4,9 @@ import torch
 
 def skip_init(module_cls, *args, **kwargs):
     r"""
-    Given a module class object and args / kwargs, instantiate the module without initializing
-    parameters / buffers.  This can be useful if initialization is slow or if custom initialization will
+    Given a module class object and args / kwargs, instantiate the module without initializing parameters / buffers.
+
+    This can be useful if initialization is slow or if custom initialization will
     be performed, making the default initialization unnecessary. There are some caveats to this, due to
     the way this function is implemented:
 

@@ -78,8 +78,21 @@ triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
 
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_mutation_dense(*, kernel_idx, grid, kwargs):
+    from torch._inductor.codegen.wrapper import user_defined_kernel_grid_fn_code
+
     kernel = kernel_side_table.get_kernel(kernel_idx)
-    kernel[grid](**kwargs)
+
+    if len(grid) == 1:
+        grid_fn = grid[0]
+    else:
+        fn_name, code = user_defined_kernel_grid_fn_code(
+            kernel.fn.__name__, kernel.configs, grid
+        )
+        namespace: Dict[str, Any] = {}
+        exec(code, namespace)
+        grid_fn = namespace[fn_name]
+
+    kernel[grid_fn](**kwargs)
 
 
 @triton_kernel_wrapper_mutation.py_impl(FakeTensorMode)

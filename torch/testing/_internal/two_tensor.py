@@ -42,7 +42,7 @@ class TwoTensor(torch.Tensor):
         return ["a", "b"], None
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors, meta):
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
         assert meta is None
         a, b = inner_tensors["a"], inner_tensors["b"]
         return TwoTensor(a, b)
@@ -61,7 +61,7 @@ class TwoTensor(torch.Tensor):
         out_b = func(*args_b, **kwargs_b)
         assert type(out_a) == type(out_b)
         out_a_flat, spec = pytree.tree_flatten(out_a)
-        out_b_flat, _ = pytree.tree_flatten(out_b)
+        out_b_flat = pytree.tree_leaves(out_b)
         # for aten ops that return non-tensors, just assume that
         # our two inner tensors return the same value
         out_flat = [

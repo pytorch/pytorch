@@ -38,7 +38,7 @@ jobs:
           PR_NUM: ${{ github.event.client_payload.pr_num }}
           BRANCH: ${{ github.event.client_payload.branch }}
         run: |
-          set -ex
+          set -x
           if [ -n "${BRANCH}" ]; then
             python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${BRANCH}"
           else

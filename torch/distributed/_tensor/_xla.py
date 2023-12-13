@@ -6,8 +6,8 @@ from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 import torch
 
 import torch.nn as nn
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import Placement, Replicate
+from torch.distributed.device_mesh import DeviceMesh
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def convert_to_xla_mesh(dt_mesh: DeviceMesh) -> "Mesh":
     Example (1x4 logical device mesh topology):
       ```
       dt_mesh = DeviceMesh("xla", [[1, 2, 3, 4]])
-      dt_mesh.mesh.shape
+      dt_mesh.shape
       >> torch.Size([1, 4])
 
       mesh = convert_to_xla_mesh(dt_mesh)

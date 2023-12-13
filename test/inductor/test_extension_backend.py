@@ -130,7 +130,7 @@ class ExtensionBackendTests(TestCase):
 
         metrics.reset()
         opt_fn = torch.compile()(fn)
-        code = run_and_get_cpp_code(opt_fn, x, y, z)
+        _, code = run_and_get_cpp_code(opt_fn, x, y, z)
         FileCheck().check("void kernel").check("loadu").check("extension_device").run(
             code
         )

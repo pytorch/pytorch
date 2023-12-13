@@ -30,6 +30,7 @@ from github_utils import (
     gh_fetch_url,
     gh_post_commit_comment,
     gh_post_pr_comment,
+    gh_update_pr_state,
     GitHubComment,
 )
 
@@ -1803,6 +1804,7 @@ def try_revert(
     if not dry_run:
         pr.add_numbered_label("reverted")
         gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
+        gh_update_pr_state(pr.org, pr.project, pr.pr_num)
 
 
 def prefix_with_github_url(suffix_str: str) -> str:
@@ -1925,7 +1927,8 @@ def merge(
     ignore_current: bool = False,
 ) -> None:
     initial_commit_sha = pr.last_commit()["oid"]
-    print(f"Attempting merge of {initial_commit_sha}")
+    pr_link = f"https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num}"
+    print(f"Attempting merge of {initial_commit_sha} ({pr_link})")
 
     if MERGE_IN_PROGRESS_LABEL not in pr.get_labels():
         gh_add_labels(pr.org, pr.project, pr.pr_num, [MERGE_IN_PROGRESS_LABEL])

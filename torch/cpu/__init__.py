@@ -21,6 +21,7 @@ __all__ = [
     "device_count",
     "Stream",
     "StreamContext",
+    "Event",
 ]
 
 _device_t = Union[_device, str, int, None]
@@ -56,7 +57,25 @@ class Stream:
     N.B. This class only exists to facilitate device-agnostic code
     """
 
-    pass
+    def __init__(self, priority: int = -1):
+        pass
+
+    def wait_stream(self, stream) -> None:
+        pass
+
+
+class Event:
+    def query(self) -> bool:
+        return True
+
+    def record(self, stream=None):
+        pass
+
+    def synchronize(self):
+        pass
+
+    def wait(self, stream=None):
+        pass
 
 
 _default_cpu_stream = Stream()
