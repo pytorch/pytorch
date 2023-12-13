@@ -1143,14 +1143,6 @@ aten::select_copy.int
 aten::select_copy.int_out
 aten::select_scatter
 aten::select_scatter.out
-aten::set
-aten::set.out
-aten::set.source_Storage
-aten::set.source_Storage_out
-aten::set.source_Storage_storage_offset
-aten::set.source_Storage_storage_offset_out
-aten::set.source_Tensor
-aten::set.source_Tensor_out
 aten::set_
 aten::set_.source_Storage
 aten::set_.source_Storage_storage_offset
