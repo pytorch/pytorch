@@ -248,17 +248,18 @@ LoweringException: AssertionError:
         for logger_qname in torch._logging._internal.log_registry.get_log_qnames():
             logger = logging.getLogger(logger_qname)
 
-            if logger_qname in dynamo_qnames:
+            # if logger_qname is a.b.c and dynamo_qnames contains a.b, it still matches dynamo's INFO setting
+            if any(logger_qname.find(d) == 0 for d in dynamo_qnames):
                 self.assertEqual(
                     logger.getEffectiveLevel(),
                     logging.INFO,
-                    msg=f"expected {logger_qname} is INFO, got {logger.level}",
+                    msg=f"expected {logger_qname} is INFO, got {logging.getLevelName(logger.getEffectiveLevel())}",
                 )
             else:
                 self.assertEqual(
                     logger.getEffectiveLevel(),
                     logging.DEBUG,
-                    msg=f"expected {logger_qname} is DEBUG, got {logger.level}",
+                    msg=f"expected {logger_qname} is DEBUG, got {logging.getLevelName(logger.getEffectiveLevel())}",
                 )
 
     @make_logging_test(graph_breaks=True)
@@ -596,6 +597,38 @@ print("arf")
                    ~~^~~""",
         )
 
+    @make_logging_test(guards=True, recompiles=True)
+    def test_guards_recompiles(self, records):
+        def fn(x, ys, zs):
+            return inner(x, ys, zs)
+
+        def inner(x, ys, zs):
+            for y, z in zip(ys, zs):
+                x += y * z
+            return x
+
+        ys = [1.0, 2.0]
+        zs = [3.0]
+        x = torch.tensor([1.0])
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(x, ys, zs)
+        fn_opt(x, ys[:1], zs)
+
+        record_str = "\n".join(r.getMessage() for r in records)
+
+        self.assertIn(
+            """\
+L['zs'][0] == 3.0                                             # for y, z in zip(ys, zs):""",
+            record_str,
+        )
+        self.assertIn(
+            """\
+    triggered by the following guard failure(s):\n\
+    - len(L['ys']) == 2                                             # for y, z in zip(ys, zs):""",
+            record_str,
+        )
+
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
     def test_default_logging(self, records):
         def fn(a):
@@ -630,6 +663,7 @@ exclusions = {
     "post_grad_graphs",
     "compiled_autograd",
     "recompiles",
+    "recompiles_verbose",
     "graph_breaks",
     "ddp_graphs",
     "perf_hints",

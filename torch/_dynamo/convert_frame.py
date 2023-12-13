@@ -26,7 +26,7 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.utils._traceback import format_traceback_short
 
 from . import config, exc
-from .allowed_functions import is_allowed
+from .allowed_functions import is_allowed, is_numpy
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
@@ -178,7 +178,11 @@ def has_tensor_in_frame(frame):
     # Check if there is global import of torch.*
     for co_name in frame.f_code.co_names:
         if co_name in frame.f_globals:
-            if is_allowed(frame.f_globals[co_name]):
+            obj = frame.f_globals[co_name]
+            if is_allowed(obj):
+                return True
+            # ... or a global import of numpy.*
+            if np and config.trace_numpy and (obj is np or is_numpy(obj)):
                 return True
 
     seen_ids: Dict[int, bool] = dict()
@@ -510,7 +514,6 @@ def _compile(
             CompileContext.get().attempt = attempt
             try:
                 out_code = transform_code_object(code, transform)
-                orig_code_map[out_code] = code
                 break
             except exc.RestartAnalysis as e:
                 log.info(
@@ -531,7 +534,6 @@ def _compile(
                 if one_graph:
                     log.debug("No graph captured with one_graph=True")
                 return None
-        output_codes.add(out_code)
 
         def log_bytecode(prefix, name, filename, line_no, code):
             if bytecode_log.isEnabledFor(logging.DEBUG):
@@ -558,6 +560,9 @@ def _compile(
             hook_output = hook(code, out_code)
             if hook_output is not None:
                 out_code = hook_output
+
+        orig_code_map[out_code] = code
+        output_codes.add(out_code)
 
         assert output is not None
 
@@ -615,50 +620,58 @@ def _compile(
                 e.__traceback__
             ) from None
         finally:
-            from .utils import curr_frame
+            if config.log_compilation_metrics:
+                from .utils import curr_frame
 
-            frame_key = str(curr_frame)
-            if (
-                fail_reason is None
-                and output is not None
-                and frame_key in frame_phase_timing
-            ):
-                guard_count = len(output.guards)
-                graph_op_count = output.count_calls()
-                graph_node_count = len(output.graph.nodes)
-                graph_input_count = len(output.placeholders)
-                entire_frame_compile_time = frame_phase_timing[frame_key].get(
-                    "entire_frame_compile", None
+                frame_key = str(curr_frame)
+                if (
+                    fail_reason is None
+                    and output is not None
+                    and frame_key in frame_phase_timing
+                ):
+                    guard_count = len(output.guards)
+                    graph_op_count = output.count_calls()
+                    graph_node_count = len(output.graph.nodes)
+                    graph_input_count = len(output.placeholders)
+                    entire_frame_compile_time = frame_phase_timing[frame_key].get(
+                        "entire_frame_compile", None
+                    )
+                    backend_compile_time = frame_phase_timing[frame_key].get(
+                        "backend_compile", None
+                    )
+                    non_compliant_ops = {
+                        op.__qualname__ for op in output.non_compliant_ops
+                    }
+                    compliant_custom_ops = {
+                        op.__qualname__ for op in output.compliant_custom_ops
+                    }
+                else:
+                    guard_count = None
+                    graph_op_count = None
+                    graph_node_count = None
+                    graph_input_count = None
+                    entire_frame_compile_time = None
+                    backend_compile_time = None
+                    non_compliant_ops = set({})
+                    compliant_custom_ops = set({})
+                metrics = CompilationMetrics(
+                    frame_key,
+                    code.co_name,
+                    code.co_filename,
+                    code.co_firstlineno,
+                    cache_size.num_cache_entries_with_same_id_matched_objs,
+                    cache_size.num_cache_entries,
+                    guard_count,
+                    graph_op_count,
+                    graph_node_count,
+                    graph_input_count,
+                    entire_frame_compile_time,
+                    backend_compile_time,
+                    fail_reason,
+                    non_compliant_ops,
+                    compliant_custom_ops,
                 )
-                backend_compile_time = frame_phase_timing[frame_key].get(
-                    "backend_compile", None
-                )
-                non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
-            else:
-                guard_count = None
-                graph_op_count = None
-                graph_node_count = None
-                graph_input_count = None
-                entire_frame_compile_time = None
-                backend_compile_time = None
-                non_compliant_ops = set({})
-            metrics = CompilationMetrics(
-                frame_key,
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                cache_size.num_cache_entries_with_same_id_matched_objs,
-                cache_size.num_cache_entries,
-                guard_count,
-                graph_op_count,
-                graph_node_count,
-                graph_input_count,
-                entire_frame_compile_time,
-                backend_compile_time,
-                fail_reason,
-                non_compliant_ops,
-            )
-            log_compilation_event(metrics)
+                log_compilation_event(metrics)
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):

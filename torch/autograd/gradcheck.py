@@ -1668,7 +1668,7 @@ def _vec_from_tensor(x, generator, downcast_complex=False):
             .view(x_values.shape)
         )
         values /= values.norm()
-        vec = torch.sparse_coo_tensor(x._indices(), values, x.size())
+        vec = torch.sparse_coo_tensor(x._indices(), values, x.size(), device=x.device)
     elif _is_sparse_compressed_tensor(x):
         if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
             compressed_indices, plain_indices = x.crow_indices(), x.col_indices()
@@ -1683,7 +1683,12 @@ def _vec_from_tensor(x, generator, downcast_complex=False):
         )
         values /= values.norm()
         vec = torch.sparse_compressed_tensor(
-            compressed_indices, plain_indices, values, x.size(), layout=x.layout
+            compressed_indices,
+            plain_indices,
+            values,
+            x.size(),
+            layout=x.layout,
+            device=x.device,
         )
     else:
         dtype = _to_real_dtype(x.dtype) if downcast_complex else x.dtype
@@ -1736,11 +1741,11 @@ If the test
 
 
 def _run_slow_mode_and_get_error(
-    func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, is_forward_ad
+    func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, eps, is_forward_ad
 ):
     # Compute jacobians in slow mode for better error message
     slow_numerical = _get_numerical_jacobian(
-        func, tupled_inputs, outputs, is_forward_ad=is_forward_ad
+        func, tupled_inputs, outputs, eps=eps, is_forward_ad=is_forward_ad
     )[input_idx][output_idx]
     if is_forward_ad:
 
@@ -1785,13 +1790,20 @@ def _to_flat_dense_if_sparse(tensor):
 def _make_vectors(inp_tensors, outputs, *, use_forward_ad):
     # Use our own generator to avoid messing with the user's RNG state
     g_cpu = torch.Generator()
+
+    def _vec_from_tensor_cpu(*args):
+        # Default allocate all tensors on CPU, so they are on the same device as the generator
+        # even if the user specified a default device
+        with torch.device("cpu"):
+            return _vec_from_tensor(*args)
+
     all_u = []
     all_u_dense = []
     for inp in inp_tensors:
-        ur = _vec_from_tensor(inp, g_cpu, True)
+        ur = _vec_from_tensor_cpu(inp, g_cpu, True)
         ur_dense = _to_flat_dense_if_sparse(ur)
         if inp.is_complex():
-            ui = _vec_from_tensor(inp, g_cpu, True)
+            ui = _vec_from_tensor_cpu(inp, g_cpu, True)
             all_u.append((ur, ui))
             ui_dense = _to_flat_dense_if_sparse(ui)
             all_u_dense.append((ur_dense, ui_dense))
@@ -1799,7 +1811,9 @@ def _make_vectors(inp_tensors, outputs, *, use_forward_ad):
             all_u.append(ur)
             all_u_dense.append(ur_dense)
     all_v = (
-        None if use_forward_ad else [_vec_from_tensor(out, g_cpu) for out in outputs]
+        None
+        if use_forward_ad
+        else [_vec_from_tensor_cpu(out, g_cpu) for out in outputs]
     )
     return all_v, all_u, all_u_dense
 
@@ -1815,6 +1829,7 @@ def _check_analytical_numerical_equal(
     all_u,
     rtol,
     atol,
+    eps,
     test_imag,
     *,
     is_forward_ad=False,
@@ -1830,7 +1845,7 @@ def _check_analytical_numerical_equal(
             updated_atol = _adjusted_atol(atol, all_u[i], all_v[j] if all_v else None)
             if not _allclose_with_type_promotion(a, n.to(a.device), rtol, updated_atol):
                 jacobians_str = _run_slow_mode_and_get_error(
-                    func, tupled_inputs, outputs, i, j, rtol, atol, is_forward_ad
+                    func, tupled_inputs, outputs, i, j, rtol, atol, eps, is_forward_ad
                 )
                 raise GradcheckError(
                     _get_notallclose_msg(
@@ -1914,6 +1929,7 @@ def _fast_gradcheck(
         all_u,
         rtol,
         atol,
+        eps,
         test_imag,
         is_forward_ad=use_forward_ad,
     )

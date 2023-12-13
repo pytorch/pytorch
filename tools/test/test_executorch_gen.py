@@ -470,6 +470,7 @@ Kernel(
         internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
+        internal::event_tracer_log_evalue(context.internal_event_tracer(), *stack[0]);
 
         *stack[0] = EValue(result_);
     }
@@ -556,6 +557,7 @@ Kernel(
         internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
+        internal::event_tracer_log_evalue(context.internal_event_tracer(), *stack[0]);
 
         *stack[0] = EValue(result_);
     }
@@ -591,6 +593,7 @@ Kernel(
         internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
+        internal::event_tracer_log_evalue(context.internal_event_tracer(), *stack[0]);
 
         *stack[0] = EValue(result_);
     }
