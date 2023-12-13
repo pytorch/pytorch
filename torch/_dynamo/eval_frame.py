@@ -1584,7 +1584,7 @@ class TorchPatcher:
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook
             # which is the *last* hook applied, we want to keep the no_grad hook
-            hooked = getattr(opt.step, "hooked", False)
+            hooked = getattr(opt.step, "hooked", False) and opt.__name__ != "AdamW"
             if hooked:
                 unwrapped_step = getattr(opt.step, "__wrapped__", None)
                 if unwrapped_step:
