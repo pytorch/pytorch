@@ -25,7 +25,6 @@ def checkpoint_wrapper(fn):
 
 
 class TestSDPAPatternRewriterTemplate(TestCase):
-
     use_static_shapes = True
 
     def _clone_inputs(self, inputs):
@@ -425,7 +424,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             )
 
     def _test_pattern_fails_with_unsupported_mask(self):
-
         if not self.use_static_shapes:
             self.skipTest("Causes shape specialization. TODO: investigate")
 
@@ -646,7 +644,6 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
         )
 
     class SDPAPatternRewriterCudaDynamicTests(SDPAPatternRewriterCudaTests):
-
         use_static_shapes = False
 
 
@@ -680,7 +677,6 @@ if HAS_CPU:
         )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):
-
         use_static_shapes = False
 
 

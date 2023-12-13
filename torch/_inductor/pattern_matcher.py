@@ -928,18 +928,24 @@ def register_replacement(
             try:
                 if sym_args:
                     orig_len = len(args)
+
                     def search_fn_new(*args):
-                        return search_fn(*args[len(args) - (orig_len):])
+                        return search_fn(*args[len(args) - (orig_len) :])
 
                     specific_graph = trace_fn(search_fn_new, sym_args + args)
                     sym_arg_names = []
-                    for i, placeholder in zip(range(len(sym_args) + len(args)), list(specific_graph.graph.nodes)):
+                    for i, placeholder in zip(
+                        range(len(sym_args) + len(args)),
+                        list(specific_graph.graph.nodes),
+                    ):
                         if i < len(sym_args):
                             sym_arg_names.append(placeholder.target)
                             continue
 
                         with specific_graph.graph.inserting_after(placeholder):
-                            new_node = specific_graph.graph.placeholder(argnames[i - len(sym_args)])
+                            new_node = specific_graph.graph.placeholder(
+                                argnames[i - len(sym_args)]
+                            )
                             new_node.target = new_node.name
                             placeholder.replace_all_uses_with(new_node)
                             specific_graph.graph.erase_node(placeholder)
@@ -1264,7 +1270,9 @@ def fwd_only(fn, args) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
-        mode = "real" if not torch._inductor.utils.any_is_symbolic(*args) else "symbolic"
+        mode = (
+            "real" if not torch._inductor.utils.any_is_symbolic(*args) else "symbolic"
+        )
         gm = make_fx(fn, select_decomp_table(), tracing_mode=mode)(*args)
     gm.graph.eliminate_dead_code()
     gm.recompile()

@@ -577,9 +577,10 @@ def free_symbol_has(index: sympy.Expr, pattern: str):
 
 
 def is_symbolic(a: Any) -> bool:
-    return isinstance(a, torch.SymInt) or (isinstance(a, torch.Tensor) and any(
-        is_symbolic(x) for x in itertools.chain(a.size(), a.stride())
-    ))
+    return isinstance(a, torch.SymInt) or (
+        isinstance(a, torch.Tensor)
+        and any(is_symbolic(x) for x in itertools.chain(a.size(), a.stride()))
+    )
 
 
 def any_is_symbolic(*args: Any) -> bool:

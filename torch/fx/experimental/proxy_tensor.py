@@ -13,6 +13,8 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake
 from torch._dispatch.python import enable_python_dispatcher, enable_pre_dispatch
 import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.fx.experimental.symbolic_shapes import definitely_true
+
 from contextlib import contextmanager, nullcontext
 import inspect
 from dataclasses import dataclass
@@ -70,7 +72,64 @@ def decompose(decomposition_table):
 proxy_slot = object()
 no_default = object()
 
+
 py_sym_types = (SymInt, SymFloat, SymBool)
+
+
+class SuppressGuardsAndCheckIfAnyAdded:
+    def __init__(self, shape_env):
+        self.guards_added = False
+        self.shape_env = shape_env
+        self.num_guards = len(shape_env.guards)
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, *args):
+        self.guards_added = len(self.shape_env.guards) != self.num_guards
+        self.shape_env.guards = self.shape_env.guards[0:self.num_guards]
+
+@dataclass
+class SymExprHash:
+    sym_obj: py_sym_types
+
+    def __hash__(self) -> int:
+        return hash((type(self.sym_obj), hash(self.sym_obj.node.expr)))
+
+    def __eq__(self, value: "SymExprHash") -> bool:
+        assert isinstance(value, SymExprHash)
+
+        sg = SuppressGuardsAndCheckIfAnyAdded(self.sym_obj.node.shape_env)
+        with sg:
+            eq = definitely_true(self.sym_obj == value.sym_obj)
+
+        return eq and not sg.guards_added
+
+
+def wrap_to_sym_expr_hash(key):
+    return SymExprHash(key) if isinstance(key, py_sym_types) else key
+
+
+class SymHashingDict:
+    """
+    Wrapper around a dictionary that will convert sym types to hash with SymExprHash.
+    """
+    def __init__(self):
+        self.wrapped_dict = {}
+
+    def __setitem__(self, key, value):
+        return self.wrapped_dict.__setitem__(wrap_to_sym_expr_hash(key), value)
+
+    def __getitem__(self, key):
+        return self.wrapped_dict.__getitem__(wrap_to_sym_expr_hash(key))
+
+    def __contains__(self, key):
+        return self.wrapped_dict.__contains__(wrap_to_sym_expr_hash(key))
+
+    def get(self, key, default=None):
+        return self.wrapped_dict.get(wrap_to_sym_expr_hash(key), default)
+
+
 def is_sym_node(node):
     assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
     return "val" in node.meta and isinstance(node.meta['val'], py_sym_types)
@@ -87,7 +146,7 @@ def set_proxy_slot(obj, tracer, proxy):
         # This works because primals get their SymInts set first, and
         # THEN later we allocate tangent inputs.  Make sure if a SymInt
         # is derivable from a primal that we use that.
-        assert isinstance(obj, SymNode), type(obj)
+        assert isinstance(obj, py_sym_types), type(obj)
         if obj not in tracer.symnode_tracker:
             tracer.symnode_tracker[obj] = proxy
 
@@ -102,7 +161,7 @@ def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
     if isinstance(obj, torch.Tensor):
         tracker = tracer.tensor_tracker
     else:
-        assert isinstance(obj, SymNode), type(obj)
+        assert isinstance(obj, py_sym_types), type(obj)
         tracker = tracer.symnode_tracker
 
     if obj not in tracker:
@@ -163,8 +222,7 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     def try_set_proxy_slot(outer_s, proxy_callable, *args):
         assert callable(proxy_callable)
         if isinstance(outer_s, SymInt):
-            inner_s = outer_s.node
-            set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, outer_s, *args))
+            set_proxy_slot(outer_s, tracer, thunkify(proxy_callable, outer_s, *args))
 
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
@@ -172,34 +230,30 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
 
-
     # reuse existing sym int if it exists instead of inserting sym_size calls,
     # which can interfere with graph passes / pattern-matching
     def get_existing_proxy(s_inp):
         if isinstance(s_inp, torch.SymInt):
-            if p := tracer.symnode_tracker.get(s_inp.node, None):
+            if p := tracer.symnode_tracker.get(s_inp, None):
                 return p
 
-            # TODO - there should be a better way of doing this !
-            # Why do we have different nodes but same expr ??
-            for key, value in tracer.symnode_tracker.items():
-                if key.expr is s_inp.node.expr:
-                    return value
         return None
-        
+
+
+    def proxy_func(p, *args, **kwargs):
+        return p()
+
     for i, s in enumerate(tensor.shape):
         if p := get_existing_proxy(s):
-            def proxy_func(p):
-                def func(*arg, **kwargs):
-                    return p()
-                return func
-
-            try_set_proxy_slot(s, proxy_func(p))
+            try_set_proxy_slot(s, functools.partial(proxy_func, p))
         else:
             try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
 
     for i, s in enumerate(tensor.stride()):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride.int(proxy, i), x), i)
+        if p := get_existing_proxy(s):
+            try_set_proxy_slot(s, functools.partial(proxy_func, p))
+        else:
+            try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride.int(proxy, i), x), i)
 
     try_set_proxy_slot(tensor.numel(), lambda x: set_meta(torch.ops.aten.sym_numel.default(proxy), x))
     try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset.default(proxy), x))
@@ -213,7 +267,7 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
         elif isinstance(e, py_sym_types):
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
-            set_proxy_slot(e.node, tracer, lambda: proxy)
+            set_proxy_slot(e, tracer, lambda: proxy)
         elif isinstance(e, (tuple, list)):
             if isinstance(proxy, fx.Proxy):
                 set_meta(proxy, e)
@@ -270,7 +324,7 @@ def fetch_sym_proxy(tracer):
             return n.constant
         else:
             # NB: we REQUIRE all symints to be tracked
-            return get_proxy_slot(n, tracer)()
+            return get_proxy_slot(e, tracer)()
     return inner
 
 
@@ -453,7 +507,7 @@ class PythonKeyTracer(Tracer):
     def __init__(self):
         super().__init__(autowrap_modules=())
         self.tensor_tracker = WeakTensorKeyDictionary()
-        self.symnode_tracker = weakref.WeakKeyDictionary()  # type: ignore[var-annotated]
+        self.symnode_tracker = SymHashingDict()  # type: ignore[var-annotated]
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
@@ -675,7 +729,7 @@ class ProxySymDispatchMode(SymDispatchMode):
 
     def _compute_proxy(self, func, args, out: Union[SymInt, SymFloat, SymBool]):
         n_args = tuple(
-            get_proxy_slot(a.node, self.tracer)().node if isinstance(a, py_sym_types) else a
+            get_proxy_slot(a, self.tracer)().node if isinstance(a, py_sym_types) else a
             for a in args
         )
 
@@ -711,7 +765,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         if isinstance(out, py_sym_types):
             # Delays tracing out the proxies on this op until we actually need it
             p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)
-            set_proxy_slot(out.node, self.tracer, p_out_thunk)
+            set_proxy_slot(out, self.tracer, p_out_thunk)
 
         return out
 
