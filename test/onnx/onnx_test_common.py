@@ -11,7 +11,6 @@ import logging
 import os
 import unittest
 import warnings
-from enum import auto, Enum
 from typing import (
     Any,
     Callable,
@@ -62,11 +61,6 @@ pytorch_converted_dir = os.path.join(onnx_model_dir, "pytorch-converted")
 
 
 pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
-
-
-class TorchModelType(Enum):
-    TORCH_NN_MODULE = auto()
-    TORCH_EXPORT_EXPORTEDPROGRAM = auto()
 
 
 def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
@@ -260,7 +254,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
 
         if (
             has_mutation
-            and self.model_type != TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+            and self.model_type
+            != pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
         ):
             ref_model = _try_clone_model(model)
             ref_input_args, ref_input_kwargs = _try_clone_inputs(
@@ -274,7 +269,10 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         assert isinstance(ref_model, torch.nn.Module) or callable(
             ref_model
         ), "Model must be a torch.nn.Module or callable"
-        if self.model_type == TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM:
+        if (
+            self.model_type
+            == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
+        ):
             ref_model = torch.export.export(ref_model, args=ref_input_args)
             if (
                 self.dynamic_shapes
@@ -533,7 +531,7 @@ class DecorateMeta:
     test_behavior: str
     matcher: Optional[Callable[[Any], bool]] = None
     enabled_if: bool = True
-    model_type: Optional[TorchModelType] = None
+    model_type: Optional[pytorch_test_common.TorchModelType] = None
 
     def contains_opset(self, opset: int) -> bool:
         if self.opsets is None:
@@ -553,7 +551,7 @@ def xfail(
     dtypes: Optional[Collection[torch.dtype]] = None,
     matcher: Optional[Callable[[Any], bool]] = None,
     enabled_if: bool = True,
-    model_type: Optional[TorchModelType] = None,
+    model_type: Optional[pytorch_test_common.TorchModelType] = None,
 ):
     """Expects a OpInfo test to fail.
 
@@ -591,7 +589,7 @@ def skip(
     dtypes: Optional[Collection[torch.dtype]] = None,
     matcher: Optional[Callable[[Any], Any]] = None,
     enabled_if: bool = True,
-    model_type: Optional[TorchModelType] = None,
+    model_type: Optional[pytorch_test_common.TorchModelType] = None,
 ):
     """Skips a test case in OpInfo that we don't care about.
 
