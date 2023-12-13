@@ -2364,8 +2364,9 @@ class AsyncCompile:
 
     @classmethod
     def warm_pool(cls) -> None:
-        if config.compile_threads <= 1:
+        if config.compile_threads <= 1 or config.worker_start_method == "threads":
             return
+
         _compile_start()
         pool = cls.process_pool()
 
@@ -2409,7 +2410,12 @@ class AsyncCompile:
     ) -> Union[TritonFuture, ModuleType]:
         _compile_start()
 
-        if config.compile_threads > 1:
+        if config.compile_threads == 1:
+            return _load_kernel(kernel_name, source_code)
+        elif config.worker_start_method == "threads":
+            future = self.pool().submit(_load_kernel, kernel_name, source_code)
+            return TritonFuture(kernel_name, source_code, future)
+        else:
             device_interface = get_interface_for_device(device_str)
             device = torch.device(device_str, device_interface.current_device())
             cc = device_interface.get_compute_capability(device)
@@ -2417,8 +2423,6 @@ class AsyncCompile:
                 _worker_compile, kernel_name, source_code, cc, device
             )
             return TritonFuture(kernel_name, source_code, future)
-        else:
-            return _load_kernel(kernel_name, source_code)
 
     def cpp(self, source_code: str) -> ModuleType:
         def task():
