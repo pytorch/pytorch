@@ -30,9 +30,9 @@ from torch import Tensor
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
     _named_parameters_with_duplicates,
+    _no_dispatch_record_stream,
     _set_fsdp_flattened,
     HandleTrainingState,
-    _no_dispatch_record_stream,
 )
 from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
 from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
@@ -910,7 +910,7 @@ class FlatParamHandle:
                 allocated = flat_param._typed_storage()._size() > 0
                 if allocated:
                     flat_param._typed_storage()._resize_(0)
-            flat_param.set_(sharded_flat_param)
+            flat_param.set_(sharded_flat_param)  # type: ignore[call-overload]
             start_idx = sharded_flat_param.numel() * self.rank
             end_idx = sharded_flat_param.numel() * (self.rank + 1) - 1  # inclusive
             self._init_shard_metadata(numel_padded, start_idx, end_idx)
@@ -2265,9 +2265,7 @@ class FlatParamHandle:
                     continue
                 needs_grad_writeback = (
                     flat_param_grad is None
-                    or not _same_storage_as_data_ptr(
-                        torch._same_storage(param.grad, flat_param_tensor)
-                    )
+                    or not torch._same_storage(param.grad, flat_param_tensor)
                 )
                 if needs_grad_writeback:
                     if flat_param_grad is None:
