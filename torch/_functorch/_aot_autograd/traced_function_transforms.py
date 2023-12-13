@@ -12,6 +12,7 @@ It does so by:
 
 import warnings
 from contextlib import nullcontext
+from functools import wraps
 from typing import Any, Callable, List, Tuple, Union
 from unittest.mock import patch
 
@@ -63,6 +64,7 @@ def fn_input_mutations_to_outputs(
     meta: ViewAndMutationMeta,
     keep_data_input_mutations: bool,
 ) -> Any:
+    @wraps(fn)
     def inner_fn(*args):
         outs = fn(*args)
         assert len(meta.output_info) == len(outs)
@@ -95,6 +97,7 @@ def fn_prepped_for_autograd(
     fn: Callable,
     meta: ViewAndMutationMeta,
 ) -> Any:
+    @wraps(fn)
     def inner_fn(*args):
         args_maybe_cloned = [
             maybe_to_fresh_input(i, t, meta) for i, t in enumerate(args)
@@ -342,6 +345,7 @@ def create_functionalized_fn(
     aot_config: AOTConfig,
     trace_joint: bool,
 ) -> Any:
+    @wraps(fn)
     def _functionalized_f_helper(*args):
         # Wrap inputs into functional wrappers
         f_args = pytree.tree_map(to_fun, args)
@@ -466,6 +470,8 @@ def create_functionalized_fn(
         return _functionalized_f_helper(*args)
 
     helper = joint_helper if trace_joint else fwd_helper
+    if hasattr(_functionalized_f_helper, "_orig_mod"):
+        helper._orig_mod = _functionalized_f_helper._orig_mod
     if config.functionalize_rng_ops:
         # Setup the wrapper for functionalization of rng ops
         helper, args = create_functionalized_rng_ops_wrapper(helper, args, trace_joint)
@@ -586,7 +592,7 @@ def aot_dispatch_subclass(
     )
 
 
-def create_functional_call(mod, params_spec, params_len):
+def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
     # https://github.com/pytorch/pytorch/issues/103569
 
@@ -611,5 +617,9 @@ def create_functional_call(mod, params_spec, params_len):
                 "have tuple outputs or use aot_module instead."
             )
         return out
+
+    # This is fine in terms of perf because we only pass this around for export path
+    if store_orig_mod:
+        functional_call._orig_mod = mod
 
     return functional_call

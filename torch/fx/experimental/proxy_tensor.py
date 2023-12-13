@@ -779,6 +779,7 @@ class ModuleStackTracer(PythonKeyTracer):
         self.scope_root = scope_root
         self.proxy_paths = WeakKeyDictionary()
         self.proxy_modules = WeakKeyDictionary()
+        self.counter = 0
 
         self.module_id_cache = defaultdict(list)
         for name, mod in self.scope_root.named_modules(remove_duplicate=False):
@@ -817,6 +818,7 @@ class ModuleStackTracer(PythonKeyTracer):
                 }
 
         self.proxy_type = AttrProxy
+        self.skip_list = set()
 
     def path_of_module(self, mod: torch.nn.Module) -> str:
         """
@@ -825,12 +827,13 @@ class ModuleStackTracer(PythonKeyTracer):
         """
         if mod is self.scope_root:
             return ""
-        assert isinstance(mod, self.proxy_type)
-        module_id = id(self.proxy_modules[mod])
-        results = self.module_id_cache[module_id]
-        assert self.proxy_paths[mod] in results
 
-        return self.proxy_paths[mod]
+        if isinstance(mod, self.proxy_type):
+            module_id = id(self.proxy_modules[mod])
+            results = self.module_id_cache[module_id]
+            return self.proxy_paths[mod]
+
+        return Tracer.path_of_module(self, mod)
 
     def getattr(self, attr, attr_val, parameter_proxy_cache):
         if not isinstance(attr_val, torch.nn.Module):
@@ -841,10 +844,18 @@ class ModuleStackTracer(PythonKeyTracer):
         """PythonKeyTracer overrides call_module to avoid the scope handling,
         but we actually want it.
         """
+        from torch._dynamo import OptimizedModule
+        # When we call torch.compile inside HOO, we will end up
+        # invoking a module that is not registered on the root.
+        # So we just temporarily register it there so that tracer
+        # goes through. I think this is ok because make_fx traces
+        # the callable that is not the actual user supplied callable,
+        # so it doesn't matter that we are adding more modules.
+        if isinstance(m, OptimizedModule):
+            self.root.register_module("throw_away" + str(self.counter), m)
+            self.counter += 1
+        return Tracer.call_module(self, m, forward, args, kwargs)
 
-        module_path = "" if m is self.scope_root else self.proxy_paths[m]
-        ret = Tracer.call_module(self, m, forward, args, kwargs)
-        return ret
 
     def is_leaf_module(self, m, module_qualified_name):
         return False
@@ -853,7 +864,6 @@ class ModuleStackTracer(PythonKeyTracer):
 def make_fx(f,
             decomposition_table=None,
             tracing_mode="real",
-            scope_root=None,
             _allow_non_fake_inputs=False,
             *,
             pre_dispatch=False,
@@ -870,10 +880,12 @@ def make_fx(f,
         from .symbolic_shapes import ShapeEnv
 
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
-        if scope_root is None:
-            fx_tracer = PythonKeyTracer()
-        else:
+
+        if hasattr(f, "_orig_mod"):
+            scope_root = f._orig_mod
             fx_tracer = ModuleStackTracer(scope_root)
+        else:
+            fx_tracer = PythonKeyTracer()
         fake_tensor_mode: Any = nullcontext()
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()

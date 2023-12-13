@@ -179,6 +179,9 @@ def create_tree_flattened_fn(fn, args, kwargs=None) -> Tuple[Callable, PytreeThu
         out_spec.set(spec)
         return flat_out
 
+    if hasattr(fn, "_orig_mod"):
+        flat_fn._orig_mod = fn._orig_mod
+
     return flat_fn, out_spec
 
 

@@ -961,7 +961,7 @@ def aot_export_module(
     params_and_buffers_flat = tuple(params_and_buffers_flat)
     params_len = len(params_and_buffers_flat)
 
-    functional_call = create_functional_call(mod, params_spec, params_len)
+    functional_call = create_functional_call(mod, params_spec, params_len, store_orig_mod=True)
 
     num_fw_outs = None
 
@@ -1028,7 +1028,6 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             decompositions=decompositions,
             num_params_buffers=params_len,
             no_tangents=True,
-            scope_root=mod,
         )
     if trace_joint:
         def flattened_joint(*args):
@@ -1174,7 +1173,6 @@ def _aot_export_function(
     # (requiring it to be a graph input).
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
-    scope_root: Optional[torch.nn.Module] = None,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     dynamic_shapes = False
     for x in args:
@@ -1204,7 +1202,6 @@ def _aot_export_function(
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
         no_tangents=no_tangents,
-        scope_root=scope_root,
     )
 
     fx_g, meta = create_aot_dispatcher_function(
