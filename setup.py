@@ -345,13 +345,6 @@ report(f"Building wheel {package_name}-{version}")
 cmake = CMake()
 
 
-def is_source_hipified() -> bool:
-    with os.path.join(cwd, "torch/csrc/utils/cuda_enabled.h") as f:
-        # The original content is USE_CUDA but replaced as USE_ROCM during
-        # hipification
-        return "USE_ROCM" in f.read()
-
-
 def get_submodule_folders():
     git_modules_path = os.path.join(cwd, ".gitmodules")
     default_modules_path = [
@@ -392,9 +385,6 @@ def check_submodules():
     if bool(os.getenv("USE_SYSTEM_LIBS", False)):
         return
     folders = get_submodule_folders()
-    if not is_source_hipified():
-        # triton-mathaot is only required for ROCM, remove it from non-ROCM builds
-        folders = [p for p in folders if "third_party/triton-mathaot" not in p]
     # If none of the submodule folders exists, try to initialize them
     if all(not_exists_or_empty(folder) for folder in folders):
         try:

@@ -149,7 +149,3 @@
 [submodule "third_party/mimalloc"]
 	path = third_party/mimalloc
 	url = https://github.com/microsoft/mimalloc.git
-[submodule "third_party/triton-mathaot"]
-	path = third_party/triton-mathaot
-	url = https://github.com/ROCmSoftwarePlatform/triton.git
-	shallow = true
