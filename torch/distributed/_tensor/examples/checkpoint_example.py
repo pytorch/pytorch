@@ -22,7 +22,7 @@ from torch.distributed._tensor import (
     Shard,
 )
 from torch.distributed._tensor.placement_types import Placement
-from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
+from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
 
 
 class SimpleMLP(torch.nn.Module):
@@ -45,7 +45,7 @@ def gen_tensor_parallel_model(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
     return parallelize_module(
         model,
         mesh,
-        PairwiseParallel(),
+        {"net1": ColwiseParallel()},
     )
 
 

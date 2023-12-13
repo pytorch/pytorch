@@ -2,14 +2,21 @@ import functools
 import importlib
 import sys
 import types
+from typing import Any, Dict
 
 import torch
 
 from .allowed_functions import _disallowed_function_ids, is_user_defined_allowed
 
-from .utils import hashable
+from .utils import hashable, is_function
 
-from .variables import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+from .variables import (
+    SkipFilesVariable,
+    TorchCtxManagerClassVariable,
+    TorchInGraphFunctionVariable,
+)
+
+from .variables.base import VariableTracker
 
 
 """
@@ -45,10 +52,6 @@ manual_torch_name_rule_map = {
     "torch.profiler.profiler.profile": TorchCtxManagerClassVariable,
     "torch.autograd.profiler.profile": TorchCtxManagerClassVariable,
     "torch.autograd.profiler.record_function": TorchCtxManagerClassVariable,
-    "torch.default_generator#get_state": TorchInGraphFunctionVariable,
-    "torch._C.Generator#get_state": TorchInGraphFunctionVariable,
-    "torch.default_generator#set_state": TorchInGraphFunctionVariable,
-    "torch._C.Generator#set_state": TorchInGraphFunctionVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -60,11 +63,36 @@ manual_torch_name_rule_map = {
     "torch.distributed.get_rank": TorchInGraphFunctionVariable,
     "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
     "torch.distributed._tensor.DTensor#from_local": TorchInGraphFunctionVariable,
+    "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
+    "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.overrides.get_default_nowrap_functions": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.autograd.graph.disable_saved_tensors_hooks": TorchInGraphFunctionVariable,
+    "torch.autograd._profiler_enabled": SkipFilesVariable,
+    # We graph break on RNG state setters or getters like
+    # `torch.get_rng_state` or `torch.set_rng_state`. These functions
+    # are not aten operations and therefore they are completely ignored
+    # by the AOT dispatcher. As a result, the AOT graph does not have
+    # these setter or getter functions, producing an incorrect graph
+    # when it comes to rng states.
+    "torch.default_generator#get_state": SkipFilesVariable,
+    "torch._C.Generator#get_state": SkipFilesVariable,
+    "torch.get_rng_state": SkipFilesVariable,
+    "torch.cuda.get_rng_state": SkipFilesVariable,
+    "torch.default_generator#set_state": SkipFilesVariable,
+    "torch._C.Generator#set_state": SkipFilesVariable,
+    "torch.set_rng_state": SkipFilesVariable,
+    "torch.cuda.set_rng_state": SkipFilesVariable,
+    # https://github.com/pytorch/pytorch/issues/107187
+    "torch.manual_seed": SkipFilesVariable,
+    # https://github.com/pytorch/pytorch/issues/93501
+    "torch.nn.utils.rnn.pack_padded_sequence": SkipFilesVariable,
+    # https://github.com/pytorch/pytorch/issues/99569
+    "torch.nn.Parameter": SkipFilesVariable,
+    "torch._nested_tensor_from_mask": SkipFilesVariable,
+    "torch._nested_from_padded": SkipFilesVariable,
 }
 
 
@@ -1289,9 +1317,7 @@ torch_c_binding_in_graph_functions = {
         "torch._neg_view_copy",
         "torch._neg_view",
         "torch._nested_from_padded_and_nested_example",
-        "torch._nested_from_padded",
         "torch._nested_tensor_from_mask_left_aligned",
-        "torch._nested_tensor_from_mask",
         "torch._nested_tensor_from_tensor_list",
         "torch._nested_tensor_softmax_with_shape",
         "torch._nested_view_from_buffer_copy",
@@ -2225,7 +2251,6 @@ torch_non_c_binding_in_graph_functions = {
         "torch.autograd.graph._get_sid",
         "torch.autograd.graph._get_tid",
         "torch.autograd.graph.allow_mutation_on_saved_tensors",
-        "torch.autograd.graph.disable_saved_tensors_hooks",
         "torch.autograd.graph.get_gradient_edge",
         "torch.autograd.graph.increment_version",
         "torch.autograd.graph.register_multi_grad_hook",
@@ -2405,14 +2430,12 @@ torch_non_c_binding_in_graph_functions = {
         "torch.cuda.profiler.start",
         "torch.cuda.profiler.stop",
         "torch.cuda.random.get_rng_state_all",
-        "torch.cuda.random.get_rng_state",
         "torch.cuda.random.initial_seed",
         "torch.cuda.random.manual_seed_all",
         "torch.cuda.random.manual_seed",
         "torch.cuda.random.seed_all",
         "torch.cuda.random.seed",
         "torch.cuda.random.set_rng_state_all",
-        "torch.cuda.random.set_rng_state",
         "torch.cuda.set_device",
         "torch.cuda.set_stream",
         "torch.cuda.set_sync_debug_mode",
@@ -2451,7 +2474,6 @@ torch_non_c_binding_in_graph_functions = {
         "torch.is_storage",
         "torch.is_tensor",
         "torch.is_warn_always_enabled",
-        "torch.manual_seed",
         "torch.masked._ops._any",
         "torch.masked._ops._apply_docstring_templates",
         "torch.masked._ops._canonical_dim",
@@ -2649,11 +2671,8 @@ torch_non_c_binding_in_graph_functions = {
         "torch.quantization.default_eval_fn",
         "torch.random._seed_custom_device",
         "torch.random.fork_rng",
-        "torch.random.get_rng_state",
         "torch.random.initial_seed",
-        "torch.random.manual_seed",
         "torch.random.seed",
-        "torch.random.set_rng_state",
         "torch.return_types.pytree_register_structseq",
         "torch.set_default_device",
         "torch.set_default_dtype",
@@ -2695,12 +2714,12 @@ torch_non_c_binding_in_graph_functions = {
 }
 
 
-torch_name_rule_map = {
-    **manual_torch_name_rule_map,
-    **torch_ctx_manager_classes,
-    **torch_c_binding_in_graph_functions,
-    **torch_non_c_binding_in_graph_functions,
-}
+torch_name_rule_map = [
+    manual_torch_name_rule_map,
+    torch_ctx_manager_classes,
+    torch_c_binding_in_graph_functions,
+    torch_non_c_binding_in_graph_functions,
+]
 
 """
 Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
@@ -2709,11 +2728,17 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 
 @functools.lru_cache(None)
 def get_torch_obj_rule_map():
-    d = dict()
-    for k, v in torch_name_rule_map.items():
-        obj = load_object(k)
-        if obj is not None:
-            d[obj] = v
+    d: Dict[Any, VariableTracker] = dict()
+    for m in torch_name_rule_map:
+        for k, v in m.items():
+            obj = load_object(k)
+            if obj is not None:
+                if obj in d and d[obj] != v:
+                    raise AssertionError(
+                        f"Duplicate torch object {obj} with different rules: {v}, {d[obj]}"
+                    )
+                else:
+                    d[obj] = v
     return d
 
 
@@ -2786,7 +2811,10 @@ def lookup(obj):
         return None
     if is_user_defined_allowed(obj):
         return TorchInGraphFunctionVariable
-    if hasattr(obj, "__wrapped__"):
+    # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
+    if isinstance(obj, functools._lru_cache_wrapper) or (
+        is_function(obj) and hasattr(obj, "__wrapped__")
+    ):
         # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass.
         if not (
             hasattr(obj, "__qualname__")

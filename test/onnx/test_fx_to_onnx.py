@@ -135,6 +135,26 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             expected_node="aten.convolution.default",
         )
 
+    def test_no_warnings_on_complex_dtype_in_op_level_debug(self):
+        class ComplexModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.ops.aten.mul(input, input)
+
+        real = torch.tensor([1, 2], dtype=torch.float32)
+        imag = torch.tensor([3, 4], dtype=torch.float32)
+        x = torch.complex(real, imag)
+
+        onnx_program = dynamo_export(
+            ComplexModel(), x, export_options=ExportOptions(op_level_debug=True)
+        )
+
+        assert_has_diagnostics(
+            onnx_program.diagnostic_context,
+            diagnostics.rules.op_level_debugging,
+            diagnostics.levels.NONE,
+            expected_node="aten.mul.Tensor",
+        )
+
     def test_trace_only_op_with_evaluator(self):
         model_input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])
 

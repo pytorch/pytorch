@@ -350,11 +350,11 @@ class ExportedProgram:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """
-        from torch._export.exported_program import unlift_exported_program_lifted_states
         from torch._export.unflatten import unflatten
+        from ._unlift import _unlift_exported_program_lifted_states
 
         if flat:
-            return unlift_exported_program_lifted_states(self)
+            return _unlift_exported_program_lifted_states(self)
         else:
             return unflatten(self)
 
@@ -466,14 +466,13 @@ class ExportedProgram:
             for inp_dim1, inp_dim2 in self.equality_constraints
         ]
 
-        state_dict = self.state_dict.copy()
-        lift_constant_tensor_pass(gm, new_graph_signature, state_dict)
+        lift_constant_tensor_pass(gm, new_graph_signature)
         _replace_sym_size_ops_pass(gm)
         exported_program = ExportedProgram(
             gm,
             gm.graph,
             new_graph_signature,
-            state_dict,
+            self.state_dict,
             new_range_constraints,
             new_equality_constraints,
             copy.deepcopy(self.module_call_graph),
