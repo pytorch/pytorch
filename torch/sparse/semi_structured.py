@@ -222,7 +222,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             return ['sparse_tensor_cutlass', 'meta_tensor_cutlass'], (self.original_shape, self.transposed)
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors, meta):
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
         original_shape, transposed = meta
 
         if len(inner_tensors) == 2:

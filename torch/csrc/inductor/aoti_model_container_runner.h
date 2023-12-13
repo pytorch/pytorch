@@ -10,6 +10,7 @@ struct DynamicLibrary;
 }
 
 namespace torch::inductor {
+using TensorConstantMap = std::unordered_map<std::string, at::Tensor*>;
 
 class TORCH_API AOTIModelContainerRunner {
  public:
@@ -27,6 +28,9 @@ class TORCH_API AOTIModelContainerRunner {
       AOTInductorStreamHandle cuda_stream_handle = nullptr,
       AOTIProxyExecutorHandle proxy_executor_handle = nullptr);
 
+  void update_inactive_constant_buffer(const TensorConstantMap& const_map);
+  void swap_constant_buffer();
+
   std::vector<const char*> get_call_spec();
 
   AOTIModelContainerRunner(
@@ -42,6 +46,10 @@ class TORCH_API AOTIModelContainerRunner {
   decltype(&AOTInductorModelContainerGetNumOutputs) get_num_outputs_func_{
       nullptr};
   decltype(&AOTInductorModelContainerRun) run_func_{nullptr};
+  decltype(&AOTInductorModelContainerUpdateInactiveConstantBuffer)
+      update_inactive_constant_buffer_func_{nullptr};
+  decltype(&AOTInductorModelContainerSwapConstantBuffer)
+      swap_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerGetCallSpec) get_call_spec_func_{nullptr};
   AOTInductorModelContainerHandle container_handle_ = nullptr;
 };

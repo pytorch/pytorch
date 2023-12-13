@@ -440,6 +440,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return TorchInGraphFunctionVariable(torch.add).call_function(
                 tx, [args[0], result], {}
             )
+        elif (
+            self.value is torch._assert
+            and len(args) >= 1
+            and (
+                (args[0].is_python_constant() and args[0].as_python_constant())
+                or (
+                    isinstance(args[0], variables.SymNodeVariable)
+                    and args[0].evaluate_expr()
+                )
+            )
+        ):
+            return ConstantVariable(None)
         elif is_constant_pg_functions(self.value):
             # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
             # ID_MATCH based on how it was constructed.
@@ -518,7 +530,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     # NB: This includes UnspecializedPythonVariable
                     if isinstance(x, (TensorVariable, SymNodeVariable)):
                         return True
-                    elif isinstance(x, ListVariable):
+                    elif isinstance(x, (ListVariable, TupleVariable)):
                         return any(check_any_unspec(y) for y in x.items)
                     # TODO: there maybe other recursive structures you need to
                     # check
