@@ -1,5 +1,4 @@
 //  Copyright © 2022 Apple Inc.
-#include "c10/core/ScalarType.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorOperators.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
