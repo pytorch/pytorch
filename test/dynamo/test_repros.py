@@ -758,11 +758,27 @@ def _get_sorted_bucket_idx_and_undo_sorted_bucket_idx(buckets):
     return sorted_bucket_idx, undo_sorted_bucket_idx
 
 
-class CustomList(list):
+class CustomList1(list):
     def __call__(self, x):
         for processor in self:
             x = processor(x)
         return x
+
+    def clear(self):
+        pass  # this prevents RestrictedListSubclassVariable from kicking in
+
+
+class CustomList2(list):
+    def __call__(self, x):
+        for processor in self:
+            x = processor(x)
+        return x
+
+    def length_times_10(self):
+        return len(self) * 10
+
+    def append_twice(self, x):
+        self.extend([x, x])
 
 
 def _merge_criteria_processor_list(default_list, custom_list):
@@ -2045,8 +2061,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.rand([1])
         self.assertEqual(fn(x), torch._dynamo.optimize("eager")(fn)(x))
 
-    @unittest.skipIf(not has_detectron2(), "requires detectron2")
     def test_multi_import(self):
+        if not has_detectron2():
+            raise unittest.SkipTest("requires detectron2")
+
         @torch._dynamo.optimize("eager", nopython=True)
         def to_bitmasks(boxes):
             from detectron2.layers.mask_ops import (
@@ -2663,16 +2681,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertNoUnraisable(f)
 
-    def test_merge_criteria_processor_list(self):
+    def common_merge_criteria_processor_list(self, list_cls, fullgraph):
         cnt = CompileCounter()
 
-        @torch.compile(backend=cnt)
+        @torch.compile(backend=cnt, fullgraph=fullgraph)
         def f(x, left, right):
             combined = _merge_criteria_processor_list(left, right)
             return combined(x)
 
-        l1 = CustomList([torch.nn.ReLU(), torch.nn.Sigmoid()])
-        l2 = CustomList([])
+        l1 = list_cls([torch.nn.ReLU(), torch.nn.Sigmoid()])
+        l2 = list_cls([])
         input = torch.randn(16)
         result = f(input, l1, l2)
         self.assertEqual(result, l1(input))
@@ -2680,13 +2698,78 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 2)
 
         cnt.clear()
-        l3 = CustomList([torch.nn.SiLU()])
+        l3 = list_cls([torch.nn.SiLU()])
         expected = l3(l1(input))
         result = f(input, l1, l3)
         self.assertEqual(len(l1), 3)
         self.assertEqual(result, expected)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 3)
+
+    def test_merge_criteria_processor_list1(self):
+        self.common_merge_criteria_processor_list(CustomList1, False)
+
+    def test_merge_criteria_processor_list2(self):
+        self.common_merge_criteria_processor_list(CustomList2, True)
+
+    def test_restricted_list_subclass1(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            l = CustomList2()
+            l.extend([True])
+            l.append(a)
+            l.extend([b])
+            l.pop(0)
+            l.append(l.length_times_10())
+            return sum(l)
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+        self.assertEqual(fn(x, y), x + y + 20)
+        self.assertEqual(cnt.op_count, 3)
+
+    def test_restricted_list_subclass2(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            l1 = CustomList2([a + 1])
+            l2 = CustomList2([b + 2])
+            l1.extend(l2)
+            return l1
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+        z = fn(x, y)
+        self.assertEqual(type(z), CustomList2)
+        self.assertEqual(len(z), 2)
+        self.assertEqual(z.length_times_10(), 20)
+        self.assertEqual(list(z), [x + 1, y + 2])
+
+    def test_restricted_list_subclass3(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a: CustomList2, b: CustomList2):
+            a.extend(b)
+            a.append_twice(b[2] + 1)
+            a.append(b[3] + 2)
+            return b
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+        l = CustomList2([x, y])
+        self.assertIs(fn(l, l), l)
+        self.assertEqual(len(l), 7)
+        self.assertIs(l[0], x)
+        self.assertIs(l[1], y)
+        self.assertIs(l[2], x)
+        self.assertIs(l[3], y)
+        self.assertEqual(l[4], x + 1)
+        self.assertIs(l[5], l[4])
+        self.assertEqual(l[6], y + 2)
 
     def test_rewrite_assert_with_msg(self):
         def f(x):
@@ -2704,6 +2787,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
+
+    def test_list_aliasing(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a):
+            a.append(torch.sin(a[0]))
+            return a
+
+        x = torch.randn(10)
+        l = [x]
+        self.assertIs(fn(l), l)
+        self.assertEqual(len(l), 2)
+        self.assertIs(l[0], x)
+        self.assertEqual(l[1], torch.sin(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
 
     def test_not_rewrite_assert_for_other_errors(self):
         def f(x):
@@ -3325,7 +3425,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             compiled_opt_step()
 
         compiled_model_step(x)
-        param_grad_ref = weakref.ref(list(model.parameters())[0].grad)
+        param_grad_ref = weakref.ref(next(iter(model.parameters())).grad)
         optimizer.zero_grad(True)
         self.assertIsNone(param_grad_ref())
 
@@ -3769,7 +3869,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             z = x
             x.data = y
             y.data = torch.zeros([0])
-            return x is z
+            return torch.tensor(x is z)
 
         for backend in ["eager", "aot_eager", "inductor"]:
             for func in [func1, func2, func3]:
@@ -3795,7 +3895,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                     out_compiled = compiled_fn(compiled_a, compiled_b)
                     self.assertEqual(eager_a, compiled_a)
                     self.assertEqual(eager_b, compiled_b)
-                    self.assertEqual(out_eager, out_compiled)
+                    self.assertTrue(torch.equal(out_eager, out_compiled))
 
                     # func1 hits a leaf Variable that requires grad is being used in an in-place operation
                     if requires_grad:

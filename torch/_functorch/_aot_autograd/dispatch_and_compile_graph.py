@@ -82,16 +82,12 @@ def aot_dispatch_base_graph(
 
     # As long as we opted to remove input mutations, then
     # there should be *NO* mutating ops in the graph at this point.
-    copy_count = assert_functional_graph(
-        fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations
-    )
+    copy_count = assert_functional_graph(fw_module.graph)
 
     fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
 
-    copy_count2 = assert_functional_graph(
-        fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations
-    )
+    copy_count2 = assert_functional_graph(fw_module.graph)
 
     assert copy_count == copy_count2
 
@@ -159,9 +155,7 @@ def aot_dispatch_autograd_graph(
     fx_g = _create_graph(joint_fn_to_trace, updated_joint_inputs, aot_config=aot_config)
 
     # There should be *NO* mutating ops in the graph at this point.
-    assert_functional_graph(
-        fx_g.graph, allow_input_mutations=aot_config.keep_inference_input_mutations
-    )
+    assert_functional_graph(fx_g.graph)
 
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.
