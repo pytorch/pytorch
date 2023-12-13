@@ -23,7 +23,6 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
-    skipIfRocm,
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
