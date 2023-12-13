@@ -782,8 +782,8 @@ def gen_functionalization_definition(
         # (1) fix their schemas (BC-breaking)
         # (2) hand-write their functionalization kernels
         if (
-            str(g.func.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION and
-            str(g.func.name.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION
+            str(g.func.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION
+            and str(g.func.name.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION
         ):
             assert g.has_composite_implicit_autograd_kernel or not modifies_arguments(g)
         return []
