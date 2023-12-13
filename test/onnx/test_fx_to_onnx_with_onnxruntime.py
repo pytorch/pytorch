@@ -1346,7 +1346,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
-        "DynamoExport does not support input mutation"
+        "AssertionError: Expected 5 inputs, got 3"
+        "Github issue: https://github.com/pytorch/pytorch/issues/115745"
     )
     @pytorch_test_common.skip_dynamic_fx_test(
         "AssertionError: Dynamic shape check failed for graph inputs",
