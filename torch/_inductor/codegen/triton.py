@@ -224,8 +224,20 @@ class TritonOverrides(OpOverrides):
         return f"{x}.to({triton_compute_type(dtype)})"
 
     @staticmethod
-    def to_dtype_bitcast(x, dtype: torch.dtype):
-        return f"{x}.to({triton_compute_type(dtype)}, bitcast=True)"
+    def to_dtype_bitcast(x, dtype: torch.dtype, src_dtype: torch.dtype):
+        triton_dtype = triton_compute_type(dtype)
+        # We may promote float16 or bfloat16 to float32 and cause the
+        # bitwidth of dtype to be different from the input tensor (i.e. float32).
+        # In such as case, we will have to convert the input tensor to
+        # its src_type, perform bitcast, and then convert the bit-casted
+        # tensor back to float to ensure we use values with the right precision.
+        if src_dtype in (torch.float16, torch.bfloat16):
+            triton_src_dtype = str(src_dtype).split(".")[-1]
+            cast_x = f"{x}.to(tl.{triton_src_dtype})"
+            cast_x = f"{cast_x}.to({triton_dtype}, bitcast=True)"
+            return f"{cast_x}.to(tl.float32)"
+        else:
+            return f"{x}.to({triton_dtype}, bitcast=True)"
 
     @staticmethod
     def _shaped_constant(value, dtype, shape):

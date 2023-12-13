@@ -1102,6 +1102,19 @@ class CommonTemplate:
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)))
         self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
 
+    def test_multilayer_var_lowp(self):
+        if self.device == "cpu" and IS_MACOS and not IS_X86:
+            atol, rtol = 1e-5, 5e-3
+        else:
+            atol, rtol = None, None
+
+        def fn(a):
+            return torch.var(a)
+
+        run_test = functools.partial(self.common, atol=atol, rtol=rtol)
+        run_test(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
+        run_test(fn, (torch.rand((14923), dtype=torch.float16),))
+
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
             raise unittest.SkipTest("No CUDA implementation (it returns empty)")
@@ -7929,6 +7942,40 @@ class CommonTemplate:
 
         x = torch.rand([4, 4, 3], dtype=torch.float64)
         self.common(fn, (x,))
+
+    def test_float16_to_int16(self):
+        def fn(x):
+            x_view = x.view(dtype=torch.int16)
+            return x_view.mul(2)
+
+        x = torch.ones(4, dtype=torch.float16, device=self.device)
+        ref = fn(x)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(ref, actual)
+
+    def test_bfloat16_to_int16(self):
+        def fn(a, b):
+            x = a + b
+            x_view = x.view(dtype=torch.int16)
+            return x_view.mul(2)
+
+        a = torch.ones(4, dtype=torch.bfloat16, device=self.device)
+        b = torch.ones(4, dtype=torch.bfloat16, device=self.device)
+        ref = fn(a, b)
+        actual = torch.compile(fn)(a, b)
+        self.assertEqual(ref, actual)
+
+    def test_float32_to_int32(self):
+        def fn(a, b):
+            x = a + b
+            x_view = x.view(dtype=torch.int32)
+            return x_view.mul(2)
+
+        a = torch.ones(4, dtype=torch.float32, device=self.device)
+        b = torch.ones(4, dtype=torch.float32, device=self.device)
+        ref = fn(a, b)
+        actual = torch.compile(fn)(a, b)
+        self.assertEqual(ref, actual)
 
 
 @dataclasses.dataclass
