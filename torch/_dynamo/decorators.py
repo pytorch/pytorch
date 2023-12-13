@@ -203,10 +203,10 @@ def mark_dynamic(t, index):
         _apply_func_to_inner_tensors_of_same_dim(mark_dynamic, t, index)
 
     if isinstance(index, int):
-        if not hasattr(t, "_dynamo_dynamic_indices"):
-            t._dynamo_dynamic_indices = set()
-        # TODO(voz): Should we bounds check?
-        t._dynamo_dynamic_indices.add(index)
+        # if not hasattr(t, "_dynamo_dynamic_indices"):
+        #     t._dynamo_dynamic_indices = set()
+        # # TODO(voz): Should we bounds check?
+        # t._dynamo_dynamic_indices.add(index)
         return
 
     assert isinstance(index, (list, tuple))
