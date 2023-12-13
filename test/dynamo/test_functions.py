@@ -29,10 +29,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor import metrics
 from torch.nn import functional as F
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import (
-    disable_translation_validation_if_dynamic_shapes,
-    skipIfRocm,
-)
+from torch.testing._internal.common_utils import disable_translation_validation_if_dynamic_shapes
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -1758,7 +1755,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(output, torch.zeros_like(t1))
 
     @requires_cuda()
-    @skipIfRocm
     def test_triton_kernel_functionalize(self):
         import functorch
         from functorch import make_fx
@@ -1814,7 +1810,6 @@ def forward(self, x_1, output_1):
         )
 
     @requires_cuda()
-    @skipIfRocm
     def test_triton_kernel_mutation_type(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -2000,7 +1995,6 @@ def forward(self, x_1, output_1):
             self.assertTrue("return (buf0, )" in codes[0])
 
     @requires_cuda()
-    @skipIfRocm
     def test_triton_kernel_caching(self):
         from torch._inductor.utils import run_and_get_code
 
@@ -2030,7 +2024,6 @@ def forward(self, x_1, output_1):
         self.assertTrue("add_kernel_autotuned_1.run" not in code)
 
     @requires_cuda()
-    @skipIfRocm
     def test_triton_kernel_caching_duplicate(self):
         from torch._inductor.utils import run_and_get_code
 
@@ -2068,7 +2061,6 @@ def forward(self, x_1, output_1):
         self.assertTrue("pass_kernel_1.run" in code)
 
     @requires_cuda()
-    @skipIfRocm
     def test_triton_kernel_various_args(self):
         @triton.autotune(
             configs=[triton.Config({"BLOCK_SIZE": 128})],
@@ -2105,7 +2097,6 @@ def forward(self, x_1, output_1):
         call_triton(output)
 
     @requires_cuda()
-    @skipIfRocm
     def test_triton_kernel_dependancies(self):
         def call_triton(
             x: torch.Tensor,
@@ -2254,7 +2245,6 @@ def forward(self, x_1, output_1):
         CONSTANT_C = prev_c
 
     @requires_cuda()
-    @skipIfRocm
     @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -2289,7 +2279,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_func(t1, t2, output2), torch_add)
 
     @requires_cuda()
-    @skipIfRocm
     @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])

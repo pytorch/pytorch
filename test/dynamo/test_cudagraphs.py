@@ -105,7 +105,6 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         y = torch.randn((), device="cpu")
         fn(x, y)
 
-    @skipIfRocm
     def test_mutate_input(self):
         def model(x, y):
             y.add_(3)
