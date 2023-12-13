@@ -846,7 +846,7 @@ class GraphLowering(torch.fx.Interpreter):
                 and isinstance(result, TensorBox)
                 and isinstance(result.data, ir.BaseView)
             ):
-                # Realize so that outputs are correctly aliased
+                # Realize so that outputs are correctly alised
                 result.realize()
 
             if (is_output or is_input_for_as_strided) and isinstance(

@@ -14,7 +14,8 @@ import torch
 # or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
 # see this design doc for more detailed info
 # Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
-# the name of a file to write the logs to
+# the name of a file to write the logs to (currently unused)
+# TODO(jon-chuang): use setup_log_file in setup_compile_debug
 # [@compile_ignored: debug]
 log_file_name = None
 

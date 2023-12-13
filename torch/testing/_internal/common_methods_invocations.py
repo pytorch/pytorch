@@ -21521,10 +21521,6 @@ python_ref_db = [
         validate_view_consistency=False,
     ),
     PythonRefInfo(
-        "_refs.block_diag",
-        torch_opinfo_name="block_diag",
-    ),
-    PythonRefInfo(
         "_refs.broadcast_shapes",
         torch_opinfo_name="broadcast_shapes",
     ),

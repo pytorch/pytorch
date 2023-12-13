@@ -196,7 +196,7 @@ class TestVerifier(TestCase):
         output_node.args = (
             (
                 output_node.args[0][0],
-                next(iter(ep.graph.nodes)),
+                list(ep.graph.nodes)[0],
                 output_node.args[0][1],
             ),
         )

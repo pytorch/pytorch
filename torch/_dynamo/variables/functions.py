@@ -198,13 +198,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                         closure_cell_contents = AttrSource(
                             closure_cell, "cell_contents"
                         )
-                        try:
-                            contents_var = VariableBuilder(
-                                parent, closure_cell_contents
-                            )(cell.cell_contents)
-                        except ValueError:
-                            # Cell has not yet been assigned
-                            contents_var = variables.DeletedVariable()
+                        contents_var = VariableBuilder(parent, closure_cell_contents)(
+                            cell.cell_contents
+                        )
 
                         if (
                             closure_cell_contents.name()

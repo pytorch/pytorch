@@ -68,14 +68,6 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
       TORCH_CHECK_TYPE(false,
                        "Cannot convert a float64 Tensor to MPS as the MPS framework doesn't support float64. "
                        "Please use float32 instead.")
-    case ScalarType::ComplexHalf:
-      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
-                       "MPS complex types are only supported on MacOS 14.0 or newer.");
-      return MPSDataTypeComplexFloat16;
-    case ScalarType::ComplexFloat:
-      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
-                       "MPS complex types are only supported on MacOS 14.0 or newer.");
-      return MPSDataTypeComplexFloat32;
     default:
       TORCH_CHECK_TYPE(
           false, "Trying to convert ", scalar_type, " to the MPS backend but it does not have support for that dtype.")
@@ -142,14 +134,6 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
       return MPSDataTypeUInt8;
     case ScalarType::Bool:
       return MPSDataTypeBool;
-    case ScalarType::ComplexHalf:
-      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
-                       "MPS complex types are only supported on MacOS 14.0 or newer.");
-      return MPSDataTypeComplexFloat16;
-    case ScalarType::ComplexFloat:
-      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
-                       "MPS complex types are only supported on MacOS 14.0 or newer.");
-      return MPSDataTypeComplexFloat32;
     default:
       TORCH_CHECK_TYPE(
           false, "Trying to convert ", scalar_type, " to the MPS backend but it does not have support for that dtype.")
@@ -176,10 +160,6 @@ std::string getMPSTypeString(ScalarType scalar_type, bool short_name) {
       return short_name ? "u8" : "UInt8";
     case ScalarType::Bool:
       return short_name ? "b8" : "Bool";
-    case ScalarType::ComplexHalf:
-      return short_name ? "c16" : "ComplexFloat16";
-    case ScalarType::ComplexFloat:
-      return short_name ? "c32" : "ComplexFloat32";
     default:
       return "Undefined";
   }
