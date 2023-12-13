@@ -744,7 +744,7 @@ Got grad_output types: {str(grad_output_types)}"""
                             "torch.compile with aot_autograd does not currently support double backward"
                         )
 
-                CompiledFunctionBackward._compiled_autograd_key = (  # type: ignore[attr-defined]
+                CompiledFunctionBackward._compiled_autograd_key = (  # type: ignore[method-assign]
                     CompiledFunction._compiled_autograd_key
                 )
 

@@ -389,7 +389,7 @@ class TestCompiledAutograd(TestCase):
                     (x,) = ctx.saved_tensors
                     return gO * torch.cos(x)
 
-            for i in [10, 100, 10]:
+            for i in [10, 100, 10, 15, 20, 25]:
                 x = torch.arange(0.0, i, requires_grad=True)
                 out = MySin.apply(x)
                 loss = out.sum()
@@ -411,7 +411,7 @@ class TestCompiledAutograd(TestCase):
                     (x1, x2) = ctx.saved_tensors
                     return gO * torch.cos(x1) * torch.cos(x2)
 
-            for i in [10, 100, 10]:
+            for i in [10, 100, 10, 15, 20, 25]:
                 x = torch.arange(0.0, i, requires_grad=True)
                 out = MyFn.apply(x)
                 loss = out.sum()
@@ -433,7 +433,7 @@ class TestCompiledAutograd(TestCase):
                     (x,) = ctx.saved_tensors
                     return gO * x.shape[0]
 
-            for i in [10, 100, 10]:
+            for i in [10, 100, 10, 15, 20, 25]:
                 x = torch.arange(0.0, i, requires_grad=True)
                 out = MyFn.apply(x)
                 loss = out.sum()
@@ -455,7 +455,7 @@ class TestCompiledAutograd(TestCase):
                     x_shape = ctx.shape[0]
                     return gO * x_shape
 
-            for i in [10, 100, 10]:
+            for i in [10, 100, 10, 15, 20, 25]:
                 x = torch.arange(0.0, i, requires_grad=True)
                 out = MyFn.apply(x)
                 loss = out.sum()
@@ -470,17 +470,17 @@ class TestCompiledAutograd(TestCase):
             class MyFn(torch.autograd.Function):
                 @staticmethod
                 def forward(ctx, x, y):
-                    return x + y
+                    return x + y, y
 
                 @staticmethod
-                def backward(ctx, gO):
-                    return gO, gO
+                def backward(ctx, gO_1, gO_2):
+                    return gO_1, gO_2
 
-            for i in [10, 100, 10]:
+            for i in [10, 100, 10, 15, 20, 25]:
                 x = torch.arange(0.0, i, requires_grad=True)
                 y = torch.arange(0.0, i, requires_grad=True)
-                out = MyFn.apply(x, y)
-                loss = out.sum()
+                out1, out2 = MyFn.apply(x, y)
+                loss = (out1 + out2).sum()
                 loss.backward()
                 yield x.grad
                 yield y.grad
@@ -509,7 +509,7 @@ class TestCompiledAutograd(TestCase):
                 def backward(ctx, gO):
                     return gO
 
-            for myfn in [MyFn1, MyFn2]:
+            for myfn in [MyFn1, MyFn2, MyFn1, MyFn2]:
                 x = torch.arange(0.0, 10, requires_grad=True)
                 out = myfn.apply(x)
                 loss = out.sum()
@@ -539,7 +539,7 @@ class TestCompiledAutograd(TestCase):
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, 3)
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent

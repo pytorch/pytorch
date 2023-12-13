@@ -57,7 +57,7 @@ static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   return pyinput;
 }
 
-static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
+static PyObject* wrap_pyobject_list(std::vector<c10::SafePyObject>& inputs) {
   // inplace, consumes the input hooks
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
@@ -475,9 +475,10 @@ variable_list compiled_autograd(
 
   THPObjectPtr inputs(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
-  THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
+  THPObjectPtr hooks(wrap_pyobject_list(compiler_call.hooks));
+  THPObjectPtr backwards(wrap_pyobject_list(compiler_call.backwards));
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
-      cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
+      cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), backwards.get(), NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
   return outputs;
