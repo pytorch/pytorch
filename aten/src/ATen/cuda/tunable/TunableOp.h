@@ -160,6 +160,14 @@ class TunableOp {
       return FindFastestImpl(params, ops_);
     }
 
+    bool IsNumericsCheckEnabled() {
+      static const char *env = getenv("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
+      if (env != nullptr && strcmp(env, "0") == 0) {
+        return false;
+      }
+      return true;
+    }
+
     ResultEntry FindFastestImpl(const ParamsT* params, const std::vector<Callable<ParamsT>>& candidates) {
       TuningContext* ctx = getTuningContext();
       auto op_sig = Signature();
@@ -185,14 +193,15 @@ class TunableOp {
           continue;
         }
 
-        // do 1 initial op for the numeric check, but this also counts as a warmup in case there is initial overhead.
-        ParamsT* numerical_params = params->DeepCopy();
-        WarmUp(candidate, numerical_params, 1);
-        status = reference_params->NumericalCheck(numerical_params);
-        numerical_params->Delete();
-        if (status != OK) {
-          TUNABLE_LOG("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
-          continue;
+        if (IsNumericsCheckEnabled()) {
+          ParamsT* numerical_params = params->DeepCopy();
+          WarmUp(candidate, numerical_params, 1);
+          status = reference_params->NumericalCheck(numerical_params);
+          numerical_params->Delete();
+          if (status != OK) {
+            TUNABLE_LOG("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+            continue;
+          }
         }
 
         // collect a small profile
