@@ -21,7 +21,7 @@ class TestMetaArgEngine(TestCase):
         engine = MetaArgEngine(ArgType.Tensor, constraints, deps, True)
         ms = list(engine.gen(Attribute.DTYPE))
         self.assertEqual(len(ms), len(SUPPORTED_TENSOR_DTYPES))
-        self.assertEqual(set(m.dtype for m in ms), set(SUPPORTED_TENSOR_DTYPES))
+        self.assertEqual({m.dtype for m in ms}, set(SUPPORTED_TENSOR_DTYPES))
         self.assertTrue(all(0 <= m.rank() <= 4 for m in ms))
         for m in ms:
             self.assertTrue(
@@ -32,7 +32,7 @@ class TestMetaArgEngine(TestCase):
 
         ms = list(engine.gen(Attribute.RANK))
         self.assertEqual(len(ms), 4)
-        ranks = set(len(m.structure) for m in ms)
+        ranks = {len(m.structure) for m in ms}
         self.assertTrue(0 in ranks)
         self.assertTrue(4 in ranks)
         self.assertTrue(all(0 <= r <= 4 for r in ranks))
