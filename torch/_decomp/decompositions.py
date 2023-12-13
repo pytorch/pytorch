@@ -3955,32 +3955,25 @@ def upsample_bicubic2d_default(
     N, C, iH, iW = a.shape
     oH, oW = output_size
 
-    def compute_scale(in_size, out_size, align_corners, scale=None):
-        if align_corners:
-            return (in_size - 1) / (out_size - 1) if out_size > 1 else 0
-        else:
-            return 1 / scale if scale is not None and scale > 0 else in_size / out_size
+    height_scale = _compute_scale(iH, oH, align_corners, scale_h)
+    width_scale = _compute_scale(iW, oW, align_corners, scale_w)
 
-    def compute_source_index(scale, dst_index, align_corners):
-        if align_corners:
-            return scale * dst_index
-        else:
-            return scale * (dst_index + 0.5) - 0.5
+    if a.is_floating_point():
+        dtype = a.dtype
+    else:
+        dtype = torch.int64
 
-    height_scale = compute_scale(iH, oH, align_corners, scale_h)
-    width_scale = compute_scale(iW, oW, align_corners, scale_w)
+    N_idx = torch.arange(N, device=a.device, dtype=torch.int64).view(N, 1, 1, 1)
+    C_idx = torch.arange(C, device=a.device, dtype=torch.int64).view(1, C, 1, 1)
+    out_y = torch.arange(oH, device=a.device, dtype=dtype).view((1, 1, oH, 1))
+    out_x = torch.arange(oW, device=a.device, dtype=dtype).view((1, 1, 1, oW))
 
-    N_idx = torch.arange(N, device=a.device).view(N, 1, 1, 1)
-    C_idx = torch.arange(C, device=a.device).view(1, C, 1, 1)
-    out_y = torch.arange(oH, device=a.device).view((1, 1, oH, 1))
-    out_x = torch.arange(oW, device=a.device).view((1, 1, 1, oW))
-
-    real_x = compute_source_index(width_scale, out_x, align_corners)
+    real_x = _compute_source_index(width_scale, out_x, align_corners)
     in_x = real_x.floor()
     t_x = real_x - in_x
     ix = in_x.to(dtype=torch.int64)
 
-    real_y = compute_source_index(height_scale, out_y, align_corners)
+    real_y = _compute_source_index(height_scale, out_y, align_corners)
     in_y = real_y.floor()
     t_y = real_y - in_y
     iy = in_y.to(dtype=torch.int64)
@@ -3995,7 +3988,12 @@ def upsample_bicubic2d_default(
 
     def get_x_interp(y):
         coeffs_x = tuple(load_bounded(y, x_ofs) for x_ofs in ixs_ofs)
-        return _upsample_cubic_interp1d(coeffs_x, t_x)
+        output = _upsample_cubic_interp1d(coeffs_x, t_x)
+
+        if a.dtype == torch.uint8:
+            output = torch.clamp(output, 0, 255)
+
+        return output
 
     coeffs_y = tuple(get_x_interp(y_ofs) for y_ofs in iys_ofs)
     result = _upsample_cubic_interp1d(coeffs_y, t_y)
@@ -4003,6 +4001,10 @@ def upsample_bicubic2d_default(
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(a)
     result = result.contiguous(memory_format=memory_format)
+
+    if a.dtype == torch.uint8:
+        result = torch.clamp(result.round(), 0, 255)
+
     return result
 
 
@@ -4031,7 +4033,9 @@ def upsample_bicubic2d_vec(
             ),
         )
     scale_h, scale_w = scale_factors if scale_factors else (None, None)
-    return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
+    return aten.upsample_bicubic2d.default(
+        a, output_size, align_corners, scale_h, scale_w
+    )
 
 
 @register_decomposition(aten.reflection_pad1d)
