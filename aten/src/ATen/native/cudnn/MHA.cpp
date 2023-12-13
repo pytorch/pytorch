@@ -40,13 +40,14 @@ using graph_and_tensors = std::tuple<
                                     std::shared_ptr<fe::graph::Tensor_attributes>, // K,
                                     std::shared_ptr<fe::graph::Tensor_attributes>, // V,
                                     std::shared_ptr<fe::graph::Tensor_attributes>, // Attn_scale,
-                                    //std::shared_ptr<fe::graph::Tensor_attributes>, // Bias,
-                                    //std::shared_ptr<fe::graph::Tensor_attributes>, // SEQ_LEN_Q,
-                                    //std::shared_ptr<fe::graph::Tensor_attributes>, // SEQ_LEN_KV,
+                                    // TODO(eqy): additional options
+                                    // std::shared_ptr<fe::graph::Tensor_attributes>, // Bias,
+                                    // std::shared_ptr<fe::graph::Tensor_attributes>, // SEQ_LEN_Q,
+                                    // std::shared_ptr<fe::graph::Tensor_attributes>, // SEQ_LEN_KV,
                                     std::shared_ptr<fe::graph::Tensor_attributes>, // Seed,
                                     std::shared_ptr<fe::graph::Tensor_attributes>, // Offset,
-                                    //std::shared_ptr<fe::graph::Tensor_attributes>, // Dropout_mask,
-                                    //std::shared_ptr<fe::graph::Tensor_attributes>, // Dropout_scale
+                                    // std::shared_ptr<fe::graph::Tensor_attributes>, // Dropout_mask,
+                                    // std::shared_ptr<fe::graph::Tensor_attributes>, // Dropout_scale
                                     std::shared_ptr<fe::graph::Tensor_attributes>, // O
                                     std::shared_ptr<fe::graph::Tensor_attributes> // Stats
                         >;
@@ -139,7 +140,7 @@ auto build_graph_and_tensors(int64_t b,
                                 int64_t d,
                                 float scaling_factor,
                                 bool return_softmaxstats,
-		                        bool is_causal,
+                                        bool is_causal,
                                 double dropout_probability,
                                 const Tensor& q,
                                 const Tensor& k,
@@ -212,6 +213,7 @@ auto build_graph_and_tensors(int64_t b,
                                     .set_dim({b, 1, 1, 1})
                                     .set_stride({1, 1, 1, 1})
                                     .set_data_type(fe::DataType_t::INT32));
+
     //if (cudnnGetVersion() >= 8903) {
     //    scaled_dot_product_flash_attention_options.set_bias(bias)
     //        .set_padding_mask(true)
@@ -220,24 +222,19 @@ auto build_graph_and_tensors(int64_t b,
     //}
 
 
-    auto [O, Stats] = mha_graph->scaled_dot_product_flash_attention(Q, K, V, scaled_dot_product_flash_attention_options);
+    auto [O, Stats] = mha_graph->sdpa(Q, K, V, scaled_dot_product_flash_attention_options);
     O->set_output(true).set_dim(std::vector<int64_t>(o.sizes().data(), o.sizes().data() + o.sizes().size())).set_stride(std::vector<int64_t>(o.strides().data(), o.strides().data() + o.strides().size()));
 
-    // Check that Stats tensor is real, which is only when its training step
     if (Stats) {
         Stats->set_output(true).set_data_type(fe::DataType_t::FLOAT);
     }
 
-    TORCH_INTERNAL_ASSERT(mha_graph->validate().is_good());
+    AT_CUDNN_FRONTEND_CHECK(mha_graph->validate());
+    AT_CUDNN_FRONTEND_CHECK(mha_graph->build_operation_graph(handle));
+    AT_CUDNN_FRONTEND_CHECK(mha_graph->create_execution_plans({fe::HeurMode_t::A}));
+    AT_CUDNN_FRONTEND_CHECK(mha_graph->check_support(handle));
+    AT_CUDNN_FRONTEND_CHECK(mha_graph->build_plans(handle));
 
-    TORCH_INTERNAL_ASSERT(mha_graph->build_operation_graph(handle).is_good());
-
-    auto status = mha_graph->create_execution_plans({fe::HeurMode_t::A});
-
-
-    TORCH_INTERNAL_ASSERT(mha_graph->check_support(handle).is_good());
-    TORCH_INTERNAL_ASSERT(mha_graph->build_plans(handle).is_good());
-    // TORCH_INTERNAL_ASSERT(mha_graph->set_execution_plans(plans).is_good());
     return std::make_tuple(mha_graph, Q, K, V, attn_scale, seed, offset, O, Stats);
 }
 
@@ -249,7 +246,7 @@ run_cudnn_LLM_fprop(int64_t b,
                     int64_t d,
                     float scaling_factor,
                     bool return_softmaxstats,
-		            bool is_causal,
+                            bool is_causal,
                     double dropout_probability,
                     const Tensor& q,
                     const Tensor& k,
@@ -258,6 +255,7 @@ run_cudnn_LLM_fprop(int64_t b,
                     Tensor& o,
                     Tensor& dropoutseed,
                     Tensor& dropoutoffset) {
+
     cudnnHandle_t handle = getCudnnHandle();
     o = at::empty_strided({b, h, s_q, d}, {s_q * h * d, d, h * d, 1}, q.options());
     if (return_softmaxstats) {
