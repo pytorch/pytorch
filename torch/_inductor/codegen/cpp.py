@@ -1344,8 +1344,8 @@ class CppKernel(Kernel):
                 index = index * self.ranges[i] + self.itervars[i]
             self.stores.writelines(
                 [
-                    f"if ({acc_local}.value {compare_op} {value}) {{",
-                    f"    {acc_local}.index = {cexpr_index(index)}; {acc_local}.value = {value};",
+                    f"if ({acc}.value {compare_op} {value}) {{",
+                    f"    {acc}.index = {cexpr_index(index)}; {acc}.value = {value};",
                     "}",
                 ],
             )
