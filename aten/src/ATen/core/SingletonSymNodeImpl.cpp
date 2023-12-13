@@ -72,45 +72,35 @@ c10::SymNode SingletonSymNodeImpl::mul(const c10::SymNode& other) {
   }
   c10::optional<int64_t> c = other->constant_int();
   TORCH_CHECK(c.has_value());
-  return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c, data_, dummy_, sum_offsets_));
+  return SymNode(c10::make_intrusive<SingletonSymNodeImpl>(val_, coeff_ * *c, data_, sum_offsets_));
 }
 
 namespace {
-class BorrowedTensor {
-  // Useful if I want a Tensor but only have a TensorImpl*
-  // The user of this class is responsible for ensuring that the TensorImpl*
-  // lifetime is longer than the BorrowedTensor.
-public:
-  BorrowedTensor(at::TensorImpl* ptr)
-      : tensor(c10::intrusive_ptr<at::TensorImpl>(ptr, c10::raw::DontIncreaseRefcount{})) {}
-  ~BorrowedTensor() {
-      tensor.unsafeReleaseTensorImpl();
-  }
-  at::Tensor get() const {
-      return tensor;
-  }
-private:
-  at::Tensor tensor;
-};
+at::Tensor dummy_tensor = at::Tensor();
 } // namespace
+
+void set_global_singleton_dummy(const at::Tensor& t) {
+  dummy_tensor = t;
+}
 
 std::optional<at::Tensor> try_call_with_dummy(const std::function<at::Tensor(at::Tensor)>& fn, c10::SymIntArrayRef size) {
   // See Note [ NestedTensor factory functions ]
-  at::TensorImpl* ptr = nullptr;
+  bool has_singleton = false;
   for (const auto& s : size) {
     if (!s.is_heap_allocated()) {
       continue;
     }
-    auto _ptr = s.toSymNode()->singleton_dummy();
-    if (_ptr != nullptr) {
-      TORCH_CHECK(ptr == nullptr, "Only one singleton dimension supported");
-      ptr = _ptr;
+    bool _has_singleton = s.toSymNode()->is_singleton();
+    if (_has_singleton) {
+      TORCH_CHECK(!has_singleton, "Only one singleton dimension supported");
+      has_singleton = _has_singleton;
     }
   }
-  if (ptr != nullptr) {
-    BorrowedTensor borrowed_tensor(ptr);
-    auto ret = fn(borrowed_tensor.get());
-    return ret;
+  if (has_singleton) {
+    // Grab the global dummy (in the future we will need to decide which dummy
+    // to use based on information on the singleton.
+    TORCH_CHECK(dummy_tensor.defined(), "Global dummy tensor not defined");
+    return fn(dummy_tensor);
   }
   return std::nullopt;  // Return std::nullopt if no singleton dimension is found
 }
