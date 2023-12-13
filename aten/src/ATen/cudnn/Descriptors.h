@@ -18,7 +18,9 @@
 #include <ATen/ops/empty.h>
 #endif
 
-#define RNNV8VERSION 8907
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8907
+#define USE_CUDNN_RNN_V8_API
+#endif
 
 namespace at { namespace native {
 
@@ -270,7 +272,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
                                              &cudnnDestroyRNNDescriptor> {
   DropoutDescriptor dropout_desc_;
   void set(cudnnHandle_t handle,
-#if USE_CUDNN_RNN_V8_API
+#if defined(USE_CUDNN_RNN_V8_API)
 	   int input_size,
 	   bool packed,
 #endif
@@ -278,7 +280,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
            cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnDataType_t input_type, cudnnRNNAlgo_t algo, bool allow_tf32) {
     dropout_desc_ = std::move(dropout_desc);
-#if !USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
           handle,
           mut_desc(),
@@ -316,7 +318,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
           dropout_desc_.desc(),
           packed ? CUDNN_RNN_PADDED_IO_DISABLED : CUDNN_RNN_PADDED_IO_ENABLED));
 #endif
-#if !USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major >= 7) {
       if (input_type == CUDNN_DATA_HALF) {
