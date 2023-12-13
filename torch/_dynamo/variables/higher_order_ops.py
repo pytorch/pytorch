@@ -122,10 +122,8 @@ def _call_function_and_unflatten_output(tx, fn, args, kwargs, ret_vt, ret_treesp
 # by an inference_mode(True) context manager, the tensor version will not be upated.
 # So we override the inference_mode to False then run the extracted graph module.
 #
-# Aliasing detection: We detect mutations by checking the example_value's _version
-# This approach has a corner case that if torch.compile is wrapped
-# by an inference_mode(True) context manager, the tensor version will not be upated.
-# So we override the inference_mode to False then run the extracted graph module.
+# Aliasing detection: We detect mutations by checking the example_value's _typed_storage():
+# if output fake_tensor is sharing the same storage with one of the inputs, we consider it aliasing
 def _detect_input_mutations_and_aliasing(tx, graph_module, proxy_args):
     from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -133,6 +131,7 @@ def _detect_input_mutations_and_aliasing(tx, graph_module, proxy_args):
     _before_versions = [ex._version for ex in example_values]
     with torch.inference_mode(False), tx.fake_mode, enable_python_dispatcher():
         res = graph_module(*example_values)
+
     mutated_inputs = [
         proxy_args[i]
         for i, (val, old_v) in enumerate(zip(example_values, _before_versions))
@@ -144,6 +143,7 @@ def _detect_input_mutations_and_aliasing(tx, graph_module, proxy_args):
         StorageWeakRef(proxy.node.meta["example_value"]._typed_storage()): proxy
         for proxy in proxy_args
     }
+    assert isinstance(res, (tuple, list))
     output_storages = [StorageWeakRef(t._typed_storage()) for t in res]
     aliased_inputs = [
         input_storages[ref] for ref in output_storages if ref in input_storages
