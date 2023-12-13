@@ -1507,9 +1507,6 @@ def register_onednn_fusion_ops():
             unary_scalars,
             unary_algorithmm,
         ):
-            assert (
-                binary_attr == "sum"
-            ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
             if (
                 binary_attr == "sum"
                 and output_dtype in [torch.float32, torch.bfloat16]

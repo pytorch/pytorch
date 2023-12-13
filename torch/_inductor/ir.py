@@ -5923,6 +5923,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             accum_zp, o_inv_scale, o_zp, fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = len(inputs) == 6
+        self.binary_attr = constant_args[-5]
         super().__init__(
             layout,
             inputs,
@@ -6021,6 +6022,14 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
+    def get_mutation_names(self):
+        # Return the name of accum if post op sum else return []
+        return (
+            [self.inputs[3].get_name() if self.has_bias else self.inputs[2].get_name()]
+            if self.binary_attr == "sum"
+            else []
+        )
+
     @classmethod
     def create(
         cls,
@@ -6093,6 +6102,10 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
+
+        assert (
+            binary_attr == "sum"
+        ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
 
         packed = QConvPointWiseBinaryPT2E(
             layout=NoneLayout(accum.get_device()),
