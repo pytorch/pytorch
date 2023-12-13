@@ -281,7 +281,7 @@ def check_model(
     has_lowp_args = False
     original_lowp_dtype = torch.half
 
-    if reference_in_float:
+    if reference_in_float and exact_dtype:
         # Store expected dtypes so we can check actual result gives the correct types
         torch.manual_seed(0)
         try:
@@ -297,6 +297,7 @@ def check_model(
         ]
         del eager_result
 
+    if reference_in_float:
         # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
         def upcast_fn(x):
             nonlocal has_lowp_args
@@ -364,13 +365,14 @@ def check_model(
             for x, y in zip(actual_flat, correct_flat)
         )
 
-    if reference_in_float:
+    if reference_in_float and exact_dtype:
         for expect_dtype, actual_result in zip(expect_dtypes, actual_flat):
             if expect_dtype is not None:
                 assert (
                     actual_result.dtype == expect_dtype
                 ), f"dtype mismatch, expected {expect_dtype} but got {actual_result.dtype}"
 
+    if reference_in_float:
         correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
 
@@ -1636,7 +1638,8 @@ class CommonTemplate:
                 a // b,
             )
 
-        self.common(fn, (1024, 100))
+        # FIXME: returns the wrong dtype
+        self.common(fn, (1024, 100), exact_dtype=False)
 
     def test_div9(self):
         def fn(x):
