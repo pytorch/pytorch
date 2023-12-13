@@ -659,6 +659,9 @@ class ONNXProgram:
     _fake_context: Final[Optional[ONNXFakeContext]]
     _export_exception: Final[Optional[Exception]]
     _model_signature: Final[Optional[torch.export.ExportGraphSignature]]
+    _model_torch: Final[
+        Optional[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]]
+    ]
 
     @_beartype.beartype
     def __init__(
@@ -671,9 +674,13 @@ class ONNXProgram:
         fake_context: Optional[ONNXFakeContext] = None,
         export_exception: Optional[Exception] = None,
         model_signature: Optional[torch.export.ExportGraphSignature] = None,
+        model_torch: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,
     ):
         self._model_proto = model_proto
         self._model_signature = model_signature
+        self._model_torch = model_torch
         self._input_adapter = input_adapter
         self._output_adapter = output_adapter
         self._diagnostic_context = diagnostic_context
@@ -683,7 +690,9 @@ class ONNXProgram:
     def __call__(
         self,
         *args: Any,
-        model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],
+        model_with_state_dict: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,
         options: Optional[ONNXRuntimeOptions] = None,
         **kwargs: Any,
     ) -> Any:
@@ -692,7 +701,8 @@ class ONNXProgram:
         Args:
             args: The positional inputs to the model.
             kwargs: The keyword inputs to the model.
-            model: The PyTorch model to fetch state from.
+            model_with_state_dict: The PyTorch model to fetch state from.
+                Required when :func:`enable_fake_mode` is used to extract real initializers as needed by the ONNX graph.
             options: The options to use for running the model with ONNX Runtime.
 
         Returns:
@@ -700,7 +710,12 @@ class ONNXProgram:
         """
         import onnxruntime  # type: ignore[import]
 
-        onnx_input = self.adapt_torch_inputs_to_onnx(*args, model=model, **kwargs)
+        # model specified by the user has precedence, when specified
+        model_with_state_dict = model_with_state_dict or self._model_torch
+
+        onnx_input = self.adapt_torch_inputs_to_onnx(
+            *args, model_with_state_dict=model_with_state_dict, **kwargs
+        )
         options = options or ONNXRuntimeOptions()
         providers = options.execution_providers or onnxruntime.get_available_providers()
         onnx_model = self.model_proto.SerializeToString()
@@ -809,7 +824,7 @@ class ONNXProgram:
     def adapt_torch_inputs_to_onnx(
         self,
         *model_args,
-        model: Optional[
+        model_with_state_dict: Optional[
             Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
         ] = None,
         **model_kwargs,
@@ -828,8 +843,10 @@ class ONNXProgram:
         This method replays the adapting steps recorded during export.
 
         Args:
-            model: The PyTorch model to get extra state from. If not specified, the model used during export is used.
             model_args: The PyTorch model inputs.
+            model_with_state_dict: The PyTorch model to get extra state from.
+                If not specified, the model used during export is used.
+                Required when :func:`enable_fake_mode` is used to extract real initializers as needed by the ONNX graph.
             model_kwargs: The PyTorch model keyword inputs.
 
         Returns:
@@ -841,7 +858,7 @@ class ONNXProgram:
             >>> import torch
             >>> import torch.onnx
             >>> from typing import Dict, Tuple
-            >>> def func_with_nested_input_structure(
+            >>> def func_nested_input(
             ...     x_dict: Dict[str, torch.Tensor],
             ...     y_tuple: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
             ... ):
@@ -857,23 +874,32 @@ class ONNXProgram:
             ...     return x + y1 + y2 + y3
             >>> x_dict = {"a": torch.tensor(1.)}
             >>> y_tuple = (torch.tensor(2.), (torch.tensor(3.), torch.tensor(4.)))
-            >>> onnx_program = torch.onnx.dynamo_export(func_with_nested_input_structure, x_dict, y_tuple)
+            >>> onnx_program = torch.onnx.dynamo_export(func_nested_input, x_dict, y_tuple)
             >>> print(x_dict, y_tuple)
             {'a': tensor(1.)} (tensor(2.), (tensor(3.), tensor(4.)))
-            >>> print(onnx_program.adapt_torch_inputs_to_onnx(x_dict, y_tuple, model=func_with_nested_input_structure))
+            >>> print(onnx_program.adapt_torch_inputs_to_onnx(x_dict, y_tuple, model_with_state_dict=func_nested_input))
             (tensor(1.), tensor(2.), tensor(3.), tensor(4.))
 
         .. warning::
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._input_adapter.apply(*model_args, model=model, **model_kwargs)
+        # model specified by the user has precedence, when specified
+        model_with_state_dict = model_with_state_dict or self._model_torch
+        assert (
+            model_with_state_dict is not None
+        ), "model_with_state_dict must be specified."
+        return self._input_adapter.apply(
+            *model_args, model=model_with_state_dict, **model_kwargs
+        )
 
     @_beartype.beartype
     def adapt_torch_outputs_to_onnx(
         self,
-        model: Union[torch.nn.Module, Callable, torch_export.ExportedProgram],
         model_outputs: Any,
+        model_with_state_dict: Optional[
+            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+        ] = None,
     ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
@@ -889,8 +915,10 @@ class ONNXProgram:
         This method replays the adapting steps recorded during export.
 
         Args:
-            model: The PyTorch model to get extra state from.
             model_outputs: The PyTorch model outputs.
+            model_with_state_dict: The PyTorch model to get extra state from.
+                If not specified, the model used during export is used.
+                Required when :func:`enable_fake_mode` is used to extract real initializers as needed by the ONNX graph.
 
         Returns:
             PyTorch model outputs in exported ONNX model outputs format.
@@ -912,14 +940,19 @@ class ONNXProgram:
             >>> pt_output = func_returning_tuples(x, y, z)
             >>> print(pt_output)
             (tensor(3.), (tensor(5.), tensor(8.)))
-            >>> print(onnx_program.adapt_torch_outputs_to_onnx(func_returning_tuples, pt_output))
+            >>> print(onnx_program.adapt_torch_outputs_to_onnx(pt_output, model_with_state_dict=func_returning_tuples))
             [tensor(3.), tensor(5.), tensor(8.)]
 
         .. warning::
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._output_adapter.apply(model, model_outputs)
+        # model specified by the user has precedence, when specified
+        model_with_state_dict = model_with_state_dict or self._model_torch
+        assert (
+            model_with_state_dict is not None
+        ), "model_with_state_dict must be specified."
+        return self._output_adapter.apply(model_outputs, model=model_with_state_dict)
 
     @_beartype.beartype
     def save(
@@ -1053,6 +1086,7 @@ class ONNXProgram:
         # https://github.com/pytorch/pytorch/issues/103764
         import onnx
 
+        # TODO: Should we populate ONNXProgram with more info, such _model_torch for easier debug?
         return ONNXProgram(
             onnx.ModelProto(),  # type: ignore[attr-defined]
             io_adapter.InputAdapter(),
@@ -1182,6 +1216,7 @@ class Exporter:
                 model_signature=getattr(
                     self.model, "graph_signature", None
                 ),  # Available for isinstance(self.model, ExportedProgram) only
+                model_torch=self.model,
             )
 
     def _assert_fake_tensor_mode(self):
