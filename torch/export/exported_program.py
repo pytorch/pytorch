@@ -466,14 +466,13 @@ class ExportedProgram:
             for inp_dim1, inp_dim2 in self.equality_constraints
         ]
 
-        state_dict = self.state_dict.copy()
         lift_constant_tensor_pass(gm, new_graph_signature)
         _replace_sym_size_ops_pass(gm)
         exported_program = ExportedProgram(
             gm,
             gm.graph,
             new_graph_signature,
-            state_dict,
+            self.state_dict,
             new_range_constraints,
             new_equality_constraints,
             copy.deepcopy(self.module_call_graph),
