@@ -1,10 +1,7 @@
 # We generate unittest.expectedFailure for all of the following tests
 # when run under PYTORCH_TEST_WITH_DYNAMO=1.
 #
-# If you're adding new tests that fail, prefer explicitly adding the
-# unittest.expectedFailure to the test function instead of adding something
-# into this list. This lists exists so we can more easily add large numbers
-# of failing tests, but it's not very discoverable for PyTorch devs.
+# This lists exists so we can more easily add large numbers of failing tests,
 dynamo_expected_failures = {
     "TestCommonCPU.test_out__refs_fft_ihfft2_cpu_float32 ",
     "TestCommonCPU.test_out__refs_fft_ihfft_cpu_float32 ",

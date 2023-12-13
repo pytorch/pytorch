@@ -15920,12 +15920,6 @@ op_db: List[OpInfo] = [
                    ref=np.isreal,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
                    supports_out=False,
-                   decorators=[
-                       # DecorateInfo(
-                       #     skipIfTorchDynamo("crashes"),
-                       #     'TestCommon',
-                       #     'test_python_ref_torch_fallback'),
-                   ],
                    supports_autograd=False),
     UnaryUfuncInfo('isnan',
                    ref=np.isnan,
