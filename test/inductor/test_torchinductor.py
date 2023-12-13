@@ -7930,6 +7930,40 @@ class CommonTemplate:
         x = torch.rand([4, 4, 3], dtype=torch.float64)
         self.common(fn, (x,))
 
+    def test_float16_to_int16(self):
+        def fn(x):
+            x_view = x.view(dtype=torch.int16)
+            return x_view.mul(2)
+
+        x = torch.ones(4, dtype=torch.float16, device=self.device)
+        ref = fn(x)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(ref, actual)
+
+    def test_bfloat16_to_int16(self):
+        def fn(a, b):
+            x = a + b
+            x_view = x.view(dtype=torch.int16)
+            return x_view.mul(2)
+
+        a = torch.ones(4, dtype=torch.bfloat16, device=self.device)
+        b = torch.ones(4, dtype=torch.bfloat16, device=self.device)
+        ref = fn(a, b)
+        actual = torch.compile(fn)(a, b)
+        self.assertEqual(ref, actual)
+
+    def test_float32_to_int32(self):
+        def fn(a, b):
+            x = a + b
+            x_view = x.view(dtype=torch.int32)
+            return x_view.mul(2)
+
+        a = torch.ones(4, dtype=torch.float32, device=self.device)
+        b = torch.ones(4, dtype=torch.float32, device=self.device)
+        ref = fn(a, b)
+        actual = torch.compile(fn)(a, b)
+        self.assertEqual(ref, actual)
+
 
 @dataclasses.dataclass
 class TestFailure:

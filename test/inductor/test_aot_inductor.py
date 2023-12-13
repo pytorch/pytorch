@@ -68,7 +68,10 @@ def check_model(
     disable_constraint_solver=False,
 ):
     with torch.no_grad(), config.patch(
-        "aot_inductor.abi_compatible", self.abi_compatible
+        {
+            "aot_inductor.abi_compatible": self.abi_compatible,
+            "allow_stack_allocation": self.allow_stack_allocation,
+        }
     ):
         torch.manual_seed(0)
         model = model.to(self.device)
@@ -97,7 +100,10 @@ def check_model_with_multiple_inputs(
     constraints=None,
 ):
     with torch.no_grad(), config.patch(
-        "aot_inductor.abi_compatible", self.abi_compatible
+        {
+            "aot_inductor.abi_compatible": self.abi_compatible,
+            "allow_stack_allocation": self.allow_stack_allocation,
+        }
     ):
         torch.manual_seed(0)
         model = model.to(self.device)
@@ -1404,6 +1410,7 @@ class AOTInductorTestABICompatibleCpu(TestCase):
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = False
 
 
 def fail_with_and_without_stack_allocation(is_skip=False):
@@ -1448,11 +1455,28 @@ copy_tests(
 )
 
 
+class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
+    device = "cpu"
+    abi_compatible = True
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = True
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestABICompatibleCpuWithStackAllocation,
+    "abi_compatible_cpu_with_stack_allocation",
+    CPU_TEST_FAILURES,
+)
+
+
 class AOTInductorTestABICompatibleCuda(TestCase):
     device = "cuda"
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = False
 
 
 copy_tests(
@@ -1477,6 +1501,7 @@ class AOTInductorTestNonABICompatibleCpu(TestCase):
     abi_compatible = False
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = False
 
 
 copy_tests(
@@ -1503,6 +1528,7 @@ class AOTInductorTestNonABICompatibleCuda(TestCase):
     abi_compatible = False
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = False
 
 
 copy_tests(
