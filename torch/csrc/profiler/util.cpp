@@ -340,8 +340,8 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 #ifdef USE_C10D
 static constexpr auto kCommuName = "Collective name";
 static constexpr auto kDtype = "dtype";
-static constexpr auto kInMsgSize = "In msg size";
-static constexpr auto kOutMsgSize = "Out msg size";
+static constexpr auto kInMsgNelems = "In msg nelems";
+static constexpr auto kOutMsgNelems = "Out msg nelems";
 static constexpr auto kInSplit = "In split size";
 static constexpr auto kOutSplit = "Out split size";
 static constexpr auto kGroupSize = "Group size";
@@ -365,8 +365,8 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
   map.emplace(kCommuName, fmt::format("\"{}\"", debugInfo->getColumnName()));
   map.emplace(
       kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
-  map.emplace(kInMsgSize, std::to_string(debugInfo->getInMessageSize()));
-  map.emplace(kOutMsgSize, std::to_string(debugInfo->getOutMessageSize()));
+  map.emplace(kInMsgNelems, std::to_string(debugInfo->getInMessageNelems()));
+  map.emplace(kOutMsgNelems, std::to_string(debugInfo->getOutMessageNelems()));
   auto& inSplitSizes = debugInfo->getInputSplitSizes();
   if (!inSplitSizes.empty() && inSplitSizes.size() <= kTruncatLength) {
     map.emplace(
