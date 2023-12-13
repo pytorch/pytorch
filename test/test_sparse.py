@@ -1595,7 +1595,6 @@ class TestSparse(TestSparseBase):
         true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @coalescedonoff
     @precisionOverride({torch.bfloat16: 5e-2})
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
