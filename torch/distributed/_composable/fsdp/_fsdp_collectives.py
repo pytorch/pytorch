@@ -137,35 +137,39 @@ def foreach_all_gather_copy_out(
     use_uint8: bool,
 ) -> None:
     world_size = group.size()
-    if use_uint8:
+    if use_uint8:  # slow path
         split_sizes_per_rank = [
             fsdp_param.all_gather_input_numel
             * fsdp_param.unsharded_param_data_dtype.itemsize
             for fsdp_param in fsdp_params
         ]
-    else:
-        split_sizes_per_rank = [
-            fsdp_param.all_gather_input_numel for fsdp_param in fsdp_params
-        ]
-    split_sizes = split_sizes_per_rank * world_size
-    splits = torch.split(all_gather_output, split_sizes, dim=0)
-    num_fsdp_params = len(fsdp_params)
-    all_param_shards: List[List[torch.Tensor]] = []
-    outs: List[torch.Tensor] = []
-    for fsdp_param_idx, fsdp_param in enumerate(fsdp_params):
-        param_shards: List[torch.Tensor] = [
-            splits[fsdp_param_idx + rank * num_fsdp_params]
-            for rank in range(world_size)
-        ]
+        split_sizes = split_sizes_per_rank * world_size
+        splits = torch.split(all_gather_output, split_sizes, dim=0)
+        num_fsdp_params = len(fsdp_params)
+        all_param_shards: List[List[torch.Tensor]] = []
+        outs: List[torch.Tensor] = []
+        for fsdp_param_idx, fsdp_param in enumerate(fsdp_params):
+            param_shards: List[torch.Tensor] = [
+                splits[fsdp_param_idx + rank * num_fsdp_params]
+                for rank in range(world_size)
+            ]
+            fsdp_param.alloc_unsharded_param()
+            out = fsdp_param._unsharded_param_data
+            if use_uint8:
+                out = out.view(torch.uint8)
+            all_param_shards.append(param_shards)
+            outs.append(out)
+        with _unsafe_preserve_version_counters(outs):
+            for param_shards, out in zip(all_param_shards, outs):
+                torch.cat(param_shards, out=out)
+        return
+    unsharded_param_datas: List[torch.Tensor] = []
+    for fsdp_param in fsdp_params:
         fsdp_param.alloc_unsharded_param()
-        out = fsdp_param._unsharded_param_data
-        if use_uint8:
-            out = out.view(torch.uint8)
-        all_param_shards.append(param_shards)
-        outs.append(out)
-    with _unsafe_preserve_version_counters(outs):
-        for param_shards, out in zip(all_param_shards, outs):
-            torch.cat(param_shards, out=out)
+        unsharded_param_datas.append(fsdp_param._unsharded_param_data)
+    torch.ops.c10d.fsdp_all_gather_copy_out(
+        unsharded_param_datas, all_gather_output, world_size, max_blocks_per_shard=32
+    )
 
 
 @torch.no_grad()
