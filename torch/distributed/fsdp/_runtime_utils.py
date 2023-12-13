@@ -8,6 +8,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.autograd import Variable
 from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
@@ -36,7 +37,6 @@ from torch.distributed.utils import (
     _to_kwargs,
 )
 from torch.utils import _pytree as pytree
-from torch.autograd import Variable
 
 log = logging.getLogger(__name__)
 
@@ -757,7 +757,9 @@ def _post_backward_hook(
         # Wait for all ops in the current stream (e.g. gradient computation) to
         # finish before reduce-scattering the gradient
         if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-            state._post_backward_stream.wait_stream(state._device_handle.current_stream())
+            state._post_backward_stream.wait_stream(
+                state._device_handle.current_stream()
+            )
 
         with state._device_handle.stream(state._post_backward_stream):
             autograd_computed_grad = flat_param.grad.data
@@ -1494,7 +1496,7 @@ def _register_post_backward_reshard_only_hook(
             obj for obj in args_flat if torch.is_tensor(obj) and obj.requires_grad
         ]
     assert inp_tensors is not None  # mypy
-    hands = register_multi_grad_hook(
+    hook_handle = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard, state, handle)
     )
     if torch.distributed._functional_collectives.is_torchdynamo_compiling():
