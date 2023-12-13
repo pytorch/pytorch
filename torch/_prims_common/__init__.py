@@ -1303,7 +1303,7 @@ def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
         return type(x)
 
 
-def symbol_type(x: sympy.Symbol) -> Type:
+def expr_type(x: sympy.Expr) -> Type:
     if x.is_integer:  # type: ignore[attr-defined]
         return int
     else:
@@ -1411,14 +1411,14 @@ def elementwise_dtypes(
     import sympy
 
     for x in args:
-        if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
+        if not isinstance(x, (Number, TensorLike, sympy.Expr)):
             msg = f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
             raise ValueError(msg)
 
         if isinstance(x, Number):
             highest_type = get_higher_type(highest_type, number_type(x))
-        elif isinstance(x, sympy.Symbol):
-            highest_type = get_higher_type(highest_type, symbol_type(x))
+        elif isinstance(x, sympy.Expr):
+            highest_type = get_higher_type(highest_type, expr_type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
