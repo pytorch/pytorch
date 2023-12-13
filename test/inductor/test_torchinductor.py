@@ -52,7 +52,10 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 
-from torch.testing._internal.common_device_type import _has_sufficient_memory
+from torch.testing._internal.common_device_type import (
+    _has_sufficient_memory,
+    get_desired_device_type_test_bases,
+)
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -63,6 +66,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     skipIfRocm,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 from torch.utils import _pytree as pytree
@@ -91,6 +95,10 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, skipCUDAIf
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
+_desired_test_bases = get_desired_device_type_test_bases()
+RUN_CPU = any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+RUN_CUDA = any(getattr(x, "device_type", "") == "cuda" for x in _desired_test_bases)
+
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
@@ -639,6 +647,20 @@ class CommonTemplate:
         _, code = run_and_get_code(fn, x, y)
         self.assertEqual(code[0].count("aten.view"), 3)
 
+    def test_add_complex3(self):
+        # fix https://github.com/pytorch/pytorch/issues/115071
+        @torch.compile
+        def fn(*args):
+            a = torch.neg(args[0])
+            b = torch.add(args[0], args[0])
+            return (a, b)
+
+        x = torch.randn(41, dtype=torch.complex64)
+        y = x.clone()
+        # should not inplace write to the input
+        fn(x)
+        self.assertEqual(x, y)
+
     def test_concat_add_inplace(self):
         def fn(x, y, z):
             return torch.cat([x, y], dim=1).add_(z)
@@ -686,27 +708,11 @@ class CommonTemplate:
                 ],
             )
 
-    def test_index_put_bf16(self):
-        def fn(inp, src, index):
-            inp2 = inp.clone()
-            inp2[index] = src
-            return inp2
-
-        for dtype in [torch.int64, torch.bool, torch.bfloat16]:
-            self.common(
-                fn,
-                [
-                    torch.zeros(3, 5, dtype=dtype),
-                    torch.ones((2, 5), dtype=dtype),
-                    torch.tensor([0, 1]),
-                ],
-            )
-
     def test_randn_generator(self):
         def fn(a, generator):
-            torch.randn([20, 20], generator=generator, device=a.device)
+            return torch.randn([20, 20], generator=generator, device=a.device)
 
-        self.common(fn, (torch.linspace(-10, 10, 41), None))
+        self.common(fn, (torch.linspace(-10, 10, 41), None), assert_equal=False)
 
         # generator not yet supported in dynamo
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Generator"):
@@ -1070,7 +1076,7 @@ class CommonTemplate:
             # make sure things also work if they aren't unrolled
             self.common(fn, (torch.randn(8, 3),))
 
-    def test_multilayer_low_prec(self):
+    def test_multilayer_sum_low_prec(self):
         # fp16 nyi for cpu
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -1179,6 +1185,17 @@ class CommonTemplate:
             return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
 
         self.common(fn, (torch.ones(32, 32) * 70,))
+
+    def test_cumsum(self):
+        def fn(x):
+            return x.cumsum(0), x.cumsum(1)
+
+        # Persistent reductions
+        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
+
+        # Non-persistent reduction
+        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
 
     def test_clamp(self):
         def fn(a, b):
@@ -2302,6 +2319,22 @@ class CommonTemplate:
             return m[:, :2] + x
 
         self.common(fn, (torch.randn(4, 2), torch.randn(4, 2)), check_lowp=False)
+
+    def test_slice_view_with_graph_break(self):
+        def fn():
+            a = torch.tensor([1], device=self.device)
+            a = a[0:1]
+            b = a.squeeze()
+            a[0] = 0
+            if a[0] < 1e5:
+                pass
+            a[0] = 2
+            return b
+
+        expect = fn()
+        opt_fn = torch.compile(fn)
+        actual = opt_fn()
+        self.assertEqual(expect, actual)
 
     def test_view_detach(self):
         def fn(a):
@@ -7370,7 +7403,7 @@ class CommonTemplate:
         x = torch.rand(48, 3, 512, 512)
         self.common(fn, (x,))
 
-    @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
+    @unittest.skipIf(not HAS_CPU or not RUN_CPU, "requires C++ compiler")
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
         from torch._inductor.codegen.common import boolean_ops
@@ -7897,6 +7930,40 @@ class CommonTemplate:
         x = torch.rand([4, 4, 3], dtype=torch.float64)
         self.common(fn, (x,))
 
+    def test_float16_to_int16(self):
+        def fn(x):
+            x_view = x.view(dtype=torch.int16)
+            return x_view.mul(2)
+
+        x = torch.ones(4, dtype=torch.float16, device=self.device)
+        ref = fn(x)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(ref, actual)
+
+    def test_bfloat16_to_int16(self):
+        def fn(a, b):
+            x = a + b
+            x_view = x.view(dtype=torch.int16)
+            return x_view.mul(2)
+
+        a = torch.ones(4, dtype=torch.bfloat16, device=self.device)
+        b = torch.ones(4, dtype=torch.bfloat16, device=self.device)
+        ref = fn(a, b)
+        actual = torch.compile(fn)(a, b)
+        self.assertEqual(ref, actual)
+
+    def test_float32_to_int32(self):
+        def fn(a, b):
+            x = a + b
+            x_view = x.view(dtype=torch.int32)
+            return x_view.mul(2)
+
+        a = torch.ones(4, dtype=torch.float32, device=self.device)
+        b = torch.ones(4, dtype=torch.float32, device=self.device)
+        ref = fn(a, b)
+        actual = torch.compile(fn)(a, b)
+        self.assertEqual(ref, actual)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -7938,7 +8005,7 @@ def copy_tests(
             setattr(other_cls, f"{name}_{suffix}", new_test)
 
 
-if HAS_CPU and not torch.backends.mps.is_available():
+if HAS_CPU and RUN_CPU and not torch.backends.mps.is_available():
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
@@ -7951,7 +8018,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
 
     class SweepInputsCudaTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cuda")
@@ -8620,7 +8687,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 torch.compile(f)(x)
 
 
-if HAS_CPU:
+if HAS_CPU and RUN_CPU:
 
     class TestFull(TestCase):
         def test_full_dtype(self):

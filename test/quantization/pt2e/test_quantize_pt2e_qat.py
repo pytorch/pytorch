@@ -159,6 +159,7 @@ class PT2EQATTestCase(QuantizationTestCase):
         self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
 
         if verify_convert:
+            # We don't want to impose any ordering requirements between move_exported_model_to_eval and convert_pt2e
             torch.ao.quantization.move_exported_model_to_eval(model_pt2e)
             model_pt2e = convert_pt2e(model_pt2e)
             quant_result_pt2e = model_pt2e(*example_inputs)
@@ -340,10 +341,10 @@ class PT2EQATTestCase(QuantizationTestCase):
         bn_running_var_add_node = sqrt_node.args[0]
         (bn_running_var_node, eps) = bn_running_var_add_node.args
         self.assertEqual(scale_factor_node.target, torch.ops.aten.div.Tensor)
-        self.assertTrue("param_constant" in bn_weight_node.target)
+        self.assertTrue("bn_weight" in bn_weight_node.target)
         self.assertEqual(sqrt_node.target, torch.ops.aten.sqrt.default)
         self.assertEqual(bn_running_var_add_node.target, torch.ops.aten.add.Tensor)
-        self.assertTrue("tensor_constant" in bn_running_var_node.target)
+        self.assertTrue("bn_running_var" in bn_running_var_node.target)
         self.assertEqual(eps, 1e-5)
 
 
