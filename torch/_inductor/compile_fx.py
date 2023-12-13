@@ -549,7 +549,7 @@ def fx_codegen_and_compile(
             if V.aot_compilation is True:
                 return compiled_fn
 
-            if graph.disable_cudagraphs:
+            if cudagraphs and graph.disable_cudagraphs:
                 perf_hint_log.warning(
                     "skipping cudagraphs due to %s", V.graph.disable_cudagraphs_reason
                 )

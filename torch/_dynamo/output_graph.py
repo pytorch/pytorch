@@ -911,7 +911,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             pass1 = PyCodegen(tx, root, graph_output_var)
             self.side_effects.codegen_hooks(pass1)
             self.side_effects.codegen_save_tempvars(pass1)
-            pass1.restore_stack(stack_values)
+            pass1.restore_stack(stack_values, value_from_source=not tx.export)
             self.side_effects.codegen_update_mutated(pass1)
 
             # one more time now that we have established tempvars
@@ -923,7 +923,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             )
             self.side_effects.codegen_hooks(pass2)
             self.side_effects.codegen_save_tempvars(pass2)
-            pass2.restore_stack(stack_values)
+            pass2.restore_stack(stack_values, value_from_source=not tx.export)
             self.side_effects.codegen_update_mutated(pass2)
 
             output = []
