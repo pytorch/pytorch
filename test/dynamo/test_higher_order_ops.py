@@ -1293,6 +1293,20 @@ def forward(self, L_x_ : torch.Tensor):
         ):
             M()(inp)
 
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            with torch.inference_mode():
+                torch.compile(M())(inp)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            with torch.inference_mode():
+                M()(inp)
+
     def test_cond_raise_error_when_mutating_input(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1322,6 +1336,20 @@ def forward(self, L_x_ : torch.Tensor):
         ):
             M()(inp)
 
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            with torch.inference_mode():
+                torch.compile(M())(inp)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            with torch.inference_mode():
+                M()(inp)
+
     def test_cond_raise_error_when_mutating_closure(self):
         t = torch.randn(1)
 
@@ -1348,6 +1376,20 @@ def forward(self, L_x_ : torch.Tensor):
             r"Cond doesn't work unless it is captured completely with torch.compile",
         ):
             fn(inp)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            with torch.inference_mode():
+                torch.compile(fn)(inp)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            with torch.inference_mode():
+                fn(inp)
 
     def test_cond_raise_error_when_output_alias_input(self):
         def alias_input(pred, x, y):
