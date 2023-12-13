@@ -1,6 +1,4 @@
 #include <ATen/ATen.h>
-//#ifndef AT_PER_OPERATOR_HEADERS
-//#include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 
@@ -26,11 +24,10 @@ namespace at { namespace native {
 #include <cudnn.h>
 
 #include <iostream>
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8900
 
 namespace at { namespace native {
 
-
-#if (CUDNN_VERSION >= 8900)
 #include <cudnn_frontend.h>
 
 namespace fe = cudnn_frontend;

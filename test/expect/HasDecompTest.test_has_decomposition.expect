@@ -76,6 +76,7 @@ aten::_cudnn_ctc_loss.Tensor
 aten::_cudnn_ctc_loss.out
 aten::_cudnn_init_dropout_state
 aten::_cudnn_init_dropout_state.out
+aten::_cudnn_mha
 aten::_cudnn_rnn
 aten::_cudnn_rnn.out
 aten::_cudnn_rnn_backward

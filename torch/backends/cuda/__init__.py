@@ -16,6 +16,8 @@ __all__ = [
     "matmul",
     "SDPBackend",
     "SDPAParams",
+    "enable_cudnn_sdp",
+    "cudnn_sdp_enabled",
     "enable_flash_sdp",
     "flash_sdp_enabled",
     "enable_mem_efficient_sdp",
