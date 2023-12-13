@@ -3,12 +3,13 @@
 # This writes one file: variable_factories.h
 
 import re
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import torchgen.api.python as python
 from torchgen.api import cpp
 
 from torchgen.api.types import CppSignatureGroup
+from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function, with_native_function_and
 from torchgen.gen import parse_native_yaml
 from torchgen.model import NativeFunction, TensorOptionsArguments, Variant
@@ -74,6 +75,30 @@ def is_factory_function(f: NativeFunction) -> bool:
     return has_tensor_options or name.endswith("_like")
 
 
+FACTORY_FUNCTION_DEFINITION = CodeTemplate(
+    """\
+inline at::Tensor ${sig_name}(${formals}) {
+  at::AutoDispatchBelowADInplaceOrView guard;
+  ${try_call_w_dummy_stmt}
+  ${call_and_return_stmt}
+}
+"""
+)
+
+
+TRY_CALL_WITH_DUMMY = CodeTemplate(
+    """\
+auto ret = c10::try_call_with_dummy([=](at::Tensor dummy) {
+  ${ck_mem_fmt_stmt}
+  ${call_and_return_stmt}
+}, size);
+if (ret.has_value()) {
+  return ret.value();
+}
+"""
+)
+
+
 @with_native_function_and
 def process_function(f: NativeFunction, all_fns: List[NativeFunction]) -> Optional[str]:
     name = cpp.name(f.func)
@@ -83,11 +108,15 @@ def process_function(f: NativeFunction, all_fns: List[NativeFunction]) -> Option
     if Variant.function not in f.variants or not is_factory:
         return None
 
+    # Note [ NestedTensor Factory Function Codegen ]
+    #
     # Look for the corresponding new_* function, e.g. zeros -> new_zeros
     # If it exists, insert additional logic for the symint signature to
     # call the new_* function via try_call_with_dummy. This is used for
     # dispatching to the python dispatch for NT when the sizes for factory
     # functions contains a singleton int.
+    #
+    # Also see Note [ NestedTensor factory functions ]
     new_fn = None
     for fn in all_fns:
         name_split = fn.func.name.name.base.split("new_")
@@ -105,73 +134,67 @@ def process_function(f: NativeFunction, all_fns: List[NativeFunction]) -> Option
     if cpp_sigs.symint_signature is not None:
         sigs.append(cpp_sigs.symint_signature)
     r = ""
+
     for i, sig in enumerate(sigs):
+        formals: List[str] = []
+        exprs_w_mem_fmt: List[str] = []
+        exprs_wo_mem_fmt: List[str] = []
+        req_grad_expr = "false"
+        ck_mem_fmt_stmt = ""
 
-        def get_formals_and_exprs(
-            include_memory_format: bool,
-        ) -> Tuple[List[str], List[str], str, str]:
-            # Generate formals (used for the signature) and exprs
-            # (used for the call). In order to perform the new_* call, we need
-            # to remove the memory_format argument from the exprs.
-            formals: List[str] = []
-            exprs: List[str] = []
-            requires_grad = "false"
-            check_memory_format = ""
-            for arg in sig.arguments():
-                qualified_type = fully_qualified_type(arg.type)
-                if arg.default:
-                    formals.append(f"{qualified_type} {arg.name} = {arg.default}")
+        for arg in sig.arguments():
+            qualified_type = fully_qualified_type(arg.type)
+            if arg.default:
+                formals.append(f"{qualified_type} {arg.name} = {arg.default}")
+            else:
+                formals.append(f"{qualified_type} {arg.name}")
+
+            if isinstance(arg.argument, TensorOptionsArguments):
+                # note: we remove the requires_grad setting from the TensorOptions because
+                # it is ignored anyways (and we actually have an assertion that it isn't set
+                # which would fail otherwise). We handle requires_grad explicitly here
+                # instead of passing it through to the kernel.
+                options_wo_req_grad = (
+                    f"at::TensorOptions({arg.name}).requires_grad(c10::nullopt)"
+                )
+                exprs_w_mem_fmt.append(options_wo_req_grad)
+                exprs_wo_mem_fmt.append(options_wo_req_grad)
+                # Manually set the requires_grad bit on the result tensor.
+                req_grad_expr = f"{arg.name}.requires_grad()"
+            else:
+                # new_like functions don't accept memory_format argument (not sure
+                # if intentional), but we need to generate two versions of the function
+                # call.
+                if not arg.name == "memory_format":
+                    # skip memory_format argument
+                    exprs_wo_mem_fmt.append(arg.name)
                 else:
-                    formals.append(f"{qualified_type} {arg.name}")
+                    ck_mem_fmt_stmt = "TORCH_CHECK(memory_format == c10::nullopt);"
+                exprs_w_mem_fmt.append(arg.name)
 
-                if isinstance(arg.argument, TensorOptionsArguments):
-                    # note: we remove the requires_grad setting from the TensorOptions because
-                    # it is ignored anyways (and we actually have an assertion that it isn't set
-                    # which would fail otherwise). We handle requires_grad explicitly here
-                    # instead of passing it through to the kernel.
-                    exprs.append(
-                        f"at::TensorOptions({arg.name}).requires_grad(c10::nullopt)"
-                    )
-                    # Manually set the requires_grad bit on the result tensor.
-                    requires_grad = f"{arg.name}.requires_grad()"
-                else:
-                    if arg.name == "memory_format" and not include_memory_format:
-                        # skip memory_format argument
-                        check_memory_format = (
-                            "TORCH_CHECK(memory_format == c10::nullopt);"
-                        )
-                        continue
-                    exprs.append(arg.name)
+        def get_call_and_ret_stmt(name: str, exprs: List[str]) -> str:
+            return f"return autograd::make_variable({name}({', '.join(exprs)}), /*requires_grad=*/{req_grad_expr});"
 
-            return formals, exprs, requires_grad, check_memory_format
-
-        # new_like functions don't accept memory_format argument
-        formals, exprs_w_mf, requires_grad, _ = get_formals_and_exprs(True)
-        _, exprs_wo_mf, _, check_memory_format = get_formals_and_exprs(False)
-
-        def get_return_stmt(name: str, exprs: List[str]) -> str:
-            return f"return autograd::make_variable({name}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});"
-
-        if i == 1 and new_fn is not None:
-            # symint signature is always the second one
-            try_call_stmt = f"""\
-auto ret = c10::try_call_with_dummy([=](at::Tensor dummy) {{
-    {check_memory_format}
-    {get_return_stmt('dummy.' + new_fn_sig.name(), exprs_wo_mf)}
-  }}, size);
-  if (ret.has_value()) {{
-    return ret.value();
-  }}"""
-        else:
-            try_call_stmt = ""
-
-        r += f"""\
-inline at::Tensor {sig.name()}({', '.join(formals)}) {{
-  at::AutoDispatchBelowADInplaceOrView guard;
-  {try_call_stmt}
-  {get_return_stmt('at::' + sig.name(), exprs_w_mf)}
-}}
-"""
+        try_call_w_dummy_stmt = ""
+        if new_fn is not None and i == 1:
+            # See Note [ NestedTensor Factory Function Codegen ]
+            # If we have a new_* function and we are currently processing the
+            # symint signature, try to call it via try_call_with_dummy.
+            # The symint signature is always the second one.
+            try_call_w_dummy_stmt = TRY_CALL_WITH_DUMMY.substitute(
+                ck_mem_fmt_stmt=ck_mem_fmt_stmt,
+                call_and_return_stmt=get_call_and_ret_stmt(
+                    "dummy." + new_fn_sig.name(), exprs_wo_mem_fmt
+                ),
+            )
+        r += FACTORY_FUNCTION_DEFINITION.substitute(
+            sig_name=sig.name(),
+            formals=", ".join(formals),
+            try_call_w_dummy_stmt=try_call_w_dummy_stmt,
+            call_and_return_stmt=get_call_and_ret_stmt(
+                "at::" + sig.name(), exprs_w_mem_fmt
+            ),
+        )
     return r
 
 
