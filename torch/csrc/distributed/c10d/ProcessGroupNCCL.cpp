@@ -1324,12 +1324,12 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
 
 #if defined(__linux__)
 struct DumpPipe {
-  DumpPipe(bool enabled, int rank) {
-    if (!enabled) {
+  DumpPipe(int rank) {
+    std::string fileStem =
+        getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
+    if (fileStem.empty()) {
       return;
     }
-    std::string fileStem = getCvarString(
-        {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
     TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_TEMP_FILE is empty");
     std::string filename = c10::str(fileStem, rank, ".pipe");
     TORCH_CHECK(
@@ -1365,7 +1365,7 @@ struct DumpPipe {
 };
 #else
 struct DumpPipe {
-  DumpPipe(bool enabled, int rank) {}
+  DumpPipe(int rank) {}
   bool shouldDump() {
     return false;
   }
@@ -1380,7 +1380,7 @@ void ProcessGroupNCCL::watchdogHandler() {
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
-  DumpPipe dumpPipe(dumpOnTimeout_, rank_);
+  DumpPipe dumpPipe(rank_);
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
