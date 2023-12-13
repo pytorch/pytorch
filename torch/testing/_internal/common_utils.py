@@ -94,7 +94,6 @@ from torch.testing._internal.common_dtype import get_all_dtypes
 import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
-from tools.stats.upload_metrics import emit_metric
 
 
 # Class to keep track of test flags configurable by environment variables.
@@ -2502,7 +2501,11 @@ def emit_dynamo_test_metric():
         dynamo_strict_counter,
         dynamo_total_counter,
     )
-
+    try:
+        from tools.stats.upload_metrics import emit_metric
+    except ImportError:
+        # Not all CI runs have access to tools package?
+        return
     emit_metric(
         "dynamo_strict_stats",
         {"strict": dynamo_strict_counter, "total": dynamo_total_counter},
