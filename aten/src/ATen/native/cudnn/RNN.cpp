@@ -160,13 +160,13 @@ namespace {
       this->algo = algo;
     }
 
-#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNN_V8_VERSION
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
     void set(int64_t mode, int64_t hidden_size, int64_t proj_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
 #else
     void set(int64_t mode, int64_t input_size, bool packed, int64_t hidden_size, int64_t proj_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
 #endif
       this->set_mode(mode);
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNN_V8_VERSION
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= RNNV8VERSION
       this->input_size = input_size;
       this->packed = packed;
 #endif
@@ -1299,7 +1299,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     _copyParams(MatrixRef<Tensor>{weight, static_cast<size_t>(weight_stride0)},
                 MatrixRef<Tensor>{params, params_stride0});
   } else {
-#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8_VERSION
+#if defined(CUDNN_VERSION) && CUDNN_VERSION < RNNV8VERSION
     w_desc.set(weight_buf, 3);
 #endif
   }
