@@ -1367,6 +1367,9 @@ class FakeTensorDispatchCache(TestCase):
             self.assertNotIn(reason, info.bypasses)
 
     def test_cache_hit(self):
+        """
+        Test that cache hit/miss counters are updated correctly.
+        """
         with FakeTensorMode():
             x = torch.randn(4, 3)
             y = torch.randn(4, 3)
@@ -1384,6 +1387,9 @@ class FakeTensorDispatchCache(TestCase):
             )
 
     def test_cache_bypass(self):
+        """
+        Test that cache bypass counters are updated correctly.
+        """
         with FakeTensorMode():
             x = torch.randn(1, 2)
 
@@ -1394,6 +1400,9 @@ class FakeTensorDispatchCache(TestCase):
             self.assertBypasses("inplace view", 1)
 
     def test_cache_default_dtype(self):
+        """
+        Test that the default dtype is respected when serving cached results.
+        """
         with FakeTensorMode():
             x = torch.tensor([1, 2], dtype=torch.int32)
             torch.set_default_dtype(torch.float32)
@@ -1417,6 +1426,9 @@ class FakeTensorDispatchCache(TestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cache_default_device(self):
+        """
+        Test that the default device is respected when serving cached results.
+        """
         with FakeTensorMode():
             FakeTensorMode.cache_clear()
             self.assertHitsMisses(0, 0)
@@ -1440,6 +1452,10 @@ class FakeTensorDispatchCache(TestCase):
             self.assertHitsMisses(1, 2)
 
     def test_cache_inplace_op(self):
+        """
+        Test that inplace ops served from the cache correctly reference the
+        input parameter.
+        """
         with FakeTensorMode():
             x = torch.randn(1, 2)
             y = torch.randn(1, 2)
@@ -1456,21 +1472,45 @@ class FakeTensorDispatchCache(TestCase):
             self.assertEqual(id(x), id(w))
 
     def test_cache_view_op(self):
+        """
+        Test that view ops are handled correctly when served from the cache.
+        """
         with FakeTensorMode():
-            x = torch.rand(25)
+            x1 = torch.ones(2, requires_grad=True).clone()
+            x2 = torch.ones(2, requires_grad=True).clone()
+            y2 = x2.view(-1)
 
             FakeTensorMode.cache_clear()
             self.assertHitsMisses(0, 0)
 
-            y = x.view(5, 5)
+            # Test operating on a non-view tensor, then the same operation
+            # on a view tensor. Assert that we see a cache hit, but the
+            # view property is set correctly.
+            z1 = x1.mul_(2)
             self.assertHitsMisses(0, 1)
-            self.assertTrue(outputs_alias_inputs(x, y))
+            self.assertFalse(z1._is_view())
 
-            z = x.view(5, 5)
+            z2 = y2.mul_(2)
             self.assertHitsMisses(1, 1)
-            self.assertTrue(outputs_alias_inputs(x, z))
+            self.assertTrue(z2._is_view())
+
+            # Now the other way around: first operate on a view tensor, then
+            # the same operation on a non-view tensor.
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            z2 = y2.mul_(2)
+            self.assertHitsMisses(0, 1)
+            self.assertTrue(z2._is_view())
+
+            z1 = x1.mul_(2)
+            self.assertHitsMisses(1, 1)
+            self.assertFalse(z1._is_view())
 
     def test_cache_dispatch_key_set(self):
+        """
+        Test that operations that change the dispatch key set bypass caching.
+        """
         with FakeTensorMode():
             FakeTensorMode.cache_clear()
             self.assertBypasses("dispatch_key_set mismatch", 0)

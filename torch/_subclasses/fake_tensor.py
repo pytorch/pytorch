@@ -1571,8 +1571,7 @@ class FakeTensorMode(TorchDispatchMode):
                 if FakeTensorMode.cache_crosscheck:
                     # For debugging / testing: Validate that the output synthesized
                     # from the cache matches the output created by normal dispatch.
-                    xcheck = self._dispatch_impl(func, types, args, kwargs)
-                    assert_metadata_eq(assert_eq, output, xcheck)
+                    self._crosscheck_cache_output(output, func, types, args, kwargs)
             else:
                 output = self._dispatch_impl(func, types, args, kwargs)
                 entry = self._make_cache_entry(key, func, args, kwargs, output)
@@ -1660,6 +1659,8 @@ class FakeTensorMode(TorchDispatchMode):
                 raise _BypassDispatchCache("symbolic shape")
             if arg.constant is not None:
                 raise _BypassDispatchCache("constant attribute")
+            if arg.is_sparse:
+                raise _BypassDispatchCache("sparse tensor")
             return extract_tensor_metadata(arg)
         elif isinstance(arg, torch.Tensor):
             raise _BypassDispatchCache("non-fake tensor")
@@ -1765,6 +1766,33 @@ class FakeTensorMode(TorchDispatchMode):
                 )
 
         return FakeTensor(self, empty, metadata.device)
+
+    def _crosscheck_cache_output(
+        self,
+        output: FakeTensor,
+        func: OpOverload,
+        types: Tuple[Any, ...],
+        args: Tuple[Any, ...],
+        kwargs: Dict[str, Any],
+    ):
+        """
+        Helper to validate that the output synthesized from the cache matches
+        the output created by normal dispatch.
+        """
+        try:
+            true_output = self._dispatch_impl(func, types, args, kwargs)
+        except Exception as e:
+            raise RuntimeError(
+                f"FakeTensor cache crosscheck failure: func={func}, "
+                f"args={args}, kwargs={kwargs}: Dispatch raised={e}"
+            ) from e
+        try:
+            assert_metadata_eq(assert_eq, true_output, output)
+        except Exception as e:
+            raise RuntimeError(
+                f"FakeTensor cache crosscheck failure: func={func}, "
+                f"args={args}, kwargs={kwargs}"
+            ) from e
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
