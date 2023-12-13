@@ -154,7 +154,9 @@ class SuperVariable(VariableTracker):
             object.__setattr__,
         ) and isinstance(self.objvar, variables.CustomizedDictVariable):
             assert not kwargs and len(args) == 2
-            return self.objvar.call_method(tx, "__setitem__", args, kwargs)
+            return super(variables.CustomizedDictVariable, self.objvar).call_method(
+                tx, "__setitem__", args, kwargs
+            )
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
