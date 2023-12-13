@@ -14227,7 +14227,7 @@ op_db: List[OpInfo] = [
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                device_type='cuda'),
+                         device_type='cuda'),
         )
     ),
     OpInfo(
