@@ -1034,7 +1034,7 @@ class CPUReproTests(TestCase):
                     2,
                 ),
             )
-            assert metrics.generated_cpp_vec_kernel_count == 1
+            assert metrics.generated_cpp_vec_kernel_count == 2
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -2125,7 +2125,7 @@ class CPUReproTests(TestCase):
                     m = Model().eval() if eval_mode else Model()
                     self.common(m, (x,))
                     if simdlen != 1:
-                        assert metrics.generated_cpp_vec_kernel_count == 6
+                        assert metrics.generated_cpp_vec_kernel_count == 8
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
