@@ -3375,6 +3375,10 @@ class TestNestedTensorSubclass(NestedTestCase):
                     ValueError, "only supports shapes of form"):
                 torch.zeros(transposed_shape, **kwargs)
 
+            new_shape = nt.shape[:2] + (3, 4)
+            zeros = torch.zeros(new_shape, **kwargs)
+            self.assertEqual(zeros.shape, new_shape)
+
     @torch._dynamo.config.patch(suppress_errors=True)
     def test_layer_norm_2(self, device):
         test_tensor_list = self._get_list_for_jagged_tensor(
