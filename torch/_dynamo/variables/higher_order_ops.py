@@ -116,6 +116,16 @@ def _call_function_and_unflatten_output(tx, fn, args, kwargs, ret_vt, ret_treesp
     )
 
 
+# NOTE:
+# Mutation detection: We detect mutations by checking the example_value's _version
+# This approach has a corner case that if torch.compile is wrapped
+# by an inference_mode(True) context manager, the tensor version will not be upated.
+# So we override the inference_mode to False then run the extracted graph module.
+#
+# Aliasing detection: We detect mutations by checking the example_value's _version
+# This approach has a corner case that if torch.compile is wrapped
+# by an inference_mode(True) context manager, the tensor version will not be upated.
+# So we override the inference_mode to False then run the extracted graph module.
 def _detect_input_mutations_and_aliasing(tx, graph_module, proxy_args):
     from torch.multiprocessing.reductions import StorageWeakRef
 
