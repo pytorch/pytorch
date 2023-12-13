@@ -233,6 +233,8 @@ def mps_ops_modifier(ops):
         'atleast_1d',
         'atleast_2d',
         'atleast_3d',
+        'as_strided',
+        'as_strided_scatter',
         'broadcast_tensors',
         'broadcast_to',
         'clone',
