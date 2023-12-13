@@ -1489,6 +1489,11 @@ def do_sharding(
         must_serial=must_serial,
         sort_by_time=sort_by_time,
     )
+    print(shards)
+    try:
+        print(json.dumps(shards, indent=2))
+    except Exception as e:
+        print(e)
     _, tests_from_shard = shards[which_shard - 1]
     selected_tests = tests_from_shard
 
