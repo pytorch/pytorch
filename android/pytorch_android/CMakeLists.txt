@@ -116,6 +116,7 @@ if(ANDROID_ABI)
   import_static_lib(libpthreadpool)
   import_static_lib(libeigen_blas)
   import_static_lib(libcpuinfo)
+  import_static_lib(libclog)
 
   # Link most things statically on Android.
   set(pytorch_jni_LIBS
