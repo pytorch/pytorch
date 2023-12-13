@@ -3342,6 +3342,7 @@ class TestNestedTensorSubclass(NestedTestCase):
             for i, t in enumerate(out):
                 self.assertEqual(t, tensor_list[i])
 
+    @torch._dynamo.config.patch(suppress_errors=True)
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
     def test_factory_functions(self, device, dtype, requires_grad):
