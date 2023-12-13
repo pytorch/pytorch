@@ -77,6 +77,7 @@ from torch.nn import (
     ParameterList,
     Sequential,
 )
+from .dynamo_test_failures import dynamo_expected_failures
 from torch.onnx import (
     register_custom_op_symbolic,
     unregister_custom_op_symbolic,
@@ -1383,13 +1384,15 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
     return decorator
 
 
-def markDynamoStrictTest(cls_or_func=None, nopython=False):
+def markDynamoStrictTest(cls_or_func=None, nopython=False, suppress_errors=False):
     """
     Marks the test as 'strict'. In strict mode, we reset before and after the
-    test, and run without suppress errors.
+    test, and run without suppress errors by default.
 
     Args:
     - nopython: if we should run torch._dynamo.optimize with nopython={True/False}.
+    - suppress_errors: if we should surpress errors. Please don't set this to True
+    unless you know what you're doing.
     """
     def decorator(cls_or_func):
         if inspect.isclass(cls_or_func):
@@ -1402,7 +1405,7 @@ def markDynamoStrictTest(cls_or_func=None, nopython=False):
         @wraps(fn)
         def wrapper(*args, **kwargs):
             torch._dynamo.reset()
-            with unittest.mock.patch("torch._dynamo.config.suppress_errors", False):
+            with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors):
                 fn(*args, **kwargs)
             torch._dynamo.reset()
         return wrapper
@@ -2694,6 +2697,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             elif TEST_WITH_TORCHDYNAMO:
                 # TorchDynamo optimize annotation
                 super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
+                key = f"{self.__class__.__name__}.{self._testMethodName}"
+                if key in dynamo_expected_failures:
+                    method = getattr(self, self._testMethodName)
+                    unittest.expectedFailure(self)
 
             super_run(result=result)
 
