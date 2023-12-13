@@ -13,7 +13,6 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake
 from torch._dispatch.python import enable_python_dispatcher, enable_pre_dispatch
 import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
-from torch.fx.experimental.symbolic_shapes import definitely_true
 
 from contextlib import contextmanager, nullcontext
 import inspect
@@ -76,34 +75,17 @@ no_default = object()
 py_sym_types = (SymInt, SymFloat, SymBool)
 
 
-class SuppressGuardsAndCheckIfAnyAdded:
-    def __init__(self, shape_env):
-        self.guards_added = False
-        self.shape_env = shape_env
-        self.num_guards = len(shape_env.guards)
-
-    def __enter__(self):
-        pass
-
-    def __exit__(self, *args):
-        self.guards_added = len(self.shape_env.guards) != self.num_guards
-        self.shape_env.guards = self.shape_env.guards[0:self.num_guards]
-
 @dataclass
 class SymExprHash:
     sym_obj: py_sym_types
 
     def __hash__(self) -> int:
-        return hash((type(self.sym_obj), hash(self.sym_obj.node.expr)))
+        return hash((type(self.sym_obj), self.sym_obj.node.expr))
 
     def __eq__(self, value: "SymExprHash") -> bool:
         assert isinstance(value, SymExprHash)
 
-        sg = SuppressGuardsAndCheckIfAnyAdded(self.sym_obj.node.shape_env)
-        with sg:
-            eq = definitely_true(self.sym_obj == value.sym_obj)
-
-        return eq and not sg.guards_added
+        return self.sym_obj.node.expr == value.sym_obj.node.expr
 
 
 def wrap_to_sym_expr_hash(key):
@@ -233,7 +215,7 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     # reuse existing sym int if it exists instead of inserting sym_size calls,
     # which can interfere with graph passes / pattern-matching
     def get_existing_proxy(s_inp):
-        if isinstance(s_inp, torch.SymInt):
+        if isinstance(s_inp, py_sym_types):
             if p := tracer.symnode_tracker.get(s_inp, None):
                 return p
 
