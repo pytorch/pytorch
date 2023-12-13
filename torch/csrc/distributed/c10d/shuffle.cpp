@@ -6,6 +6,16 @@ void fsdpAllGatherCopyOut(
     std::vector<at::Tensor> params,
     at::Tensor allGatherRes,
     int64_t worldSize);
+
+void fsdpAllGatherCopyOut_no_align(
+    std::vector<at::Tensor> params,
+    at::Tensor allGatherRes,
+    int64_t worldSize);
+
+void fsdpAllGatherCopyOut_no_align_2(
+    std::vector<at::Tensor> params,
+    at::Tensor allGatherRes,
+    int64_t worldSize);
 #endif
 
 namespace {
@@ -56,6 +66,28 @@ void fsdp_all_gather_copy_out(
 #endif
 }
 
+void fsdp_all_gather_copy_out_no_align(
+    std::vector<at::Tensor> params,
+    at::Tensor all_gather_res,
+    int64_t world_size) {
+#ifdef USE_CUDA
+  return fsdpAllGatherCopyOut_no_align(params, all_gather_res, world_size);
+#else
+  C10_THROW_ERROR(NotImplementedError, "Not implemented for CPU");
+#endif
+}
+
+void fsdp_all_gather_copy_out_no_align_2(
+    std::vector<at::Tensor> params,
+    at::Tensor all_gather_res,
+    int64_t world_size) {
+#ifdef USE_CUDA
+  return fsdpAllGatherCopyOut_no_align_2(params, all_gather_res, world_size);
+#else
+  C10_THROW_ERROR(NotImplementedError, "Not implemented for CPU");
+#endif
+}
+
 } // namespace
 
 TORCH_LIBRARY_FRAGMENT(c10d, m) {
@@ -71,5 +103,19 @@ TORCH_LIBRARY_FRAGMENT(c10d, m) {
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::fsdp_all_gather_copy_out),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "fsdp_all_gather_copy_out_no_align(Tensor[] params, Tensor all_gather_res, int world_size) -> ()",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd,
+          ::fsdp_all_gather_copy_out_no_align),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "fsdp_all_gather_copy_out_no_align_2(Tensor[] params, Tensor all_gather_res, int world_size) -> ()",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd,
+          ::fsdp_all_gather_copy_out_no_align_2),
       {at::Tag::pt2_compliant_tag});
 }

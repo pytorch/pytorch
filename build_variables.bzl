@@ -507,7 +507,6 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/quantization/quantization.cpp",
     "torch/csrc/distributed/c10d/reducer.cpp",
     "torch/csrc/distributed/c10d/sequence_num.cpp",
-    "torch/csrc/distributed/c10d/shuffle.cpp",
     "torch/csrc/distributed/c10d/socket.cpp",
     "torch/csrc/distributed/c10d/Work.cpp",
 ]
@@ -677,6 +676,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
+    "torch/csrc/distributed/c10d/shuffle.cpp",
     "torch/csrc/distributed/c10d/shuffle.cu",
 ]
 
