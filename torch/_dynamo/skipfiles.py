@@ -227,7 +227,6 @@ MOD_INLINELIST = {
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
     MOD_INLINELIST.add("torch.distributed._functional_collectives")
-    MOD_INLINELIST.add("torch.distributed.algorithms.dpp_comm_hooks.default_hooks")
     MOD_INLINELIST.add("torch.distributed._composable.replicate")
 
 

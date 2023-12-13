@@ -66,7 +66,7 @@ def fp16_compress_hook(
     world_size = group_to_use.size()
 
     buffer = (
-        cast(Tuple[torch.Tensor, ...], bucket[0])
+        cast(Tuple[torch.Tensor, ...], bucket)[0]
         if isinstance(bucket, tuple)
         else bucket.buffer()
     )
@@ -115,7 +115,7 @@ def bf16_compress_hook(
     world_size = group_to_use.size()
 
     buffer = (
-        cast(Tuple[torch.Tensor, ...], bucket[0])
+        cast(Tuple[torch.Tensor, ...], bucket)[0]
         if isinstance(bucket, tuple)
         else bucket.buffer()
     )
