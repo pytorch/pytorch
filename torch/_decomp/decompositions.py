@@ -3277,7 +3277,10 @@ def _compute_scale(in_size, out_size, align_corners, scale=None):
 
 def _compute_source_index(scale, dst_index, align_corners):
     if align_corners:
-        return scale * dst_index
+        # (dst_index + 0.0) is a hack to enable dtype promotion when scale is a sym expr
+        # https://github.com/pytorch/pytorch/pull/115676
+        # We can replace it with scale * dst_index once above PR is landed
+        return scale * (dst_index + 0.0)
     else:
         return scale * (dst_index + 0.5) - 0.5
 
@@ -3303,7 +3306,9 @@ def upsample_bilinear2d(
     j = torch.arange(output_size[1], device=input.device)
 
     x_f32 = _compute_source_index(w_scale_factor, j, align_corners).clamp(min=0.0)
-    y_f32 = _compute_source_index(h_scale_factor, i, align_corners).clamp(min=0.0).unsqueeze(-1)
+    y_f32 = _compute_source_index(h_scale_factor, i, align_corners).clamp(min=0.0)
+    y_f32 = y_f32.unsqueeze(-1)
+
     x = x_f32.to(torch.int64)
     y = y_f32.to(torch.int64)
 
