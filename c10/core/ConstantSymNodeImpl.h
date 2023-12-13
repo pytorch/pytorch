@@ -13,7 +13,7 @@ namespace c10 {
 template <typename T>
 class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   static_assert(
-      std::is_same_v<T, int64_t> || std::is_same_v<T, bool>,
+      ::std::is_same_v<T, int64_t> || ::std::is_same_v<T, bool>,
       "ConstantSymNodeImpl can only accept int64_t or bool types");
 
  public:
@@ -41,11 +41,11 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   }
   int64_t int_() override {
     TORCH_CHECK(is_int(), "not an int");
-    return std::get<int64_t>(value_);
+    return ::std::get<int64_t>(value_);
   }
   bool bool_() override {
     TORCH_CHECK(is_bool(), "not a bool");
-    return std::get<bool>(value_);
+    return ::std::get<bool>(value_);
   }
   bool has_hint() override {
     return true;
@@ -57,23 +57,23 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   c10::SymNode lt(const c10::SymNode& other) override;
   c10::SymNode gt(const c10::SymNode& other) override;
   c10::SymNode mul(const c10::SymNode& other) override;
-  std::string str() override {
+  ::std::string str() override {
     if constexpr (is_int_()) {
-      return std::to_string(std::get<int64_t>(value_));
+      return ::std::to_string(::std::get<int64_t>(value_));
     } else {
-      return std::get<bool>(value_) ? "true" : "false";
+      return ::std::get<bool>(value_) ? "true" : "false";
     }
   }
   c10::optional<int64_t> constant_int() override {
     if constexpr (is_int_()) {
-      return std::get<int64_t>(value_);
+      return ::std::get<int64_t>(value_);
     } else {
       return c10::nullopt;
     }
   }
   c10::optional<bool> constant_bool() override {
     if constexpr (is_bool_()) {
-      return std::get<bool>(value_);
+      return ::std::get<bool>(value_);
     } else {
       return c10::nullopt;
     }
@@ -86,13 +86,13 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   }
 
  private:
-  std::variant<int64_t, bool> value_;
+  ::std::variant<int64_t, bool> value_;
 
   static constexpr bool is_int_() {
-    return std::is_same_v<T, int64_t>;
+    return ::std::is_same_v<T, int64_t>;
   }
   static constexpr bool is_bool_() {
-    return std::is_same_v<T, bool>;
+    return ::std::is_same_v<T, bool>;
   }
 };
 
