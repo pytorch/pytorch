@@ -96,23 +96,9 @@ Tensor two_four_sgemm_cutlass(
     const int length_n = tensor_b.size(1);
     const auto meta_ncols = length_k / kSparse / kElementsPerElementE;
 
-    // Check for current CUTLASS limitations w.r.t. input sizes.
-    constexpr auto input_a_16bit = sizeof(ElementInputA) == 2;
-    TORCH_CHECK(length_m % 32 == 0,
-        "two_four_sgemm_cutlass: Number of rows of sparse matrix must be "
-        "divisible by 32");
-    TORCH_CHECK(length_k % (input_a_16bit ? 64 : 128) == 0,
-        "two_four_sgemm_cutlass: Number of rows of dense matrix must be "
-        "divisible by ", (input_a_16bit ? 64 : 128));
-    TORCH_CHECK(length_n % (input_a_16bit ? 8 : 16) == 0,
-        "two_four_sgemm_cutlass: Number of columns of dense matrix must be "
-        "divisible by ", (input_a_16bit ? 8 : 16));
-
     // Determine PyTorch datatype for the metadata matrix.
     auto meta_dtype = at::kChar;
     switch (sizeof(ElementInputE)) {
-    case 1:
-        break;
     case 2:
         meta_dtype = at::kShort;
         break;
@@ -136,14 +122,15 @@ Tensor two_four_sgemm_cutlass(
         tensor_d_dtype = at::kHalf;
     } else if constexpr (std::is_same_v<ElementOutput, cutlass::bfloat16_t>) {
         tensor_d_dtype = at::kBFloat16;
-    }
-    else {
+    } else if constexpr (std::is_same_v<ElementOutput, float>) {
+        tensor_d_dtype = at::kFloat;
+    } else {
         AT_ERROR("two_four_sgemm_cutlass: invalid datatype for sparse GEMM ",
                  " output encountered");
     }
     if (tensor_c.numel() != 0) {
         TORCH_CHECK(tensor_c.dtype() == tensor_d_dtype,
-                    "two_four_sgemm_cutlass: Expected spars GTEMM bias "
+                    "two_four_sgemm_cutlass: Expected sparse GEMM bias "
                     "datatype ", tensor_d_dtype, ", but got ",
                     tensor_c.dtype());
     }
@@ -510,7 +497,8 @@ Tensor _sparse_semi_structured_linear(
     // Validate datatypes of input tensors.
     TORCH_CHECK(tensor_a.dtype() == at::kChar ||
                 tensor_a.dtype() == at::kHalf ||
-                tensor_a.dtype() == at::kBFloat16,
+                tensor_a.dtype() == at::kBFloat16 ||
+                tensor_a.dtype() == at::kFloat,
                 "_sparse_semi_structured_linear: The weight datatype ",
                 tensor_a.dtype(), " is not supported");
     TORCH_CHECK(tensor_b.dtype() == tensor_a.dtype(),
@@ -697,6 +685,47 @@ Tensor _sparse_semi_structured_linear(
                     meta,
                     activation);
                 return;
+            })
+            AT_DISPATCH_CASE(
+            at::ScalarType::Float,
+            [&]() {
+                using ElementInputA = float;
+                using ElementInputB = float;
+                using ElementOutput = float;
+                using ElementAccumulator = float;
+                using ElementComputeEpilogue = float;
+                using ThreadblockShape = cutlass::gemm::GemmShape<128, 64, 32>;
+                using WarpShape = cutlass::gemm::GemmShape<64, 64, 32>;
+                using InstructionShape = cutlass::gemm::GemmShape<16, 8, 16>;
+                const auto EnableRowMajorRowMajorLayouts = true;
+                const auto EnableRowMajorColumnMajorLayouts = true;
+                const auto EnableColumnMajorRowMajorLayouts = true;
+                const auto EnableColumnMajorColumnMajorLayouts = true;
+                const auto EnableActivationNone = true;
+                const auto EnableActivationReLU = true;
+                const auto EnableActivationSiLU = true;
+                output = two_four_sgemm_cutlass_dispatch_layouts_activation<
+                    ElementInputA,
+                    ElementInputB,
+                    ElementOutput,
+                    ElementAccumulator,
+                    ElementComputeEpilogue,
+                    ThreadblockShape,
+                    WarpShape,
+                    InstructionShape,
+                    EnableRowMajorRowMajorLayouts,
+                    EnableRowMajorColumnMajorLayouts,
+                    EnableColumnMajorRowMajorLayouts,
+                    EnableColumnMajorColumnMajorLayouts,
+                    EnableActivationNone,
+                    EnableActivationReLU,
+                    EnableActivationSiLU>(
+                    tensor_a,
+                    tensor_b,
+                    tensor_c,
+                    meta,
+                    activation);
+                return;
             }));
 
     // Re-introduce batch dimensions into the output, and return.
@@ -761,24 +790,32 @@ _to_sparse_semi_structured(const Tensor& dense) {
 
   // Determine PyTorch datatype for the metadata matrix.
   auto meta_dtype = at::kChar;
+  auto ksparse = 0;
   auto dense_elems_per_meta_elem = 0;
   if (dense.dtype() == at::kChar) {
     meta_dtype = at::kInt;
+    ksparse = 4;
     dense_elems_per_meta_elem = 32;
   } else if (dense.dtype() == at::kHalf || dense.dtype() == at::kBFloat16) {
     meta_dtype = at::kShort;
+    ksparse = 4;
     dense_elems_per_meta_elem = 16;
+  } else if (dense.dtype() == at::kFloat) {
+    meta_dtype = at::kShort;
+    ksparse = 2;
+    dense_elems_per_meta_elem = 8;
   } else {
     AT_ERROR("_to_sparse_semi_structured: Invalid dense argument datatype ",
-             dense.dtype(), "encountered");
+             dense.dtype(), " encountered");
   }
 
   const auto dense_nrows = dense.size(0);
   const auto dense_ncols = dense.size(1);
 
-  if (dense_nrows % 32 != 0) {
+  if (dense_nrows % (meta_dtype == at::kShort ? 32 : 16) != 0) {
     AT_ERROR("_to_sparse_semi_structured: Number of rows of dense matrix must "
-             "be divisible by 32, but it is ", dense_nrows);
+             "be divisible by ", (meta_dtype == at::kShort ? 32 : 16),
+             ", but it is ", dense_nrows);
   }
   if (dense_ncols % dense_elems_per_meta_elem != 0) {
     AT_ERROR("_to_sparse_semi_structured: Number of columns of dense matrix "
@@ -795,20 +832,24 @@ _to_sparse_semi_structured(const Tensor& dense) {
 
   const auto meta_nrows = dense_nrows;
   const auto meta_ncols = dense_ncols / dense_elems_per_meta_elem;
-
   auto meta_cpu = dense_cpu.new_empty({meta_nrows, meta_ncols},
                                       at::TensorOptions().dtype(meta_dtype));
+
   auto* mask_cpu_ptr = mask_cpu.data_ptr<bool>();
   for (auto i = 0; i < meta_nrows; ++i) {
     for (auto j = 0; j < meta_ncols; ++j) {
       uint64_t meta_val = 0;
-      for (auto k = 0; k < dense_elems_per_meta_elem / 4; ++k, mask_cpu_ptr += 4) {
-        const auto mask_elems = std::make_tuple(
-          mask_cpu_ptr[0],
-          mask_cpu_ptr[1],
-          mask_cpu_ptr[2],
-          mask_cpu_ptr[3]
-        );
+      for (auto k = 0; k < dense_elems_per_meta_elem / ksparse; ++k, mask_cpu_ptr += ksparse) {
+        const auto mask_elems =
+            (ksparse == 4)
+            ? std::make_tuple(mask_cpu_ptr[0],
+                              mask_cpu_ptr[1],
+                              mask_cpu_ptr[2],
+                              mask_cpu_ptr[3])
+            : std::make_tuple(mask_cpu_ptr[0],
+                              mask_cpu_ptr[0],
+                              mask_cpu_ptr[1],
+                              mask_cpu_ptr[1]);
         auto meta_quadruple = 0;
         if (mask_elems == std::make_tuple(1, 1, 0, 0)) {
           meta_quadruple = 4; // 0100
@@ -822,10 +863,10 @@ _to_sparse_semi_structured(const Tensor& dense) {
           meta_quadruple = 13; // 1101
         } else if (mask_elems == std::make_tuple(0, 0, 1, 1)) {
           meta_quadruple = 14; // 1110
-        }
-        else {
-          AT_ERROR("_to_sparse_semi_structured: dense argument does not match "
-                   "2:4 sparsity pattern");
+        } else {
+          AT_ERROR("_to_sparse_semi_structured: dense argument does not match ",
+                   (dense.dtype() != at::kFloat) ? "2:4" : "1:2",
+                   "sparsity pattern");
         }
         meta_val = meta_val | (meta_quadruple << (4 * k));
       }

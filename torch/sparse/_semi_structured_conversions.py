@@ -13,7 +13,7 @@ def _sparse_semi_structured_from_dense_cutlass(dense):
     meta_dtype = torch.int8
     if dense.dtype == torch.int8:
         meta_dtype = torch.int32
-    elif dense.dtype in [torch.half, torch.bfloat16]:
+    elif dense.dtype in [torch.half, torch.bfloat16, torch.float]:
         meta_dtype = torch.int16
     else:
         raise RuntimeError(f"Invalid datatype {dense.dtype} of dense matrix")
@@ -23,16 +23,22 @@ def _sparse_semi_structured_from_dense_cutlass(dense):
 
     if m % 32 != 0:
         raise RuntimeError(
-            f"Number rows columns of dense matrix {m} must be divisible by 32"
+            f"Number of rows of dense matrix {m} must be divisible by 32"
         )
     if k % (4 * quadbits_per_meta_elem) != 0:
         raise RuntimeError(
             f"Number of columns of dense matrix {k} must be divisible by {4 * quadbits_per_meta_elem}"
         )
-    meta_ncols = k // (4 * quadbits_per_meta_elem)
 
-    dense_4 = dense.view(-1, k // 4, 4)
-    m0, m1, m2, m3 = (dense_4 != 0).unbind(-1)
+    if dense.dtype != torch.float32:
+        meta_ncols = k // (4 * quadbits_per_meta_elem)
+        dense_4 = dense.view(-1, k // 4, 4)
+        m0, m1, m2, m3 = (dense_4 != 0).unbind(-1)
+    else:
+        meta_ncols = 2 * k // (4 * quadbits_per_meta_elem)
+        dense_2 = dense.view(-1, k // 2, 2)
+        m0, m2 = m1, m3 = (dense_2 != 0).unbind(-1)
+        k *= 2
 
     # Encoding quadruples of True/False values as follows:
     #     [True,  True,  False, False] -> 0b0100
@@ -72,9 +78,12 @@ def _sparse_semi_structured_from_dense_cutlass(dense):
     idxs0 = bit0 | (bit1.to(torch.int64) << 1)
     idxs1 = bit2 | (bit3.to(torch.int64) << 1)
 
-    sparse0 = dense_4.gather(-1, idxs0.unsqueeze(-1))
-    sparse1 = dense_4.gather(-1, idxs1.unsqueeze(-1))
-    sparse = torch.stack((sparse0, sparse1), dim=-1).view(m, k // 2)
+    if dense.dtype != torch.float32:
+        sparse0 = dense_4.gather(-1, idxs0.unsqueeze(-1))
+        sparse1 = dense_4.gather(-1, idxs1.unsqueeze(-1))
+        sparse = torch.stack((sparse0, sparse1), dim=-1).view(m, k // 2)
+    else:
+        sparse = dense_2.gather(-1, idxs0.unsqueeze(-1) // 2).view(m, k // 4)
 
     meta_4 = idxs0 | (idxs1 << 2)
     meta_n = meta_4.view((-1, meta_ncols, quadbits_per_meta_elem)).to(meta_dtype)
@@ -202,6 +211,7 @@ def _sparse_semi_structured_from_dense_cutlass(dense):
     meta_reordered = torch.gather(meta.view(-1), 0, meta_offsets.view(-1)).view(
         m, meta_ncols
     )
+
     return (sparse, meta_reordered)
 
 
