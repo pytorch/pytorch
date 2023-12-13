@@ -884,9 +884,6 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly("name", &cudaDeviceProp::name)
       .def_readonly("major", &cudaDeviceProp::major)
       .def_readonly("minor", &cudaDeviceProp::minor)
-#if USE_ROCM
-      .def_readonly("gcn_arch_name", &hipDeviceProp_t::gcnArchName)
-#endif
       .def_readonly("is_multi_gpu_board", &cudaDeviceProp::isMultiGpuBoard)
       .def_readonly("is_integrated", &cudaDeviceProp::integrated)
       .def_readonly(
