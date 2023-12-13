@@ -228,10 +228,13 @@ def mps_ops_modifier(ops):
     SUPPORTED_COMPLEX_OPS = {
         '__radd__',
         '__rmul__',
+        '__getitem__',
         'add',
         'atleast_1d',
         'atleast_2d',
         'atleast_3d',
+        'broadcast_tensors',
+        'broadcast_to',
         'clone',
         'contiguous',
         'empty',

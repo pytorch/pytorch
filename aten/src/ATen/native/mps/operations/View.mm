@@ -738,6 +738,8 @@ static const std::string& getGatherScatterScalarType(const Tensor& t) {
       {c10::ScalarType::Char, "char"},
       {c10::ScalarType::Byte, "uchar"},
       {c10::ScalarType::Bool, "bool"},
+      {c10::ScalarType::ComplexFloat, "long"},
+      {c10::ScalarType::ComplexHalf, "int"},
   };
 
   auto it = scalarToMetalType.find(scalar_type);
