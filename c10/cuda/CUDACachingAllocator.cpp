@@ -1140,9 +1140,10 @@ class DeviceCachingAllocator {
           " is allocated by PyTorch, and ",
           format_size(reserved_bytes - allocated_bytes),
           " is reserved by PyTorch but unallocated.",
-          " If reserved but unallocated memory is large try setting max_split_size_mb to avoid"
-          " fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF",
-          "");
+          " If reserved but unallocated memory is large try setting",
+          " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
+          " fragmentation.  See documentation for Memory Management "
+          " (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)");
     }
 
     bool split_remainder = should_split(params.block, params.size());

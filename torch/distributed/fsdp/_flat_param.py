@@ -37,6 +37,7 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
 from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
+from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
 from ._fsdp_extensions import (
     _ext_post_unflatten_transform,
@@ -98,6 +99,13 @@ _FSDP_USE_FULL_PREC_IN_EVAL = "FSDP_USE_FULL_PREC_IN_EVAL"
 
 # Some value to set padding in tensors to for debuggability
 _FLAT_PARAM_PADDING_VALUE = 42
+
+# Environment variables for disabling the all-gather and reduce-scatter
+# communication ops for ablation studies. Note that without these communication
+# ops the training won't converge, and you probably need to disable correctness
+# checks in your model.
+_FSDP_USE_FAKE_ALL_GATHER = "FSDP_USE_FAKE_ALL_GATHER"
+_FSDP_USE_FAKE_REDUCE = "FSDP_USE_FAKE_REDUCE"
 
 
 # TODO: Define this for now to avoid circular imports. See if we can remove.
@@ -490,6 +498,8 @@ class FlatParamHandle:
         self._use_full_prec_in_eval = (
             os.environ.get(_FSDP_USE_FULL_PREC_IN_EVAL, "") == "1"
         )
+        self._use_fake_all_gather = os.environ.get(_FSDP_USE_FAKE_ALL_GATHER, "") == "1"
+        self._use_fake_reduce = os.environ.get(_FSDP_USE_FAKE_REDUCE, "") == "1"
         if self._skip_writeback_check:
             _warn_skip_writeback_check(
                 log,
@@ -497,12 +507,30 @@ class FlatParamHandle:
                 "for parameter or gradient writeback. Changing parameter or "
                 "gradient storages may lead to silent correctness errors.",
             )
+        if self._use_fake_all_gather:
+            _warn_use_fake_all_gather(
+                log,
+                f"Since {_FSDP_USE_FAKE_ALL_GATHER}=1, FSDP will not execute "
+                "all-gather ops. Your training will be incorrect, but "
+                "can reveal how much time spent on all-gather ops.",
+            )
+        if self._use_fake_reduce:
+            _warn_use_fake_reduce(
+                log,
+                f"Since {_FSDP_USE_FAKE_REDUCE}=1, FSDP will not execute "
+                "reduce-scatter ops. Your training will be incorrect, but "
+                "can reveal how much time spent on reduce-scatter ops.",
+            )
         # Only align addresses for `use_orig_params=True` (for now)
         align_addresses = use_orig_params
         self._init_get_unflat_views_fn(align_addresses)
         self.device = device
         self._device_handle = _FSDPDeviceHandle.from_device(self.device)
         self.process_group = process_group
+        if self._use_fake_all_gather or self._use_fake_reduce:
+            self._fake_process_group = FakeProcessGroup(
+                rank=process_group.rank(), world_size=process_group.size()
+            )
         self.rank = process_group.rank()
         self.world_size = process_group.size()
         self._sharding_strategy = sharding_strategy
@@ -1347,21 +1375,23 @@ class FlatParamHandle:
             f"Expects {expected_numel} numel but got {padded_unsharded_flat_param.numel()}",
         )
 
+        pg = (
+            self._fake_process_group
+            if self._use_fake_all_gather
+            else self.process_group
+        )
+
         # HACK this should be handled by C10D
         if sharded_flat_param.is_cpu:  # type: ignore[attr-defined]
             tensor_list = list(
-                torch.chunk(
-                    padded_unsharded_flat_param, dist.get_world_size(self.process_group)
-                )
+                torch.chunk(padded_unsharded_flat_param, dist.get_world_size(pg))
             )
-            work = dist.all_gather(
-                tensor_list, sharded_flat_param, group=self.process_group
-            )
+            work = dist.all_gather(tensor_list, sharded_flat_param, group=pg)
         else:
             dist.all_gather_into_tensor(
                 padded_unsharded_flat_param,
                 sharded_flat_param,
-                self.process_group,
+                pg,
             )
 
         if self._offload_params:
@@ -1476,7 +1506,6 @@ class FlatParamHandle:
             self._check_sharded(flat_param.grad)
             flat_param._saved_grad_shard = flat_param.grad  # type: ignore[attr-defined]
             sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
-
         padded_unsharded_grad = torch.empty(
             flat_param._padded_unsharded_size,  # type: ignore[attr-defined]
             device=self.device,
@@ -2670,4 +2699,16 @@ def _construct_padding_tensor(
 # messasge is passed in)
 @functools.lru_cache(1)
 def _warn_skip_writeback_check(log: logging.Logger, warning: str):
+    log.warning(warning)
+
+
+# Use `lru_cache(1)` to only log the warning once
+@functools.lru_cache(1)
+def _warn_use_fake_all_gather(log: logging.Logger, warning: str):
+    log.warning(warning)
+
+
+# Use `lru_cache(1)` to only log the warning once
+@functools.lru_cache(1)
+def _warn_use_fake_reduce(log: logging.Logger, warning: str):
     log.warning(warning)

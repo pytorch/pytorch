@@ -1,11 +1,16 @@
 import math
 from enum import IntEnum
 
+from typing import TYPE_CHECKING
+
 import torch
 from . import ir
 
 from .utils import get_dtype_size, sympy_product
 from .virtualized import V
+
+if TYPE_CHECKING:
+    from torch._inductor.scheduler import BaseSchedulerNode
 
 
 class NCCL_COLL(IntEnum):
@@ -33,7 +38,7 @@ def get_gpu_type() -> NVIDIA_GPU_TYPE:
         return NVIDIA_GPU_TYPE.AMPERE
 
 
-def get_collective_type(snode: "BaseSchedulerNode") -> NCCL_COLL:  # type: ignore[name-defined]
+def get_collective_type(snode: "BaseSchedulerNode") -> NCCL_COLL:
     if isinstance(snode.node, (ir.AllReduce, ir.AllReduceCoalesced)):
         return NCCL_COLL.ALL_REDUCE
     elif isinstance(
@@ -136,7 +141,7 @@ llMaxBws = torch.tensor(
 )
 
 
-def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # type: ignore[name-defined]
+def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:
     """
     Returns estimated NCCL collective runtime in nanoseconds (ns).
 
@@ -158,7 +163,7 @@ def estimate_nccl_collective_runtime(snode: "BaseSchedulerNode") -> float:  # ty
     # Currently assumes each node has 8 gpus. And when >1 node is used, assumes each node uses all 8 gpus.
     # TODO: Need to find a way to get accurate "gpus per node" and "# nodes" info.
     num_gpus_per_node = 8
-    _, _, group_size = snode.node.constant_args
+    _, _, group_size = snode.node.constant_args  # type: ignore[attr-defined]
     nNodes = math.ceil(group_size / num_gpus_per_node)
     nRanks = group_size  # this is total # of gpus globally that participate in this collective op
 
