@@ -55,28 +55,6 @@ class TestCompiledAutograd(TestCase):
             self.assertEqual(counters["compiled_autograd"]["captures"], count)
             self.assertEqual(counters["compiled_autograd"]["compiles"], count)
 
-    def test_custom_fn_multiple_grads(self):
-        def fn():
-            class MyFn(torch.autograd.Function):
-                @staticmethod
-                def forward(ctx, x, y):
-                    return x + y
-
-                @staticmethod
-                def backward(ctx, gO):
-                    return gO, gO
-
-            for i in [10, 100, 10]:
-                x = torch.arange(0.0, i, requires_grad=True)
-                y = torch.arange(0.0, i, requires_grad=True)
-                out = MyFn.apply(x, y)
-                loss = out.sum()
-                loss.backward()
-                yield x.grad
-                yield y.grad
-
-        self.check_output_and_recompiles(fn, 2)
-
     def test_basic(self):
         def fn():
             model = torch.nn.Sequential(
@@ -506,6 +484,60 @@ class TestCompiledAutograd(TestCase):
                 loss.backward()
                 yield x.grad
                 yield y.grad
+
+        self.check_output_and_recompiles(fn, 2)
+
+    def test_custom_fns(self):
+        def fn():
+            class MyFn1(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return gO
+
+            # same as MyFn1, but different autograd function id
+            # should not be using same graph as MyFn1
+            class MyFn2(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return gO
+
+            for myfn in [MyFn1, MyFn2]:
+                x = torch.arange(0.0, 10, requires_grad=True)
+                out = myfn.apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn, 2)  # should compile once for MyFn1 and once for MyFn2
+
+    def test_dynamically_defined_class(self):
+        def fn():
+            def create_class(multiplier: int):
+                class DynamicFn(torch.autograd.Function):
+                    @staticmethod
+                    def forward(ctx, x):
+                        return x * multiplier
+
+                    @staticmethod
+                    def backward(ctx, gO):
+                        return gO * multiplier
+
+                return DynamicFn
+
+            for multiplier in [10, 20, 30]:
+                x = torch.arange(0.0, 10, requires_grad=True)
+                out = create_class(multiplier).apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
 
         self.check_output_and_recompiles(fn, 2)
 
