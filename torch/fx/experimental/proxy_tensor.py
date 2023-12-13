@@ -85,6 +85,13 @@ class SymExprHash:
     def __eq__(self, value: "SymExprHash") -> bool:
         assert isinstance(value, SymExprHash)
 
+        # only dedup equivalent symbols if we are in a context
+        # where guards would be added
+        # TODO - expose as arg to api ? factor out as pass in
+        # aot autograd ?
+        if torch._guards.TracingContext.try_get() is None:
+            return self.sym_obj.node == value.sym_obj.node
+
         return self.sym_obj.node.expr == value.sym_obj.node.expr
 
 
