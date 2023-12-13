@@ -16,7 +16,10 @@ from torch.export import (
     dynamic_dim,
     export,
 )
-from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch.export._trace import (
+    _export_to_torch_ir,
+    DEFAULT_EXPORT_DYNAMO_CONFIG,
+)
 from torch._export import capture_pre_autograd_graph
 from torch._export.pass_base import _ExportPassBase
 from torch._export.utils import (
@@ -1893,6 +1896,72 @@ def forward(self, l_x_):
         ep = torch.export.export(model, args=(t, dim, index, src))
         ep.run_decompositions(decomp_table=torch._decomp.decomposition_table)
         self.assertEqual(ep(t, dim, index, src), output)
+
+    def test_fqn(self):
+        class NestedChild(torch.nn.Module):
+            def forward(self, x):
+                return x / x
+
+        class Child1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = NestedChild()
+                self.register_parameter(
+                    "child1param", torch.nn.Parameter(torch.ones(2, 3))
+                )
+
+            def forward(self, x):
+                x = self.nested(x)
+                return x + self.child1param
+
+        class Child2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("child2buffer", torch.ones(2, 3))
+
+            def forward(self, x):
+                return x - self.child2buffer
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = Child1()
+                self.bar = Child2()
+                self.register_parameter(
+                    "rootparam", torch.nn.Parameter(torch.ones(2, 3))
+                )
+
+            def forward(self, x):
+                x = x * self.rootparam
+                x = self.foo(x)
+                x = self.bar(x)
+                return x
+
+        orig_eager = MyModule()
+        test_inp = torch.randn(2, 3)
+
+        torch_gm = _export_to_torch_ir(orig_eager, (torch.rand(2, 3),), {})
+        for k, v in orig_eager.state_dict().items():
+            normalized_k = k.replace(".", "_")
+            self.assertIn(normalized_k, torch_gm.state_dict())
+            self.assertEqual(v, torch_gm.state_dict()[normalized_k])
+        self.assertTrue(torch.allclose(torch_gm(test_inp), orig_eager(test_inp)))
+
+        pre_autograd_gm = capture_pre_autograd_graph(orig_eager, (torch.rand(2, 3),), {})
+        for k, v in orig_eager.state_dict().items():
+            normalized_k = k.replace(".", "_")
+            self.assertIn(normalized_k, pre_autograd_gm.state_dict())
+            self.assertEqual(v, pre_autograd_gm.state_dict()[normalized_k])
+        self.assertTrue(torch.allclose(pre_autograd_gm(test_inp), orig_eager(test_inp)))
+
+        ep = export(orig_eager, (torch.rand(2, 3),), {})
+        for k, v in orig_eager.state_dict().items():
+            # We do not need to normalize the key here because exported
+            # program's state dict is able to contain the module information.
+            self.assertIn(k, ep.state_dict)
+            self.assertEqual(v, ep.state_dict[k])
+        self.assertTrue(torch.allclose(ep(test_inp), orig_eager(test_inp)))
+
 
 if __name__ == '__main__':
     run_tests()

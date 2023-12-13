@@ -1401,6 +1401,54 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), inputs)
 
+    def test_fqn(self):
+        class NestedChild(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("nestedchild3buffer", torch.ones(2, 3) * 3)
+
+            def forward(self, x):
+                return x / self.nestedchild3buffer
+
+        class Child1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = NestedChild()
+                self.register_parameter(
+                    "child1param", torch.nn.Parameter(torch.ones(2, 3))
+                )
+
+            def forward(self, x):
+                x = self.nested(x)
+                return x + self.child1param
+
+        class Child2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("child2buffer", torch.ones(2, 3) * 2)
+
+            def forward(self, x):
+                return x - self.child2buffer
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = Child1()
+                self.bar = Child2()
+                self.register_parameter(
+                    "rootparam", torch.nn.Parameter(torch.ones(2, 3) * 4)
+                )
+
+            def forward(self, x):
+                x = x * self.rootparam
+                x = self.foo(x)
+                x = self.bar(x)
+                return x
+
+        orig_eager = MyModule()
+
+        self.check_model(MyModule(), (torch.randn(2, 3, device=self.device),))
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
