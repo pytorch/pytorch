@@ -3880,7 +3880,7 @@ class NCCLTraceTestTimeoutDumpOnIdleRanks(NCCLTraceTestDumpOnTimeoutBase):
     def test_timeout_dumps_on_idle_ranks(self):
 
         if self.rank == self.MAIN_PROCESS_RANK:
-            # wait for rank0 to crash and rank 1 to finish sleeping before looking for rank 1's output
+            # wait for both rank0 and 1 to crash before looking for both ranks' output
             # file, and we rely on rank1 to sleep long enough to dump the debug info.
             self.assertEqual(self._wait_process(0, timeout=90), -6)
             self.assertEqual(self._wait_process(1, timeout=90), -6)

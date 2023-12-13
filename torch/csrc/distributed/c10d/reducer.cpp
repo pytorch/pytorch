@@ -194,7 +194,7 @@ Reducer::Reducer(
                     this->autograd_hook(variable_index);
                     return outputs;
                   },
-                  [=] (torch::autograd::CompiledNodeArgs& args) {
+                  [=](torch::autograd::CompiledNodeArgs& args) {
                     // Make post_hook an noop if compiled_autograds is enabled.
                   })),
           grad_accumulator);

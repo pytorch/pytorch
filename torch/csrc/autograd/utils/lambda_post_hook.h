@@ -10,14 +10,14 @@ namespace utils {
 class LambdaPostHook : public torch::autograd::FunctionPostHook {
   using variable_list = std::vector<torch::autograd::Variable>;
   using fn_type = std::function<variable_list(const variable_list&, const variable_list&)>;
-  using compiled_fn_type = std::function<void(CompiledNodeArgs&)>;
+  using compiled_fn_type =
+      std::function<void(CompiledNodeArgs&)>;
 
  public:
   // The lambda function takes as arguments the outputs and inputs of the
   // autograd function and can modify the outputs of the autograd function by
   // returning a new output if needed.
-  /* implicit */ LambdaPostHook(fn_type fn)
-      : fn_(std::move(fn)) {}
+  /* implicit */ LambdaPostHook(fn_type fn) : fn_(std::move(fn)) {}
 
   LambdaPostHook(fn_type fn, compiled_fn_type compiled_fn)
       : fn_(std::move(fn)), compiled_fn_(std::move(compiled_fn)) {}
