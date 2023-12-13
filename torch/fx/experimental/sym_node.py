@@ -26,7 +26,6 @@ from torch import (  # noqa: F401
     sym_max,
     sym_min,
     sym_not,
-    sym_sqrt,
     SymBool,
     SymFloat,
     SymInt,
@@ -43,7 +42,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-__all__ = ["SymNode", "method_to_operator", "magic_methods", "sym_sqrt"]
+__all__ = ["SymNode", "method_to_operator", "magic_methods"]
 
 
 SymTypes = (SymInt, SymFloat, SymBool)
@@ -300,9 +299,6 @@ class SymNode:
     def sym_ite(self, then_val, else_val) -> "SymNode":
         return self._sym_ite(then_val, else_val)  # type: ignore[attr-defined]
 
-    def sym_sqrt(self) -> "SymNode":
-        return self._sym_sqrt()  # type: ignore[attr-defined]
-
     def is_contiguous(self, sizes, strides) -> "SymNode":
         return self._is_contiguous(sizes, strides)  # type: ignore[attr-defined]
 
@@ -434,7 +430,6 @@ METHOD_TO_OPERATOR = {
     "sym_max": sym_max,
     "sym_min": sym_min,
     "sym_not": sym_not,
-    "sym_sqrt": sym_sqrt,
     "truediv": operator.truediv,
 }
 
@@ -444,7 +439,6 @@ unary_magic_methods = {
     "ceil",
     "floor",
     "neg",
-    "sym_sqrt",
     "sym_not",
 }
 
@@ -458,6 +452,7 @@ def _get_sym_node_fn(name):
 
 
 math_op_names = (
+    "sqrt",
     "cos",
     "cosh",
     "sin",
@@ -470,8 +465,9 @@ math_op_names = (
 )
 for name in math_op_names:
     sym_name = f"sym_{name}"
+    priv_sym_name = f"_{sym_name}"
     setattr(SymNode, sym_name, _get_sym_node_fn(name))
-    METHOD_TO_OPERATOR[sym_name] = getattr(torch, sym_name)
+    METHOD_TO_OPERATOR[sym_name] = getattr(torch, priv_sym_name)
     unary_magic_methods.add(sym_name)
     __all__.append(sym_name)
 
@@ -499,7 +495,7 @@ only_float_magic_methods = {"is_integer"}
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
 
-always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
+always_float_magic_methods = {"truediv", "sym_float", "pow"}
 
 for name in math_op_names:
     sym_name = f"sym_{name}"
@@ -671,12 +667,6 @@ def _sympy_ite(a, t, f):
     return sympy.Piecewise((t, a), (f, True))
 
 
-def _sympy_sqrt(a):
-    import sympy
-
-    return sympy.sqrt(a)
-
-
 current_module = sys.modules[__name__]
 
 
@@ -686,12 +676,15 @@ def _get_sym_math_fn(name):
 
         return getattr(sympy, name)(a)
 
-    fn.__qualname__ = fn.__name__ = f"_sym_{name}"
     return fn
 
 
 for name in math_op_names:
-    setattr(current_module, f"_sym_{name}", _get_sym_math_fn(name))
+    priv_sympy_name = f"_sympy_{name}"
+    fn = _get_sym_math_fn(name)
+    fn.__qualname__ = fn.__name__ = priv_sympy_name
+    setattr(current_module, priv_sympy_name, fn)
+    del fn
 
 
 def _sympy_abs(a):
@@ -730,7 +723,6 @@ magic_methods = {
     "sym_min": _sympy_min,
     "sym_max": _sympy_max,
     "sym_ite": _sympy_ite,
-    "sym_sqrt": _sympy_sqrt,
     "abs": _sympy_abs,
     "is_integer": _sympy_is_integer,
 }
@@ -738,7 +730,7 @@ magic_methods = {
 
 for name in math_op_names:
     sym_name = f"sym_{name}"
-    magic_methods[sym_name] = getattr(current_module, f"_sym_{name}")
+    magic_methods[sym_name] = getattr(current_module, f"_sympy_{name}")
 
 
 def sympy_is_contiguous(sizes, strides):
