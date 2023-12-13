@@ -369,7 +369,7 @@ def compile_fx_inner(
                     len(compiled_graph.device_idxs) == 1
                     or not config.triton.cudagraph_trees
                 ),
-                "multiple device indices without cudagraph_trees",
+                "multiple device indices with cudagraph_trees",
             ),
         ]
         cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
