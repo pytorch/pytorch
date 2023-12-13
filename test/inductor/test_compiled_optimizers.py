@@ -84,7 +84,9 @@ def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
             list(model_eager.parameters()), list(model_compiled.parameters())
         )
 
-        for p_eager, p_compiled in zip(model_eager.parameters(), model_compiled.parameters()):
+        for p_eager, p_compiled in zip(
+            model_eager.parameters(), model_compiled.parameters()
+        ):
             self.assertEqual(opt_eager.state[p_eager], opt_compiled.state[p_compiled])
 
         if self.check_kernel_count:
