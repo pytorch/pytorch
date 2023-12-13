@@ -1741,11 +1741,11 @@ If the test
 
 
 def _run_slow_mode_and_get_error(
-    func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, is_forward_ad
+    func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, eps, is_forward_ad
 ):
     # Compute jacobians in slow mode for better error message
     slow_numerical = _get_numerical_jacobian(
-        func, tupled_inputs, outputs, is_forward_ad=is_forward_ad
+        func, tupled_inputs, outputs, eps=eps, is_forward_ad=is_forward_ad
     )[input_idx][output_idx]
     if is_forward_ad:
 
@@ -1829,6 +1829,7 @@ def _check_analytical_numerical_equal(
     all_u,
     rtol,
     atol,
+    eps,
     test_imag,
     *,
     is_forward_ad=False,
@@ -1844,7 +1845,7 @@ def _check_analytical_numerical_equal(
             updated_atol = _adjusted_atol(atol, all_u[i], all_v[j] if all_v else None)
             if not _allclose_with_type_promotion(a, n.to(a.device), rtol, updated_atol):
                 jacobians_str = _run_slow_mode_and_get_error(
-                    func, tupled_inputs, outputs, i, j, rtol, atol, is_forward_ad
+                    func, tupled_inputs, outputs, i, j, rtol, atol, eps, is_forward_ad
                 )
                 raise GradcheckError(
                     _get_notallclose_msg(
@@ -1928,6 +1929,7 @@ def _fast_gradcheck(
         all_u,
         rtol,
         atol,
+        eps,
         test_imag,
         is_forward_ad=use_forward_ad,
     )
