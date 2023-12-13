@@ -268,6 +268,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.binary_cross_entropy,
             aten.binary_cross_entropy_backward,
             aten.binary_cross_entropy_with_logits,
+            aten.block_diag,
             aten.celu,
             aten.celu_,
             aten.clamp_max,

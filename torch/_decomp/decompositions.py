@@ -3054,7 +3054,7 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
 def select_one_layer_lstm_function(input, hx, params):
     r"""Check whether we could use decompose lstm with mkldnn_rnn_layer.
     All the below conditions need to be met:
-        * ``torch._C._has_mkldnn`` returns ``True``.
+        * ``torch._C._get_mkldnn_enabled()`` returns ``True``.
         * All the input args are on CPU.
         * The dtypes of args are either torch.float or torch.bfloat16.
         * Inference.
@@ -3067,7 +3067,7 @@ def select_one_layer_lstm_function(input, hx, params):
     """
 
     def use_mkldnn(input, hx, params):
-        if not torch._C._has_mkldnn:
+        if not torch._C._get_mkldnn_enabled():
             return False
 
         tensors = [input] + list(hx) + list(chain.from_iterable(params))
@@ -3277,10 +3277,7 @@ def _compute_scale(in_size, out_size, align_corners, scale=None):
 
 def _compute_source_index(scale, dst_index, align_corners):
     if align_corners:
-        # (dst_index + 0.0) is a hack to enable dtype promotion when scale is a sym expr
-        # https://github.com/pytorch/pytorch/pull/115676
-        # We can replace it with scale * dst_index once above PR is landed
-        return scale * (dst_index + 0.0)
+        return scale * dst_index
     else:
         return scale * (dst_index + 0.5) - 0.5
 
@@ -3302,8 +3299,13 @@ def upsample_bilinear2d(
     h_scale_factor = _compute_scale(in_h, output_size[0], align_corners, scales_h)
     w_scale_factor = _compute_scale(in_w, output_size[1], align_corners, scales_w)
 
-    i = torch.arange(output_size[0], device=input.device)
-    j = torch.arange(output_size[1], device=input.device)
+    _, dtype = utils.elementwise_dtypes(
+        input, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    )
+    # We have to create arange with int64 dtype and use .to in order to avoid
+    # additional kernels creation in inductor and get a perf slowdown
+    i = torch.arange(output_size[0], device=input.device).to(dtype=dtype)
+    j = torch.arange(output_size[1], device=input.device).to(dtype=dtype)
 
     x_f32 = _compute_source_index(w_scale_factor, j, align_corners).clamp(min=0.0)
     y_f32 = _compute_source_index(h_scale_factor, i, align_corners).clamp(min=0.0)
