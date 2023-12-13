@@ -110,7 +110,8 @@ class ReLU(Module):
 class RReLU(Module):
     r"""Applies the randomized leaky rectified linear unit function, element-wise.
 
-    Method described in the paper:`Empirical Evaluation of Rectified Activations in Convolutional Network`_.
+    Method described in the paper:
+    `Empirical Evaluation of Rectified Activations in Convolutional Network <https://arxiv.org/abs/1505.00853>`_.
 
     The function is defined as:
 
@@ -124,8 +125,6 @@ class RReLU(Module):
     where :math:`a` is randomly sampled from uniform distribution
     :math:`\mathcal{U}(\text{lower}, \text{upper})` during training while during
     evaluation :math:`a` is fixed with :math:`a = \frac{\text{lower} + \text{upper}}{2}`.
-
-     See: https://arxiv.org/pdf/1505.00853.pdf
 
     Args:
         lower: lower bound of the uniform distribution. Default: :math:`\frac{1}{8}`
@@ -242,7 +241,7 @@ class Hardtanh(Module):
 
 
 class ReLU6(Hardtanh):
-    r"""Applies the element-wise function.
+    r"""Applies the ReLU6 function element-wise.
 
     .. math::
         \text{ReLU6}(x) = \min(\max(0,x), 6)
@@ -272,7 +271,7 @@ class ReLU6(Hardtanh):
 
 
 class Sigmoid(Module):
-    r"""Applies the element-wise function.
+    r"""Applies the Sigmoid function element-wise.
 
     .. math::
         \text{Sigmoid}(x) = \sigma(x) = \frac{1}{1 + \exp(-x)}
@@ -531,7 +530,7 @@ class ELU(Module):
 
 
 class CELU(Module):
-    r"""Applies the element-wise function.
+    r"""Applies the CELU function element-wise.
 
     .. math::
         \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))
@@ -576,7 +575,7 @@ class CELU(Module):
 
 
 class SELU(Module):
-    r"""Applied element-wise, as.
+    r"""Applies the SELU function element-wise.
 
     .. math::
         \text{SELU}(x) = \text{scale} * (\max(0,x) + \min(0, \alpha * (\exp(x) - 1)))
@@ -746,7 +745,7 @@ class Hardshrink(Module):
 
 
 class LeakyReLU(Module):
-    r"""Applies the element-wise function.
+    r"""Applies the LeakyReLU function element-wise.
 
     .. math::
         \text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)
@@ -798,7 +797,7 @@ class LeakyReLU(Module):
 
 
 class LogSigmoid(Module):
-    r"""Applies the element-wise function.
+    r"""Applies the Logsigmoid function element-wise.
 
     .. math::
         \text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)
@@ -866,7 +865,7 @@ class Softplus(Module):
 
 
 class Softshrink(Module):
-    r"""Applies the soft shrinkage function elementwise.
+    r"""Applies the soft shrinkage function element-wise.
 
     .. math::
         \text{SoftShrinkage}(x) =
@@ -1074,7 +1073,9 @@ class MultiheadAttention(Module):
             attn_mask: Optional[Tensor] = None,
             average_attn_weights: bool = True,
             is_causal : bool = False) -> Tuple[Tensor, Optional[Tensor]]:
-        r"""Compute attention outputs using query, key, and value embeddings, with optional parameters for padding, masks and attention weights.
+        r"""Compute attention outputs using query, key, and value embeddings.
+
+        Supports optional parameters for padding, masks and attention weights.
 
         Args:
         query: Query embeddings of shape :math:`(L, E_q)` for unbatched input, :math:`(L, N, E_q)` when ``batch_first=False``
@@ -1322,7 +1323,7 @@ class MultiheadAttention(Module):
 
 
 class PReLU(Module):
-    r"""Applies the element-wise function.
+    r"""Applies the element-wise PReLU function.
 
     .. math::
         \text{PReLU}(x) = \max(0,x) + a * \min(0,x)
@@ -1394,7 +1395,7 @@ class PReLU(Module):
 
 
 class Softsign(Module):
-    r"""Applies the element-wise function.
+    r"""Applies the element-wise Softsign function.
 
     .. math::
         \text{SoftSign}(x) = \frac{x}{ 1 + |x|}
@@ -1417,7 +1418,7 @@ class Softsign(Module):
 
 
 class Tanhshrink(Module):
-    r"""Applies the element-wise function.
+    r"""Applies the element-wise Tanhshrink function.
 
     .. math::
         \text{Tanhshrink}(x) = x - \tanh(x)
