@@ -1117,16 +1117,23 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         # Need more extensive testing with various settings dtype/device etc.
         x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
 
-        def fn(nt):
+        def fn1(nt):
             out = torch.zeros(nt.shape, **kwargs)
             return out
 
-        compile_fn = torch.compile(
-            fn, fullgraph=True, backend="aot_eager", dynamic=True
-        )
-        out = compile_fn(x)
+        def fn2(nt):
+            out = torch.zeros(nt.shape[:2] + (2, 3), **kwargs)
+            return out
 
-        self.assertEqual(out, torch.zeros(x.shape, **kwargs))
+        def do_check(fn):
+            compile_fn = torch.compile(
+                fn, fullgraph=True, backend="aot_eager", dynamic=True
+            )
+            out = compile_fn(x)
+            self.assertEqual(out, fn(x))
+
+        do_check(fn1)
+        do_check(fn2)
 
 
 instantiate_device_type_tests(TestNestedTensor, globals())
