@@ -519,7 +519,7 @@ class TestInductorDynamic(TestCase):
 
         cfunc = self.compile_fn(func, fullgraph=True)
         x = torch.rand(10, device=device)
-        a = 1 if op in (math.asin, math.acos) else 12
+        a = -1 if op in (math.asin, math.acos) else 12
         expected = func(x, op, a)
         output = cfunc(x, op, a)
         self.assertEqual(output, expected)

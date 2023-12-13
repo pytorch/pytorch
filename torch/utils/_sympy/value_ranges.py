@@ -488,6 +488,9 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def cos(x):
+        # TODO: We should tighten value ranges
+        # If input range span is pi + 2*pi*k, then output range is (-1, 1)
+        # otherwise the minimum of the value of the function on the extremes
         return ValueRanges(-1.0, 1.0)
 
     @staticmethod
@@ -501,6 +504,8 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def sin(x):
+        # TODO: We should tighten value ranges
+        # See details on cos
         return ValueRanges(-1.0, 1.0)
 
     @staticmethod
@@ -517,12 +522,14 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def asin(x):
+        x = ValueRanges.wrap(x)
         if -1 <= x.lower and x.upper <= 1:
             return ValueRanges.increasing_map(x, sympy.asin)
         return ValueRanges.unknown()
 
     @staticmethod
     def acos(x):
+        x = ValueRanges.wrap(x)
         if -1 <= x.lower and x.upper <= 1:
             return ValueRanges.decreasing_map(x, sympy.acos)
         return ValueRanges.unknown()
