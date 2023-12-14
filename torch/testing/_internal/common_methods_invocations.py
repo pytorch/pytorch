@@ -8465,6 +8465,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             cu_seqlens_q=None,
             cu_seqlens_k=None,
             max_seqlen_q=None,
+            max_seqlen_k=None,
             dropout_p=dropout_p,
             custom_mask_type=mask_type,
             compute_log_sumexp=requires_grad,
@@ -8482,6 +8483,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
         cu_seqlens_q=None,
         cu_seqlens_k=None,
         max_seqlen_q=None,
+        max_seqlen_k=None,
         dropout_p=dropout_p,
         custom_mask_type=0,  # No Mask
         compute_log_sumexp=requires_grad,
@@ -8500,6 +8502,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             cu_seqlens_q=None,
             cu_seqlens_k=None,
             max_seqlen_q=None,
+            max_seqlen_k=None,
             dropout_p=dropout_p,
             custom_mask_type=0,  # No Mask
             compute_log_sumexp=requires_grad,
@@ -13028,7 +13031,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_avg_pool1d,
@@ -13391,7 +13394,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_layer_norm,
            supports_expanded_weight=True,),
     OpInfo('nn.functional.local_response_norm',
-           dtypes=floating_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
@@ -13784,7 +13787,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_avg_pool2d,
            sample_inputs_func=sample_inputs_avgpool2d,
@@ -14221,7 +14224,11 @@ op_db: List[OpInfo] = [
         supports_forward_ad=False,
         supports_autograd=False,
         decorators=[skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 9.0')],
-        skips=()
+        skips=(
+            # Sample inputs isn't really parametrized on dtype
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
+                         device_type='cuda'),
+        )
     ),
     OpInfo(
         'nn.functional.scaled_dot_product_attention',
