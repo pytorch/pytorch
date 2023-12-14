@@ -1278,7 +1278,7 @@ Tensor triu_indices_cpu(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor zeros_sparse_compressed_symint(c10::SymIntArrayRef size,
+static Tensor zeros_sparse_compressed_symint(c10::SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     Layout layout,
     c10::optional<Device> device,
