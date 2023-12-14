@@ -119,19 +119,6 @@ def check_ragged_dim_same(
         )
 
 
-def validate_and_get_meta(func_name, size):
-    # Assume that there's only a single ragged dimension
-    _unused_B, singleton, *Ds = size
-    if not (isinstance(singleton, torch.SymInt) and singleton.node.is_singleton()):
-        raise ValueError(
-            f"{func_name}() only supports shapes of form (B, *, D1, D2...) "
-            "where only the second-left-most dimension is ragged. "
-        )
-    offsets = singleton.node.singleton_data()
-    sum_offsets = singleton.node.singleton_sum_offsets()
-    return offsets, sum_offsets, *Ds
-
-
 # returns True if the raggedness-relevant portions of the NT shape
 # match those of the specified size
 def raggedness_matches(nt, size):
@@ -649,45 +636,17 @@ def expand_default(func, *args, **kwargs):
     expand_arg = [-1, *size[2:]]
     return NestedTensor(func(inp._values, expand_arg), **extract_kwargs(inp))
 
-# Allow both jt and t for self
-@register_jagged_func(torch.ops.aten._nested_expand.default, "self: any, size: any, dummy: jt")
-def _nested_expand(func, *args, **kwargs):
+
+@register_jagged_func(torch.ops.aten.expand_as.default, "self: t, other: jt")
+def expand_as_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    inp = new_kwargs.pop("input")
-    size = new_kwargs.pop("size")
-    offsets, sum_offsets, *Ds = validate_and_get_meta("expand_as", size)
 
-    fail_reason = None
-    if not inp.dim() <= len(size):
-        fail_reason = "trying to expand input to a size with larger dim"
-    if inp.is_nested:
-        if not inp.dim() == len(size):
-            # We don't support cases like:
-            # - (B, j0, D) -> (B, j0, D', D)
-            fail_reason = "trying to expand input to a size with different dim"
-        elif not inp._ragged_idx == 1:
-            # We could clean this up if we supported union types in the schema
-            fail_reason = "transposed jagged layout nested tensor is not supported"
-        elif not size[1] == inp._size[1]:
-            fail_reason = "input has a different raggedness than size"
-        inp = inp._values
-    else:
-        # Currently you must either expand both B and j0 or neither, e.g.
-        # one cannot expand (B, j0, D) to (B, 1, D) today.
-        # Since j0 must be expanded for this branch, both are always expanded.
-        # We only have 3 cases here:
-        # - (1, 1, *Ds) -> (B, j0 ,*Ds)
-        # - (1, *Ds) -> (B, j0, *Ds)
-        # - (*Ds,) -> (B, j0, *Ds)
-        # The case (1, 1, *Ds) is the only one we need to handle specially so that
-        # it can be expanded (sum(*), *Ds)
-        if inp.dim() == len(size):
-            inp = inp.squeeze(0)
-    if fail_reason is not None:
-        raise ValueError(f"expand_as(): {fail_reason}")
-    return NestedTensor(inp.expand([sum_offsets, *Ds]), offsets)
+    inp = new_kwargs.pop("input")
+    other = new_kwargs.pop("other")
+
+    return NestedTensor(func(inp, other._values), **extract_kwargs(other))
 
 
 @register_jagged_func(torch.ops.aten.where.self, "condition: jt, self: jt, other: jt")
@@ -758,12 +717,6 @@ def sum_dim_IntList(func, *args, **kwargs):
         if new_kwargs["keepdim"]:
             out = out.unsqueeze(0)
         return out
-
-@register_jagged_func(
-    torch.ops.aten.sum.default, "self: jt, dtype: any?"
-)
-def sum_default(func, *args, **kwargs):
-    return args[0]._values.sum(**kwargs)
 
 
 @register_jagged_func(
@@ -996,7 +949,16 @@ def jagged_new_factory(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     new_kwargs.pop("input")
-    offsets, sum_offsets, *Ds = validate_and_get_meta(factory_fn.__name__, new_kwargs.pop("size"))
+    _unused_B, singleton, *Ds = new_kwargs.pop("size")
+    if not (isinstance(singleton, torch.SymInt) and singleton.node.is_singleton()):
+        raise ValueError(
+            f"{factory_fn.__name__}() only supports shapes of form (B, *, D1, D2...) "
+            "where only the second-left-most dimension is ragged. "
+        )
+
+    offsets = singleton.node.singleton_data()
+    sum_offsets = singleton.node.singleton_sum_offsets()
+
     return NestedTensor(factory_fn([sum_offsets, *Ds], **new_kwargs), offsets)
 
 
