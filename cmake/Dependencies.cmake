@@ -1359,8 +1359,6 @@ if(USE_NCCL)
   endif()
 endif()
 
-include(${CMAKE_CURRENT_LIST_DIR}/External/xpumkldnn.cmake)
-
 # ---[ UCC
 if(USE_UCC)
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -1782,6 +1780,11 @@ if(NOT INTERN_BUILD_MOBILE)
     else()
       message(WARNING "MKLDNN could not be found.")
       caffe2_update_option(USE_MKLDNN OFF)
+    endif()
+
+    # Build mkldnn for Intel GPU
+    if(USE_XPU)
+      include(${CMAKE_CURRENT_LIST_DIR}/External/xpumkldnn.cmake)
     endif()
   else()
     message("disabling MKLDNN because USE_MKLDNN is not set")
