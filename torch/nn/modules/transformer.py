@@ -25,7 +25,7 @@ def _generate_square_subsequent_mask(
     The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0).
     """
     if device is None:
-        device = torch._C.get_default_device()
+        device = torch._C._get_default_device()
     if dtype is None:
         dtype = torch.get_default_dtype()
     return torch.triu(
