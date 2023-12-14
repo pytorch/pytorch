@@ -366,23 +366,31 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _is_ancestor_node(_src_node, _check_node):
-        if _src_node == _check_node:
-            return True
-        elif isinstance(_src_node, torch.fx.Node):
-            if (
-                _src_node.op == "placeholder"
-                or _src_node.op == "output"
-                or _src_node.op == "get_attr"
-            ):
-                return False
+    def _get_remaining_users(remaining_users, compute_node):
+        def _is_ancestor_node(_current_node, _ancestor_node):
+            # Check whether _ancestor_node is the ancestor node of current node
+            if _current_node == _ancestor_node:
+                return True
+            elif isinstance(_current_node, torch.fx.Node):
+                if (
+                    _current_node.op == "placeholder"
+                    or _current_node.op == "output"
+                    or _current_node.op == "get_attr"
+                ):
+                    return False
+                else:
+                    return any(
+                        _is_ancestor_node(input, _ancestor_node)
+                        for input in _current_node.all_input_nodes
+                    )
             else:
-                return any(
-                    _is_ancestor_node(input, _check_node)
-                    for input in _src_node.all_input_nodes
-                )
-        else:
-            return False
+                return False
+
+        return [
+            user
+            for user in remaining_users
+            if not _is_ancestor_node(compute_node, user)
+        ]
 
     def _is_valid_computation_binary_inplace(computation_op, binary_op, other_index):
         def fn(match):
@@ -390,41 +398,22 @@ if torch._C._has_mkldnn:
                 return False
             binary_nodes = filter_nodes(match.nodes, binary_op)
 
-            def _is_all_users_are_ancestor_node(_binary_node):
-                # Think about this case:
-                #      ReLU
-                #     /   \
-                #  Conv1
-                #   /      \
-                # Conv2
-                #   \      /
-                #      Add
-                # Although, the extra input node (ReLU) has more than 1 users: Conv1 and Add.
-                # The Conv1 is the ancestor node of the current compute node (Conv2).
-                # This indicates that the buffer of ReLU has completed all its usage,
-                # So we can safely make changes to it now by doing Conv2->Add inplace fusion.
+            def _get_compute_node(_binary_node, _other_index):
                 if len(_binary_node.all_input_nodes) != 2:
                     # Binary node should have 2 input nodes.
                     return False
-
-                # Step 1: Get the compute node and othe node of binary node
-                # As above example:
-                #   * binary node is Add
-                #   * compute_node is Conv2
-                #   * other_node is ReLU
-                compute_index = 1 if (other_index == 0) else 0
-                compute_node = _binary_node.args[compute_index]
-                other_node = _binary_node.args[other_index]
-
-                # Step 2: Check all the users of other_node should be ancestor_node of compute node
-                return all(
-                    (user == _binary_node or _is_ancestor_node(compute_node, user))
-                    for user in list(other_node.users)
-                )
+                _compute_index = 1 if (_other_index == 0) else 0
+                return _binary_node.args[_compute_index]
 
             if any(
                 len(n.args[other_index].users) > 1
-                and not _is_all_users_are_ancestor_node(n)
+                and len(
+                    _get_remaining_users(
+                        [user for user in list(n.args[other_index].users) if user != n],
+                        _get_compute_node(n, other_index),
+                    )
+                )
+                != 0
                 for n in binary_nodes
             ):
                 return False
