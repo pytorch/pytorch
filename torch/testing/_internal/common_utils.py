@@ -1384,12 +1384,11 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
     return decorator
 
 
-def unMarkDynamoStrictTest(cls):
+def unMarkDynamoStrictTest(cls=None):
     def decorator(cls):
         assert inspect.isclass(cls)
-        cls_or_func.dynamo_strict = False
-        cls_or_func.dynamo_strict_nopython = nopython
-        return cls_or_func
+        cls.dynamo_strict = False
+        return cls
 
     if cls is None:
         return decorator
