@@ -62,9 +62,7 @@ def _sfdp_replacement_2(query, key, value, scale):
 
 def _sfdp_pattern_3(query, key, value, inv_scale, dropout_p):
     return torch.nn.functional.dropout(
-        torch.matmul(query, key.transpose(-2, -1))
-        .div(inv_scale)
-        .softmax(dim=-1),
+        torch.matmul(query, key.transpose(-2, -1)).div(inv_scale).softmax(dim=-1),
         p=dropout_p,
     ).matmul(value)
 
