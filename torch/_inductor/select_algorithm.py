@@ -6,6 +6,7 @@ import logging
 import sys
 import textwrap
 import time
+from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 
 from typing import Any, Callable, Dict, List, Optional, Type, Union
@@ -716,6 +717,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # arg, the function will be called instead of
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
+        precompilation_timeout_seconds: int = 60 * 60,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -737,7 +739,53 @@ class AlgorithmSelectorCache(PersistentCache):
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
+        def precompile(choices):
+            if (
+                precompilation_timeout_seconds is None
+                or precompilation_timeout_seconds <= 0
+            ):
+                return
+            if config.autotune_precompilation_workers <= 0:
+                return
+            num_workers = min(
+                config.autotune_precompilation_workers,
+                torch.get_num_threads(),
+                len(choices),
+            )
+            log.info(
+                "Multithreaded precompilation for %d choices using %d worker threads",
+                len(choices),
+                num_workers,
+            )
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = executor.map(
+                    lambda c: c.precompile(),
+                    [c for c in choices if hasattr(c, "precompile")],
+                    timeout=precompilation_timeout_seconds,
+                )
+                try:
+                    iterator = iter(futures)
+                    while True:
+                        try:
+                            next(iterator)
+                        except CUDACompileError:
+                            log.error("CUDA Compilation error", exc_info=True)
+                except TimeoutError:
+                    log.warning(
+                        f"Precompilation timed out after {precompilation_timeout_seconds} seconds."
+                    )
+                except StopIteration:
+                    pass
+                executor.shutdown(wait=True)
+
         def autotune(choices):
+            try:
+                precompile(choices)
+            except TimeoutError:
+                log.warning(
+                    "Precompilation phase took longer than timeout allowed. Continuing"
+                )
+                pass
             return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
