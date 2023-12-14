@@ -2261,7 +2261,7 @@ class CUDACodeCache:
                     cmd = cuda_compile_command(
                         [input_path], output_path, dst_file_ext, extra_args
                     )
-                    log.info("CUDA Compilation: %s", cmd)
+                    log.debug("CUDA Compilation: %s", cmd)
                     cmd = cmd.split(" ")
                     try:
                         subprocess.check_output(
@@ -2270,7 +2270,7 @@ class CUDACodeCache:
                     except subprocess.CalledProcessError as error:
                         raise exc.CUDACompileError(cmd, error.output) from error
                 else:
-                    log.info(
+                    log.debug(
                         "CUDA Compilation skipped: %s since output already exists",
                         input_path,
                     )

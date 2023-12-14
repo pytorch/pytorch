@@ -3346,7 +3346,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         # Global memory (in bytes) needed for this template.
         self.workspace_size = workspace_size
         self.template = template
-        self._tuned_for_epilogue: Optional[List[Any]] = None
+        self._tuned_for_epilogue: List[Any] = []
 
     def get_workspace_size(self):
         if callable(self.workspace_size):

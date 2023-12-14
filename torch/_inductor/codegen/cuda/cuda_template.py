@@ -27,6 +27,13 @@ from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
 log = logging.getLogger(__name__)
 
 
+def _set_layout(input_node: ir.IRNode, layout: Layout):
+    if isinstance(input_node, ir.MutableBox):
+        _set_layout(input_node.data, layout)
+    else:
+        input_node.layout = layout
+
+
 class MakeCUDAKernelRender:
     def __init__(self, template: "CUDATemplate", render_kwargs: Dict[Any, Any]):
         self.template = template
@@ -206,19 +213,13 @@ class CUDATemplate(KernelTemplate):
                         input_tensor_meta_variant.strides,
                         lo.offset,
                     )
-                    if isinstance(input_node, ir.MutableBox):
-                        input_node.data.layout = new_layout
-                    else:
-                        input_node.layout = new_layout
+                    _set_layout(input_node, new_layout)
             code = self.render(kernel=kernel, **kwargs)
         finally:
             # restore the original (still flexible until Autotuning has been resolved) strides
             for input_node, original_layout in zip(self.input_nodes, original_layouts):
                 if isinstance(original_layout, FlexibleLayout):
-                    if isinstance(input_node, ir.MutableBox):
-                        input_node.data.layout = original_layout
-                    else:
-                        input_node.layout = original_layout
+                    _set_layout(input_node, original_layout)
         return code
 
     def generate_input_layout_combinations(self, input_nodes) -> List[List[TensorMeta]]:
