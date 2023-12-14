@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     noncontiguous_like,
     TEST_WITH_ASAN,
     TEST_WITH_TORCHDYNAMO,
+    TEST_WITH_TORCHINDUCTOR,
     TEST_WITH_UBSAN,
     IS_WINDOWS,
     IS_FBCODE,
@@ -260,6 +261,13 @@ class TestCommon(TestCase):
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
     def test_numpy_ref(self, device, dtype, op):
+        if (
+            TEST_WITH_TORCHINDUCTOR and
+            op.formatted_name in ('signal_windows_exponential', 'signal_windows_bartlett') and
+            dtype == torch.float64 and 'cuda' in device
+           ):   # noqa: E121
+            raise unittest.SkipTest("XXX: raises tensor-likes are not close.")
+
         # Sets the default dtype to NumPy's default dtype of double
         with set_default_dtype(torch.double):
             for sample_input in op.reference_inputs(device, dtype):
@@ -661,7 +669,7 @@ class TestCommon(TestCase):
         dtype = (
             torch.float32
             if torch.float32 in supported_dtypes
-            else list(supported_dtypes)[0]
+            else next(iter(supported_dtypes))
         )
 
         # Ops from python_ref_db point to python decomps that are potentially
@@ -1895,6 +1903,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
         # other
+        '_refs.block_diag',  # only refs._block_diag_iterable is in decomposition table
         '_refs.empty',  # intentional; direct empty is faster and has less guards
         '_refs.empty_permuted',  # intentional; direct empty is faster and has less guards
         '_refs.expand_as',

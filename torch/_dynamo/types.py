@@ -53,7 +53,7 @@ class DynamoCallbackFn(Protocol):
     def __call__(
         self,
         frame: DynamoFrameType,
-        cache_entry: Optional[CacheEntry],  # type: ignore[valid-type]
+        cache_entry: Optional[CacheEntry],
         frame_state: FrameState,
     ) -> Optional[GuardedCode]:
         ...

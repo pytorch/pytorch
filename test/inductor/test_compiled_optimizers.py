@@ -1,4 +1,7 @@
 # Owner(s): ["module: inductor"]
+
+import sys
+import unittest
 import weakref
 
 from copy import deepcopy
@@ -12,13 +15,20 @@ from torch.optim import Adadelta, Adagrad, Adam, AdamW, ASGD, NAdam, RMSprop, Rp
 
 from torch.testing._internal.common_utils import TestCase
 
-from torch.testing._internal.inductor_utils import (
-    check_model,
-    check_model_cuda,
-    requires_cuda,
-)
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
+
+try:
+    try:
+        from .test_torchinductor import check_model, check_model_cuda, requires_cuda
+    except ImportError:
+        from test_torchinductor import check_model, check_model_cuda, requires_cuda
+except (unittest.SkipTest, ImportError) as e:
+    sys.stderr.write(f"{type(e)}: {e}\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
 
 
 def compile_opt(opt_compiled, closure=None):
@@ -213,6 +223,7 @@ class CompiledOptimizerTests(TestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    from torch._dynamo.test_case import run_tests
 
-    run_inductor_tests(skip_rocm=True)
+    if HAS_CPU or HAS_CUDA:
+        run_tests(needs="filelock")

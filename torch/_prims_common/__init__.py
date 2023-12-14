@@ -52,12 +52,19 @@ IntLike = (int, torch.SymInt)
 FloatLike = (float, torch.SymFloat)
 IntWithoutSymInt = int
 FloatWithoutSymFloat = float
-DeviceLikeType = Union[str, torch.device]
+DeviceLikeType = Union[str, torch.device, int]
 Tensor = torch.Tensor
 
 
 torch_function_passthrough = {
     torch.device,
+    torch.sym_not,
+    torch.sym_float,
+    torch.sym_int,
+    torch.sym_max,
+    torch.sym_min,
+    torch.sym_sqrt,
+    torch.sym_ite,
     torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
     torch.Tensor.numel,
@@ -1296,7 +1303,7 @@ def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
         return type(x)
 
 
-def symbol_type(x: sympy.Symbol) -> Type:
+def expr_type(x: sympy.Expr) -> Type:
     if x.is_integer:  # type: ignore[attr-defined]
         return int
     else:
@@ -1404,14 +1411,14 @@ def elementwise_dtypes(
     import sympy
 
     for x in args:
-        if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
+        if not isinstance(x, (Number, TensorLike, sympy.Expr)):
             msg = f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
             raise ValueError(msg)
 
         if isinstance(x, Number):
             highest_type = get_higher_type(highest_type, number_type(x))
-        elif isinstance(x, sympy.Symbol):
-            highest_type = get_higher_type(highest_type, symbol_type(x))
+        elif isinstance(x, sympy.Expr):
+            highest_type = get_higher_type(highest_type, expr_type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
@@ -1530,27 +1537,13 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
-    # TODO: Move this somewhere central?
-    def _is_singleton(s):
-        # check for SingletonSymNode
-        if not isinstance(s, torch.SymInt):
-            return False
-        if s.node.singleton_int() is not None:
-            return True
-
-        # check for SymInt wrapping a SingletonSymNode (fake-ifying causes this)
-        return (
-            s.node.is_symbolic()
-            and s.node.hint is not None
-            and isinstance(s.node.hint, torch.SymInt)
-            and s.node.hint.node.singleton_int() is not None
-        )
+    from torch.fx.experimental.symbolic_shapes import is_singleton
 
     multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= l if _is_singleton(l) else sym_max(l, 1)
+        multiplier *= l if is_singleton(l) else sym_max(l, 1)
 
     result = tuple(reversed(strides))
 
@@ -1857,7 +1850,7 @@ def dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
     return dtype if dtype is not None else torch.get_default_dtype()
 
 
-def device_or_default(device: Optional[torch.device]) -> torch.device:
+def device_or_default(device: Optional[DeviceLikeType]) -> DeviceLikeType:
     return device if device is not None else torch.device("cpu")
 
 

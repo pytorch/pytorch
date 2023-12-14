@@ -22,6 +22,7 @@
 #endif
 
 #include <c10/util/irange.h>
+#include <c10/util/string_utils.h>
 #include <c10/util/SmallBuffer.h>
 
 #include <array>
@@ -107,13 +108,13 @@ TensorIteratorConfig& TensorIteratorConfig::add_owned_output(const TensorBase& o
       num_inputs_ == 0,
       "Keep in mind that you have to add all outputs first before adding any input. "
       "For more details, see https://github.com/pytorch/pytorch/wiki/How-to-use-TensorIterator.");
-  tensors_.push_back(c10::MaybeOwned<TensorBase>::owned(c10::in_place, output));
+  tensors_.push_back(c10::MaybeOwned<TensorBase>::owned(std::in_place, output));
   num_outputs_++;
   return *this;
 }
 
 TensorIteratorConfig& TensorIteratorConfig::add_owned_input(const TensorBase& input) {
-  tensors_.push_back(c10::MaybeOwned<TensorBase>::owned(c10::in_place, input));
+  tensors_.push_back(c10::MaybeOwned<TensorBase>::owned(std::in_place, input));
   num_inputs_++;
   return *this;
 }

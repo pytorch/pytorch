@@ -5,6 +5,7 @@ import functools
 import weakref
 
 import torch
+from torch._prims_common import DeviceLikeType
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
@@ -1016,7 +1017,7 @@ class Module:
         """
         return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
 
-    def to_empty(self: T, *, device: Union[str, device], recurse: bool = True) -> T:
+    def to_empty(self: T, *, device: Optional[DeviceLikeType], recurse: bool = True) -> T:
         r"""Move the parameters and buffers to the specified device without copying storage.
 
         Args:
@@ -1031,7 +1032,7 @@ class Module:
         return self._apply(lambda t: torch.empty_like(t, device=device), recurse=recurse)
 
     @overload
-    def to(self, device: Optional[Union[int, str, device]] = ..., dtype: Optional[Union[dtype, str]] = ...,
+    def to(self, device: Optional[DeviceLikeType] = ..., dtype: Optional[Union[dtype, str]] = ...,
            non_blocking: bool = ...) -> Self:
         ...
 

@@ -273,6 +273,21 @@ class TestFX(JitTestCase):
         t = T()
         self.checkGraphModule(t, (torch.rand(1), torch.rand(1)), {'foo': torch.rand(1)})
 
+    def test_varargs_concrete(self):
+        class T(torch.nn.Module):
+            def forward(self, *args, **kwargs):
+                x = args[0] + args[1]
+                return x
+
+        args = (torch.rand(1), torch.rand(1))
+
+        t = T()
+        ref_outs = t(*args)
+        gm = symbolic_trace(t, concrete_args=(torch.fx.PH, torch.fx.PH))
+        gm.graph.lint()
+        test_outs = gm(*args)
+        self.assertEqual(ref_outs, test_outs)
+
     def test_args_kwargs_no_self(self):
         class T(torch.nn.Module):
             def forward(*args, **kwargs):  # noqa: B902
@@ -1752,8 +1767,8 @@ class TestFX(JitTestCase):
         gm = torch.fx.symbolic_trace(m)
 
         mod_stack = {}
-        expected_stack = [('sub_mod', type(m.sub_mod)),
-                          ('sub_mod.conv_mod', type(m.sub_mod.conv_mod))]
+        expected_stack = [('sub_mod', ('sub_mod', type(m.sub_mod))),
+                          ('sub_mod.conv_mod', ('sub_mod.conv_mod', type(m.sub_mod.conv_mod)))]
         for node in gm.graph.nodes:
             mod_stack = node.meta.get('nn_module_stack', {})
             if mod_stack:
@@ -1800,6 +1815,24 @@ class TestFX(JitTestCase):
         gm = torch.fx.symbolic_trace(m)
 
         interpreter = Interpreter(gm)
+        input = torch.randn(3, 4)
+        self.assertEqual(interpreter.run(input), gm(input))
+        self.assertEqual(interpreter.run(input), m(input))
+
+    def test_interpreter_other_graph(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x):
+                return self.linear(x + self.param).clamp(min=0.0, max=1.0)
+
+        m = MyModule()
+        gm = torch.fx.symbolic_trace(m)
+
+        interpreter = Interpreter(gm, graph=gm.graph)
         input = torch.randn(3, 4)
         self.assertEqual(interpreter.run(input), gm(input))
         self.assertEqual(interpreter.run(input), m(input))
@@ -2306,7 +2339,7 @@ class TestFX(JitTestCase):
         combined_graph = torch.fx.Graph()
         output_node = combined_graph.graph_copy(inline_into.graph, {})
 
-        input_node = list(to_inline.graph.nodes)[0]
+        input_node = next(iter(to_inline.graph.nodes))
         assert input_node and input_node.op == 'placeholder'
 
         val_map = {input_node : output_node}
@@ -3529,7 +3562,7 @@ class TestFX(JitTestCase):
         def f_namedtuple_add(x):
             return x.x + x.y
 
-        pytree._register_pytree_node(
+        pytree.register_pytree_node(
             Foo,
             lambda x: ([x.a, x.b], None),
             lambda x, _: Foo(x[0], x[1]),
@@ -3824,12 +3857,12 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         self.assertEqual(len(output_node.args), r + 1)
         self.assertEqual(len(a.users), 1)
         self.assertIs(output_node.args[0], a)
-        self.assertIs(list(a.users.keys())[0], output_node)
+        self.assertIs(next(iter(a.users.keys())), output_node)
         output_node.insert_arg(2, a)
         self.assertEqual(len(output_node.args), r + 2)
         self.assertEqual(len(a.users), 1)
         self.assertIs(output_node.args[2], a)
-        self.assertIs(list(a.users.keys())[0], output_node)
+        self.assertIs(next(iter(a.users.keys())), output_node)
         m.graph.lint()
 
 
@@ -4208,7 +4241,7 @@ class TestFunctionalTracing(JitTestCase):
         "linear": BUILT_IN_FUNC,
         "logsigmoid": BUILT_IN_FUNC,
         "one_hot": BUILT_IN_FUNC,
-        "pad": BUILT_IN_FUNC,
+        "pad": ARG_TYPE_MISMATCH,
         "pairwise_distance": BUILT_IN_FUNC,
         "pdist": BUILT_IN_FUNC,
         "pixel_shuffle": BUILT_IN_FUNC,
@@ -4238,6 +4271,7 @@ class TestFunctionalTracing(JitTestCase):
         "max_pool3d": PROXY_ITERABLE,
 
         "lp_pool2d": PROXY_ITERATED,
+        "lp_pool3d": PROXY_ITERATED,
         "max_unpool1d": PROXY_ITERATED,
         "max_unpool2d": PROXY_ITERATED,
         "max_unpool3d": PROXY_ITERATED,

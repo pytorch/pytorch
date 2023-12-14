@@ -9,7 +9,7 @@ from torch._inductor.lowering import register_lowering
 from torch._inductor.virtualized import ops
 
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
 # These tests check issues for lowerings that aren't in the main pytorch repo
@@ -139,6 +139,7 @@ class TestCustomLowering(TorchTestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    from torch._dynamo.test_case import run_tests
 
-    run_inductor_tests()
+    if HAS_CPU or HAS_CUDA:
+        run_tests(needs="filelock")

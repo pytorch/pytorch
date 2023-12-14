@@ -21,10 +21,10 @@ from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-
-test_functions = torch._dynamo.testing.load_test_module(
-    __file__, "dynamo.test_functions"
-)
+try:
+    from . import test_functions
+except ImportError:
+    import test_functions
 
 
 class BasicModule(torch.nn.Module):
@@ -214,6 +214,26 @@ class ModuleProperty(torch.nn.Module):
 
     def forward(self, x):
         return x * self.scale_alias
+
+
+class NestedModuleList(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList([])
+        for _ in range(3):
+            self.layers.append(
+                torch.nn.ModuleList(
+                    [
+                        torch.nn.Linear(10, 10),
+                        torch.nn.ReLU(),
+                    ]
+                )
+            )
+
+    def forward(self, x):
+        for layer, act in self.layers:
+            x = act(layer(x))
+        return x
 
 
 class ConstLoop(torch.nn.Module):
@@ -1046,6 +1066,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
+    test_modulelist_nested = make_test(NestedModuleList())
     test_modulelist_custom = make_test(CustomGetItemModuleList())
     test_moduledict = make_test(ModuleDict())
     test_moduledict_custom = make_test(CustomGetItemModuleDict())
@@ -2272,6 +2293,51 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod.eval()
         generate(torch.randn(10, 10), 0)
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_state_dict_pass_through(self):
+        mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt)(mod)
+        self.assertIsInstance(opt_mod, torch._dynamo.OptimizedModule)
+
+        # The state-dict doesn't contain the `_orig_mod` prefix
+        self.assertEqual(mod.state_dict(), opt_mod.state_dict())
+        self.assertEqual(opt_mod.state_dict(), opt_mod._orig_mod.state_dict())
+
+        # Load the state-dict of an `OptimizedModule` into a regular `nn.Module`
+        new_mod = MockModule()
+        self.assertNotEqual(list(new_mod.parameters()), list(mod.parameters()))
+        new_mod.load_state_dict(opt_mod.state_dict())
+        self.assertEqual(list(new_mod.parameters()), list(mod.parameters()))
+
+        # Load the state-dict of a regular `nn.Module` into an `OptimizedModule`
+        new_mod = MockModule()
+        self.assertNotEqual(list(new_mod.parameters()), list(opt_mod.parameters()))
+        opt_mod.load_state_dict(new_mod.state_dict())
+        self.assertEqual(list(new_mod.parameters()), list(opt_mod.parameters()))
+        self.assertEqual(
+            list(opt_mod.parameters()), list(opt_mod._orig_mod.parameters())
+        )
+
+        # For backward-compatibility, load a state-dict with keys prefixed with `_orig_mod`
+        old_mod = MockModule()
+        state_dict = old_mod.state_dict()
+        legacy_opt_state_dict = {("_orig_mod." + k): v for k, v in state_dict.items()}
+
+        new_mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt)(new_mod)
+        self.assertNotEqual(list(opt_mod.parameters()), list(old_mod.parameters()))
+        opt_mod.load_state_dict(legacy_opt_state_dict)
+        self.assertEqual(list(opt_mod.parameters()), list(old_mod.parameters()))
+        self.assertEqual(opt_mod.state_dict(), old_mod.state_dict())
+        self.assertEqual(old_mod.state_dict(), new_mod.state_dict())
+
+        # When only a submodule is an `OptimizedModule`
+        mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        mod.linear = torch._dynamo.optimize(cnt)(mod.linear)
+        assert not any("_orig_mod" in key for key in mod.state_dict())
 
 
 if __name__ == "__main__":
