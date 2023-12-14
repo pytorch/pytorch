@@ -386,7 +386,7 @@ struct NCCLTraceBuffer {
         id_,
         pg_id,
         seq_id,
-        profiling_name,
+        profiling_name == nullptr ? "" : profiling_name,
         std::move(traceback),
         std::move(start),
         std::move(end),
