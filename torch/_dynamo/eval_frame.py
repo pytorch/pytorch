@@ -456,7 +456,8 @@ class _TorchDynamoContext:
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
         assert not hasattr(_fn, "get_compiler_config")
-        _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+        if not self.serialize:
+            _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -718,6 +719,7 @@ def optimize(
             backend,
             dynamic=dynamic,
             hooks=hooks,
+            serialize=serialize
         )
 
     callback = convert_frame.convert_frame(backend, hooks=hooks, serialize=serialize)
@@ -729,6 +731,7 @@ def optimize(
         compiler_config=backend.get_compiler_config()
         if hasattr(backend, "get_compiler_config")
         else None,
+        serialize=serialize,
     )
 
 
@@ -1421,6 +1424,7 @@ def optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=None,
+    serialize=False,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -1438,6 +1442,7 @@ def optimize_assert(
         backend_ctx_ctor,
         export=export,
         dynamic=dynamic,
+        serialize=serialize,
     )
 
 

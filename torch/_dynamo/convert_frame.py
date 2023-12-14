@@ -728,6 +728,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks, serialize=False):
                 if serialize:
                     # Will raise if it cannot serialize
                     _placeholder_remote_write(unique_frame_id, guarded_code=result)
+                    recompiles_log.debug(f"Cache Write - {unique_frame_id}")
             else:
                 if serialize:
                     recompiles_log.debug(f"Cache Hit - {unique_frame_id}")
