@@ -133,7 +133,7 @@ class CUDACPPScheduling(BaseScheduling):
                 check_layouts = [n.layout for n in template.input_nodes[:2]] + [
                     added_node.layout
                 ]
-                if not template.are_inputs_layout_compatible(
+                if not template._are_inputs_layout_compatible(
                     [n.layout for n in template.input_nodes[:2]] + [added_node.layout]
                 ):
                     log.warning(

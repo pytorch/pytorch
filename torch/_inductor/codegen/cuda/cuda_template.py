@@ -284,7 +284,7 @@ class CUDATemplate(KernelTemplate):
             variant_kwargs.update(kwarg_override)
             yield from self.generate(**variant_kwargs)
 
-    def are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
+    def _are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
         raise NotImplementedError()
 
     def header(self) -> IndentedBuffer:
