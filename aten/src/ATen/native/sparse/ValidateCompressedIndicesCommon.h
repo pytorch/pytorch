@@ -126,8 +126,8 @@ INVARIANT_CHECK_FUNC_API _check_idx_sorted_distinct_vals_slices_with_cidx(
   // Note that ptr_idx_batch = &idx[batch_idx] and is contiguous.
   const auto* RESTRICT slice_begin = ptr_idx_batch + cidx;
   const auto* RESTRICT slice_end = ptr_idx_batch + cidx_next;
-  for (auto* RESTRICT curr = slice_begin + 1; curr < slice_end; ++curr) {
-    const auto invariant = *(curr - 1) < *curr;
+  for (auto* RESTRICT curr = slice_begin; (slice_begin < slice_end) && (curr + 1 < slice_end); ++curr) {
+    const auto invariant = *curr < *(curr + 1);
     if (cdim_name == CDimName::CRow) {
       _assert(
           invariant,
