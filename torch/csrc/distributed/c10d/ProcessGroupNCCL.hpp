@@ -590,6 +590,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       OpType opType);
 
  private:
+  int globalRankStart;
+  int globalRankStride;
+
   // Helper that encapsulates work shared across all collective communication
   // primitives.  The callbacks have the following signatures:
   //

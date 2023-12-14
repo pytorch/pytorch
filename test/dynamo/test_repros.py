@@ -3819,6 +3819,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # When symbolic storage offsets were added in #113734, tensors_definitely_do_not_overlap
         # began adding shape guards - a quadratic amount relative to the number of inputs.
         # Test this configuration, and test that a reasonable number of guards are added.
+        # Note, when dynamic shapes are turned on, this test fails and we still get quadratic guards.
         def fn(x):
             x[0].relu_()
             return torch.cat(x).sum()
