@@ -44,11 +44,17 @@ if has_triton_package():
     from triton import Config
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
+
+    try:
+        from triton.compiler.compiler import ASTSource
+    except ImportError:
+        ASTSource = None
 else:
     Config = object
     triton = None
     KernelInterface = object
     OutOfResources = object
+    ASTSource = None
 
 
 _NUM_THREADS_PER_WARP = 32
@@ -286,14 +292,44 @@ class CachingAutotuner(KernelInterface):
         # Setting device_type="hip" required on ROCm to pass down to triton
         compile_meta["device_type"] = "cuda" if torch.version.hip is None else "hip"
 
+        device_type = compile_meta["device_type"]
+        if warm_cache_only_with_cc:
+            cc = warm_cache_only_with_cc
+        else:
+            device_id = compile_meta["device"]
+            device_interface = get_interface_for_device(device_type)
+            device = torch.device(device_type, device_id)
+            cc = device_interface.get_compute_capability(device)
+
+        compile_meta["cc"] = cc
+
+        if ASTSource:
+            compile_args = (
+                ASTSource(
+                    self.fn,
+                    compile_meta["signature"],
+                    compile_meta["constants"],
+                    compile_meta["configs"][0],
+                ),
+            )
+
+            target = (device_type, cc)
+            options = {
+                "num_warps": compile_meta["num_warps"],
+                "num_stages": compile_meta["num_stages"],
+                "debug": compile_meta["debug"],
+            }
+            compile_kwargs = {
+                "target": target,
+                "options": options,
+            }
+        else:
+            compile_args = (self.fn,)
+            compile_kwargs = compile_meta
+
         if warm_cache_only_with_cc:
             return (
-                triton.compile(
-                    self.fn,
-                    warm_cache_only=True,
-                    cc=warm_cache_only_with_cc,
-                    **compile_meta,
-                ),
+                triton.compile(*compile_args, **compile_kwargs),
                 None,
             )
 
@@ -301,10 +337,8 @@ class CachingAutotuner(KernelInterface):
         with torch.cuda.device(compile_meta["device"]):
             # need to initialize context
             torch.cuda.synchronize(torch.cuda.current_device())
-            binary = triton.compile(
-                self.fn,
-                **compile_meta,
-            )
+
+            binary = triton.compile(*compile_args, **compile_kwargs)
             binary._init_handles()
 
         call_args = [
@@ -329,13 +363,23 @@ class CachingAutotuner(KernelInterface):
                 else:
                     grid_0, grid_1, grid_2 = grid
 
+                if hasattr(bin, "run"):
+                    runner = bin.run
+                else:
+                    runner = bin.c_wrapper
+
+                if hasattr(bin, "cluster_dims"):
+                    cluster_dims = bin.cluster_dims
+                else:
+                    cluster_dims = bin.clusterDims
+
                 if hasattr(bin, "num_ctas"):
-                    bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps,
-                                bin.num_ctas, *bin.clusterDims, bin.shared,
-                                stream, bin.cu_function, None, None, None,
+                    runner(grid_0, grid_1, grid_2, bin.num_warps,
+                                bin.num_ctas, *cluster_dims, bin.shared,
+                                stream, bin.function, None, None, None,
                                 {', '.join(call_args)})
                 else:
-                    bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
+                    runner(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
                                 stream, bin.cu_function, None, None, None,
                                 {', '.join(call_args)})
                 return bin

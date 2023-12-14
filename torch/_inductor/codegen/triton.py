@@ -2099,6 +2099,10 @@ class TritonKernel(Kernel):
                     from torch._inductor.ir import TileHint
                     from torch._inductor.triton_heuristics import AutotuneHint, {heuristics}
                     from torch._inductor.utils import instance_descriptor
+                    try:
+                        from triton.compiler.compiler import AttrsDescriptor
+                    except ImportError:
+                        pass  # ignore
                     from torch._inductor import triton_helpers
                 """
             )
