@@ -1699,6 +1699,26 @@ class CommonTemplate:
                 ),
             )
 
+    def test_floordiv(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Fails on CPU")
+
+        def fn_floor_input(a, i):
+            n = (i * 1.234) // 8.234
+            return a + n
+
+        self.common(
+            fn_floor_input, (make_tensor(10, device="cpu", dtype=torch.float32), 33)
+        )
+
+        def fn_int_input(a, i):
+            n = i // 8
+            return a + n
+
+        self.common(
+            fn_int_input, (make_tensor(10, device="cpu", dtype=torch.float32), 33)
+        )
+
     def test_both_scalars(self):
         def fn(a, b):
             return (
