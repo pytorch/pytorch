@@ -149,6 +149,7 @@ class BackendWorker:
         request_queue,
         response_queue,
         data_generation_event,
+        batch_size,
         model_dir=".",
         compile_model=True,
     ):
@@ -158,9 +159,11 @@ class BackendWorker:
         self.request_queue = request_queue
         self.response_queue = response_queue
         self.data_generation_event = data_generation_event
+        self.batch_size = batch_size
         self.model_dir = model_dir
         self.compile_model = compile_model
         self._setup_complete = False
+        self.memcpy_stream = torch.cuda.Stream()
 
     def _setup(self):
         import time
@@ -190,14 +193,22 @@ class BackendWorker:
             self.metrics_dict["m_compile_time"] = end_compile_time - start_compile_time
         return m
 
-    def model_predict(self, model, data, request_time):
+    def model_predict(self, model, data, copy_event, request_time):
+        torch.cuda.current_stream().wait_event(copy_event)
         with torch.no_grad():
-            data = data.to(self.device, non_blocking=True)
             out = model(data)
         self.response_queue.put((out, request_time))
+        del data
+
+    def copy_data(self, dest, data, copy_event):
+        # data = data.pin_memory()
+        with torch.cuda.stream(self.memcpy_stream):
+            dest.copy_(data, non_blocking=True)
+            copy_event.record()
 
     async def run(self):
-        pool = ThreadPoolExecutor(max_workers=1)
+        worker_pool = ThreadPoolExecutor(max_workers=1)
+        memcpy_pool = ThreadPoolExecutor(max_workers=1)
         self.data_generation_event.wait()
         while True:
             try:
@@ -209,7 +220,11 @@ class BackendWorker:
                 model = self._setup()
                 self._setup_complete = True
 
-            asyncio.get_running_loop().run_in_executor(pool, self.model_predict, model, data, request_time)
+            # TODO: should the input_buffer be pre-allocated and reused?
+            input_buffer = torch.empty([self.batch_size, 3, 250, 250], dtype=torch.float32, device='cuda')
+            copy_event = torch.cuda.Event()
+            asyncio.get_running_loop().run_in_executor(memcpy_pool, self.copy_data, input_buffer, data, copy_event)
+            asyncio.get_running_loop().run_in_executor(worker_pool, self.model_predict, model, input_buffer, copy_event, request_time)
 
 
 if __name__ == "__main__":
@@ -261,6 +276,7 @@ if __name__ == "__main__":
             request_queue,
             response_queue,
             data_generation_event,
+            args.batch_size,
             args.model_dir, args.compile
         )
 
