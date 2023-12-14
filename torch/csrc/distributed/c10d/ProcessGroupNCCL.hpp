@@ -833,9 +833,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   bool writeDebugInfo_ = false;
 
-  // Mutex to Guard the check of writeDebugInfo_
-  std::mutex writeDebugInfoMutex_;
-
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
 
