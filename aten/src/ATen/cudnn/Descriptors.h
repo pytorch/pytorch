@@ -299,26 +299,6 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
             /*recProjSize=*/proj_size,
             /*outProjSize=*/0));
     }
-#else
-    auto md = mut_desc();
-    AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v8(
-          md,
-          algo,
-          mode,
-          CUDNN_RNN_DOUBLE_BIAS,
-          bidirectional,
-          input_mode,
-          input_type,
-          datatype,
-          allow_tf32 ? CUDNN_DEFAULT_MATH : CUDNN_FMA_MATH,
-          input_size,
-          hidden_size,
-          proj_size ? proj_size : hidden_size,
-          num_layers,
-          dropout_desc_.desc(),
-          packed ? CUDNN_RNN_PADDED_IO_DISABLED : CUDNN_RNN_PADDED_IO_ENABLED));
-#endif
-#ifndef USE_CUDNN_RNN_V8_API
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major >= 7) {
       if (input_type == CUDNN_DATA_HALF) {
@@ -335,6 +315,23 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_DEFAULT_MATH);
       }
     }
+#else
+    AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v8(
+          mut_desc(),
+          algo,
+          mode,
+          CUDNN_RNN_DOUBLE_BIAS,
+          bidirectional,
+          input_mode,
+          input_type,
+          datatype,
+          allow_tf32 ? CUDNN_DEFAULT_MATH : CUDNN_FMA_MATH,
+          input_size,
+          hidden_size,
+          proj_size ? proj_size : hidden_size,
+          num_layers,
+          dropout_desc_.desc(),
+          packed ? CUDNN_RNN_PADDED_IO_DISABLED : CUDNN_RNN_PADDED_IO_ENABLED));
 #endif
   }
 };
