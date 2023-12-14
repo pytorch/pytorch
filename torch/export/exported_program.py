@@ -243,11 +243,10 @@ class ExportedProgram:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
-        from torch._export import combine_args_kwargs
 
         if self.call_spec.in_spec is not None:
             try:
-                user_args = combine_args_kwargs(args, kwargs)
+                user_args = (args, kwargs or {})
                 args = fx_pytree.tree_flatten_spec(
                     user_args, self.call_spec.in_spec, exact_structural_match=True
                 )  # type: ignore[assignment]
@@ -351,11 +350,11 @@ class ExportedProgram:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """
-        from torch._export.exported_program import unlift_exported_program_lifted_states
         from torch._export.unflatten import unflatten
+        from ._unlift import _unlift_exported_program_lifted_states
 
         if flat:
-            return unlift_exported_program_lifted_states(self)
+            return _unlift_exported_program_lifted_states(self)
         else:
             return unflatten(self)
 
@@ -468,7 +467,7 @@ class ExportedProgram:
         ]
 
         state_dict = self.state_dict.copy()
-        lift_constant_tensor_pass(gm, new_graph_signature, state_dict)
+        lift_constant_tensor_pass(gm, new_graph_signature)
         _replace_sym_size_ops_pass(gm)
         exported_program = ExportedProgram(
             gm,

@@ -394,14 +394,29 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
-            # TODO: Once we decide to break serialization FC, no longer
-            # need to wrap with TypedStorage
-            args = (
-                torch.storage.TypedStorage(
+            v3_dtypes = [
+                torch.float8_e5m2,
+                torch.float8_e4m3fn,
+                torch.bits8,
+                torch.bits16,
+                torch.bits1x8,
+                torch.bits2x4,
+                torch.bits4x2,
+            ]
+            if self.dtype in v3_dtypes:
+                rebuild_func = torch._utils._rebuild_tensor_v3
+                storage = self.untyped_storage()
+            else:
+                # TODO: Once we decide to break serialization FC, no longer
+                # need to wrap with TypedStorage
+                rebuild_func = torch._utils._rebuild_tensor_v2  # type: ignore[assignment]
+                storage = torch.storage.TypedStorage(
                     wrap_storage=self._typed_storage()._untyped_storage,
                     dtype=self.dtype,
                     _internal=True,
-                ),
+                )  # type: ignore[assignment]
+            args = (
+                storage,
                 self.storage_offset(),
                 tuple(self.size()),
                 self.stride(),
@@ -409,10 +424,14 @@ class Tensor(torch._C.TensorBase):
                 backward_hooks,
             )  # previously was self._backward_hooks
 
+            if isinstance(storage, torch.storage.UntypedStorage):
+                args = args + (self.dtype,)  # type: ignore[assignment]
+
             metadata = torch._utils.get_tensor_metadata(self)
             if metadata:
                 args = args + (metadata,)  # type: ignore[assignment]
-            return (torch._utils._rebuild_tensor_v2, args)
+
+            return (rebuild_func, args)
 
     def __setstate__(self, state):
         if has_torch_function_unary(self):
