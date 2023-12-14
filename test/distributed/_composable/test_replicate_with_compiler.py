@@ -45,9 +45,11 @@ class Net(nn.Module):
 
 def compiler_fn(gm):
     def inner_compiler(gm_, example_inputs_):
+        # This backend is the same as inductor.compile. It's created
+        # for easy debugging purpose.
         return inductor.compile(gm_, example_inputs_)
 
-    gm = torch.compile(gm, fullgraph=True, dynamic=True, backend=inner_compiler)
+    gm = torch.compile(gm, fullgraph=True, backend=inner_compiler)
     return gm
 
 
@@ -102,6 +104,9 @@ class ReplicateTest(MultiProcessTestCase):
 
         # Run multiple iterations so that we could test no_sync
         for i in range(6):
+            # Settting a different random seed so that if the allreduces are not
+            # executed correctly, the gradients won't be correct compared to the
+            # eager DDP.
             torch.manual_seed(123 + self.rank + i)
             input = torch.randn([1, DIM], device=device)
 
@@ -127,6 +132,8 @@ class ReplicateTest(MultiProcessTestCase):
                 for p1, p2 in zip(model.parameters(), compiled_model.parameters()):
                     self.assertEqual(p1.grad, p2.grad)
                 compiled_optim.step()
+                # Right now we have to use `set_to_none=False`, otherwise
+                # the backward will be recompiled every iteration.
                 compiled_optim.zero_grad(set_to_none=False)
                 optim.step()
                 optim.zero_grad()
