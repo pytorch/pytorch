@@ -73,7 +73,7 @@ struct ThreadLocalCachedOutputTensor<ArrayRefTensor<T>> {
         t.sizes().data(),
         t.strides().data(),
         0,
-        t.dtype(),
+        aoti_torch_dtype<std::remove_const_t<T>>(),
         t.device_type(),
         t.device_idx(),
         &handle));
@@ -203,7 +203,6 @@ void convert_handle_to_arrayref_tensor(
       MiniArrayRef<T>(reinterpret_cast<T*>(data_ptr), numel),
       MiniArrayRef<const int64_t>(sizes, dim),
       MiniArrayRef<const int64_t>(strides, dim),
-      dtype,
       device_type,
       device_index);
 }
@@ -236,5 +235,13 @@ RAIIAtenTensorHandle convert_arrayref_tensor_to_tensor(
   return art.expensiveCopyToTensor();
 }
 
+template <typename T>
+void assert_numel(const ArrayRefTensor<T>& tensor, int64_t numel) {
+  if (tensor.numel() != numel) {
+    std::stringstream err;
+    err << "incorrect numel for input tensor. expected " << numel << ", got " << tensor.numel();
+    throw std::runtime_error(err.str());
+  }
+}
 } // namespace aot_inductor
 } // namespace torch
