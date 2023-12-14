@@ -7,14 +7,25 @@ import sympy
 import torch._inductor.virtualized as virtualized
 from torch._inductor import ir
 
+# Utility functions for working with the index expressions encountered in the Pointwise IRNode's
+# 'define by run' inner function, which is accessed via the virtualized.V.ops_handler mechanism.
+# required by other modules in this package.
+
 
 def map_pointwise_index_to_read_strides(
     index_expr: sympy.Expr, master_layout: ir.Layout, flip_mn: bool
 ) -> List[int]:
     """
-    Converts a sympy index expression to a list of strides, mapped to the master layout
+    Converts a Sympy index expression into a list of strides, according to the provided master layout.
+
+    Arguments:
+        index_expr (sympy.Expr): The Sympy expression to transform.
+        master_layout (ir.Layout): The layout to map the strides to.
+        flip_mn (bool): If True, the last two dimensions of the stride and the layout are swapped.
+
+    Returns:
+        List[int]: The list of computed strides.
     """
-    strides = []
     free_symbols = list(index_expr.free_symbols)
     assert len(free_symbols) <= len(
         master_layout.stride
@@ -50,17 +61,37 @@ def map_pointwise_index_to_read_strides(
     index_expr: sympy.Expr, master_layout: ir.Layout, flip_mn: bool
 ) -> List[int]:
     """
-    Converts a sympy index expression to a list of strides, mapped to the GEMM output master layout.
-    Can flip M and N dimensions in the mapping if the corresponding flag is set.
+    Converts a sympy index expression to a list of strides in accordance with the provided master layout.
+
+    Takes a sympy index expression as input and converts this to a list of strides, aligned to the layout
+    specified by `master_layout`. The M and N dimensions can be flipped in the mapping based on the
+    `flip_mn` boolean flag.
+
+    Note: This function does not return the offset, but considers it while computing strides.
+
+    Args:
+        index_expr (sympy.Expr): The index expression to convert to strides.
+        master_layout (ir.Layout): The master layout for stride mapping.
+        flip_mn (bool): A flag determining if M and N dimensions should be flipped in the mapping.
+
+    Returns:
+        List[int]: A list of strides mapped to the GEMM output master_layout.
     """
     free_symbols = list(index_expr.free_symbols)
     assert len(free_symbols) <= len(
         master_layout.stride
     ), f"Too many free symbols in index expression {index_expr} for layout {master_layout}"
     subs = {sym: 0 for sym in free_symbols}
+    # Calculate constant offset first by setting all variable coefficients to zero
+    # e.g. if we have "256 + 64 * i0 + i1" and set both i0 and i1 to 0, we get 256 as offset
+    offset = index_expr.evalf(subs=subs)
+    assert (
+        math.isfinite(offset) and offset >= 0.0
+    ), f"Invalid offset {offset} in index expression {index_expr}"
+    offset = int(offset)
     result_strides = [0] * len(master_layout.stride)
     sym_idx_map = list(range(len(result_strides)))
-    # flip m and n dimensions in this mapping
+    # flip m and n dimensions in this mapping if requested by the flip_mn flag
     if flip_mn and len(master_layout.stride) >= 2:
         sym_idx_map[-1] = len(master_layout.stride) - 2
         sym_idx_map[-2] = len(master_layout.stride) - 1
@@ -74,11 +105,18 @@ def map_pointwise_index_to_read_strides(
         if i > 0:
             subs[free_symbols[i - 1]] = 0
         subs[free_symbols[i]] = 1
-        stride = index_expr.evalf(subs=subs)
+        # Result of the calculation below is a stride + offset.
+        # Example: index_expr = "256 + 64 * i0 + i1"
+        # Now we set all index variables (i0, i1, ...) to 0 except the one we are
+        # interested in. So we set i0 to 1 and i1 to 0
+        # this gives us 256 + 64, which equals the constant offset ( 256 ) + the stride ( 64 ) of i1
+        stride_plus_offset = index_expr.evalf(subs=subs)
         assert (
-            math.isfinite(stride) and stride >= 0.0
-        ), f"Invalid stride {stride} for symbol {free_symbols[i]} in index expression {index_expr}"
-        stride = int(stride)
+            math.isfinite(stride_plus_offset) and stride_plus_offset >= 0.0
+        ), f"Invalid stride+offset {stride_plus_offset} for symbol {free_symbols[i]} in index expression {index_expr}"
+        stride = (
+            int(stride_plus_offset) - offset
+        )  # need to subtract constant offset to arrive at stride
         result_strides[sym_idx] = stride
 
     return result_strides
@@ -129,7 +167,7 @@ def index_to_stride_dict(index_expr: sympy.Expr) -> Dict[str, int]:
 class _IndexExtractor:
     """
     V.ops handler that extracts load index expressions for each buffer loaded
-    and just keeps them in a map for further usage.
+    and just keeps them in a map for further usage. Used by function extract_pointwise_load_strides
     """
 
     def __init__(
@@ -153,8 +191,20 @@ def extract_pointwise_load_strides(
     node: ir.IRNode, reference_buffer: ir.Buffer
 ) -> Dict[str, Tuple[List[int], int, List[int]]]:
     """
-    Extract the strides used to load inputs to the pointwise op, mapped to the corresponding dimensions of a
+    Extract the strides used to load inputs to an operator working pointwise, mapped to the corresponding dimensions of a
     reference buffer that is also among the inputs.
+
+    This is similar to `map_pointwise_index_to_read_strides`, but instead of mapping to a given index expression,
+    we are mapping to the layout of a given Buffer. This Buffer's name has to appear in the inputs loaded by the
+    Pointwise IRNode.
+
+    Args:
+        node (ir.IRNode): The node from which to extract the strides.
+        reference_buffer (ir.Buffer): The reference buffer to which to map the strides.
+
+    Returns:
+        dict: A dictionary that maps the buffer names to a tuple of strides (List[int]), offset (int), and sizes (List[int]).
+        Each tuple corresponds to a load instruction encountered in the Pointwise IRNode, except for the reference buffer's.
     """
     if isinstance(node, ir.ComputedBuffer):
         pointwise_node = node.data
