@@ -27,13 +27,6 @@ GEMM_TEMPLATE = r"""
 extern "C" {
 {{kernel_call_signature}} {
   try {
-  {{kernel.check_not_null(X)}}
-  {{kernel.check_not_null(W)}}
-  {{kernel.check_not_null(Bias)}}
-  {{kernel.check_not_null(Y)}}
-  {% for aux_node in aux_input_nodes %}
-  {{kernel.check_not_null(aux_node)}}
-  {% endfor %}
   int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
   int64_t M = {{kernel.size(X, -2)}};
   int64_t K = {{kernel.size(X, -1)}};
@@ -55,6 +48,14 @@ extern "C" {
     *workspace_size = gemm_op.get_workspace_size(arguments);
     return 0;
   }
+  // check for null pointers after workspace size, since querying workspace size doesn't require valid data pointers
+  {{kernel.check_not_null(X)}}
+  {{kernel.check_not_null(W)}}
+  {{kernel.check_not_null(Bias)}}
+  {{kernel.check_not_null(Y)}}
+  {% for aux_node in aux_input_nodes %}
+  {{kernel.check_not_null(aux_node)}}
+  {% endfor %}
   {
     auto status = gemm_op.can_implement(arguments);
     CUTLASS_CHECK(status);
@@ -201,7 +202,7 @@ bool initialize_block(
   return true;
 }
 
-extern "C" int run_standalone(uint64_t seed) {
+extern "C" int run_standalone(uint64_t seed, int repetitions) {
     std::cout << "Starting GEMM Standalone test run with seed " << seed << std::endl;
     size_t workspace_size = 0;
     size_t* workspace_size_ptr = &workspace_size;
@@ -238,7 +239,9 @@ extern "C" int run_standalone(uint64_t seed) {
     }
     std::cout << "Calling Kernel as {{test_call_statement}};" << std::endl;
     workspace_size_ptr = nullptr;
-    {{test_call_statement}};
+    for (int i=0; i<repetitions; i++) {
+        {{test_call_statement}};
+    }
     cudaError_t result = cudaDeviceSynchronize();
     if (result != cudaSuccess) {
       std::cerr << "Device synchronize failed with error "
@@ -249,7 +252,10 @@ extern "C" int run_standalone(uint64_t seed) {
 }
 
 int main(int argc, char** argv) {
-    return run_standalone(1);
+    // warmup
+    run_standalone(1, 2);
+    // repeat
+    return run_standalone(2, 10);
 }
 
 #endif
@@ -710,10 +716,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if (self.can_fuse_epilogue is not None) and (
             self.can_fuse_epilogue != supports_evt
         ):
-            return None
-        # StreamK seems to lead to extreme spilling for certain shapes
-        # and might take forever during autotuning. @TODO kadeng: investigate
-        if op.tile_scheduler == cutlass_lib.TileSchedulerType.StreamK:
             return None
         # Only keep GemmUniversal kernels
         if op.gemm_kind not in {

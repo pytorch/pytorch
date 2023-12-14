@@ -638,13 +638,6 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             )
             workspace_ptr = c_void_p(self.workspace.data_ptr())
 
-        # TODO: Support non-zero workspace_size.
-        assert self.workspace_size == 0, (
-            "Things need to be fixed to support non-zero workspace_size: "
-            "1) max autotune cache needs to store workspace size; "
-            "2) memory allocation needs to allocate / deallocate workspace correctly; "
-        )
-
         # Generate partial function.
         return functools.partial(
             run_method,

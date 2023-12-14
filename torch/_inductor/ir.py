@@ -2950,6 +2950,12 @@ class WorkspaceBuffer(Buffer):
     def should_allocate(self):
         return True
 
+    def get_device(self):
+        return self.user_node.get_device()
+
+    def is_no_op(self):
+        return True
+
 
 class ConstantBuffer(InputBuffer):
     override_device: Optional[torch.device] = None
@@ -3343,6 +3349,8 @@ class CUDATemplateBuffer(TemplateBuffer):
         self._tuned_for_epilogue: Optional[List[Any]] = None
 
     def get_workspace_size(self):
+        if callable(self.workspace_size):
+            return self.workspace_size()
         return self.workspace_size if self.workspace_size is not None else 0
 
     def get_read_writes(self):
