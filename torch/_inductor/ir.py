@@ -4145,7 +4145,9 @@ class AccumulateGrad(ExternKernel):
 
     def codegen(self, wrapper):
         (variable, new_grad) = (t.codegen_reference() for t in self.inputs)
-        wrapper.writeline(f"{self.get_kernel_name()}({variable}, {new_grad}){wrapper.ending}")
+        wrapper.writeline(
+            f"{self.get_kernel_name()}({variable}, {new_grad}){wrapper.ending}"
+        )
 
     def should_allocate(self):
         return False
