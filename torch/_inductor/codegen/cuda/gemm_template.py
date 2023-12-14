@@ -461,7 +461,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             input_layouts = [node.get_layout() for node in input_nodes]
             input_strides = [node.get_stride() for node in input_nodes]
             output_layout = layout
-            warning_msg = f"No suitable Cutlass GEMM configs found, fallbacks used ( {fuseable=}, {non_fuseable=}, {len(ops_evt)=}, {len(ops)=}, {output_layout=}, {input_layouts=}, {input_strides=}"
+            warning_msg = f"No suitable Cutlass GEMM configs found, fallbacks used ( {fuseable=}, {non_fuseable=}, {len(ops_evt)=}, {len(ops)=}, {output_layout=}, {input_layouts=}, {input_strides=}"  # noqa: B950
             log.warning(warning_msg)
         log.debug(
             "Added %d Cutlass gemm configs and %d fuseable gemm configs.",

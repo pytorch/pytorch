@@ -527,7 +527,7 @@ class BenchmarkRequest:
 
     def create_argument_tensors_from_metadata(
         self,
-    ) -> Tuple[List[torch.Tensor], List[torch.Tensor], torch.Tensor]:
+    ) -> Tuple[Tuple[torch.Tensor, ...], Tuple[torch.Tensor, ...], torch.Tensor]:
         """
         Creates argument tensor from metadata.
         Returns a tuple of (input_tensors, unique_input_tensors, output_tensor)
@@ -541,8 +541,8 @@ class BenchmarkRequest:
                     continue
             seen_names.add(tensor_meta.name)
             unique_input_tensors.append(tensor)
-        output_tensor = self.output_tensor_meta.to_tensor()
-        return input_tensors, unique_input_tensors, output_tensor
+        output_tensor: torch.Tensor = self.output_tensor_meta.to_tensor()
+        return tuple(input_tensors), tuple(unique_input_tensors), output_tensor
 
 
 class TestBenchmarkRequest(BenchmarkRequest):
@@ -717,7 +717,7 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         torch.cuda.synchronize()  # shake out any CUDA errors
         self.workspace_size = c_workspace_size.value
         log.debug(
-            "update_workspace_size called: new workspace size=%d, self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
+            "update_workspace_size called: new workspace size=%d, self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",  # noqa: B950
             self.workspace_size,
             self.kernel_name,
             self.source_file,
