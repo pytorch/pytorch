@@ -118,9 +118,11 @@ class _FromTorchTensor(torch.autograd.Function):
         run_check: bool,
         shape: Optional[torch.Size] = None,
         stride: Optional[Tuple[int, ...]] = None,
+        async_output: bool = True,
     ) -> "DTensor":
         ctx.previous_placement = placements
         ctx.previous_device_mesh = device_mesh
+        ctx.async_output = async_output
 
         if shape and stride:
             tensor_shape, tensor_stride = shape, stride
@@ -171,6 +173,7 @@ class _FromTorchTensor(torch.autograd.Function):
     def backward(ctx, grad_output: "DTensor"):  # type: ignore[override]
         previous_placement = ctx.previous_placement
         previous_device_mesh = ctx.previous_device_mesh
+        async_output = ctx.async_output
 
         # reshard to the placement when creating DistributedTensor
         # so that the gradient layout matches, and we could return
@@ -183,7 +186,15 @@ class _FromTorchTensor(torch.autograd.Function):
 
         # TODO: backward is also differentiable now, add a test
         # to test higher level gradients.
-        return grad_output.to_local(), None, None, None, None, None
+        return (
+            grad_output.to_local(async_output=async_output),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
@@ -292,6 +303,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         run_check: bool = True,
         shape: Optional[torch.Size] = None,
         stride: Optional[Tuple[int, ...]] = None,
+        async_output: bool = True,
     ) -> "DTensor":
         """
         Create a :class:`DTensor` from a local torch.Tensor on each rank
@@ -362,10 +374,14 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             run_check,
             shape,
             stride,
+            async_output,
         )
 
     def to_local(
-        self, *, grad_placements: Optional[Sequence[Placement]] = None
+        self,
+        *,
+        grad_placements: Optional[Sequence[Placement]] = None,
+        async_output: str = True,
     ) -> torch.Tensor:
         """
         Get the local tensor of this DTensor on its current rank. For sharding it returns
@@ -393,7 +409,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         if grad_placements is not None and not isinstance(grad_placements, tuple):
             grad_placements = tuple(grad_placements)
         return _ToTorchTensor.apply(
-            self, grad_placements, True
+            self, grad_placements, async_output
         )  # pyre-ignore[16]: autograd func
 
     def redistribute(

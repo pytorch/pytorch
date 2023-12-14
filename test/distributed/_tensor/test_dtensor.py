@@ -428,6 +428,30 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(out_data, ref)
 
     @with_comms
+    def test_dtensor_sync_output_to_local(self):
+        # Test that if the async_output is set to false for to_local()
+        # the collective output is synced.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(dt):
+            dt_out_redistribute = dt.redistribute(mesh, [Replicate()])
+            # Make sure we haven't synced yet
+            dt_out_redistribute_view = dt_out_redistribute.view(
+                dt_out_redistribute.shape
+            )
+            local_tensor = dt_out_redistribute_view.to_local(async_output=False)
+            return local_tensor
+
+        x = torch.ones((4, 2), device=self.device_type)
+        dt = distribute_tensor(x, mesh, [Shard(0)])
+        out = fn(dt)
+
+        # Make sure the output is synced
+        self.assertNotEqual(type(out), AsyncCollectiveTensor)
+        self.assertEqual(type(out), torch.Tensor)
+        self.assertEqual(out, x)
+
+    @with_comms
     def test_from_local_then_to_local(self):
         # this test ensure end to end from torch.Tensor -> dist tensor -> torch.Tensor works
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
