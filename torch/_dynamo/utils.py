@@ -89,6 +89,7 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map_only
@@ -595,6 +596,38 @@ class CompilationMetrics:
     fail_reason: Optional[str]
     non_compliant_ops: Set[str]
     compliant_custom_ops: Set[str]
+
+
+DEFAULT_COMPILATION_METRICS_LIMIT = 64
+
+
+_compilation_metrics: collections.deque[CompilationMetrics] = collections.deque(
+    maxlen=DEFAULT_COMPILATION_METRICS_LIMIT
+)
+
+
+def record_compilation_metrics(compilation_metrics: CompilationMetrics):
+    global _compilation_metrics
+    _compilation_metrics.append(compilation_metrics)
+    if config.log_compilation_metrics:
+        log_compilation_event(compilation_metrics)
+
+
+def set_compilation_metrics_limit(new_size: int) -> None:
+    global _compilation_metrics
+    while len(_compilation_metrics) > new_size:
+        _compilation_metrics.popleft()
+    new_deque = collections.deque(_compilation_metrics, maxlen=new_size)
+    _compilation_metrics = new_deque
+
+
+def clear_compilation_metrics() -> None:
+    global _compilation_metrics
+    _compilation_metrics.clear()
+
+
+def get_compilation_metrics() -> List[CompilationMetrics]:
+    return list(_compilation_metrics)
 
 
 @dataclasses.dataclass

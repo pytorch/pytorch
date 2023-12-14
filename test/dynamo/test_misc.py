@@ -8804,7 +8804,7 @@ ShapeEnv not equal: field values don't match:
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
         )
 
-    def test_metrics_size_limit(self):
+    def test_compilation_metrics_size_limit(self):
         def fn1(x):
             return x.relu()
 
@@ -8822,10 +8822,12 @@ ShapeEnv not equal: field values don't match:
         @contextlib.contextmanager
         def metrics_limit_ctx():
             try:
-                torch._dynamo.metrics.set_size(3)
+                torch._dynamo.utils.set_compilation_metrics_limit(3)
                 yield
             finally:
-                torch._dynamo.metrics.set_size(torch._dynamo.metrics.DEFAULT_SIZE)
+                torch._dynamo.utils.set_compilation_metrics_limit(
+                    torch._dynamo.utils.DEFAULT_COMPILATION_METRICS_LIMIT
+                )
 
         x = torch.rand((4, 4))
         torch._dynamo.reset()
@@ -8835,18 +8837,17 @@ ShapeEnv not equal: field values don't match:
         torch.compile(fn4, backend="eager")(x)
 
         with metrics_limit_ctx():
-            torch._dynamo.metrics.clear_compilation_metrics()
+            torch._dynamo.utils.clear_compilation_metrics()
             torch._dynamo.reset()
-            self.assertEqual(0, len(torch._dynamo.metrics.get_compilation_metrics()))
+            self.assertEqual(0, len(torch._dynamo.utils.get_compilation_metrics()))
             torch.compile(fn1, backend="eager")(x)
-            self.assertEqual(1, len(torch._dynamo.metrics.get_compilation_metrics()))
+            self.assertEqual(1, len(torch._dynamo.utils.get_compilation_metrics()))
             torch.compile(fn2, backend="eager")(x)
-            self.assertEqual(2, len(torch._dynamo.metrics.get_compilation_metrics()))
+            self.assertEqual(2, len(torch._dynamo.utils.get_compilation_metrics()))
             torch.compile(fn3, backend="eager")(x)
-            self.assertEqual(3, len(torch._dynamo.metrics.get_compilation_metrics()))
+            self.assertEqual(3, len(torch._dynamo.utils.get_compilation_metrics()))
             torch.compile(fn4, backend="eager")(x)
-            self.assertEqual(3, len(torch._dynamo.metrics.get_compilation_metrics()))
-
+            self.assertEqual(3, len(torch._dynamo.utils.get_compilation_metrics()))
 
     def test_funcname_cache(self):
         src = """\
