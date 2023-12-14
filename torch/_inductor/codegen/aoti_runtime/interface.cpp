@@ -3,6 +3,7 @@
 #include <torch/csrc/inductor/aoti_runtime/model_container.h>
 
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <vector>
 
