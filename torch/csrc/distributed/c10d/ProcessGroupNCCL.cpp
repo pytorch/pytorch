@@ -1377,7 +1377,7 @@ struct DumpPipe {
 #endif
 
 const std::string& ProcessGroupNCCL::logPrefix() const {
-  static std::string prefix = c10::str("[Rank ", rank_, "] ");
+  static std::string prefix = c10::str("[PG ", uid_, " Rank ", rank_, "] ");
   return prefix;
 }
 
