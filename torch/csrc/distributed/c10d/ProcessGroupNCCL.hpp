@@ -101,7 +101,7 @@ enum ErrorHandlingMode {
   LOG(WARNING) << "[RANK" << rank << "] at phase " << phase                    \
                << ": Collective hash of " << opType                            \
                << " before calling into NCCL, "                                \
-               << "numel: " << numel << "hash: " << hashValue;
+               << "numel: " << numel << ", hash: " << hashValue;
 
 // If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
 // caching allocator safety for tensors used on both user-facing and

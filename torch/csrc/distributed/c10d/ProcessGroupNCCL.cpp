@@ -645,8 +645,8 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
   synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
   if (debug_level() == DebugLevel::Detail) {
-    auto hashValue = hashTensors(*outputs_);
     auto numel = getTensorsNumel(*outputs_);
+    auto hashValue = hashTensors(*outputs_);
     PRINT_COLLECTIVE_HASH_SIGNATURE(
         "launching", rank_, opTypeToString(opType_), numel, hashValue);
   }
@@ -2337,8 +2337,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   }
 
   if (enableCollecticeHashDebug_.load()) {
-    auto hashValue = hashTensors(inputs);
     auto numel = getTensorsNumel(inputs);
+    auto hashValue = hashTensors(inputs);
     PRINT_COLLECTIVE_HASH_SIGNATURE(
         "creating", rank_, opTypeToString(opType), numel, hashValue);
   }

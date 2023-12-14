@@ -979,7 +979,7 @@ def _is_barrier_after_init() -> int:
     return int(os.getenv("TORCH_DIST_INIT_BARRIER", "0"))
 
 
-def _get_default_group():
+def _get_default_group() -> ProcessGroup:
     """Get the default process group created by init_process_group."""
     if not is_initialized():
         raise ValueError(
@@ -2156,20 +2156,20 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
 def _object_to_tensor(obj, device):
     f = io.BytesIO()
     _pickler(f).dump(obj)
-    if get_debug_level() != DebugLevel.DETAIL:
-        logger.warning("_object_to_tensor hash value: {torch._C._distributed_c10d._hash_tensors([f.getvalue()])}")
     byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
     # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
     # Otherwise, it will casue 100X slowdown.
     # See: https://github.com/pytorch/pytorch/issues/65696
     byte_tensor = torch.ByteTensor(byte_storage).to(device)
+    if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
+        logger.warning(f"_object_to_tensor hash value: {torch._C._distributed_c10d._hash_tensors([byte_tensor])}")  # noqa: G004
     local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
     return byte_tensor, local_size
 
 
 def _tensor_to_object(tensor, tensor_size):
-    if get_debug_level() != DebugLevel.DETAIL:
-        logger.warning("_tensor_to_object hash value: {torch._C._distributed_c10d._hash_tensors([tensor])}")
+    if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
+        logger.warning(f"_tensor_to_object hash value: {torch._C._distributed_c10d._hash_tensors([tensor])}")  # noqa: G004
     tensor = tensor.cpu()
     buf = tensor.numpy().tobytes()[:tensor_size]
     return _unpickler(io.BytesIO(buf)).load()
