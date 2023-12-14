@@ -1324,6 +1324,7 @@ class CppKernel(Kernel):
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
 
+        self.parallel_reduction_stores.writelines(self.stores._lines)
         acc = self.reduction_cse.generate(
             self.loads, f"reduction {reduction_key}", write=False
         )
@@ -1475,14 +1476,14 @@ class CppKernel(Kernel):
                         if is_suffix:
                             suffix = (
                                 kernel.parallel_reduction_suffix
-                                if loop.parallel
+                                if loop.under_parallel_scope()
                                 else kernel.reduction_suffix
                             )
                             return suffix
                         else:
                             prefix = (
                                 kernel.parallel_reduction_prefix
-                                if loop.parallel
+                                if loop.under_parallel_scope()
                                 else kernel.reduction_prefix
                             )
                             return prefix
@@ -1527,7 +1528,7 @@ class CppKernel(Kernel):
                     else:
                         kernels = loop.get_kernels()
                         assert len(kernels) == 1
-                        gen_kernel(kernels[0], loop.parallel)
+                        gen_kernel(kernels[0], loop.under_parallel_scope())
 
             stack.enter_context(code.indent())
             if loop_nest.root:
@@ -1754,6 +1755,7 @@ class CppVecKernel(CppKernel):
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
 
+        self.parallel_reduction_stores.writelines(self.stores._lines)
         acc = self.reduction_cse.generate(
             self.loads, f"reduction {reduction_key}", write=False
         )
@@ -3343,6 +3345,12 @@ class LoopLevel:
         if self.collapsed or not line1:
             return [line2]
         return [line1, line2]
+
+    def under_parallel_scope(self):
+        in_parallel = self.parallel
+        if self.parent is not None:
+            in_parallel = in_parallel or self.parent.parallel
+        return in_parallel
 
 
 @dataclasses.dataclass
