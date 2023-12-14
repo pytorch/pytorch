@@ -306,7 +306,9 @@ class TestSparseCompressed(TestCase):
         compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[layout]
         for m, n, b in itertools.product(ns, ns, batch_shapes):
             shape = (*b, m, n)
-            result = torch.empty(shape, dtype=dtype, device=device, layout=layout)
+            with torch.sparse.check_sparse_tensor_invariants(enable=False):
+                # torch.empty may return invalid sparse compressed tensors
+                result = torch.empty(shape, dtype=dtype, device=device, layout=layout)
             self.assertEqual(result.shape, shape)
             self.assertEqual(result.dtype, dtype)
             self.assertEqual(result.device, torch.device(device))
@@ -727,11 +729,25 @@ class TestSparseCompressed(TestCase):
                    shape((2, 3)),
                    r'`compressed_indices\[..., 0\] == 0` is not satisfied.')
 
+            yield ('invalid compressed_indices[0] when nnz == 0',
+                   tensor([1, 0], dtype=torch.int64),
+                   tensor([], dtype=torch.int64),
+                   values([1])[:0],
+                   shape((1, 1)),
+                   r'`compressed_indices\[..., 0\] == 0` is not satisfied.')
+
             yield ('invalid compressed_indices[-1]',
                    tensor([0, 2, 5]),
                    tensor([0, 1, 0, 2]),
                    values([1, 2, 3, 4]),
                    shape((2, 3)),
+                   r'`compressed_indices\[..., -1\] == nnz` is not satisfied.')
+
+            yield ('invalid compressed_indices[-1] when nnz == 0',
+                   tensor([0, 1], dtype=torch.int64),
+                   tensor([], dtype=torch.int64),
+                   values([1])[:0],
+                   shape((1, 1)),
                    r'`compressed_indices\[..., -1\] == nnz` is not satisfied.')
 
             yield ('invalid compressed_indices.diff(dim=-1)',
