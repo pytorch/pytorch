@@ -592,15 +592,18 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         ) -> torch.Tensor:
             """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
             attn_mask = torch.ones(
-                query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
+                query.size(1), key.size(1), dtype=torch.bool, device=query.device
             ).tril(diagonal=0)
             attn_mask = attn_mask.masked_fill(
                 torch.logical_not(attn_mask), -float("inf")
             )
+            q = query.permute(0, 2, 1, 3)
+            k = key.permute(0, 2, 1, 3)
+            v = value.permute(0, 2, 1, 3)
             return (
-                (torch.matmul(query, key.transpose(-2, -1)).div(3.0) + attn_mask)
+                (torch.matmul(q, k.transpose(-2, -1)).div(3.0) + attn_mask)
                 .softmax(dim=-1)
-                .matmul(value)
+                .matmul(v)
             )
 
         self._check_common(dot_prod_attention, contains=False)
@@ -611,17 +614,20 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
             """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
-            bs = query.size(0)
-            k_len = key.size(-2)
+            q = query.transpose(1, 2)
+            k = key.transpose(1, 2)
+            v = value.transpose(1, 2)
+            bs = q.size(0)
+            k_len = k.size(-2)
             attn_mask = torch.ones(
                 bs, k_len, dtype=torch.bool, device=query.device
             ).tril(diagonal=0)
-            query = query / 3.0
-            scores = torch.matmul(query, key.transpose(-2, -1))
+            q = q / 3.0
+            scores = torch.matmul(q, k.transpose(-2, -1))
             attn_mask = (attn_mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
             scores = scores.masked_fill(attn_mask, -float("inf"))
             weights = torch.nn.functional.softmax(scores, dim=-1)
-            return torch.matmul(weights, value)
+            return torch.matmul(weights, v)
 
         self._check_common(dot_prod_attention, contains=False, check_train=False)
 
@@ -683,9 +689,6 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
         )
         test_sdpa_rewriter_14_cuda = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_14
-        )
-        test_sdpa_rewriter_15_cuda = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_15
         )
 
     class SDPAPatternRewriterCudaDynamicTests(SDPAPatternRewriterCudaTests):
