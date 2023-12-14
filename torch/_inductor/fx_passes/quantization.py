@@ -417,27 +417,51 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
     # Check if it's a valid Conv Binary Pattern:
     # * qconv2d_pointwise should only has one users
     # * Extra input of binary node comes from dequant pattern
+    # * All users of the extra input in this pattern should be
+    #   ancestor nodes of the compute node, except for the binary node
+    #   connected to the compute node.
     def fn(match):
-        qconv2d_node_after_weight_prepack = filter_nodes(
-            match.nodes, torch.ops.onednn.qconv2d_pointwise
-        )[0]
-        if len(qconv2d_node_after_weight_prepack.users) != 1:
+        compute_node = filter_nodes(match.nodes, torch.ops.onednn.qconv2d_pointwise)[0]
+        # qconv2d_pointwise should only has one users
+        if len(compute_node.users) != 1:
             return False
+        binary_node = next(iter(compute_node.users))
+        binary_node_inputs = binary_node.args
+        assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
+        extra_input_of_binary_node = None
+        for arg in binary_node_inputs:
+            if arg != compute_node:
+                extra_input_of_binary_node = arg
+                break
+        assert extra_input_of_binary_node is not None
         if output_dtype is not None:
-            binary_node_inputs = next(
-                iter(qconv2d_node_after_weight_prepack.users)
-            ).args
-            assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
-            extra_input_node = None
-            for arg in binary_node_inputs:
-                if arg != qconv2d_node_after_weight_prepack:
-                    extra_input_node = arg
-                    break
-            assert extra_input_node is not None
-            if (not isinstance(extra_input_node, torch.fx.Node)) or (
-                extra_input_node.target != aten.mul.Tensor
+            # Extra input of binary node comes from dequant pattern
+            if (not isinstance(extra_input_of_binary_node, torch.fx.Node)) or (
+                extra_input_of_binary_node.target != aten.mul.Tensor
             ):
                 return False
+
+        # All users of the extra input in this pattern should be
+        # ancestor nodes of the compute node, except for the binary node
+        # connected to the compute node.
+
+        from .mkldnn_fusion import _get_remaining_users
+
+        extra_input_of_pattern = (
+            match.kwargs["accum"]
+            if output_dtype is None
+            else match.kwargs["accum_after_dequant"]
+        )
+        if (
+            len(
+                _get_remaining_users(
+                    extra_input_of_pattern,
+                    compute_node,
+                )
+            )
+            > 1
+        ):
+            return False
         return True
 
     return fn
