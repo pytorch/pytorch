@@ -229,7 +229,7 @@ struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>>
                 op_name, ": The input tensor A must have at least 2 dimensions.");
     TORCH_CHECK(rankWithoutBatchDim(second, second_bdim) >= 2,
                 op_name, ": The input tensor B must have at least 2 dimensions.");
-    return _binary_pointwise_helper(first, first_bdim, second, second_bdim, false);
+    return _binary_pointwise_helper(first, first_bdim, second, second_bdim);
   }
 
   static oneOutput apply_one(
@@ -316,7 +316,7 @@ oneOutput cholesky_solve_batch_rule(
   TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2,
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
 
-  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, A, A_bdim, /*do_type_promotion=*/false);
+  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, A, A_bdim);
   const auto tensor_ = std::get<0>(tensor_other);
   const auto other_ = std::get<1>(tensor_other);
   return std::make_tuple(at::cholesky_solve(tensor_, other_, upper), 0);
@@ -386,7 +386,7 @@ oneOutput cross_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim,
   );
 
   const auto batch_size = get_bdim_size2(self, self_bdim, other, other_bdim);
-  const auto self_other_bundled = _binary_pointwise_helper(self, self_bdim, other, other_bdim, false);
+  const auto self_other_bundled = _binary_pointwise_helper(self, self_bdim, other, other_bdim);
 
   const auto self_ = ensure_has_bdim(std::get<0>(self_other_bundled), self_bdim.has_value(), batch_size);
   const auto other_ = ensure_has_bdim(std::get<1>(self_other_bundled), other_bdim.has_value(), batch_size);
@@ -410,7 +410,7 @@ fourOutputs linalg_lstsq_batch_rule(
   TORCH_CHECK(rankWithoutBatchDim(b, b_bdim) >= 1, "torch.linalg.lstsq: other must have at least 1 dimension.");
 
   const auto batch_size = get_bdim_size2(self, self_bdim, b, b_bdim);
-  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, b, b_bdim, /*do_type_promotion=*/false);
+  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, b, b_bdim);
 
   // because of ambiguity with vector case, lstsq can broadcast [1, 2] -> [batch_size, 2] but not [2] -> [batch_size, 2]
   // so could unsqueeze if there's no bdim or just ensure_has_bdim

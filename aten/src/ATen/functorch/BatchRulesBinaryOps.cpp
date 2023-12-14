@@ -285,7 +285,7 @@ static void fill__Tensor_batch_rule(
     vmapIncompatibleInplaceError("fill_");
   }
   auto self_and_other = _binary_pointwise_helper(
-      self, self_bdim, other, other_bdim, /*do_type_promotion*/false);
+      self, self_bdim, other, other_bdim);
   std::get<0>(self_and_other).copy_(std::get<1>(self_and_other));
 }
 

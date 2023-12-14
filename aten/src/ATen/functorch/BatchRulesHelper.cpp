@@ -172,8 +172,7 @@ static void handleScalarTypePromotion(Tensor& logical_scalar_tensor, Tensor& sec
 
 std::tuple<Tensor, Tensor> _binary_pointwise_helper(
     const Tensor& tensor, optional<int64_t> tensor_batch_dim,
-    const Tensor& other, optional<int64_t> other_batch_dim,
-    bool do_type_promotion) {
+    const Tensor& other, optional<int64_t> other_batch_dim) {
   // compute max logical rank
   auto tensor_logical_rank = rankWithoutBatchDim(tensor, tensor_batch_dim);
   auto other_logical_rank = rankWithoutBatchDim(other, other_batch_dim);
@@ -181,18 +180,6 @@ std::tuple<Tensor, Tensor> _binary_pointwise_helper(
 
   auto tensor_ = moveBatchDimToFront(tensor, tensor_batch_dim);
   auto other_ = moveBatchDimToFront(other, other_batch_dim);
-
-  // In the (0D, ND) case, type promotion semantics are different :/
-  if (do_type_promotion) {
-    auto tensor_is_logical_scalar = (tensor_logical_rank == 0 && tensor_batch_dim.has_value());
-    auto other_is_logical_scalar = (other_logical_rank == 0 && other_batch_dim.has_value());
-    if (tensor_is_logical_scalar && !other_is_logical_scalar) {
-      handleScalarTypePromotion(tensor_, other_);
-    }
-    if (other_is_logical_scalar && !tensor_is_logical_scalar) {
-      handleScalarTypePromotion(other_, tensor_);
-    }
-  }
 
   // If the dimensions aren't aligned, we need to line them up.
   // Tensor[B, 3] + Tensor[2, 5, 3] -> Tensor[B, 1, 1, 3] + Tensor[2, 5, 3]
