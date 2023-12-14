@@ -86,7 +86,9 @@ def get_nccl_wheel_version(arch_version: str) -> str:
     requirements = map(
         str.strip, re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version])
     )
-    return [x for x in requirements if x.startswith("nvidia-nccl-cu")][0].split("==")[1]
+    return next(x for x in requirements if x.startswith("nvidia-nccl-cu")).split("==")[
+        1
+    ]
 
 
 def validate_nccl_dep_consistency(arch_version: str) -> None:
