@@ -798,7 +798,7 @@ class FxGraphCache:
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
         """
-        from filelock import FileLock
+        from filelock import FileLock  # type: ignore[import-not-found]
 
         key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
 
@@ -1477,7 +1477,6 @@ def cpp_compile_command(
         assert is_clang()
         # Use clang runtime instead of libgcc
         clang_flags += " --rtlib=compiler-rt"
-        clang_flags += " -fuse-ld=lld"
         linker_paths = "-B" + build_paths.glibc_lib()
         linker_paths += " -L" + build_paths.glibc_lib()
     else:
@@ -2122,7 +2121,7 @@ def cuda_compile_command(
     src_files: List[str],
     dst_file: str,
     dst_file_ext: str,
-    extra_args : Optional[List[str]]=None
+    extra_args: Optional[List[str]] = None,
 ) -> str:
     if extra_args is None:
         extra_args = []
@@ -2242,7 +2241,9 @@ class CUDACodeCache:
         return key, input_path
 
     @classmethod
-    def compile(cls, source_code, dst_file_ext, extra_args : Optional[List[str]]=None) -> Tuple[str, str, str]:
+    def compile(
+        cls, source_code, dst_file_ext, extra_args: Optional[List[str]] = None
+    ) -> Tuple[str, str, str]:
         """
         Compiles CUDA source_code into a file with dst_file_ext extension.
         Returns a tuple of dst_file_path, hash_key, source_code_path

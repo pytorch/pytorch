@@ -141,7 +141,6 @@ def _gen_ops_cached(arch, version) -> List[Any]:
 
     # Import cutlass python scripts.
     assert try_import_cutlass()
-    import torch._inductor.codegen.cuda.cutlass_lib_extensions.generator_extended_v322 as cutlass_generator  # type: ignore[import]
     import cutlass_library.manifest as cutlass_manifest  # type: ignore[import]
 
     import torch._inductor.codegen.cuda.cutlass_lib_extensions.generator_extended_v322 as cutlass_generator  # type: ignore[import]
@@ -300,11 +299,10 @@ class CUDACompileSourceCapturingContext:
         self._compile_patch = mock.patch(
             "torch._inductor.codecache.CUDACodeCache.compile", my_compile
         )
-        return self._compile_patch.__enter__(*args, **kwargs)
+        return self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
 
     def __exit__(self, *args, **kwargs):
-        return self._compile_patch.__exit__(*args, **kwargs)
-
+        return self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
 
 def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
     # returns command string to compile a (captured) CUDA GEMM Kernel source to a standalone executable that's ready to run
