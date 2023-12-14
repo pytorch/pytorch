@@ -509,7 +509,8 @@ for name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos"
     fn = _get_sym_math_fn(name)
     fn.__qualname__ = fn.__name__ = sym_name
     setattr(current_module, sym_name, fn)
-    del fn
+
+del fn, name, sym_name, current_module
 
 
 def sym_ite(b, t, f):

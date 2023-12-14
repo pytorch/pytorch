@@ -684,7 +684,8 @@ for name in math_op_names:
     fn = _get_sym_math_fn(name)
     fn.__qualname__ = fn.__name__ = priv_sympy_name
     setattr(current_module, priv_sympy_name, fn)
-    del fn
+
+del fn, name, current_module, priv_sympy_name
 
 
 def _sympy_abs(a):
@@ -731,6 +732,8 @@ magic_methods = {
 for name in math_op_names:
     sym_name = f"sym_{name}"
     magic_methods[sym_name] = getattr(current_module, f"_sympy_{name}")
+
+del name, sym_name, math_op_names
 
 
 def sympy_is_contiguous(sizes, strides):
