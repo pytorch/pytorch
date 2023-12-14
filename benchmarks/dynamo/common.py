@@ -1942,8 +1942,6 @@ class BenchmarkRunner:
             raise RuntimeError("Eager run failed") from e
 
     def maybe_cast(self, model, example_inputs):
-        model = self.deepcopy_model(model)
-        example_inputs = clone_inputs(example_inputs)
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
         return model, example_inputs
 
@@ -2145,7 +2143,8 @@ class BenchmarkRunner:
                 self.args.cosine = True
                 fp64_outputs = None
             finally:
-                del model_fp64
+                del model_fp64, inputs_fp64
+                torch.cuda.empty_cache()
 
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
                 self.args.training, current_device, name
@@ -2174,6 +2173,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
+                torch.cuda.empty_cache()
 
             # Rerun native pytorch
             reset_rng_state()
@@ -2194,6 +2194,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
+                torch.cuda.empty_cache()
 
             # Two eager runs should have exactly same result
             is_same = True
@@ -3145,7 +3146,7 @@ def main(runner, original_dir=None, args=None):
         process_entry(0, runner, original_dir, args)
 
 
-def write_csv_when_exception(name: str, status: str, device=None):
+def write_csv_when_exception(args, name: str, status: str, device=None):
     print(status)
     placeholder_batch_size = 0
     devices = [device] if device is not None else args.devices
@@ -3599,7 +3600,7 @@ def run(runner, args, original_dir=None):
                         if isinstance(e, NotImplementedError)
                         else "eager_fail_to_run"
                     )
-                    write_csv_when_exception(name, status, device)
+                    write_csv_when_exception(args, name, status, device)
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:
@@ -3695,7 +3696,7 @@ def run(runner, args, original_dir=None):
                     [sys.executable] + sys.argv + [f"--only={name}"], timeout=timeout
                 )
             except subprocess.TimeoutExpired:
-                write_csv_when_exception(name, "timeout")
+                write_csv_when_exception(args, name, "timeout")
             except subprocess.CalledProcessError as e:
                 print("Run failed with return code: ", e.returncode, file=sys.stderr)
                 print("Output: ", e.output, file=sys.stderr)
