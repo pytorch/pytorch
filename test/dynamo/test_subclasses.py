@@ -51,6 +51,21 @@ class DummyNDim(torch.Tensor):
         return super().__torch_function__(func, types, args, kwargs)
 
 
+class WrapperSubclass:
+    def __init__(self, tensor):
+        self.tensor = tensor
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        args = pytree.tree_map_only(WrapperSubclass, lambda x: x.tensor, args)
+        kwargs = pytree.tree_map_only(WrapperSubclass, lambda x: x.tensor, kwargs)
+
+        return func(*args, **kwargs)
+
+
 class SigmoidToExpSubclass(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -120,7 +135,11 @@ class EagerRecordGraphAndInputs:
         return gm
 
 
-GLOBAL_TEST_SUBCLASSES = {MockSubclass, DummyNDim, SigmoidToExpSubclass}
+GLOBAL_TEST_SUBCLASSES = {
+    MockSubclass,
+    DummyNDim,
+    SigmoidToExpSubclass,
+}
 
 
 # Returns True if the function recompiles between inputs1 and inputs2 with the
@@ -231,6 +250,20 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res = fn(input)
             self.assertIsInstance(res, LocalSubclass)
 
+    def test_isinstance_check_subclass(self):
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {DummyNDim}):
+
+            def fn(x):
+                if isinstance(x, DummyNDim):
+                    return torch.ones(1, 1)
+                else:
+                    return torch.zeros(2, 2)
+
+            input = torch.ones(2, 2)
+            exp_res = fn(input)
+            act_res = torch.compile(backend="eager", fullgraph=True)(fn)(input)
+            self.assertEqual(exp_res, act_res)
+
     def test_torch_function_call_on_method(self):
         x = torch.ones(2, 2)
         y = torch.ones(2, 2)
@@ -261,17 +294,17 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             def sigmoid(self):
                 return None
 
-        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
-
-            @torch.compile(backend="eager", fullgraph=True)
-            def fn(x):
-                x.sigmoid()
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            x.sigmoid()
 
         msg = (
             "Accessing overridden method/attribute sigmoid on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+        with torch._dynamo.config.patch(
+            "traceable_tensor_subclasses", {LocalSubclass}
+        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
@@ -285,17 +318,17 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
             ndim = 10
 
-        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
-
-            @torch.compile(backend="eager", fullgraph=True)
-            def fn(x):
-                return x.ndim
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.ndim
 
         msg = (
             "Accessing overridden method/attribute ndim on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+        with torch._dynamo.config.patch(
+            "traceable_tensor_subclasses", {LocalSubclass}
+        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
@@ -318,17 +351,17 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             def ndim(self, value):
                 self._ndim = value
 
-        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
-
-            @torch.compile(backend="eager", fullgraph=True)
-            def fn(x):
-                return x.ndim
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.ndim
 
         msg = (
             "Accessing overridden method/attribute ndim on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+        with torch._dynamo.config.patch(
+            "traceable_tensor_subclasses", {LocalSubclass}
+        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
@@ -376,6 +409,19 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res_exp, res_act)
         self.assertEqual(res_exp, torch.ones(2) + 10)
+
+    def test_torch_function_wrapper_class(self):
+        x = torch.ones(2, 2)
+        wrapped = WrapperSubclass(x)
+
+        def fn(w):
+            return torch.add(w, 1.0)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped)
+        self.assertEqual(res_exp, res_act)
 
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
@@ -768,9 +814,6 @@ class GraphModule(torch.nn.Module):
         sub2 = ScaledTensor(torch.randn(3, 5), torch.randn(6))
         self.assertFalse(_recompiles_for_inputs(func, (sub1,), (sub2,), dynamic=False))
 
-    # Broken because we don't guard properly on inner tensors yet.
-    # TODO: Enable this when we do
-    @unittest.expectedFailure
     def test_wrapper_subclass_with_differently_sized_inner_tensor(self):
         # should recompile for different scale size when dynamic=False
         sub1 = ScaledTensor(torch.randn(2, 4), torch.randn(3))

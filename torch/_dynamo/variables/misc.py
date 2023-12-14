@@ -158,13 +158,9 @@ class SuperVariable(VariableTracker):
         ):
             assert not kwargs and len(args) == 2
             k = variables.ConstDictVariable.get_key(args[0])
-
-            newval = dict(self.objvar.items)
-            newval[k] = args[1]
-            return tx.replace_all(
-                self.objvar,
-                self.objvar.modifed(newval),
-            )
+            tx.output.side_effects.mutation(self)
+            self.objvar.items[k] = args[1]
+            return variables.ConstantVariable.create(None)
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -370,10 +366,7 @@ class AutogradFunctionVariable(VariableTracker):
             if jvp_fn is not torch.autograd.Function.jvp:
                 unimplemented("NYI - User defind jvp")
 
-            from .higher_order_ops import (
-                safe_or_raise_always_restore,
-                TorchHigherOrderOperatorVariable,
-            )
+            from .higher_order_ops import TorchHigherOrderOperatorVariable
 
             trampoline_autograd_apply = produce_trampoline_autograd_apply(self.fn_cls)
             trampoline_autograd_fwd = produce_trampoline_autograd_fwd(self.fn_cls)
@@ -388,16 +381,13 @@ class AutogradFunctionVariable(VariableTracker):
             # and a limited input scope confined to contexts, tensors, and constants. If the forward trace is sound,
             # we install any guards accumulated from tracing. If not, we graph break. We trace backward, and evaluate
             # for soundness, same as forward, except with more strictness. We enable a strict mode on the tx, and
-            # reject certain ops when running under this strict mode. If the backward trace is sound, we discard the
-            # trace by restoring. Otherwise, we raise.
-
-            # if both the forward and backward traces are sound, we write the autograd function’s apply into the graph.
+            # reject certain ops when running under this strict mode. If both the forward and backward traces are sound,
+            # we write the autograd function’s apply into the graph.
 
             # For tracing forward and backward, we use UserFunctionVariable. Although it does not directly contribute
             # to soundness evaluation, it plus a  GlobalSource makes sure we can produce valid guards,
             # and that we can inline properly here. Inlining is required in order to be able to ensure that the
             # soundness evaluation works as described above.
-            graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
 
             module_source = AttrSource(
                 tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
@@ -420,19 +410,15 @@ class AutogradFunctionVariable(VariableTracker):
                 bwd_args = [ctx, *speculated_fwd_result.items]
             else:
                 bwd_args = [ctx, speculated_fwd_result]
-            safe_or_raise_always_restore(
-                tx,
-                graph_checkpoint,
-                checkpoint,
-                TorchHigherOrderOperatorVariable.make(
-                    trampoline_autograd_bwd,
-                    source=AttrSource(module_source, "backward"),
-                    fwd_bwd_tracer=fwd_bwd_tracer,
-                ),
-                bwd_args,
-            )
+
+            TorchHigherOrderOperatorVariable.make(
+                trampoline_autograd_bwd,
+                source=AttrSource(module_source, "backward"),
+                fwd_bwd_tracer=fwd_bwd_tracer,
+            ).call_function(tx, bwd_args, {})
+
             # If fwd and backward are sound, we want apply in the graph.
-            # And we don't want backwards for the obvious reasons.
+            # We don't want backward because we are tracing forwards.
             args = args[1:]
             return TorchHigherOrderOperatorVariable.make(
                 trampoline_autograd_apply,
@@ -710,13 +696,26 @@ class PythonModuleVariable(VariableTracker):
     def __init__(self, value: types.ModuleType, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+        self.is_torch = self.value is torch or self.value.__name__.startswith("torch.")
 
     def python_type(self):
         return types.ModuleType
 
+    def as_python_constant(self):
+        return self.value
+
+    def __repr__(self):
+        return f"PythonModuleVariable({self.value})"
+
+    def call_hasattr(self, tx, name):
+        if self.is_torch:
+            result = hasattr(self.value, name)
+            return variables.ConstantVariable.create(result)
+        return super().call_hasattr(tx, name)
+
 
 class SkipFilesVariable(VariableTracker):
-    def __init__(self, value, reason, **kwargs):
+    def __init__(self, value, reason=None, **kwargs):
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
@@ -726,6 +725,14 @@ class SkipFilesVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+        return cls(
+            value,
+            source=source,
+        )
 
     @staticmethod
     @functools.lru_cache(None)
@@ -960,9 +967,9 @@ class SkipFilesVariable(VariableTracker):
                 path = inspect.getfile(self.value)
             except TypeError:
                 path = f"Builtin {self.value.__name__}"
-            unimplemented(
-                f"'call_function {self.value.__qualname__} in skip_files {path}, {self.reason}'"
-            )
+            msg = f"'skip function {self.value.__qualname__} in file {path}'"
+            msg += f"', {self.reason}'" if self.reason else ""
+            unimplemented(msg)
 
     def call_method(
         self,

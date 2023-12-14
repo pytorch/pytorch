@@ -220,14 +220,6 @@ std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
   return res;
 }
 
-// Return CUDA device with ordinal given by input rank.
-at::Device getDeviceForRank(int rank) {
-  TORCH_CHECK_WITH(ValueError, rank >= 0, "Invalid rank ", rank);
-  auto numGPUs = at::cuda::getNumGPUs();
-  int16_t deviceIdx = static_cast<int16_t>(rank % numGPUs);
-  return at::Device(at::DeviceType::CUDA, deviceIdx);
-}
-
 // [Sync Streams] Helper that lets the input ncclStreams to wait for the current
 // stream. NCCL communications run on ncclStreams, but input tensors are
 // allocated on different streams (i.e., current streams). Communications on
@@ -347,6 +339,23 @@ void cacheAllocatorDeregisterHook(
 
 std::string dump_nccl_trace() {
   return NCCLTraceBuffer::get()->dump();
+}
+
+// Return CUDA device with ordinal given by input rank.  If we aren't
+// bound to a specific device, there is no strict guarantee that this
+// heuristic is the correct assignment of ranks to GPUs that Python
+// layers use, but in practice it tends to be.  Fortunately we don't
+// rely on this for correctness of any tensor operations, just for
+// ancillary uses like health checks and barriers.
+at::Device ProcessGroupNCCL::guessDeviceForRank() const {
+  TORCH_CHECK_WITH(ValueError, rank_ >= 0, "Invalid rank ", rank_);
+  if (getBoundDeviceId()) {
+    return *getBoundDeviceId();
+  } else {
+    auto numGPUs = at::cuda::getNumGPUs();
+    int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
+    return at::Device(at::DeviceType::CUDA, deviceIdx);
+  }
 }
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 1000;
@@ -632,6 +641,8 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      -1,
+      -1,
       static_cast<int>(devices_.size())); // worldSize
   synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
@@ -712,14 +723,13 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   dumpOnTimeout_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
-  monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, false));
+  monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
-      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_ ||
-      ncclTraceBufferSize_ > 0);
+      getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
 #endif
   avoidRecordStreams_ = getCvarBool(TORCH_NCCL_AVOID_RECORD_STREAMS, false);
 #ifdef NCCL_HAS_COMM_REGISTER
@@ -785,6 +795,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TIMEOUT(ms): " << options_->timeout.count()
             << ", USE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
+            << ", SPLIT_FROM: " << options_->split_from
+            << ", SPLIT_COLOR: " << options_->split_color
             << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
             << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
@@ -796,6 +808,38 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
 
+  if (options_->global_ranks_in_group.empty()) {
+    this->globalRankStart = 0;
+  } else {
+    this->globalRankStart = options_->global_ranks_in_group[0];
+  }
+
+  if (options_->global_ranks_in_group.empty()) {
+    this->globalRankStride = 1;
+  } else if (options_->global_ranks_in_group.size() == 1) {
+    this->globalRankStride = 0;
+  } else {
+    bool ranksAreStrided = true;
+    int startRank = options_->global_ranks_in_group[0];
+    int stride =
+        options_->global_ranks_in_group[1] - options_->global_ranks_in_group[0];
+    for (std::vector<uint64_t>::size_type i = 0;
+         i < options_->global_ranks_in_group.size();
+         i++) {
+      if (options_->global_ranks_in_group[i] != startRank + i * stride) {
+        ranksAreStrided = false;
+        break;
+      }
+    }
+
+    if (ranksAreStrided) {
+      this->globalRankStride = options_->global_ranks_in_group[1] -
+          options_->global_ranks_in_group[0];
+    } else {
+      this->globalRankStride = -1;
+    }
+  }
+
   RECORD_PARAM_COMMS(
       0, // seq
       this->getID(),
@@ -806,6 +850,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       size_); // worldSize
 
   // Attach hooks to cache allocator to trigger the hooks whenever a traced
@@ -822,6 +868,32 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   }
 }
 
+void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
+  std::vector<at::Device> rankDevices = {device};
+  const auto key = getKeyFromDevices(rankDevices);
+  LOG(INFO) << "Eagerly connecting nccl backend with device " << device;
+  getNCCLComm(key, rankDevices, OpType::ALLREDUCE);
+}
+
+void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
+  // If our backend doesn't support splitting, this is a no-op for
+  // ranks not in the new subgroup (and ranks that would be in it will
+  // just use a new communicator rather than split).
+#ifdef NCCL_HAS_COMM_SPLIT
+  std::vector<at::Device> rankDevices = {device};
+  const auto key = getKeyFromDevices(rankDevices);
+  LOG(INFO) << "Performing nocolor split on backend device " << device
+            << ", key " << key << ", i am " << this;
+  auto comm = getNCCLComm(key, rankDevices, OpType::ALLREDUCE);
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      comm.size() == 1,
+      "exactly one communicator found for device ",
+      device);
+  NCCLComm::split(comm[0].get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
+#endif
+}
+
 void ProcessGroupNCCL::runHealthCheck() {
   // Run health check in a separate thread and wait on CV to handle timeouts,
   // since majority of getNCCLComm failures are hangs.
@@ -836,7 +908,8 @@ void ProcessGroupNCCL::runHealthCheck() {
   HealthCheckData healthCheckData;
   auto t = std::thread([&healthCheckData, this]() {
     try {
-      std::vector<at::Device> rankDevice = {getDeviceForRank(rank_)};
+      std::vector<at::Device> rankDevice = {guessDeviceForRank()};
+
       const auto key = getKeyFromDevices(rankDevice);
       // OpType does not matter, only need to set to not go through send/recv
       // path.
@@ -919,7 +992,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   //    completedWorkList_ before it finishes.
   // 3. We have three threads and two locks.
   //      a. main thread (this function) grabs two locks atomically
-  //      b. watchdog thread (workCleanupLoop function) always grabs
+  //      b. watchdog thread (watchdogHandler function) always grabs
   //      workMetaListMutex_
   //         first and then grabs completedWorkListMutex_.
   //      c. hook thread (runHookLoop function) only grabs
@@ -946,15 +1019,23 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
 }
 
-c10::optional<std::thread> ProcessGroupNCCL::tryWriteDebugInfo() {
-  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
-  if (writeDebugInfo_) {
-    return c10::nullopt;
-  }
-  // If we have not dumped the debugInfo return true and set the flag
-  writeDebugInfo_ = true;
-  return c10::optional<std::thread>(
-      std::thread(&ProcessGroupNCCL::dumpDebuggingInfo, this));
+std::future<bool> ProcessGroupNCCL::launchAsyncDebugDump() {
+  std::promise<bool> resultPromise;
+  std::future<bool> resultFuture = resultPromise.get_future();
+
+  std::thread workerThread(
+      [promise = std::move(resultPromise), this]() mutable {
+        try {
+          promise.set_value(dumpDebuggingInfo());
+        } catch (...) {
+          promise.set_exception(std::current_exception());
+        }
+      });
+
+  // Detach the thread to allow it to run independently
+  workerThread.detach();
+
+  return resultFuture;
 }
 
 void abortCommsFromMap(
@@ -1059,7 +1140,11 @@ void ProcessGroupNCCL::registerDebugInfoWriter(
   debugInfoWriter_ = std::move(writer);
 }
 
-void ProcessGroupNCCL::dumpDebuggingInfo() {
+bool ProcessGroupNCCL::dumpDebuggingInfo() {
+  // Serialize all calls to this function to avoid corrupting data, but allow
+  // multiple calls in one runtime. User is responsible for preserving the
+  // output file from an earlier call before a later call overwrites it.
+  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
   LOG(ERROR) << "ProcessGroupNCCL preparing to dump debug info.";
   if (ncclTraceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
@@ -1073,7 +1158,9 @@ void ProcessGroupNCCL::dumpDebuggingInfo() {
       registerDebugInfoWriter(std::move(debugInfoWriterPtr));
     }
     debugInfoWriter_->write(ncclTrace);
+    return true;
   }
+  return false;
 }
 
 void ProcessGroupNCCL::terminateProcess(std::string errMsg) {
@@ -1110,7 +1197,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
-  auto maybeWriteDebugInfo = tryWriteDebugInfo();
+  std::future<bool> asyncDebugDump = launchAsyncDebugDump();
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
@@ -1119,8 +1206,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       rank_,
       "] NCCL monitor thread timeout. Basically, this could ",
       "be due to CUDA or NCCL calls being unexpectedly blocking, ",
-      "especially when your program enters a deadlock state in watchdog"
-      "or destructors. If you see this error, please file a bug to pytorch.");
+      "especially when your program enters a deadlock state in watchdog "
+      "or destructors. If you see this error, please file a bug to PyTorch.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
@@ -1130,8 +1217,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Case two: desync might be slow or get stuck. Or we get stuck in
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
-  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
-       (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable())) &&
+  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave another two mins for desync report generation or process group
     // destroy.
@@ -1143,9 +1229,11 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // thread, so We mark the thread detach and the dump of debug info becomes
   // "best effort". If the process exit normally, marking it detach also makes
   // sense because we don't really care about dumping the debug info.
-  if (maybeWriteDebugInfo && maybeWriteDebugInfo->joinable()) {
-    maybeWriteDebugInfo->detach();
-  }
+
+  // We already log completion inside the thread, so it may not be necessary to
+  // check the return value here.  We mainly use a future so we can exit early
+  // if done.
+  asyncDebugDump.wait_for(std::chrono::seconds(heartbeatTimeoutInSec_));
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     const auto logMsg = c10::str(
@@ -1168,7 +1256,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
       ncclHeartbeatMonitorThread_ =
           std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
     }
-    workCleanupLoop();
+    watchdogHandler();
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
@@ -1180,7 +1268,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
           << " (Watchdog caught exception: " << e.what();
 
     } else {
-      // Append error message reported from workCleanupLoop
+      // Append error message reported from watchdogHandler
       const auto exitMsg = c10::str(
           "[Rank ",
           rank_,
@@ -1284,8 +1372,11 @@ struct DumpPipe {
 };
 #endif
 
-void ProcessGroupNCCL::workCleanupLoop() {
+void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
+  lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
+  auto lastTimePollStore = std::chrono::steady_clock::now();
+  c10::optional<std::future<bool>> optAsyncDebugDump;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
@@ -1300,6 +1391,37 @@ void ProcessGroupNCCL::workCleanupLoop() {
         [&]() -> bool { return terminateProcessGroup_.load(); });
     // Bump up heart beat by one.
     heartbeat_++;
+
+    // poll store to see if some ranks have flagged a timeout when
+    // we haven't polled for `heartbeat_timeout` seconds and there haven't
+    // any work added or removed for `watchdog_timeout` seconds.
+    if (dumpOnTimeout_) {
+      auto currentTime = std::chrono::steady_clock::now();
+      auto timeSinceLastWorkListUpdate =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastWorkListUpdateTime_))
+              .count();
+      auto timeSinceLastPollStore =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastTimePollStore))
+              .count();
+      if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
+          timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
+        lastTimePollStore = currentTime;
+        if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
+          optAsyncDebugDump = launchAsyncDebugDump();
+          optAsyncDebugDump->wait_for(
+              std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
+          const auto exitMsg = c10::str(
+              "Some other rank's watchdog thread detected a timeout and notified ",
+              "all other ranks, so we're dumping debug info and aborting [Rank ",
+              rank_,
+              "] as well.");
+          LOG(ERROR) << exitMsg;
+          C10_THROW_ERROR(DistBackendError, exitMsg);
+        }
+      }
+    }
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
@@ -1324,12 +1446,13 @@ void ProcessGroupNCCL::workCleanupLoop() {
               // Set shutdown mode, so the heartbeat monitor thread will not
               // abort process immediately.
               collectiveDebugInfoMode_.store(true);
+              std::vector<uint8_t> vec(1);
+              store_->set(std::string(TIMEOUT_DUMP), vec);
             }
 
-            c10::optional<std::thread> dumpingDebugInfo;
-            if (dumpOnTimeout_) {
+            if (dumpOnTimeout_ && !optAsyncDebugDump) {
               // Store debug info to storage. (By default to local disk)
-              dumpingDebugInfo = tryWriteDebugInfo();
+              optAsyncDebugDump = launchAsyncDebugDump();
             }
 
             if (desyncDebug_) {
@@ -1339,15 +1462,8 @@ void ProcessGroupNCCL::workCleanupLoop() {
 
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
-              if (dumpingDebugInfo && dumpingDebugInfo->joinable()) {
-                std::this_thread::sleep_for(
-                    std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
-                // At this point, we either have already waited for
-                // `kWatchdogThreadSleepMillis * 30` or the thread has finished
-                // so that we mark the thread detach and the dump of debug info
-                // becomes "best effort".
-                dumpingDebugInfo->detach();
-              }
+              optAsyncDebugDump->wait_for(
+                  std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
             }
 
           } catch (const std::exception& e) {
@@ -1387,6 +1503,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
           completedWorkListCV_.notify_one();
         } else {
           it = workMetaList_.erase(it);
+          lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
         }
         at::cuda::CUDAGraph::dec_pending_event_queries();
       } else {
@@ -1397,8 +1514,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
     }
     // process a request to dump the trace
     if (dumpPipe.shouldDump()) {
-      std::thread dump_thread(&ProcessGroupNCCL::dumpDebuggingInfo, this);
-      dump_thread.detach();
+      launchAsyncDebugDump();
     }
     done = workMetaList_.empty();
   }
@@ -1614,6 +1730,17 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
         DistBackendError,
         "Not able to create/get the NCCL Communicator since "
         "the GPU devices are not known");
+  }
+  if (bound_device_id_) {
+    for (const auto& device : devices) {
+      if (*bound_device_id_ != device) {
+        LOG(ERROR) << "Tensor found on device " << device
+                   << " but backend constrained to " << *bound_device_id_;
+        C10_THROW_ERROR(
+            DistBackendError,
+            "Attempt to perform collective on tensor not on device passed to init_process_group");
+      }
+    }
   }
 
   for (auto& device : devices) {
@@ -2082,6 +2209,7 @@ void ProcessGroupNCCL::workEnqueue(
     // needs to be destructed in user thread. Otherwise will
     // get deadlock. Here we enqueue work without outputs_.
     workMetaList_.emplace_back(*work);
+    lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   }
 }
 
@@ -2682,6 +2810,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
@@ -2708,6 +2838,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
       // I'm not sure what in,outSplitSizes mean here.
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
@@ -2734,6 +2866,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
@@ -2797,6 +2931,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   return collective(
@@ -2839,6 +2975,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   int dev_in_group = 0;
@@ -2903,6 +3041,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_oop(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   int dev_in_group{0};
@@ -2961,6 +3101,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
         tensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
         std::vector<int64_t>(), // outSplitSize
+        globalRankStart, // globalRankStart
+        globalRankStride, // globalRankStride
         this->getSize()); // worldSize
 
     return collective(
@@ -3104,6 +3246,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
         tensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
         std::vector<int64_t>(), // outSplitSizes
+        globalRankStart, // globalRankStart
+        globalRankStride, // globalRankStride
         this->getSize()); // worldSize
 
     return collective(
@@ -3223,6 +3367,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
       tensor.scalar_type(), // dtype
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   auto inputs = std::vector<at::Tensor>{inputTensor};
@@ -3311,6 +3457,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   std::vector<at::Device> devices;
@@ -3336,7 +3484,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
         " to perform barrier as devices used by this process are currently unknown. ",
         "This can potentially cause a hang if this rank to GPU mapping is incorrect.",
         "Specify device_ids in barrier() to force use of a particular device.");
-    devices.emplace_back(getDeviceForRank(rank_));
+    devices.emplace_back(guessDeviceForRank());
   } else {
     for (auto usedDeviceIdx : usedDeviceIdxs_) {
       devices.emplace_back(at::DeviceType::CUDA, usedDeviceIdx);
@@ -3392,6 +3540,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         inputTensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
         std::vector<int64_t>(), // outSplitSizes
+        globalRankStart, // globalRankStart
+        globalRankStride, // globalRankStride
         this->getSize()); // worldSize
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
@@ -3434,6 +3584,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         inputTensor.scalar_type(), // dType
         inputSplitSizes, // inSplitSizes
         outputSplitSizes, // outSplitSizes
+        globalRankStart, // globalRankStart
+        globalRankStride, // globalRankStride
         this->getSize()); // worldSize
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
@@ -3510,6 +3662,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       inputTensors.front().scalar_type(), // dType
       inSplitSizes, // inSplitSizes
       outSplitSizes, // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   std::vector<at::Tensor> inputTensor0 = {inputTensors[0]};
@@ -3561,6 +3715,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   auto ret = pointToPoint(
@@ -3599,6 +3755,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   auto ret = pointToPoint(
@@ -3759,6 +3917,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSize
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash inputTensors and
@@ -3846,6 +4006,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSize
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash outputTensors and
@@ -3917,6 +4079,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSize
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // just a wrapper to fit the collective interface

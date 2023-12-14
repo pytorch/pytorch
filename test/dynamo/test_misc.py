@@ -950,9 +950,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # Filter out id-matches that won't reproduce run to run
         guard_code = filter(
-            lambda line: not any(
-                banned in line for banned in ["id", "lookup_backend", "config_hash"]
-            ),
+            lambda line: "id" not in line and "lookup_backend" not in line,
             sorted(guard_code),
         )
         guard_code_str = "\n".join(guard_code)
@@ -1594,6 +1592,25 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.testing.standard_test(
             self, fn, 1, expected_ops=6, expected_ops_dynamic=ifdynstaticdefault(6, 18)
         )
+
+    def test_list_iadd_side_effect(self):
+        def fn(a, b):
+            a += [b]
+            torch._dynamo.graph_break()
+            return a
+
+        a = [1, 2, 3]
+        b = torch.ones(2, 2)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+
+        exp = fn(a, b)
+
+        a = [1, 2, 3]
+        b = torch.ones(2, 2)
+        act = opt_fn(a, b)
+
+        self.assertEqual(exp, act)
 
     def test_user_getattr1(self):
         class MyConfig(dict):
@@ -2915,6 +2932,27 @@ utils_device.CURRENT_DEVICE == None""".split(
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(cnts.op_count, 3)
             cnts.clear()
+
+    def test_closure_with_mutation_and_graph_break(self):
+        def fn():
+            x = torch.zeros(1)
+
+            def subfunc():
+                x[0] = backup
+
+            if x[0] >= -1e5:
+                pass
+
+            backup = 1
+            subfunc()
+            return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        expected = fn()
+        actual = opt_fn()
+        self.assertTrue(same(expected, actual))
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_closure_out_of_scope_cell_with_cond(self):
         # Test closure with out-of-scope cell variable, used in a cond
@@ -4309,7 +4347,7 @@ def fn():
         self.assertEqual(exp_out, opt_out)
         self.assertEqual(cnt.frame_count, exp_frame_count)
         self.assertEqual(
-            len(torch._dynamo.eval_frame.guarded_backend_cache.cached_backends),
+            len(torch._dynamo.eval_frame.cached_backends),
             exp_n_cached_backend,
         )
 
@@ -4358,10 +4396,11 @@ def fn():
         def foo(x):
             return x.sin() + x.cos()
 
-        def compile_then_check_exp(*args):
-            self._optimize_then_check_exp(*args)
-            self._optimize_then_check_exp(*args)
-            self._optimize_then_check_exp(*args)
+        def compile_then_check_exp(foo, args, cnt, eager_result, exp_frame_count):
+            for i in range(3):
+                opt_out = torch._dynamo.optimize(backend=cnt)(foo)(*args)
+                self.assertEqual(opt_out, eager_result)
+            self.assertEqual(cnt.frame_count, exp_frame_count)
             thread_success[threading.current_thread()] = True
 
         eager_record_backend = torch._dynamo.testing.EagerAndRecordGraphs()
@@ -4370,7 +4409,6 @@ def fn():
         # Test dynamo recompiles but only caches a single backend for each thread
         eager_result = foo(x)
         # cnt and None
-        exp_n_cached_backend = 2
         exp_frame_count = 1
         threads = []
         thread_success = {}
@@ -4384,7 +4422,6 @@ def fn():
                     cnt,
                     eager_result,
                     exp_frame_count,
-                    exp_n_cached_backend,
                 ),
             )
             threads.append(thread)
@@ -4393,6 +4430,12 @@ def fn():
         # Wait for all threads to finish
         for thread in threads:
             thread.join()
+
+        # Threads are sharing the backend cache. We see two cnt backends and one None backend
+        self.assertEqual(
+            len(torch._dynamo.eval_frame.cached_backends),
+            3,
+        )
 
         self.assertEqual(len(thread_success), len(threads))
 
@@ -7973,7 +8016,6 @@ def ___make_guard_fn():
             return [t * k for t in yield_from_gen(t_list)]
 
         t_list = [torch.randn([2, 3])] * 3
-        multiplier = torch.tensor([10])
         eager = yield_from_fn(t_list, 2)
         counter = CompileCounter()
         compiled = torch._dynamo.optimize(counter)(yield_from_fn)(t_list, 2)
@@ -8410,6 +8452,19 @@ def ___make_guard_fn():
 
         self.assertEqual(eager, compiled)
         self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_list_iterator_contains(self):
+        def fn(x):
+            it = iter(["my_weight", "not_my_weight"])
+            next(it)
+            if "my_weight" in it:
+                return x + 2
+            return x + 1
+
+        x = torch.zeros(3)
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+
+        self.assertEqual(fn(x), compiled_fn(x))
 
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
