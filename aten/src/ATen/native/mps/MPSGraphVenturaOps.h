@@ -16,6 +16,11 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
     MPSGraphResizeNearestRoundingModeRoundToEven       =  4L,
     MPSGraphResizeNearestRoundingModeRoundToOdd        =  5L,
 };
+
+// Define complex enums for MacOS 12
+#define MPSDataTypeComplexBit 0x01000000
+#define MPSDataTypeComplexFloat32 ((MPSDataType) (MPSDataTypeFloatBit | MPSDataTypeComplexBit | 64))
+#define MPSDataTypeComplexFloat16 ((MPSDataType) (MPSDataTypeFloatBit | MPSDataTypeComplexBit | 32))
 #endif
 
 - (MPSGraphTensor * _Nonnull)cumulativeSumWithTensor:(MPSGraphTensor * _Nonnull)tensor
