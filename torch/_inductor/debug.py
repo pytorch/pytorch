@@ -493,7 +493,7 @@ class DebugFormatter:
         self,
         name: str,
         input_nodes: List[ir.IRNode],
-        timings: dict["ChoiceCaller", float],  # type: ignore[name-defined]
+        timings: Dict["ChoiceCaller", float],  # type: ignore[name-defined]
         elapse: float,
     ):
         import json
@@ -532,7 +532,7 @@ class DebugFormatter:
             return node_info
 
         general_properties = {
-            "op_name" : name,
+            "op_name": name,
             "cuda_device_name": torch.cuda.get_device_name(),
             "cuda_device_count": torch.cuda.device_count(),
             "input_nodes": [build_node_info(node) for node in input_nodes],
