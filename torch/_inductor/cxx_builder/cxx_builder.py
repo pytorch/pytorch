@@ -133,7 +133,6 @@ class BuildOptionsBase:
     This is the Base class for store cxx build options, as a template.
     Acturally, to build a cxx shared library. We just need to select a compiler
     and maintains the suitable args.
-    This class will help maintains cxx build compiler and nessary args.
     """
 
     def __init__(self) -> None:
@@ -274,7 +273,7 @@ def get_cxx_options(cpp_compiler):
 class CxxOptions(BuildOptionsBase):
     """
     This class is inherited from BuildOptionsBase, and as cxx build options.
-    This option contains basic cxx build option, which contains:
+    This option need contains basic cxx build option, which contains:
     1. OS related args.
     2. Toolchains related args.
     3. Cxx standard related args.
@@ -554,7 +553,7 @@ def get_cxx_torch_options(cpp_compiler, chosen_isa: VecISA, aot_mode: bool = Fal
 
 class CxxTorchOptions(CxxOptions):
     """
-    This class is inherited from CxxTorchOptions, which need contains
+    This class is inherited from CxxTorchOptions, which automatic contains
     base cxx build options. And then it will maintains torch related build
     args.
     1. Torch include_directories, libraries, libraries_directories.
@@ -665,7 +664,7 @@ def get_cxx_torch_cuda_options(aot_mode: bool = False):
 
 class CxxTorchCudaOptions(CxxTorchOptions):
     """
-    This class is inherited from CxxTorchOptions, which need contains
+    This class is inherited from CxxTorchOptions, which automatic contains
     base cxx build options and torch common build options. And then it will
     maintains cuda device related build args.
     """
