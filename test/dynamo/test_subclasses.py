@@ -51,6 +51,21 @@ class DummyNDim(torch.Tensor):
         return super().__torch_function__(func, types, args, kwargs)
 
 
+class WrapperSubclass:
+    def __init__(self, tensor):
+        self.tensor = tensor
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        args = pytree.tree_map_only(WrapperSubclass, lambda x: x.tensor, args)
+        kwargs = pytree.tree_map_only(WrapperSubclass, lambda x: x.tensor, kwargs)
+
+        return func(*args, **kwargs)
+
+
 class SigmoidToExpSubclass(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -120,7 +135,11 @@ class EagerRecordGraphAndInputs:
         return gm
 
 
-GLOBAL_TEST_SUBCLASSES = {MockSubclass, DummyNDim, SigmoidToExpSubclass}
+GLOBAL_TEST_SUBCLASSES = {
+    MockSubclass,
+    DummyNDim,
+    SigmoidToExpSubclass,
+}
 
 
 # Returns True if the function recompiles between inputs1 and inputs2 with the
@@ -390,6 +409,19 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res_exp, res_act)
         self.assertEqual(res_exp, torch.ones(2) + 10)
+
+    def test_torch_function_wrapper_class(self):
+        x = torch.ones(2, 2)
+        wrapped = WrapperSubclass(x)
+
+        def fn(w):
+            return torch.add(w, 1.0)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped)
+        self.assertEqual(res_exp, res_act)
 
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
