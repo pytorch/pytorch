@@ -872,9 +872,7 @@ class DistributedDataParallel(Module, Joinable):
         self._accum_grad_hooks: List[RemovableHandle] = []
         self._ddp_python_hook = torch._dynamo.config.ddp_python_hook
         if self._ddp_python_hook:
-            from torch._dynamo.skipfiles import MOD_INLINELIST
-
-            MOD_INLINELIST.add("torch.nn.parallel.distributed")
+            torch._dynamo.config.optimize_ddp = False
             self._register_accum_grad_hook()
 
         torch._inductor.config.allreduce_fusion_bucket_size = bucket_cap_mb
