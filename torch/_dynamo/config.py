@@ -223,8 +223,8 @@ enforce_cond_guards_match = True
 optimize_ddp = True
 
 # Register Python hooks for AccumuldateGrad when using DDP. With Python hooks
-# and compiled_autograd(), the allreduce issued by DDP can be traced. The DDP
-# module needs to be compiled to make this flag meaningful.
+# and compiled_autograd(), the allreduce issued by DDP can be traced. This
+# flag is only used when DDP module is compiled.
 # This is an experimental feature.
 ddp_python_hook = False
 
