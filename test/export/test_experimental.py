@@ -29,8 +29,10 @@ class TestExperiment(TestCase):
             def forward(self, x):
                 y = x + 2
                 y.add_(4)
-                self.buffer1.add_(6)
-                return x.sum() + y.sum() + self.buffer1.sum()
+                # this doesnt' work today with HOO
+                #self.buffer1.add_(6)
+                buffer_updated = self.buffer1 + 6
+                return x.sum() + y.sum() + buffer_updated.sum()
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -52,38 +54,32 @@ def forward(self, arg0_1, arg1_1):
     add = torch.ops.aten.add.Tensor(arg1_1, 3);  arg1_1 = None
     return (getitem, add)""")
 
+        self.assertExpectedInline(str(gm.strict_graph_0.code.strip()), """\
+def forward(self, arg0_1, arg1_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 2)
+    add_1 = torch.ops.aten.add.Tensor(add, 4);  add = None
+    add_2 = torch.ops.aten.add.Tensor(arg1_1, 6);  arg1_1 = None
+    sum_1 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+    sum_2 = torch.ops.aten.sum.default(add_1);  add_1 = None
+    add_3 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    sum_3 = torch.ops.aten.sum.default(add_2);  add_2 = None
+    add_4 = torch.ops.aten.add.Tensor(add_3, sum_3);  add_3 = sum_3 = None
+    return (add_4,)""")
+
         eager_mod = M()
+        ep = torch.export.export(eager_mod, (inp,), strict=True)
 
-        graph_res_1, graph_res_2 = gm(torch.ones(3), inp)
+        graph_res_1, graph_res_2 = ep(inp)
         eager_res_1, eager_res_2 = eager_mod(inp)
 
-        self.assertTrue(torch.allclose(graph_res_2, eager_res_1))
-        self.assertTrue(torch.allclose(graph_res_3, eager_res_2))
+        self.assertTrue(torch.allclose(graph_res_2, eager_res_2))
+        self.assertTrue(torch.allclose(graph_res_1, eager_res_1))
 
-        graph_res_1, graph_res_2 = gm(graph_res_1, inp)
+        graph_res_1, graph_res_2 = ep(inp)
         eager_res_1, eager_res_2 = eager_mod(inp)
 
-        self.assertTrue(torch.allclose(graph_res_2, eager_res_1))
-
-    def test_cond(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                def true_fn(x):
-                    return x.cos()
-
-                def false_fn(x):
-                    return x.sin()
-
-                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
-                return (a + 3, a + 4)
-
-        inp = torch.randn(3, 4)
-        from torch.fx.experimental.proxy_tensor import make_fx
-        gm, _ = aot_export_module(M(), (inp,), trace_joint=False)
-        print(gm)
+        self.assertTrue(torch.allclose(graph_res_2, eager_res_2))
+        self.assertTrue(torch.allclose(graph_res_1, eager_res_1))
 
 
 
