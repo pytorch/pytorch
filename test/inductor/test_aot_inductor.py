@@ -17,6 +17,7 @@ from torch._inductor.utils import cache_dir
 
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_quantization import skip_if_no_torchvision
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -71,6 +72,7 @@ def check_model(
         {
             "aot_inductor.abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
+            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
     ):
         torch.manual_seed(0)
@@ -674,6 +676,7 @@ class AOTInductorTestsTemplate:
 
     # scaled_dot_product_flash_attention
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
+    @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
     def test_sdpa(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -690,6 +693,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
+    @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
     def test_sdpa_2(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1401,6 +1405,54 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), inputs)
 
+    def test_fqn(self):
+        class NestedChild(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("nestedchild3buffer", torch.ones(2, 3) * 3)
+
+            def forward(self, x):
+                return x / self.nestedchild3buffer
+
+        class Child1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = NestedChild()
+                self.register_parameter(
+                    "child1param", torch.nn.Parameter(torch.ones(2, 3))
+                )
+
+            def forward(self, x):
+                x = self.nested(x)
+                return x + self.child1param
+
+        class Child2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("child2buffer", torch.ones(2, 3) * 2)
+
+            def forward(self, x):
+                return x - self.child2buffer
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = Child1()
+                self.bar = Child2()
+                self.register_parameter(
+                    "rootparam", torch.nn.Parameter(torch.ones(2, 3) * 4)
+                )
+
+            def forward(self, x):
+                x = x * self.rootparam
+                x = self.foo(x)
+                x = self.bar(x)
+                return x
+
+        orig_eager = MyModule()
+
+        self.check_model(MyModule(), (torch.randn(2, 3, device=self.device),))
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1411,11 +1463,23 @@ class AOTInductorTestABICompatibleCpu(TestCase):
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
 
 
 def fail_with_and_without_stack_allocation(is_skip=False):
     return TestFailure(
-        ("abi_compatible_cpu", "abi_compatible_cpu_with_stack_allocation"),
+        (
+            "abi_compatible_cpu",
+            "abi_compatible_cpu_with_stack_allocation",
+            "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
+        ),
+        is_skip=is_skip,
+    )
+
+
+def fail_minimal_arrayref_interface(is_skip=False):
+    return TestFailure(
+        ("abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",),
         is_skip=is_skip,
     )
 
@@ -1434,12 +1498,18 @@ CPU_TEST_FAILURES = {
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
+    # minimal arrayref interface only works with CPU; test crashes.
+    "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
     "test_poi_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
     # the test segfaults
     "test_scatter_fallback": fail_with_and_without_stack_allocation(is_skip=True),
+    # Minimal arrayref interface doesn't support bfloat16 yet.
+    "test_sdpa": fail_minimal_arrayref_interface(is_skip=True),
+    # Minimal arrayref interface doesn't support bfloat16 yet.
+    "test_sdpa_2": fail_minimal_arrayref_interface(is_skip=True),
     # error: could not find s0
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -1461,6 +1531,7 @@ class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = True
+    use_minimal_arrayref_interface = False
 
 
 copy_tests(
@@ -1471,12 +1542,32 @@ copy_tests(
 )
 
 
+class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface(
+    TestCase
+):
+    device = "cpu"
+    abi_compatible = True
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = True
+    use_minimal_arrayref_interface = True
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface,
+    "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
+    CPU_TEST_FAILURES,
+)
+
+
 class AOTInductorTestABICompatibleCuda(TestCase):
     device = "cuda"
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
 
 
 copy_tests(
@@ -1502,6 +1593,7 @@ class AOTInductorTestNonABICompatibleCpu(TestCase):
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
 
 
 copy_tests(
@@ -1529,6 +1621,7 @@ class AOTInductorTestNonABICompatibleCuda(TestCase):
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
 
 
 copy_tests(
