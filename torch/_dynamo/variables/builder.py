@@ -5,6 +5,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import itertools
 import logging
 import operator
 import re
@@ -67,6 +68,7 @@ from ..utils import (
     get_fake_value,
     get_static_address_type,
     global_key_name,
+    hashable,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
@@ -111,6 +113,7 @@ from .functions import (
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
+from .iter import ItertoolsVariable
 from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
@@ -644,6 +647,9 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
+        elif hashable(value) and value in itertools.__dict__.values():
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return ItertoolsVariable(value, source=self.source)
         elif isinstance(value, torch.SymBool):
             # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
             # user provided SymBool with a SymInt in dynamo.
