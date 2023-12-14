@@ -64,7 +64,7 @@ class CutlassEVTEpilogueTypeFormatter:
         self.output = IndentedBuffer(0)
         self.var_counter = 0
         self.evt_type_name = evt_type_name
-        self.aliases: Dict[str, str] = dict()
+        self.aliases: Dict[str, Optional[str]] = dict()
         self.pre_fused_evt = pre_fused_evt
 
     @staticmethod
@@ -113,7 +113,8 @@ class CutlassEVTEpilogueTypeFormatter:
                 index = pnode._index(pnode.ranges)
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
-                formatter.aliases[node.name] = result
+                if node.name is not None:
+                    formatter.aliases[node.name] = result
             res = formatter.getvalue(result)
             if _MAGIC_SYMPY_ERROR_STRING in res:
                 raise CUTLASSEVTOpNotImplementedError(
@@ -312,7 +313,7 @@ class CutlassEVTEpilogueArgumentFormatter:
                 index = pnode._index(pnode.ranges)
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
-                if node.name is not None:
+                if node.name is not None and result is not None:
                     formatter.aliases[node.name] = result  # type: ignore[assignment]
 
             res: str = formatter.getvalue(result)
@@ -336,7 +337,7 @@ class CutlassEVTEpilogueArgumentFormatter:
           },                // end binary op
           {} // ternary args : multiply_add
         }   // end ternary op
-        """ % (  # noqa: UP031`
+        """ % (  # noqa: UP031
             beta,
             alpha,
         )

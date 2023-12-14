@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
@@ -298,7 +298,7 @@ class CUDATemplateCaller(ChoiceCaller):
         layout: Layout,
         make_kernel_render: Callable[[CUDATemplateBuffer, Optional[List[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
-        template: "CUDATemplate",  # type: ignore[name-defined],
+        template: "CUDATemplate",
         info_kwargs: Optional[dict[str, PrimitiveInfoType]],  # type: ignore[type-arg]
     ):
         super().__init__(name, input_nodes, layout)
@@ -331,7 +331,7 @@ class CUDATemplateCaller(ChoiceCaller):
     def info_dict(self) -> Dict[str, PrimitiveInfoType]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         if self.info_kwargs is not None and "op" in self.info_kwargs:
-            op = self.info_kwargs["op"]
+            op: Any = self.info_kwargs["op"]
             return {
                 "backend": "CUDA",
                 "op_type": type(op).__name__,
@@ -340,7 +340,9 @@ class CUDATemplateCaller(ChoiceCaller):
                 "kernel_schedule": str(op.kernel_schedule),
                 "element_accumulator": str(op.accumulator_type()),
                 "op_name": str(op.procedural_name()),
-                "instruction_shape" : str(op.tile_description.math_instruction.instruction_shape),
+                "instruction_shape": str(
+                    op.tile_description.math_instruction.instruction_shape
+                ),
             }
         else:
             return {"backend": "CUDA", "op_type": "unknown"}
