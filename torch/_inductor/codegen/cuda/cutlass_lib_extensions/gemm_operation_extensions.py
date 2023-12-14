@@ -52,7 +52,7 @@ if try_import_cutlass():
         >;
 
         using ADDMM_EVT =  // alpha * acc + beta * C
-            cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::multiply_add,
+            cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::homogeneous_multiply_add,
                     ElementD, ElementAcc, RoundStyle>, // beta * C + (alpha * acc)
               cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementAcc>, // beta
               cutlass::epilogue::fusion::Sm90SrcFetch, // C
