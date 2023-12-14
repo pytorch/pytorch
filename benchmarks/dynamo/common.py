@@ -1759,38 +1759,48 @@ class BenchmarkRunner:
         self.model_iter_fn = None
         self.grad_scaler = DummyGradScaler()
         self.autocast = contextlib.nullcontext
+        self.autocast_arg = {}
         self.optimizer = None
         self._args = None
 
-    def setup_amp(self):
+    def setup_amp(self, current_device=None):
         if self.args.only in self.fp32_only_models:
             return
 
-        if self.args.amp and self.args.devices == ["cuda"]:
-            # AMP training can lead to small loss values which can undeflow
-            # gradient values returning in zero gradients. To solve this
-            # problem, PyTorch introduces GradScaler. GradScaler is a stateful
-            # structure, that scales the loss values to prevent underflow. Loss
-            # values are big at the beginning of training (therefore not
-            # requiring scaling), while loss value tends to be small as network
-            # starts getting better (requiring scaling). GradScaler manages all
-            # of this fine tuning, checking the gradients are turning to inf,
-            # discarding such batches.
+        devices = [current_device] if current_device else self.args.devices
+        if self.args.amp:
+            if devices == ["cuda"]:
+                # AMP training can lead to small loss values which can undeflow
+                # gradient values returning in zero gradients. To solve this
+                # problem, PyTorch introduces GradScaler. GradScaler is a stateful
+                # structure, that scales the loss values to prevent underflow. Loss
+                # values are big at the beginning of training (therefore not
+                # requiring scaling), while loss value tends to be small as network
+                # starts getting better (requiring scaling). GradScaler manages all
+                # of this fine tuning, checking the gradients are turning to inf,
+                # discarding such batches.
 
-            # Since we are not running a long iteration, default value of
-            # init_scale 65536 is going to turn all gradients to inf. Therefore,
-            # we just use a init_scale of 2.0 for benchmarking purpose.
+                # Since we are not running a long iteration, default value of
+                # init_scale 65536 is going to turn all gradients to inf. Therefore,
+                # we just use a init_scale of 2.0 for benchmarking purpose.
 
-            # Disabling Gradscaler because
-            #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
-            #  2) Current setup shares grad_scaler for eager and dynamo model,
-            #  which is bad as Gradscaler has state and can adjust the scaling
-            #  factor between eager and dynamo run, making accuracy check
-            #  harder.
-            # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
-            self.autocast = torch.cuda.amp.autocast
-        elif (self.args.bfloat16 or self.args.amp) and self.args.devices == ["cpu"]:
-            self.autocast = torch.cpu.amp.autocast
+                # Disabling Gradscaler because
+                #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
+                #  2) Current setup shares grad_scaler for eager and dynamo model,
+                #  which is bad as Gradscaler has state and can adjust the scaling
+                #  factor between eager and dynamo run, making accuracy check
+                #  harder.
+                # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+                self.autocast = torch.cuda.amp.autocast
+            if devices == ["cpu"]:
+                self.autocast = torch.cpu.amp.autocast
+            if self.args.amp_dtype:
+                amp_dtype = (
+                    torch.float16
+                    if self.args.amp_dtype == "float16"
+                    else torch.bfloat16
+                )
+                self.autocast_arg["dtype"] = amp_dtype
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
@@ -2232,7 +2242,7 @@ class BenchmarkRunner:
                     # apply export on module directly
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
-                    with self.autocast():
+                    with self.autocast(**self.autocast_arg):
                         optimized_model_iter_fn = optimize_ctx(
                             model_copy, example_inputs
                         )
@@ -2968,7 +2978,11 @@ def parse_args(args=None):
     group_prec.add_argument(
         "--amp", action="store_true", help="use automatic mixed precision"
     )
-
+    parser.add_argument(
+        "--amp-dtype",
+        choices=("bfloat16", "float16"),
+        help="the data type used with automatic mixed precision",
+    )
     group_printout = parser.add_mutually_exclusive_group()
     group_printout.add_argument(
         "--verbose", "-v", action="store_true", help="enable verbose debug printouts"
@@ -3654,6 +3668,7 @@ def run(runner, args, original_dir=None):
 
             else:
                 model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+            runner.setup_amp(current_device)
             runner.run_one_model(
                 name,
                 model,
