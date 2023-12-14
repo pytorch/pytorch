@@ -9,7 +9,6 @@ from torch._dynamo.source import (
     is_from_local_source,
     LocalSource,
 )
-from torch._dynamo.testing import run_tests
 
 
 class SourceTests(torch._dynamo.test_case.TestCase):
@@ -25,4 +24,4 @@ class SourceTests(torch._dynamo.test_case.TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    torch._dynamo.test_case.run_tests()
