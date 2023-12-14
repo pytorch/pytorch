@@ -4134,7 +4134,7 @@ class InplaceBernoulliFallback(ExternKernel):
         )
         self.name = V.graph.register_buffer(self)
         self.python_kernel_name = "aten.bernoulli_"
-        self.cpp_kernel_name = "at::bernoulli_"
+        self.cpp_kernel_name = "at::native::bernoulli_"
         mark_node_as_mutating(self, x)
 
 

@@ -1416,6 +1416,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #include <torch/types.h>
+                #include <ATen/ops/bernoulli_native.h>
+
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
