@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 import torch
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
+from ..codegen.common import ChoiceCaller
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -123,7 +124,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
     from torch._inductor.ir import FixedLayout, FlexibleLayout
 
-    choices = []
+    choices: List[ChoiceCaller] = []
 
     if m * n != 0 and use_triton_template(layout):
         for config in mm_configs(m, n, k):
@@ -194,8 +195,6 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
-    from torch._inductor.ir import FlexibleLayout
-
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
     choices = []
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
