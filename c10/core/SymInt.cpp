@@ -134,6 +134,13 @@ bool SymInt::expect_size(const char* file, int64_t line) const {
 
 SymInt operator-(const SymInt& s) {
   if (auto ma = s.maybe_as_int()) {
+    if (C10_UNLIKELY(*ma == std::numeric_limits<int64_t>::min())) {
+      TORCH_CHECK(
+          false,
+          "SymInt with value ",
+          *ma,
+          " would overflow when negated. This might be caused by extremely large tensor indices.");
+    }
     return SymInt(-*ma);
   } else {
     return SymInt(s.toSymNodeImplUnowned()->neg());
