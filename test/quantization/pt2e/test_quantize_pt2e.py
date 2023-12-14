@@ -773,7 +773,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         conv_output_obs = []
         for n in m.graph.nodes:
             if n.op == "call_function" and n.target == torch.ops.aten.conv2d.default:
-                conv_output_obs.append(getattr(m, list(n.users)[0].target))
+                conv_output_obs.append(getattr(m, next(iter(n.users)).target))
             if n.op == "call_function" and n.target == torch.ops.aten.cat.default:
                 inputs = n.args[0]
                 input0 = inputs[0]
@@ -830,7 +830,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         conv_output_obs = []
         for n in m.graph.nodes:
             if n.op == "call_function" and n.target == torch.ops.aten.conv2d.default:
-                conv_output_obs.append(getattr(m, list(n.users)[0].target))
+                conv_output_obs.append(getattr(m, next(iter(n.users)).target))
             if n.op == "call_function" and n.target == torch.ops.aten.cat.default:
                 inputs = n.args[0]
                 input0 = inputs[0]
@@ -841,7 +841,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 obs_ins1 = getattr(m, input1.target)
                 assert obs_ins0 == obs_ins1
 
-                output_obs = list(n.users)[0]
+                output_obs = next(iter(n.users))
                 assert output_obs.op == "call_module"
                 obs_ins2 = getattr(m, output_obs.target)
                 assert obs_ins0 == obs_ins2, "input observer does not match output"
@@ -1132,7 +1132,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             if n.target == torch.ops.aten.add.Tensor:
                 input_obs1 = getattr(m, n.args[0].target)
                 input_obs2 = getattr(m, n.args[1].target)
-                output_obs = getattr(m, list(n.users)[0].target)
+                output_obs = getattr(m, next(iter(n.users)).target)
                 self.assertIs(input_obs1, input_obs2)
                 self.assertIs(input_obs1, output_obs)
                 observers.append(input_obs1)
@@ -1307,7 +1307,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
         weight_meta = None
         for n in m.graph.nodes:
-            if n.op == "get_attr" and list(n.users)[0].target == torch.ops.aten.linear.default:
+            if n.op == "get_attr" and next(iter(n.users)).target == torch.ops.aten.linear.default:
                 weight_meta = n.meta
                 break
         assert weight_meta is not None, "Expect to find metadata for weight node"
