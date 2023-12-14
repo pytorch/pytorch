@@ -6,8 +6,6 @@
 #include <string>
 #include <thread>
 
-#include <cuda_runtime.h>
-
 namespace c10d {
 
 std::vector<at::Tensor> getTensorShapes(
@@ -22,28 +20,6 @@ std::vector<at::Tensor> getTensorShapes(
     shapeTensors.emplace_back(std::move(shapesTensor));
   }
   return shapeTensors;
-}
-
-size_t hashTensors(const std::vector<at::Tensor>& tensors) {
-  size_t hash = 0;
-  for (auto& tensor : tensors) {
-    if (tensor.numel() > 0 && tensor.storage()) {
-      size_t data_size = tensor.storage().nbytes();
-      if (data_size > 0 && tensor.storage().data_ptr()) {
-        std::hash<char> hasher;
-        auto src = static_cast<const char*>(tensor.storage().data_ptr().get());
-        char* dst = (char*)std::calloc(data_size, sizeof(char));
-        cudaMemcpy(dst, src, data_size, cudaMemcpyDeviceToHost);
-        for (size_t i = 0; i < data_size; ++i) {
-          // Update the hash for each byte in the tensor
-          hash ^=
-              hasher(((char*)dst)[i]) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        }
-        free(dst);
-      }
-    }
-  }
-  return hash;
 }
 
 size_t getTensorsNumel(const std::vector<at::Tensor>& tensors) {

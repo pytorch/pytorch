@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 
+#include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <nccl.h>
@@ -163,6 +164,7 @@
 
 namespace c10d {
 
+TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 std::string getNcclVersion();
 std::string ncclGetErrorWithVersion(ncclResult_t error);
 bool nccl_use_nonblocking();

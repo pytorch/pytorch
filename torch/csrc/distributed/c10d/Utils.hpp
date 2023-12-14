@@ -33,8 +33,6 @@ typedef SSIZE_T ssize_t;
 
 namespace c10d {
 
-TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
-
 TORCH_API size_t getTensorsNumel(const std::vector<at::Tensor>& tensors);
 
 // Retrieve tensor shapes from a given tensor.
