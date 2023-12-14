@@ -643,6 +643,8 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      -1,
+      -1,
       static_cast<int>(devices_.size())); // worldSize
   synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
@@ -710,7 +712,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       terminateProcessGroup_(false),
       terminateHeartbeatMonitorThread_(false),
       collectiveDebugInfoMode_(false),
-      uid_(process_group_id++) {
+      uid_(process_group_id++),
+      intraNodeComm_(initIntraNodeComm()) {
   TORCH_CHECK_WITH(
       ValueError,
       at::cuda::getNumGPUs() != 0,
@@ -723,7 +726,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   dumpOnTimeout_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
-  monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, false));
+  monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
@@ -807,6 +810,38 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
 
+  if (options_->global_ranks_in_group.empty()) {
+    this->globalRankStart = 0;
+  } else {
+    this->globalRankStart = options_->global_ranks_in_group[0];
+  }
+
+  if (options_->global_ranks_in_group.empty()) {
+    this->globalRankStride = 1;
+  } else if (options_->global_ranks_in_group.size() == 1) {
+    this->globalRankStride = 0;
+  } else {
+    bool ranksAreStrided = true;
+    int startRank = options_->global_ranks_in_group[0];
+    int stride =
+        options_->global_ranks_in_group[1] - options_->global_ranks_in_group[0];
+    for (std::vector<uint64_t>::size_type i = 0;
+         i < options_->global_ranks_in_group.size();
+         i++) {
+      if (options_->global_ranks_in_group[i] != startRank + i * stride) {
+        ranksAreStrided = false;
+        break;
+      }
+    }
+
+    if (ranksAreStrided) {
+      this->globalRankStride = options_->global_ranks_in_group[1] -
+          options_->global_ranks_in_group[0];
+    } else {
+      this->globalRankStride = -1;
+    }
+  }
+
   RECORD_PARAM_COMMS(
       0, // seq
       this->getID(),
@@ -817,6 +852,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       size_); // worldSize
 
   // Attach hooks to cache allocator to trigger the hooks whenever a traced
@@ -857,6 +894,12 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
       device);
   NCCLComm::split(comm[0].get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
 #endif
+}
+
+c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
+    initIntraNodeComm() {
+  return intra_node_comm::IntraNodeComm::rendezvous(
+      store_, std::to_string(uid_), rank_, size_);
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -956,7 +999,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
   //    completedWorkList_ before it finishes.
   // 3. We have three threads and two locks.
   //      a. main thread (this function) grabs two locks atomically
-  //      b. watchdog thread (workCleanupLoop function) always grabs
+  //      b. watchdog thread (watchdogHandler function) always grabs
   //      workMetaListMutex_
   //         first and then grabs completedWorkListMutex_.
   //      c. hook thread (runHookLoop function) only grabs
@@ -1169,8 +1212,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       logPrefix(),
       "NCCL monitor thread timeout. Basically, this could ",
       "be due to CUDA or NCCL calls being unexpectedly blocking, ",
-      "especially when your program enters a deadlock state in watchdog"
-      "or destructors. If you see this error, please file a bug to pytorch.");
+      "especially when your program enters a deadlock state in watchdog "
+      "or destructors. If you see this error, please file a bug to PyTorch.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
@@ -1218,7 +1261,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
       ncclHeartbeatMonitorThread_ =
           std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
     }
-    workCleanupLoop();
+    watchdogHandler();
     VLOG(2) << logPrefix() << "NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
     if (std::string(e.what()).find("driver shutting down") !=
@@ -1229,7 +1272,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
           << " (Watchdog caught exception: " << e.what();
 
     } else {
-      // Append error message reported from workCleanupLoop
+      // Append error message reported from watchdogHandler
       const auto exitMsg = c10::str(
           logPrefix(),
           "NCCL watchdog thread terminated with exception: ",
@@ -1338,7 +1381,7 @@ const std::string& ProcessGroupNCCL::logPrefix() const {
   return prefix;
 }
 
-void ProcessGroupNCCL::workCleanupLoop() {
+void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   auto lastTimePollStore = std::chrono::steady_clock::now();
@@ -1370,8 +1413,13 @@ void ProcessGroupNCCL::workCleanupLoop() {
     if (dumpOnTimeout_) {
       auto currentTime = std::chrono::steady_clock::now();
       auto timeSinceLastWorkListUpdate =
-          (currentTime - lastWorkListUpdateTime_).count();
-      auto timeSinceLastPollStore = (currentTime - lastTimePollStore).count();
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastWorkListUpdateTime_))
+              .count();
+      auto timeSinceLastPollStore =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              (currentTime - lastTimePollStore))
+              .count();
       if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
           timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
         lastTimePollStore = currentTime;
@@ -1380,7 +1428,8 @@ void ProcessGroupNCCL::workCleanupLoop() {
           optAsyncDebugDump->wait_for(
               std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
           const auto exitMsg = c10::str(
-              logPrefix(), "NCCL watchdog thread detected timeout from Store");
+              logPrefix(),
+              "Another rank reported a timeout and signaled a global abort.");
           LOG(ERROR) << exitMsg;
           C10_THROW_ERROR(DistBackendError, exitMsg);
         }
@@ -2759,6 +2808,16 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
+  if (intraNodeComm_ != nullptr && tensors.size() == 1 &&
+      opts.reduceOp == ReduceOp::SUM) {
+    using namespace intra_node_comm;
+    auto algo = intraNodeComm_->selectAllReduceAlgo(tensors[0]);
+    if (algo != intra_node_comm::AllReduceAlgo::NONE) {
+      intraNodeComm_->allReduce(tensors[0], algo);
+      return c10::make_intrusive<IntraNodeCommWork>();
+    }
+  }
+
   check_gpu_tensors_different_devices(tensors);
 
   // @lint-ignore CLANGTIDY
@@ -2776,6 +2835,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
@@ -2802,6 +2863,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
       // I'm not sure what in,outSplitSizes mean here.
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
@@ -2828,6 +2891,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
@@ -2891,6 +2956,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   return collective(
@@ -2933,6 +3000,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   int dev_in_group = 0;
@@ -2997,6 +3066,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_oop(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   int dev_in_group{0};
@@ -3055,6 +3126,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
         tensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
         std::vector<int64_t>(), // outSplitSize
+        globalRankStart, // globalRankStart
+        globalRankStride, // globalRankStride
         this->getSize()); // worldSize
 
     return collective(
@@ -3198,6 +3271,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
         tensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
         std::vector<int64_t>(), // outSplitSizes
+        globalRankStart, // globalRankStart
+        globalRankStride, // globalRankStride
         this->getSize()); // worldSize
 
     return collective(
@@ -3317,6 +3392,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
       tensor.scalar_type(), // dtype
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   auto inputs = std::vector<at::Tensor>{inputTensor};
@@ -3405,6 +3482,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   std::vector<at::Device> devices;
@@ -3486,6 +3565,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         inputTensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
         std::vector<int64_t>(), // outSplitSizes
+        globalRankStart, // globalRankStart
+        globalRankStride, // globalRankStride
         this->getSize()); // worldSize
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
@@ -3528,6 +3609,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         inputTensor.scalar_type(), // dType
         inputSplitSizes, // inSplitSizes
         outputSplitSizes, // outSplitSizes
+        globalRankStart, // globalRankStart
+        globalRankStride, // globalRankStride
         this->getSize()); // worldSize
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
@@ -3604,6 +3687,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       inputTensors.front().scalar_type(), // dType
       inSplitSizes, // inSplitSizes
       outSplitSizes, // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   std::vector<at::Tensor> inputTensor0 = {inputTensors[0]};
@@ -3655,6 +3740,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   auto ret = pointToPoint(
@@ -3693,6 +3780,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   auto ret = pointToPoint(
@@ -3853,6 +3942,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSize
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash inputTensors and
@@ -3940,6 +4031,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSize
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash outputTensors and
@@ -4011,6 +4104,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSize
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // just a wrapper to fit the collective interface
