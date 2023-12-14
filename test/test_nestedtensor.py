@@ -2033,8 +2033,8 @@ class TestNestedTensorDeviceType(NestedTestCase):
             self.assertEqual(ptT, ptT_from_ntT)
 
     @dtypes(torch.float, torch.float16, torch.double)
-    def test_view(self, device, dtype):
-        nt = random_nt(device, dtype, 4, (4, 4))
+    def test_view(self, device, dtype, layout):
+        nt = random_nt(device, dtype, 4, (4, 4), layout=layout)
         # error case: empty shape
         self.assertRaisesRegex(
             RuntimeError,
@@ -3116,6 +3116,41 @@ class TestNestedTensorSubclass(NestedTestCase):
             r"split_with_sizes\(\): not supported for NestedTensor on dim=0 or dim=1",
         ):
             torch.split(nt, [1, 2], 1)
+
+    def test_views_inherit_ragged_dim(self, device):
+        # view
+        nt = random_nt_from_dims(
+            [4, None, 8, 10], device=device, dtype=torch.float32, layout=torch.jagged)
+        # inherit ragged dim via -1
+        view = nt.view(4, -1, 80)
+        self.assertEqual(nt.shape[1], view.shape[1])
+        # inherit batch and ragged dims via -1
+        view2 = nt.view(-1, -1, 80)
+        self.assertEqual(nt.shape[:2], view2.shape[:2])
+
+        # expand
+        nt = random_nt_from_dims(
+            [3, None, 1], device=device, dtype=torch.float32, layout=torch.jagged)
+        # inherit batch and ragged dims via -1
+        view = nt.expand(-1, -1, 5)
+        self.assertEqual(nt.shape[:2], view.shape[:2])
+
+    def test_reshape_decomp(self, device):
+        # contiguous NT should result in view
+        nt = random_nt_from_dims(
+            [3, None, 10], device=device, dtype=torch.float32, layout=torch.jagged)
+        view = nt.reshape(-1, -1, 5, 2)
+        self.assertEqual(view.shape[:2], nt.shape[:2])
+        self.assertTrue(view._is_view() and view._base is nt)
+
+        # non-contiguous NT should result in contiguous copy
+        nt = random_nt_from_dims(
+            [3, None, 5, 2], device=device, dtype=torch.float32, layout=torch.jagged)
+        nt_noncontig = nt.transpose(-1, -2)
+        self.assertFalse(nt_noncontig.is_contiguous())
+        copy = nt_noncontig.reshape(-1, -1, 10)
+        self.assertTrue(copy.is_contiguous())
+        self.assertEqual(copy.shape[:2], nt.shape[:2])
 
     def test_binary_pointwise_broadcasting(self, device):
         # (B, j0, 3, 4)
