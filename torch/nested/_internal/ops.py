@@ -667,10 +667,10 @@ def _nested_expand(func, *args, **kwargs):
             # We don't support cases like:
             # - (B, j0, D) -> (B, j0, D', D)
             fail_reason = "trying to expand input to a size with different dim"
-        if not inp._ragged_idx == 1:
+        elif not inp._ragged_idx == 1:
             # We could clean this up if we supported union types in the schema
             fail_reason = "transposed jagged layout nested tensor is not supported"
-        if not size[1] == inp._size[1]:
+        elif not size[1] == inp._size[1]:
             fail_reason = "input has a different raggedness than size"
         inp = inp._values
     else:
