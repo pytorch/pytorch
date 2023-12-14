@@ -16,6 +16,7 @@ exclude_patterns = [
     'functorch/docs/**',
     'functorch/examples/**',
     'functorch/notebooks/**',
+    'torch/_inductor/codegen/cuda/cutlass_lib_extensions/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
