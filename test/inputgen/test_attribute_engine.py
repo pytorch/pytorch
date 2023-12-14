@@ -1,5 +1,6 @@
 # Owner(s): ["module: tests"]
 
+import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.inputgen.argument.type import ArgType
 from torch.testing._internal.inputgen.attribute.engine import AttributeEngine
@@ -40,6 +41,16 @@ class TestAttributeEngine(TestCase):
         self.assertTrue(2.0 in values)
         self.assertTrue(5.000000000000001 in values)
         self.assertTrue(float("inf") in values)
+
+    def test_scalar_type(self):
+        engine = AttributeEngine(Attribute.VALUE, [], True, ArgType.ScalarType)
+        values = engine.gen(Attribute.VALUE)
+        self.assertTrue(len(values) > 0)
+        self.assertTrue(all(isinstance(v, torch.dtype) for v in values))
+
+        engine = AttributeEngine(Attribute.VALUE, [], False, ArgType.ScalarType)
+        values = engine.gen(Attribute.VALUE)
+        self.assertTrue(len(values) == 0)
 
 
 if __name__ == "__main__":
