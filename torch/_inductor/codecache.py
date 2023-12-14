@@ -2109,17 +2109,18 @@ def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
     if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
-        return os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc")
+        return os.path.realpath(os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc"))
     return "nvcc"
 
 
 def _cutlass_include_paths() -> List[str]:
     cutlass_path = config.cuda.cutlass_dir
     return [
-        os.path.join(cutlass_path, "include"),
-        os.path.join(cutlass_path, "tools/library/include"),
-        os.path.join(cutlass_path, "tools/library/src"),
-        os.path.join(cutlass_path, "tools/util/include"),
+        # Use realpath to get canonical absolute paths, in order not to mess up cache keys
+        os.path.realpath(os.path.join(cutlass_path, "include")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/library/include")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/library/src")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/util/include")),
     ]
 
 
@@ -2340,6 +2341,7 @@ class CUDACodeCache:
                     cmd = cuda_compile_command(
                         [input_path], output_path, dst_file_ext, extra_args
                     )
+                    log.debug("CUDA Compilation: %s", cmd)
                     cmd = cmd.split(" ")
                     try:
                         subprocess.check_output(
@@ -2347,6 +2349,11 @@ class CUDACodeCache:
                         )
                     except subprocess.CalledProcessError as error:
                         raise exc.CUDACompileError(cmd, error.output) from error
+                else:
+                    log.debug(
+                        "CUDA Compilation skipped: %s since output already exists",
+                        input_path,
+                    )
                 cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path)
 
         return (cls.cache[key].output_path, key, input_path)

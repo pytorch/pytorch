@@ -143,7 +143,7 @@ def _gen_ops_cached(arch, version) -> List[Any]:
     assert try_import_cutlass()
     import cutlass_library.manifest as cutlass_manifest  # type: ignore[import]
 
-    import torch._inductor.codegen.cuda.cutlass_lib_extensions.generator_extended_v322 as cutlass_generator  # type: ignore[import]
+    import torch._inductor.codegen.cuda.cutlass_lib_extensions.generator_extended as cutlass_generator  # type: ignore[import]
 
     if arch is None or version is None:
         log.error(
@@ -159,8 +159,8 @@ def _gen_ops_cached(arch, version) -> List[Any]:
     manifest = cutlass_manifest.Manifest(args)
 
     if arch == "90":
-        cutlass_generator.GenerateSM90(manifest, args.cuda_version)
-        cutlass_generator.GenerateSM80(manifest, args.cuda_version)
+        cutlass_generator.GenerateSM90(manifest, args.cuda_version)  # type: ignore[attr-defined]
+        cutlass_generator.GenerateSM80(manifest, args.cuda_version)  # type: ignore[attr-defined]
     else:
         try:
             func = getattr(cutlass_generator, "GenerateSM" + arch)

@@ -3389,7 +3389,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         # Global memory (in bytes) needed for this template.
         self.workspace_size = workspace_size
         self.template = template
-        self._tuned_for_epilogue: Optional[List[Any]] = None
+        self._tuned_for_epilogue: List[Any] = []
 
     def get_workspace_size(self):
         if callable(self.workspace_size):
@@ -3455,7 +3455,7 @@ class CUDATemplateBuffer(TemplateBuffer):
                 ):
                     return
             choices = self.template.generate_retune_choices(self, epilogue_nodes)
-            if choices and len(choices) > 1:
+            if choices and len(choices) > 0:
                 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
                 from torch._inductor.select_algorithm import autotune_select_algorithm
 
