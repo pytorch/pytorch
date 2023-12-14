@@ -1180,7 +1180,7 @@ def _aot_export_function(
             dynamic_shapes = x.fake_mode.shape_env is not None
             break
 
-    flat_fn, out_spec = create_tree_flattened_fn(func, args, export=True)
+    flat_fn, out_spec = create_tree_flattened_fn(func, args)
     flat_args, in_spec = pytree.tree_flatten(args)
 
     # The export use case doesn't care about several bits of AOTConfig

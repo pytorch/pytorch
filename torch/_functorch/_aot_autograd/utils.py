@@ -146,22 +146,12 @@ class PytreeThunk:
 # Creates a function that returns flattened inputs and outputs
 # Also returns the output tree spec, which is needed to recover the "unflattened"
 # output tree structure later.
-def create_tree_flattened_fn(
-    fn, args, kwargs=None, export=False
-) -> Tuple[Callable, PytreeThunk]:
+def create_tree_flattened_fn(fn, args, kwargs=None) -> Tuple[Callable, PytreeThunk]:
     if kwargs is None:
         kwargs = {}
     # Save the args_spec for flat_tensor_args to unflatten while tracing
     _, tensor_args_spec = pytree.tree_flatten((args, kwargs))
     out_spec = PytreeThunk()
-
-    def conditional_decorator(dec, condition):
-        def decorator(func):
-            if not condition:
-                return func
-            return dec(func)
-
-        return decorator
 
     def flat_fn(*flat_args):
         # The input are flattened tensor args. Prepare the args in the
