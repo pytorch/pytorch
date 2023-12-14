@@ -60,6 +60,10 @@ class ColwiseParallel(ParallelStyle):
         >>>     parallelize_plan={"w1": ColwiseParallel()},
         >>> )
         >>> ...
+
+    ... note:: By default ColwiseParallel output is sharded on the last dimension if the `output_layouts` not
+        specified, if there're operators that require specific tensor shape (i.e. before the paired RowwiseParallel),
+        keep in mind that if the output is sharded the operator might need to be adjusted to the sharded size.
     """
 
     def __init__(
@@ -68,7 +72,7 @@ class ColwiseParallel(ParallelStyle):
         input_layouts: Optional[Placement] = None,
         output_layouts: Optional[Placement] = None,
         use_local_output: bool = True
-    ) -> None:
+    ):
         super().__init__()
         self.input_layouts = (input_layouts or Replicate(), )
         self.output_layouts = (output_layouts or Shard(-1), )
@@ -171,7 +175,7 @@ class RowwiseParallel(ParallelStyle):
         input_layouts: Optional[Placement] = None,
         output_layouts: Optional[Placement] = None,
         use_local_output: bool = True
-    ) -> None:
+    ):
         super().__init__()
         self.input_layouts = (input_layouts or Shard(-1), )
         self.output_layouts = (output_layouts or Replicate(), )
@@ -225,7 +229,7 @@ class RowwiseParallel(ParallelStyle):
 class PrepareModuleInput(ParallelStyle):
     """
     Configure the nn.Module's inputs to convert the input tensors of the nn.Module to DTensors at runtime according to
-    input_layouts, and perform layout redistribution according to the desired_input_layouts.
+    `input_layouts`, and perform layout redistribution according to the `desired_input_layouts`.
 
     Keyword Args:
         input_layouts (Union[Placement, Tuple[Placement]]):
@@ -298,7 +302,7 @@ class PrepareModuleInput(ParallelStyle):
 class PrepareModuleOutput(ParallelStyle):
     """
     Configure the nn.Module's outputs to convert the output tensors of the nn.Module to DTensors at runtime according to
-    output_layouts, and perform layout redistribution according to the desired_output_layouts.
+    `output_layouts`, and perform layout redistribution according to the `desired_output_layouts`.
 
     Keyword Args:
         output_layouts (Union[Placement, Tuple[Placement]]):
