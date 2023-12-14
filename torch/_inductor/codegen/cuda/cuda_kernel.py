@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
@@ -335,7 +335,7 @@ class CUDATemplateCaller(ChoiceCaller):
     def info_dict(self) -> Dict[str, PrimitiveInfoType]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         if self.info_kwargs is not None and "op" in self.info_kwargs:
-            op = self.info_kwargs["op"]
+            op: Any = self.info_kwargs["op"]
             return {
                 "backend": "CUDA",
                 "op_type": type(op).__name__,

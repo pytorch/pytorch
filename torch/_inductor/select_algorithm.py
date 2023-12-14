@@ -971,7 +971,7 @@ class AlgorithmSelectorCache(PersistentCache):
     def log_results(
         name: str,
         input_nodes: List[ir.IRNode],
-        timings: dict[ChoiceCaller, float],
+        timings: Dict[ChoiceCaller, float],
         elapse: float,
     ):
         V.debug.log_autotuning_results(name, input_nodes, timings, elapse)
