@@ -148,7 +148,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
+from .torch import torch_special_class_types, TorchVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
@@ -352,14 +352,6 @@ class VariableBuilder:
                 dataclasses.fields,
                 lambda self, value: LambdaVariable(
                     _dataclasses_fields_lambda,
-                    source=self.source,
-                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
-                ),
-            ),
-            (
-                tensor_dunder_fns,
-                lambda self, value: TorchVariable(
-                    value,
                     source=self.source,
                     **self.install_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
@@ -718,6 +710,12 @@ class VariableBuilder:
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
+        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return PythonModuleVariable(
+                value,
+                source=self.source,
+            )
         elif is_allowed(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchVariable(
@@ -766,12 +764,6 @@ class VariableBuilder:
             return UserMethodVariable(
                 value.__func__,
                 self_obj,
-                source=self.source,
-            )
-        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return PythonModuleVariable(
-                value,
                 source=self.source,
             )
         elif isinstance(value, types.GetSetDescriptorType):
