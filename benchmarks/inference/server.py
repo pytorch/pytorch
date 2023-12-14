@@ -20,12 +20,19 @@ class FrontendWorker(mp.Process):
     """
 
     def __init__(
-        self, metrics_dict, request_queue, response_queue, batch_size, num_iters=10
+        self,
+        metrics_dict,
+        request_queue,
+        response_queue,
+        data_generation_event,
+        batch_size,
+        num_iters=10
     ):
         super().__init__()
         self.metrics_dict = metrics_dict
         self.request_queue = request_queue
         self.response_queue = response_queue
+        self.data_generation_event = data_generation_event
         self.warmup_event = mp.Event()
         self.batch_size = batch_size
         self.num_iters = num_iters
@@ -86,7 +93,6 @@ class FrontendWorker(mp.Process):
             gpu_utilization = get_gpu_utilization()
             if gpu_utilization != "N/A":
                 gpu_utilizations.append(float(gpu_utilization))
-            time.sleep(0.1)
 
         self.metrics_dict["gpu_util"] = np.array(gpu_utilizations).mean()
 
@@ -95,19 +101,22 @@ class FrontendWorker(mp.Process):
         This function will send one warmup request, and then num_iters requests
         to the backend process.
         """
-        # Send one batch of warmup data
+
         fake_data = torch.randn(
             self.batch_size, 3, 250, 250, requires_grad=False, pin_memory=True
         )
+        other_data = [torch.randn(
+                        self.batch_size, 3, 250, 250, requires_grad=False, pin_memory=True
+                      ) for i in range(self.num_iters)]
+
+        # Send one batch of warmup data
         self.request_queue.put((fake_data, time.time()))
+        self.data_generation_event.set()
         self.warmup_event.wait()
 
         # Send fake data
         for i in range(self.num_iters):
-            fake_data = torch.randn(
-                self.batch_size, 3, 250, 250, requires_grad=False, pin_memory=True
-            )
-            self.request_queue.put((fake_data, time.time()))
+            self.request_queue.put((other_data[i], time.time()))
 
     def run(self):
         import threading
@@ -136,6 +145,7 @@ class BackendWorker:
         metrics_dict,
         request_queue,
         response_queue,
+        data_generation_event,
         model_dir=".",
         compile_model=True,
     ):
@@ -144,6 +154,7 @@ class BackendWorker:
         self.metrics_dict = metrics_dict
         self.request_queue = request_queue
         self.response_queue = response_queue
+        self.data_generation_event = data_generation_event
         self.model_dir = model_dir
         self.compile_model = compile_model
         self._setup_complete = False
@@ -184,7 +195,7 @@ class BackendWorker:
 
     async def run(self):
         pool = ThreadPoolExecutor(max_workers=1)
-
+        self.data_generation_event.wait()
         while True:
             try:
                 data, request_time = self.request_queue.get(timeout=10)
@@ -227,6 +238,7 @@ if __name__ == "__main__":
         mp.set_start_method("forkserver")
         request_queue = mp.Queue()
         response_queue = mp.Queue()
+        data_generation_event = mp.Event()
 
         manager = mp.Manager()
         metrics_dict = manager.dict()
@@ -237,11 +249,16 @@ if __name__ == "__main__":
             metrics_dict,
             request_queue,
             response_queue,
+            data_generation_event,
             args.batch_size,
             num_iters=args.num_iters,
         )
         backend = BackendWorker(
-            metrics_dict, request_queue, response_queue, args.model_dir, args.compile
+            metrics_dict,
+            request_queue,
+            response_queue,
+            data_generation_event,
+            args.model_dir, args.compile
         )
 
         frontend.start()
