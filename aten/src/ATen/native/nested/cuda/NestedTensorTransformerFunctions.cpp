@@ -293,6 +293,7 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
   Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
       cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
   int64_t max_seqlen_batch_q{0};
+  int64_t max_seqlen_batch_k{0};
   std::tie(
       query_buffer_reshaped,
       key_buffer_reshaped,
@@ -300,7 +301,7 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
       cumulative_sequence_length_q,
       cumulative_sequence_length_kv,
       max_seqlen_batch_q,
-      std::ignore,
+      max_seqlen_batch_k,
       output_shape) = preprocessing::sdpa_nested_preprocessing(query, key, value);
 
   sdp::CustomMaskType custom_mask_type = is_causal
@@ -317,6 +318,7 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
       cumulative_sequence_length_q,
       cumulative_sequence_length_kv,
       max_seqlen_batch_q,
+      max_seqlen_batch_k,
       dropout_p,
       static_cast<int64_t>(custom_mask_type),
       compute_log_sumexp,

@@ -159,6 +159,7 @@ class PT2EQATTestCase(QuantizationTestCase):
         self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
 
         if verify_convert:
+            # We don't want to impose any ordering requirements between move_exported_model_to_eval and convert_pt2e
             torch.ao.quantization.move_exported_model_to_eval(model_pt2e)
             model_pt2e = convert_pt2e(model_pt2e)
             quant_result_pt2e = model_pt2e(*example_inputs)
@@ -340,17 +341,24 @@ class PT2EQATTestCase(QuantizationTestCase):
         bn_running_var_add_node = sqrt_node.args[0]
         (bn_running_var_node, eps) = bn_running_var_add_node.args
         self.assertEqual(scale_factor_node.target, torch.ops.aten.div.Tensor)
-        self.assertTrue("param_constant" in bn_weight_node.target)
+        self.assertTrue("bn_weight" in bn_weight_node.target)
         self.assertEqual(sqrt_node.target, torch.ops.aten.sqrt.default)
         self.assertEqual(bn_running_var_add_node.target, torch.ops.aten.add.Tensor)
-        self.assertTrue("tensor_constant" in bn_running_var_node.target)
+        self.assertTrue("bn_running_var" in bn_running_var_node.target)
         self.assertEqual(eps, 1e-5)
 
 
-class BaseTestQuantizePT2EQAT_ConvBn(PT2EQATTestCase):
+class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
     """
     Base TestCase to be used for all conv-bn[-relu] fusion patterns.
     """
+
+    def setUp(self):
+        # NB: Skip the test if this is a base class, this is to handle the test
+        # discovery logic in buck which finds and runs all tests here including
+        # the base class which we don't want to run
+        if self.id() and "_Base" in self.id():
+            self.skipTest("Skipping test running from base class")
 
     def test_qat_conv_no_bias(self):
         m1 = self._get_conv_bn_model(has_conv_bias=False, has_bn=False, has_relu=True)
@@ -759,7 +767,7 @@ class BaseTestQuantizePT2EQAT_ConvBn(PT2EQATTestCase):
 
 # TODO: enable this in the next PR
 @skipIfNoQNNPACK
-class TestQuantizePT2EQAT_ConvBn1d(BaseTestQuantizePT2EQAT_ConvBn):
+class TestQuantizePT2EQAT_ConvBn1d(TestQuantizePT2EQAT_ConvBn_Base):
     dim = 1
     example_inputs = (torch.randn(1, 3, 5),)
     conv_class = torch.nn.Conv1d
@@ -767,7 +775,7 @@ class TestQuantizePT2EQAT_ConvBn1d(BaseTestQuantizePT2EQAT_ConvBn):
 
 
 @skipIfNoQNNPACK
-class TestQuantizePT2EQAT_ConvBn2d(BaseTestQuantizePT2EQAT_ConvBn):
+class TestQuantizePT2EQAT_ConvBn2d(TestQuantizePT2EQAT_ConvBn_Base):
     dim = 2
     example_inputs = (torch.randn(1, 3, 5, 5),)
     conv_class = torch.nn.Conv2d

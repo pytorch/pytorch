@@ -188,10 +188,8 @@ class ProcessGroupNCCLNoHeartbeatCaught
   }
 
   void forceTryWriteDebugInfo() {
-    auto thread = tryWriteDebugInfo();
-    if (thread) {
-      thread->join();
-    }
+    std::future<bool> asyncDebugDump = launchAsyncDebugDump();
+    asyncDebugDump.wait();
   }
 
  protected:
