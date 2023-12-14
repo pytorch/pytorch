@@ -196,6 +196,7 @@ class CacheBase:
     def update_local_cache(self, local_cache: Dict[str, Any]) -> None:
         if not os.path.exists(self.local_cache_path.parent):
             os.makedirs(self.local_cache_path.parent, exist_ok=True)
+
         write_atomic(
             str(self.local_cache_path),
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
@@ -287,8 +288,18 @@ class PersistentCache(CacheBase):
                 and check_cache(self.get_global_cache(), callback=log_stats)
             ):
                 try:
-                    # re-benchmark everything to try to get consistent numbers from the same machine
-                    timings = benchmark(choices)
+                    uncached_choices = []
+                    timings = dict()
+                    # We re-use results from local cache, but not from global cache, to ensure
+                    # that results are comparable
+                    for choice in choices:
+                        choice_hash = choice.hash_key()
+                        if choice_hash in local_cache.get(op, {}).get(inputs, {}):
+                            # cache hit
+                            timings[choice] = local_cache[op][inputs][choice_hash]
+                        else:
+                            uncached_choices.append(choice)
+                    timings.update(benchmark(uncached_choices))
                     assert all(choice in timings for choice in choices)
                     local_cache.setdefault(op, {})
                     local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
@@ -787,7 +798,7 @@ class FxGraphCache:
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
         """
-        from filelock import FileLock
+        from filelock import FileLock  # type: ignore[import-not-found]
 
         key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
 
@@ -2082,6 +2093,7 @@ def _nvcc_compiler_options() -> List[str]:
         config.cuda.compile_opt_level,
         "-std=c++17",
         "--expt-relaxed-constexpr",
+        "-DNDEBUG",
     ]
     if config.cuda.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
