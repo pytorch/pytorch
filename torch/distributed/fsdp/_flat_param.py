@@ -2263,9 +2263,10 @@ class FlatParamHandle:
                     # referenced by `flat_param.grad`, while `flat_param_grad`
                     # is `flat_param._cpu_grad`, which is on CPU
                     continue
+
                 needs_grad_writeback = (
                     flat_param_grad is None
-                    or not torch._same_storage(param.grad, flat_param_tensor)
+                    or not torch._same_storage(param.grad, flat_param_grad)
                 )
                 if needs_grad_writeback:
                     if flat_param_grad is None:
@@ -2281,6 +2282,7 @@ class FlatParamHandle:
                     )
                     flat_param.grad = flat_param_grad
                     flat_param_grad = flat_param.grad
+
         # TODO: If we want to handle shared parameters, we need to re-generate
         # the shared parameter data structures in case sharedness changed.
         for i, (
