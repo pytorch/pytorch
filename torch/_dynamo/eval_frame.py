@@ -670,7 +670,7 @@ def optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
-    serialize=False,
+    _serialize=False,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -719,10 +719,10 @@ def optimize(
             backend,
             dynamic=dynamic,
             hooks=hooks,
-            serialize=serialize
+            serialize=_serialize
         )
 
-    callback = convert_frame.convert_frame(backend, hooks=hooks, serialize=serialize)
+    callback = convert_frame.convert_frame(backend, hooks=hooks, serialize=_serialize)
     return _optimize_catch_errors(
         callback,
         hooks,
@@ -731,7 +731,7 @@ def optimize(
         compiler_config=backend.get_compiler_config()
         if hasattr(backend, "get_compiler_config")
         else None,
-        serialize=serialize,
+        serialize=_serialize,
     )
 
 
