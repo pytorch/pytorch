@@ -313,6 +313,7 @@ class _TorchDynamoContext:
         export=False,
         dynamic=None,
         compiler_config=None,
+        serialize=False,
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -324,6 +325,7 @@ class _TorchDynamoContext:
         self.export = export
         self.dynamic = dynamic
         self.compiler_config = compiler_config
+        self.serialize = serialize
         patch_fn()
 
     def __enter__(self):
@@ -378,7 +380,8 @@ class _TorchDynamoContext:
             # provide public api OptimizedModule.get_compiler_config()
             assert not hasattr(new_mod, "get_compiler_config")
             # TODO(voz): Enable w/ serialize
-            # new_mod.get_compiler_config = get_compiler_config
+            if not self.serialize:
+                new_mod.get_compiler_config = get_compiler_config
 
             return new_mod
         assert callable(fn)
@@ -507,6 +510,7 @@ class OptimizeContext(_TorchDynamoContext):
         export=False,
         dynamic=None,
         compiler_config=None,
+        serialize=False,
     ):
         def on_enter():
             install_generation_tagging_init()
@@ -520,6 +524,7 @@ class OptimizeContext(_TorchDynamoContext):
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
+            serialize=serialize,
         )
 
 
@@ -609,6 +614,7 @@ def _optimize_catch_errors(
     export=False,
     dynamic=None,
     compiler_config=None,
+    serialize=False,
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
@@ -617,6 +623,7 @@ def _optimize_catch_errors(
         export=export,
         dynamic=dynamic,
         compiler_config=compiler_config,
+        serialize=serialize
     )
 
 

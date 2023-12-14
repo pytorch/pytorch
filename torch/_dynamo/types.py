@@ -64,6 +64,9 @@ class GuardedCode:
 
         # annoying
         unique_id = torch._dynamo.bytecode_transformation._unique_id_counter
+        if hasattr(self.compiled_fn, "get_compiler_config"):
+            del self.compiled_fn.get_compiler_config
+
         guarded_code_struct = (
             code_attrs, # code_attrs
             self.name, # name

@@ -86,6 +86,7 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
+recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
 
 
