@@ -13,6 +13,7 @@
 #include <c10/util/Optional.h>
 
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -30,7 +31,9 @@ struct PyNode : public Node {
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
   variable_list apply(variable_list&& inputs) override;
-  variable_list compiled_apply(variable_list&& inputs, SwapSavedVariables& saved);
+  variable_list compiled_apply(
+      variable_list&& inputs,
+      SwapSavedVariables& saved);
 
   void release_variables() override;
   std::string name() const override;
@@ -43,6 +46,10 @@ struct PyNode : public Node {
 
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
+
+  // The AutogradCompilerCall::backwards idx corresponding to this node's
+  // backward method
+  std::optional<int> _backward_idx;
 
   ~PyNode() override {
     // Can't use THPObjectPtr as a field in this class; destructor won't take

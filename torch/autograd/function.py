@@ -1,9 +1,9 @@
 import functools
 import inspect
+import itertools
 import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional, Tuple
-import itertools
 
 import torch
 import torch._C as _C
@@ -26,6 +26,7 @@ __all__ = [
 # Unique id provider for each class inheriting from Function
 # This is incremented in FunctionMeta during class definition
 AUTOGRAD_FUNCTION_COUNTER = itertools.count()
+
 
 # Formerly known as: _ContextMethodMixin
 class FunctionCtx:
@@ -569,7 +570,7 @@ class Function(_SingleLevelFunction):
 
     @staticmethod
     def _compiled_autograd_key(ctx):
-        return (ctx._autograd_function_id, )
+        return (ctx._autograd_function_id,)
 
 
 def once_differentiable(fn):

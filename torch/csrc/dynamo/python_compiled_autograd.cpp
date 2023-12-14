@@ -304,7 +304,8 @@ variable_list compiled_autograd(
     GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
-  std::cout << "compiled_autograd on graph_root=" << graph_root->name() << std::endl;
+  std::cout << "compiled_autograd on graph_root=" << graph_root->name()
+            << std::endl;
   TORCH_CHECK(
       output_edges.empty() || !accumulate_grad,
       "specifying inputs= with .backward() not yet implemented for compiled autograd")
@@ -390,10 +391,11 @@ variable_list compiled_autograd(
       // if (C10_UNLIKELY(step_callbacks.has_value())) { ... }
 
       // autograd engine sets the inputs in each node
-      std::cout << "Visiting " <<  call.node->name() << std::endl;
+      std::cout << "Visiting " << call.node->name() << std::endl;
       auto& input_buffer = input_buffers.lookup(call.node.get());
       variable_list inputs = input_buffer.buffer;
-      // should the inputs for all nodes sum up to the inputs at call_begin_capture?
+      // should the inputs for all nodes sum up to the inputs at
+      // call_begin_capture?
       std::cout << "line393 inputs.size=" << inputs.size() << std::endl;
 
       if (!call.tensor_pre_hooks.empty()) {
@@ -430,7 +432,8 @@ variable_list compiled_autograd(
       }
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
-      std::cout << "apply_with_saved: " << call.node->name() << ", with inputs.size()=" << inputs.size() << std::endl;
+      std::cout << "apply_with_saved: " << call.node->name()
+                << ", with inputs.size()=" << inputs.size() << std::endl;
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
 
       saved.debug_asserts();
@@ -487,8 +490,15 @@ variable_list compiled_autograd(
   THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
   THPObjectPtr hooks(wrap_pyobject_list(compiler_call.hooks));
   THPObjectPtr backwards(wrap_pyobject_list(compiler_call.backwards));
+  THPObjectPtr saved_tensors(wrap_pyobject_list(compiler_call.saved_tensors));
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
-      cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), backwards.get(), NULL)));
+      cache->compiled_fn.get(),
+      inputs.get(),
+      sizes.get(),
+      hooks.get(),
+      backwards.get(),
+      saved_tensors.get(),
+      NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
   return outputs;

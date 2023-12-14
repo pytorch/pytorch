@@ -1,9 +1,9 @@
 import contextlib
 import functools
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
 
 import torch
-from torch._dynamo.external_utils import call_hook, call_backward
+from torch._dynamo.external_utils import call_backward, call_hook
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code
 from torch._logging import getArtifactLogger
@@ -62,7 +62,12 @@ class AutogradCompilerInstance:
         args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
         sizes_proxy = self.fx_tracer.create_proxy("placeholder", "sizes", (), {})
         self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
-        self.backward_proxy = self.fx_tracer.create_proxy("placeholder", "backward", (), {})
+        self.backward_proxy = self.fx_tracer.create_proxy(
+            "placeholder", "backward", (), {}
+        )
+        self.saved_tensors_proxy = self.fx_tracer.create_proxy(
+            "placeholder", "saved_tensors", (), {}
+        )
 
         # tensor inputs to fake tensors
         inputs = [
@@ -92,10 +97,13 @@ class AutogradCompilerInstance:
         self.stack.enter_context(disable_proxy_modes_tracing(enable_current=True))
         return inputs, sizes
 
-    def proxy_call_backward(self, inputs, fwdInputInfos: Tuple[Tuple[int]], backward_id: int):
+    def proxy_call_backward(
+        self, inputs, fwdInputInfos: Tuple[Tuple[Tuple[int], bool]], backward_id: int
+    ):
         assert self.backward_proxy is not None
+        assert self.saved_tensors_proxy is not None
         backward_fn = self.backward_proxy[backward_id]
-        saved_variables = self.backward_proxy[backward_id+1]
+        saved_variables = self.saved_tensors_proxy[backward_id]
         proxies = self.fx_tracer.create_proxy(
             kind="call_function",
             target=call_backward,
@@ -112,7 +120,7 @@ class AutogradCompilerInstance:
             # create proxies from sizes and requires_grad in fwdInputInfos
             for fwdInputInfo in fwdInputInfos:
                 shape, requires_grad = fwdInputInfo
-                grad_ins.append(torch.Tensor(*shape)) # creates FakeTensors
+                grad_ins.append(torch.Tensor(*shape))  # creates FakeTensors
 
             assert len(grad_ins) == len(fwdInputInfos)
             self.bind_tensors_to_proxies(grad_ins, proxies)

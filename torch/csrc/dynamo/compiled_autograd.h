@@ -4,9 +4,9 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
+#include <iostream>
 #include <typeindex>
 #include <vector>
-#include <iostream>
 
 // see [Note: Compiled Autograd]
 
@@ -176,6 +176,11 @@ struct AutogradCompilerCall {
     return backwards.size() - 1;
   }
 
+  int emplace_saved_tensors(c10::SafePyObject&& obj) {
+    saved_tensors.emplace_back(std::move(obj));
+    return saved_tensors.size() - 1;
+  }
+
   TensorArgs tensor_args;
   std::vector<SizeInput> all_size_inputs;
   std::vector<int64_t> dyn_size_inputs;
@@ -183,6 +188,7 @@ struct AutogradCompilerCall {
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
   std::vector<c10::SafePyObject> backwards;
+  std::vector<c10::SafePyObject> saved_tensors;
 };
 
 class CompiledNodeArgs {
@@ -378,8 +384,12 @@ class CompiledNodeArgs {
         typeid(*node), _specialization_key, _specialization_key_size);
   }
 
-  void add_backward(c10::SafePyObject&& obj) {
-    _compiler.emplace_backward(std::move(obj));
+  int add_backward(c10::SafePyObject&& obj) {
+    return _compiler.emplace_backward(std::move(obj));
+  }
+
+  int add_saved_tensors(c10::SafePyObject&& obj) {
+    return _compiler.emplace_saved_tensors(std::move(obj));
   }
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {

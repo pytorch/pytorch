@@ -5,9 +5,9 @@
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <structmember.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/PyInterpreter.h>
 
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/functorch/DynamicLayer.h>
@@ -32,6 +32,7 @@
 
 #include <exception>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -40,7 +41,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include <iostream>
 
 using namespace torch;
 using namespace torch::autograd;
@@ -174,7 +174,9 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   }
 
   // Now the number of gradients should match
-  std::cout << "eager apply: num_inputs_bwd=" << num_inputs << ", num_outputs_bwd=" << num_outputs << ", num_forward_inputs=" << num_forward_inputs << std::endl;
+  std::cout << "eager apply: num_inputs_bwd=" << num_inputs
+            << ", num_outputs_bwd=" << num_outputs
+            << ", num_forward_inputs=" << num_forward_inputs << std::endl;
   if (num_outputs != num_forward_inputs) {
     std::string msg("function ");
     msg += name() + " returned an incorrect number of gradients (expected ";
@@ -215,10 +217,11 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   return results;
 }
 
-// Almost identical to apply, instead of calling directly into BackwardCFunction.apply
-// it calls into compiled autograd
+// Almost identical to apply, instead of calling directly into
+// BackwardCFunction.apply it calls into compiled autograd
 // TODO: merge this with apply's codegen
-auto PyNode::compiled_apply(variable_list&& inputs, SwapSavedVariables& saved) -> variable_list {
+auto PyNode::compiled_apply(variable_list&& inputs, SwapSavedVariables& saved)
+    -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
@@ -256,47 +259,57 @@ auto PyNode::compiled_apply(variable_list&& inputs, SwapSavedVariables& saved) -
 
   auto& is_variable_input = py_fn->is_variable_input;
   auto num_forward_inputs = static_cast<Py_ssize_t>(is_variable_input.size());
-  THPObjectPtr gradsInfo(PyTuple_New(static_cast<Py_ssize_t>(num_forward_inputs)));
+  THPObjectPtr gradsInfo(
+      PyTuple_New(static_cast<Py_ssize_t>(num_forward_inputs)));
   for (auto i : c10::irange(num_forward_inputs)) {
-    PyTuple_SET_ITEM(gradsInfo.get(), i, PyBool_FromLong(static_cast<long>(is_variable_input[i])));
+    PyTuple_SET_ITEM(
+        gradsInfo.get(),
+        i,
+        PyBool_FromLong(static_cast<long>(is_variable_input[i])));
   }
-  int idx = 0; // do we need support for multiple custom autograd functions in the same graph?
 
-  // The gradients returned in the backwards should match the number of inputs to the forward, and their shapes
-  // Create fwdInputInfos to represent shape sizes and requires_grad for each input to the forward
-  // shape: PyTuple[PyLong]
-  // requires_grad: PyBool
-  // fwdInputInfo: PyTuple[sizes, requires_grad]
-  // fwdInputInfos: PyTuple[fwdInputInfo]
-  THPObjectPtr fwdInputInfos(PyTuple_New(static_cast<Py_ssize_t>(py_fn->input_info.size())));
+  // The gradients returned in the backwards should match the number of inputs
+  // to the forward, and their shapes Create fwdInputInfos to represent shape
+  // sizes and requires_grad for each input to the forward shape:
+  // PyTuple[PyLong] requires_grad: PyBool fwdInputInfo: PyTuple[sizes,
+  // requires_grad] fwdInputInfos: PyTuple[fwdInputInfo]
+  THPObjectPtr fwdInputInfos(
+      PyTuple_New(static_cast<Py_ssize_t>(py_fn->input_info.size())));
   for (const auto i : c10::irange(py_fn->input_info.size())) {
     PyObject* fwdInputInfo(PyTuple_New(static_cast<Py_ssize_t>(2)));
     const auto& input_info = py_fn->input_info[i];
 
     // shape
     std::vector<c10::SymInt> input_info_sizes = input_info.size;
-    PyObject* shape(PyTuple_New(static_cast<Py_ssize_t>(input_info_sizes.size())));
+    PyObject* shape(
+        PyTuple_New(static_cast<Py_ssize_t>(input_info_sizes.size())));
     for (const auto j : c10::irange(input_info_sizes.size())) {
-      int64_t size = input_info_sizes[j].expect_int(); // TODO: When would this fail?
-      PyTuple_SET_ITEM(shape, static_cast<Py_ssize_t>(j), PyLong_FromLong(size));
+      int64_t size =
+          input_info_sizes[j].expect_int(); // TODO: When would this fail?
+      PyTuple_SET_ITEM(
+          shape, static_cast<Py_ssize_t>(j), PyLong_FromLong(size));
     }
     PyTuple_SET_ITEM(fwdInputInfo, static_cast<Py_ssize_t>(0), shape);
 
     // requires_grad
-    PyObject* requires_grad = PyBool_FromLong(static_cast<long>(input_info.requires_grad));
+    PyObject* requires_grad =
+        PyBool_FromLong(static_cast<long>(input_info.requires_grad));
     PyTuple_SET_ITEM(fwdInputInfo, static_cast<Py_ssize_t>(1), requires_grad);
 
-
-    PyTuple_SET_ITEM(fwdInputInfos.get(), static_cast<Py_ssize_t>(i), fwdInputInfo);
+    PyTuple_SET_ITEM(
+        fwdInputInfos.get(), static_cast<Py_ssize_t>(i), fwdInputInfo);
   }
 
+  TORCH_INTERNAL_ASSERT(
+      _backward_idx.has_value(),
+      "_backward_idx should already be set by compiled_args, called before apply_with_saved");
   THPObjectPtr r(PyObject_CallMethod(
-    saved.get_py_compiler(),
-    "proxy_call_backward",
-    "OOi",
-    pyInputs.get(),
-    fwdInputInfos.get(),
-    idx));
+      saved.get_py_compiler(),
+      "proxy_call_backward",
+      "OOi",
+      pyInputs.get(),
+      fwdInputInfos.get(),
+      *_backward_idx));
 
   if (!r)
     throw_python_error();
@@ -317,7 +330,9 @@ auto PyNode::compiled_apply(variable_list&& inputs, SwapSavedVariables& saved) -
     }
   }
 
-  std::cout << "compiled apply: num_bwd_inputs=" << num_inputs << ", num_bwd_outputs=" << num_outputs << ", num_fwd_inputs=" << num_forward_inputs << std::endl;
+  std::cout << "compiled apply: num_bwd_inputs=" << num_inputs
+            << ", num_bwd_outputs=" << num_outputs
+            << ", num_fwd_inputs=" << num_forward_inputs << std::endl;
   // Now the number of gradients should match
   if (num_outputs != num_forward_inputs) {
     std::string msg("function ");
@@ -439,14 +454,17 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   static PyObject* forward_cls_name =
       PyUnicode_InternFromString("_forward_cls");
   PyObject* forward_cls(PyObject_GetAttr(obj, forward_cls_name));
-  static PyObject* backward_name =
-      PyUnicode_InternFromString("backward");
+  static PyObject* backward_name = PyUnicode_InternFromString("backward");
   PyObject* backward(PyObject_GetAttr(forward_cls, backward_name));
-  PyObject* saved_variables(unpack_saved_variables(
-        f, [](const Variable& var) { return THPVariable_Wrap(var); }));
+  int backward_idx =
+      args.add_backward(c10::SafePyObject(backward, getPyInterpreter()));
 
-  args.add_backward(c10::SafePyObject(backward, getPyInterpreter()));
-  args.add_backward(c10::SafePyObject(saved_variables, getPyInterpreter()));
+  PyObject* saved_tensors(unpack_saved_variables(
+      f, [](const Variable& var) { return THPVariable_Wrap(var); }));
+  int saved_tensors_idx = args.add_saved_tensors(
+      c10::SafePyObject(saved_tensors, getPyInterpreter()));
+  TORCH_INTERNAL_ASSERT(backward_idx == saved_tensors_idx);
+  _backward_idx = backward_idx;
 }
 
 variable_list PyNode::apply_with_saved(

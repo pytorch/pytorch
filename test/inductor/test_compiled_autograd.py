@@ -21,11 +21,11 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 def compiler_fn(gm):
     """Same as torch.compile() but counts number of compiles"""
 
-    # def inner_compiler(gm_, example_inputs_):
-    #     counters["compiled_autograd"]["compiles"] += 1
-    #     return inductor.compile(gm_, example_inputs_)
+    def inner_compiler(gm_, example_inputs_):
+        counters["compiled_autograd"]["compiles"] += 1
+        return inductor.compile(gm_, example_inputs_)
 
-    return torch.compile(gm, backend="eager", fullgraph=True, dynamic=True)
+    return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
 
 
 # TODO(jansel): hooks as lambdas creates recompiles in dynamo, we should fix that
@@ -46,14 +46,14 @@ class TestCompiledAutograd(TestCase):
         with torch.autograd.set_multithreading_enabled(False):
             torch._dynamo.reset()
             counters["compiled_autograd"].clear()
-            # torch.manual_seed(123)
-            # expected = list(fn())
+            torch.manual_seed(123)
+            expected = list(fn())
             torch.manual_seed(123)
             with compiled_autograd.enable(compiler_fn):
                 actual = list(fn())
-            # self.assertEqual(expected, actual)
-            # self.assertEqual(counters["compiled_autograd"]["captures"], count)
-            # self.assertEqual(counters["compiled_autograd"]["compiles"], count)
+            self.assertEqual(expected, actual)
+            self.assertEqual(counters["compiled_autograd"]["captures"], count)
+            self.assertEqual(counters["compiled_autograd"]["compiles"], count)
 
     def test_basic(self):
         def fn():
@@ -205,24 +205,22 @@ class TestCompiledAutograd(TestCase):
     def test_dynamic_shapes(self):
         def fn():
             model = torch.nn.Sequential(
-                torch.nn.Linear(4, 4, bias=False),
+                torch.nn.Linear(4, 4),
                 torch.nn.ReLU(),
-                torch.nn.Linear(4, 4, bias=False),
+                torch.nn.Linear(4, 4),
                 torch.nn.ReLU(),
             )
-            # opt_model = torch.compile(model, dynamic=True)
-            opt_model = torch._dynamo.optimize("eager", dynamic=True)(model)
+            opt_model = torch.compile(model, dynamic=True)
 
-            # for b in range(10, 100, 10):
-            b = 10
-            x = torch.randn([b, 4])
-            result = opt_model(x).sum()
-            result.backward()
-            yield model[0].weight.grad
-            # yield model[0].bias.grad
-            yield model[2].weight.grad
-            # yield model[2].bias.grad
-            # model.zero_grad()
+            for b in range(10, 100, 10):
+                x = torch.randn([b, 4])
+                result = opt_model(x).sum()
+                result.backward()
+                yield model[0].weight.grad
+                yield model[0].bias.grad
+                yield model[2].weight.grad
+                yield model[2].bias.grad
+                model.zero_grad()
 
         # TODO(jansel): we should be able to get this count to 1
         self.check_output_and_recompiles(fn, count=2)
@@ -518,7 +516,9 @@ class TestCompiledAutograd(TestCase):
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)  # should compile once for MyFn1 and once for MyFn2
+        self.check_output_and_recompiles(
+            fn, 2
+        )  # should compile once for MyFn1 and once for MyFn2
 
     def test_dynamically_defined_class(self):
         def fn():
@@ -542,6 +542,7 @@ class TestCompiledAutograd(TestCase):
                 yield x.grad
 
         self.check_output_and_recompiles(fn, 3)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
