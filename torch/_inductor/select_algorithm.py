@@ -800,16 +800,36 @@ class AlgorithmSelectorCache(PersistentCache):
                 return
             if config.autotune_precompilation_workers <= 0:
                 return
-            with ThreadPoolExecutor(
-                max_workers=min(
-                    config.autotune_precompilation_workers, torch.get_num_threads()
-                )
-            ) as executor:
-                executor.map(
+            num_workers = min(
+                config.autotune_precompilation_workers,
+                torch.get_num_threads(),
+                len(choices),
+            )
+            log.info(
+                "Multithreaded precompilation for %d choices using %d worker threads",
+                len(choices),
+                num_workers,
+            )
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = executor.map(
                     lambda c: c.precompile(),
                     [c for c in choices if hasattr(c, "precompile")],
                     timeout=precompilation_timeout_seconds,
                 )
+                try:
+                    iterator = iter(futures)
+                    while True:
+                        try:
+                            next(iterator)
+                        except CUDACompileError:
+                            log.error("CUDA Compilation error", exc_info=True)
+                except TimeoutError:
+                    log.warning(
+                        f"Precompilation timed out after {precompilation_timeout_seconds} seconds."
+                    )
+                except StopIteration:
+                    pass
+                executor.shutdown(wait=True)
 
         def autotune(choices):
             try:
