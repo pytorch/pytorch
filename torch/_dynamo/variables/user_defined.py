@@ -19,12 +19,13 @@ from .. import variables
 from ..allowed_functions import is_allowed
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ODictGetItemSource, RandomValueSource
+from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
     check_constant_args,
     get_custom_getattr,
+    has_torch_function,
     is_namedtuple_cls,
     is_utils_checkpoint,
     istype,
@@ -181,6 +182,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif variables.DataClassVariable.is_matching_cls(self.value):
             options = {"mutable_local": MutableLocal()}
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
+        elif (
+            variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
+            and self.source
+        ):
+            return variables.RestrictedListSubclassVariable(
+                variables.BuiltinVariable(list).call_function(tx, args, kwargs).items,
+                user_cls=self.value,
+                user_cls_source=self.source,
+                mutable_local=MutableLocal(),
+            )
 
         return super().call_function(tx, args, kwargs)
 
@@ -217,6 +228,32 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def python_type(self):
         return self.value_type
 
+    def torch_function_check(self):
+        assert has_torch_function(
+            self
+        ), f"calling torch function on object without __torch_function__ {self}"
+
+    def get_torch_fn(self, tx):
+        self.torch_function_check()
+        from .torch_function import build_torch_function_fn
+
+        return build_torch_function_fn(tx, self.value, self.source)
+
+    def call_torch_function(self, tx, fn, types, args, kwargs):
+        self.torch_function_check()
+
+        from .torch_function import _get_subclass_type_var, call_torch_function
+
+        return call_torch_function(
+            tx,
+            _get_subclass_type_var(tx, self),
+            self.get_torch_fn(tx),
+            fn,
+            types,
+            args,
+            kwargs,
+        )
+
     @staticmethod
     @functools.lru_cache(None)
     def _supported_random_functions():
@@ -227,6 +264,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             random.uniform,
         }
         return fns
+
+    def _maybe_get_baseclass_method(self, name):
+        if name not in getattr(self.value, "__dict__", {}):
+            try:
+                return inspect.getattr_static(type(self.value), name)
+            except AttributeError:
+                pass
+        return None
 
     def call_method(
         self,
@@ -242,11 +287,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             UserMethodVariable,
         )
 
-        if name not in getattr(self.value, "__dict__", {}):
-            try:
-                method = inspect.getattr_static(type(self.value), name)
-            except AttributeError:
-                method = None
+        method = self._maybe_get_baseclass_method(name)
+        if method is not None:
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
@@ -307,7 +349,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     tx, args, kwargs
                 )
 
+            if method is list.__len__ and self.source and not (args or kwargs):
+                install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+                return ConstantVariable(len(self.value))
+
         return super().call_method(tx, name, args, kwargs)
+
+    def unpack_var_sequence(self, tx):
+        if (
+            self.source
+            and self._maybe_get_baseclass_method("__iter__") is list.__iter__
+            and self._maybe_get_baseclass_method("__len__") is list.__len__
+            and self._maybe_get_baseclass_method("__getitem__") is list.__getitem__
+        ):
+            install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+            return [
+                variables.LazyVariableTracker.create(
+                    self.value[k],
+                    source=GetItemSource(self.source, k),
+                )
+                for k in range(len(self.value))
+            ]
+        return super().unpack_var_sequence(tx)
 
     def is_supported_random(self):
         try:
@@ -475,7 +538,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if dynamic_subobj.__self__ is not self.value:
                     unimplemented("__self__ mismatch for bound method")
                 func = subobj.__func__
-                source = AttrSource(source, "__func__") if source else None
             else:
                 assert isinstance(subobj, types.FunctionType)
                 func = subobj

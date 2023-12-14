@@ -4143,7 +4143,7 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
                 # Don't use node.name() here as it is not consistent on windows
                 node_name = node.__class__.__name__ if node else "None"
                 pr.append(f"Running {func} from within {node_name}")
-                return func(*args, **kwargs or {})
+                return func(*args, **(kwargs or {}))
 
         with MyMode():
             pr.append("FW")
@@ -4284,7 +4284,7 @@ Done""")
                 y = x * 2 + 4
 
         function_events = p.function_events
-        foo_event = [event for event in function_events if "foo" in event.name][0]
+        foo_event = next(event for event in function_events if "foo" in event.name)
         self.assertEqual(foo_event.count, 1)
 
     def test_record_function_legacy(self):
@@ -4299,7 +4299,7 @@ Done""")
                 torch.ops.profiler._record_function_exit(handle)
 
         function_events = p.function_events
-        foo_event = [event for event in function_events if "bar" in event.name][0]
+        foo_event = next(event for event in function_events if "bar" in event.name)
         self.assertEqual(foo_event.count, 1)
 
     def test_profiler_aggregation_fake(self):
@@ -8742,6 +8742,18 @@ get_out().sum().backward()
         self.assertEqual(y_expected, y1_expected)
         self.assertEqual(y, y2)
         self.assertEqual(y_expected, y2_expected)
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_gradcheck_default_device_placement_context(self):
+        # During gradcheck with fast_mode=True, we create a random vector on the CPU device using a CPU generator.
+        # This test ensures that this still works when the default device is set to something else by the user.
+        with torch.device('cuda'):
+            x = torch.randn(3, dtype=torch.double, requires_grad=True)
+
+            def func(inp):
+                return inp ** 2.0
+
+            self.assertTrue(gradcheck(func, x, fast_mode=True))
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):

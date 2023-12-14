@@ -49,7 +49,7 @@ CONSTANT_NUMEL_LIMIT = 1
 
 # We currently convert all SymInt to proxies before we use them.
 # This could plausibly be handled at the Dynamo level.
-pytree._register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
+pytree.register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
 
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""
@@ -134,6 +134,8 @@ def extract_val(val):
                 return torch.empty_strided(val.shape, val.stride(), device=val.device, dtype=val.dtype)
         else:
             return None
+    elif isinstance(val, (int, float, bool)):
+        return val
 
 # What invariants do we have for the 'val' set on the FX node?  It has accurate
 # metadata... but only for metadata that exists "below" all other subsystems
