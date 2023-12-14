@@ -183,7 +183,7 @@ def main() -> None:
         if args.commit_hash
         else read_triton_pin(args.build_rocm),
         version=args.triton_version
-        if not args.build_rocm else "2.1.0,
+        if not args.build_rocm else "2.1.0",
         build_conda=args.build_conda,
         py_version=args.py_version,
         release=args.release,
