@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 import torch
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
+from ..codegen.common import ChoiceCaller
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -121,7 +122,7 @@ aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
-    choices = []
+    choices: List[ChoiceCaller] = []
 
     if m * n != 0 and use_triton_template(layout):
         for config in mm_configs(m, n, k):
