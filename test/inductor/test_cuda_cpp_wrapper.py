@@ -58,7 +58,7 @@ class DynamicShapesCudaWrapperCudaTests(TorchTestCase):
 
 
 test_failures_cuda_wrapper = {
-    "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
+    "test_mm_plus_mm2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
         ("cuda_wrapper",), is_skip=True
     ),
 }
