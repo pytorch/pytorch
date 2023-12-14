@@ -501,7 +501,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 torch.matmul(query, key.transpose(-2, -1))
                 .div(math.sqrt(key.shape[-1]))
                 .softmax(dim=-1)
-                .clone()
                 .matmul(value)
             )
 
@@ -517,7 +516,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 torch.matmul(query, key.transpose(-2, -1))
                 .mul(1.0 / math.sqrt(key.shape[-1]))
                 .softmax(dim=-1)
-                .clone()
                 .matmul(value)
             )
 
@@ -537,7 +535,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 torch.matmul(q, k.transpose(-2, -1))
                 .div(math.sqrt(key.shape[-1]))
                 .softmax(dim=-1)
-                .clone()
                 .matmul(v)
             )
 
