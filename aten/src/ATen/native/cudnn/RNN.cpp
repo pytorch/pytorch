@@ -993,7 +993,7 @@ namespace {
   inline bool use_rnn_persist_small_h(const RNNDescriptorParams& rnn,
                                             const TensorDescriptorListParams& tensors,
                                             bool forward) {
-#if CUDNN_VERSION >= 8201 // 8.2.1
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8201 // 8.2.1
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major < 6) return false;
 
@@ -1030,7 +1030,7 @@ namespace {
     // https://docs.nvidia.com/deeplearning/cudnn/developer-guide/index.html#features-of-rnn-functions
     if (!tensors.is_input_packed()) {
       auto cudnnDataType = getCudnnDataType(input);
-#if CUDNN_VERSION >= 8201 // 8.2.1
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8201 // 8.2.1
       if (cudnnDataType != CUDNN_DATA_DOUBLE) {
         if (use_rnn_persist_small_h(rnn, tensors, forward)) {
           return CUDNN_RNN_ALGO_PERSIST_STATIC_SMALL_H;
