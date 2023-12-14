@@ -3017,6 +3017,33 @@ else:
                 actual, expected = self._inf_nan_preprocess(list(actual), expected)
                 self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.long, torch.float32, torch.complex64)
+    def test_gradient_spacing_list_length_error(self, device, dtype):
+        t = make_tensor((2, 2), device=device, dtype=dtype)
+
+        spacing = (make_tensor((2,), device=device, dtype=dtype),)
+        with self.assertRaisesRegex(RuntimeError, r'expected spacing to be'):
+            torch.gradient(t, spacing=spacing)
+
+        spacing = (make_tensor((2,), device=device, dtype=dtype),) * 2
+        torch.gradient(t, spacing=spacing)
+
+        spacing = (make_tensor((2,), device=device, dtype=dtype),) * 3
+        with self.assertRaisesRegex(RuntimeError, r'expected spacing to be'):
+            torch.gradient(t, spacing=spacing)
+
+        spacing = (2,)
+        with self.assertRaisesRegex(RuntimeError, r'expected spacing to be'):
+            torch.gradient(t, spacing=spacing)
+
+        spacing = (2, 2)
+        torch.gradient(t, spacing=spacing)
+
+        spacing = (2, 2, 2)
+        with self.assertRaisesRegex(RuntimeError, r'expected spacing to be'):
+            torch.gradient(t, spacing=spacing)
+
     def _test_large_cum_fn_helper(self, x, fn):
         expected = fn(x.cpu().float())
         actual = fn(x).cpu().float()
@@ -8595,6 +8622,17 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             torch.backends.quantized.engine = qe
             assert torch.backends.quantized.engine == qe, 'qengine not set successfully'
         torch.backends.quantized.engine = original_qe
+
+    def test_terminate_handler_on_crash(self):
+        cmd = [sys.executable, '-c', "import os; os.environ[\"TORCH_CUSTOM_TERMINATE\"] ='1'; \
+               import torch; import torch._C; torch._C._abort()"]
+        with self.assertRaises(subprocess.CalledProcessError) as cm:
+            subprocess.check_output(cmd, shell=False)
+        e = cm.exception
+        output = e.stdout.decode("utf-8")
+        self.assertNotEqual(e.returncode, 0)
+        self.assertNotEqual(output, None)
+        self.assertIn('Unhandled exception caught in c10/util/AbortHandler.h', output)
 
     # FIXME: port to a distributed test suite -- also... how could this be OOMing on Windows CUDA?
     @slowTest
