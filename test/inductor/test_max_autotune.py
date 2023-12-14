@@ -17,6 +17,8 @@ from torch._inductor.autotune_process import (
     CUDA_VISIBLE_DEVICES,
     TuningProcessPool,
 )
+from torch._inductor.codegen.cuda.cutlass_utils import cuda_standalone_runner_compile_command, \
+    CUDACompileSourceCapturingContext
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
@@ -26,7 +28,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplateCaller,
 )
 from torch._inductor.util_autotuning_log_parser import AutotuningLogParser
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, cache_dir
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -72,6 +74,29 @@ class FailChoiceCaller(ChoiceCaller):
 class TestMaxAutotune(TestCase):
     def _create_buffer(self, name, shape):
         return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
+
+    def cuda_test_compile_standalone_runner(self, src, name=None, do_compile=True, do_run=True, log=sys.stderr):
+        if name is None:
+            name = "test_cuda_kernel"
+            src_name = name + ".cu"
+
+        target_dir = Path(cache_dir()) / self.id()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        src_path = target_dir / src_name
+        exe_path = target_dir / name
+        print(f"Wrote CUDA Kernel source to {src_path}", file=log)
+        src_path.write_text(src)
+        compile_command = cuda_standalone_runner_compile_command(src_path, exe_path)
+        print(f"Compilation command would be {compile_command}", file=log)
+        print(compile_command, file=log)
+        if do_compile:
+            print(f"Compiling {src_path} to {exe_path}", file=log)
+            print(subprocess.check_output(compile_command.split(" "), stderr=subprocess.STDOUT, env=os.environ, encoding="utf-8"), file=log)
+            print(f"Wrote standalone CUDA Kernel executable to {exe_path}, source to {src_path}", file=log)
+            if do_run:
+                print(f"Running {exe_path}", file=log)
+                print(subprocess.check_output([str(exe_path)], stderr=subprocess.STDOUT, env=os.environ, encoding="utf-8"), file=log)
+        return compile_command, src_path, exe_path
 
     def test_benchmark_choice_in_subproc(self):
         gm = make_fx(
@@ -277,6 +302,8 @@ class TestMaxAutotune(TestCase):
         max_profiling_configs=4,
         batch_size=None,
         evt_only=True,
+        aux_shape : Optional[Tuple[int]] = None,
+        config_override = {},
     ):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
             mixed_precision
@@ -298,7 +325,9 @@ class TestMaxAutotune(TestCase):
             if with_bias:
                 bias = torch.randn(batch_size, m, n).mul(1.0 / 32).cuda()
             if with_aux:
-                aux = torch.randn(batch_size, m, n).mul(1.0 / 32).cuda()
+                if aux_shape is None:
+                    aux_shape = (batch_size, m, n)
+                aux = torch.randn(*aux_shape).mul(1.0 / 32).cuda()
         if fp16:
             a = a.half()
             b = b.half()
@@ -311,20 +340,22 @@ class TestMaxAutotune(TestCase):
             args.append(bias)
         if with_aux:
             args.append(aux)
-        with config.patch(
-            {
+        conf_patch = {
                 "max_autotune": True,
                 "autotune_in_subproc": False,
+                "benchmark_fusion" : False,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": max_profiling_configs,
                 "cuda.cutlass_prefer_evt_capable_ops": evt_only,
                 "cuda.version": "12.1",  # required to enable the Kernels we need
-            }
-        ):
+        }
+        conf_patch.update(config_override)
+        with config.patch(conf_patch):
             counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(*args)
             Y = mm(*args)
+            mm_jit = torch.compile(mm, dynamic=dynamic)
+            Y_compiled = mm_jit(*args)
             actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
             assert (
                 actual_count == expected_fuse_count
