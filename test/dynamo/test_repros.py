@@ -3829,11 +3829,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = [src.as_strided((4, 4), (4, 1), 3 + 16 * i) for i in range(AMT)]
 
         torch._dynamo.reset()
-        torch._dynamo.metrics.clear_compilation_metrics()
+        torch._dynamo.utils.clear_compilation_metrics()
 
         res = torch.compile(fn, backend="aot_eager")(x)
 
-        all_metrics = torch._dynamo.metrics.get_compilation_metrics()
+        all_metrics = torch._dynamo.utils.get_compilation_metrics()
 
         total_guards = sum(metric.guard_count for metric in all_metrics)
         self.assertLess(total_guards, AMT * 8)

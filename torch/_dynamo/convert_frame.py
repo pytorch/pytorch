@@ -59,7 +59,6 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .metrics import record_compilation_metrics
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator, SpeculationLog
@@ -78,6 +77,7 @@ from .utils import (
     istype,
     LazyString,
     orig_code_map,
+    record_compilation_metrics,
     reset_graph_break_dup_checker,
     setup_compile_debug,
     troubleshooting_url,
@@ -621,61 +621,58 @@ def _compile(
                 e.__traceback__
             ) from None
         finally:
-            if config.log_compilation_metrics:
-                from .utils import curr_frame
+            from .utils import curr_frame
 
-                frame_key = str(curr_frame)
-                if (
-                    fail_reason is None
-                    and output is not None
-                    and frame_key in frame_phase_timing
-                ):
-                    guard_count = len(output.guards)
-                    shape_env_guard_count = len(output.shape_env.guards)
-                    graph_op_count = output.count_calls()
-                    graph_node_count = len(output.graph.nodes)
-                    graph_input_count = len(output.placeholders)
-                    entire_frame_compile_time = frame_phase_timing[frame_key].get(
-                        "entire_frame_compile", None
-                    )
-                    backend_compile_time = frame_phase_timing[frame_key].get(
-                        "backend_compile", None
-                    )
-                    non_compliant_ops = {
-                        op.__qualname__ for op in output.non_compliant_ops
-                    }
-                    compliant_custom_ops = {
-                        op.__qualname__ for op in output.compliant_custom_ops
-                    }
-                else:
-                    guard_count = None
-                    shape_env_guard_count = None
-                    graph_op_count = None
-                    graph_node_count = None
-                    graph_input_count = None
-                    entire_frame_compile_time = None
-                    backend_compile_time = None
-                    non_compliant_ops = set({})
-                    compliant_custom_ops = set({})
-                metrics = CompilationMetrics(
-                    frame_key,
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    cache_size.num_cache_entries_with_same_id_matched_objs,
-                    cache_size.num_cache_entries,
-                    guard_count,
-                    shape_env_guard_count,
-                    graph_op_count,
-                    graph_node_count,
-                    graph_input_count,
-                    entire_frame_compile_time,
-                    backend_compile_time,
-                    fail_reason,
-                    non_compliant_ops,
-                    compliant_custom_ops,
+            frame_key = str(curr_frame)
+            if (
+                fail_reason is None
+                and output is not None
+                and frame_key in frame_phase_timing
+            ):
+                guard_count = len(output.guards)
+                shape_env_guard_count = len(output.shape_env.guards)
+                graph_op_count = output.count_calls()
+                graph_node_count = len(output.graph.nodes)
+                graph_input_count = len(output.placeholders)
+                entire_frame_compile_time = frame_phase_timing[frame_key].get(
+                    "entire_frame_compile", None
                 )
-                record_compilation_metrics(metrics)
+                backend_compile_time = frame_phase_timing[frame_key].get(
+                    "backend_compile", None
+                )
+                non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
+                compliant_custom_ops = {
+                    op.__qualname__ for op in output.compliant_custom_ops
+                }
+            else:
+                guard_count = None
+                shape_env_guard_count = None
+                graph_op_count = None
+                graph_node_count = None
+                graph_input_count = None
+                entire_frame_compile_time = None
+                backend_compile_time = None
+                non_compliant_ops = set({})
+                compliant_custom_ops = set({})
+            metrics = CompilationMetrics(
+                frame_key,
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                cache_size.num_cache_entries_with_same_id_matched_objs,
+                cache_size.num_cache_entries,
+                guard_count,
+                shape_env_guard_count,
+                graph_op_count,
+                graph_node_count,
+                graph_input_count,
+                entire_frame_compile_time,
+                backend_compile_time,
+                fail_reason,
+                non_compliant_ops,
+                compliant_custom_ops,
+            )
+            record_compilation_metrics(metrics)
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
