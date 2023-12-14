@@ -358,6 +358,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // via `ncclCommSplit`
     std::shared_ptr<ProcessGroupNCCL> split_from;
     int64_t split_color{0};
+    std::vector<uint64_t> global_ranks_in_group;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -589,6 +590,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       OpType opType);
 
  private:
+  int globalRankStart;
+  int globalRankStride;
+
   // Helper that encapsulates work shared across all collective communication
   // primitives.  The callbacks have the following signatures:
   //
@@ -679,7 +683,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Watchdog's inside loop.
   // Takes care of cleaning up completed work, and aborting upon failure or
   // timeout.
-  void workCleanupLoop();
+  void watchdogHandler();
 
   void runHookLoop();
 

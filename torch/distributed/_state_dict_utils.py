@@ -1,16 +1,18 @@
 import math
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from torch.distributed import distributed_c10d
-from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor, Replicate
+
+if dist.is_available() or TYPE_CHECKING:
+    from torch.distributed import distributed_c10d
+    from torch.distributed._shard.sharded_tensor import ShardedTensor
+    from torch.distributed._tensor import DTensor, Replicate
 
 
 def _all_gather_sharded_tensor(
-    sharded_tensor: ShardedTensor,
+    sharded_tensor: "ShardedTensor",
     pg: Optional[dist.ProcessGroup] = None,
     device: Optional[torch.device] = None,
 ) -> torch.Tensor:
