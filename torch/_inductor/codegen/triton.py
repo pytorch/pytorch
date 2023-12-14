@@ -2137,7 +2137,7 @@ class TritonKernel(Kernel):
                 if before_calling_kernel and not is_read:
                     continue
                 before_or_after = 'before' if before_calling_kernel else 'after'
-                if before_or_after:
+                if before_calling_kernel:
                     if arg in ['buf100', 'buf95', 'primals_3', 'clone', 'buf4']:
                         import os
                         save_path_prefix = os.environ['inductor_nan_dump_dir']
