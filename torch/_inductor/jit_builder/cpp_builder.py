@@ -46,7 +46,7 @@ _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
 
-def _get_cxx_compiler() -> str:
+def _get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
     else:
@@ -143,6 +143,7 @@ class BuildOptionsBase:
         self._ldflags: List[str] = []
         self._libraries_dirs: List[str] = []
         self._libraries: List[str] = []
+        # Some args is hard to abstract to OS compatable, passthough it directly.
         self._passthough_args: List[str] = []
 
     def _remove_duplicate_options(self):
@@ -186,7 +187,7 @@ def _get_warning_all_cflag(warning_all: bool = True) -> List[str]:
         return []
 
 
-def _get_cxx_std_cflag(std_num: str = "c++17") -> List[str]:
+def _get_cpp_std_cflag(std_num: str = "c++17") -> List[str]:
     if _IS_WINDOWS:
         return [f"std:{std_num}"]
     else:
@@ -242,7 +243,7 @@ def _get_shared_cflag() -> List[str]:
     return SHARED_FLAG
 
 
-def get_cxx_options(cpp_compiler):
+def get_cpp_options(cpp_compiler):
     definations: List[str] = []
     include_dirs: List[str] = []
     cflags: List[str] = []
@@ -255,7 +256,7 @@ def get_cxx_options(cpp_compiler):
         _get_shared_cflag()
         + _get_optimization_cflags()
         + _get_warning_all_cflag()
-        + _get_cxx_std_cflag()
+        + _get_cpp_std_cflag()
         + _get_linux_cpp_cflags(cpp_compiler)
     )
 
@@ -270,7 +271,7 @@ def get_cxx_options(cpp_compiler):
     )
 
 
-class CxxOptions(BuildOptionsBase):
+class CppOptions(BuildOptionsBase):
     """
     This class is inherited from BuildOptionsBase, and as cxx build options.
     This option need contains basic cxx build option, which contains:
@@ -283,7 +284,7 @@ class CxxOptions(BuildOptionsBase):
 
     def __init__(self) -> None:
         super().__init__()
-        self._compiler = _get_cxx_compiler()
+        self._compiler = _get_cpp_compiler()
 
         (
             definations,
@@ -293,7 +294,7 @@ class CxxOptions(BuildOptionsBase):
             libraries_dirs,
             libraries,
             passthough_args,
-        ) = get_cxx_options(self._compiler)
+        ) = get_cpp_options(self._compiler)
 
         _append_list(self._definations, definations)
         _append_list(self._include_dirs, include_dirs)
@@ -492,7 +493,7 @@ def _get_openmp_args(cpp_compiler):
     return cflags, ldflags, include_dir_paths, lib_dir_paths, libs
 
 
-def get_cxx_torch_options(cpp_compiler, chosen_isa: VecISA, aot_mode: bool = False):
+def get_cpp_torch_options(cpp_compiler, chosen_isa: VecISA, aot_mode: bool = False):
     definations: List[str] = []
     include_dirs: List[str] = []
     cflags: List[str] = []
@@ -551,9 +552,9 @@ def get_cxx_torch_options(cpp_compiler, chosen_isa: VecISA, aot_mode: bool = Fal
     )
 
 
-class CxxTorchOptions(CxxOptions):
+class CppTorchOptions(CppOptions):
     """
-    This class is inherited from CxxTorchOptions, which automatic contains
+    This class is inherited from CppTorchOptions, which automatic contains
     base cxx build options. And then it will maintains torch related build
     args.
     1. Torch include_directories, libraries, libraries_directories.
@@ -574,7 +575,7 @@ class CxxTorchOptions(CxxOptions):
             torch_libraries_dirs,
             torch_libraries,
             torch_passthough_args,
-        ) = get_cxx_torch_options(cpp_compiler=self._compiler, chosen_isa=chosen_isa)
+        ) = get_cpp_torch_options(cpp_compiler=self._compiler, chosen_isa=chosen_isa)
 
         _append_list(self._definations, torch_definations)
         _append_list(self._include_dirs, torch_include_dirs)
@@ -632,7 +633,7 @@ def _get_cuda_related_args(aot_mode: bool):
     )
 
 
-def get_cxx_torch_cuda_options(aot_mode: bool = False):
+def get_cpp_torch_cuda_options(aot_mode: bool = False):
     definations: List[str] = []
     include_dirs: List[str] = []
     cflags: List[str] = []
@@ -662,9 +663,9 @@ def get_cxx_torch_cuda_options(aot_mode: bool = False):
     )
 
 
-class CxxTorchCudaOptions(CxxTorchOptions):
+class CppTorchCudaOptions(CppTorchOptions):
     """
-    This class is inherited from CxxTorchOptions, which automatic contains
+    This class is inherited from CppTorchOptions, which automatic contains
     base cxx build options and torch common build options. And then it will
     maintains cuda device related build args.
     """
@@ -692,7 +693,7 @@ class CxxTorchCudaOptions(CxxTorchOptions):
                 cuda_libraries_dirs,
                 cuda_libraries,
                 cuda_passthough_args,
-            ) = get_cxx_torch_cuda_options(aot_mode=aot_mode)
+            ) = get_cpp_torch_cuda_options(aot_mode=aot_mode)
 
         _append_list(self._definations, cuda_definations)
         _append_list(self._include_dirs, cuda_include_dirs)
@@ -704,7 +705,7 @@ class CxxTorchCudaOptions(CxxTorchOptions):
         self._remove_duplicate_options()
 
 
-class CxxBuilder:
+class CppBuilder:
     def get_shared_lib_ext(self) -> str:
         SHARED_LIB_EXT = ".dll" if _IS_WINDOWS else ".so"
         return SHARED_LIB_EXT
@@ -840,6 +841,7 @@ class CxxBuilder:
     def build(self) -> Tuple[int, str]:
         """
         It is must need a temperary directory to store object files in Windows.
+        After build completed, delete the temperary directory to save disk space.
         """
         _create_if_dir_not_exist(self._output_dir)
         _build_tmp_dir = os.path.join(

@@ -1032,7 +1032,7 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)
     def __bool__(self) -> bool:
-        from torch._inductor.cxx_builder.cxx_builder import CxxBuilder, CxxTorchOptions
+        from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppTorchOptions
 
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
@@ -1047,8 +1047,8 @@ cdll.LoadLibrary("__lib_path__")
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
             output_dir = os.path.dirname(input_path)
-            x86_isa_help_builder = CxxBuilder(
-                key, [input_path], CxxTorchOptions(self), output_dir
+            x86_isa_help_builder = CppBuilder(
+                key, [input_path], CppTorchOptions(self), output_dir
             )
             try:
                 # Check build result
@@ -1134,8 +1134,8 @@ supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 
 
 def x86_isa_checker() -> List[str]:
-    from torch._inductor.cxx_builder.cxx_builder import CxxBuilder, CxxOptions
-    from torch._inductor.cxx_builder.isa_help_code_store import get_x86_isa_detect_code
+    from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppOptions
+    from torch._inductor.jit_builder.isa_help_code_store import get_x86_isa_detect_code
 
     supported_isa: List[str] = []
 
@@ -1162,7 +1162,7 @@ def x86_isa_checker() -> List[str]:
     lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
     with lock:
         output_dir = os.path.dirname(input_path)
-        x86_isa_help_builder = CxxBuilder(key, [input_path], CxxOptions(), output_dir)
+        x86_isa_help_builder = CppBuilder(key, [input_path], CppOptions(), output_dir)
         status, target_file = x86_isa_help_builder.build()
 
         # 1. open the shared library
@@ -1611,9 +1611,9 @@ class AotCodeCache:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> str:
-        from torch._inductor.cxx_builder.cxx_builder import (
-            CxxBuilder,
-            CxxTorchCudaOptions,
+        from torch._inductor.jit_builder.cpp_builder import (
+            CppBuilder,
+            CppTorchCudaOptions,
         )
 
         """
@@ -1623,10 +1623,10 @@ class AotCodeCache:
             )
         )
         """
-        isa_seed = CxxBuilder(
+        isa_seed = CppBuilder(
             "i",
             ["o"],
-            CxxTorchCudaOptions(use_cuda=cuda, aot_mode=graph.aot_mode),
+            CppTorchCudaOptions(use_cuda=cuda, aot_mode=graph.aot_mode),
             compile_only=True,
         )
 
@@ -1693,10 +1693,10 @@ class AotCodeCache:
                     )
                     """
                     output_dir = os.path.dirname(input_path)
-                    builder = CxxBuilder(
+                    builder = CppBuilder(
                         key,
                         [input_path],
-                        CxxTorchCudaOptions(use_cuda=cuda, aot_mode=graph.aot_mode),
+                        CppTorchCudaOptions(use_cuda=cuda, aot_mode=graph.aot_mode),
                         output_dir,
                         compile_only=True,
                     )
@@ -1790,10 +1790,10 @@ class AotCodeCache:
                     )
                     """
                     output_dir = os.path.dirname(input_path)
-                    builder = CxxBuilder(
+                    builder = CppBuilder(
                         key,
                         [output_o, consts_o],
-                        CxxTorchCudaOptions(use_cuda=cuda, aot_mode=graph.aot_mode),
+                        CppTorchCudaOptions(use_cuda=cuda, aot_mode=graph.aot_mode),
                         output_dir,
                     )
                     cmd = builder.get_command_line()
@@ -1926,10 +1926,10 @@ class CppCodeCache:
 
     @classmethod
     def load(cls, source_code: str) -> CDLL:
-        from torch._inductor.cxx_builder.cxx_builder import CxxBuilder, CxxTorchOptions
+        from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppTorchOptions
 
         picked_vec_isa = pick_vec_isa()
-        isa_seed = CxxBuilder("i", ["o"], CxxTorchOptions(picked_vec_isa))
+        isa_seed = CppBuilder("i", ["o"], CppTorchOptions(picked_vec_isa))
         # write will calc source_code hash, but we need split same code with different
         # ISAs. get a command_line which contains isa parameters as a seed, what make
         # hash value different with multiple Isa.
@@ -1942,8 +1942,8 @@ class CppCodeCache:
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
                 output_dir = os.path.dirname(input_path)
-                builder = CxxBuilder(
-                    key, [input_path], CxxTorchOptions(picked_vec_isa), output_dir
+                builder = CppBuilder(
+                    key, [input_path], CppTorchOptions(picked_vec_isa), output_dir
                 )
                 target_file = builder.get_target_file_path()
                 if not os.path.exists(target_file):
