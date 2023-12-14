@@ -2307,6 +2307,10 @@ def is_tensor_base_attr_getter(value):
     )
 
 
+def is_torch_function_object(value):
+    return hasattr(value, "__torch_function__")
+
+
 def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
     from torch._dynamo.variables import UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable

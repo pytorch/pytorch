@@ -90,7 +90,7 @@ def _train(model, optim, train_steps=1):
     return loss
 
 
-class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
+class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     def _create_model(self, compile, model_type):
         dummy_model = TestDummyModel().cuda()
 
@@ -242,7 +242,13 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
         DCP.save(sd, DCP.FileSystemWriter(self.temp_dir))
         DCP.load(sd, DCP.FileSystemReader(self.temp_dir))
 
+    @with_temp_dir
+    def test_no_dist(self):
+        checkpointer = DCP.FileSystemCheckpointer(self.temp_dir, no_dist=True)
+        checkpointer.save({})
+        checkpointer.load({})
 
-instantiate_parametrized_tests(TestE2ELoadAndSave)
+
+instantiate_parametrized_tests(TestE2ESaveAndLoad)
 if __name__ == "__main__":
     run_tests()
