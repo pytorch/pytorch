@@ -94,8 +94,6 @@ class CUDACPPScheduling(BaseScheduling):
             )
             if last_epilogue_name not in additional_node.get_read_names():
                 return False
-        if additional_node.layout != cuda_template_buffer.layout:
-            return False
 
         template_buffer_names: Set[str] = cuda_template_buffer.get_read_names()
         fused_reading_buffer_names: Set[str] = set(template_buffer_names)
@@ -120,21 +118,24 @@ class CUDACPPScheduling(BaseScheduling):
             fused_reading_buffer_names.union(additional_node.get_read_names())
             - fused_written_names
         )
-        if len(after_fuse_reading_buffers) > 3:
-            return False
         if len(after_fuse_reading_buffers) > len(fused_reading_buffer_names):
             # Check that the layout of the additional input is compatible
             added_names = after_fuse_reading_buffers - fused_reading_buffer_names
-            assert len(added_names) == 1, "Only one additional input is supported."
-            added_name = added_names.pop()
-            added_node = V.graph.get_buffer(added_name)
-            from torch._inductor.codegen.cuda.cuda_template import CUDATemplate
+            for added_name in added_names:
+                added_node = V.graph.get_buffer(added_name)
+                from torch._inductor.codegen.cuda.cuda_template import CUDATemplate
 
-            template: CUDATemplate = cuda_template_buffer.template
-            if not template.are_inputs_layout_compatible(
-                [n.layout for n in template.input_nodes] + [added_node.layout]
-            ):
-                return False
+                template: CUDATemplate = cuda_template_buffer.template
+                check_layouts = [n.layout for n in template.input_nodes[:2]] + [
+                    added_node.layout
+                ]
+                if not template.are_inputs_layout_compatible(
+                    [n.layout for n in template.input_nodes[:2]] + [added_node.layout]
+                ):
+                    log.warning(
+                        f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, since the layouts (A,B,C)={check_layouts} are not compatible"  # noqa: B950, G004
+                    )
+                    return False
         try:
             from torch._inductor.codegen.cuda.cutlass_epilogue_gen import (
                 CutlassEVTEpilogueArgumentFormatter,
@@ -158,9 +159,14 @@ class CUDACPPScheduling(BaseScheduling):
             else:
                 # Likely due to unsupported dtype.
                 log.warning(
-                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950
+                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950, G004
                 )
                 return False
+        if len(after_fuse_reading_buffers) > 3:
+            log.warning(
+                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, since that would require auxiliary input support."  # noqa: G004, B950, G004
+            )
+            return False
         return True
 
     @staticmethod

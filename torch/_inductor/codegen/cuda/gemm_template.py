@@ -191,34 +191,61 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
         assert len(layouts) == 2 or len(layouts) == 3
+        # Check if A and B are compatible
         A_layout, B_layout = layouts[:2]
+        if len(A_layout.size) < 1:
+            return False
+        if len(B_layout.size) < 1:
+            return False
+        A_size = list(A_layout.size)
+        B_size = list(B_layout.size)
+        if len(A_size) < 2:
+            A_size.insert(0, 1)
+        if len(B_size) < 2:
+            A_size.insert(1, 1)
+        # Are batch dims broadcastable?
+        while len(A_size) < len(B_size):
+            A_size.insert(0, 1)
+        while len(B_size) < len(A_size):
+            B_size.insert(0, 1)
         if A_layout.dtype != B_layout.dtype:
             return False
-        if len(A_layout.size) < 2:
+        K = max(A_size[-1], B_size[-2])
+        M = A_size[-2]
+        N = B_size[-1]
+        if K != A_size[-1] and A_size[-1] != 1:
             return False
-        if len(B_layout.size) != len(A_layout.size):
+        if K != B_size[-2] and B_size[-1] != 1:
             return False
-        K = A_layout.size[-1]
-        M = A_layout.size[-2]
-        N = B_layout.size[-1]
-        if K != B_layout.size[-2]:
-            return False
-        if len(A_layout.size) == 3 and A_layout.size[0] != B_layout.size[0]:
-            # batch dim mismatch
-            return False
+        # check batch dim broadcastable
+        for i in range(len(A_size) - 2):
+            if A_size[i] != B_size[i] and A_size[i] != 1 and B_size[i] != 1:
+                return False
         if len(layouts) == 3:
             C_layout = layouts[2]
-            # @TODO: dtype check
-            # C may have accumulator dtype or lower precision dtype
-            # but not higher precision
-            if len(C_layout.size) != len(A_layout.size):
+            C_size = list(C_layout.size)
+            while len(C_size) < len(A_size):
+                C_size.insert(0, 1)
+            # check batch dims
+            for i in range(len(A_size) - 2):
+                bd = max(A_size[i], B_size[i])
+                if bd != C_size[i] and C_size[i] != 1:
+                    return False
+            if len(C_size) > len(A_size):
+                # This may happen if the last elements of C are contiguous and
+                # their multiplied size equals the last dim size of B
+                if M != C_size[len(A_size) - 2] and C_size[len(A_size) - 2] != 1:
+                    return False
+                remaining_size = 1
+                for i in range(len(A_size) - 1, len(C_size)):
+                    remaining_size *= C_size[i]
+                if N != remaining_size and remaining_size != 1:
+                    return False
+                return True
+            assert len(C_size) == len(A_size)
+            if M != C_size[-2] and C_size[-2] != 1:
                 return False
-            if len(A_layout.size) == 3 and A_layout.size[0] != C_layout.size[0]:
-                # batch dim mismatch
-                return False
-            if M != C_layout.size[-2]:
-                return False
-            if N != C_layout.size[-1]:
+            if N != C_size[-1] and C_size[-1] != 1:
                 return False
         return True
 
@@ -302,6 +329,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 #include "cutlass/epilogue/collective/collective_builder.hpp"
                 #include "cutlass/epilogue/collective/default_epilogue.hpp"
                 #include "cutlass/epilogue/thread/linear_combination.h"
+                #include "cutlass/epilogue/thread/activation.h"
                 #include "cutlass/gemm/dispatch_policy.hpp"
                 #include "cutlass/gemm/kernel/tile_scheduler.hpp"
                 #include "cutlass/util/distribution.h"
@@ -803,6 +831,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
+        assert isinstance(X.layout, FixedLayout), "X.layout is not fixed"
+        assert isinstance(W.layout, FixedLayout), "W.layout is not fixed"
         Y = self.output_node
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
         if (
