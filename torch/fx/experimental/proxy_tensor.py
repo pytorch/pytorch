@@ -536,7 +536,7 @@ class PythonKeyTracer(Tracer):
         if isinstance(e, torch.Tensor):
             return get_proxy_slot(e, self, e, lambda e: e.proxy)
         elif isinstance(e, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-            return get_proxy_slot(e.node, self, e, lambda e: e())
+            return get_proxy_slot(e, self, e, lambda e: e())
         else:
             return e
 
