@@ -389,9 +389,15 @@ def _get_torch_related_args(aot_mode: bool):
         os.path.join(_TORCH_PATH, "include", "THC"),
     ]
     libraries_dirs = [TORCH_LIB_PATH]
-    libraries = ["torch", "torch_cpu", "c10"]
+    libraries = ["torch", "torch_cpu"]
     if not aot_mode:
         libraries.append("torch_python")
+
+    # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
+    if not config.aot_inductor.abi_compatible:
+        libraries += ["c10"]
+        libraries_dirs += [TORCH_LIB_PATH]
+
     return include_dirs, libraries_dirs, libraries
 
 
@@ -615,11 +621,6 @@ def _get_cuda_related_args(aot_mode: bool):
             passthough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
         else:
             libraries.append("cudart_static")
-
-    # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
-    if not config.aot_inductor.abi_compatible:
-        libraries += ["c10"]
-        libraries_dirs += [cpp_extension.TORCH_LIB_PATH]
 
     return (
         definations,
