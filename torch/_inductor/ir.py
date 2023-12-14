@@ -4113,7 +4113,7 @@ class InplaceBernoulliFallback(ExternKernel):
     def codegen(self, wrapper):
         (x,) = (t.codegen_reference() for t in self.inputs)
         wrapper.writeline(
-            f"{self.python_kernel_name}({x}, {', '.join(map(repr, self.constant_args))})"
+            f"{self.get_kernel_name()}({x}, {', '.join(map(repr, self.constant_args))}){wrapper.ending}"
         )
 
     def should_allocate(self):
@@ -4145,7 +4145,7 @@ class AccumulateGrad(ExternKernel):
 
     def codegen(self, wrapper):
         (variable, new_grad) = (t.codegen_reference() for t in self.inputs)
-        wrapper.writeline(f"{self.python_kernel_name}({variable}, {new_grad})")
+        wrapper.writeline(f"{self.get_kernel_name()}({variable}, {new_grad}){wrapper.ending}")
 
     def should_allocate(self):
         return False
@@ -4177,6 +4177,12 @@ class ScatterFallback(ExternKernel):
 
     def codegen(self, wrapper):
         reduce = self.kwargs["reduce"]
+        if V.graph.cpp_wrapper:
+            # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
+            get_operator_enum = {"add": "sum", "multiply": "prod"}
+            if reduce in get_operator_enum:
+                reduce = get_operator_enum[reduce]
+
         if self.src_is_tensor:
             (x, index, src) = (t.codegen_reference() for t in self.inputs)
         else:
@@ -4195,11 +4201,9 @@ class ScatterFallback(ExternKernel):
     def should_allocate(self):
         return False
 
-    def get_cpp_kernel(self, fn, reduce):
-        get_operator_enum = {"add": "sum", "multiply": "prod"}
-        if reduce in get_operator_enum:
-            reduce = get_operator_enum[reduce]
-        if fn == "aten.scatter_":
+    def get_cpp_kernel(self):
+        reduce = self.kwargs["reduce"]
+        if self.python_kernel_name == "aten.scatter_":
             if self.src_is_tensor:
                 kernel = (
                     "at::scatter_out" if reduce is None else "at::scatter_reduce_out"
@@ -4253,7 +4257,7 @@ class ScatterFallback(ExternKernel):
         )
 
         self.python_kernel_name = python_kernel_name
-        self.cpp_kernel_name = self.get_cpp_kernel(self.python_kernel_name, reduce)
+        self.cpp_kernel_name = self.get_cpp_kernel()
         self.ordered_kwargs_for_cpp_kernel = ["reduce", "include_self"]
         self.name = V.graph.register_buffer(self)
         mark_node_as_mutating(self, x)
@@ -4278,9 +4282,7 @@ class IndexPutFallback(ExternKernel):
         args = [x, indices_str, values, *self.codegen_const_args()]
         wrapper.writeline(
             wrapper.wrap_kernel_call(
-                self.cpp_kernel_name
-                if V.graph.cpp_wrapper
-                else self.python_kernel_name,
+                self.get_kernel_name(),
                 args,
             )
         )
