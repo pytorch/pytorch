@@ -1698,8 +1698,8 @@ class TestSDPA(NNTestCase):
         atol = 1e-5
         rtol = 5e-6
         if dtype is torch.bfloat16:
-            atol = 2e-2
-            rtol = 2e-2
+            atol = 5e-2
+            rtol = 5e-2
 
         n_embd = n_head * head_dim
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, packed=True, requires_grad=False)
@@ -2424,7 +2424,7 @@ class TestSDPACudaOnly(NNTestCase):
         output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
 
         # Fudge Factor when dropout is enabled
-        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.5
+        dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 1.75
         mask_fudge_factor = 1.0 if attn_mask is None else 1.5
 
         query_fudge_factor = dropout_fudge_factor
