@@ -548,7 +548,10 @@ class GraphLowering(torch.fx.Interpreter):
             return None
         workspace_name = f"workspace_of_{buffer.get_name()}"
         if workspace_name in self.name_to_buffer:
-            return self.name_to_buffer[workspace_name]
+            res = self.name_to_buffer[workspace_name]
+            assert isinstance(res, ir.WorkspaceBuffer)
+            res.resize(workspace_size)  # could have been changed via retuning
+            return res
         workspace_buffer = ir.WorkspaceBuffer.create(workspace_size, buffer)
         workspace_buffer.name = workspace_name
         self.buffers.append(workspace_buffer)

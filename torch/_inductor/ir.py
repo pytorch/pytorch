@@ -2994,6 +2994,14 @@ class WorkspaceBuffer(Buffer):
         res = cls(layout=layout, name=None, user_node=user_node)
         return res
 
+    def resize(self, workspace_size):
+        self.layout = FixedLayout(
+            self.get_device(),
+            torch.int8,
+            [workspace_size],
+            [1],
+        )
+
     def should_allocate(self):
         return True
 

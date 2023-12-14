@@ -867,6 +867,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if (
             make_benchmark_fn.cache_info().currsize
             or log.getEffectiveLevel() == logging.DEBUG
+            or config.trace.log_autotuning_results
         ):
             self.log_results(name, input_nodes, timings, autotune_elapse)
 
