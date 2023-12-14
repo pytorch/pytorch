@@ -1,13 +1,15 @@
 import warnings
-from typing import Optional
+from typing import Optional, Any
+from concurrent.futures import ThreadPoolExecutor, Future
 
 import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
 
+from .planner import SavePlanner
 from .default_planner import DefaultSavePlanner
 from .metadata import Metadata, STATE_DICT_TYPE
-from .planner import SavePlanner
 from .storage import StorageWriter
 from .utils import _DistWrapper
 
@@ -105,14 +107,8 @@ def save(
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
-    dumpable_state_dict = {}
-    for key, elem in state_dict.items():
-        dumpable_state_dict[key] = (
-            elem.state_dict() if isinstance(elem, Stateful) else elem
-        )
-
     return _save_state_dict(
-        dumpable_state_dict,
+        _stateful(state_dict),
         storage_writer,
         process_group,
         coordinator_rank,
@@ -120,6 +116,38 @@ def save(
         planner,
     )
 
+def async_save(state_dict: STATE_DICT_TYPE, *args: Any, **kwargs: Any) -> Future:
+    """Asynchronous version of ``save_state_dict``. This code first de-stages the state_dict on CPU, and then calls
+    `save` in a separate thread.
+
+    .. warning::
+        This feature is experimental and subject to removal/change.
+
+    Returns:
+        Future: A future holding the resultant Metadata object from `save`.
+
+    """
+
+    # since calling nccl collectives in new threads is risky, we call `_stateful` here in case users have
+    # defined custom collectives
+    cpu_state_dict = _offload_state_dict_to_cpu(_stateful(state_dict))
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    f = executor.submit(
+        _save_state_dict,
+        cpu_state_dict,
+        *args,
+        **kwargs
+    )
+    f.add_done_callback(lambda f: executor.shutdown(wait=False))
+
+    return f
+
+def _stateful(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+    stateful_state_dict = {}
+    for key, elem in state_dict.items():
+        stateful_state_dict[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
+    return stateful_state_dict
 
 def _save_state_dict(
     state_dict: STATE_DICT_TYPE,

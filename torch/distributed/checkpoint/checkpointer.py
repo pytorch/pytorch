@@ -1,9 +1,10 @@
+from concurrent.futures import Future
 from typing import Any, Dict, Optional
 
 import torch.distributed as dist
 import torch.distributed.checkpoint.state_dict_loader as loader
 import torch.distributed.checkpoint.state_dict_saver as saver
-from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
+from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
 from torch.distributed.checkpoint.storage import (
     LoadPlanner,
     SavePlanner,
@@ -57,9 +58,9 @@ class Checkpointer:
     def save(
         self,
         state_dict: STATE_DICT_TYPE,
-    ):
+    ) -> Metadata:
         """Calls :py:meth: `torch.distributed.state_dict_saver.save`. Utilizing values passed during initialization."""
-        saver.save(
+        return saver.save(
             state_dict,
             self.storage_writer,
             process_group=self.process_group,
@@ -68,7 +69,7 @@ class Checkpointer:
             planner=self.save_planner,
         )
 
-    def load(self, state_dict: Dict[str, Any]):
+    def load(self, state_dict: Dict[str, Any]) -> None:
         """Calls :py:meth: `torch.distributed.state_dict_loader.load`. Utilizing values passed during initialization."""
         loader.load(
             state_dict,
@@ -77,4 +78,21 @@ class Checkpointer:
             coordinator_rank=self.coordinator_rank,
             no_dist=self.no_dist,
             planner=self.load_planner,
+        )
+
+    def async_save(self, state_dict: STATE_DICT_TYPE) -> Future:
+        """
+        Calls :py:meth: `torch.distributed.state_dict_saver.async_save`
+
+        .. warning::
+            This feature is experimental and subject to removal/change.
+
+        """
+        return saver.async_save(
+            state_dict,
+            self.storage_writer,
+            process_group=self.process_group,
+            coordinator_rank=self.coordinator_rank,
+            no_dist=self.no_dist,
+            planner=self.save_planner,
         )
