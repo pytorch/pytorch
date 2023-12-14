@@ -1122,17 +1122,16 @@ def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
     l_y_ = L_y_
     map_body_1 = self.map_body_1
     map_impl = torch.ops.higher_order.map_impl(map_body_1, 1, l_xs_, l_y_);  map_body_1 = l_xs_ = l_y_ = None
-    getitem_2 = map_impl[0];  map_impl = None
-    return (getitem_2,)""",
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
             )
             self.assertExpectedInline(
                 body_graph,
                 """\
 def forward(self, getitem, l_y_):
-    getitem_3 = getitem
-    l_y__1 = l_y_
+    getitem_1 = getitem[0]
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, getitem_3, l_y__1);  map_body_0 = getitem_3 = l_y__1 = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, getitem, l_y_);  map_body_0 = getitem = l_y_ = None
     getitem_2 = map_impl[0];  map_impl = None
     return (getitem_2,)""",
             )
@@ -1162,9 +1161,8 @@ def forward(self, L_x_ : torch.Tensor):
                 body_graph,
                 """\
 def forward(self, getitem):
-    getitem_1 = getitem
-    sin = getitem_1.sin()
-    sin_1 = getitem_1.sin();  getitem_1 = None
+    sin = getitem.sin()
+    sin_1 = getitem.sin();  getitem = None
     return (sin, sin_1)""",
             )
 
@@ -1204,8 +1202,7 @@ def forward(self, L_x_ : torch.Tensor):
                 body_graph,
                 """\
 def forward(self, getitem):
-    getitem_1 = getitem
-    return (getitem_1, getitem_1, getitem_1, getitem_1, getitem_1, getitem_1, getitem_1)""",
+    return (getitem, getitem, getitem, getitem, getitem, getitem, getitem)""",
             )
 
     def test_map_kwargs(self):
@@ -1240,16 +1237,15 @@ def forward(self, getitem):
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_);  map_body_0 = l_x_ = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
     getitem_1 = map_impl[0];  map_impl = None
     return (getitem_1,)""",
             )
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem):
-    getitem_1 = getitem
-    add = getitem_1 + 3;  getitem_1 = None
+def forward(self, getitem, const):
+    add = getitem + 3;  getitem = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
             )
@@ -1275,16 +1271,15 @@ def forward(self, getitem):
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_);  map_body_0 = l_x_ = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
     getitem_1 = map_impl[0];  map_impl = None
     return (getitem_1,)""",
             )
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, getitem):
-    getitem_1 = getitem
-    add = getitem_1 + 3;  getitem_1 = None
+def forward(self, getitem, const):
+    add = getitem + 3;  getitem = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
             )

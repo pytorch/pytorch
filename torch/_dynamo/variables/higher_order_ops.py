@@ -206,6 +206,7 @@ def speculate_subgraph(
     manually_set_subgraph_inputs=True,
     restore_side_effects=True,
     should_flatten_outputs=False,
+    should_flatten_inputs=False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer=None,
@@ -225,18 +226,42 @@ def speculate_subgraph(
             lambda x: x.realize(),
             (f, sub_args, sub_kwargs),
         )
-        with tx.output.subtracer(source_target, tracer) as subtracer:
-            args = validate_args_and_maybe_create_graph_inputs(
-                sub_args, subtracer, tx, manually_set_subgraph_inputs, description
-            )
 
-            validate_args_and_maybe_create_graph_inputs(
-                sub_kwargs.values(),
-                subtracer,
-                tx,
-                manually_set_subgraph_inputs=False,
-                description=description,
-            )
+        with tx.output.subtracer(source_target, tracer) as subtracer:
+            if should_flatten_inputs:
+                if sub_kwargs:
+                    unimplemented(
+                        "Passing both `should_flatten_inputs=True` and `sub_kwargs` is not supported."
+                    )
+
+                flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
+                    ListVariable(sub_args)
+                ).unpack_var_sequence(tx)
+
+                args = validate_args_and_maybe_create_graph_inputs(
+                    flat_args.items,
+                    subtracer,
+                    tx,
+                    manually_set_subgraph_inputs=True,
+                    description=description,
+                )
+                args = _make_inlined(tx, pytree.tree_unflatten)(
+                    ListVariable(args), tree_spec
+                )
+                args = args.items
+
+            else:
+                args = validate_args_and_maybe_create_graph_inputs(
+                    sub_args, subtracer, tx, manually_set_subgraph_inputs, description
+                )
+
+                validate_args_and_maybe_create_graph_inputs(
+                    sub_kwargs.values(),
+                    subtracer,
+                    tx,
+                    manually_set_subgraph_inputs=False,
+                    description=description,
+                )
 
             autograd_ctx = (
                 dynamo_enable_grad(tx, enable_grad)
@@ -748,64 +773,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             manually_set_subgraph_inputs=False,
             should_flatten_outputs=True,
+            should_flatten_inputs=True,
         )
-
-        # Find out used lifted args in body_graph.
-        # Note: Those un-used lifted freevars are first dim variables used for
-        # sepculate subgraphs. They're lifted to parent when tracing, which
-        # causes their parent to lift to their graph inputs (they're not used anywhere in the parent
-        # since it's a temporary slice from parent graph's point of view) and
-        # finally becomes a get_item call in top-level grah.
-        used_lifted_freevars = {
-            key: proxy
-            for key, proxy in body_lifted_freevars.items()
-            if len(proxy.node.users) > 0
-        }
-
-        map_sliced_proxy_to_arg = {first_dim.as_proxy(): args[1].as_proxy()}
-
-        # It could be possible that body graph never uses the sliced xs at all.
-        # We therefore need to find out which sliced_proxies are used in the body graph.
-        used_mapped_proxy = {
-            outer_proxy: inner_proxy
-            for outer_proxy, inner_proxy in used_lifted_freevars.items()
-            if outer_proxy in map_sliced_proxy_to_arg
-        }
-        used_other_proxy = {
-            outer_proxy: inner_proxy
-            for outer_proxy, inner_proxy in used_lifted_freevars.items()
-            if outer_proxy not in used_mapped_proxy
-        }
-
-        def _fixup_body_inps(graph, mapped_proxy, other_proxy):
-            # Remove unused placeholders.
-            unused_phs = [
-                node
-                for node in graph.nodes
-                if node.op == "placeholder" and len(node.users) == 0
-            ]
-            for node in unused_phs:
-                graph.erase_node(node)
-
-            first_not_ph_node = next(
-                node for node in graph.nodes if node.op != "placeholder"
-            )
-
-            def _override_existing_node(proxy_map):
-                for outer_proxy, inner_proxy in proxy_map.items():
-                    new_ph = graph.placeholder(outer_proxy.node.name)
-                    old_ph = inner_proxy.node
-                    old_ph.replace_all_uses_with(new_ph)
-                    # replace_all_uses_with doesn't clean users. Clean it mannually so that we could erase it.
-                    old_ph.users = {}
-                    graph.erase_node(old_ph)
-
-            # Overriding the placeholders to to what we want: i.e. mapped then others.
-            with graph.inserting_before(first_not_ph_node):
-                _override_existing_node(mapped_proxy)
-                _override_existing_node(other_proxy)
-
-        _fixup_body_inps(body_graph, used_mapped_proxy, used_other_proxy)
 
         body_nn_modules = dict(tx.output.nn_modules)
 
@@ -816,15 +785,12 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             torch.fx.GraphModule(body_nn_modules, body_graph),
         )
 
-        mapped_args = [
-            map_sliced_proxy_to_arg[outer_proxy]
-            for outer_proxy in used_mapped_proxy.keys()
-        ]
         body_node = make_attr(tx, body_name)
+
         p_args = (
             body_node,
-            len(mapped_args),  # right now we only supports num_mapped = 1
-            *(mapped_args + list(used_other_proxy.keys())),
+            1,  # right now we only supports num_mapped = 1
+            *([arg.as_proxy() for arg in args[1:]] + list(body_lifted_freevars.keys())),
         )
         return _call_function_and_unflatten_output(
             tx, torch.ops.higher_order.map_impl, p_args, {}, body_r, body_spec
