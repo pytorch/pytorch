@@ -403,6 +403,9 @@ public:
   Vectorized<T> expm1() const {
     return map(std::expm1);
   }
+  Vectorized<T> exp_u20() const {
+    return map(std::exp);
+  }
   Vectorized<T> frac() const {
     return *this - this->trunc();
   }

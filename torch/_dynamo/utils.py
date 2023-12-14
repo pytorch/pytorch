@@ -941,6 +941,9 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
+iter_next = next
+
+
 def enum_repr(value, local):
     # enum class can override __str__ method. Use __class__ and name attribute
     # to extract the class name and key name.
@@ -2281,11 +2284,14 @@ def get_static_address_type(t):
 
 def is_rng_state_getter_or_setter(value):
     getters = (
+        # The following two functions are not identical, so don't remove anyone!
+        torch._C.Generator.get_state,
         torch.default_generator.get_state,
         torch.get_rng_state,
         torch.cuda.get_rng_state,
     )
     setters = (
+        torch._C.Generator.set_state,
         torch.default_generator.set_state,
         torch.set_rng_state,
         torch.cuda.set_rng_state,
@@ -2299,6 +2305,10 @@ def is_tensor_base_attr_getter(value):
         and value.__name__ == "__get__"
         and value.__self__.__objclass__ is torch._C._TensorBase  # type: ignore[attr-defined]
     )
+
+
+def is_torch_function_object(value):
+    return hasattr(value, "__torch_function__")
 
 
 def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
