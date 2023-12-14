@@ -325,7 +325,7 @@ class TestMaxAutotune(TestCase):
         expected_fuse_count=1,
         mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
         with_bias=False,
-        bias_broadcast=[False, False],
+        bias_broadcast=(False, False),
         with_aux=False,
         m=1024,
         n=1024,

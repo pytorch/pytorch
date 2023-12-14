@@ -420,7 +420,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         )
         if fuseable:
             cutlass_template_evt = CUTLASSGemmTemplate(
-                input_nodes,
+                input_nodes,  # type: ignore[arg-type]
                 layout,
                 alpha=alpha,
                 beta=beta,
@@ -441,7 +441,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 can_fuse_epilogue = None
 
             cutlass_template = CUTLASSGemmTemplate(
-                input_nodes,
+                input_nodes,  # type: ignore[arg-type]
                 layout,
                 alpha=alpha,
                 beta=beta,
@@ -491,7 +491,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices,
             self.layout,
-            self.input_nodes,
+            self.input_nodes,  # type: ignore[arg-type]
             alpha=self.alpha,
             beta=self.beta,
             fuseable=True,
@@ -571,7 +571,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def layout_match(
-        torch_layout: ir.Layout, cutlass_layout: "cutlass_lib.LayoutType"
+        torch_layout: ir.Layout,
+        cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined] # noqa: F821
     ) -> bool:
         """Helper Method: Determines whether a given torch layout matches a given Cutlass layout"""
         return CUTLASSGemmTemplate.cutlass_layout(torch_layout) == cutlass_layout
@@ -599,9 +600,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             return True
 
     @staticmethod
-    def has_tma_epilogue(
-        op: "cutlass_library.gemm_op.GemmOperation",
-    ) -> bool:  #  type: ignore[name-defined]
+    def has_tma_epilogue(  # noqa: F821 # type: ignore[arg-type,name-defined]
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined,arg-type] # noqa: F821
+    ) -> bool:  # type: ignore[name-defined]
         """Helper method: Determine whether a given Cutlass GEMM op has a TMA Epilogue"""
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.library as cutlass_lib
@@ -1322,7 +1323,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         ):
             additional_input_nodes: List[
                 ir.ComputedBuffer
-            ] = template_buffer_node.get_additional_input_nodes(epilogue_nodes)
+            ] = template_buffer_node.get_additional_input_nodes(
+                epilogue_nodes  # type: ignore[arg-type]
+            )  # type: ignore[arg-type]
             aux_input_nodes = additional_input_nodes  # type: ignore[assignment]
             # If we have additional nodes, their memory layout might be interpreted differently
             # than in the corresponding input node. We actually need to interpret the (Triton-style)
@@ -1337,22 +1340,23 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 epilogue_node = epilogue_nodes[0]
                 # Extract strides and offsets, mapped to the GEMM output reference dimensions
                 # of all inputs of the Pointwise op
+                pointwise_load_strides: Dict[str, Tuple[List[int], int, List[int]]] = {}
                 if len(additional_input_nodes) > 0:
-                    pointwise_load_strides: Dict[
-                        str, List[int]
-                    ] = extract_pointwise_load_strides(
+                    pointwise_load_strides = extract_pointwise_load_strides(
                         epilogue_node, template_buffer_node
                     )
                 # If we want to cast one of the additional inputs as Bias
                 for i in range(len(additional_input_nodes)):
-                    MaybeBias = additional_input_nodes[i]
+                    MaybeBias: IRNode = additional_input_nodes[i]
                     if MaybeBias.get_name() is None:
                         continue
                     (
                         maybe_bias_stride,
                         maybe_bias_offset,
                         maybe_bias_size,
-                    ) = pointwise_load_strides.get(MaybeBias.get_name(), None)
+                    ) = pointwise_load_strides.get(
+                        MaybeBias.get_name(), (None, None, None)
+                    )
                     if maybe_bias_stride is None:
                         continue
                     if len(maybe_bias_stride) < 2:
@@ -1369,7 +1373,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                         reinterpret_mbb_layout = ir.FixedLayout(
                             device=mbb_layout.device,
                             dtype=mbb_layout.dtype,
-                            size=maybe_bias_size,
+                            size=maybe_bias_size,  # type: ignore[arg-type]
                             stride=maybe_bias_stride,
                             offset=maybe_bias_offset,
                         )
@@ -1401,7 +1405,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                     aux_input_nodes = (
                         additional_input_nodes[:i] + additional_input_nodes[i + 1 :]  # type: ignore[assignment]
                     )
-                    Bias = MaybeBias
+                    Bias = MaybeBias  # type: ignore[assignment]
                     break
             for i, aux_input_node in enumerate(aux_input_nodes):
                 assert (

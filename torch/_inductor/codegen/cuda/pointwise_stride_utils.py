@@ -16,51 +16,6 @@ def map_pointwise_index_to_read_strides(
     index_expr: sympy.Expr, master_layout: ir.Layout, flip_mn: bool
 ) -> List[int]:
     """
-    Converts a Sympy index expression into a list of strides, according to the provided master layout.
-
-    Arguments:
-        index_expr (sympy.Expr): The Sympy expression to transform.
-        master_layout (ir.Layout): The layout to map the strides to.
-        flip_mn (bool): If True, the last two dimensions of the stride and the layout are swapped.
-
-    Returns:
-        List[int]: The list of computed strides.
-    """
-    free_symbols = list(index_expr.free_symbols)
-    assert len(free_symbols) <= len(
-        master_layout.stride
-    ), f"Too many free symbols in index expression {index_expr} for layout {master_layout}"
-    subs = {sym: 0 for sym in free_symbols}
-    result_strides = [0] * len(master_layout.stride)
-    sym_idx_map = list(range(len(result_strides)))
-    # flip m and n dimensions in this mapping
-    if flip_mn and len(master_layout.stride) >= 2:
-        sym_idx_map[-1] = len(master_layout.stride) - 2
-        sym_idx_map[-2] = len(master_layout.stride) - 1
-    for i in range(len(free_symbols)):
-        sym_name = free_symbols[i].name
-        assert sym_name[0] == "i"
-        sym_idx = sym_idx_map[int(sym_name[1:])]
-        assert sym_idx >= 0 and sym_idx < len(
-            master_layout.stride
-        ), f"Invalid symbol name {sym_name} in index expression {index_expr} for layout {master_layout}"
-        if i > 0:
-            subs[free_symbols[i - 1]] = 0
-        subs[free_symbols[i]] = 1
-        stride = index_expr.evalf(subs=subs)
-        assert (
-            math.isfinite(stride) and stride >= 0.0
-        ), f"Invalid stride {stride} for symbol {free_symbols[i]} in index expression {index_expr}"
-        stride = int(stride)
-        result_strides[sym_idx] = stride
-
-    return result_strides
-
-
-def map_pointwise_index_to_read_strides(
-    index_expr: sympy.Expr, master_layout: ir.Layout, flip_mn: bool
-) -> List[int]:
-    """
     Converts a sympy index expression to a list of strides in accordance with the provided master layout.
 
     Takes a sympy index expression as input and converts this to a list of strides, aligned to the layout
@@ -186,7 +141,6 @@ class _IndexExtractor:
         self.name_index_expr_map[name] = index_expr
 
 
-@staticmethod
 def extract_pointwise_load_strides(
     node: ir.IRNode, reference_buffer: ir.Buffer
 ) -> Dict[str, Tuple[List[int], int, List[int]]]:
@@ -226,7 +180,7 @@ def extract_pointwise_load_strides(
 
     name_index_expr_map = extractor.name_index_expr_map
     reference_index_expr: Optional[sympy.Expr] = name_index_expr_map.get(
-        reference_buffer.name, None
+        reference_buffer.name, None  # type: ignore[arg-type]
     )
     if reference_index_expr is None:
         raise RuntimeError("Reference buffer not loaded by pointwise op")
@@ -246,7 +200,7 @@ def extract_pointwise_load_strides(
         dim = reference_stride_to_dim_map.get(stride, -1)
         if dim == -1:
             raise RuntimeError(
-                f"Reference buffer {reference_buffer.name} is being read with stride {stride} that has no corresponding existing dimension."
+                f"Reference buffer {reference_buffer.name} is being read with stride {stride} that has no corresponding existing dimension."  # noqa: B950
             )
         index_to_reference_dim[name] = dim
     result = {}
@@ -269,7 +223,7 @@ def extract_pointwise_load_strides(
             dim = index_to_reference_dim.get(index_name, -1)
             if dim == -1:
                 raise RuntimeError(
-                    f"Buffer {name} is being read with stride {stride} ( index name: {index_name} ) that has no corresponding existing dimension in reference buffer {reference_buffer.name}."
+                    f"Buffer {name} is being read with stride {stride} ( index name: {index_name} ) that has no corresponding existing dimension in reference buffer {reference_buffer.name}."  # noqa: B950
                 )
             buffer_strides[dim] = stride
             buffer_sizes[dim] = reference_layout.size[

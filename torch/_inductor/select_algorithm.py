@@ -824,10 +824,12 @@ class AlgorithmSelectorCache(PersistentCache):
                         try:
                             next(iterator)
                         except CUDACompileError:
-                            log.error("CUDA Compilation error", exc_info=True)
+                            log.error(  # noqa: G201
+                                "CUDA Compilation error", exc_info=True
+                            )
                 except TimeoutError:
                     log.warning(
-                        f"Precompilation timed out after {precompilation_timeout_seconds} seconds."
+                        f"Precompilation timed out after {precompilation_timeout_seconds} seconds."  # noqa: G004
                     )
                 except StopIteration:
                     pass

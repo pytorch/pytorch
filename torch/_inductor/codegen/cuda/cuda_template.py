@@ -31,7 +31,7 @@ def _set_layout(input_node: ir.IRNode, layout: Layout):
     if isinstance(input_node, ir.MutableBox):
         _set_layout(input_node.data, layout)
     else:
-        input_node.layout = layout
+        input_node.layout = layout  # type: ignore[attr-defined]
 
 
 class MakeCUDAKernelRender:
