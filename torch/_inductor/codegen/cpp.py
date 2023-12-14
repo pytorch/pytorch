@@ -174,6 +174,14 @@ def reduction_init(reduction_type, dtype):
     raise AssertionError(reduction_type)
 
 
+def sync_stores_to_parallel_reduction_stores(
+    store_bufer, parallel_reduction_stores_buffer
+):
+    for line in store_bufer._lines:
+        if isinstance(line, DeferredLine):
+            parallel_reduction_stores_buffer.writeline(line)
+
+
 def reduction_init_vec(reduction_type, dtype):
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     vec_type = f"at::vec::Vectorized<{scalar_type}>"
@@ -1324,7 +1332,9 @@ class CppKernel(Kernel):
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
 
-        self.parallel_reduction_stores.writelines(self.stores._lines)
+        sync_stores_to_parallel_reduction_stores(
+            self.stores, self.parallel_reduction_stores
+        )
         acc = self.reduction_cse.generate(
             self.loads, f"reduction {reduction_key}", write=False
         )
@@ -1755,7 +1765,9 @@ class CppVecKernel(CppKernel):
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
 
-        self.parallel_reduction_stores.writelines(self.stores._lines)
+        sync_stores_to_parallel_reduction_stores(
+            self.stores, self.parallel_reduction_stores
+        )
         acc = self.reduction_cse.generate(
             self.loads, f"reduction {reduction_key}", write=False
         )
