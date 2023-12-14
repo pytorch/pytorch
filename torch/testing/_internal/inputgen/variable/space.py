@@ -1,5 +1,5 @@
 import math
-from typing import Any, List, Optional, Union
+from typing import Any, Callable, List, Optional, Union
 
 from torch.testing._internal.inputgen.variable.constants import INT64_MAX, INT64_MIN
 from torch.testing._internal.inputgen.variable.type import (
@@ -12,6 +12,31 @@ from torch.testing._internal.inputgen.variable.type import (
 
 
 class Discrete:
+    """
+    Representes a set of discrete values. Examples:
+
+    >>> d = Discrete(['a','b','c'])
+    >>> d.contains('a')
+    True
+    >>> d.contains('z')
+    False
+    >>> d.remove('a')
+    >>> str(d)
+    "{'b', 'c'}"
+
+    >>> d = Discrete([-4,1,2,3,7,9])
+    >>> d.contains(1)
+    True
+    >>> d.contains(-5)
+    False
+    >>> d.remove(1)
+    >>> str(d)
+    '{-4, 2, 3, 7, 9}'
+    >>> d.filter(lambda x: x % 2 == 0)
+    >>> str(d)
+    '{-4, 2}'
+    """
+
     def __init__(self, values: Optional[List[Any]] = None):
         if values is None:
             self.initialized = False
@@ -28,21 +53,25 @@ class Discrete:
         return str(self.values)
 
     def empty(self) -> bool:
+        """Returns true iff the set is empty."""
         if not self.initialized:
             raise Exception("Discrete must be initialized before checking if empty")
         return len(self.values) == 0
 
-    def contains(self, v) -> bool:
+    def contains(self, v: Any) -> bool:
+        """Returns true iff the value is contained in the set."""
         if not self.initialized:
             raise Exception("Discrete must be initialized before checking membership")
         return v in self.values
 
-    def remove(self, v) -> None:
+    def remove(self, v: Any) -> None:
+        """Removes the value from the set."""
         if not self.initialized:
             raise Exception("Discrete must be initialized before removing")
         self.values.difference_update({v})
 
-    def filter(self, f) -> None:
+    def filter(self, f: Callable[[Any], bool]) -> None:
+        """Filters out all elements that do not satisfy the predicate."""
         if not self.initialized:
             raise Exception("Discrete must be initialized before filtering")
         new_values = set()
@@ -53,6 +82,43 @@ class Discrete:
 
 
 class Interval:
+    """
+    Represents an interval of real numbers. By default, the interval is closed on both
+    ends. Examples:
+
+    >>> i = Interval(1, 3)
+    >>> str(i)
+    "[1, 3]"
+    >>> i.contains(1)
+    True
+    >>> i.contains(2)
+    True
+    >>> i.contains(3)
+    True
+    >>> i.contains(0)
+    False
+    >>> i.contains(4)
+    False
+    >>> i.contains_int()
+    True
+
+    >>> i = Interval(1, 3, lower_open=True)
+    >>> str(i)
+    "(1, 3]"
+    >>> i.contains(1)
+    False
+
+    >>> i = Interval(1, 2, lower_open=True, upper_open=True)
+    >>> str(i)
+    "(1, 2)"
+    >>> i.contains(1)
+    False
+    >>> i.contains(2)
+    False
+    >>> i.contains_int()
+    False
+    """
+
     def __init__(
         self,
         lower: Union[int, float] = float("-inf"),
@@ -71,6 +137,7 @@ class Interval:
         return f"{lower_braket}{self.lower}, {self.upper}{upper_braket}"
 
     def empty(self) -> bool:
+        """Returns true iff the interval is empty."""
         if self.lower < self.upper:
             return False
         elif self.lower == self.upper:
@@ -78,7 +145,8 @@ class Interval:
         else:
             return True
 
-    def contains(self, v) -> bool:
+    def contains(self, v: Union[int, float]) -> bool:
+        """Returns true iff the value is contained in the interval."""
         if self.empty():
             return False
         if v < self.lower:
@@ -92,6 +160,7 @@ class Interval:
         return True
 
     def contains_int(self) -> bool:
+        """Returns true iff the interval contains at least one integer."""
         if self.empty():
             return False
         if self.lower > INT64_MAX or (self.lower == INT64_MAX and self.lower_open):
@@ -106,10 +175,54 @@ class Interval:
 
 
 class Intervals:
+    """
+    Represents an ordered sequence of disjoint intervals. It defaults to [-inf, inf].
+    Examples:
+
+    >>> i = Intervals()
+    >>> str(i)
+    "[-inf, inf]"
+    >>> i.contains(float('inf'))
+    True
+    >>> i.remove(float('inf'))
+    >>> str(i)
+    "[-inf, inf)"
+    >>> i.contains(float('inf'))
+    False
+
+    >>> i = Intervals([Interval(1, 3), Interval(5, 7)])
+    >>> str(i)
+    "[1, 3] [5, 7]"
+    >>> i.set_lower(7, lower_open=True)
+    >>> str(i)
+    "{}"
+    >>> i.empty()
+    True
+
+    >>> i = Intervals([Interval(1, 3), Interval(5, 7, lower_open=True)])
+    >>> str(i)
+    "[1, 3] (5, 7]"
+    >>> i.contains(4)
+    False
+    >>> i.contains(5)
+    False
+    >>> i.contains_int()
+    True
+    >>> i.set_lower(2, lower_open=True)
+    >>> str(i)
+    "(2, 3] (5, 7]"
+    >>> i.set_upper(6, upper_open=True)
+    >>> str(i)
+    "(2, 3] (5, 6)"
+    >>> i.remove(3)
+    >>> str(i)
+    "(2, 3) (5, 6)"
+    >>> i.contains_int()
+    False
+    """
+
     def __init__(self, intervals: Optional[List[Interval]] = None):
-        self.intervals = intervals
-        if self.intervals is None:
-            self.intervals = [Interval()]
+        self.intervals = [Interval()] if intervals is None else intervals
 
     def __str__(self) -> str:
         if len(self.intervals) == 0:
@@ -117,15 +230,19 @@ class Intervals:
         return " ".join([str(r) for r in self.intervals])
 
     def empty(self) -> bool:
+        """Returns true iff the intervals are empty."""
         return all(r.empty() for r in self.intervals)
 
-    def contains(self, v) -> bool:
+    def contains(self, v: Union[int, float]) -> bool:
+        """Returns true iff the value is contained within one of the intervals."""
         return any(r.contains(v) for r in self.intervals)
 
     def contains_int(self) -> bool:
+        """Returns true iff some integer is contained within one of the intervals."""
         return any(r.contains_int() for r in self.intervals)
 
-    def remove(self, v) -> None:
+    def remove(self, v: Union[int, float]) -> None:
+        """Removes the value from the intervals."""
         for ix, r in enumerate(self.intervals):
             if r.lower <= v <= r.upper:
                 if r.lower == v and r.upper == v:
@@ -144,7 +261,10 @@ class Intervals:
                     )
                 return
 
-    def set_lower(self, lower: float, lower_open: bool = False) -> None:
+    def set_lower(self, lower: Union[int, float], lower_open: bool = False) -> None:
+        """Sets the lower bound, being open or closed depending on the flag. In other
+        words, it removes all values less than the given value. It also removes the value
+        itself if lower_open is True."""
         for ix, r in enumerate(self.intervals):
             if r.upper < lower or r.upper == lower and (r.upper_open or lower_open):
                 continue
@@ -157,7 +277,10 @@ class Intervals:
             return
         self.intervals = []
 
-    def set_upper(self, upper: float, upper_open: bool = False) -> None:
+    def set_upper(self, upper: Union[int, float], upper_open: bool = False) -> None:
+        """Sets the upper bound, being open or closed depending on the flag. In other
+        words, it removes all values greather than the given value. It also removes the value
+        itself if upper_open is True."""
         for ix, r in enumerate(self.intervals):
             if r.upper < upper:
                 continue
@@ -174,7 +297,38 @@ class Intervals:
 
 
 class VariableSpace:
-    def __init__(self, vtype):
+    """
+    Represents a space of values for a variable of a given type.
+    The space can be discrete or continuous. Examples:
+
+    >>> s = VariableSpace(bool)
+    >>> str(s)
+    '[False, True]'
+    >>> s.contains(True)
+    True
+    >>> s.contains(1)
+    True
+    >>> s.remove(0)
+    >>> str(s)
+    '[True]'
+
+    >>> s = VariableSpace(int)
+    >>> str(s)
+    '(-inf, inf)'
+    >>> s.remove(1)
+    >>> str(s)
+    '(-inf, 1) (1, inf)'
+
+    >>> s = VariableSpace(float)
+    >>> str(s)
+    '[-inf, inf]'
+
+    >>> s = VariableSpace(ScalarDtype)
+    >>> str(s)
+    '{ScalarDtype.bool, ScalarDtype.int, ScalarDtype.float}'
+    """
+
+    def __init__(self, vtype: type):
         if not VariableType.contains(vtype):
             raise ValueError(f"Unsupported variable type {vtype}")
         self.vtype = vtype
@@ -200,6 +354,7 @@ class VariableSpace:
             return str(self.intervals)
 
     def empty(self) -> bool:
+        """Returns true iff the space is empty."""
         if self.discrete.initialized:
             return self.discrete.empty()
         elif self.vtype == int:
@@ -208,7 +363,8 @@ class VariableSpace:
             return self.intervals.empty()
         return False
 
-    def contains(self, v) -> bool:
+    def contains(self, v: Any) -> bool:
+        """Returns true iff the value is contained in the space."""
         if invalid_vtype(self.vtype, v):
             raise TypeError("Variable type mismatch")
         if self.discrete.initialized:
@@ -221,7 +377,8 @@ class VariableSpace:
             return self.intervals.contains(v)
         return True
 
-    def remove(self, v) -> None:
+    def remove(self, v: Any) -> None:
+        """Removes the value from the space."""
         if invalid_vtype(self.vtype, v):
             raise TypeError("Variable type mismatch")
         if self.discrete.initialized:
