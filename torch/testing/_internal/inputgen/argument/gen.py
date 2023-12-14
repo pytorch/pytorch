@@ -32,8 +32,13 @@ class TensorGenerator:
         )
 
     def get_random_tensor(self, size, dtype, high=None, low=None):
-        high = 100 if high is None else high
-        low = -high if low is None else low
+        if low is None and high is None:
+            low = -100
+            high = 100
+        elif low is None:
+            low = high - 100
+        elif high is None:
+            high = low + 100
         size = tuple(size)
         if dtype == torch.bool:
             if not self.space.contains(0):
@@ -58,7 +63,10 @@ class TensorGenerator:
 
         t = torch.randint(low=low, high=high, size=size, dtype=dtype)
         if not self.space.contains(0):
-            pos = torch.randint(low=max(1, low), high=high, size=size, dtype=dtype)
+            if high > 0:
+                pos = torch.randint(low=max(1, low), high=high, size=size, dtype=dtype)
+            else:
+                pos = torch.randint(low=low, high=0, size=size, dtype=dtype)
             t = torch.where(t == 0, pos, t)
 
         if dtype in integral_types():

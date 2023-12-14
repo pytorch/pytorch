@@ -10,7 +10,24 @@ from torch.testing._internal.inputgen.variable.type import (
 
 
 class SolvableVariable:
-    def __init__(self, vtype):
+    """
+    A solvable variable is a variable over which we can impose constraints.
+    It needs to be initialized with the variable type. It maintains an internal state
+    of the possible values of the variable, represented by a VariableSpace object.
+    It supports the following constraints:
+        - Eq: Equal to a specific value
+        - Ne: Not equal to a specific value
+        - In: Contained in a list of values
+        - NotIn: Not contained in a list of values
+        - Le: Less than or equal to a specific value
+        - Lt: Less than a specific value
+        - Ge: Greater than or equal to a specific value
+        - Gt: Greater than a specific value
+    The result of applying multiple constraints to a solvable variable, is the
+    conjunction of those constraints.
+    """
+
+    def __init__(self, vtype: type):
         self.vtype = vtype
         self.space = VariableSpace(vtype)
 

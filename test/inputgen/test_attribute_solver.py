@@ -62,6 +62,17 @@ class TestAttributeSolver(TestCase):
         self.assertEqual(str(variables[0].space), "[0, 3)")
         self.assertEqual(str(variables[1].space), "(7, inf)")
 
+    def test_scalar_type(self):
+        solver = AttributeSolver(Attribute.VALUE, ArgType.ScalarType)
+        constraints = []
+
+        variables = list(solver.solve(constraints, Attribute.VALUE, True))
+        self.assertEqual(len(variables), 1)
+        self.assertFalse(variables[0].space.empty())
+
+        variables = list(solver.solve(constraints, Attribute.VALUE, False))
+        self.assertEqual(len(variables), 0)
+
 
 if __name__ == "__main__":
     run_tests()
