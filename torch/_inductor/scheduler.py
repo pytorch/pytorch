@@ -134,7 +134,10 @@ class BaseSchedulerNode:
             str
         ] = set()  # buffers that won't be used after this kernel
         self.written = False
-        self.workspace_buffer = V.graph.get_workspace_buffer_for(self.node)
+
+    @property
+    def workspace_buffer(self):
+        return V.graph.get_workspace_buffer_for(self.node)
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"
