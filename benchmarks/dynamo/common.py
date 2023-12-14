@@ -221,6 +221,12 @@ CI_USE_SGD = {
     "DALLE2_pytorch",
     "moco",
     "timm_efficientdet",
+    "ghostnet_100",
+    "regnety_002",
+    "poolformer_m36",
+    "inception_v3",
+    "tinynet_a",
+    "selecsls42b",
 }
 
 
