@@ -1,20 +1,11 @@
 import abc
 from dataclasses import dataclass
-from typing import List, Any
+from typing import Any, List
 
 from torch.futures import Future
 
-from .metadata import (
-    Metadata,
-    MetadataIndex,
-)
-
-from .planner import (
-    LoadPlan,
-    SavePlan,
-    SavePlanner,
-    LoadPlanner,
-)
+from .metadata import Metadata, MetadataIndex
+from .planner import LoadPlan, LoadPlanner, SavePlan, SavePlanner
 
 __all__ = ["WriteResult", "StorageWriter", "StorageReader"]
 
@@ -115,9 +106,7 @@ class StorageWriter(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def finish(
-        self, metadata: Metadata, results: List[List[WriteResult]]
-    ) -> None:
+    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
         """
         Write the metadata and marks the current checkpoint as successful.
 
