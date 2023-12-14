@@ -584,7 +584,6 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
-
     def test_pointless_cumsum(self):
         # Constant folding was explicitly turned off due to issue #108388
         # Turn it back on for test
