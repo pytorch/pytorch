@@ -69,6 +69,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch._subclasses.fake_tensor import (
     FakeTensor,
+    FakeTensorConfig,
     FakeTensorMode,
 )
 from torch._subclasses.fake_utils import outputs_alias_inputs
@@ -84,6 +85,9 @@ import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 
 assert torch.get_default_dtype() == torch.float32
+
+FakeTensorConfig.cache_enabled = True
+FakeTensorConfig.cache_crosscheck_enabled = True
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -669,7 +673,7 @@ class TestCommon(TestCase):
         dtype = (
             torch.float32
             if torch.float32 in supported_dtypes
-            else list(supported_dtypes)[0]
+            else next(iter(supported_dtypes))
         )
 
         # Ops from python_ref_db point to python decomps that are potentially
@@ -1903,6 +1907,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
         # other
+        '_refs.block_diag',  # only refs._block_diag_iterable is in decomposition table
         '_refs.empty',  # intentional; direct empty is faster and has less guards
         '_refs.empty_permuted',  # intentional; direct empty is faster and has less guards
         '_refs.expand_as',

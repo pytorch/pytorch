@@ -11,12 +11,12 @@ from torch.testing._internal.jit_utils import RUN_CUDA
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
+    FakeTensorConfig,
     FakeTensorMode,
     FakeTensorConverter,
     DynamicOutputShapeException,
     UnsupportedOperatorException,
 )
-from torch._subclasses.fake_utils import outputs_alias_inputs
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic, free_symbols, StatelessSymbolicContext
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import ops
@@ -41,8 +41,8 @@ import torch.utils._pytree as pytree
 
 aten = torch.ops.aten
 
-FakeTensorMode.cache_enabled = True
-FakeTensorMode.cache_crosscheck = True
+FakeTensorConfig.cache_enabled = True
+FakeTensorConfig.cache_crosscheck_enabled = True
 
 
 class FakeTensorTest(TestCase):

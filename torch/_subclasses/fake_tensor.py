@@ -1033,10 +1033,20 @@ def should_allow_numbers_as_tensors(func: OpOverload):
     )
 
 
+def is_fbcode():
+    return not hasattr(torch.version, "git_version")
+
+
 class FakeTensorConfig:
     debug = os.environ.get("TORCH_FAKE_TENSOR_DEBUG", "0") == "1"
-    cache = os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE", "1") == "1"
-    cache_crosscheck = (
+    cache_enabled = (
+        os.environ.get(
+            "TORCH_FAKE_TENSOR_DISPATCH_CACHE",
+            "0" if is_fbcode() else "1",
+        )
+        == "1"
+    )
+    cache_crosscheck_enabled = (
         os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE_CROSSCHECK", "0") == "1"
     )
 
@@ -1427,8 +1437,6 @@ class FakeTensorMode(TorchDispatchMode):
     cache_hits: int = 0
     cache_misses: int = 0
     cache_bypasses = defaultdict(int)
-    cache_enabled: bool = FakeTensorConfig.cache
-    cache_crosscheck: bool = FakeTensorConfig.cache_crosscheck
 
     def __init__(
         self,
@@ -1568,7 +1576,7 @@ class FakeTensorMode(TorchDispatchMode):
             if entry is not None:
                 output = self._output_from_cache_entry(entry, func, args)
                 FakeTensorMode.cache_hits += 1
-                if FakeTensorMode.cache_crosscheck:
+                if FakeTensorConfig.cache_crosscheck_enabled:
                     # For debugging / testing: Validate that the output synthesized
                     # from the cache matches the output created by normal dispatch.
                     self._crosscheck_cache_output(output, func, types, args, kwargs)
@@ -1624,6 +1632,7 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             raise _BypassDispatchCache("CompositeImplicitAutograd")
 
+        shape_env = self.shape_env
         key_values = (
             func,
             # Translate any FakeTensor args to metadata.
@@ -1632,10 +1641,18 @@ class FakeTensorMode(TorchDispatchMode):
             # Capture the default_dtype mode since that can affect the output tensor,
             # e.g., when operating on constant float values.
             torch.get_default_dtype(),
-            # The disallowance of dynamic shapes can affect caching, e.g., a change of
-            # mode can introduce a DynamicOutputShapeException where it wasn't seen on
-            # a previous instance of the same func and arg combination.
-            self.shape_env and self.shape_env.allow_dynamic_output_shape_ops,
+            # Capture the current device to support, e.g., cache tensor creation,
+            # where there isn't necessarily a tensor to take the device from.
+            torch._C._get_default_device(),
+            # Shape env settings could affect behavior. One example seen in the wild:
+            # The disallowance of dynamic shapes could introduce a
+            # DynamicOutputShapeException where it wasn't seen on a previous instance
+            # of the same op.
+            shape_env.allow_scalar_outputs if shape_env else None,
+            shape_env.allow_dynamic_output_shape_ops if shape_env else None,
+            shape_env.assume_static_by_default if shape_env else None,
+            shape_env.specialize_zero_one if shape_env else None,
+            shape_env.duck_shape if shape_env else None,
         )
         return _DispatchCacheKey(key_values)
 
@@ -1828,7 +1845,7 @@ class FakeTensorMode(TorchDispatchMode):
             with in_kernel_invocation_manager(self):
                 return func(*args, **kwargs)
 
-        if FakeTensorMode.cache_enabled:
+        if FakeTensorConfig.cache_enabled:
             return self._cached_dispatch_impl(func, types, args, kwargs)
         else:
             return self._dispatch_impl(func, types, args, kwargs)
