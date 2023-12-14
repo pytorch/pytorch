@@ -1544,9 +1544,10 @@ class WelfordReduction(Reduction):
 class Scan(Loops):
     scan_ranges: List[Expr]
     size: List[Expr]
-    scan_op: str  # TODO make this a callable
+    combine_fn: Callable[..., Any]
     reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
     reduction_hint: ReductionHint
+    init: Any
 
     # HACK we mimick reduction
 
@@ -1557,11 +1558,12 @@ class Scan(Loops):
     def store_reduction(self, output_name, indexer, vars, scan_vars):
         idx = self.reindex(vars, scan_vars)
         value = self.inner_fn(idx)
-        result = ops.scan(self.dtype, self.scan_op, value)
+        result = ops.scan(self.dtype, self.combine_fn, value, self.init)
         return ops.store(output_name, indexer(idx), result)
 
     def get_reduction_type(self):
-        return self.scan_op
+        # return self.scan_op
+        return "custom"
 
     def get_reduction_size(self):
         return self.scan_ranges
@@ -1592,10 +1594,10 @@ class Scan(Loops):
         inner_fn: Callable[[List[Expr]], Any],
         size: List[Expr],
         axis: int,
-        scan_op: str,
+        combine_fn: Callable[..., Any],
+        init: Any,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ) -> Optional["TensorBox"]:
-        assert scan_op in {"sum", "prod"}
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
@@ -1626,7 +1628,7 @@ class Scan(Loops):
             axis=axis,
             pointwise_ranges=pointwise_ranges,
             scan_ranges=scan_ranges,
-            scan_op=scan_op,
+            combine_fn=combine_fn,
             scan_numel=scan_numel,
         )
         if num_splits > 1:
@@ -1646,8 +1648,9 @@ class Scan(Loops):
                 size=size,
                 ranges=pointwise_ranges,
                 scan_ranges=scan_ranges,
-                scan_op=scan_op,
+                combine_fn=combine_fn,
                 reindex=reindex,
+                init=init,
                 reduction_hint=reduction_hint,
             )
         )
@@ -1663,7 +1666,7 @@ class Scan(Loops):
         axis: int,
         pointwise_ranges: List[Expr],
         scan_ranges: List[Expr],
-        scan_op: str,
+        combine_fn: Callable[..., Any],
         scan_numel: Expr,
     ):
         # TODO: custom splitting heuristic for scan
@@ -1677,7 +1680,7 @@ class Scan(Loops):
             inner_fn=wrapper_fn,
             ranges=pointwise_ranges,
             reduction_ranges=scan_ranges,
-            reduction_type=scan_op,
+            reduction_type="sum",
             reduction_numel=scan_numel,
         )
 
@@ -2334,6 +2337,15 @@ class IndexingConstant(BaseConstant):
         return IndexingConstant(self.index, self.dtype, device)
 
 
+def is_contiguous_strides_for_shape(stride, shape):
+    return all(
+        size == 1 or left == right
+        for left, right, size in zip(
+            stride, FlexibleLayout.contiguous_strides(shape), shape
+        )
+    )
+
+
 @dataclasses.dataclass
 class Layout(IRNode):
     def __init__(
@@ -2370,12 +2382,7 @@ class Layout(IRNode):
     __repr__ = __str__
 
     def is_contiguous(self):
-        for left, right, size in zip(
-            self.stride, FlexibleLayout.contiguous_strides(self.size), self.size
-        ):
-            if size != 1 and left != right:
-                return False
-        return True
+        return is_contiguous_strides_for_shape(self.stride, self.size)
 
     def is_channels_last_contiguous(self):
         ndim = len(self.size)
@@ -3339,7 +3346,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         # Global memory (in bytes) needed for this template.
         self.workspace_size = workspace_size
         self.template = template
-        self._tuned_for_epilogue = []
+        self._tuned_for_epilogue: List[Any] = []
 
     def get_workspace_size(self):
         if callable(self.workspace_size):
@@ -3400,11 +3407,8 @@ class CUDATemplateBuffer(TemplateBuffer):
                     epilogue_nodes is None
                     or len(self._tuned_for_epilogue) == len(epilogue_nodes)
                     and all(
-                        [
-                            x is y
-                            for x, y in zip(self._tuned_for_epilogue, epilogue_nodes)
-                        ]
-                    )
+                        x is y for x, y in zip(self._tuned_for_epilogue, epilogue_nodes)
+                    )  # noqa: E122
                 ):
                     return
             choices = self.template.generate_retune_choices(self, epilogue_nodes)
@@ -3412,7 +3416,9 @@ class CUDATemplateBuffer(TemplateBuffer):
                 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
                 from torch._inductor.select_algorithm import autotune_select_algorithm
 
-                additional_inputs = self.get_additional_input_nodes(epilogue_nodes)
+                additional_inputs = self.get_additional_input_nodes(
+                    cast(List[ComputedBuffer], epilogue_nodes)
+                )
                 choice, timings = autotune_select_algorithm(
                     "retune",
                     choices,
@@ -4484,14 +4490,7 @@ class DynamicScalar(ExternKernel):
         return {self.sym}
 
     def codegen(self, wrapper):
-        (data,) = (t.codegen_reference() for t in self.inputs)
-        if self.is_bool:
-            wrapper.writeline(f"{self.sym} = 1 if {data}.item() else 0")
-        else:
-            wrapper.writeline(f"{self.sym} = {data}.item()")
-        # No one should ever use this buffer, but for uniformity
-        # define the variable and assign it None
-        wrapper.writeline(f"{self.get_name()} = None")
+        wrapper.codegen_dynamic_scalar(self)
 
 
 @dataclasses.dataclass
@@ -6737,6 +6736,18 @@ class LoopBodyBlock:
                 self.body.subblocks[name] = subblock
                 return tracer.create_proxy(
                     "call_module", name, (mask_proxy, other_proxy), {}
+                )
+
+            @staticmethod
+            def scan(
+                dtype_proxy, combine_fn: Callable[..., Any], value_proxy, init_proxy
+            ):
+                def shim(dtype, value, init):
+                    return V.ops.scan(dtype, combine_fn, value, init)
+
+                name = self.body.add_submodule(shim, "scan")
+                return tracer.create_proxy(
+                    "call_module", name, (dtype_proxy, value_proxy, init_proxy), {}
                 )
 
             @staticmethod

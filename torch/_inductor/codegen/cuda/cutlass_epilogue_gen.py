@@ -51,7 +51,7 @@ class CutlassEVTEpilogueTypeFormatter:
         evt_type_name,
         pre_fused_evt: Optional[str] = None,
         c_operand_alias: Optional[str] = None,
-        gemm_output_layout: Layout = None,
+        gemm_output_layout: Optional[Layout] = None,
         flip_mn: bool = False,
     ):
         """
@@ -72,7 +72,7 @@ class CutlassEVTEpilogueTypeFormatter:
         self.output = IndentedBuffer(0)
         self.var_counter = 0
         self.evt_type_name = evt_type_name
-        self.aliases: Dict[str, str] = dict()
+        self.aliases: Dict[str, Optional[str]] = dict()
         self.pre_fused_evt = pre_fused_evt
         self.c_operand_alias = c_operand_alias
         self.accumulator_index_expr = None
@@ -86,7 +86,7 @@ class CutlassEVTEpilogueTypeFormatter:
         epilogue_nodes: List[IRNode],
         pre_fused_evt: Optional[str] = None,
         c_operand_alias: Optional[str] = None,
-        gemm_output_layout: Layout = None,
+        gemm_output_layout: Optional[Layout] = None,
         flip_mn: bool = False,
     ):
         """
@@ -138,11 +138,11 @@ class CutlassEVTEpilogueTypeFormatter:
                     gemm_output_layout, pnode
                 )
 
-                # assert len(pnode.ranges) == len(gemm_output_layout.stride), f"Pointwise.ranges {pnode.ranges} must have the same length as the strides of the GEMM output layout {gemm_output_layout}. Pointwise op: {pnode}"
-                formatter.current_index_symbols = index
+                formatter.current_index_symbols = index  # type: ignore[attr-defined]
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
-                formatter.aliases[node.name] = result
+                if node.name is not None:
+                    formatter.aliases[node.name] = result
             res = formatter.getvalue(result)
             if _MAGIC_SYMPY_ERROR_STRING in res:
                 raise CUTLASSEVTOpNotImplementedError(
@@ -157,11 +157,11 @@ class CutlassEVTEpilogueTypeFormatter:
             return
         if not gemm_output_layout.is_contiguous():
             raise CUTLASSEVTOpNotImplementedError(
-                f"For non-contiguous tensors, Pointwise.ranges {pnode.ranges} must have the same length as the strides of the GEMM output layout {gemm_output_layout}. Pointwise op: {pnode}"
+                f"For non-contiguous tensors, Pointwise.ranges {pnode.ranges} must have the same length as the strides of the GEMM output layout {gemm_output_layout}. Pointwise op: {pnode}"  # noqa: B950
             )
         if len(pnode.ranges) > len(gemm_output_layout.stride):
             raise CUTLASSEVTOpNotImplementedError(
-                f"For non-contiguous tensors, Pointwise.ranges {pnode.ranges} must have the same length as the strides of the GEMM output layout {gemm_output_layout}. Pointwise op: {pnode}"
+                f"For non-contiguous tensors, Pointwise.ranges {pnode.ranges} must have the same length as the strides of the GEMM output layout {gemm_output_layout}. Pointwise op: {pnode}"  # noqa: B950
             )
         return
 
@@ -241,10 +241,10 @@ class CutlassEVTEpilogueTypeFormatter:
             )
         else:
             aux_load_op = "Sm90AuxLoad"
-            aux_load_template_args = f"{ALD}::Stages, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride, typename {ALD}::SmemLayoutAtom, typename {ALD}::CopyOpS2R"
+            aux_load_template_args = f"{ALD}::Stages, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride, typename {ALD}::SmemLayoutAtom, typename {ALD}::CopyOpS2R"  # noqa: B950
         return f"""cutlass::epilogue::fusion::Sm90EVT<
                                         cutlass::epilogue::fusion::Sm90Compute<identity_op,ElementAcc, typename {ALD}::Element, RoundStyle >,
-                                        cutlass::epilogue::fusion::{aux_load_op}<{aux_load_template_args}>> /* :={name} as aux operand, cast to accumulator dtype */"""
+                                        cutlass::epilogue::fusion::{aux_load_op}<{aux_load_template_args}>> /* :={name} as aux operand, cast to accumulator dtype */"""  # noqa: B950
 
     def _op_load(self, name, index_expr):
         # Load an input to an operation. Might be the output of the matmul, the result
@@ -363,7 +363,7 @@ class CutlassEVTEpilogueArgumentFormatter:
         pre_fused_evt_args: Optional[str] = None,
         c_operand_alias: Optional[str] = None,
         dry_run: bool = False,
-        gemm_output_layout: Layout = None,
+        gemm_output_layout: Optional[Layout] = None,
         flip_mn: bool = False,
     ):
         """
@@ -397,7 +397,7 @@ class CutlassEVTEpilogueArgumentFormatter:
         pre_fused_evt_args: Optional[str] = None,
         c_operand_alias: Optional[str] = None,
         dry_run: bool = False,
-        gemm_output_layout: Layout = None,
+        gemm_output_layout: Optional[Layout] = None,
         flip_mn: bool = False,
     ) -> str:
         formatter = CutlassEVTEpilogueArgumentFormatter(
@@ -420,11 +420,12 @@ class CutlassEVTEpilogueArgumentFormatter:
                 assert isinstance(node, ComputedBuffer)
                 pnode = node.data
                 assert isinstance(pnode, Pointwise)
+                assert gemm_output_layout is not None  # for mypy
                 assert len(pnode.ranges) == len(gemm_output_layout.stride)
                 index = pnode._index(pnode.ranges)
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
-                if node.name is not None:
+                if node.name is not None and result is not None:
                     formatter.aliases[node.name] = result  # type: ignore[assignment]
 
             res: str = formatter.getvalue(result)
@@ -448,7 +449,7 @@ class CutlassEVTEpilogueArgumentFormatter:
           },                // end binary op
           {} // ternary args : multiply_add
         }   // end ternary op
-        """ % (  # noqa: UP031`
+        """ % (  # noqa: UP031
             beta,
             alpha,
         )
@@ -496,7 +497,7 @@ class CutlassEVTEpilogueArgumentFormatter:
             ]
             # cpp_dtype = kernel.dtype(aux_input_node)
             data_ptr = kernel.ptr(aux_input_node)
-
+            assert self.gemm_output_layout is not None  # for mypy
             strides: List[int] = map_pointwise_index_to_read_strides(
                 index_expr, self.gemm_output_layout, self.flip_mn
             )
@@ -509,7 +510,7 @@ class CutlassEVTEpilogueArgumentFormatter:
             # The strides might have reinterpreted the buffer, but they may not read beyond it's bounds, let's check that...
             assert (
                 load_stride_max_idx < aux_input_node.get_numel()
-            ), f"Aux input would read beyond bounds (A): Load stride {strides} for node {aux_input_node.get_name()} with layout {aux_input_node.get_layout()} - accessed using index expr {index_expr} is too large for the node when mapped onto GEMM with output layout {self.gemm_output_layout}."
+            ), f"Aux input would read beyond bounds (A): Load stride {strides} for node {aux_input_node.get_name()} with layout {aux_input_node.get_layout()} - accessed using index expr {index_expr} is too large for the node when mapped onto GEMM with output layout {self.gemm_output_layout}."  # noqa: B950
             if len(strides) == 2:
                 strides.insert(0, 0)
 
@@ -519,7 +520,7 @@ class CutlassEVTEpilogueArgumentFormatter:
             ]
             stride_strings = [stride_strings[-2], stride_strings[-1], stride_strings[0]]
             stride_args = ", ".join(stride_strings)
-            return f"""{{ (({cutlass_dtype}*)({data_ptr})), {cutlass_dtype}(0), {{ {stride_args} }} }} /* {name} data pointer incl. offset, zero element value and strides for MNL (L=batch) dims */"""
+            return f"""{{ (({cutlass_dtype}*)({data_ptr})), {cutlass_dtype}(0), {{ {stride_args} }} }} /* {name} data pointer incl. offset, zero element value and strides for MNL (L=batch) dims */"""  # noqa: B950
 
     def _op_constant(self, value, dtype):
         if str(dtype) in ("torch.float16", "torch.float32"):
@@ -623,13 +624,13 @@ def create_cutlass_aux_load_descriptor(
     # The strides might have reinterpreted the buffer, but they may not read beyond it's bounds, let's check that...
     assert (
         load_stride_max_idx < node.get_numel()
-    ), f"Aux input would read beyond bounds (B): Load stride {strides} for node {node.get_name()} with layout {node.get_layout()} - accessed using index expr {index_expr} is too large for the node when mapped onto GEMM with output layout {gemm_output_layout}."
+    ), f"Aux input would read beyond bounds (B): Load stride {strides} for node {node.get_name()} with layout {node.get_layout()} - accessed using index expr {index_expr} is too large for the node when mapped onto GEMM with output layout {gemm_output_layout}."  # noqa: B950
     if len(strides) < 2:
         raise CUTLASSEVTOpNotImplementedError(
-            f"Unsupported number of strides: {len(strides)} for aux input for node {node.get_name()} with layout {node.get_layout()} - accessed using index expr {index_expr}. Accumulator index expr={accumulator_index_expr}"
+            f"Unsupported number of strides: {len(strides)} for aux input for node {node.get_name()} with layout {node.get_layout()} - accessed using index expr {index_expr}. Accumulator index expr={accumulator_index_expr}"  # noqa: B950
         )
     layout_stride_decl, mnl_strides = cute_stride_mnl_decl(strides)
     return (
-        f"""cutlass::epilogue::collective::detail::AuxLoadDescriptor<EpilogueDescriptor, {layout_stride_decl}, {cutlass_dtype}>""",
+        f"""cutlass::epilogue::collective::detail::AuxLoadDescriptor<EpilogueDescriptor, {layout_stride_decl}, {cutlass_dtype}>""",  # noqa: B950
         mnl_strides,
     )
