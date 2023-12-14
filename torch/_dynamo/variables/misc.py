@@ -696,9 +696,22 @@ class PythonModuleVariable(VariableTracker):
     def __init__(self, value: types.ModuleType, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+        self.is_torch = self.value is torch or self.value.__name__.startswith("torch.")
 
     def python_type(self):
         return types.ModuleType
+
+    def as_python_constant(self):
+        return self.value
+
+    def __repr__(self):
+        return f"PythonModuleVariable({self.value})"
+
+    def call_hasattr(self, tx, name):
+        if self.is_torch:
+            result = hasattr(self.value, name)
+            return variables.ConstantVariable.create(result)
+        return super().call_hasattr(tx, name)
 
 
 class SkipFilesVariable(VariableTracker):

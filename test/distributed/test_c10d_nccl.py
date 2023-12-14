@@ -3116,6 +3116,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_intra_node_comm_all_reduce(self):
         if not SM80OrLater:
             return
@@ -3600,6 +3601,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
         os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = '1'
         self.tempdir = tempfile.TemporaryDirectory()
         os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"] = self._trace_basename()
+        os.environ["TORCH_NCCL_DEBUG_INFO_PIPE_FILE"] = self._trace_basename()
         self._spawn_processes()
 
     @classmethod
