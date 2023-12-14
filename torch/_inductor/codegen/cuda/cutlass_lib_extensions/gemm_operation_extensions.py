@@ -40,6 +40,17 @@ if try_import_cutlass():
         using ElementAcc = ${element_accumulator};
         using ElementD = ${element_d};
         using ElementC = ${element_c};
+        using TileShapeMNK = cute::Shape<cute::_${tile_shape_m}, cute::_${tile_shape_n}, cute::_${tile_shape_k}>;
+        using ClusterShapeMNK = cute::Shape<cute::_${cluster_m},cute::_${cluster_n},cute::_${cluster_k}>;
+        using EpilogueTileType = cutlass::epilogue::collective::EpilogueTileAuto;
+        using EpilogueDescriptor = cutlass::epilogue::collective::detail::EpilogueDescriptor<
+            TileShapeMNK,
+            EpilogueTileType,
+            ElementC,
+            ElementD,
+            EpilogueScheduleType
+        >;
+
         using ADDMM_EVT =  // alpha * acc + beta * C
             cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::multiply_add,
                     ElementD, ElementAcc, RoundStyle>, // beta * C + (alpha * acc)
@@ -54,9 +65,9 @@ if try_import_cutlass():
         using ${operation_name}_epilogue =
           typename cutlass::epilogue::collective::CollectiveBuilder<
             ${arch}, ${opcode_class},
-            cute::Shape<cute::_${tile_shape_m}, cute::_${tile_shape_n}, cute::_${tile_shape_k}>,
-            cute::Shape<cute::_${cluster_m},cute::_${cluster_n},cute::_${cluster_k}>,
-            cutlass::epilogue::collective::EpilogueTileAuto,
+            TileShapeMNK,
+            ClusterShapeMNK,
+            EpilogueTileType,
             ${element_accumulator}, ${element_epilogue},
             ${element_c}, ${layout_c}, ${align_c},
             ${element_d}, ${layout_d}, ${align_d},
