@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import torch
 from torch.testing._internal.inputgen.argument.type import ArgType
@@ -15,7 +15,7 @@ class Attribute(str, Enum):
     VALUE = "value"
 
     @staticmethod
-    def hierarchy(argtype: ArgType):
+    def hierarchy(argtype: ArgType) -> List["Attribute"]:
         if argtype.is_tensor_list():
             if argtype == ArgType.TensorOptList:
                 return [
@@ -53,15 +53,18 @@ class Attribute(str, Enum):
         self,
         argtype: Optional[ArgType] = None,
         scalar_dtype: Optional[ScalarDtype] = None,
-    ):
+    ) -> type:
         if self == Attribute.OPTIONAL:
             return bool
         if self == Attribute.DTYPE:
             if argtype is None:
                 raise ValueError(f"Attribute {self} requires an argtype")
             if argtype.is_scalar():
+                assert isinstance(ScalarDtype, type)
                 return ScalarDtype
-            return torch.dtype
+            else:
+                assert isinstance(torch.dtype, type)
+                return torch.dtype
         if self in [Attribute.LENGTH, Attribute.RANK, Attribute.SIZE]:
             return int
         if self == Attribute.VALUE:
@@ -82,12 +85,17 @@ class Attribute(str, Enum):
                     raise ValueError(
                         "Attribute value for argtype scalar requires a scalar_dtype"
                     )
+                assert isinstance(scalar_dtype, ScalarDtype)
+                assert isinstance(scalar_dtype.value, type)
                 return scalar_dtype.value
             if argtype.is_scalar_type():
+                assert isinstance(torch.dtype, type)
                 return torch.dtype
         return float
 
-    def get_custom_limits(self, argtype: Optional[ArgType] = None):
+    def get_custom_limits(
+        self, argtype: Optional[ArgType] = None
+    ) -> Optional[Tuple[int, int]]:
         RANK_MAX = 6
         SIZE_MAX = 8
         TL_LEN_MAX = 6
