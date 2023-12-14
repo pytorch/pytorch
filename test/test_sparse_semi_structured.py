@@ -639,6 +639,9 @@ class TestCUSPARSELT(TestCase):
     @parametrize("alg_id", range(CUSPARSELT_NUM_ALG_IDS))
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_cslt_sparse_mm_alg_id(self, device, dtype, alg_id):
+        # alg_id=3 not supported for float32 dtype
+        if dtype == torch.float32 and alg_id == 3:
+            return
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         A_compressed = torch._cslt_compress(A)
         B = torch.ones((128, 128), device=device).to(dtype)

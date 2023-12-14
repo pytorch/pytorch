@@ -13,7 +13,8 @@ _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
     "_SEMI_STRUCTURED_SPARSE_CONFIG", "sparse_min_rows sparse_min_cols dense_min_rows dense_min_cols"
 )
 _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG = {
-    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 128, 16, 16),
+    # torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 128, 16, 16) for CUTLASS, cuSPASRELt has a 32 x 32 min sparse shape
+    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 128, 16, 16),
     torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 64, 8, 8),
     torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 64, 8, 8),
     torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 4, 4)
@@ -205,7 +206,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         self.original_shape = original_shape
 
     def __tensor_flatten__(self):
-        if self.is_cutlass():
+        if self.compressed_tensor_cusparselt is None:
             return ['sparse_tensor_cutlass', 'meta_tensor_cutlass'], (self.original_shape, self.transposed)
         else:
             return ['compressed_tensor_cusparselt'], (self.original_shape, self.transposed)
@@ -243,12 +244,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
         else:
             raise RuntimeError(f"Datatype {values_dtype}  is not supported!")
         return None
-
-    def is_cutlass(self) -> bool:
-        if self.compressed_tensor_cusparselt is None:
-            assert self.sparse_tensor_cutlass is not None and self.meta_tensor_cutlass is not None
-            return True
-        return False
 
     def __repr__(self) -> str:  # type: ignore[override]
         """Return string representation of SparseSemiStructuredTensor
@@ -349,7 +344,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 row, col = input_A.shape
                 input_A_padded = input_B._pad_tensor_for_matmul(input_A)
 
-                if input_B.is_cutlass():
+                if input_B.compressed_tensor_cusparselt is None:
+                    assert input_B.sparse_tensor_cutlass is not None and input_B.meta_tensor_cutlass is not None
                     res = torch._sparse_semi_structured_linear(
                         input_A_padded,
                         input_B.sparse_tensor_cutlass,
@@ -375,7 +371,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 row, col = input_B.shape
                 input_B_padded = input_A._pad_tensor_for_matmul(input_B)
 
-                if input_A.is_cutlass():
+                if input_A.compressed_tensor_cusparselt is None:
+                    assert input_A.sparse_tensor_cutlass is not None and input_A.meta_tensor_cutlass is not None
                     res = torch._sparse_semi_structured_linear(
                         input_B_padded.t(),
                         input_A.sparse_tensor_cutlass,
@@ -394,7 +391,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 row, col = input_A.shape
                 input_A_padded = input_B._pad_tensor_for_matmul(input_A)
 
-                if input_B.is_cutlass():
+                if input_B.compressed_tensor_cusparselt is None:
+                    assert input_B.sparse_tensor_cutlass is not None and input_B.meta_tensor_cutlass is not None
                     res = torch._sparse_semi_structured_linear(
                         input_A_padded,
                         input_B.sparse_tensor_cutlass,
@@ -423,7 +421,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
             input_tensor_2d_padded = weight._pad_tensor_for_matmul(input_tensor_2d)
 
             if isinstance(weight, cls):
-                if weight.is_cutlass():
+                if weight.compressed_tensor_cusparselt is None:
+                    assert weight.sparse_tensor_cutlass is not None and weight.meta_tensor_cutlass is not None
                     res = torch._sparse_semi_structured_linear(
                         input_tensor_2d_padded,
                         weight.sparse_tensor_cutlass,
@@ -443,7 +442,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
         # handle values
         if func is torch.ops.aten.values.default:
-            if args[0].is_cutlass():
+            if args[0].compressed_tensor_cusparselt is None:
                 return args[0].sparse_tensor_cutlass.detach()
             else:
                 m, k = args[0].shape
@@ -452,7 +451,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
         # handle indices
         if func is torch.ops.aten.indices.default:
-            if args[0].is_cutlass():
+            if args[0].compressed_tensor_cusparselt is None:
                 return args[0].meta_tensor_cutlass
             else:
                 m, k = args[0].shape
@@ -471,10 +470,10 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
 
     def to_dense(self):
-        if not self.is_cutlass():
+        if self.compressed_tensor_cusparselt is not None:
             raise RuntimeError("Converting to dense is not yet supported by cuSPARSELt backend!")
 
-        if self.is_cutlass() and self.sparse_tensor_cutlass.dtype == torch.float32:
+        if self.sparse_tensor_cutlass is not None and self.sparse_tensor_cutlass.dtype == torch.float32:
             raise RuntimeError("Converting to dense for torch.float32 datatype is not yet supported by CUTLASS backend!")
 
         from torch.sparse._semi_structured_conversions import (
