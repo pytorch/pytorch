@@ -275,7 +275,7 @@ try:
             torch.sym_max: lift(ops.max),
             torch.sym_min: lift(ops.min),
             torch.sym_ite: lift(lambda b, t, f: t if b else f),
-            torch._sym_sqrt: lift(ops.sqrt),
+            torch._sym_sqrt: lift(ops.sqrt),  # type: ignore[attr-defined]
             # Not lifted because we only use this function as a
             # marker for adding the expression as validator input.
             torch._assert: torch._assert,
