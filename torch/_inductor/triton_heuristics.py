@@ -373,14 +373,19 @@ class CachingAutotuner(KernelInterface):
                 else:
                     cluster_dims = bin.clusterDims
 
+                if hasattr(bin, "function"):
+                    function = bin.function
+                else:
+                    function = bin.cu_function
+
                 if hasattr(bin, "num_ctas"):
                     runner(grid_0, grid_1, grid_2, bin.num_warps,
                                 bin.num_ctas, *cluster_dims, bin.shared,
-                                stream, bin.function, None, None, None,
+                                stream, function, None, None, None,
                                 {', '.join(call_args)})
                 else:
                     runner(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
-                                stream, bin.cu_function, None, None, None,
+                                stream, function, None, None, None,
                                 {', '.join(call_args)})
                 return bin
             """.lstrip(),
