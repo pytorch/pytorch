@@ -21,7 +21,7 @@ void run_cudnn_LLM_fprop(int64_t b,
                  Tensor& softmaxstats,
                  Tensor& o,
                  Tensor& dropoutseed,
-                 Tensor& dropoutoffset)
+                 Tensor& dropoutoffset) {
     TORCH_CHECK(false, "PyTorch was not compiled with cuDNN enabled!");
 }
 
