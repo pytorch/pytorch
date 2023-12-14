@@ -166,19 +166,28 @@ def track_tensor(tensor, proxy, *, constant, tracer):
             inner_s = outer_s.node
             set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, outer_s, *args))
 
+    def enable_tf(fn):
+        # If we have redispatched from a __torch_function__, TF may be disabled
+        # Proxy is a torch function class, so we need to make sure that calls
+        # to sym_size etc are wrapped in enable_tf.
+        def inner(*args, **kwargs):
+            g = torch._C._EnableTorchFunction()
+            return fn(*args, **kwargs)
+        return inner
+
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
     # the proxy on the proxy slot of the object, keyed on the tracer
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
     for i, s in enumerate(tensor.shape):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(enable_tf(torch.ops.aten.sym_size.int)(proxy, i), x), i)
 
     for i, s in enumerate(tensor.stride()):
-        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride.int(proxy, i), x), i)
+        try_set_proxy_slot(s, lambda x, i: set_meta(enable_tf(torch.ops.aten.sym_stride.int)(proxy, i), x), i)
 
-    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(torch.ops.aten.sym_numel.default(proxy), x))
-    try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset.default(proxy), x))
+    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(enable_tf(torch.ops.aten.sym_numel.default)(proxy), x))
+    try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(enable_tf(torch.ops.aten.sym_storage_offset.default)(proxy), x))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):

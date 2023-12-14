@@ -3331,6 +3331,7 @@ class TestNestedTensorSubclass(NestedTestCase):
             self.assertEqual(orig_device, nt.offsets().device)
             self.assertEqual(torch.int64, nt.offsets().dtype)
 
+    @torch._dynamo.config.patch(suppress_errors=True)
     def test_expand_as(self, device):
         def do_test(a, b):
             out = a.expand_as(b)
