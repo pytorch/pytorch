@@ -35,52 +35,52 @@ class ArgType(str, Enum):
     StringOpt = "String?"
     MemoryFormat = "MemoryFormat"
 
-    def is_tensor(self):
+    def is_tensor(self) -> bool:
         return self in [ArgType.Tensor, ArgType.TensorOpt]
 
-    def is_tensor_list(self):
+    def is_tensor_list(self) -> bool:
         return self in [ArgType.TensorList, ArgType.TensorOptList]
 
-    def is_scalar(self):
+    def is_scalar(self) -> bool:
         return self in [ArgType.Scalar, ArgType.ScalarOpt]
 
-    def is_scalar_type(self):
+    def is_scalar_type(self) -> bool:
         return self in [ArgType.ScalarType, ArgType.ScalarTypeOpt]
 
-    def is_dim(self):
+    def is_dim(self) -> bool:
         return self in [ArgType.Dim, ArgType.DimOpt]
 
-    def is_dim_list(self):
+    def is_dim_list(self) -> bool:
         return self in [ArgType.DimList, ArgType.DimListOpt]
 
-    def is_shape(self):
+    def is_shape(self) -> bool:
         return self in [ArgType.Shape]
 
-    def is_index(self):
+    def is_index(self) -> bool:
         return self in [ArgType.Index, ArgType.IndexOpt]
 
-    def is_length(self):
+    def is_length(self) -> bool:
         return self in [ArgType.Length, ArgType.LengthOpt]
 
-    def is_length_list(self):
+    def is_length_list(self) -> bool:
         return self in [ArgType.LengthList]
 
-    def is_bool(self):
+    def is_bool(self) -> bool:
         return self in [ArgType.Bool]
 
-    def is_int(self):
+    def is_int(self) -> bool:
         return self in [ArgType.Int, ArgType.IntOpt]
 
-    def is_float(self):
+    def is_float(self) -> bool:
         return self in [ArgType.Float, ArgType.FloatOpt]
 
-    def is_string(self):
+    def is_string(self) -> bool:
         return self in [ArgType.String, ArgType.StringOpt]
 
-    def is_memory_format(self):
+    def is_memory_format(self) -> bool:
         return self in [ArgType.MemoryFormat]
 
-    def is_optional(self):
+    def is_optional(self) -> bool:
         return self in [
             ArgType.TensorOpt,
             ArgType.ScalarOpt,
@@ -93,7 +93,7 @@ class ArgType(str, Enum):
             ArgType.LengthOpt,
         ]
 
-    def is_list(self):
+    def is_list(self) -> bool:
         return self in [
             ArgType.TensorList,
             ArgType.TensorOptList,
@@ -103,7 +103,7 @@ class ArgType(str, Enum):
             ArgType.Shape,
         ]
 
-    def has_integer_value(self):
+    def has_integer_value(self) -> bool:
         return self in [
             ArgType.Dim,
             ArgType.DimOpt,
@@ -119,7 +119,7 @@ class ArgType(str, Enum):
             ArgType.IntOpt,
         ]
 
-    def has_dtype(self):
+    def has_dtype(self) -> bool:
         return (
             self.is_tensor()
             or self.is_tensor_list()
