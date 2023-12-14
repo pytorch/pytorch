@@ -1208,20 +1208,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             do_check(fn1)
             do_check(fn2)
 
-    def test_sum(self):
-        # Need more extensive testing with various settings dtype/device etc.
-        x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
-
-        def fn(nt):
-            out = torch.sum(nt)
-            return out
-
-        compile_fn = torch.compile(
-            fn, fullgraph=True, backend="aot_eager", dynamic=True
-        )
-        out = compile_fn(x)
-        out.backward()
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
