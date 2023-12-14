@@ -8,6 +8,7 @@ import sys
 import time
 import unittest
 
+import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN)
 import torch.multiprocessing as mp
 

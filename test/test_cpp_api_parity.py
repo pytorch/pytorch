@@ -3,6 +3,7 @@
 
 import os
 
+import torch
 import torch.testing._internal.common_utils as common
 import torch.testing._internal.common_nn as common_nn
 from cpp_api_parity.parity_table_parser import parse_parity_tracker_table
