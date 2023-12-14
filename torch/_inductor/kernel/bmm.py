@@ -1,6 +1,8 @@
 import logging
+from typing import List
 
 import torch
+from ..codegen.common import ChoiceCaller
 
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -98,7 +100,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
     # options to tune from
-    choices = []
+    choices: List[ChoiceCaller] = []
     if use_triton_template(layout):
         for config in mm_configs(m, n, k):
             bmm_template.maybe_append_choice(

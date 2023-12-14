@@ -60,14 +60,18 @@ class PyCodegen:
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
         self.mutable_side_effects_from_source = False
+        self.value_from_source: bool = True
 
-    def restore_stack(self, stack_values):
+    def restore_stack(self, stack_values, *, value_from_source=True):
         prior = self.mutable_side_effects_from_source
         self.mutable_side_effects_from_source = True
+        prev = self.value_from_source
+        self.value_from_source &= value_from_source
         try:
             self.foreach(stack_values)
         finally:
             self.mutable_side_effects_from_source = prior
+            self.value_from_source = prev
 
     def graph_output_vars(self):
         return [x.variable for x in self.graph_outputs.values()]
@@ -108,7 +112,7 @@ class PyCodegen:
                 self.top_of_stack = value
                 return
 
-        if value.source is not None and allow_cache:
+        if value.source is not None and allow_cache and self.value_from_source:
             output.extend(value.source.reconstruct(self))
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()

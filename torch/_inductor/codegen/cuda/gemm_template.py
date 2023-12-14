@@ -309,7 +309,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             input_layouts = [node.get_layout() for node in input_nodes]
             input_strides = [node.get_stride() for node in input_nodes]
             output_layout = layout
-            warning_msg = f"No suitable Cutlass GEMM configs found, fallbacks used ( {fuseable=}, {non_fuseable=}, {len(ops_evt)=}, {len(ops)=}, {output_layout=}, {input_layouts=}, {input_strides=}"
+            warning_msg = f"No suitable Cutlass GEMM configs found, fallbacks used ( {fuseable=}, {non_fuseable=}, {len(ops_evt)=}, {len(ops)=}, {output_layout=}, {input_layouts=}, {input_strides=}"  # noqa: B950
             log.warning(warning_msg)
         log.debug(
             "Added %d Cutlass gemm configs and %d fuseable gemm configs.",
@@ -841,9 +841,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             and epilogue_nodes is not None
             and len(epilogue_nodes) > 0
         ):
-            additional_input_nodes: List[
-                ir.ComputedBuffer
-            ] = self.get_additional_input_nodes(template_buffer_node, epilogue_nodes)
+            additional_input_nodes: List[ir.ComputedBuffer] = cast(
+                List[ir.ComputedBuffer],
+                self.get_additional_input_nodes(
+                    template_buffer_node, cast(List[ir.ComputedBuffer], epilogue_nodes)
+                ),
+            )
             assert (
                 len(additional_input_nodes) <= 1
             ), "Only one additional input node is supported at the moment"
