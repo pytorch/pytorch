@@ -127,6 +127,9 @@ class FrontendWorker(mp.Process):
 
         requests_thread.start()
         metrics_thread.start()
+
+        # only start polling GPU utilization after the warmup request is complete
+        self.warmup_event.wait()
         gpu_utilization_thread.start()
 
         requests_thread.join()
