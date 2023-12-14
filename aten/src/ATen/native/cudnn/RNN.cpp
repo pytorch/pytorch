@@ -232,7 +232,7 @@ namespace {
     RNNDataDescriptor r;
     std::vector<int> seqLengthArray(batch_size, 1);
     // cuDNN wants the sequence lenghts for a packed batch as if they
-    // were unpacked, e.g., for the 
+    // were unpacked, e.g., for the
     // Sequence 1: ABCD
     // Sequence 2: EF
     // Sequence 3: G
@@ -828,7 +828,7 @@ namespace {
               &matrix_pointer
               ));
 #else
-	void *unused_pointer;
+    void *unused_pointer;
         TensorDescriptor unused_desc;
         TensorDescriptor lin_layer_mat_desc;
 
@@ -1092,7 +1092,7 @@ copy_weights_to_flat_buf_views(
 #if defined(USE_CUDNN_RNN_V8_API)
       input_size,
       false, // eqy: bogus as we do not know if the input is packed here
-	     // but it should not affect the weights (what are are interested in)
+         // but it should not affect the weights (what are are interested in)
 #endif
       hidden_size,
       proj_size,
@@ -1964,7 +1964,7 @@ Tensor try_get_weight_buf(
 #else
   auto cudnn_input_size = input.size(-1);
   auto packed = false; // eqy: bogus as we do not know if the input is packed here
-		       // again, it should also not affect the weights
+               // again, it should also not affect the weights
   rnn.set(mode, cudnn_input_size, packed, hidden_size.guard_int(__FILE__, __LINE__), proj_size.guard_int(__FILE__, __LINE__), num_layers, bidirectional, promote_rnn_math_type(datatype), datatype);
 #endif
   RNNDescriptor rnn_desc = rnn.descriptor(handle);
