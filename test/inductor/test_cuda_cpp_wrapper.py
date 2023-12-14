@@ -66,19 +66,19 @@ test_failures_cuda_wrapper = {
 if TEST_WITH_ROCM:
     # Current skips for ROCm - mostly all Tensor-likes failures, need to undergo investigation.
     rocm_exclude_list = [
-        "test_addmm",
+        "test_addmm_cuda",
         "test_batch_norm_2d_2_cuda",
         "test_bmm1_cuda",
         "test_cat_cuda",
-        "test_cat_slice_cat",
+        "test_cat_slice_cat_cuda",
         "test_custom_op_cuda",
         "test_convolution1_cuda",
-        "test_foreach_cpp_wrapper",
+        "test_foreach_cpp_wrapper_cuda",
         "test_index_put_deterministic_fallback_cuda",
         "test_index_tensor_cuda",
-        "test_linear_relu",
+        "test_linear_relu_cuda",
         "test_multi_device_cuda",
-        "test_mm_plus_mm2",
+        "test_mm_plus_mm2_cuda",
         "test_sum_dtype_cuda",
         "test_transpose_cuda",
     ]
