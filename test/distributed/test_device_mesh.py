@@ -9,12 +9,8 @@ from torch.distributed._tensor._collective_utils import (
     mesh_broadcast,
     mesh_scatter,
 )
-from torch.distributed._tensor.device_mesh import (
-    _mesh_resources,
-    DeviceMesh,
-    init_device_mesh,
-)
 from torch.distributed._tensor.placement_types import Shard
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 
 from torch.distributed.distributed_c10d import (
     get_global_rank,
@@ -84,6 +80,33 @@ class DeviceMeshTest(DTensorTestBase):
 
         self.assertEqual(mesh_2d.get_group("dp"), dp_mesh.get_group())
         self.assertEqual(mesh_2d.get_group("tp"), tp_mesh.get_group())
+
+    @with_comms
+    def test_get_local_rank_raises_exception(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=("dp", "tp")
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
+        ):
+            local_rank = mesh_2d.get_local_rank()
+
+    @with_comms
+    def test_get_local_rank(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=("dp", "tp")
+        )
+        self.assertEqual(mesh_2d.get_local_rank("dp"), mesh_2d.get_local_rank(0))
+        self.assertEqual(mesh_2d.get_local_rank("tp"), mesh_2d.get_local_rank(1))
+
+        dp_mesh = mesh_2d["dp"]
+        tp_mesh = mesh_2d["tp"]
+        self.assertEqual(dp_mesh.get_local_rank(), mesh_2d.get_local_rank("dp"))
+        self.assertEqual(tp_mesh.get_local_rank(), mesh_2d.get_local_rank("tp"))
 
     @with_comms
     def test_device_mesh_2d(self):
@@ -269,9 +292,11 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         dp_group_idx = self.rank % 4
         self.assertEqual(mesh_2d["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx])
 
+
+class TestMeshEnv(DTensorTestBase):
     @with_comms
     def test_get_parent_mesh(self):
-        mesh_shape = (2, 4)
+        mesh_shape = (2, self.world_size // 2)
         mesh_dim_names = ("DP", "TP")
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
@@ -290,7 +315,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
     @with_comms
     def test_get_parent_mesh_dim_exist(self):
-        mesh_shape = (2, 4)
+        mesh_shape = (2, self.world_size // 2)
         mesh_dim_names = ("DP", "TP")
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
@@ -305,6 +330,17 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, mesh_shape)
 
         self.assertEqual(_mesh_resources.get_parent_mesh_dim(mesh), None)
+
+    @with_comms
+    def test_get_mesh_dim_by_name(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_dim_names = ("DP", "TP")
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "DP"), 0)
+        self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "TP"), 1)
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):

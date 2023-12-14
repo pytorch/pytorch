@@ -432,7 +432,7 @@ Tensor& set__symint(Tensor& result, const Tensor& storage, c10::SymInt storage_o
 
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
   if (result.unsafeGetTensorImpl() != source.unsafeGetTensorImpl()) {
-    return result.set_(source.storage(), source.storage_offset(), source.sizes(), source.strides());
+    return result.set__symint(source.storage(), source.sym_storage_offset(), source.sym_sizes(), source.sym_strides());
   }
   return result;
 }

@@ -5,7 +5,6 @@ import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.api import (
-    _parallelize_linear_like_module,
     parallelize_module,
 )
 from torch.distributed.tensor.parallel.style import (
@@ -209,7 +208,7 @@ class TensorParallelAPITests(DTensorTestBase):
 
         # parallelize model_tp
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        model_tp = _parallelize_linear_like_module(model_tp, device_mesh, rowwise)
+        model_tp = parallelize_module(model_tp, device_mesh, rowwise)
 
         # let each rank generate unique local input
         torch.manual_seed(self.rank)
@@ -228,7 +227,7 @@ class TensorParallelAPITests(DTensorTestBase):
 
         # parallelize model_tp
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        model_tp = _parallelize_linear_like_module(model_tp, device_mesh, colwise)
+        model_tp = parallelize_module(model_tp, device_mesh, colwise)
 
         self._compare_module(model, model_tp, inp_size)
 
@@ -236,7 +235,14 @@ class TensorParallelAPITests(DTensorTestBase):
     def test_prepare_module_input(self):
         module = DummyModule()
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        parallelize_module(module, device_mesh, PrepareModuleInput())
+        parallelize_module(
+            module,
+            device_mesh,
+            PrepareModuleInput(
+                input_layouts=Shard(0),
+                desired_input_layouts=Replicate()
+            )
+        )
         inp = torch.rand(5, 7, device=self.device_type)
         output = module(inp).redistribute(device_mesh, [Shard(0)]).to_local()
         self.assertEqual(inp, output)
@@ -245,7 +251,14 @@ class TensorParallelAPITests(DTensorTestBase):
     def test_prepare_module_output(self):
         module = DummyModule()
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        parallelize_module(module, device_mesh, PrepareModuleOutput())
+        parallelize_module(
+            module,
+            device_mesh,
+            PrepareModuleOutput(
+                output_layouts=Replicate(),
+                desired_output_layouts=Shard(0)
+            )
+        )
         torch.manual_seed(15)
         inp = torch.rand(16, 7, device=self.device_type)
         dtensor = DTensor.from_local(inp, device_mesh, [Replicate()], run_check=False)
