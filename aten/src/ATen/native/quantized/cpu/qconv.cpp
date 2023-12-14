@@ -1604,10 +1604,10 @@ static at::Tensor _quantized_convolution_onednn(
   }
   ideep::tensor dst;
   if (has_accum_postop_sum) {
-    TORCH_CHECK(accum.value().dtype() == output.dtype(), "The output tensor should have same dtype as the accum tensor.");
     auto dst_desc = ideep::tensor::desc(dst_dims, fp32_output ? ideep::tensor::data_type::f32 : (
       bfloat16_output ? ideep::tensor::data_type::bf16 : src_data_type),
         kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
+    TORCH_CHECK(accum.value().dtype() == output.dtype(), "The output tensor should have same dtype as the accum tensor.");
     // When fused with sum, the dst tensor will share the data ptr as the accum tensor.
     dst.init(dst_desc, accum.value().data_ptr());
   } else {
