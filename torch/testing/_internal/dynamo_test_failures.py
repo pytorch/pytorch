@@ -343,7 +343,7 @@ dynamo_expected_failures = {
     "TestModuleInitCPU.test_nn_Linear_cpu_float32",
     "TestModuleInitCPU.test_nn_Linear_cpu_float64",
 	"TestMultiprocessing.test_empty_shared",
-	"TestMultiprocessing.test_fs_is_share",
+	"TestMultiprocessing.test_fs_is_shared",
 	"TestMultiprocessing.test_inherit_tensor",
 	"TestMultiprocessing.test_is_shared",
 }
