@@ -133,7 +133,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 **mm_options(config, m, n, k, layout),
             )
 
-    if m * n != 0 and use_cutlass_template(layout):
+    if m * n != 0 and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
@@ -236,7 +236,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
             )
 
-    if use_cutlass_template(layout):
+    if use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
