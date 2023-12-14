@@ -756,7 +756,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
   auto cudnn_seed = at::zeros({1}, query.options().dtype(kLong));
   auto cudnn_offset = at::zeros({1}, query.options().dtype(kLong));
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
-  const auto sizes = query.sizes();
 
   run_cudnn_LLM_fprop(batch_size/*int64_t b*/,
                       num_heads/*int64_t h*/,
@@ -765,7 +764,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
                       head_dim/*int64_t d*/,
                       softmax_scale/*float scaling_factor*/,
                       training/* bool */,
-		              is_causal/* bool */,
+		      is_causal/* bool */,
                       dropout_p/*double dropout_probability*/,
                       query/* Tensor q*/,
                       key/* Tensor k*/,
