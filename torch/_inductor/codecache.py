@@ -798,7 +798,7 @@ class FxGraphCache:
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
         """
-        from filelock import FileLock
+        from filelock import FileLock  # type: ignore[import-not-found]
 
         key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
 
@@ -1477,7 +1477,6 @@ def cpp_compile_command(
         assert is_clang()
         # Use clang runtime instead of libgcc
         clang_flags += " --rtlib=compiler-rt"
-        clang_flags += " -fuse-ld=lld"
         linker_paths = "-B" + build_paths.glibc_lib()
         linker_paths += " -L" + build_paths.glibc_lib()
     else:
