@@ -497,7 +497,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             == cutlass_lib.OpcodeClass.Simt
         ):
             return None
-
+        # StreamK seems to lead to extreme spilling for certain shapes
+        # and might take forever during autotuning. @TODO kadeng: investigate
+        if op.tile_scheduler == cutlass_lib.TileSchedulerType.StreamK:
+            return None
         # Only keep GemmUniversal kernels
         if op.gemm_kind not in {
             cutlass_lib.GemmKind.Universal,
