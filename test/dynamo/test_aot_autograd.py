@@ -696,7 +696,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
             @staticmethod
             def backward(ctx, grad):
-                x, = ctx.saved_tensors
+                (x,) = ctx.saved_tensors
                 return x, grad
 
         def fn(x, y):
