@@ -1,3 +1,5 @@
+#pragma once
+
 #include <c10/core/ConstantSymNodeImpl.h>
 #include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
