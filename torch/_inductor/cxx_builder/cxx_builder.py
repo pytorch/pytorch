@@ -136,16 +136,6 @@ class BuildOptionsBase:
     and maintains the suitable args.
     This class will help maintains cxx build compiler and nessary args.
     """
-
-    _compiler = ""
-    _definations: List[str] = []
-    _include_dirs: List[str] = []
-    _cflags: List[str] = []
-    _ldflags: List[str] = []
-    _libraries_dirs: List[str] = []
-    _libraries: List[str] = []
-    _passthough_args: List[str] = []
-
     def _set_options(
         self,
         definations,
@@ -173,7 +163,14 @@ class BuildOptionsBase:
         self._passthough_args = _remove_duplication_in_list(self._passthough_args)
 
     def __init__(self) -> None:
-        pass
+        self._compiler = ""
+        self._definations: List[str] = []
+        self._include_dirs: List[str] = []
+        self._cflags: List[str] = []
+        self._ldflags: List[str] = []
+        self._libraries_dirs: List[str] = []
+        self._libraries: List[str] = []
+        self._passthough_args: List[str] = []
 
     def get_compiler(self) -> str:
         return self._compiler
@@ -777,22 +774,6 @@ class CxxTorchCudaOptions(CxxTorchOptions):
 
 
 class CxxBuilder:
-    _compiler = ""
-    _cflags_args = ""
-    _definations_args = ""
-    _include_dirs_args = ""
-    _ldflags_args = ""
-    _libraries_dirs_args = ""
-    _libraries_args = ""
-    _passthough_parameters_args = ""
-
-    _name = ""
-    _sources_args = ""
-    _output_dir = ""
-    _target_file = ""
-
-    _compile_only = False
-
     def get_shared_lib_ext(self) -> str:
         SHARED_LIB_EXT = ".dll" if _IS_WINDOWS else ".so"
         return SHARED_LIB_EXT
@@ -809,6 +790,18 @@ class CxxBuilder:
         output_dir: str = "",
         compile_only: bool = False,
     ) -> None:
+        self._compiler = ""
+        self._cflags_args = ""
+        self._definations_args = ""
+        self._include_dirs_args = ""
+        self._ldflags_args = ""
+        self._libraries_dirs_args = ""
+        self._libraries_args = ""
+        self._passthough_parameters_args = ""
+
+        self._output_dir = ""
+        self._target_file = ""     
+
         self._name = name
         self._sources_args = " ".join(sources)
 
