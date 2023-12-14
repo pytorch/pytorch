@@ -658,10 +658,11 @@ def _nested_expand(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     size = new_kwargs.pop("size")
     offsets, sum_offsets, *Ds = validate_and_get_meta("expand_as", size)
+
+    fail_reason = None
     if not inp.dim() <= len(size):
         fail_reason = "trying to expand input to a size with larger dim"
     if inp.is_nested:
-        fail_reason = None
         if not inp.dim() == len(size):
             # We don't support cases like:
             # - (B, j0, D) -> (B, j0, D', D)
