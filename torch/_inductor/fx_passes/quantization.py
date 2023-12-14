@@ -424,7 +424,9 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
         if len(qconv2d_node_after_weight_prepack.users) != 1:
             return False
         if output_dtype is not None:
-            binary_node_inputs = list(qconv2d_node_after_weight_prepack.users)[0].args
+            binary_node_inputs = next(
+                iter(qconv2d_node_after_weight_prepack.users)
+            ).args
             assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
             extra_input_node = None
             for arg in binary_node_inputs:
