@@ -2,7 +2,7 @@ import copy
 import functools
 import itertools
 import logging
-from typing import Generator, List, Optional
+from typing import cast, Generator, Iterable, List, Optional
 from unittest.mock import patch
 
 import sympy
@@ -72,7 +72,7 @@ class CUDATemplate(KernelTemplate):
         # Generate Row-Major and Column-Major variants of all flexible input tensor layouts
         input_layout_alternatives: List[List[TensorMeta]] = []
         for input_node in self.input_nodes:
-            unchanged_variant = TensorMeta.from_irnodes(input_node)
+            unchanged_variant = cast(TensorMeta, TensorMeta.from_irnodes(input_node))
             input_tensor_meta_variants = [unchanged_variant]
             if (
                 hasattr(input_node, "layout")
@@ -101,7 +101,12 @@ class CUDATemplate(KernelTemplate):
                 layout_variant.strides = tuple(new_strides)
                 input_tensor_meta_variants.append(layout_variant)
             input_layout_alternatives.append(input_tensor_meta_variants)
-        all_variant_combinations = list(itertools.product(*input_layout_alternatives))
+        all_variant_combinations: List[List[TensorMeta]] = list(
+            cast(
+                Iterable[List[TensorMeta]],
+                itertools.product(*input_layout_alternatives),
+            )
+        )
         if len(all_variant_combinations) != 1:
             log.debug(
                 "Generating %d input layout variants of %s",
@@ -135,9 +140,9 @@ class CUDATemplate(KernelTemplate):
                                 lo.offset,
                             )
                             if isinstance(input_node, ir.MutableBox):
-                                input_node.data.layout = new_layout
+                                input_node.data.layout = new_layout  # type: ignore[attr-defined]
                             else:
-                                input_node.layout = new_layout
+                                input_node.layout = new_layout  # type: ignore[attr-defined]
                     code = self.render(kernel=kernel, **kwargs)
                 finally:
                     # restore the original (still flexible until Autotuning has been resolved) strides
@@ -146,9 +151,9 @@ class CUDATemplate(KernelTemplate):
                     ):
                         if isinstance(original_layout, FlexibleLayout):
                             if isinstance(input_node, ir.MutableBox):
-                                input_node.data.layout = original_layout
+                                input_node.data.layout = original_layout  # type: ignore[attr-defined]
                             else:
-                                input_node.layout = original_layout
+                                input_node.layout = original_layout  # type: ignore[attr-defined]
 
                 _, call_args, _ = kernel.args.python_argdefs()
                 log.debug("Generated Code:\n%s", code)

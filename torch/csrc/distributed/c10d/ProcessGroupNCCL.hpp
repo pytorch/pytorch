@@ -13,6 +13,7 @@
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -358,6 +359,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // via `ncclCommSplit`
     std::shared_ptr<ProcessGroupNCCL> split_from;
     int64_t split_color{0};
+    std::vector<uint64_t> global_ranks_in_group;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -543,6 +545,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Provide an API for users to define their own ways to store NCCL debug info.
   void registerDebugInfoWriter(std::unique_ptr<DebugInfoWriter> writer);
 
+  c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
+
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
   void abort(c10::optional<std::string> abortReason = c10::nullopt);
@@ -589,6 +593,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       OpType opType);
 
  private:
+  int globalRankStart;
+  int globalRankStride;
+
   // Helper that encapsulates work shared across all collective communication
   // primitives.  The callbacks have the following signatures:
   //
@@ -679,7 +686,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Watchdog's inside loop.
   // Takes care of cleaning up completed work, and aborting upon failure or
   // timeout.
-  void workCleanupLoop();
+  void watchdogHandler();
 
   void runHookLoop();
 
@@ -933,6 +940,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
   size_t uid_;
+
+  c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
 };
 
 TORCH_API std::string dump_nccl_trace();
