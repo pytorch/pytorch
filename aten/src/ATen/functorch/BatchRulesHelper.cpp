@@ -160,16 +160,6 @@ void vmapIncompatibleInplaceError(const char* schema_name) {
     "please file a bug report instead.");
 }
 
-static void handleScalarTypePromotion(Tensor& logical_scalar_tensor, Tensor& second) {
-  auto result_type = at::native::result_type(logical_scalar_tensor[0], second);
-  if (logical_scalar_tensor.scalar_type() != result_type) {
-    logical_scalar_tensor = logical_scalar_tensor.to(result_type);
-  }
-  if (second.scalar_type() != result_type) {
-    second = second.to(result_type);
-  }
-}
-
 std::tuple<Tensor, Tensor> _binary_pointwise_helper(
     const Tensor& tensor, optional<int64_t> tensor_batch_dim,
     const Tensor& other, optional<int64_t> other_batch_dim) {
