@@ -470,6 +470,12 @@ class DTensorSpec:
         return num_shards
 
     @property
+    def device_mesh(self) -> DeviceMesh:
+        # simple aliasing for the mesh field, make some
+        # checks that mixes DTensor/DTensorSpec easier
+        return self.mesh
+
+    @property
     def dim_map(self) -> List[int]:
         """
         dim_map is a property we derive from `placements` of
