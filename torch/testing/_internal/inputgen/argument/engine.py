@@ -234,8 +234,11 @@ class MetaArgEngine:
             return [random.choice(variables).space]
 
     def gen(self, focus):
-        if self.argtype.is_optional() and self.gen_optional():
-            yield MetaArg(self.argtype, optional=True)
+        if focus in [None, Attribute.OPTIONAL]:
+            if self.argtype.is_optional() and self.gen_optional():
+                yield MetaArg(self.argtype, optional=True)
+            if focus == Attribute.OPTIONAL:
+                return
 
         if self.argtype.is_scalar():
             scalar_dtypes = self.gen_dtypes(focus)
