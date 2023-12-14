@@ -203,7 +203,6 @@ inductor_expected_failures_single_sample["cpu"] = {
         f16
     },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
-    "bernoulli": {f16, f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
     "cross": {f16},
@@ -229,7 +228,6 @@ inductor_expected_failures_single_sample["cpu"] = {
 inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "atanh": {f32},
-    "bernoulli": {f16, f32, f64},
     "cholesky": {f32, f64},
     "multinomial": {f16, f32, f64},
     "nn.functional.normalize": {f16},
