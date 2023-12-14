@@ -14,6 +14,7 @@ from torch.export.exported_program import (
     SymIntArgument,
     TensorArgument,
 )
+from torch.fx._symbolic_trace import is_fx_tracing
 
 __all__ = ["InterpreterModule", "UnflattenedModule", "unflatten", "FlatArgsAdapter"]
 
@@ -183,6 +184,10 @@ class UnflattenedModule(torch.nn.Module):
                 assert node.name not in inputs_to_state
 
     def forward(self, *args, **kwargs):
+        if is_fx_tracing():
+            return torch.fx.Interpreter(self, graph=self.graph).run(
+                *args, enable_io_processing=False
+            )
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
         assert self.module_call_graph[0].fqn == ""
@@ -375,6 +380,24 @@ def _generate_unflatten(gm: torch.nn.Module, nodes, spec) -> torch.fx.Node:
     return gm.graph.call_function(pytree.tree_unflatten, (nodes, spec_node))
 
 
+def _add_submodule(mod: torch.nn.Module, target: str, module_to_add: torch.nn.Module):
+    *prefix, field = target.split(".")
+
+    for item in prefix:
+        submod = getattr(mod, item, None)
+
+        if submod is None:
+            submod = torch.nn.Module()
+            setattr(mod, item, submod)
+
+        if not isinstance(submod, torch.nn.Module):
+            return False
+
+        mod = submod
+
+    mod.add_module(field, module_to_add)
+
+
 class _ModuleFrame:
     def __init__(
         self,
@@ -421,7 +444,8 @@ class _ModuleFrame:
         self.parent_call_module: Optional[torch.fx.Node] = None
         if parent is not None:
             accessor = _compute_accessor(parent.fqn, self.fqn)
-            parent.module.add_module(
+            _add_submodule(
+                parent.module,
                 accessor,
                 self.module
                 if self.cached_graph_module is None
