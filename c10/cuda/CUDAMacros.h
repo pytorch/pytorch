@@ -39,8 +39,8 @@
 #endif
 
 /**
- * The maximum number of GPUs that we recognizes. Increasing this beyond the initial limit of 16 broke Caffe2
- * testing, hence the ifdef guards.
+ * The maximum number of GPUs that we recognizes. Increasing this beyond the
+ * initial limit of 16 broke Caffe2 testing, hence the ifdef guards.
  */
 #ifndef BUILD_CAFFE2
 // When building PyTorch
