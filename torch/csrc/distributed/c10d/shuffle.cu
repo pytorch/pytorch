@@ -4,7 +4,8 @@
 #include <c10/cuda/CUDAGuard.h>
 
 constexpr int64_t BYTES_PER_THREAD = 16;
-constexpr int64_t MAX_NUM_THREADS = 512;
+constexpr int64_t MAX_NUM_THREADS = 1024;
+constexpr int64_t MIN_NUM_THREADS = 128;
 constexpr int64_t WARP_SIZE = 32;
 
 template <typename T>
@@ -162,11 +163,16 @@ void fsdpAllGatherCopyOut(
       dimCumSums.back() * worldSize == allGatherRes.numel(),
       "allGatherRes and params must contain the same number of elements.");
 
+  // To balance the throughput larger shards and waste on smaller shards,
+  // determine the block size with the average shard length.
   const int64_t numelPerThread = BYTES_PER_THREAD / params[0].element_size();
   const int64_t avgShardLen = allGatherRes.numel() / worldSize / params.size();
-  const int64_t blockSize = std::min(
-      divUp(divUp(avgShardLen, numelPerThread), WARP_SIZE) * WARP_SIZE, MAX_NUM_THREADS);
+  int64_t blockSize = divUp(avgShardLen, numelPerThread);
+  blockSize = divUp(blockSize, WARP_SIZE) * WARP_SIZE;
+  blockSize = std::min(std::max(blockSize, MIN_NUM_THREADS), MAX_NUM_THREADS);
 
+  // TODO: if the numBlocks produced at this stage far exceeds maxActiveBlocks,
+  // we should increase the iter factor here as well.
   std::vector<int64_t> blockOffsetToParamIdx;
   std::vector<int64_t> blockCumSums{0};
   for (int64_t paramIdx = 0; paramIdx < static_cast<int64_t>(params.size());
@@ -178,19 +184,30 @@ void fsdpAllGatherCopyOut(
         blockOffsetToParamIdx.end(), numBlocks, paramIdx);
     blockCumSums.push_back(blockCumSums.back() + numBlocks);
   }
+  const auto numBlocks = blockCumSums.back();
 
   auto packed =
       pack({paramPtrs, blockOffsetToParamIdx, blockCumSums, dimCumSums});
 
-  const int64_t ranksPerBlock = 4;
-  const int64_t numBlocks = blockCumSums.back() * worldSize / ranksPerBlock;
-  LOG(INFO) << "avgShardLen: " << avgShardLen;
-  LOG(INFO) << "blocks: " << numBlocks << ", threads: " << blockSize;
+  // TODO: this is only for A100
+  constexpr int64_t maxActiveBlocks = 32 * 108;
+  int64_t ranksPerBlock = 1;
+  while (numBlocks * (worldSize / ranksPerBlock) < maxActiveBlocks &&
+         ranksPerBlock < worldSize) {
+    ++ranksPerBlock;
+  }
+
+  dim3 blocks(numBlocks * (worldSize / ranksPerBlock), 1, 1);
+  dim3 threads(blockSize, 1, 1);
+
+  LOG(INFO) << "blocks: " << blocks.x << ", threads: " << threads.x;
+  LOG(INFO) << "avgShardLen: " << avgShardLen
+            << ", ranksPerBlock: " << ranksPerBlock;
 
   AT_DISPATCH_ALL_TYPES_AND(
       at::ScalarType::BFloat16, scalarType, "fsdp_all_gather_copy_out", [&] {
         fsdpAllGatherCopyOutKernel<scalar_t>
-            <<<numBlocks, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
+            <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
                 reinterpret_cast<scalar_t**>(packed.second[0]),
                 allGatherRes.data_ptr<scalar_t>(),
                 allGatherRes.numel(),
