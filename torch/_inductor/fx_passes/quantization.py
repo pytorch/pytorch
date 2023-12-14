@@ -425,16 +425,15 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
         # qconv2d_pointwise should only has one users
         if len(compute_node.users) != 1:
             return False
-        binary_node = next(iter(compute_node.users))
-        binary_node_inputs = binary_node.args
-        assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
-        extra_input_of_binary_node = None
-        for arg in binary_node_inputs:
-            if arg != compute_node:
-                extra_input_of_binary_node = arg
-                break
-        assert extra_input_of_binary_node is not None
         if output_dtype is not None:
+            binary_node_inputs = next(iter(compute_node.users)).args
+            assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
+            extra_input_of_binary_node = None
+            for arg in binary_node_inputs:
+                if arg != compute_node:
+                    extra_input_of_binary_node = arg
+                    break
+            assert extra_input_of_binary_node is not None
             # Extra input of binary node comes from dequant pattern
             if (not isinstance(extra_input_of_binary_node, torch.fx.Node)) or (
                 extra_input_of_binary_node.target != aten.mul.Tensor
