@@ -695,7 +695,7 @@ Tensor _sparse_semi_structured_linear(
                 using ElementAccumulator = float;
                 using ElementComputeEpilogue = float;
                 using ThreadblockShape = cutlass::gemm::GemmShape<128, 64, 32>;
-                using WarpShape = cutlass::gemm::GemmShape<64, 64, 32>;
+                using WarpShape = cutlass::gemm::GemmShape<64, 32, 32>;
                 using InstructionShape = cutlass::gemm::GemmShape<16, 8, 16>;
                 const auto EnableRowMajorRowMajorLayouts = true;
                 const auto EnableRowMajorColumnMajorLayouts = true;
