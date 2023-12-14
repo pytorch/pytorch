@@ -119,7 +119,7 @@ jobs:
   workflow-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
-      runner: linux.2xlarge
+      runner: linux.2xlarge.arc
       docker-image: pytorch-linux-focal-linter
       fetch-depth: -1
       submodules: true

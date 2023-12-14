@@ -4,6 +4,7 @@ self-hosted-runner:
     - linux.20_04.16x
     - linux.large
     - linux.large.arc
+    - linux.2xlarge.arc
     - linux.2xlarge
     - linux.4xlarge
     - linux.12xlarge
