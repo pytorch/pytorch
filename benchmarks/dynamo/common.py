@@ -227,6 +227,7 @@ CI_USE_SGD = {
     "inception_v3",
     "tinynet_a",
     "selecsls42b",
+    "mobilevit_s",
 }
 
 
