@@ -46,7 +46,7 @@ TuningContext* getTuningContext() {
 }
 
 std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry) {
-  return stream << entry.id_ << "," << entry.time_ << "," << entry.doc_;
+  return stream << entry.key_ << "," << entry.time_;
 }
 
 // TuningResultsManager
@@ -466,8 +466,12 @@ void TuningContext::ReadFile(const std::string& filename) {
       validators[parts[1]] = parts[2];
       TUNABLE_LOG("Validator ", parts[1], "=", parts[2]);
     }
-    else if (parts.size() >= 5) {
-      results[parts[0]].emplace(parts[1], ResultEntry(atoi(parts[2].c_str()), atof(parts[3].c_str()), parts[4]));
+    else if (parts.size() >= 4) {
+      results[parts[0]].emplace(parts[1], ResultEntry(parts[2], atof(parts[3].c_str())));
+    }
+    else if (parts.size() >= 3) {
+      // the timestamp from the file is optional
+      results[parts[0]].emplace(parts[1], ResultEntry(parts[2], 0));
     }
   }
   if (GetTuningResultsValidator().ValidateAll(validators) != FAIL) {

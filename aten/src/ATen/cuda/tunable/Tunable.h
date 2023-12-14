@@ -40,20 +40,17 @@ enum TuningStatus {
 // Mapping from params signature to kernel id
 class ResultEntry {
   public:
-    explicit ResultEntry(int id, double time, const std::string& doc) : id_(id), time_(time), doc_(doc) {}
-    bool operator<(const ResultEntry& other) { return id_ < other.id_; }
-    bool operator<(int other) { return id_ < other; }
-    bool operator>(int other) { return id_ > other; }
-    operator int() { return id_; }
-    bool operator==(const ResultEntry& other) { return id_ == other.id_; }
-    bool operator!=(const ResultEntry& other) { return id_ != other.id_; }
+    explicit ResultEntry(const std::string& key, double time) : key_(key), time_(time) {}
+    bool operator==(const ResultEntry& other) { return key_ == other.key_; }
+    bool operator!=(const ResultEntry& other) { return key_ != other.key_; }
+    operator std::string () { return key_; }
     friend std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry);
-    static ResultEntry Null() { return ResultEntry(-1, 0.0f, "null"); }
+    static ResultEntry Null() { return ResultEntry("Null", 0.0); }
+    static ResultEntry Default() { return ResultEntry("Default", 0.0); }
 
   private:
-    int id_;
+    std::string key_;
     double time_;
-    std::string doc_;
 };
 
 typedef std::unordered_map<std::string, ResultEntry> KernelMap;

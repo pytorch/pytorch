@@ -31,17 +31,20 @@
 namespace at::cuda::tunable {
 
 template <typename T>
-TuningStatus DefaultGemmOp(const GemmParams<T>* params) {
-  at::cuda::blas::gemm_internal<T>(
-      params->transa, params->transb,
-      params->m, params->n, params->k,
-      params->alpha,
-      params->a, params->lda,
-      params->b, params->ldb,
-      params->beta,
-      params->c, params->ldc);
-  return OK;
-}
+class DefaultGemmOp : public Callable<GemmParams<T>> {
+  public:
+    TuningStatus Call(const GemmParams<T>* params) override {
+      at::cuda::blas::gemm_internal<T>(
+          params->transa, params->transb,
+          params->m, params->n, params->k,
+          params->alpha,
+          params->a, params->lda,
+          params->b, params->ldb,
+          params->beta,
+          params->c, params->ldc);
+      return OK;
+    }
+};
 
 template <typename T>
 bool IsZero(T v) {
@@ -108,7 +111,7 @@ template <typename T, BlasOp ALayout, BlasOp BLayout>
 class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
  public:
   GemmTunableOp() {
-    this->RegisterOp(std::string("Default"), DefaultGemmOp<T>);
+    this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
 
     auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
 

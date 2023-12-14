@@ -16,60 +16,25 @@
 #include <cxxabi.h>
 #endif
 
+#include <string>
 #include <type_traits>
+#include <unordered_map>
+#include <vector>
 
 namespace at::cuda::tunable {
 
-template <typename T, typename Arg, typename E = void>
-struct HasIsSupportedMethod {
-  constexpr static bool value = false;
-};
-
-template <typename T, typename Arg>
-struct HasIsSupportedMethod<
-    T, Arg, std::enable_if_t<std::is_same_v<decltype(std::declval<T>().IsSupported(std::declval<Arg>())), TuningStatus>>> {
-  constexpr static bool value = true;
-};
-
-// A type erased Callable wrapper. We could have used std::function<TuningStatus<const ParamsT*>> here. However, std::function
-// requires the callable object to be CopyConstructible and CopyAssignable. This is not suitable for move only functor
-// or move captured lambda. So we create a simple wrapper for our purpose here.
 template <typename ParamsT>
 class Callable {
- public:
-  template <typename T, typename = std::enable_if_t<
-                            !std::is_same_v<Callable<ParamsT>, std::remove_cv_t<std::remove_reference_t<T>>>,
-                            void>>
-  Callable(T&& c) : callable_{std::make_unique<CallableImpl<T>>(std::forward<T>(c))} {}  // NOLINT(google-explicit-constructor)
-  Callable(Callable&&) = default;
-  TuningStatus operator()(const ParamsT* param) { return (*callable_)(param); }
-  TuningStatus IsSupported(const ParamsT* param) { return (*callable_).IsSupported(param); }
-
- private:
-  struct ICallable {
-    virtual ~ICallable() = default;
-    virtual TuningStatus operator()(const ParamsT*) = 0;
-    virtual TuningStatus IsSupported(const ParamsT*) = 0;
-  };
-
-  template <typename T>
-  struct CallableImpl : ICallable {
-    explicit CallableImpl(T&& c) : c_{std::move(c)} {}
-    CallableImpl(CallableImpl&&) = default;
-    TuningStatus operator()(const ParamsT* param) override { return c_(param); }
-    TuningStatus IsSupported(const ParamsT* param) override {
-      if constexpr (HasIsSupportedMethod<T, const ParamsT*>::value) {
-        return c_.IsSupported(param);
-      } else {
-        return c_(param);
-      }
+  public:
+    Callable() = default;
+    Callable(Callable&&) = default;
+    virtual ~Callable() = default;
+    virtual TuningStatus Call(const ParamsT*) {
+      return FAIL;
     }
-
-   private:
-    T c_;
-  };
-
-  std::unique_ptr<ICallable> callable_;
+    virtual TuningStatus IsSupported(const ParamsT* params) {
+      return Call(params);
+    }
 };
 
 template <typename ParamsT, typename TimerT>
@@ -86,25 +51,23 @@ class TunableOp {
         auto& mgr = ctx->GetTuningResultsManager();
         auto op_sig = Signature();
         auto params_sig = params->Signature();
-
-        // Usage is enabled, then we are free to use previous tuning result.
         result = mgr.Lookup(op_sig, params_sig);
-        if (result > static_cast<int>(ops_.size())) {
-          TUNABLE_LOG("Invalid TunableOp kernel result for ", op_sig, ", result:", result, ", registered op:", ops_.size());
-          mgr.Delete(op_sig, params_sig);
-          result = ResultEntry::Null();
-        }
-
         // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
-        if (result < 0 && ctx->IsTuningEnabled()) {
-          auto result = FindFastest(params);
+        if (result == ResultEntry::Null() && ctx->IsTuningEnabled()) {
+          result = FindFastest(params);
           mgr.Add(op_sig, params_sig, result);
         }
       }
-      if (result < 0) {
-        TUNABLE_LOG("result < 0, using default_id_; result=", result);
+      else {
+        result = ResultEntry::Default();
       }
-      return (ops_[result < 0 ? default_id_ : result](params));
+      if (result == ResultEntry::Null()) {
+        TUNABLE_LOG("no result, using default");
+        result = ResultEntry::Default();
+      }
+      auto iter = ops_.find(result);
+      TORCH_CHECK(iter != ops_.end());
+      return iter->second->Call(params);
     }
 
     virtual std::string Signature() {
@@ -118,48 +81,29 @@ class TunableOp {
     }
 
   protected:
-    // set the default op to be used in non-tuning scenario
-    void SetDefaultId(int id) {
-      TORCH_CHECK(id < static_cast<int>(ops_.size()), "TunableOp id out of bound");
-      default_id_ = id;
-    }
-
-    void RegisterOp(std::string&& name, Callable<ParamsT>&& op) {
-      this->ops_.emplace_back(std::move(op));
-      this->op_names_.emplace_back(std::move(name));
-    }
-
-    int NumberOfOps() {
-      return this->ops_.size();
+    void RegisterOp(const std::string& name, std::unique_ptr<Callable<ParamsT>> op) {
+      this->op_names_.emplace_back(name);
+      this->ops_.emplace(name, std::move(op));
     }
 
   private:
-    static void WarmUp(Callable<ParamsT>& op, const ParamsT* param, int num_iter) {
+    static void WarmUp(Callable<ParamsT> *op, const ParamsT* param, int num_iter) {
       for (int i = 0; i < num_iter; i++) {
-        TORCH_CHECK(op(param) == OK);
+        TORCH_CHECK(op->Call(param) == OK);
       }
     }
 
-    static double Profile(Callable<ParamsT>& op, const ParamsT* param, int num_iter) {
+    static double Profile(Callable<ParamsT> *op, const ParamsT* param, int num_iter) {
       TimerT timer{};
       timer.Start();
       for (int i = 0; i < num_iter; i++) {
-        TORCH_CHECK(op(param) == OK);
+        TORCH_CHECK(op->Call(param) == OK);
       }
       timer.End();
       return timer.Duration() / num_iter;
     }
 
-    static TuningStatus IsSupported(Callable<ParamsT>& op, const ParamsT* params) {
-      TuningStatus status = op.IsSupported(params);
-      return status;
-    }
-
   protected:
-    virtual ResultEntry FindFastest(const ParamsT* params) {
-      return FindFastestImpl(params, ops_);
-    }
-
     bool IsNumericsCheckEnabled() {
       static const char *env = getenv("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
       if (env != nullptr && strcmp(env, "0") == 0) {
@@ -168,26 +112,24 @@ class TunableOp {
       return true;
     }
 
-    ResultEntry FindFastestImpl(const ParamsT* params, const std::vector<Callable<ParamsT>>& candidates) {
+    virtual ResultEntry FindFastest(const ParamsT* params) {
       TuningContext* ctx = getTuningContext();
       auto op_sig = Signature();
       auto params_sig = params->Signature();
-      TUNABLE_LOG("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", candidates.size(), " candidates");
+      TUNABLE_LOG("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
-      int id = -1;
-      std::string id_name = "";
+      std::string id_name = "Default";
 
       // calcaulte a reference answer for numerical check
       ParamsT* reference_params = params->DeepCopy();
-      auto& reference_op = const_cast<Callable<ParamsT>&>(candidates[0]);
-      TORCH_CHECK(reference_op(reference_params) == OK);
+      TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
 
       // need a copy of params to reuse
       ParamsT* reusable_params = params->DeepCopy();
 
-      for (size_t i = 0; i < candidates.size(); i++) {
-        auto& candidate = const_cast<Callable<ParamsT>&>(candidates[i]);
-        auto status = IsSupported(candidate, reusable_params);
+      for (size_t i = 0; i < op_names_.size(); i++) {
+        auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
+        auto status = candidate->Call(reusable_params);
         if (status != OK) {
           TUNABLE_LOG("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
@@ -257,10 +199,8 @@ class TunableOp {
         WarmUp(candidate, reusable_params, warmup_iter);
         auto duration_ms = Profile(candidate, reusable_params, tuning_iter);
         if (duration_ms < min_duration_ms) {
-          TUNABLE_LOG("├──found better instance, ",
-              "new best id=", i, ", old id=", id, ". " , duration_ms, "ms. ", op_names_[i]);
+          TUNABLE_LOG("├──found better instance id=", i, ". " , duration_ms, "ms. ", op_names_[i]);
           min_duration_ms = duration_ms;
-          id = static_cast<int>(i);
           id_name = op_names_[i];
         }
       }
@@ -269,9 +209,8 @@ class TunableOp {
       reusable_params->Delete();
       reference_params->Delete();
 
-      TORCH_CHECK(id >= 0, "Could not find viable op");
-      TUNABLE_LOG("└──found fastest with id=", id, " for ", op_sig, '(', params_sig, ") ", id_name);
-      return ResultEntry(id, min_duration_ms, id_name);
+      TUNABLE_LOG("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);
+      return ResultEntry(id_name, min_duration_ms);
     }
 
   private:
@@ -291,10 +230,7 @@ class TunableOp {
     mutable c10::once_flag signature_init_once_;
     std::string signature_;
 
-    // the default impl to use when tuning is disabled
-    int default_id_{0};
-
-    std::vector<Callable<ParamsT>> ops_;
+    std::unordered_map<std::string, std::unique_ptr<Callable<ParamsT>>> ops_;
     std::vector<std::string> op_names_;
 };
 

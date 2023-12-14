@@ -131,11 +131,6 @@ static char _charFromhipblasOp(hipblasOperation_t op) {
       "_charFromhipblasOp input should be HIPBLAS_OP_N/T/C but got `", op, "`");
 }
 
-template <typename T, typename ParamsT>
-const T* GetBiasFromParams(const ParamsT* params) {
-  return nullptr;
-}
-
 static hipblasOperation_t MapLayoutToHipBlasLt(BlasOp layout) {
   if (layout == BlasOp::N) {
     return HIPBLAS_OP_N;
@@ -164,40 +159,14 @@ static size_t GetHipblasltWorkspaceSize() {
 }
 
 template <typename T, BlasOp ALayout, BlasOp BLayout, typename ParamsT>
-auto GetHipBlasLtTypeStringAndOps() {
-  std::vector<std::pair<std::string, Callable<ParamsT>>> ret;
+class HipblasltGemmOp : public Callable<GemmParams<T>> {
+  public:
+    HipblasltGemmOp(hipblasLtMatmulAlgo_t algo) : algo_{algo} {}
 
-  hipblasOperation_t transa_outer = MapLayoutToHipBlasLt(ALayout);
-  hipblasOperation_t transb_outer = MapLayoutToHipBlasLt(BLayout);
-  auto in_out_datatype = HipBlasDataTypeFor<T>();
-  std::vector<hipblasLtMatmulHeuristicResult_t> heuristic_result;
-
-  hipblasLtHandle_t handle;
-  TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&handle));
-  TORCH_HIPBLASLT_CHECK(hipblaslt_ext::getAllAlgos(handle,
-        hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
-        transa_outer,
-        transb_outer,
-        in_out_datatype,
-        in_out_datatype,
-        in_out_datatype,
-        in_out_datatype,
-        HIPBLASLT_COMPUTE_F32,
-        heuristic_result));
-  TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
-
-  // Sort heuristic_result by algo index to make sure the order of returned algos is deterministic.
-  std::sort(heuristic_result.begin(),
-      heuristic_result.end(),
-      [](hipblasLtMatmulHeuristicResult_t& a, hipblasLtMatmulHeuristicResult_t& b) {
-      return GETINDEXFROMALGO(a.algo) < GETINDEXFROMALGO(b.algo);
-      });
-
-  int returned_algo_count = heuristic_result.size();
-  for (int i = 0; i < returned_algo_count; i++) {
-    hipblasLtMatmulAlgo_t algo = heuristic_result[i].algo;
-    int algo_index = GETINDEXFROMALGO(algo);
-    auto hipblaslt_gemm_op = [=](const ParamsT* params) -> TuningStatus {
+    TuningStatus Call(const GemmParams<T>* params) override {
+      hipblasOperation_t transa_outer = MapLayoutToHipBlasLt(ALayout);
+      hipblasOperation_t transb_outer = MapLayoutToHipBlasLt(BLayout);
+      auto in_out_datatype = HipBlasDataTypeFor<T>();
       auto opa = _hipblasOpFromChar(params->transa);
       auto opb = _hipblasOpFromChar(params->transb);
 
@@ -234,7 +203,6 @@ auto GetHipBlasLtTypeStringAndOps() {
       TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&op_handle));
 
       size_t ret_workspace_size = 0;
-      hipblasLtMatmulAlgo_t algo_i = algo;
       auto status = hipblaslt_ext::matmulIsAlgoSupported(op_handle,
           matmul,
           &alpha,
@@ -243,17 +211,17 @@ auto GetHipBlasLtTypeStringAndOps() {
           &beta,
           mat_c,
           mat_c,
-          algo_i,
+          algo_,
           ret_workspace_size);
 
       if (status == HIPBLAS_STATUS_SUCCESS) {
         if (ret_workspace_size >= workspace_size) {
-          //TUNABLE_LOG("[hipBLASLt] Solution #", i, " failed: algo ", algo_index, " workspace too large");
+          //TUNABLE_LOG("[hipBLASLt] Solution #", algo_index, " workspace too large");
           return FAIL;
         }
       }
       else {
-        //TUNABLE_LOG("[hipBLASLt] Solution #", i, " failed: algo ", algo_index, " not supported");
+        //TUNABLE_LOG("[hipBLASLt] Solution #", algo_index, " not supported");
         return FAIL;
       }
 
@@ -274,7 +242,7 @@ auto GetHipBlasLtTypeStringAndOps() {
             mat_c,
             params->c,
             mat_c,
-            &algo_i,
+            &algo_,
             workspace_buffer,
             workspace_size,
             at::cuda::getCurrentCUDAStream()));
@@ -288,12 +256,49 @@ auto GetHipBlasLtTypeStringAndOps() {
         c10::cuda::CUDACachingAllocator::raw_delete(workspace_buffer);
       }
       return OK;
-    };
+    }
+
+  private:
+    hipblasLtMatmulAlgo_t algo_;
+};
+
+template <typename T, BlasOp ALayout, BlasOp BLayout, typename ParamsT>
+auto GetHipBlasLtTypeStringAndOps() {
+  hipblasOperation_t transa_outer = MapLayoutToHipBlasLt(ALayout);
+  hipblasOperation_t transb_outer = MapLayoutToHipBlasLt(BLayout);
+  auto in_out_datatype = HipBlasDataTypeFor<T>();
+  std::vector<hipblasLtMatmulHeuristicResult_t> heuristic_result;
+
+  hipblasLtHandle_t handle;
+  TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&handle));
+  TORCH_HIPBLASLT_CHECK(hipblaslt_ext::getAllAlgos(handle,
+        hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
+        transa_outer,
+        transb_outer,
+        in_out_datatype,
+        in_out_datatype,
+        in_out_datatype,
+        in_out_datatype,
+        HIPBLASLT_COMPUTE_F32,
+        heuristic_result));
+  TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
+
+  // Sort heuristic_result by algo index to make sure the order of returned algos is deterministic.
+  std::sort(heuristic_result.begin(),
+      heuristic_result.end(),
+      [](hipblasLtMatmulHeuristicResult_t& a, hipblasLtMatmulHeuristicResult_t& b) {
+      return GETINDEXFROMALGO(a.algo) < GETINDEXFROMALGO(b.algo);
+      });
+
+  int returned_algo_count = heuristic_result.size();
+  std::vector<std::pair<std::string, std::unique_ptr<Callable<GemmParams<T>>>>> ret;
+  for (int i = 0; i < returned_algo_count; i++) {
+    auto algo = heuristic_result[i].algo;
+    int algo_index = GETINDEXFROMALGO(algo);
+    auto callable = std::make_unique<HipblasltGemmOp<T, ALayout, BLayout, GemmParams<T>>>(algo);
     std::string type_string = c10::str(
-        "Gemm_Hipblaslt_",
-        _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer),
-        "_", i, "_algo_", algo_index);
-    ret.emplace_back(type_string, std::move(hipblaslt_gemm_op));
+        "Gemm_Hipblaslt_", _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer), "_", algo_index);
+    ret.emplace_back(type_string, std::move(callable));
   }
 
   return ret;
