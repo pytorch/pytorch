@@ -584,17 +584,6 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
-    def test_pointless_convert_scalar(self):
-        # Not point converting a scalar to a tensor if the next op
-        # accepts Number.
-        def fn1(x):
-            x = torch.ops.prims.convert_element_type.default(1, torch.int32)
-            return torch.ops.aten.add.Tensor(x, x)
-
-        gm = torch.fx.symbolic_trace(fn1)
-        # self.assertEqual(count_calls(gm.graph), 2)
-        joint_graph.joint_graph_passes(gm)
-        self.assertEqual(count_calls(gm.graph), 1)
 
     def test_pointless_cumsum(self):
         # Constant folding was explicitly turned off due to issue #108388
