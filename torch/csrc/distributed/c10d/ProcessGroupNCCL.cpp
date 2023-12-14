@@ -787,7 +787,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
   std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
-            << "NCCL version: " << getNcclVersion()
+            << "NCCL version: " << getNcclVersion() << ", size: " << size
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
