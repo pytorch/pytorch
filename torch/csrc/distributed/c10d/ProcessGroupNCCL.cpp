@@ -1306,6 +1306,8 @@ struct DumpPipe {
         "Error creating named pipe ",
         filename);
     fd_ = open(filename.c_str(), O_RDONLY | O_NONBLOCK);
+    LOG(INFO) << "Pipe file " << filename
+              << " has been opened, write to it to trigger NCCL Debug Dump.";
     TORCH_CHECK(fd_ != -1, "Error opening named pipe ", filename);
   }
   bool shouldDump() {
@@ -1345,7 +1347,13 @@ void ProcessGroupNCCL::workCleanupLoop() {
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
-  DumpPipe dumpPipe(rank_);
+  c10::optional<DumpPipe> dumpPipe = c10::nullopt;
+  if (uid_ == 0) {
+    // DumpPipe is one per-trainer process, and its convenient to name them
+    // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
+    // the global PG and has globally unique rank ids across trainers.
+    dumpPipe.emplace(rank_);
+  }
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
@@ -1471,8 +1479,10 @@ void ProcessGroupNCCL::workCleanupLoop() {
         ++it;
       }
     }
-    // process a request to dump the trace
-    if (dumpPipe.shouldDump()) {
+    // process a request to dump the trace. only PG uid 0 will respond to dump
+    // requests, but this is fine since all PG's feed into the same flight
+    // recorder and dump.
+    if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
       launchAsyncDebugDump();
     }
     done = workMetaList_.empty();
