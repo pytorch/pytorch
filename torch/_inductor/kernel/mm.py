@@ -244,7 +244,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             alpha=alpha,
             beta=beta,
             input_reorder=[2, 0, 1],
-            fuseable=False,
+            fuseable=True,
+            non_fuseable=True,
         )
 
     return autotune_select_algorithm(
