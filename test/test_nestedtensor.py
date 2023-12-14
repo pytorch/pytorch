@@ -2033,8 +2033,8 @@ class TestNestedTensorDeviceType(NestedTestCase):
             self.assertEqual(ptT, ptT_from_ntT)
 
     @dtypes(torch.float, torch.float16, torch.double)
-    def test_view(self, device, dtype, layout):
-        nt = random_nt(device, dtype, 4, (4, 4), layout=layout)
+    def test_view(self, device, dtype):
+        nt = random_nt(device, dtype, 4, (4, 4))
         # error case: empty shape
         self.assertRaisesRegex(
             RuntimeError,
