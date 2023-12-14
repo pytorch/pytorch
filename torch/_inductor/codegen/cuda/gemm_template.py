@@ -536,8 +536,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         epilogue_nodes: List[IRNode],
         Bias: Optional[Buffer] = None,
         gemm_output_layout: Layout = None,
+        flip_mn: bool = None,
     ) -> str:
         """Generates the epilogue for the EVT epilogue fusion"""
+        assert flip_mn is not None
         if len(self.input_nodes) > 2:  # if no bias arg passed in at construction
             pre_fused_addmm_evt = (
                 CutlassEVTEpilogueTypeFormatter.create_pre_fused_addmm_evt_type()
@@ -551,6 +553,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             pre_fused_addmm_evt,
             Bias.get_name() if Bias is not None else None,
             gemm_output_layout=gemm_output_layout,
+            flip_mn=flip_mn,
         )
 
     def define_gemm_instance(
@@ -560,6 +563,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         epilogue_nodes: Optional[List[IRNode]] = None,
         Bias: Optional[Buffer] = None,
         gemm_output_layout: Optional[Layout] = None,
+        flip_mn: bool = False,
     ) -> Tuple[str, str]:
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
@@ -585,6 +589,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                     epilogue_nodes,
                     Bias=Bias,
                     gemm_output_layout=gemm_output_layout,
+                    flip_mn=flip_mn,
                 )
             else:
                 emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()
@@ -615,19 +620,19 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def should_swap_XW(
+        X: IRNode,
+        W: IRNode,
         bias: IRNode,
         beta: float,
     ) -> bool:
+        # If bias is row major, swap all M and N dimensions
+        if (
+            bias is not None
+            and len(bias.get_stride()) >= 2
+            and bias.get_stride()[-1] in (0, 1)
+        ):
+            return True
         return False
-
-        # TODO(ipiszy): Check whether it's necessary to swap X/W.
-        # strides = bias.get_stride()
-        # if strides[-1] != 1:
-        #     return True
-        # for stride in strides[:-1]:
-        #     if stride != 0:
-        #         return True
-        # return False
 
     @staticmethod
     def swap_XW(
@@ -995,7 +1000,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         epilogue_args = f"{{ElementComputeEpilogue({self.alpha}), ElementComputeEpilogue({self.beta})}}"
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
             if Bias is not None and self.has_tma_epilogue(op):
-                if self.should_swap_XW(Bias, self.beta):
+                if self.should_swap_XW(X, W, Bias, self.beta):
                     # TMA epilogue requires bias vector in column major to get best perf.
                     op = self.swap_XW(op)
                     should_swap_xw = True
@@ -1013,6 +1018,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                         pre_fused_evt_args,
                         Bias.get_name() if Bias is not None else None,
                         gemm_output_layout=self.output_node.get_layout(),
+                        flip_mn=should_swap_xw,
                     )
                 )
             epilogue_template = GEMM_ARGS_CUTLASS_3X_EPILOGUE
@@ -1027,6 +1033,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             epilogue_nodes,
             Bias=Bias,
             gemm_output_layout=self.output_node.get_layout(),
+            flip_mn=should_swap_xw,
         )
 
         options = dict(
