@@ -314,11 +314,9 @@ def jagged_torch_function(func, *args, **kwargs):
             return inp
 
         product = functools.reduce(operator.mul, inp.shape[start_dim : end_dim + 1])
-        new_shape = (
-            list(inp.shape[:start_dim]) + [product] + list(inp.shape[end_dim + 1 :])
-        )
+        new_shape = (*inp.shape[:start_dim], product, *inp.shape[end_dim + 1 :])
 
-        return inp.reshape(new_shape)
+        return inp.reshape(*new_shape)
 
     raise NotImplementedError(func)
 
