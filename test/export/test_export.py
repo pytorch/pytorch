@@ -1900,6 +1900,80 @@ def forward(self, arg3_1):
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
 
+    def test_nn_module_stack_shared_submodule(self):
+        class Leaf(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.leaf = Leaf()
+                self.register_buffer("buffer", torch.randn(4, 4))
+
+            def forward(self, x):
+                return self.buffer.sum() + self.leaf(x).sum()
+
+        class BarDifferent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.leaf = Leaf()
+
+            def forward(self, x):
+                return self.leaf(x).sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+                self.bar_different = BarDifferent()
+
+            def forward(self, x):
+                y = self.bar.buffer + x
+                return (self.bar(x) + self.bar_different(x + 2), y.sum(),)
+
+        inp = (torch.randn(4, 4),)
+        mod = Foo()
+        ep_strict = torch.export.export(mod, inp)
+        ep_non_strict = torch.export.export(mod, inp, strict=False)
+
+        gm_unflat_non_strict = ep_non_strict.module(flat=False)
+        self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
+        self.assertTrue(hasattr(gm_unflat_non_strict.bar, "buffer"))
+        self.assertTrue(hasattr(gm_unflat_non_strict.bar, "leaf"))
+        self.assertTrue(hasattr(gm_unflat_non_strict.bar_different, "leaf"))
+
+        gm_unflat_strict = ep_strict.module(flat=False)
+
+        self.assertEqual(gm_unflat_non_strict(*inp), gm_unflat_strict(*inp))
+        self.assertExpectedInline(
+            str(gm_unflat_non_strict.bar.leaf.linear.code).strip(), """\
+def forward(self, arg5_1):
+    bias = self.bias
+    weight = self.weight
+    t = torch.ops.aten.t.default(weight);  weight = None
+    addmm = torch.ops.aten.addmm.default(bias, arg5_1, t);  bias = arg5_1 = t = None
+    return addmm"""
+        )
+        self.assertExpectedInline(
+            str(gm_unflat_non_strict.bar_different.leaf.linear.code).strip(), """\
+def forward(self, add_2):
+    bias = self.bias
+    weight = self.weight
+    t_1 = torch.ops.aten.t.default(weight);  weight = None
+    addmm_1 = torch.ops.aten.addmm.default(bias, add_2, t_1);  bias = add_2 = t_1 = None
+    return addmm_1"""
+        )
+
+        gm_flat_non_strict = ep_non_strict.module()
+        gm_flat_strict = ep_strict.module()
+
+        self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
+
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -1969,18 +2043,20 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return x.cos() + self.bar(x)
 
         inp = (torch.randn(4, 4),)
-        ep_strict = torch.export.export(CondExport(), inp)
+        ep = torch.export.export(CondExport(), inp, strict=False)
 
         cond_top_level_nn_module_stack = [
             node.meta["nn_module_stack"]
-            for node in ep_strict.graph.nodes
+            for node in ep.graph.nodes
             if node.name == "true_graph_0"
         ][0]
 
-        for node in ep_strict.graph_module.true_graph_0.graph.nodes:
+        # we can't preserve nn_module_stack for the subgraphs for now.
+        for node in ep.graph_module.true_graph_0.graph.nodes:
             self.assertEqual(node.meta["nn_module_stack"], cond_top_level_nn_module_stack)
 
-        gm_unflat_strict = ep_strict.module(flat=False)
+        # this doesn't work today
+        gm_unflat_strict = ep.module(flat=False)
 
 
 if __name__ == '__main__':
