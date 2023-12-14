@@ -385,23 +385,23 @@ if torch._C._has_mkldnn:
         # _get_remaining_users will return the users of extra_input_node which are not
         # ancestor node of compute_node.
         def _is_ancestor_node(_current_node, _ancestor_node):
-            # Check whether _ancestor_node is the ancestor node of current node
-            if _current_node == _ancestor_node:
-                return True
-            elif isinstance(_current_node, torch.fx.Node):
-                if (
-                    _current_node.op == "placeholder"
-                    or _current_node.op == "output"
-                    or _current_node.op == "get_attr"
-                ):
-                    return False
-                else:
-                    return any(
-                        _is_ancestor_node(input, _ancestor_node)
-                        for input in _current_node.all_input_nodes
-                    )
-            else:
-                return False
+            # Check whether _ancestor_node is the ancestor node of _current_node
+            _node_list = [_current_node]
+            _visited_nodes = set()
+            while len(_node_list) != 0:
+                _current_node = _node_list.pop(0)
+                if _current_node in _visited_nodes:
+                    # Skip if already visited
+                    continue
+                _visited_nodes.add(_current_node)
+                if _current_node == _ancestor_node:
+                    return True
+                elif isinstance(
+                    _current_node, torch.fx.Node
+                ) and _current_node.op not in ["placeholder", "output", "get_attr"]:
+                    for input in _current_node.all_input_nodes:
+                        _node_list.append(input)
+            return False
 
         return [
             user
