@@ -323,7 +323,7 @@ class Round(sympy.Function):
     def __int__(self):
         # This will only ever be called when computing size hints. At that point, self.args[0] should be a number and
         # no longer an expression. If it were, the float call would fail and the caller would handle this further.
-        return round(float(self.args[0]))
+        return round(float(self.args[0]))  # type: ignore[arg-type]
 
 
 class RoundDecimal(sympy.Function):

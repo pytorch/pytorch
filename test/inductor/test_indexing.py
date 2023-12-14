@@ -6,8 +6,12 @@ from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
 
 from torch._inductor.sizevars import SizeVarAllocator
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TestCase as TorchTestCase,
+)
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Round, RoundDecimal
 
 
 class TestIndexingSimplification(TorchTestCase):
@@ -223,6 +227,35 @@ class ExprPrinterTests(TorchTestCase):
                 self.assertEqual(pexpr(expr), "math.ceil((1/2)*s1)")
                 self.assertEqual(cexpr(expr), "std::ceil((1.0/2.0)*s1)")
 
+    def test_print_round(self):
+        expr = Round(sympy.Symbol("x", integer=True) / 2)
+        self.assertEqual(pexpr(expr), "round((1/2)*x)")
+        self.assertEqual(cexpr(expr), "std::lrint((1.0/2.0)*x)")
+        self.assertEqual(texpr(expr), "tl.math.llrint((1/2)*x)")
+
+    @parametrize("ndigits", [-1, 0, 1])
+    def test_print_round_decimal(self, ndigits):
+        expr = RoundDecimal(sympy.Symbol("x", integer=True) / 2, ndigits)
+        self.assertEqual(pexpr(expr), f"round((1/2)*x, {ndigits})")
+        if ndigits >= 0:
+            self.assertEqual(
+                cexpr(expr),
+                f"static_cast<double>(std::nearbyint(1e{ndigits} * ((1.0/2.0)*x)) * 1e-{ndigits})",
+            )
+            self.assertEqual(
+                texpr(expr),
+                f"tl.math.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e-{ndigits}",
+            )
+        else:
+            self.assertEqual(
+                cexpr(expr),
+                f"static_cast<double>(std::nearbyint(1e-{-ndigits} * ((1.0/2.0)*x)) * 1e{-ndigits})",
+            )
+            self.assertEqual(
+                texpr(expr),
+                f"tl.math.nearbyint(1e-{-ndigits} * ((1/2)*x)) * 1e{-ndigits}",
+            )
+
     def test_print_floor_div(self):
         for integer in [True, False]:
             s1 = sympy.Symbol("s1", integer=integer)
@@ -265,6 +298,9 @@ class ExprPrinterTests(TorchTestCase):
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(texpr(expr), f"tl.math.{s}(x, tl.math.{s}(2*x, 3*x))")
             self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
+
+
+instantiate_parametrized_tests(ExprPrinterTests)
 
 
 if __name__ == "__main__":
