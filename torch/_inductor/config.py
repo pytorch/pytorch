@@ -648,7 +648,7 @@ class cuda:
     # 2）CUDACXX environment variable
     # 3）CUDA_HOME environment variable
     # 4) default system search PATH.
-    cuda_cxx = None
+    cuda_cxx = os.environ.get("CUDA_NVCC_EXECUTABLE", None)
 
     # If set to True, it will ensure that only GEMM ops capable of
     # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
@@ -708,6 +708,8 @@ class trace:
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar = None
+
+    log_autotuning_results = False
 
 
 _save_config_ignore = {
