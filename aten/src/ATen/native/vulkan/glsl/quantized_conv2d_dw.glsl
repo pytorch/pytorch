@@ -22,8 +22,8 @@ layout(set = 0, binding = 0, rgba8ui) uniform PRECISION restrict writeonly uimag
  * Input Textures
  */
 layout(set = 0, binding = 1) uniform PRECISION isampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION isampler3D uKernel;
-layout(set = 0, binding = 3) uniform PRECISION isampler3D uBias;
+layout(set = 0, binding = 2) uniform PRECISION isampler2D uKernel;
+layout(set = 0, binding = 3) uniform PRECISION isampler2D uBias;
 
 /*
  * Params Buffer
@@ -90,7 +90,7 @@ void main() {
   const ivec2 kstart = (start - ipos) / uBlock.dilate;
 
   vec4 sum = dequantize(
-      texelFetch(uBias, ivec3(pos.z, 0, 0), 0),
+      texelFetch(uBias, ivec2(pos.z, 0), 0),
       uBlock.scales.w,
       uBlock.zero_points.w);
 
@@ -104,7 +104,7 @@ void main() {
       const int k_ind = kx + ky * uBlock.kernel_size.x;
 
       const vec4 k_tex = dequantize(
-          texelFetch(uKernel, ivec3(k_ind, pos.z, 0), 0),
+          texelFetch(uKernel, ivec2(k_ind, pos.z), 0),
           uBlock.scales.z,
           uBlock.zero_points.z);
       const vec4 in_tex = dequantize(

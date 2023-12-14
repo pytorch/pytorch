@@ -548,13 +548,6 @@ at::Tensor preprocess_mask(
   constexpr int mem_eff_alignment = 8;
   at::Tensor result_mask = mask;
   if (!aligned_tensor<mem_eff_alignment>(mask)) {
-    TORCH_WARN_ONCE(
-        "Memory Efficient Attention requires the attn_mask to be aligned to, ",
-        mem_eff_alignment,
-        " elements. "
-        "Prior to calling SDPA, pad the last dimension of the attn_mask "
-        "to be at least a multiple of ", mem_eff_alignment,
-        " and then slice the attn_mask to the original size.");
     result_mask = pad_bias<mem_eff_alignment>(mask);
   }
   return result_mask.expand_symint(

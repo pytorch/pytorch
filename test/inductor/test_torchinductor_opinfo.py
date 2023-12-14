@@ -203,7 +203,6 @@ inductor_expected_failures_single_sample["cpu"] = {
         f16
     },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
-    "bernoulli": {f16, f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
     "cross": {f16},
@@ -229,7 +228,6 @@ inductor_expected_failures_single_sample["cpu"] = {
 inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "atanh": {f32},
-    "bernoulli": {f16, f32, f64},
     "cholesky": {f32, f64},
     "multinomial": {f16, f32, f64},
     "nn.functional.normalize": {f16},
@@ -238,6 +236,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f16, f32, f64},
     "torch.ops.aten._efficient_attention_forward": {f16, bf16, f32},
+    "torch.ops.aten._flash_attention_forward": {f16, bf16, f32},
 }
 
 
@@ -301,10 +300,6 @@ torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
     wrapper_noop_set_seed
 )
 
-# This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
-torch._dynamo.variables.torch.tensor_dunder_fns.append(
-    torch.testing._internal.common_utils.disable_functorch
-)
 
 # key can be either op_name, or (op_name, deivce_type), or (op_name, device_type, dtype)
 inductor_override_kwargs = {
@@ -361,6 +356,16 @@ inductor_override_kwargs = {
     "nn.functional.interpolate.bilinear": {"assert_equal": False},
     "nn.functional.upsample_bilinear": {"assert_equal": False},
 }
+
+
+if not TEST_WITH_ROCM:
+    inductor_override_kwargs.update(
+        {
+            # We have better precision than eager
+            ("cumsum", "cuda", f16): {"reference_in_float": True},
+        }
+    )
+
 
 # Always test with all sample for following ops
 inductor_all_samples = {
