@@ -65,12 +65,6 @@ class LazyVariableTracker(VariableTracker):
     def is_realized(self):
         return self._cache.vt is not None
 
-    def clone(self, **kwargs):
-        assert kwargs.get("_cache", self._cache) is self._cache
-        if kwargs.get("source", self.source) is not self.source:
-            self.realize()
-        return VariableTracker.clone(self.unwrap(), **kwargs)
-
     def __str__(self):
         return VariableTracker.__str__(self.unwrap())
 

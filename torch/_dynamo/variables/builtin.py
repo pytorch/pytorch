@@ -901,7 +901,9 @@ class BuiltinVariable(VariableTracker):
             if isinstance(arg, dict):
                 return ConstDictVariable(arg, user_cls, mutable_local=MutableLocal())
             elif isinstance(arg, variables.ConstDictVariable):
-                return arg.clone(user_cls=user_cls, mutable_local=MutableLocal())
+                return variables.ConstDictVariable(
+                    dict(arg.items), user_cls=user_cls, mutable_local=MutableLocal()
+                )
             elif isinstance(
                 arg,
                 (

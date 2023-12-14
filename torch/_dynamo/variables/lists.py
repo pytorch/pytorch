@@ -85,13 +85,13 @@ class BaseListVariable(VariableTracker):
 
         if isinstance(index, slice):
             if self.source is not None:
-                return self.clone(
+                return self.__class__(
                     items=self.items[index],
                     source=GetItemSource(self.source, index),
                     mutable_local=MutableLocal() if self.mutable_local else None,
                 )
             else:
-                return self.clone(
+                return self.__class__(
                     items=self.items[index],
                     mutable_local=MutableLocal() if self.mutable_local else None,
                 )

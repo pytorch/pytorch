@@ -152,12 +152,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         "user_code_variable_name",
     }
 
-    def clone(self, **kwargs):
-        """Shallow copy with some (optional) changes"""
-        args = dict(self.__dict__)
-        args.update(kwargs)
-        return self.__class__(**args)
-
     @classmethod
     def copy(cls, value):
         """Deeper (but not full) copy, leaving FX and user objects alone"""

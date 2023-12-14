@@ -390,6 +390,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             Union[Source, VariableTracker]
         ] = wrapped_reconstructible
 
+    def clone(self, **kwargs):
+        """Shallow copy with some (optional) changes"""
+        args = dict(self.__dict__)
+        args.update(kwargs)
+        return self.__class__(**args)
+
     def self_args(self):
         return []
 
