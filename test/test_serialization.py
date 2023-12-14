@@ -3948,6 +3948,22 @@ class TestSerialization(TestCase, SerializationMixin):
             for v in result.values():
                 self.assertTrue(v.is_cuda)
 
+    @parametrize('dtype', (torch.float8_e5m2, torch.float8_e4m3fn))
+    @parametrize('weights_only', (True, False))
+    def test_serialization_dtype(self, dtype, weights_only):
+        """ Tests that newer dtypes can be serialized using `_rebuild_tensor_v3` """
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.arange(0.0, 100.0).to(dtype=dtype)
+            torch.save({'x': x, 'even': x[0::2], 'odd': x[1::2]}, f)
+            f.seek(0)
+            y = torch.load(f, weights_only=weights_only)
+            self.assertEqual(y['x'], x)
+            # Check that views are actually views
+            y['odd'][0] = torch.tensor(0.25, dtype=dtype)
+            y['even'][0] = torch.tensor(-0.25, dtype=dtype)
+            self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
+
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
