@@ -2,7 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 
-#if !AT_CUDNN_ENABLED()
+#if !AT_CUDNN_ENABLED() && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8900
 
 namespace at { namespace native {
 
@@ -27,7 +27,7 @@ void run_cudnn_LLM_fprop(int64_t b,
 
 }} // namespace at::native
 
-#else // AT_CUDNN_ENABLED
+#else // AT_CUDNN_ENABLED && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8900
 #include <ATen/native/cudnn/MHA.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
@@ -43,7 +43,6 @@ void run_cudnn_LLM_fprop(int64_t b,
 #include <cudnn.h>
 
 #include <iostream>
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8900
 
 namespace at { namespace native {
 
@@ -325,5 +324,4 @@ run_cudnn_LLM_fprop(int64_t b,
 
 }} // namespace at::native
 
-#endif
 #endif
