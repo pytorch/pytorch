@@ -925,6 +925,7 @@ class _Ops(types.ModuleType):
         if torch._running_with_deploy():
             return
 
+        _utils_internal.log_load_library(path)
         path = _utils_internal.resolve_library_path(path)
         with dl_open_guard():
             # Import the shared library into the process, thus running its

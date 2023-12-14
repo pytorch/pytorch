@@ -78,6 +78,10 @@ def signpost_event(category: str, name: str, parameters: Dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
 
 
+def log_load_library(metrics):
+    log.info("%s", metrics)
+
+
 def log_compilation_event(metrics):
     log.info("%s", metrics)
 
