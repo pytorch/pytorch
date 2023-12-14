@@ -2708,8 +2708,7 @@ class CPUReproTests(TestCase):
         m = M().eval()
         with torch.no_grad():
             metrics.reset()
-            # FIXME: returns the wrong dtype
-            self.common(m, (idx, x), exact_dtype=False)
+            self.common(m, (idx, x))
             assert metrics.generated_cpp_vec_kernel_count == 1
 
         # we are doing direct load/store, make sure we do not generate
