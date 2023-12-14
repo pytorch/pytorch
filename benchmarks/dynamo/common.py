@@ -810,6 +810,8 @@ def speedup_experiment_onnx(
         )
         if torch.cuda.device_count() > 1:
             # Manually set correct torch.cuda.current_device to ensure torch.cuda.synchronize() works as intended.
+            # When there are more than 1 cuda devices, the first one is used for pytorch eager.
+            # The second one is used for onnx ort.
             torch.cuda.set_device(0)
         timings[rep, 0], expected_output = timed(
             model,
@@ -821,6 +823,8 @@ def speedup_experiment_onnx(
         )
         if torch.cuda.device_count() > 1:
             # Manually set correct torch.cuda.current_device to ensure torch.cuda.synchronize() works as intended.
+            # When there are more than 1 cuda devices, the first one is used for pytorch eager.
+            # The second one is used for onnx ort.
             torch.cuda.set_device(1)
         timings[rep, 1], actual_output = timed_onnx(model, onnx_model, inputs)
 
