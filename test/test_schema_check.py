@@ -495,9 +495,7 @@ class TestSchemaCheckModeOpInfo(JitTestCase):
     def test_schema_correctness(self, device, dtype, op):
         # Currently torch.equal isn't supported with torch.complex32
         # There's also errors with complex64 and complex128
-        # Skipping float8_e4m3fn per https://github.com/pytorch/pytorch/issues/107256
-        if (dtype == torch.complex32 or dtype == torch.float8_e4m3fn):
-            unittest.skip(f"{dtype} is not supported")
+        if (dtype == torch.complex32):
             return
         for sample in op.sample_inputs(device, dtype, requires_grad=False):
             with SchemaCheckMode():
