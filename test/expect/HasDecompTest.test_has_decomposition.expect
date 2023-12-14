@@ -63,6 +63,7 @@ aten::_copy_from_and_resize
 aten::_copy_from_and_resize.out
 aten::_cslt_compress
 aten::_cslt_sparse_mm
+aten::_cslt_sparse_mm_search
 aten::_ctc_loss
 aten::_ctc_loss.Tensor
 aten::_ctc_loss.Tensor_out
