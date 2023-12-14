@@ -542,7 +542,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         epilogue_nodes: List[IRNode],
         Bias: Optional[Buffer] = None,
         gemm_output_layout: Optional[Layout] = None,
-        flip_mn: bool = None,
+        flip_mn: Optional[bool] = None,
     ) -> str:
         """Generates the epilogue for the EVT epilogue fusion"""
         assert flip_mn is not None

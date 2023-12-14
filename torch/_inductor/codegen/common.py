@@ -1348,7 +1348,7 @@ def jinja2_env():
         return None
 
 
-PrimitiveInfoType = Union[int, float, bool, str]
+PrimitiveInfoType = Union[int, float, bool, str, List[Union[int, str, float, bool]]]
 
 
 class ChoiceCaller:

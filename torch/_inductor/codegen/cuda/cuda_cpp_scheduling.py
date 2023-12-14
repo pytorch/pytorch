@@ -185,7 +185,7 @@ class CUDACPPScheduling(BaseScheduling):
             cuda_template_buffer.retune(epilogue_nodes + [additional_node])
         except NoValidChoicesError:
             log.warning(
-                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, retuning did not return any viable kernel choices. This can indicate that the shared memory requirement would be too high."  # noqa: G004, B950
+                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, retuning did not return any viable kernel choices. This can indicate that the shared memory requirement would be too high."  # noqa: G004, B950, G004
             )
             return False
         return True

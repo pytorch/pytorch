@@ -265,16 +265,16 @@ class CUDATemplate(KernelTemplate):
         kwarg_override_variants: Sequence[Dict],  # type: ignore[type-arg]
     ) -> Generator[CUDATemplateCaller, None, None]:
         """
-        Generates variants of the given CUDATemplateBuffer after fusion with the given epilogue nodes. May be used to
-        determine the best configuration for a fused kernel, which may differ from
+        Generates variants of the given CUDATemplateBuffer after fusion with the given epilogue nodes.
+        May be used to determine the best configuration for a fused kernel, which may differ from
         the best configuration for the unfused kernel.
 
         Args:
             template_buffer (CUDATemplateBuffer): The CUDATemplateBuffer to generate variants of.
             epilogue_nodes (List[IRNode]): The epilogue nodes to fuse with the given CUDATemplateBuffer.
-            kwarg_override_variants (Sequence[Dict]): A sequence of keyword argument overrides to use for generating
-            the variants. Will typically be used to override the "op" argument for CUTLASSGemmTemplates and provide a
-            sequence of ops to try.
+            kwarg_override_variants (Sequence[Dict]): A sequence of keyword argument overrides to use for
+            generating the variants. Will typically be used to override the "op" argument for
+            CUTLASSGemmTemplates and provide a sequence of ops to try.
         """
         original_kwargs = template_buffer.make_kernel_render.render_kwargs
         original_template = template_buffer.make_kernel_render.template

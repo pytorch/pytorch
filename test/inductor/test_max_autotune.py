@@ -335,6 +335,8 @@ class TestMaxAutotune(TestCase):
         aux_shape: Optional[Tuple[int]] = None,
         config_override=None,
     ):
+        if config_override is None:
+            config_override = {}
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
             mixed_precision
         )
@@ -869,7 +871,9 @@ class TestMaxAutotune(TestCase):
     @parametrize("cutlass_prefer_evt_capable_ops", (True, False))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
-        self, dynamic=False, max_autotune_gemm_backends="CUTLASS",
+        self,
+        dynamic=False,
+        max_autotune_gemm_backends="CUTLASS",
         cutlass_prefer_evt_capable_ops=True,
     ):
         """

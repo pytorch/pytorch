@@ -1643,7 +1643,7 @@ class Scheduler:
         """
         # note self.nodes is topologically sorted
         name_to_ancestors: Dict[str, Set[str]] = {}
-        empty_set = set()
+        empty_set: Set[str] = set()
         for node in self.nodes:
             ancestors = set()
             for dep in node.unmet_dependencies:
