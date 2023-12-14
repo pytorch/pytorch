@@ -974,24 +974,14 @@ def register_replacement(
         else:
             pattern = search_fn_pattern
 
-        replace_pattern = gen_pattern(
-                replace_fn,
-                example_inputs,
-                trace_fn,
-                scalar_workaround,
-                exclusive_arg_names,
-            )
-
         pattern_repr = PatternPrettyPrinter.run(pattern)
-        replace_pattern_repr = PatternPrettyPrinter.run(replace_pattern)
-        if pattern_repr in _seen_search_replace_pattern_pairs:
-            # If we have seen this search pattern, make sure the
-            # replacement pattern is the same. This can happen if multiple
-            # functions have the same computation graph under some conditions.
-            # By allowing this, we don't require users to clearly separate them.
-            assert _seen_search_replace_pattern_pairs[pattern_repr] == replace_pattern_repr
-        else:
-            _seen_search_replace_pattern_pairs[pattern_repr] = replace_pattern_repr
+        if pattern_repr in _seen_patterns:
+            msg = (
+                "Duplicate search pattern %s, please make sure the "
+                "replacement function also has the same computation graph"
+            )
+            log.warning(msg, pattern_repr)
+        _seen_patterns.add(pattern_repr)
         pattern = ReplacementPatternEntry(
             pattern=pattern,
             extra_check=check_fn,
@@ -1371,7 +1361,7 @@ def clone_graph(input_graph: torch.fx.GraphModule) -> torch.fx.GraphModule:
     return CopyGraph(input_graph).transform()
 
 
-_seen_search_replace_pattern_pairs: Dict[str, str] = dict()
+_seen_patterns: Set[str] = set()
 
 
 def get_arg_value(
