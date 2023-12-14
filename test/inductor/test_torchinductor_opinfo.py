@@ -252,7 +252,6 @@ inductor_expected_failures_single_sample["cuda"].update(intentionally_not_handle
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
-    "atanh": {f32},
     "nn.functional.normalize": {f16},
 }
 
@@ -551,6 +550,7 @@ class TestInductorOpInfo(TestCase):
             return ((contextlib.nullcontext, {}),)
 
         try:
+
             def _get_tolerances(dtype):
                 _custom_tolerances = {
                     torch.float32: (1.3e-5, 1.5e-5),
