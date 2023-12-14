@@ -135,7 +135,7 @@ class CUDACPPScheduling(BaseScheduling):
                     [n.layout for n in template.input_nodes[:2]] + [added_node.layout]
                 ):
                     log.warning(
-                        f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, since the layouts (A,B,C)={check_layouts} are not compatible"
+                        f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, since the layouts (A,B,C)={check_layouts} are not compatible"  # noqa: B950, G004
                     )
                     return False
         try:
@@ -167,7 +167,7 @@ class CUDACPPScheduling(BaseScheduling):
             else:
                 # Likely due to unsupported dtype.
                 log.warning(
-                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950
+                    f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}. Reason: {not_implemented_op}"  # noqa: G004, B950, G004
                 )
                 return False
         return True
@@ -176,7 +176,7 @@ class CUDACPPScheduling(BaseScheduling):
         )
         if not compilation_result:
             log.warning(
-                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, due to compilation failure, this most likely means that the fused kernel would require too much shared memory."
+                f"Cannot fuse epilogue node {additional_node} into {cuda_template_buffer.name}, due to compilation failure, this most likely means that the fused kernel would require too much shared memory."  # noqa: G004, B950, G004
             )
             return False
         try:

@@ -423,7 +423,7 @@ class TritonTemplate(KernelTemplate):
         self.all_templates[name] = self
         self.debug = debug
 
-    def generate(
+    def generate(  # type: ignore[override]
         self,
         input_nodes,
         layout,
@@ -475,7 +475,7 @@ class TritonTemplate(KernelTemplate):
                 code = kernel.render(self.template, kwargs).finalize()
             except ZeroDivisionError:
                 # TODO(nmacchioni): fix sympy division by zero
-                return None
+                return None  # noqa: B901
             if self.debug:
                 print("Generated Code:\n", code)
             extra = (
@@ -991,7 +991,7 @@ class AlgorithmSelectorCache(PersistentCache):
     def log_results(
         name: str,
         input_nodes: List[ir.IRNode],
-        timings: dict[ChoiceCaller, float],
+        timings: Dict[ChoiceCaller, float],
         elapse: float,
     ):
         V.debug.log_autotuning_results(name, input_nodes, timings, elapse)
