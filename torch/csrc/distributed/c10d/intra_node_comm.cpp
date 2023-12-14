@@ -15,11 +15,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
-#include <cuda_runtime.h>
 #include <nvml.h>
 #endif
+
+#include <cuda_runtime.h>
 
 namespace c10d {
 namespace intra_node_comm {
@@ -92,7 +93,7 @@ static bool isSame(NvlMesh lhs, NvlMesh rhs) {
  * Query the nvlink connection among devices.
  */
 static NvlMesh getNvlMesh(std::vector<std::string> rankToBusId) {
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   using namespace c10::cuda;
 
   NvlMesh nvlMesh = {};
@@ -297,7 +298,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
     const std::string& prefix,
     size_t rank,
     size_t worldSize) {
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   if (!isIntraNodeCommSupported() ||
       !getCvarBool(ENABLE_INTRA_NODE_COMM, false) || worldSize < 2 ||
       worldSize > kMaxDevices) {
