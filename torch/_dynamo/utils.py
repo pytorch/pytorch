@@ -35,6 +35,7 @@ from typing import (
     ClassVar,
     Counter,
     DefaultDict,
+    Deque,
     Dict,
     Iterator,
     List,
@@ -601,7 +602,7 @@ class CompilationMetrics:
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
 
 
-_compilation_metrics: collections.deque[CompilationMetrics] = collections.deque(
+_compilation_metrics: Deque[CompilationMetrics] = collections.deque(
     maxlen=DEFAULT_COMPILATION_METRICS_LIMIT
 )
 
