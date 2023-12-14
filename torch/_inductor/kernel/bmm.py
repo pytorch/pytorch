@@ -1,4 +1,8 @@
+import logging
+from typing import List
+
 import torch
+from ..codegen.common import ChoiceCaller
 
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -15,6 +19,7 @@ from ..utils import (
 
 from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_options
 
+log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
@@ -95,7 +100,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
     # options to tune from
-    choices = [aten_bmm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
+    choices: List[ChoiceCaller] = []
     if use_triton_template(layout):
         for config in mm_configs(m, n, k):
             bmm_template.maybe_append_choice(
@@ -110,6 +115,13 @@ def tuned_bmm(mat1, mat2, *, layout=None):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
+    use_aten = use_aten_gemm_kernels()
+    if len(choices) == 0 and not use_aten:
+        log.warning("No choices for GEMM, using ATen backend as fallback")
+        use_aten = True
+
+    if use_aten:
+        choices.extend([aten_bmm.bind((mat1, mat2), layout)])
 
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
 
@@ -118,7 +130,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 # @register_lowering(aten.baddbmm)
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
-
+    choices = []
     # options to tune from
     choices = (
         [aten_baddbmm.bind((inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta)]
