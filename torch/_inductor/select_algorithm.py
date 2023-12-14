@@ -423,7 +423,7 @@ class TritonTemplate(KernelTemplate):
         self.all_templates[name] = self
         self.debug = debug
 
-    def generate(
+    def generate(  # type: ignore[override]
         self,
         input_nodes,
         layout,
@@ -475,7 +475,7 @@ class TritonTemplate(KernelTemplate):
                 code = kernel.render(self.template, kwargs).finalize()
             except ZeroDivisionError:
                 # TODO(nmacchioni): fix sympy division by zero
-                return None
+                return None  # noqa: B901
             if self.debug:
                 print("Generated Code:\n", code)
             extra = (
@@ -749,8 +749,10 @@ class ErrorFromChoice(RuntimeError):
         super().__init__(msg)
         self.choice = choice
 
+
 class NoValidChoicesError(RuntimeError):
     pass
+
 
 class AlgorithmSelectorCache(PersistentCache):
     def __call__(
@@ -843,7 +845,12 @@ class AlgorithmSelectorCache(PersistentCache):
 
         selected_key = builtins.min(timings, key=timings.__getitem__)
         selected_time = timings[selected_key]
-        if (not isinstance(selected_time, float)) or (selected_time<0.0) or (not math.isfinite(selected_time)) or math.isnan(selected_time):
+        if (
+            (not isinstance(selected_time, float))
+            or (selected_time < 0.0)
+            or (not math.isfinite(selected_time))
+            or math.isnan(selected_time)
+        ):
             raise NoValidChoicesError()
         selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
@@ -979,7 +986,7 @@ class AlgorithmSelectorCache(PersistentCache):
     def log_results(
         name: str,
         input_nodes: List[ir.IRNode],
-        timings: dict[ChoiceCaller, float],
+        timings: Dict[ChoiceCaller, float],
         elapse: float,
     ):
         V.debug.log_autotuning_results(name, input_nodes, timings, elapse)
