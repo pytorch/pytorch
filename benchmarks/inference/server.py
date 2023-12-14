@@ -207,6 +207,7 @@ if __name__ == "__main__":
         "--compile", default=True, action=argparse.BooleanOptionalAction
     )
     parser.add_argument("--output_file", type=str, default="output.csv")
+    parser.add_argument("--profile", default=False, action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
 
     downloaded_checkpoint = False
@@ -244,7 +245,15 @@ if __name__ == "__main__":
         )
 
         frontend.start()
-        asyncio.run(backend.run())
+
+        if args.profile:
+            def trace_handler(prof):
+                prof.export_chrome_trace("trace.json")
+
+            with torch.profiler.profile(on_trace_ready=trace_handler) as prof:
+                asyncio.run(backend.run())
+        else:
+            asyncio.run(backend.run())
 
         frontend.join()
 
