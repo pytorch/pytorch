@@ -108,7 +108,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x = DTensor.from_local(torch.rand(1), mesh, [Shard(0)], run_check=False)
         ref = fn(x)
 
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=False)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -122,7 +122,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x = DTensor.from_local(torch.rand(1), mesh, [Shard(0)], run_check=False)
         ref = fn(x)
 
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=False)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -147,7 +147,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         ref = fn(x)
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=False)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -160,7 +160,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         ref = from_local_kwargs_fn(x)
         opt_kwargs_fn = torch.compile(
-            from_local_kwargs_fn, backend="aot_eager", fullgraph=True, dynamic=False
+            from_local_kwargs_fn, backend="aot_eager", fullgraph=True
         )
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
@@ -176,7 +176,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         ref = fn(x)
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=False)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -190,7 +190,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         ref = redistribute_kwargs_fn(x)
         opt_kwargs_fn = torch.compile(
-            redistribute_kwargs_fn, backend="aot_eager", fullgraph=True, dynamic=False
+            redistribute_kwargs_fn, backend="aot_eager", fullgraph=True
         )
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
@@ -327,9 +327,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         torch.manual_seed(rng_seed)
         inp = torch.rand(20, 10, device=self.device_type)
         out = model(inp)
-        compiled_mod = torch.compile(
-            model, backend="aot_eager", fullgraph=True, dynamic=False
-        )
+        compiled_mod = torch.compile(model, backend="aot_eager", fullgraph=True)
         compiled_out = compiled_mod(inp)
         self.assertEqual(compiled_out, out)
 
@@ -377,7 +375,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         )
 
         # TODO: once aot autograd support is ready we can just use default backend
-        compiled_2d = torch.compile(fsdp_2d, backend="aot_eager", dynamic=False)
+        compiled_2d = torch.compile(fsdp_2d, backend="aot_eager")
         compiled_output = compiled_2d(inp)
 
         self.assertEqual(out, compiled_output)
@@ -418,7 +416,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
             use_orig_params=True,
         )
         # TODO: once aot autograd support is ready we can just use default backend
-        compiled_2d = torch.compile(fsdp_2d, backend="aot_eager", dynamic=False)
+        compiled_2d = torch.compile(fsdp_2d, backend="aot_eager")
 
         # forward pass
         out = eager_2d(inp)
@@ -445,9 +443,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
             dt_out_redistribute = dt_out.redistribute(mesh, [Replicate()])
             return dt_out_redistribute.to_local()
 
-        opt_fn = torch.compile(
-            fn, backend=aot_eager_graph, fullgraph=True, dynamic=False
-        )
+        opt_fn = torch.compile(fn, backend=aot_eager_graph, fullgraph=True)
 
         x_ref = torch.arange(8, requires_grad=True, dtype=torch.float32)
         y_ref = torch.arange(8, requires_grad=True, dtype=torch.float32)
