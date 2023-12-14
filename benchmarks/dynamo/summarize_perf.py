@@ -130,7 +130,7 @@ def main(directory, amp, float32, perf_compare):
             print(f"## {descriptions[statistic]}")
 
             table = []
-            for row_name in data[list(data.keys())[0]]:
+            for row_name in data[next(iter(data.keys()))]:
                 row = [row_name]
                 for col_name in data:
                     row.append(round(data[col_name][row_name], 2))
