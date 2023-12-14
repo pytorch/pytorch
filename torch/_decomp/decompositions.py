@@ -3054,7 +3054,7 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
 def select_one_layer_lstm_function(input, hx, params):
     r"""Check whether we could use decompose lstm with mkldnn_rnn_layer.
     All the below conditions need to be met:
-        * ``torch._C._has_mkldnn`` returns ``True``.
+        * ``torch._C._get_mkldnn_enabled()`` returns ``True``.
         * All the input args are on CPU.
         * The dtypes of args are either torch.float or torch.bfloat16.
         * Inference.
@@ -3067,7 +3067,7 @@ def select_one_layer_lstm_function(input, hx, params):
     """
 
     def use_mkldnn(input, hx, params):
-        if not torch._C._has_mkldnn:
+        if not torch._C._get_mkldnn_enabled():
             return False
 
         tensors = [input] + list(hx) + list(chain.from_iterable(params))

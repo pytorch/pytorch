@@ -19,6 +19,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
@@ -255,6 +256,11 @@ static PyObject* THPModule_crashIfATenASAN(PyObject* module, PyObject* arg) {
       "but got %s",
       THPUtils_typename(arg));
   return THPUtils_packInt32(at::_crash_if_asan(THPUtils_unpackInt(arg)));
+}
+
+static PyObject* THPModule_abort(PyObject* module, PyObject* noargs) {
+  std::terminate();
+  Py_RETURN_NONE;
 }
 
 static PyObject* THPModule_crashIfDebugAssertsFail(
@@ -1119,6 +1125,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {"_set_default_dtype", THPModule_setDefaultDtype, METH_O, nullptr},
     {"_infer_size", THPModule_inferSize, METH_VARARGS, nullptr},
+    {"_abort", THPModule_abort, METH_NOARGS, nullptr},
     {"_crash_if_csrc_asan", THPModule_crashIfCsrcASAN, METH_O, nullptr},
     {"_crash_if_csrc_ubsan", THPModule_crashIfCsrcUBSAN, METH_O, nullptr},
     {"_crash_if_vptr_ubsan", THPModule_crashIfvptrUBSAN, METH_NOARGS, nullptr},
@@ -1380,7 +1387,7 @@ PyObject* initModule() {
   HANDLE_TH_ERRORS
 
   c10::initLogging();
-
+  c10::set_terminate_handler();
   at::internal::lazy_init_num_threads();
 
   C10_LOG_API_USAGE_ONCE("torch.python.import");
