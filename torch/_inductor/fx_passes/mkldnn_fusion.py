@@ -366,7 +366,24 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _get_remaining_users(remaining_users, compute_node):
+    def _get_remaining_users(extra_input_node, compute_node):
+        # Think about this pattern:
+        #      ReLU
+        #     /   \
+        #  Conv1
+        #   /      \
+        # Conv2
+        #   \      /
+        #      Add
+        # Although, the extra input node (ReLU) has more than 1 users: Conv1 and Add.
+        # The Conv1 is the ancestor node of the current compute node (Conv2).
+        # This indicates that the buffer of ReLU has completed all its usage,
+        # So we can safely make changes to it now by doing Conv2->Add inplace fusion.
+        # Take above case as example:
+        # * extra_input_node: ReLU
+        # * compute_node: Conv2
+        # _get_remaining_users will return the users of extra_input_node which are not
+        # ancestor node of compute_node.
         def _is_ancestor_node(_current_node, _ancestor_node):
             # Check whether _ancestor_node is the ancestor node of current node
             if _current_node == _ancestor_node:
@@ -388,7 +405,7 @@ if torch._C._has_mkldnn:
 
         return [
             user
-            for user in remaining_users
+            for user in list(extra_input_node.users)
             if not _is_ancestor_node(compute_node, user)
         ]
 
@@ -406,14 +423,12 @@ if torch._C._has_mkldnn:
                 return _binary_node.args[_compute_index]
 
             if any(
-                len(n.args[other_index].users) > 1
-                and len(
+                len(
                     _get_remaining_users(
-                        [user for user in list(n.args[other_index].users) if user != n],
-                        _get_compute_node(n, other_index),
+                        n.args[other_index], _get_compute_node(n, other_index)
                     )
                 )
-                != 0
+                > 1
                 for n in binary_nodes
             ):
                 return False
