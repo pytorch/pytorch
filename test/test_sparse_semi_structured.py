@@ -427,9 +427,27 @@ class TestSparseSemiStructured(TestCase):
 
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_min_sparse_shape(self, dtype, device, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
+        config = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG[dtype]
+        A = rand_sparse_semi_structured_mask(config.sparse_min_rows, config.sparse_min_cols, dtype=dtype, device=device)
+        A_sparse = to_sparse_semi_structured(A)
+        B = torch.rand((config.sparse_min_cols, config.dense_min_cols), device=device).to(dtype)
+        if dtype == torch.int8:
+            dense_res = torch.mm(A.cpu(), B.cpu()).to(device, dtype=torch.int32 if backend == "cutlass" else torch.int8)
+            # int8 sparse matmul not supported for R/R -> R layout, so we transpose one of the arguments to get R/C -> R
+            B_t = B.t().contiguous()
+            sparse_res = torch.mm(A_sparse, B_t.t())
+        else:
+            dense_res = torch.mm(A, B)
+            sparse_res = torch.mm(A_sparse, B)
+        assert torch.allclose(sparse_res, dense_res, rtol=1e-3, atol=1e-3)
+
+    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
     def test_unsupported_shape(self, dtype, device, backend):
         SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
-        A = rand_sparse_semi_structured_mask(4, 4, dtype=dtype, device=device)
+        A = rand_sparse_semi_structured_mask(2, 2, dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.shape"):
             A_sparse = to_sparse_semi_structured(A)
 
