@@ -1,6 +1,6 @@
 import math
 import random
-from typing import Any, List, Set
+from typing import Any, List, Optional, Set, Union
 
 from torch.testing._internal.inputgen.variable.constants import (
     BOUND_ON_INF,
@@ -12,116 +12,126 @@ from torch.testing._internal.inputgen.variable.space import (
     Intervals,
     VariableSpace,
 )
+from torch.testing._internal.inputgen.variable.utils import nextafter
 
 
-def gen_min_float_from_interval(r: Interval):
+def gen_min_float_from_interval(r: Interval) -> Optional[float]:
     if r.empty():
         return None
     if not r.lower_open:
-        return r.lower
+        return float(r.lower)
     else:
-        next_float = math.nextafter(r.lower, math.inf)
+        next_float = nextafter(r.lower, math.inf)
         if next_float < r.upper or next_float == r.upper and not r.upper_open:
-            return next_float
+            return float(next_float)
         return None
 
 
-def gen_max_float_from_interval(r: Interval):
+def gen_max_float_from_interval(r: Interval) -> Optional[float]:
     if r.empty():
         raise ValueError("interval must not be empty")
     if not r.upper_open:
-        return r.upper
+        return float(r.upper)
     else:
-        prev_float = math.nextafter(r.upper, -math.inf)
+        prev_float = nextafter(r.upper, -math.inf)
         if prev_float > r.lower or prev_float == r.lower and not r.lower_open:
-            return prev_float
+            return float(prev_float)
         return None
 
 
-def gen_float_from_interval(r: Interval):
+def gen_float_from_interval(r: Interval) -> Optional[float]:
     if r.empty():
         return None
     lower = gen_min_float_from_interval(r)
     upper = gen_max_float_from_interval(r)
     if lower == float("-inf"):
-        lower = math.nextafter(lower, math.inf)
+        lower = nextafter(lower, math.inf)
     if upper == float("inf"):
-        upper = math.nextafter(upper, -math.inf)
-    if lower > upper:
+        upper = nextafter(upper, -math.inf)
+    if lower is None or upper is None:
         return None
-    return random.uniform(lower, upper)
+    elif lower > upper:
+        return None
+    else:
+        return random.uniform(lower, upper)
 
 
-def gen_min_float_from_intervals(rs: Intervals):
+def gen_min_float_from_intervals(rs: Intervals) -> Optional[float]:
     if rs.empty():
         return None
     return gen_min_float_from_interval(rs.intervals[0])
 
 
-def gen_max_float_from_intervals(rs: Intervals):
+def gen_max_float_from_intervals(rs: Intervals) -> Optional[float]:
     if rs.empty():
         return None
     return gen_max_float_from_interval(rs.intervals[-1])
 
 
-def gen_float_from_intervals(rs: Intervals):
+def gen_float_from_intervals(rs: Intervals) -> Optional[float]:
+    if rs.empty():
+        return None
     r = random.choice(rs.intervals)
     return gen_float_from_interval(r)
 
 
-def gen_min_int_from_interval(r: Interval):
+def gen_min_int_from_interval(r: Interval) -> Optional[int]:
+    if r.empty():
+        return None
     if r.lower not in [float("-inf"), float("inf")]:
         if r.lower > INT64_MAX or (r.lower == INT64_MAX and r.lower_open):
             return None
-        lower = math.floor(r.lower) + 1 if r.lower_open else math.ceil(r.lower)
+        lower: int = math.floor(r.lower) + 1 if r.lower_open else math.ceil(r.lower)
         lower = max(INT64_MIN, lower)
         if r.contains(lower):
             return lower
     return None
 
 
-def gen_max_int_from_interval(r: Interval):
+def gen_max_int_from_interval(r: Interval) -> Optional[int]:
+    if r.empty():
+        return None
     if r.upper not in [float("-inf"), float("inf")]:
         if r.upper < INT64_MIN or (r.upper == INT64_MIN and r.upper_open):
             return None
-        upper = math.ceil(r.upper) - 1 if r.upper_open else math.floor(r.upper)
+        upper: int = math.ceil(r.upper) - 1 if r.upper_open else math.floor(r.upper)
         upper = min(INT64_MAX, upper)
         if r.contains(upper):
             return upper
     return None
 
 
-def gen_int_from_interval(r: Interval):
-    if r.lower == float("-inf") and r.upper == float("inf"):
+def gen_int_from_interval(r: Interval) -> Optional[int]:
+    if r.empty():
+        return None
+    lower = gen_min_int_from_interval(r)
+    upper = gen_max_int_from_interval(r)
+    if lower is None and upper is None:
         lower = -BOUND_ON_INF
         upper = BOUND_ON_INF
-    elif r.lower == float("-inf"):
-        lower = r.upper - BOUND_ON_INF
-        upper = gen_max_int_from_interval(r)
-    elif r.upper == float("inf"):
-        lower = gen_min_int_from_interval(r)
-        upper = r.lower + BOUND_ON_INF
-    else:
-        lower = gen_min_int_from_interval(r)
-        upper = gen_max_int_from_interval(r)
+    elif lower is None:
+        lower = upper - BOUND_ON_INF
+    elif upper is None:
+        upper = lower + BOUND_ON_INF
+    assert lower is not None and upper is not None
     return random.randint(lower, upper)
 
 
-def gen_min_int_from_intervals(rs: Intervals):
+def gen_min_int_from_intervals(rs: Intervals) -> Optional[int]:
     for r in rs.intervals:
         if r.contains_int():
             return gen_min_int_from_interval(r)
     return None
 
 
-def gen_max_int_from_intervals(rs: Intervals):
+def gen_max_int_from_intervals(rs: Intervals) -> Optional[int]:
     for r in reversed(rs.intervals):
         if r.contains_int():
             return gen_max_int_from_interval(r)
     return None
 
 
-def gen_int_from_intervals(rs: Intervals):
+def gen_int_from_intervals(rs: Intervals) -> Optional[int]:
     intervals_with_ints = [r for r in rs.intervals if r.contains_int()]
     if len(intervals_with_ints) == 0:
         return None
@@ -130,11 +140,17 @@ def gen_int_from_intervals(rs: Intervals):
 
 
 class VariableGenerator:
+    """
+    A variable generator needs to be initialized with a variable space.
+    It is equipped with methods to generate values from that variable space.
+    """
+
     def __init__(self, space: VariableSpace):
         self.vtype = space.vtype
         self.space = space
 
-    def gen_min(self):
+    def gen_min(self) -> Any:
+        """Returns the minimum value of the space."""
         if self.space.empty() or self.vtype not in [bool, int, float]:
             return None
         elif self.space.discrete.initialized:
@@ -146,7 +162,8 @@ class VariableGenerator:
         else:
             raise Exception("Impossible path")
 
-    def gen_max(self):
+    def gen_max(self) -> Any:
+        """Returns the maximum value of the space."""
         if self.space.empty() or self.vtype not in [bool, int, float]:
             return None
         elif self.space.discrete.initialized:
@@ -159,6 +176,7 @@ class VariableGenerator:
             raise Exception("Impossible path")
 
     def gen_extremes(self) -> Set[Any]:
+        """Returns the extreme values of the space."""
         if self.space.empty() or self.vtype not in [bool, int, float]:
             return set()
         elif self.space.discrete.initialized:
@@ -177,10 +195,11 @@ class VariableGenerator:
             raise Exception("Impossible path")
 
     def gen_edges(self) -> Set[Any]:
+        """Returns the edge values of the space. An edge is an interval boundary."""
+        edge_vals: Set[Any] = set()
         if self.space.empty() or self.space.discrete.initialized:
-            return set()
+            pass
         elif self.vtype == int:
-            edge_vals = set()
             for r in self.space.intervals.intervals:
                 if r.contains_int():
                     lower = gen_min_int_from_interval(r)
@@ -189,15 +208,16 @@ class VariableGenerator:
                     upper = gen_max_int_from_interval(r)
                     if upper is not None:
                         edge_vals.add(upper)
-            return edge_vals
         elif self.vtype == float:
-            edge_vals = set()
             for r in self.space.intervals.intervals:
                 edge_vals.add(gen_min_float_from_interval(r))
                 edge_vals.add(gen_max_float_from_interval(r))
-            return edge_vals
+        else:
+            raise Exception("Impossible path")
+        return edge_vals
 
-    def gen_edges_non_extreme(self, num: int = 2):
+    def gen_edges_non_extreme(self, num: int = 2) -> Set[Any]:
+        """Generates edge values that are not extremal."""
         if self.space.empty() or self.space.discrete.initialized:
             return set()
         edges_not_extreme = self.gen_edges() - self.gen_extremes()
@@ -205,18 +225,19 @@ class VariableGenerator:
             return edges_not_extreme
         return set(random.sample(list(edges_not_extreme), num))
 
-    def gen_non_edges(self, num=2) -> List[Any]:
+    def gen_non_edges(self, num: int = 2) -> Set[Any]:
+        """Generates non-edge (or interior) values of the space."""
         if self.space.empty() or self.vtype == bool:
             return set()
         edge_or_extreme_vals = self.gen_edges() | self.gen_extremes()
+        vals = set()
         if self.space.discrete.initialized:
             vals = self.space.discrete.values - edge_or_extreme_vals
-            if num >= len(vals):
-                return vals
-            return set(random.sample(list(vals), num))
+            if num < len(vals):
+                vals = set(random.sample(list(vals), num))
         else:
-            vals = set()
             for _ in range(100):
+                v: Optional[Union[int, float]] = None
                 if self.vtype == int:
                     v = gen_int_from_intervals(self.space.intervals)
                 else:
@@ -228,9 +249,12 @@ class VariableGenerator:
                     vals.add(v)
                 if len(vals) >= num:
                     break
-            return vals
+        return vals
 
     def gen_balanced(self, num: int = 6) -> Set[Any]:
+        """Generates a balanced sample of the space. Balanced, in the sense that
+        extremal values, edge values, and interior values are drawn as equally likely
+        as possible."""
         if self.space.empty():
             return set()
         extreme_vals = self.gen_extremes()
@@ -250,6 +274,7 @@ class VariableGenerator:
         return set(random.sample(list(balanced), num))
 
     def gen(self, num: int = 6) -> List[Any]:
+        """Generates a sorted (if applicable), balanced sample of the space."""
         vals = list(self.gen_balanced(num))
         if self.vtype in [bool, int, float, str]:
             return sorted(vals)
