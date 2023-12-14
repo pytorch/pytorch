@@ -374,7 +374,7 @@ Tensor& set_(Tensor& result, Storage source) {
 }
 
 bool _same_storage(at::Tensor& a, at::Tensor const& b) {
-  return a.storage().data_ptr() == b.storage().data_ptr();
+  return a.storage().data_ptr().get() == b.storage().data_ptr().get();
 }
 
 bool _data_ptr_allocated(at::Tensor& a) {
