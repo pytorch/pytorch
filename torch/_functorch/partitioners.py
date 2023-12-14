@@ -685,19 +685,15 @@ def min_cut_rematerialization_partition(
         fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
         inputs = primal_inputs + fwd_seed_offset_inputs
         fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-        # Someone saves a input for backward, saves it for backward and
-        # returns it as-is, we always want to save this tensor because it cannot
-        # be recomputed anyway.
-        required_to_save = set(primal_inputs) & set(bwd_outputs)
         required_bw_nodes.update(o for o in bwd_outputs if o is not None)
         forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, inputs, fwd_outputs)
         required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
                              if node.op != 'output'}
         unclaimed_nodes = {node for node in joint_module.graph.nodes
                            if node not in required_fw_nodes and node not in required_bw_nodes}
-        return fwd_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, required_to_save
+        return fwd_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, inputs
 
-    orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, required_to_save = classify_nodes(joint_module)
+    orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, inputs = classify_nodes(joint_module)
 
     # networkx blows up on graphs with no required backward nodes
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
@@ -840,8 +836,17 @@ def min_cut_rematerialization_partition(
             continue
 
         if node in required_bw_nodes:
-            nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
-            continue
+            if node not in inputs:
+                nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
+                continue
+            # If someone saves a input for backward as-is and backward
+            # returns that tensor as-is as a grad input, then the node x would
+            # be both a required_bw_node and an input. We (1) connect x_in to
+            # to the source, (2) x_out to the sink, and (3) assign the proper
+            # weight to the x_in-x_out edge. A case where this happens is if
+            # NestedTensor saves a offset tensor as part of the singleton int
+            # in sizes.
+            nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
 
         if _is_primal(node) or _is_fwd_seed_offset(node):
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
@@ -885,10 +890,6 @@ def min_cut_rematerialization_partition(
         assert node_in[:-3] == node_out[:-4]
         node_name = node_in[:-3]
         cut_nodes.add(node_name)
-
-    # TODO: Need some analysis as to why the min-cut algorithm doesn't
-    # automatically save here, and if we can just improve it that way.
-    cut_nodes |= set(str(x) for x in required_to_save)
 
     # To make this stuff deterministic
     node_idx = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
