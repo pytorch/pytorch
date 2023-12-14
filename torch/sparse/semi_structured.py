@@ -117,22 +117,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
         return torch.Tensor._make_wrapper_subclass(cls, original_shape, **kwargs)  # type: ignore[attr-defined]
 
-    @staticmethod
-    def __get_indices_dtype(values_dtype):
-        if values_dtype == torch.int8:
-            return torch.int32
-        elif values_dtype in (torch.float16, torch.bfloat16, torch.float32):
-            return torch.int16
-        else:
-            raise RuntimeError(f"Datatype {values_dtype}  is not supported!")
-        return None
-
-    def is_cutlass(self) -> bool:
-        if self.compressed_tensor_cusparselt is None:
-            assert self.sparse_tensor_cutlass is not None and self.meta_tensor_cutlass is not None
-            return True
-        return False
-
     def __init__(
         self,
         original_tensor: Optional[torch.Tensor],
@@ -193,7 +177,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 original_tensor.dtype
             ].sparse_min_cols
             if m < min_rows or m % min_rows or n < min_cols or n % min_cols:
-                # TODO in the future we can add in padding to support dimensions that aren't perfect multiples
+                # TODO in the future we can add in padding to support sparse dimensions that aren't perfect multiples
                 raise RuntimeError(
                     f"Error original_tensor.shape {original_tensor.shape} is not supported! "
                     f"Both dimensions must be larger or equal than and a multiple of ({min_rows}, {min_cols})"
@@ -249,6 +233,22 @@ class SparseSemiStructuredTensor(torch.Tensor):
             meta_tensor_cutlass=meta_tensor_cutlass,
             transposed=transposed,
         )
+
+    @staticmethod
+    def __get_indices_dtype(values_dtype):
+        if values_dtype == torch.int8:
+            return torch.int32
+        elif values_dtype in (torch.float16, torch.bfloat16, torch.float32):
+            return torch.int16
+        else:
+            raise RuntimeError(f"Datatype {values_dtype}  is not supported!")
+        return None
+
+    def is_cutlass(self) -> bool:
+        if self.compressed_tensor_cusparselt is None:
+            assert self.sparse_tensor_cutlass is not None and self.meta_tensor_cutlass is not None
+            return True
+        return False
 
     def __repr__(self) -> str:  # type: ignore[override]
         """Return string representation of SparseSemiStructuredTensor

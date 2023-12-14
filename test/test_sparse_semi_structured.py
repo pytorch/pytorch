@@ -183,7 +183,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         # https://github.com/pytorch/pytorch/pull/114477
         assert sparse_result.stride() == sparse_compile_result.stride()
 
-    @unittest.skipIf(IS_WINDOWS, "torch.compile not support on windows")
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
     @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cusparselt not supported on this machine")
     def test_mlp_contiguous_relu_compile_cusparselt(self):
         """
@@ -192,7 +192,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         for dense_input_shape in [(1, 128), (64, 128), (128, 128), (64, 128, 128)]:
             SparseSemiStructuredTensorCompileTest._test_mlp_contiguous_relu_compile("cusparselt", dense_input_shape)
 
-    @unittest.skipIf(IS_WINDOWS, "torch.compile not support on windows")
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
     def test_mlp_contiguous_relu_compile_cutlass(self):
         """
         test for CUTLASS meta registrations (_sparse_semi_structured_linear) + torch.compile
