@@ -1334,7 +1334,8 @@ struct DumpPipe {
   DumpPipe(int rank) {
     std::string fileStem =
         getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
-    if (fileStem.empty()) {
+    if (fileStem.empty() ||
+        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
       return;
     }
     TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_TEMP_FILE is empty");
