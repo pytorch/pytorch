@@ -4361,37 +4361,39 @@ def isin_default(elements, test_elements, *, invert=False):
     return cmp.any(dim=dim)
 
 def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
+    elements_flat = elements.flatten()
+    test_elements_flat = test_elements.flatten()
     if assume_unique:
-        elements_flat = elements.flatten()
-        test_elements_flat = test_elements.flatten()
-    else:
-        elements_flat, unique_order = torch.unique(elements,
-                                                   return_inverse=True, sorted=False)
-        test_elements_flat = torch.unique(test_elements, sorted=False)
+        # This is the same as the aten implementation. For
+        # assume_unique=False, we cannot use unique() here, so we use a
+        # version with searchsorted instead.
+        all_elements = torch.cat([elements_flat, test_elements_flat])
+        sorted_elements, sorted_order = torch.sort(all_elements, stable=True)
 
-    all_elements = torch.cat([elements_flat, test_elements_flat])
-    sorted_elements, sorted_order = torch.sort(all_elements, stable=True)
+        duplicate_mask = torch.empty_like(sorted_elements, dtype=torch.bool)
+        sorted_except_first = sorted_elements[1:]
+        sorted_except_last = sorted_elements[:-1]
+        if invert:
+            duplicate_mask = duplicate_mask.slice_scatter(sorted_except_first !=
+                                                           sorted_except_last,
+                                                           start=0, end=-1)
+        else:
+            duplicate_mask = duplicate_mask.slice_scatter(sorted_except_first ==
+                                                           sorted_except_last,
+                                                           start=0, end=-1)
+        duplicate_mask = duplicate_mask.index_put([torch.tensor(-1)], torch.tensor(invert))
 
-    duplicate_mask = torch.empty_like(sorted_elements, dtype=torch.bool)
-    sorted_except_first = sorted_elements[1:]
-    sorted_except_last = sorted_elements[:-1]
-    if invert:
-        duplicate_mask = duplicate_mask.slice_scatter(sorted_except_first !=
-                                                       sorted_except_last,
-                                                       start=0, end=-1)
-    else:
-        duplicate_mask = duplicate_mask.slice_scatter(sorted_except_first ==
-                                                       sorted_except_last,
-                                                       start=0, end=-1)
-    duplicate_mask = duplicate_mask.index_put([torch.tensor(-1)], torch.tensor(invert))
+        mask = torch.empty_like(duplicate_mask)
+        mask = mask.index_copy(0, sorted_order, duplicate_mask)
 
-    mask = torch.empty_like(duplicate_mask)
-    mask = mask.index_copy(0, sorted_order, duplicate_mask)
-
-    if assume_unique:
         return mask[0:elements.numel()]
     else:
-        return mask[unique_order]
+        sorted_test_elements, _ = torch.sort(test_elements_flat)
+        idx = torch.searchsorted(sorted_test_elements, elements_flat)
+        test_idx = torch.where(idx < sorted_test_elements.numel() , idx, 0)
+        cmp = sorted_test_elements[test_idx] == elements_flat
+        cmp = cmp.logical_not() if invert else cmp
+        return cmp.reshape(elements.shape)
 
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
