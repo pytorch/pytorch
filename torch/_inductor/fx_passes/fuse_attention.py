@@ -38,16 +38,16 @@ def _sfdp_replacement_1(query, key, value, inv_scale):
     )
 
 
-def _sfdp_pattern_2(query, key, value, scale_factor):
+def _sfdp_pattern_2(query, key, value, scale):
     return (
         torch.matmul(query, key.transpose(-2, -1))
-        .mul(scale_factor)
+        .mul(scale)
         .softmax(dim=-1)
         .matmul(value)
     )
 
 
-def _sfdp_replacement_2(query, key, value, scale_factor):
+def _sfdp_replacement_2(query, key, value, scale):
     counters["inductor"]["fuse_attention"] += 1
     return aten.scaled_dot_product_attention(
         query.contiguous(),
@@ -56,20 +56,20 @@ def _sfdp_replacement_2(query, key, value, scale_factor):
         attn_mask=None,
         dropout_p=0.0,
         is_causal=False,
-        scale=scale_factor,
+        scale=scale,
     )
 
 
-def _sfdp_pattern_3(query, key, value, inv_scale_factor, dropout_p):
+def _sfdp_pattern_3(query, key, value, inv_scale, dropout_p):
     return torch.nn.functional.dropout(
         torch.matmul(query, key.transpose(-2, -1))
-        .div(inv_scale_factor)
+        .div(inv_scale)
         .softmax(dim=-1),
         p=dropout_p,
     ).matmul(value)
 
 
-def _sfdp_replacement_3(query, key, value, inv_scale_factor, dropout_p):
+def _sfdp_replacement_3(query, key, value, inv_scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     return aten.scaled_dot_product_attention(
         query.contiguous(),
@@ -78,18 +78,18 @@ def _sfdp_replacement_3(query, key, value, inv_scale_factor, dropout_p):
         attn_mask=None,
         dropout_p=dropout_p,
         is_causal=False,
-        scale=1.0 / inv_scale_factor,
+        scale=1.0 / inv_scale,
     )
 
 
-def _sfdp_pattern_4(query, key, value, scale_factor, dropout_p):
+def _sfdp_pattern_4(query, key, value, scale, dropout_p):
     return torch.nn.functional.dropout(
-        torch.matmul(query, key.transpose(-2, -1)).mul(scale_factor).softmax(dim=-1),
+        torch.matmul(query, key.transpose(-2, -1)).mul(scale).softmax(dim=-1),
         p=dropout_p,
     ).matmul(value)
 
 
-def _sfdp_replacement_4(query, key, value, scale_factor, dropout_p):
+def _sfdp_replacement_4(query, key, value, scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     return aten.scaled_dot_product_attention(
         query.contiguous(),
@@ -98,7 +98,7 @@ def _sfdp_replacement_4(query, key, value, scale_factor, dropout_p):
         attn_mask=None,
         dropout_p=dropout_p,
         is_causal=False,
-        scale=scale_factor,
+        scale=scale,
     )
 
 
