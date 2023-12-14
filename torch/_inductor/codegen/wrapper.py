@@ -1403,8 +1403,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
-            if V.graph.const_wrapper:
-                self.header.splice(V.graph.const_wrapper.header)
+            if V.graph.const_graph:
+                self.header.splice(V.graph.const_graph.wrapper_code.header)
                 self.prefix.splice(V.graph.const_code)
 
             if V.graph.is_const_graph:

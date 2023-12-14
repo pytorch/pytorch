@@ -179,11 +179,9 @@ class GraphLowering(torch.fx.Interpreter):
         extern_node_serializer=None,
         is_inference=False,
         is_const_graph=False,
-        original_constants=None,
         const_output_index=None,
         const_code=None,
-        const_kernels=None,
-        const_wrapper=None,
+        const_graph=None,
     ):
         super().__init__(gm)
 
@@ -197,7 +195,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.is_inference = is_inference
         self.is_const_graph = is_const_graph
         self.const_code = const_code
-        self.const_wrapper = const_wrapper
+        self.const_graph = const_graph
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -210,16 +208,18 @@ class GraphLowering(torch.fx.Interpreter):
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
-        self.device_types: Set[str] = set()
-        self.device_idxs: Set[int] = set()
+        self.device_types: Set[str] = const_graph.device_types if const_graph else set()
+        self.device_idxs: Set[int] = const_graph.device_idxs if const_graph else set()
         self.cuda = False
         self.buffers: List[ir.Buffer] = []
         self.const_output_index: Dict[str, int] = (
             const_output_index if const_output_index else {}
         )
-        self.const_kernels: Set[str] = const_kernels if const_kernels else set()
+        self.const_kernels: Set[str] = (
+            const_graph.wrapper_code.src_to_kernel.values() if const_graph else set()
+        )
         self.constants: Dict[str, torch.Tensor] = (
-            original_constants if original_constants else {}
+            const_graph.constants if const_graph else {}
         )
         self.used_constants: Set[str] = set()
         self.constant_reprs: Dict[str, str] = {}
