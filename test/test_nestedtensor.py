@@ -3332,6 +3332,11 @@ class TestNestedTensorSubclass(NestedTestCase):
             self.assertEqual(torch.int64, nt.offsets().dtype)
 
     def test_expand_as(self, device):
+        def do_test(a, b):
+            out = a.expand_as(b)
+            self.assertEqual(out.shape, b.shape)
+            self.assertTrue(torch.allclose(out._values, (b * 0)._values))
+
         for tensor_list in self._get_example_tensor_lists():
             nt = torch.nested.nested_tensor(
                 tensor_list,
@@ -3339,21 +3344,47 @@ class TestNestedTensorSubclass(NestedTestCase):
                 device=device)
 
             # NT: [B, j0, *1s] -> NT: [B, j0, *Ds]
-            inp = torch.empty(nt.shape[:2] + tuple(1 for _ in nt.shape[2:]))
-            out = inp.expand_as(nt)
-            self.assertEqual(out.shape, nt.shape)
+            inp = torch.zeros(nt.shape[:2] + tuple(1 for _ in nt.shape[2:]))
+            do_test(inp, nt)
 
-            # Dense -> NT
             # T: [*Ds] -> NT: [B, j0, *Ds]
-            dense = torch.ones(nt.shape[2:])
-            out = dense.expand_as(nt)
-            self.assertEqual(out.shape, nt.shape)
+            dense = torch.zeros(nt.shape[2:])
+            do_test(inp, nt)
 
-            # Dense -> NT
             # T: [1, 1, *Ds] -> NT: [B, j0, *Ds]
-            dense = torch.ones((1, 1, *nt.shape[2:]))
-            out = dense.expand_as(nt)
-            self.assertEqual(out.shape, nt.shape)
+            dense = torch.zeros((1, 1, *nt.shape[2:]))
+            do_test(inp, nt)
+
+        # Error cases:
+        def check_error(a, b, fail_reason):
+            with self.assertRaisesRegex(ValueError, fail_reason):
+                a.expand_as(b)
+
+        # NT: [B, j0, D] -> NT [B, j0, D', D]
+        test_tensor_list = self._get_list_for_jagged_tensor(
+            ((2, 3, 4), 3, 4), device=device, requires_grad=True
+        )
+        nt = torch.nested.nested_tensor(
+            test_tensor_list,
+            layout=torch.jagged,
+            device=device
+        )
+        inp = torch.ones((*nt.shape[:2], 3))
+        check_error(inp, nt, "trying to expand input to a size with different dim")
+
+        # NT: [B, D', j0, D] -> NT [B, j0, D', D]
+        inp = nt.transpose(1, 2)
+        check_error(inp, nt, "transposed jagged layout nested tensor is not supported")
+        # NT: [B, j1, D1', D] -> NT [B, j0, D', D]
+        test_tensor_list = self._get_list_for_jagged_tensor(
+            ((2, 3, 5), 3, 4), device=device, requires_grad=True
+        )
+        inp = torch.nested.nested_tensor(
+            test_tensor_list,
+            layout=torch.jagged,
+            device=device
+        )
+        check_error(inp, nt, "input has a different raggedness than size")
 
     def test_unbind(self, device):
         for tensor_list in self._get_example_tensor_lists():
