@@ -864,7 +864,6 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                 x, y = ctx.saved_tensors
                 x1 = ctx.t1
                 y1 = ctx.t2
-                # return grad_output, grad_output
                 return x * grad_output, y * grad_output
 
         @torch.compile(fullgraph=True, backend="inductor")

@@ -703,8 +703,12 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
-        from .builder import wrap_fx_proxy_cls
+        from . import (
+            ConstantVariable,
+            NestedUserFunctionVariable,
+            TensorVariable,
+            UserFunctionVariable,
+        )
 
         if len(kwargs) > 0:
             unimplemented(
@@ -727,8 +731,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # To get the example output from map() we will need to provide at least one sample to
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
-        first_dim = wrap_fx_proxy_cls(
-            target_cls=TensorVariable, tx=tx, proxy=args[1].as_proxy()[0]
+        first_dim = args[1].call_method(
+            tx, "__getitem__", args=[ConstantVariable.create(0)], kwargs={}
         )
 
         # TODO: Support kwargs
@@ -761,12 +765,11 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         body_node = make_attr(tx, body_name)
         p_args = (
             body_node,
-            1,  # right now we only supports num_mapped = 1
             *(arg.as_proxy() for arg in args[1:]),
             *(arg for arg in body_lifted_freevars.keys()),
         )
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.map_impl, p_args, {}, body_r, body_spec
+            tx, self.value, p_args, {}, body_r, body_spec
         )
 
 
@@ -1157,6 +1160,7 @@ def autograd_speculate(
     tracer,
     always_restore=False,
     enable_grad=False,
+    manually_set_subgraph_inputs=True,
 ):
     # TODO(jansel): BUG!!! we aren't copying on the line below, so the post-pre check below is pointless
     pre_guards = tx.output.guards
@@ -1180,6 +1184,7 @@ def autograd_speculate(
         restore_side_effects=False,
         tracer=tracer,
         enable_grad=enable_grad,
+        manually_set_subgraph_inputs=manually_set_subgraph_inputs
     )
     post_guards = tx.output.guards
     if body_lifted_freevars:
@@ -1487,9 +1492,11 @@ class AutogradFunctionApplyVariable(VariableTracker):
         saved_tensors = (
             list(ctx.saved_tensors.tensors) if ctx.saved_tensors is not None else []
         )
-        saved_attrs = dict(
-            tx.output.side_effects.store_attr_mutations[ctx.mutable_local]
-        )
+        saved_attrs = dict()
+        if ctx.mutable_local in tx.output.side_effects.store_attr_mutations:
+            saved_attrs = dict(
+                tx.output.side_effects.store_attr_mutations[ctx.mutable_local]
+            )
 
         # TODO(oulgen): Ideally, we would not do a linear search for output
         # node but as things currently are there could be nodes after the
@@ -1521,14 +1528,21 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         fwd_node = make_attr(tx, fwd_name)
 
+        tracer = torch._dynamo.output_graph.SubgraphTracer(
+            tx.output,
+            parent=tx.output.current_tracer,
+            source_target="autograd.Function",
+        )
         fn = UserFunctionVariable(self.bwd_graph, source=self.source)
+        from .constant import ConstantVariable
         speculation = autograd_speculate(
             fn,
             self.bwd_graph,
             tx,
-            [ctx, fwd_body],
-            {},
+            [ctx, ConstantVariable(len(saved_tensors)), *saved_tensors, fwd_body],
+            saved_attrs,
             tracer=tracer,
+            manually_set_subgraph_inputs=False,
         )
         if speculation is None:
             return None

@@ -158,13 +158,9 @@ class SuperVariable(VariableTracker):
         ):
             assert not kwargs and len(args) == 2
             k = variables.ConstDictVariable.get_key(args[0])
-
-            newval = dict(self.objvar.items)
-            newval[k] = args[1]
-            return tx.replace_all(
-                self.objvar,
-                self.objvar.modifed(newval),
-            )
+            tx.output.side_effects.mutation(self)
+            self.objvar.items[k] = args[1]
+            return variables.ConstantVariable.create(None)
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -314,6 +310,19 @@ def produce_trampoline_autograd_bwd(fn_cls):
     return trampoline_autograd_bwd
 
 
+def produce_trampoline_autograd_bwd_with_saved(fn_cls):
+    def trampoline_autograd_bwd(ctx, num_saved_tensors, *args, **kwargs):
+        saved_tensors = args[:num_saved_tensors]
+        args = args[num_saved_tensors:]
+        ctx.saved_tensors = saved_tensors
+        for name, value in kwargs.items():
+            setattr(ctx, name, value)
+        return fn_cls.backward(ctx, *args)
+
+    trampoline_autograd_bwd._origin = produce_trampoline_autograd_bwd
+    return trampoline_autograd_bwd
+
+
 def produce_trampoline_autograd_apply(fn_cls):
     def trampoline_autograd_apply(*args, **kwargs):
         return fn_cls.apply(*args, **kwargs)
@@ -378,6 +387,9 @@ class AutogradFunctionVariable(VariableTracker):
             trampoline_autograd_apply = produce_trampoline_autograd_apply(self.fn_cls)
             trampoline_autograd_fwd = produce_trampoline_autograd_fwd(self.fn_cls)
             trampoline_autograd_bwd = produce_trampoline_autograd_bwd(self.fn_cls)
+            trampoline_autograd_bwd_with_saved = (
+                produce_trampoline_autograd_bwd_with_saved(self.fn_cls)
+            )
 
             # NOTE [On Tracing autograd.Function w/ grad]
             # The complex system described here revolves around the soundness evaluation of an autograd.Function in
@@ -430,7 +442,7 @@ class AutogradFunctionVariable(VariableTracker):
             args = args[1:]  # Drop context
             return AutogradFunctionApplyVariable(
                 trampoline_autograd_fwd,
-                trampoline_autograd_bwd,
+                trampoline_autograd_bwd_with_saved,
                 source=module_source,
             ).call_function(tx, args, kwargs)
 
@@ -711,7 +723,7 @@ class PythonModuleVariable(VariableTracker):
 
 
 class SkipFilesVariable(VariableTracker):
-    def __init__(self, value, reason, **kwargs):
+    def __init__(self, value, reason=None, **kwargs):
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
@@ -721,6 +733,14 @@ class SkipFilesVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+        return cls(
+            value,
+            source=source,
+        )
 
     @staticmethod
     @functools.lru_cache(None)
@@ -955,9 +975,9 @@ class SkipFilesVariable(VariableTracker):
                 path = inspect.getfile(self.value)
             except TypeError:
                 path = f"Builtin {self.value.__name__}"
-            unimplemented(
-                f"'call_function {self.value.__qualname__} in skip_files {path}, {self.reason}'"
-            )
+            msg = f"'skip function {self.value.__qualname__} in file {path}'"
+            msg += f"', {self.reason}'" if self.reason else ""
+            unimplemented(msg)
 
     def call_method(
         self,
