@@ -686,7 +686,7 @@ class ExternKernelCaller(ChoiceCaller):
             cls(
                 layout=self.layout,
                 inputs=self.input_nodes,
-                kernel=self.choice.call_name(),
+                python_kernel_name=self.choice.call_name(),
                 cpp_kernel_name=self.choice.cpp_kernel_name,
                 ordered_kwargs_for_cpp_kernel=self.choice.ordered_kwargs_for_cpp_kernel,
                 kwargs=self.kwargs,
