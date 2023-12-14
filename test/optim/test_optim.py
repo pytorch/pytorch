@@ -736,7 +736,7 @@ class TestOptim(TestCase):
                     actual = mt_p_state[k]
                     self.assertEqual(st_p_state[k], actual, rtol=rtol, atol=atol)
 
-    def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag, reduced_precision=False):
+    def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag, reduced_precision=False, assert_step_dtype=None):
         if not torch.cuda.is_available():
             return
         assert flag in ("foreach", "fused")
@@ -770,11 +770,10 @@ class TestOptim(TestCase):
                 # foreach/fused optimizers should be tested with a param_groups['params'] with
                 # zero_size tensor as its last param.
                 # ref: https://github.com/pytorch/pytorch/issues/100701
-                empty_params = [torch.empty((), device=device, dtype=torch.float64)]
+                empty_param = torch.empty((), device=device, dtype=torch.float64)
+                parameters = list(model.parameters()) + [empty_param]
 
-                optimizer = optimizer_constructor(
-                    list(model.parameters()) + empty_params, **params_with_flags
-                )
+                optimizer = optimizer_constructor(parameters, **params_with_flags)
 
                 for i in range(kIterations):
                     optimizer.zero_grad()
@@ -787,6 +786,11 @@ class TestOptim(TestCase):
                         optimizer.zero_grad(set_to_none=True)
 
                     optimizer.step()
+
+                if assert_step_dtype is not None:
+                    p_state = optimizer.state[parameters[0]]
+                    if torch.is_tensor(p_state.get("step", None)):
+                        self.assertEqual(p_state["step"].dtype, assert_step_dtype)
 
                 state.append(optimizer.state)
                 res.append(model.parameters())
@@ -963,7 +967,8 @@ class TestOptim(TestCase):
 
     def test_multi_tensor_optimizers_default_dtype(self):
         # https://github.com/pytorch/pytorch/issues/110940
-        # We coerce step to always be float32
+        # We coerce step to always be float32 unless the
+        # default dtype is higher prec float64
         default_dtype = torch.tensor(0.0).dtype
         for dtype in [torch.float64, torch.float16]:
             try:
@@ -971,7 +976,8 @@ class TestOptim(TestCase):
                 self._test_derived_optimizers(
                     self._multi_tensor_optimizer_configs,
                     "foreach",
-                    reduced_precision=dtype == torch.float16
+                    reduced_precision=dtype == torch.float16,
+                    assert_step_dtype=torch.float64 if dtype == torch.float64 else torch.float32
                 )
             finally:
                 torch.set_default_dtype(default_dtype)
