@@ -56,10 +56,9 @@ def _get_cxx_compiler() -> str:
     return compiler
 
 
-def _nonduplicate_append(dest_list: List[str], src_list: List[str]):
+def _append_list(dest_list: List[str], src_list: List[str]):
     for item in src_list:
-        if item not in dest_list:
-            dest_list.append(item)
+        dest_list.append(item)
 
 
 def _remove_duplication_in_list(orig_list: List[str]) -> List[str]:
@@ -136,31 +135,6 @@ class BuildOptionsBase:
     and maintains the suitable args.
     This class will help maintains cxx build compiler and nessary args.
     """
-    def _set_options(
-        self,
-        definations,
-        include_dirs,
-        cflags,
-        ldflags,
-        libraries_dirs,
-        libraries,
-        passthough_args,
-    ):
-        self._definations = definations
-        self._include_dirs = include_dirs
-        self._cflags = cflags
-        self._ldflags = ldflags
-        self._libraries_dirs = libraries_dirs
-        self._libraries = libraries
-        self._passthough_args = passthough_args
-
-        self._definations = _remove_duplication_in_list(self._definations)
-        self._include_dirs = _remove_duplication_in_list(self._include_dirs)
-        self._cflags = _remove_duplication_in_list(self._cflags)
-        self._ldflags = _remove_duplication_in_list(self._ldflags)
-        self._libraries_dirs = _remove_duplication_in_list(self._libraries_dirs)
-        self._libraries = _remove_duplication_in_list(self._libraries)
-        self._passthough_args = _remove_duplication_in_list(self._passthough_args)
 
     def __init__(self) -> None:
         self._compiler = ""
@@ -171,6 +145,15 @@ class BuildOptionsBase:
         self._libraries_dirs: List[str] = []
         self._libraries: List[str] = []
         self._passthough_args: List[str] = []
+
+    def _remove_duplicate_options(self):
+        self._definations = _remove_duplication_in_list(self._definations)
+        self._include_dirs = _remove_duplication_in_list(self._include_dirs)
+        self._cflags = _remove_duplication_in_list(self._cflags)
+        self._ldflags = _remove_duplication_in_list(self._ldflags)
+        self._libraries_dirs = _remove_duplication_in_list(self._libraries_dirs)
+        self._libraries = _remove_duplication_in_list(self._libraries)
+        self._passthough_args = _remove_duplication_in_list(self._passthough_args)
 
     def get_compiler(self) -> str:
         return self._compiler
@@ -300,6 +283,7 @@ class CxxOptions(BuildOptionsBase):
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self._compiler = _get_cxx_compiler()
 
         (
@@ -312,15 +296,14 @@ class CxxOptions(BuildOptionsBase):
             passthough_args,
         ) = get_cxx_options(self._compiler)
 
-        self._set_options(
-            definations,
-            include_dirs,
-            cflags,
-            ldflags,
-            libraries_dirs,
-            libraries,
-            passthough_args,
-        )
+        _append_list(self._definations, definations)
+        _append_list(self._include_dirs, include_dirs)
+        _append_list(self._cflags, cflags)
+        _append_list(self._ldflags, ldflags)
+        _append_list(self._libraries_dirs, libraries_dirs)
+        _append_list(self._libraries, libraries)
+        _append_list(self._passthough_args, passthough_args)
+        self._remove_duplicate_options()
 
 
 def _get_glibcxx_abi_build_flags() -> List[str]:
@@ -576,17 +559,7 @@ class CxxTorchOptions(CxxOptions):
     """
 
     def __init__(self, chosen_isa: VecISA, aot_mode: bool = False) -> None:
-        self._compiler = _get_cxx_compiler()
-
-        (
-            cxx_definations,
-            cxx_include_dirs,
-            cxx_cflags,
-            cxx_ldflags,
-            cxx_libraries_dirs,
-            cxx_libraries,
-            cxx_passthough_args,
-        ) = get_cxx_options(self._compiler)
+        super().__init__()
 
         (
             torch_definations,
@@ -598,23 +571,14 @@ class CxxTorchOptions(CxxOptions):
             torch_passthough_args,
         ) = get_cxx_torch_options(cpp_compiler=self._compiler, chosen_isa=chosen_isa)
 
-        definations = cxx_definations + torch_definations
-        include_dirs = cxx_include_dirs + torch_include_dirs
-        cflags = cxx_cflags + torch_cflags
-        ldflags = cxx_ldflags + torch_ldflags
-        libraries_dirs = cxx_libraries_dirs + torch_libraries_dirs
-        libraries = cxx_libraries + torch_libraries
-        passthough_args = cxx_passthough_args + torch_passthough_args
-
-        self._set_options(
-            definations,
-            include_dirs,
-            cflags,
-            ldflags,
-            libraries_dirs,
-            libraries,
-            passthough_args,
-        )
+        _append_list(self._definations, torch_definations)
+        _append_list(self._include_dirs, torch_include_dirs)
+        _append_list(self._cflags, torch_cflags)
+        _append_list(self._ldflags, torch_ldflags)
+        _append_list(self._libraries_dirs, torch_libraries_dirs)
+        _append_list(self._libraries, torch_libraries)
+        _append_list(self._passthough_args, torch_passthough_args)
+        self._remove_duplicate_options()
 
 
 def _get_cuda_related_args(aot_mode: bool):
@@ -706,32 +670,10 @@ class CxxTorchCudaOptions(CxxTorchOptions):
     """
 
     def __init__(self, use_cuda: bool = True, aot_mode: bool = False) -> None:
-        self._compiler = _get_cxx_compiler()
         from torch._inductor.codecache import pick_vec_isa
 
         chosen_isa = pick_vec_isa()
-
-        (
-            cxx_definations,
-            cxx_include_dirs,
-            cxx_cflags,
-            cxx_ldflags,
-            cxx_libraries_dirs,
-            cxx_libraries,
-            cxx_passthough_args,
-        ) = get_cxx_options(self._compiler)
-
-        (
-            torch_definations,
-            torch_include_dirs,
-            torch_cflags,
-            torch_ldflags,
-            torch_libraries_dirs,
-            torch_libraries,
-            torch_passthough_args,
-        ) = get_cxx_torch_options(
-            cpp_compiler=self._compiler, chosen_isa=chosen_isa, aot_mode=aot_mode
-        )
+        super().__init__(chosen_isa=chosen_isa, aot_mode=aot_mode)
 
         cuda_definations: List[str] = []
         cuda_include_dirs: List[str] = []
@@ -752,25 +694,14 @@ class CxxTorchCudaOptions(CxxTorchOptions):
                 cuda_passthough_args,
             ) = get_cxx_torch_cuda_options(aot_mode=aot_mode)
 
-        definations = cxx_definations + torch_definations + cuda_definations
-        include_dirs = cxx_include_dirs + torch_include_dirs + cuda_include_dirs
-        cflags = cxx_cflags + torch_cflags + cuda_cflags
-        ldflags = cxx_ldflags + torch_ldflags + cuda_ldflags
-        libraries_dirs = cxx_libraries_dirs + torch_libraries_dirs + cuda_libraries_dirs
-        libraries = cxx_libraries + torch_libraries + cuda_libraries
-        passthough_args = (
-            cxx_passthough_args + torch_passthough_args + cuda_passthough_args
-        )
-
-        self._set_options(
-            definations,
-            include_dirs,
-            cflags,
-            ldflags,
-            libraries_dirs,
-            libraries,
-            passthough_args,
-        )
+        _append_list(self._definations, cuda_definations)
+        _append_list(self._include_dirs, cuda_include_dirs)
+        _append_list(self._cflags, cuda_cflags)
+        _append_list(self._ldflags, cuda_ldflags)
+        _append_list(self._libraries_dirs, cuda_libraries_dirs)
+        _append_list(self._libraries, cuda_libraries)
+        _append_list(self._passthough_args, cuda_passthough_args)
+        self._remove_duplicate_options()
 
 
 class CxxBuilder:
@@ -800,7 +731,7 @@ class CxxBuilder:
         self._passthough_parameters_args = ""
 
         self._output_dir = ""
-        self._target_file = ""     
+        self._target_file = ""
 
         self._name = name
         self._sources_args = " ".join(sources)
