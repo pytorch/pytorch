@@ -290,6 +290,56 @@ class TestUnflatten(TestCase):
         with self.assertRaisesRegex(RuntimeError, ".shape\[1\] is specialized at 3"):
             unflattened(torch.randn(6, 6))
 
+    def test_unflatten_with_inplace_compile(self):
+        class NestedChild(torch.nn.Module):
+            def forward(self, x):
+                return x / x
+
+        class Child1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = NestedChild()
+                self.register_parameter(
+                    "child1param", torch.nn.Parameter(torch.ones(2, 3))
+                )
+
+            def forward(self, x):
+                x = self.nested(x)
+                return x + self.child1param
+
+        class Child2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("child2buffer", torch.ones(2, 3))
+
+            def forward(self, x):
+                return x - self.child2buffer
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = Child1()
+                self.bar = Child2()
+                self.register_parameter(
+                    "rootparam", torch.nn.Parameter(torch.ones(2, 3))
+                )
+
+            def forward(self, x):
+                x = x * self.rootparam
+                x = self.foo(x)
+                x = self.bar(x)
+                return x
+
+        orig_eager = MyModule()
+        export_module = torch.export.export(orig_eager, (torch.rand(2, 3),), {})
+        unflattened = export_module.module(flat=False)
+
+        # in-place compilation should work. Pass fullgraph to ensure no graph breaks.
+        unflattened.foo.compile(fullgraph=True)
+
+        inputs = (torch.rand(2, 3),)
+        self.compare_outputs(orig_eager, unflattened, inputs)
+
 
 if __name__ == '__main__':
     run_tests()
