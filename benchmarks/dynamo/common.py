@@ -228,6 +228,8 @@ CI_USE_SGD = {
     "tinynet_a",
     "selecsls42b",
     "mobilevit_s",
+    "pytorch_CycleGAN_and_pix2pix",
+    "vision_maskrcnn",
 }
 
 
