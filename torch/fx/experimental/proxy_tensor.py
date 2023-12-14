@@ -84,14 +84,6 @@ class SymExprHash:
 
     def __eq__(self, value: "SymExprHash") -> bool:
         assert isinstance(value, SymExprHash)
-
-        # only dedup equivalent symbols if we are in a context
-        # where guards would be added
-        # TODO - expose as arg to api ? factor out as pass in
-        # aot autograd ?
-        if torch._guards.TracingContext.try_get() is None:
-            return self.sym_obj.node == value.sym_obj.node
-
         return self.sym_obj.node.expr == value.sym_obj.node.expr
 
 
@@ -99,24 +91,36 @@ def wrap_to_sym_expr_hash(key):
     return SymExprHash(key) if isinstance(key, py_sym_types) else key
 
 
+
 class SymHashingDict:
     """
     Wrapper around a dictionary that will convert sym types to hash with SymExprHash.
     """
     def __init__(self):
+        # optimistically hash sympy expressions, if those fail, fallback to symnodes
+        self.sym_node_dict = {}
         self.wrapped_dict = {}
+        self.graph_input_symbols = set()
+
 
     def __setitem__(self, key, value):
-        return self.wrapped_dict.__setitem__(wrap_to_sym_expr_hash(key), value)
+        if value().node.op == "placeholder" or key.node.expr.free_symbols.issubset(self.graph_input_symbols):
+            self.graph_input_symbols.update(key.node.expr.free_symbols)
+            self.wrapped_dict.__setitem__(wrap_to_sym_expr_hash(key), value)
+        self.sym_node_dict[key.node] = value
 
     def __getitem__(self, key):
-        return self.wrapped_dict.__getitem__(wrap_to_sym_expr_hash(key))
+        if val := self.wrapped_dict.get(wrap_to_sym_expr_hash(key), None):
+            return val
+        return self.sym_node_dict[key.node]
 
     def __contains__(self, key):
-        return self.wrapped_dict.__contains__(wrap_to_sym_expr_hash(key))
+        return (self.wrapped_dict.__contains__(wrap_to_sym_expr_hash(key))) or key.node in self.sym_node_dict
 
     def get(self, key, default=None):
-        return self.wrapped_dict.get(wrap_to_sym_expr_hash(key), default)
+        if val := self.wrapped_dict.get(wrap_to_sym_expr_hash(key), default) is not default:
+            return val
+        return self.sym_node_dict.get(key.node, default)
 
 
 def is_sym_node(node):
