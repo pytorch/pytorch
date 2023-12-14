@@ -119,6 +119,19 @@ def check_ragged_dim_same(
         )
 
 
+def validate_and_get_meta(func_name, size):
+    # Assume that there's only a single ragged dimension
+    _unused_B, singleton, *Ds = size
+    if not (isinstance(singleton, torch.SymInt) and singleton.node.is_singleton()):
+        raise ValueError(
+            f"{func_name}() only supports shapes of form (B, *, D1, D2...) "
+            "where only the second-left-most dimension is ragged. "
+        )
+    offsets = singleton.node.singleton_data()
+    sum_offsets = singleton.node.singleton_sum_offsets()
+    return offsets, sum_offsets, *Ds
+
+
 # returns True if the raggedness-relevant portions of the NT shape
 # match those of the specified size
 def raggedness_matches(nt, size):
@@ -644,28 +657,35 @@ def _nested_expand(func, *args, **kwargs):
     )
     inp = new_kwargs.pop("input")
     size = new_kwargs.pop("size")
-    _unused_B, singleton, *Ds = size
-    offsets = singleton.node.singleton_data()
-    sum_offsets = singleton.node.singleton_sum_offsets()
-    assert inp.dim() <= len(size)
-
+    offsets, sum_offsets, *Ds = validate_and_get_meta("expand_as", size)
+    if not inp.dim() <= len(size):
+        fail_reason = "trying to expand input to a size with larger dim"
     if inp.is_nested:
-        # B and j0 of inp.shape must match that of size
-        # ex: (B, j0, 1) -> (B, j0, D)
-        assert inp.dim() == len(size)
-        assert singleton == size[1]
+        fail_reason = None
+        if not inp.dim() == len(size):
+            # We don't support cases like:
+            # - (B, j0, D) -> (B, j0, D', D)
+            fail_reason = "trying to expand input to a size with different dim"
+        if not inp._ragged_idx == 1:
+            # We could clean this up if we supported union types in the schema
+            fail_reason = "transposed jagged layout nested tensor is not supported"
+        if not size[1] == inp._size[1]:
+            fail_reason = "input has a different raggedness than size"
         inp = inp._values
     else:
-        # currently you must either expand both or neither
-        # and since j0 must be expanded, both are always expanded
-        # cannot expand (B, j0, D) to (B, 1, D) today
-        # ex: (1, 1, D) -> (B, j0 ,D)
-        # - (1, 1, D) is squeezed to (1, D,) and then expanded to (sum_offsets, D)
+        # Currently you must either expand both B and j0 or neither, e.g.
+        # one cannot expand (B, j0, D) to (B, 1, D) today.
+        # Since j0 must be expanded for this branch, both are always expanded.
+        # We only have 3 cases here:
+        # - (1, 1, *Ds) -> (B, j0 ,*Ds)
+        # - (1, *Ds) -> (B, j0, *Ds)
+        # - (*Ds,) -> (B, j0, *Ds)
+        # The case (1, 1, *Ds) is the only one we need to handle specially so that
+        # it can be expanded (sum(*), *Ds)
         if inp.dim() == len(size):
-            # because both B and j0 must be expanded, the two leading dimensions
-            # are 1 here. squeeze until expandable to [sum_offsets, *Ds]
-            # TODO: decide whether we want to do error checking here.
             inp = inp.squeeze(0)
+    if fail_reason is not None:
+        raise ValueError(f"expand_as(): {fail_reason}")
     return NestedTensor(inp.expand([sum_offsets, *Ds]), offsets)
 
 
@@ -975,16 +995,7 @@ def jagged_new_factory(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     new_kwargs.pop("input")
-    _unused_B, singleton, *Ds = new_kwargs.pop("size")
-    if not (isinstance(singleton, torch.SymInt) and singleton.node.is_singleton()):
-        raise ValueError(
-            f"{factory_fn.__name__}() only supports shapes of form (B, *, D1, D2...) "
-            "where only the second-left-most dimension is ragged. "
-        )
-
-    offsets = singleton.node.singleton_data()
-    sum_offsets = singleton.node.singleton_sum_offsets()
-
+    offsets, sum_offsets, *Ds = validate_and_get_meta(factory_fn.__name__, new_kwargs.pop("size"))
     return NestedTensor(factory_fn([sum_offsets, *Ds], **new_kwargs), offsets)
 
 
