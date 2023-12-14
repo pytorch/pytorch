@@ -12,6 +12,7 @@ from typing import (
     Callable,
     ClassVar,
     Dict,
+    Generator,
     List,
     NamedTuple,
     Optional,
@@ -1420,17 +1421,17 @@ class KernelTemplate:
         Maybe generates a new ChoiceCaller and appends it into existing choices.
 
         choices: A list of ChoiceCallers.
-        kwargs: Additional kwargs to be passed to self.generate() to generate a new ChoiceCaller.
+        kwargs: Additional kwargs to be passed to self.generate() to generate new ChoiceCallers.
         """
 
         try:
-            choices.append(self.generate(**kwargs))
+            choices.extend(self.generate(**kwargs))
         except NotImplementedError:
             pass
 
-    def generate(self, **kwargs) -> ChoiceCaller:
+    def generate(self, **kwargs) -> Generator[ChoiceCaller, None, None]:
         """
-        Generates a ChoiceCaller instance from the given arguments.
+        Generates a sequence of ChoiceCaller instances from the given arguments.
         """
 
         raise NotImplementedError()

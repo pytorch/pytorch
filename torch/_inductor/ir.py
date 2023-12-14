@@ -3454,6 +3454,18 @@ class CUDATemplateBuffer(TemplateBuffer):
             return self.workspace_size()
         return self.workspace_size if self.workspace_size is not None else 0
 
+    def get_read_writes(self):
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            return super().get_read_writes()
+
+    def normalized_read_writes(self):
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            return super().normalized_read_writes()
+
+    def decide_layout(self):
+        if isinstance(self.layout, FlexibleLayout):
+            self.freeze_layout()
+
 
 @dataclasses.dataclass
 class InputsKernel(Buffer):
