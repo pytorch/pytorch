@@ -1,6 +1,3 @@
-set(MAKE_COMMAND "cmake" "--build" ".")
-
-
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(DNNL_DPCPP_HOST_COMPILER "g++")
     # g++ is soft linked to /usr/bin/cxx, oneDNN woule not treat it as an absolute path
@@ -8,6 +5,7 @@ else()
     set(DNNL_DPCPP_HOST_COMPILER DEFAULT)
 endif()
 
+set(MAKE_COMMAND "cmake" "--build" ".")
 ExternalProject_Add(xpumkldnn_proj
     SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn
     BUILD_IN_SOURCE 0
@@ -27,7 +25,6 @@ ExternalProject_Add(xpumkldnn_proj
 
 ExternalProject_Get_Property(xpumkldnn_proj BINARY_DIR)
 set(__XPU__MKLDNN_BUILD_DIR ${BINARY_DIR})
-
 set(XPU_MKLDNN_LIBRARIES ${__XPU_MKLDNN_BUILD_DIR}/src/libdnnl.a)
 set(XPU_MKLDNN_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn/include)
 set(xpumkldnn_dep xpumkldnn_proj)
