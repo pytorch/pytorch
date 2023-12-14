@@ -1,4 +1,4 @@
-#include <c10/core/SingletonSymNodeImpl.h>
+#include <ATen/core/SingletonSymNodeImpl.h>
 #include <c10/core/SymNodeImpl.h>
 #include <c10/util/Exception.h>
 

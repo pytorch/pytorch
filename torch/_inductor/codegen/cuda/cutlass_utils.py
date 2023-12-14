@@ -139,8 +139,9 @@ def _gen_ops_cached(arch, version) -> List[Any]:
 
     # Import cutlass python scripts.
     assert try_import_cutlass()
-    import torch._inductor.codegen.cuda.cutlass_lib_extensions.generator_extended_v322 as cutlass_generator  # type: ignore[import]
     import cutlass_library.manifest as cutlass_manifest  # type: ignore[import]
+
+    import torch._inductor.codegen.cuda.cutlass_lib_extensions.generator_extended_v322 as cutlass_generator  # type: ignore[import]
 
     if arch is None or version is None:
         log.error(
@@ -177,6 +178,7 @@ def gen_ops() -> List[Any]:
     version = get_cuda_version()
     return _gen_ops_cached(arch, version)
 
+
 def torch_dtype_to_cutlass_type(
     torch_dtype: torch.dtype,
 ) -> "cutlass_library.library.DataType":  # type: ignore[name-defined]
@@ -185,15 +187,14 @@ def torch_dtype_to_cutlass_type(
     import cutlass_library  # type: ignore[import]
 
     if torch_dtype == torch.float:
-        return (
-            cutlass_library.library.DataType.f32
-        )
+        return cutlass_library.library.DataType.f32
     elif torch_dtype == torch.half:
         return cutlass_library.library.DataType.f16
     elif torch_dtype == torch.bfloat16:
         return cutlass_library.library.DataType.bf16
     else:
         raise NotImplementedError(f"Unsupported data type: {torch_dtype=}")
+
 
 def dtype_match(
     torch_dtype: Optional[torch.dtype],
