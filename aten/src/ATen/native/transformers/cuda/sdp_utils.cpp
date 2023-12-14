@@ -177,9 +177,6 @@ bool check_sm_version(cudaDeviceProp * dprops) {
   return is_gte_lower_bound && is_lte_upper_bound;
 }
 
-#if USE_ROCM
-#endif
-
 bool check_flash_attention_hardware_support(sdp_params const& params, bool debug) {
   // Check that the gpu is capable of running flash attention
   using sm80 = SMVersion<8, 0>;
