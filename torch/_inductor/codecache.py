@@ -1621,7 +1621,6 @@ class AotCodeCache:
                         compile_file(input_path, output_o, cmd.split())
                         os.chmod(output_o, 0o644)
                     else:
-                        breakpoint()
                         run_command_and_check(cmd)
 
                     def _to_bytes(t: torch.Tensor) -> bytes:

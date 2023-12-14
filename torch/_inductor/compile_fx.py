@@ -574,8 +574,9 @@ def fx_codegen_and_compile(
     with V.set_fake_mode(fake_mode):
         original_constants = None
         const_output_index = None
-        const_kernels = None
         const_code = None
+        const_kernels = None
+        const_wrapper = None
 
         if aot_mode and config.split_const_graph:
             const_gm, const_output_index = split_const_gm(gm)
@@ -603,6 +604,7 @@ def fx_codegen_and_compile(
                 const_graph.run()
 
                 const_code, _ = const_graph.codegen_with_cpp_wrapper()
+                const_wrapper = const_graph.wrapper_code
                 original_constants = const_graph.constants
                 const_kernels = set(const_graph.wrapper_code.src_to_kernel.values())  # type: ignore[union-attr]
 
@@ -622,8 +624,9 @@ def fx_codegen_and_compile(
             is_inference=is_inference,
             original_constants=original_constants,
             const_output_index=const_output_index,
-            const_kernels=const_kernels,
             const_code=const_code,
+            const_kernels=const_kernels,
+            const_wrapper=const_wrapper,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)

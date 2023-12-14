@@ -181,8 +181,9 @@ class GraphLowering(torch.fx.Interpreter):
         is_const_graph=False,
         original_constants=None,
         const_output_index=None,
-        const_kernels=None,
         const_code=None,
+        const_kernels=None,
+        const_wrapper=None,
     ):
         super().__init__(gm)
 
@@ -196,6 +197,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.is_inference = is_inference
         self.is_const_graph = is_const_graph
         self.const_code = const_code
+        self.const_wrapper = const_wrapper
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
