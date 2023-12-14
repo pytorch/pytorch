@@ -6,6 +6,7 @@
 #include <torch/csrc/utils/torch_dispatch_mode.h>
 #include <typeindex>
 #include <vector>
+#include <iostream>
 
 // see [Note: Compiled Autograd]
 

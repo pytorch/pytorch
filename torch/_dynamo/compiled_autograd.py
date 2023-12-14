@@ -92,9 +92,8 @@ class AutogradCompilerInstance:
         self.stack.enter_context(disable_proxy_modes_tracing(enable_current=True))
         return inputs, sizes
 
-    def proxy_call_backward(self, inputs, outputGradsInfo: Tuple[bool], backward_id: int):
+    def proxy_call_backward(self, inputs, fwdInputInfos: Tuple[Tuple[int]], backward_id: int):
         assert self.backward_proxy is not None
-        assert len(inputs) == len(outputGradsInfo), "number of inputs to backwards should match number of outputs to backwards"
         backward_fn = self.backward_proxy[backward_id]
         saved_variables = self.backward_proxy[backward_id+1]
         proxies = self.fx_tracer.create_proxy(
@@ -108,8 +107,14 @@ class AutogradCompilerInstance:
             kwargs={},
         )
 
+        grad_ins = []
         with disable_proxy_modes_tracing():
-            grad_ins = [maybe_clone(inputs[i]) if has_grad else None for i,has_grad in enumerate(outputGradsInfo)]
+            # create proxies from sizes and requires_grad in fwdInputInfos
+            for fwdInputInfo in fwdInputInfos:
+                shape, requires_grad = fwdInputInfo
+                grad_ins.append(torch.Tensor(*shape)) # creates FakeTensors
+
+            assert len(grad_ins) == len(fwdInputInfos)
             self.bind_tensors_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
 

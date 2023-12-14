@@ -40,6 +40,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 using namespace torch;
 using namespace torch::autograd;
@@ -173,6 +174,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   }
 
   // Now the number of gradients should match
+  std::cout << "eager apply: num_inputs_bwd=" << num_inputs << ", num_outputs_bwd=" << num_outputs << ", num_forward_inputs=" << num_forward_inputs << std::endl;
   if (num_outputs != num_forward_inputs) {
     std::string msg("function ");
     msg += name() + " returned an incorrect number of gradients (expected ";
@@ -259,12 +261,41 @@ auto PyNode::compiled_apply(variable_list&& inputs, SwapSavedVariables& saved) -
     PyTuple_SET_ITEM(gradsInfo.get(), i, PyBool_FromLong(static_cast<long>(is_variable_input[i])));
   }
   int idx = 0; // do we need support for multiple custom autograd functions in the same graph?
+
+  // The gradients returned in the backwards should match the number of inputs to the forward, and their shapes
+  // Create fwdInputInfos to represent shape sizes and requires_grad for each input to the forward
+  // shape: PyTuple[PyLong]
+  // requires_grad: PyBool
+  // fwdInputInfo: PyTuple[sizes, requires_grad]
+  // fwdInputInfos: PyTuple[fwdInputInfo]
+  THPObjectPtr fwdInputInfos(PyTuple_New(static_cast<Py_ssize_t>(py_fn->input_info.size())));
+  for (const auto i : c10::irange(py_fn->input_info.size())) {
+    PyObject* fwdInputInfo(PyTuple_New(static_cast<Py_ssize_t>(2)));
+    const auto& input_info = py_fn->input_info[i];
+
+    // shape
+    std::vector<c10::SymInt> input_info_sizes = input_info.size;
+    PyObject* shape(PyTuple_New(static_cast<Py_ssize_t>(input_info_sizes.size())));
+    for (const auto j : c10::irange(input_info_sizes.size())) {
+      int64_t size = input_info_sizes[j].expect_int(); // TODO: When would this fail?
+      PyTuple_SET_ITEM(shape, static_cast<Py_ssize_t>(j), PyLong_FromLong(size));
+    }
+    PyTuple_SET_ITEM(fwdInputInfo, static_cast<Py_ssize_t>(0), shape);
+
+    // requires_grad
+    PyObject* requires_grad = PyBool_FromLong(static_cast<long>(input_info.requires_grad));
+    PyTuple_SET_ITEM(fwdInputInfo, static_cast<Py_ssize_t>(1), requires_grad);
+
+
+    PyTuple_SET_ITEM(fwdInputInfos.get(), static_cast<Py_ssize_t>(i), fwdInputInfo);
+  }
+
   THPObjectPtr r(PyObject_CallMethod(
     saved.get_py_compiler(),
     "proxy_call_backward",
     "OOi",
     pyInputs.get(),
-    gradsInfo.get(),
+    fwdInputInfos.get(),
     idx));
 
   if (!r)
@@ -286,6 +317,7 @@ auto PyNode::compiled_apply(variable_list&& inputs, SwapSavedVariables& saved) -
     }
   }
 
+  std::cout << "compiled apply: num_bwd_inputs=" << num_inputs << ", num_bwd_outputs=" << num_outputs << ", num_fwd_inputs=" << num_forward_inputs << std::endl;
   // Now the number of gradients should match
   if (num_outputs != num_forward_inputs) {
     std::string msg("function ");
@@ -360,6 +392,7 @@ auto PyNode::name() const -> std::string {
 }
 
 void PyNode::compiled_args(CompiledNodeArgs& args) {
+  std::cout << "PyNode::compiled_args" << std::endl;
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
   THPObjectPtr pykey(PyObject_CallMethodNoArgs(obj, method_name));
@@ -419,6 +452,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
 variable_list PyNode::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
+  std::cout << "PyNode::apply_with_saved" << std::endl;
   auto f = (THPFunction*)obj;
   TORCH_INTERNAL_ASSERT(!f->compiled_autograd_tracing);
   saved.before(f->compiled_autograd_symints);
