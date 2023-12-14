@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
     skipIfCrossRef
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from typing import Dict, Any
@@ -109,6 +110,7 @@ class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
             torch.ops.aten._values.default,
         )
 
+@unMarkDynamoStrictTest
 class TestSparseLegacyAndDeprecation(TestCase):
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
@@ -163,6 +165,7 @@ class TestSparseLegacyAndDeprecation(TestCase):
             self.assertEqual(len(cm.warnings), 1)
 
 
+@unMarkDynamoStrictTest
 class TestSparseBase(TestCase):
     def run(self, result=None):
         if TEST_WITH_CROSSREF:
@@ -171,6 +174,7 @@ class TestSparseBase(TestCase):
         else:
             return super().run(result)
 
+@unMarkDynamoStrictTest
 class TestSparse(TestSparseBase):
 
     def setUp(self):
@@ -4024,6 +4028,7 @@ class TestSparse(TestSparseBase):
             run_test(shape, shape[0] * shape[1])
 
 
+@unMarkDynamoStrictTest
 class TestSparseOneOff(TestCase):
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_cuda_from_cpu(self):
@@ -4082,6 +4087,7 @@ def _sparse_to_dense(tensor):
 
 _sparse_unary_ops = ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
                         allowed_dtypes=all_types_and_complex())
+@unMarkDynamoStrictTest
 class TestSparseUnaryUfuncs(TestCase):
     exact_dtype = True
 
@@ -4173,6 +4179,7 @@ class TestSparseUnaryUfuncs(TestCase):
                 masked=True))
 
 
+@unMarkDynamoStrictTest
 class TestSparseMaskedReductions(TestCase):
     exact_dtype = True
 
@@ -4226,6 +4233,7 @@ class TestSparseMaskedReductions(TestCase):
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
 
 
+@unMarkDynamoStrictTest
 class TestSparseMeta(TestCase):
     exact_dtype = True
 
@@ -4273,6 +4281,7 @@ class _SparseDataset(torch.utils.data.Dataset):
         return self.sparse_tensors[index]
 
 
+@unMarkDynamoStrictTest
 class TestSparseAny(TestCase):
 
     @onlyCPU

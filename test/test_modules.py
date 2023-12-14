@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
 from unittest.mock import patch, call
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestModule(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True

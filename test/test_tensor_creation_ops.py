@@ -77,6 +77,7 @@ def _rand_shape(dim, min_size, max_size):
 #
 # See https://pytorch.org/docs/master/torch.html#creation-ops
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTensorCreation(TestCase):
     exact_dtype = True
 
@@ -3133,6 +3134,7 @@ class TestTensorCreation(TestCase):
 
 
 # Class for testing random tensor creation ops, like torch.randint
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRandomTensorCreation(TestCase):
     exact_dtype = True
 
@@ -3526,6 +3528,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
 
 # Class for testing *like ops, like torch.ones_like
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestLikeTensorCreation(TestCase):
     exact_dtype = True
 
@@ -3594,6 +3597,7 @@ def may_require_grad(dtype):
 def get_dtype_size(dtype):
     return int(torch.empty((), dtype=dtype).element_size())
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBufferProtocol(TestCase):
     def _run_test(self, shape, dtype, count=-1, first=0, offset=None, **kwargs):
         numpy_dtype = torch_to_numpy_dtype_dict[dtype]
@@ -3768,6 +3772,7 @@ def to_numpy(tensor):
 def to_memview(tensor):
     return memoryview(to_numpy(tensor))
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAsArray(TestCase):
     def _check(self, original, cvt=lambda t: t, is_alias=True, same_dtype=True, same_device=True, **kwargs):
         """Check the output of 'asarray', given its input and assertion informations.

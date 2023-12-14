@@ -130,6 +130,7 @@ def _test_addmm_addmv(
     test_case.assertEqual(res1, res3)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSparseCSRSampler(TestCase):
 
     def test_make_crow_indices(self):
@@ -187,6 +188,7 @@ def hybrid_nonhybrid(test_name='hybrid'):
     ])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSparseCompressed(TestCase):
     """Testing sparse compressed (CSR, CSC, BSR, BSC) tensor generic features.
     """
@@ -967,6 +969,7 @@ def _npref_block_addmm_addmv(c, a, b, alpha, beta):
     return alpha * (a @ b) + beta * c
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSparseCSR(TestCase):
 
     def test_csr_stride(self):
@@ -3403,6 +3406,7 @@ def skipIfNoTriton(cls):
         return skipped_cls
 
 @skipIfNoTriton
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSparseCompressedTritonKernels(TestCase):
 
     def _to_block_triangular_inplace(self, d, row_block, col_block):

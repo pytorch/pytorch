@@ -51,6 +51,7 @@ class RandomDatasetMock(torch.utils.data.Dataset):
         return 1000
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCheckpoint(TestCase):
 
     # This runs checkpoint_sequential on each of the nets in
@@ -460,6 +461,7 @@ class TestCheckpoint(TestCase):
         self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
         self.assertEqual(non_retain_stats, checkpoint_retain_stats)
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
 
@@ -526,6 +528,7 @@ test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBottleneck(TestCase):
     def _run(self, command, timeout=30):
         """Returns (return-code, stdout, stderr)"""
@@ -627,12 +630,14 @@ from torch.utils.collect_env import get_pretty_env_info
 
 
 @unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCollectEnv(TestCase):
     def test_smoke(self):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count('\n') >= 17)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestONNXUtils(TestCase):
     def test_prepare_onnx_paddings(self):
         sizes = [2, 3, 4]
@@ -693,11 +698,13 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAssert(TestCase):
     def test_assert_true(self):
         # verify assertions work as expected
@@ -727,6 +734,7 @@ class TestAssert(TestCase):
 
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestStandaloneCPPJIT(TestCase):
     def test_load_standalone(self):
         build_dir = tempfile.mkdtemp()
@@ -805,6 +813,7 @@ class DummyXPUModule:
         return [torch.float16]
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestExtensionUtils(TestCase):
     def tearDown(self):
         # Clean up from test_external_module_register
@@ -856,6 +865,7 @@ class TestExtensionUtils(TestCase):
         self.assertEqual(torch._utils._get_device_index('foo:1'), 1)
         self.assertEqual(torch._utils._get_device_index(torch.device("foo:2")), 2)
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRenderUtils(TestCase):
     def test_basic(self):
         self.assertExpectedInline(
@@ -867,6 +877,7 @@ class TestRenderUtils(TestCase):
             '''torch.sum(tensor([...], size=(100, 100)), dim=0)'''
         )
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDeviceUtils(TestCase):
     def test_basic(self):
         with torch.device('meta') as dev:
@@ -935,6 +946,7 @@ class TestDeviceUtils(TestCase):
 instantiate_device_type_tests(TestDeviceUtils, globals())
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionUtils(TestCase):
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('c++'))
@@ -943,6 +955,7 @@ class TestCppExtensionUtils(TestCase):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('cc'))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTraceback(TestCase):
     def test_basic(self):
         source = '''\
