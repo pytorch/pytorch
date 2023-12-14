@@ -39,6 +39,7 @@ if try_import_cutlass():
         static constexpr auto RoundStyle = cutlass::FloatRoundStyle::round_to_nearest;
         using ElementAcc = ${element_accumulator};
         using ElementD = ${element_d};
+        using ElementC = ${element_c};
         using ADDMM_EVT =  // alpha * acc + beta * C
             cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::multiply_add,
                     ElementD, ElementAcc, RoundStyle>, // beta * C + (alpha * acc)
