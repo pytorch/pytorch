@@ -466,10 +466,15 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
   std::unique_lock<std::mutex> lock(mutex_);
   exception_ = exception_ptr;
   if (exception_) {
-    LOG(INFO) << "[Rank " << rank_ << "]"
-              << " found async exception when checking for NCCL errors: "
+    LOG(INFO) << logPrefix()
+              << "found async exception when checking for NCCL errors: "
               << getExceptionMsgFromExceptionPtr(exception_);
   }
+}
+
+const std::string& ProcessGroupNCCL::WorkNCCL::logPrefix() const {
+  static std::string prefix = c10::str("[Rank ", rank_, "] ");
+  return prefix;
 }
 
 void ProcessGroupNCCL::WorkNCCL::setException(
@@ -527,9 +532,7 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
     return true;
 
   std::string exceptionMsg = c10::str(
-      "[Rank ",
-      rank_,
-      "] ",
+      logPrefix(),
       "Watchdog caught collective operation timeout: ",
       *this,
       " ran for ",
@@ -597,9 +600,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
       // can not run new events successfully.
       if (timedOut) {
         std::string exceptionMsg = c10::str(
-            "[Rank ",
-            rank_,
-            "] Work ",
+            logPrefix(),
+            "Work ",
             (*this),
             " timed out in blocking wait (TORCH_NCCL_BLOCKING_WAIT=1).");
         LOG(ERROR) << exceptionMsg;
@@ -740,15 +742,15 @@ ProcessGroupNCCL::ProcessGroupNCCL(
           expandable_segments()) {
     useTensorRegisterAllocatorHook_ = false;
     LOG(INFO)
-        << "[Rank " << rank_
-        << "] disables TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
+        << logPrefix()
+        << "disables TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
   }
 #endif
 
   if (blockingWait_) {
     if (asyncErrorHandling_ != NoHandling || desyncDebug_) {
       LOG(INFO)
-          << "[Rank " << rank_ << "] TORCH_NCCL_BLOCKING_WAIT and "
+          << logPrefix() << "TORCH_NCCL_BLOCKING_WAIT and "
           << "TORCH_NCCL_ASYNC_ERROR_HANDLING|TORCH_NCCL_DESYNC_DEBUG"
           << "should not both be enabled. "
           << "Only TORCH_NCCL_BLOCKING_WAIT is being used in this process.";
@@ -758,8 +760,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   } else {
     if (desyncDebug_ && asyncErrorHandling_ == NoHandling) {
       LOG(INFO)
-          << "[Rank " << rank_
-          << "] TORCH_NCCL_DESYNC_DEBUG and TORCH_NCCL_ASYNC_ERROR_HANDLING "
+          << logPrefix()
+          << "TORCH_NCCL_DESYNC_DEBUG and TORCH_NCCL_ASYNC_ERROR_HANDLING "
           << "must both be enabled. "
           << "Enabling TORCH_NCCL_ASYNC_ERROR_HANDLING.";
       asyncErrorHandling_ = SkipCleanUp;
@@ -785,8 +787,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
   std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
-  LOG(INFO) << "[Rank " << rank_
-            << "] ProcessGroupNCCL initialization options: "
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
             << "NCCL version: " << getNcclVersion()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
@@ -940,8 +941,7 @@ void ProcessGroupNCCL::runHealthCheck() {
   // We don't need to join the thread, just need to verify health check via the
   // CV. Hence we detach the thread here.
   t.detach(); // NOLINT
-  LOG(INFO) << "[Rank " << rank_ << "]"
-            << " will wait up to " << options_->timeout.count()
+  LOG(INFO) << logPrefix() << "will wait up to " << options_->timeout.count()
             << " msec for NCCL health check to complete.";
   std::unique_lock<std::mutex> lock(healthCheckData.healthCheckMutex);
   healthCheckData.healthCheckCv.wait_for(
@@ -1209,9 +1209,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
   const auto exitMsg = c10::str(
-      "[Rank ",
-      rank_,
-      "] NCCL monitor thread timeout. Basically, this could ",
+      logPrefix(),
+      "NCCL monitor thread timeout. Basically, this could ",
       "be due to CUDA or NCCL calls being unexpectedly blocking, ",
       "especially when your program enters a deadlock state in watchdog "
       "or destructors. If you see this error, please file a bug to PyTorch.");
@@ -1244,9 +1243,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     const auto logMsg = c10::str(
-        "[Rank ",
-        rank_,
-        "] monitoring thread detects no heartbeat and will finally kill the process!",
+        logPrefix(),
+        "monitoring thread detects no heartbeat and will finally kill the process!",
         " terminateProcessGroup_",
         terminateProcessGroup_,
         " collectiveDebugInfoMode_",
@@ -1258,28 +1256,26 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
-    VLOG(2) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
+    VLOG(2) << logPrefix() << "NCCL watchdog thread started!";
     if (monitorThreadEnabled_.load()) {
       ncclHeartbeatMonitorThread_ =
           std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
     }
     watchdogHandler();
-    VLOG(2) << "[Rank " << rank_
-            << "] NCCL watchdog thread terminated normally";
+    VLOG(2) << logPrefix() << "NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
       LOG(INFO)
-          << "[Rank " << rank_
-          << "] main process destroyed cuda before watchdog loop exited, terminating watchdog."
+          << logPrefix()
+          << "main process destroyed cuda before watchdog loop exited, terminating watchdog."
           << " (Watchdog caught exception: " << e.what();
 
     } else {
       // Append error message reported from watchdogHandler
       const auto exitMsg = c10::str(
-          "[Rank ",
-          rank_,
-          "] NCCL watchdog thread terminated with exception: ",
+          logPrefix(),
+          "NCCL watchdog thread terminated with exception: ",
           e.what());
       LOG(ERROR) << exitMsg;
       // TODO(whc) clean up the rethrow - why is it stored in a class var and
@@ -1290,9 +1286,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
     }
   } catch (...) {
     const auto exitMsg = c10::str(
-        "[Rank ",
-        rank_,
-        "] NCCL watchdog thread terminated with exception: unknown");
+        logPrefix(), "NCCL watchdog thread terminated with exception: unknown");
     LOG(ERROR) << exitMsg;
     watchDogException_ =
         std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
@@ -1382,6 +1376,11 @@ struct DumpPipe {
 };
 #endif
 
+const std::string& ProcessGroupNCCL::logPrefix() const {
+  static std::string prefix = c10::str("[Rank ", rank_, "] ");
+  return prefix;
+}
+
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
@@ -1429,10 +1428,8 @@ void ProcessGroupNCCL::watchdogHandler() {
           optAsyncDebugDump->wait_for(
               std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
           const auto exitMsg = c10::str(
-              "Some other rank's watchdog thread detected a timeout and notified ",
-              "all other ranks, so we're dumping debug info and aborting [Rank ",
-              rank_,
-              "] as well.");
+              logPrefix(),
+              "Another rank reported a timeout and signaled a global abort.");
           LOG(ERROR) << exitMsg;
           C10_THROW_ERROR(DistBackendError, exitMsg);
         }
@@ -1577,8 +1574,8 @@ void ProcessGroupNCCL::runHookLoop() {
       if (std::string(e.what()).find("driver shutting down") !=
           std::string::npos) {
         LOG(INFO)
-            << "[Rank " << rank_
-            << "] main process destroyed cuda before runHookLoop exited, terminating runHookLoop."
+            << logPrefix()
+            << "main process destroyed cuda before runHookLoop exited, terminating runHookLoop."
             << " (runHookLoop caught exception: " << e.what();
 
       } else {
