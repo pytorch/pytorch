@@ -180,11 +180,11 @@ namespace {
 
     RNNDescriptor descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
       RNNDescriptor rnn_desc;
- #ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
       rnn_desc.set(handle, hidden_size, proj_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, input_datatype, algo, at::globalContext().allowTF32CuDNN());
- #else
+#else
       rnn_desc.set(handle, input_size, packed, hidden_size, proj_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, input_datatype, algo, at::globalContext().allowTF32CuDNN());
- #endif
+#endif
       return rnn_desc;
     }
 
@@ -1122,7 +1122,7 @@ copy_weights_to_flat_buf_views(
 #ifndef USE_CUDNN_RNN_V8_API
   FilterDescriptor w_desc;
   w_desc.set(weight_buf, 3);
-# endif
+#endif
 
   // Slice off views into weight_buf
   std::vector<Tensor> params_arr;
@@ -1328,7 +1328,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   // this information.  Use 'train' as a proxy.
   if (fn_train) {
     size_t reserve_size;
- #ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
     AT_CUDNN_CHECK(cudnnGetRNNTrainingReserveSize(
           handle,
           descs.rnn_desc.desc(),
