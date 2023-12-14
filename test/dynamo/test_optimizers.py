@@ -44,9 +44,9 @@ def get_optimizer_step(opt, closure=None):
 
 
 def make_test(optim_cls, closure=None, **kwargs):
+    opt = optim_cls(model.parameters(), **kwargs)
     def test_fn(self):
-        opt = optim_cls(model.parameters(), **kwargs)
-
+        nonlocal opt
         fn = get_optimizer_step(opt, closure=closure)
 
         with torch.set_grad_enabled(False):
