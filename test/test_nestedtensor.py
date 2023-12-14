@@ -3331,6 +3331,30 @@ class TestNestedTensorSubclass(NestedTestCase):
             self.assertEqual(orig_device, nt.offsets().device)
             self.assertEqual(torch.int64, nt.offsets().dtype)
 
+    def test_expand_as(self, device):
+        for tensor_list in self._get_example_tensor_lists():
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                layout=torch.jagged,
+                device=device)
+
+            # NT: [B, j0, *1s] -> NT: [B, j0, *Ds]
+            inp = torch.empty(nt.shape[:2] + tuple(1 for _ in nt.shape[2:]))
+            out = inp.expand_as(nt)
+            self.assertEqual(out.shape, nt.shape)
+
+            # Dense -> NT
+            # T: [*Ds] -> NT: [B, j0, *Ds]
+            dense = torch.ones(nt.shape[2:])
+            out = dense.expand_as(nt)
+            self.assertEqual(out.shape, nt.shape)
+
+            # Dense -> NT
+            # T: [1, 1, *Ds] -> NT: [B, j0, *Ds]
+            dense = torch.ones((1, 1, *nt.shape[2:]))
+            out = dense.expand_as(nt)
+            self.assertEqual(out.shape, nt.shape)
+
     def test_unbind(self, device):
         for tensor_list in self._get_example_tensor_lists():
             nt = torch.nested.nested_tensor(
