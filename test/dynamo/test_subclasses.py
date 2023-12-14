@@ -927,7 +927,7 @@ class GraphModule(torch.nn.Module):
                 return ["inner_elem"], None
 
             @staticmethod
-            def __tensor_unflatten__(inner_tensors, _):
+            def __tensor_unflatten__(inner_tensors, *args):
                 return TestTensor(inner_tensors["inner_elem"])
 
             @classmethod
