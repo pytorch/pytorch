@@ -124,7 +124,7 @@ def check_ragged_dim_same(
 # match those of the specified size
 def raggedness_matches(nt, size):
     end = nt._ragged_idx + 1
-    return list(nt._size[:end]) == list(size[:end])
+    return all(ns == s or s == -1 for ns, s in zip(nt._size[:end], size[:end]))
 
 
 def squeeze_leading_ones(t):
