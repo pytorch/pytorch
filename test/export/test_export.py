@@ -1900,6 +1900,87 @@ def forward(self, arg3_1):
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
 
+    def test_cond_with_module_stack_export_with(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                def true_fn(x):
+                    return self.linear(x).cos()
+                def false_fn(x):
+                    return self.linear(x).sin()
+                return torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+
+        class CondExport(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                return x.cos() + self.bar(x)
+
+        inp = (torch.randn(4, 4),)
+        ep = torch.export.export(CondExport(), inp, strict=False)
+        self.assertExpectedInline(ep.graph_module.code.strip(), """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    cos = torch.ops.aten.cos.default(arg2_1)
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg1_1, arg0_1, arg2_1]);  true_graph_0 = false_graph_0 = arg1_1 = arg0_1 = arg2_1 = None
+    getitem = conditional[0];  conditional = None
+    add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
+    return (add,)""")
+
+        cond_top_level_nn_module_stack = [
+            node.meta["nn_module_stack"]
+            for node in ep.graph.nodes
+            if node.name == "true_graph_0"
+        ][0]
+
+        self.assertExpectedInline(
+            str(cond_top_level_nn_module_stack),
+            """{'L__self__': ('', <class 'torch.fx.experimental.proxy_tensor.CondExport'>), 'L__self__bar': ('bar', <class 'torch.fx.experimental.proxy_tensor.Bar'>)}"""
+        )
+
+
+    # TODO: See https://github.com/pytorch/pytorch/issues/115790
+    @unittest.expectedFailure
+    def test_cond_with_module_stack_export_with_unflatten(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                def true_fn(x):
+                    return self.linear(x).cos()
+                def false_fn(x):
+                    return self.linear(x).sin()
+                return torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+
+        class CondExport(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                return x.cos() + self.bar(x)
+
+        inp = (torch.randn(4, 4),)
+        ep_strict = torch.export.export(CondExport(), inp)
+
+        cond_top_level_nn_module_stack = [
+            node.meta["nn_module_stack"]
+            for node in ep_strict.graph.nodes
+            if node.name == "true_graph_0"
+        ][0]
+
+        for node in ep_strict.graph_module.true_graph_0.graph.nodes:
+            self.assertEqual(node.meta["nn_module_stack"], cond_top_level_nn_module_stack)
+
+        gm_unflat_strict = ep_strict.module(flat=False)
 
 
 if __name__ == '__main__':

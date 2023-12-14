@@ -463,15 +463,11 @@ def create_functionalized_fn(
 
     # Kinda annoying, but needed to make sure that the fx graph we trace out has "primals"
     # and "tangents" as its input names (which are special-cased by the partitioner)
+    # TODO (tmanlaibaatar) revisit this if we ever need to turn on non-strict joint graph export
     def joint_helper(primals, tangents):
         return _functionalized_f_helper(primals, tangents)
 
-    def fwd_helper(*args):
-        return _functionalized_f_helper(*args)
-
-    helper = joint_helper if trace_joint else fwd_helper
-    if hasattr(_functionalized_f_helper, "_orig_mod"):
-        helper._orig_mod = _functionalized_f_helper._orig_mod
+    helper = joint_helper if trace_joint else _functionalized_f_helper
     if config.functionalize_rng_ops:
         # Setup the wrapper for functionalization of rng ops
         helper, args = create_functionalized_rng_ops_wrapper(helper, args, trace_joint)
@@ -618,8 +614,12 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
             )
         return out
 
-    # This is fine in terms of perf because we only pass this around for export path
+    # Note [Preserving the nn module stack metadata during export non-strict mode]
+    # This path is currently only used by the non-strict export flow,
+    # where we cannot rely on dynamo to preserve nn stack metadata in our captured graph.
+    # Instead, we stash the original user nn module here, and rely on `make_fx` to grab
+    # this stashed module and use it to track nn module stack metadata
     if store_orig_mod:
-        functional_call._orig_mod = mod
+        functional_call._orig_mod = mod  # type: ignore[attr-defined]
 
     return functional_call

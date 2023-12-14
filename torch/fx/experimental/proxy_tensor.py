@@ -770,8 +770,7 @@ class ModuleStackTracer(PythonKeyTracer):
     So for this version we hold onto a reference to the original module
     (scope_root) and monkeypatch it in when capturing the stack trace.
 
-    TODO: we should probably augment the standard FX APIs to better support how
-    make_fx uses it.
+    See Note [Preserving the nn module stack metadata during export non-strict mode]
     """
 
     def __init__(self, scope_root):
@@ -818,7 +817,6 @@ class ModuleStackTracer(PythonKeyTracer):
                 }
 
         self.proxy_type = AttrProxy
-        self.skip_list = set()
 
     def path_of_module(self, mod: torch.nn.Module) -> str:
         """
@@ -836,7 +834,7 @@ class ModuleStackTracer(PythonKeyTracer):
         return Tracer.path_of_module(self, mod)
 
     def getattr(self, attr, attr_val, parameter_proxy_cache):
-        if not isinstance(attr_val, torch.nn.Module):
+        if not isinstance(attr_val, torch.nn.Module) or isinstance(attr_val, torch.fx.GraphModule):
             return super().getattr(attr, attr_val, parameter_proxy_cache)
         return self.proxy_type(attr_val, attr)
 
@@ -845,15 +843,15 @@ class ModuleStackTracer(PythonKeyTracer):
         but we actually want it.
         """
         from torch._dynamo import OptimizedModule
+        # FIXME (tmanlaibaatar)
         # When we call torch.compile inside HOO, we will end up
-        # invoking a module that is not registered on the root.
-        # So we just temporarily register it there so that tracer
-        # goes through. I think this is ok because make_fx traces
-        # the callable that is not the actual user supplied callable,
-        # so it doesn't matter that we are adding more modules.
-        if isinstance(m, OptimizedModule):
-            self.root.register_module("throw_away" + str(self.counter), m)
-            self.counter += 1
+        # invoking a module that is not registered on the root. For
+        # now, we just inline them. But once we start supporting
+        # mark_strict in export, we do need to properly handle this.
+        # Right now, it doesn't matter because current non-strict
+        # use cases don't need to work with HOO.
+        if isinstance(m, (OptimizedModule, GraphModule)):
+            return forward(*args, **kwargs)
         return Tracer.call_module(self, m, forward, args, kwargs)
 
 
