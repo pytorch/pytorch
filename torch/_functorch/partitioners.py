@@ -841,9 +841,10 @@ def min_cut_rematerialization_partition(
                 continue
             # If someone saves a input for backward as-is and backward
             # returns that tensor as-is as a grad input, then the node x would
-            # be both a required_bw_node and an input. We (1) connect x_in to
-            # to the source, (2) x_out to the sink, and (3) assign the proper
-            # weight to the x_in-x_out edge. A case where this happens is if
+            # be both a required_bw_node and an input. In this case we
+            # (1) connect x_in to to the source, (2) x_out to the sink, and
+            # (3) assign the proper weight to the x_in-x_out edge, so that
+            # x would be part of cut nodes. A case where this happens is if
             # NestedTensor saves a offset tensor as part of the singleton int
             # in sizes.
             nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
