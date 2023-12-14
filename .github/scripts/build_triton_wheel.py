@@ -45,7 +45,7 @@ def patch_setup_py(
     orig = check_and_replace(orig, 'name="triton",', f'name="{name}",')
     # Replace version
     if not expected_version:
-        expected_version = read_trition_version()
+        expected_version = read_triton_version()
     orig = check_and_replace(
         orig, f'version="{expected_version}",', f'version="{version}",'
     )
@@ -57,7 +57,7 @@ def patch_init_py(
     path: Path, *, version: str, expected_version: Optional[str] = None
 ) -> None:
     if not expected_version:
-        expected_version = read_trition_version()
+        expected_version = read_triton_version()
     with open(path) as f:
         orig = f.read()
     # Replace version
