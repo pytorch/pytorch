@@ -12,6 +12,7 @@ import torch.multiprocessing as mp
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import threading
 
 class FrontendWorker(mp.Process):
     """
@@ -150,6 +151,7 @@ class BackendWorker:
         response_queue,
         data_generation_event,
         batch_size,
+        num_workers,
         model_dir=".",
         compile_model=True,
     ):
@@ -160,10 +162,13 @@ class BackendWorker:
         self.response_queue = response_queue
         self.data_generation_event = data_generation_event
         self.batch_size = batch_size
+        self.num_workers = num_workers
         self.model_dir = model_dir
         self.compile_model = compile_model
         self._setup_complete = False
         self.memcpy_stream = torch.cuda.Stream()
+        # maps thread_id to the cuda.Stream associated with that worker thread
+        self.stream_map = dict()
 
     def _setup(self):
         import time
@@ -193,22 +198,26 @@ class BackendWorker:
             self.metrics_dict["m_compile_time"] = end_compile_time - start_compile_time
         return m
 
-    def model_predict(self, model, data, copy_event, request_time):
-        torch.cuda.current_stream().wait_event(copy_event)
-        with torch.no_grad():
-            out = model(data)
-        self.response_queue.put((out, request_time))
-        del data
-
     def copy_data(self, dest, data, copy_event):
         # data = data.pin_memory()
         with torch.cuda.stream(self.memcpy_stream):
             dest.copy_(data, non_blocking=True)
             copy_event.record()
 
+    def model_predict(self, model, data, copy_event, request_time):
+        self.stream_map[threading.get_native_id()].wait_event(copy_event)
+        with torch.cuda.stream(self.stream_map[threading.get_native_id()]):
+            with torch.no_grad():
+                out = model(data)
+            self.response_queue.put((out, request_time))
+
     async def run(self):
-        worker_pool = ThreadPoolExecutor(max_workers=1)
+        def worker_initializer():
+            self.stream_map[threading.get_native_id()] = torch.cuda.Stream()
+
+        worker_pool = ThreadPoolExecutor(max_workers=self.num_workers, initializer=worker_initializer)
         memcpy_pool = ThreadPoolExecutor(max_workers=1)
+
         self.data_generation_event.wait()
         while True:
             try:
@@ -237,6 +246,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--output_file", type=str, default="output.csv")
     parser.add_argument("--profile", default=False, action=argparse.BooleanOptionalAction)
+    parser.add_argument("--num_workers", type=int, default=4)
     args = parser.parse_args()
 
     downloaded_checkpoint = False
@@ -277,6 +287,7 @@ if __name__ == "__main__":
             response_queue,
             data_generation_event,
             args.batch_size,
+            args.num_workers,
             args.model_dir, args.compile
         )
 
