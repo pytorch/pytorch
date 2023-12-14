@@ -68,6 +68,7 @@ from ..utils import (
     get_fake_value,
     get_static_address_type,
     global_key_name,
+    is_function,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
@@ -727,8 +728,16 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
+        elif istype(value, type) and value in itertools.__dict__.values():
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return SkipFilesVariable(
+                value,
+                skipfiles.check_verbose(value, is_inlined_call=True).reason,
+                source=self.source,
+            )
         elif (
-            istype(value, (type, types.FunctionType))
+            # istype(value, (type, types.FunctionType))
+            is_function(value)
             and skipfiles.check(value, is_inlined_call=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
@@ -800,6 +809,7 @@ class VariableBuilder:
             )
         else:
             self.install_guards(GuardBuilder.TYPE_MATCH)
+            breakpoint()
             result = UserDefinedObjectVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__

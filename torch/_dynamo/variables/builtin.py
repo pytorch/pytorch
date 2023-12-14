@@ -993,6 +993,7 @@ class BuiltinVariable(VariableTracker):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
 
     def call_getitem(self, tx, *args, **kwargs):
+        breakpoint()
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
 
     def call_isinstance(self, tx, arg, isinstance_type):
