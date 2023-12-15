@@ -332,6 +332,11 @@ class FunctionalTensorMode(TorchDispatchMode):
                         torch.Tensor, wrap, outs_unwrapped
                     )
                 else:
+                    # When we dispatch to the C++ functionalization kernel, we might need to jump back to the
+                    # PreDispatch mode stack afterwards, to handle any other PreDispatch modes underneath
+                    # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch
+                    # from the TLS in order to avoid infinite looping, but this would prevent us from coming
+                    # back to PreDispatch later
                     outs_unwrapped = func._op_dk(
                         torch._C.DispatchKey.Functionalize,
                         *args_unwrapped,
