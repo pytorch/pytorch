@@ -780,8 +780,7 @@ void gemm_and_bias(
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
-  cublasLtHandle_t ltHandle =
-      reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
+  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
   TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
       ltHandle,
       computeDesc.descriptor(),
@@ -957,8 +956,7 @@ void scaled_gemm(
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
-  cublasLtHandle_t ltHandle =
-      reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
+  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
   TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
       ltHandle,
       computeDesc.descriptor(),
@@ -1052,8 +1050,7 @@ void int8_gemm(
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
   CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
 
-  cublasLtHandle_t ltHandle =
-      reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
+  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasHandle();
 
   // cublas team: alpha and beta need to be the same dtype as of scaleType
   at::opmath_type<int32_t> alpha_val = 1;
