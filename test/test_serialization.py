@@ -785,6 +785,7 @@ class serialization_method:
         torch.save = self.torch_save
 
 @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBothSerialization(TestCase):
     @parametrize("weights_only", (True, False))
     def test_serialization_new_format_old_format_compat(self, device, weights_only):
@@ -807,6 +808,7 @@ class TestBothSerialization(TestCase):
             self.assertTrue(len(w) == 0, msg=f"Expected no warnings but got {[str(x) for x in w]}")
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestOldSerialization(TestCase, SerializationMixin):
     # unique_key is necessary because on Python 2.7, if a warning passed to
     # the warning module is the same, it is not raised again.
@@ -904,6 +906,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
             return super().run(*args, **kwargs)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSerialization(TestCase, SerializationMixin):
     @parametrize('weights_only', (True, False))
     def test_serialization_zipfile(self, weights_only):
@@ -4014,6 +4017,7 @@ class TestEmptySubclass(torch.Tensor):
     ...
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSubclassSerialization(TestCase):
     def test_tensor_subclass_wrapper_serialization(self):
         wrapped_tensor = torch.rand(2)
