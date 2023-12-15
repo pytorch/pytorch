@@ -1528,7 +1528,7 @@ class CommonTemplate:
             for i in range(1, 6):
                 self.assertEqual(cfn(x, i), fn(x, i))
 
-    def test_builtins_round_ndigits_pos(self):
+    def test_builtins_round_float_ndigits_pos(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, 1)
 
@@ -1540,7 +1540,7 @@ class CommonTemplate:
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
-    def test_builtins_round_ndigits_zero(self):
+    def test_builtins_round_float_ndigits_zero(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, 0)
 
@@ -1552,7 +1552,7 @@ class CommonTemplate:
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
-    def test_builtins_round_ndigits_neg(self):
+    def test_builtins_round_float_ndigits_neg(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, -1)
 
@@ -1563,6 +1563,42 @@ class CommonTemplate:
 
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
+
+    def test_builtins_round_int_ndigits_pos(self):
+        def fn(x, i):
+            return x + round(i, 1)
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2, device=self.device)
+        i = 123
+
+        with torch.no_grad():
+            self.assertEqual(cfn(x, i), fn(x, i))
+
+    def test_builtins_round_int_ndigits_zero(self):
+        def fn(x, i):
+            return x + round(i, 0)
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2, device=self.device)
+        i = 123
+
+        with torch.no_grad():
+            self.assertEqual(cfn(x, i), fn(x, i))
+
+    def test_builtins_round_int_ndigits_neg(self):
+        def fn(x, i):
+            return x + round(i, -1)
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2, device=self.device)
+        i = 123
+
+        with torch.no_grad():
+            self.assertEqual(cfn(x, i), fn(x, i), msg=f"{cfn(x, i)=}, {fn(x, i)=}")
 
     def test_silu(self):
         def fn(a):

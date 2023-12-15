@@ -990,7 +990,7 @@ def _make_node_magic(method, func):
 
             expr = self.expr
             try:
-                out = func(expr)
+                out = func(expr, ndigits)
             except Exception:
                 log.warning("failed to eval %s(%s, ndigits=%s)", method, expr, ndigits)
                 raise

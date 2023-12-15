@@ -237,24 +237,14 @@ class ExprPrinterTests(TorchTestCase):
     def test_print_round_decimal(self, ndigits):
         expr = RoundDecimal(sympy.Symbol("x", integer=True) / 2, ndigits)
         self.assertEqual(pexpr(expr), f"round((1/2)*x, {ndigits})")
-        if ndigits >= 0:
-            self.assertEqual(
-                cexpr(expr),
-                f"static_cast<double>(std::nearbyint(1e{ndigits} * ((1.0/2.0)*x)) * 1e-{ndigits})",
-            )
-            self.assertEqual(
-                texpr(expr),
-                f"tl.math.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e-{ndigits}",
-            )
-        else:
-            self.assertEqual(
-                cexpr(expr),
-                f"static_cast<double>(std::nearbyint(1e-{-ndigits} * ((1.0/2.0)*x)) * 1e{-ndigits})",
-            )
-            self.assertEqual(
-                texpr(expr),
-                f"tl.math.nearbyint(1e-{-ndigits} * ((1/2)*x)) * 1e{-ndigits}",
-            )
+        self.assertEqual(
+            cexpr(expr),
+            f"static_cast<double>(std::nearbyint(1e{ndigits} * ((1.0/2.0)*x)) * 1e{-ndigits})",
+        )
+        self.assertEqual(
+            texpr(expr),
+            f"tl.math.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e{-ndigits}",
+        )
 
     def test_print_floor_div(self):
         for integer in [True, False]:

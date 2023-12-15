@@ -445,7 +445,19 @@ class SymPyValueRangeAnalysis:
 
     @classmethod
     def round(cls, number, ndigits=None):
-        return ValueRanges(sympy.floor(number.lower), sympy.ceiling(number.upper))
+        if ndigits is not None:
+            assert ndigits.is_singleton()
+            ndigits = ndigits.lower
+
+        # Negative ndigits not just affect the decimal, but the integer part as well
+        if ndigits is None or ndigits >= 0:
+            lower = sympy.floor(number.lower)
+            upper = sympy.ceiling(number.upper)
+        else:
+            lower = sympy.floor(number.lower * 10 ** ndigits) * 10 ** -ndigits
+            upper = sympy.floor(number.upper * 10 ** ndigits) * 10 ** -ndigits
+
+        return ValueRanges(lower, upper)
 
     # It's used in some models on symints
     @staticmethod
