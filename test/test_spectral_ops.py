@@ -127,6 +127,7 @@ def skip_helper_for_fft(device, dtype):
 
 
 # Tests of functions related to Fourier analysis in the torch.fft namespace
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFFT(TestCase):
     exact_dtype = True
 
@@ -1590,6 +1591,7 @@ class FFTDocTestFinder:
         return doctests
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFFTDocExamples(TestCase):
     pass
 

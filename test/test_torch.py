@@ -87,6 +87,7 @@ def torch_vital_set(value):
 
 # Tests Vital Signs for Torch
 # FIXME: document or deprecate whatever this is
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBasicVitalSigns(TestCase):
     def test_basic_vitals(self):
         with torch_vital_set(''):
@@ -111,6 +112,7 @@ class TestBasicVitalSigns(TestCase):
             self.assertIn('Dataloader.enabled\t\t True', torch.read_vitals())
 
 # FIXME: document or deprecate whatever this is
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestVitalSignsCuda(TestCase):
     @onlyCUDA
     def test_cuda_vitals_gpu_only(self, device):
@@ -120,6 +122,7 @@ class TestVitalSignsCuda(TestCase):
 
 is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
@@ -5660,6 +5663,7 @@ else:
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDevicePrecision(TestCase):
     exact_dtype = True
 
@@ -5894,6 +5898,7 @@ def disable_gc():
     else:
         yield
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTorch(TestCase):
     exact_dtype = True
 
@@ -9905,9 +9910,11 @@ def add_neg_dim_tests():
 
 # TODO: these empy classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestViewOps(TestCase):
     pass
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTensorDeviceOps(TestCase):
     pass
 
