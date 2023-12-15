@@ -55,18 +55,17 @@ def compile_opt(opt_compiled, closure=None):
     return torch.compile(fn, backend="inductor", fullgraph=True)
 
 
-def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
-    @requires_cuda()
+def make_test(optim_cls, closure=None, kernel_count=2, device="cuda:0", **kwargs):
     def test_fn(self):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
-        input = torch.ones([10, 10], device="cuda:0")
+        input = torch.ones([10, 10], device=device)
         model_eager = torch.nn.Sequential(
-            *[torch.nn.Linear(10, 10, device="cuda:0") for _ in range(2)]
+            *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
         )
         model_eager(input).sum().backward()
 
-        input = torch.ones([10, 10], device="cuda:0")
+        input = torch.ones([10, 10], device=device)
         model_compiled = deepcopy(model_eager)
         model_compiled(input).sum().backward()
 
@@ -91,6 +90,9 @@ def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
             self.assertEqual(
                 torch._inductor.metrics.generated_kernel_count, kernel_count
             )
+
+    if device == "cuda:0":
+        test_fn = requires_cuda()(test_fn)
 
     return test_fn
 
@@ -150,6 +152,7 @@ class CompiledOptimizerTests(TestCase):
         torch._inductor.metrics.reset()
 
     test_adam = make_test(Adam, lr=0.01)
+    test_adam_loop = make_test(Adam, lr=0.01, kernel_count=8, foreach=False)
     test_adam_weight_decay = make_test(Adam, lr=0.01, weight_decay=0.01)
     test_adam_amsgrad = make_test(Adam, lr=0.01, amsgrad=True)
     test_adam_maximize = make_test(Adam, lr=0.01, maximize=True)
@@ -161,20 +164,26 @@ class CompiledOptimizerTests(TestCase):
     )
 
     test_adamw = make_test(AdamW, lr=0.01)
+    test_adamw_loop = make_test(AdamW, lr=0.01, kernel_count=8, foreach=False)
     # Need to an impl which does not use python scalars
     # test_adamax = make_test(Adamax, lr=0.01)
     test_nadam = make_test(NAdam, lr=0.01)
+    test_nadam_loop = make_test(NAdam, lr=0.01, kernel_count=12, foreach=False)
     test_nadam_weight_decay = make_test(NAdam, lr=0.01, weight_decay=0.01)
     test_nadam_momentum_decay = make_test(NAdam, lr=0.01, momentum_decay=6e-3)
     test_nadam_weight_momentum_decay = make_test(
         NAdam, lr=0.01, weight_decay=0.01, momentum_decay=6e-3
     )
     test_rprop = make_test(Rprop, kernel_count=1, lr=0.01)
+    test_rprop_loop = make_test(Rprop, kernel_count=4, lr=0.01, foreach=False)
     test_rmsprop = make_test(RMSprop, kernel_count=1, lr=0.01)
+    test_rmsprop_loop = make_test(RMSprop, kernel_count=4, lr=0.01, foreach=False)
     test_adadelta = make_test(Adadelta, kernel_count=1, lr=0.01)
+    test_adadelta_loop = make_test(Adadelta, kernel_count=4, lr=0.01, foreach=False)
     test_adagrad = make_test(Adagrad, kernel_count=5, lr=0.01)
+    test_adagrad_loop = make_test(Adagrad, kernel_count=8, lr=0.01, foreach=False)
     test_asgd_default = make_test(ASGD, kernel_count=2, lr=0.1)
-    test_asgd_single = make_test(ASGD, kernel_count=12, lr=0.1, foreach=False)
+    test_asgd_default_loop = make_test(ASGD, kernel_count=12, lr=0.1, foreach=False)
     test_asgd_foreach = make_test(ASGD, kernel_count=2, lr=0.1, foreach=True)
     # test_sgd = make_test(SGD, kernel_count=1, lr=0.01)
 
