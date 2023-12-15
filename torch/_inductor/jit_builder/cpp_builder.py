@@ -838,6 +838,17 @@ class CppBuilder:
     def get_target_file_path(self):
         return self._target_file
 
+    def convert_to_cpp_extension_args(self):
+        include_dirs = self._include_dirs_args
+        cflags = (
+            self._cflags_args
+            + self._definations_args
+            + self._passthough_parameters_args
+        )
+        ldflags = self._ldflags_args + self._libraries_args + self._libraries_dirs_args
+
+        return include_dirs, cflags, ldflags
+
     def build(self) -> Tuple[int, str]:
         """
         It is must need a temperary directory to store object files in Windows.

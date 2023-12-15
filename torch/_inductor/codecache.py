@@ -2048,8 +2048,23 @@ class CppWrapperCodeCache:
         if not os.path.exists(cpp_wrapper_dir):
             os.makedirs(cpp_wrapper_dir)
 
+        """
         ext = "so"
         filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
+        """
+        from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppTorchOptions
+
+        picked_vec_isa = pick_vec_isa()
+        dummy_builder = CppBuilder(
+            name,
+            [source_code],
+            CppTorchOptions(picked_vec_isa),
+            output_dir=cpp_wrapper_dir,
+        )
+        # not call build(). just calc the output path.
+        filepath = dummy_builder.get_target_file_path()
+        # print(f"!!! CppWrapperCodeCache: {filepath} -- {cpp_wrapper_dir}")
+
         log.debug("Cpp wrapper code path %s", filepath)
 
         if key not in cls.cache:
@@ -2062,6 +2077,7 @@ class CppWrapperCodeCache:
                 if not os.path.exists(filepath):
                     log.debug("Cpp wrapper building %s", filepath)
 
+                    """
                     _cpp_flags = cpp_flags()
                     _opt_flags = optimization_flags()
                     _shared = get_shared()
@@ -2087,6 +2103,13 @@ class CppWrapperCodeCache:
                     # For the default python wrapper, the compilation and linking are done in one command thus -ffast-math
                     # will take effect in both compilation and linking.
                     extra_ldflags = f"{_shared} {_lpaths} {_libs} -ffast-math"
+                    """
+
+                    (
+                        include_dirs,
+                        extra_cflags,
+                        extra_ldflags,
+                    ) = dummy_builder.convert_to_cpp_extension_args()
 
                     mod = torch.utils.cpp_extension.load_inline(
                         name=name,
@@ -2095,7 +2118,7 @@ class CppWrapperCodeCache:
                         functions=[func_name],
                         extra_cflags=[extra_cflags],
                         extra_ldflags=[extra_ldflags],
-                        extra_include_paths=_ipaths,
+                        extra_include_paths=[include_dirs],
                         use_pch=True,
                     )
                     log.debug("Cpp wrapper done building %s", filepath)
