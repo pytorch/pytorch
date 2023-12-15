@@ -1213,7 +1213,10 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       "NCCL monitor thread timeout. Basically, this could ",
       "be due to CUDA or NCCL calls being unexpectedly blocking, ",
       "especially when your program enters a deadlock state in watchdog "
-      "or destructors. If you see this error, please file a bug to PyTorch.");
+      "or destructors. If you don't believe this is the base, you can turn"
+      "off monitor thread by set TORCH_NCCL_ENABLE_MONITORING=0 or increase"
+      "timeout by set TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=1800 (30 mins)"
+      "If this turns out to be a real error, please file a bug to PyTorch.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
