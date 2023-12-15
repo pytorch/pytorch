@@ -7101,6 +7101,36 @@ mkldnn_rnn_layer_differentiable_backward(
   return std::make_tuple(cat_layer_dx, dWx, dWh, db, db, dprev_h, dprev_c);
 }
 
+Tensor values_backward(const Tensor& grad, const Tensor& self) {
+  Tensor grad_self;
+  if (grad.defined()) {
+    if (self.layout() == c10::kSparse) {
+      return at::_sparse_coo_tensor_unsafe_symint(
+          self.indices(),
+          grad,
+          self.sym_sizes(),
+          self.options(),
+          /*is_coalesced=*/true);
+    } else if (at::sparse_csr::is_sparse_compressed(self)) {
+      Tensor compressed_indices, plain_indices;
+      std::tie(compressed_indices, plain_indices) =
+          at::sparse_csr::getCompressedPlainIndices(self);
+      return at::_sparse_compressed_tensor_unsafe(
+          compressed_indices,
+          plain_indices,
+          grad,
+          self.sizes(),
+          self.options());
+    } else {
+      TORCH_CHECK_NOT_IMPLEMENTED(
+          false,
+          "values backward with respect to self with layout ",
+          self.layout());
+    }
+  }
+  return grad_self;
+}
+
 } // namespace details
 } // namespace generated
 } // namespace autograd

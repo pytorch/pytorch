@@ -3017,6 +3017,33 @@ else:
                 actual, expected = self._inf_nan_preprocess(list(actual), expected)
                 self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.long, torch.float32, torch.complex64)
+    def test_gradient_spacing_list_length_error(self, device, dtype):
+        t = make_tensor((2, 2), device=device, dtype=dtype)
+
+        spacing = (make_tensor((2,), device=device, dtype=dtype),)
+        with self.assertRaisesRegex(RuntimeError, r'expected spacing to be'):
+            torch.gradient(t, spacing=spacing)
+
+        spacing = (make_tensor((2,), device=device, dtype=dtype),) * 2
+        torch.gradient(t, spacing=spacing)
+
+        spacing = (make_tensor((2,), device=device, dtype=dtype),) * 3
+        with self.assertRaisesRegex(RuntimeError, r'expected spacing to be'):
+            torch.gradient(t, spacing=spacing)
+
+        spacing = (2,)
+        with self.assertRaisesRegex(RuntimeError, r'expected spacing to be'):
+            torch.gradient(t, spacing=spacing)
+
+        spacing = (2, 2)
+        torch.gradient(t, spacing=spacing)
+
+        spacing = (2, 2, 2)
+        with self.assertRaisesRegex(RuntimeError, r'expected spacing to be'):
+            torch.gradient(t, spacing=spacing)
+
     def _test_large_cum_fn_helper(self, x, fn):
         expected = fn(x.cpu().float())
         actual = fn(x).cpu().float()
