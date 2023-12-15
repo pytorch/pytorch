@@ -3117,6 +3117,24 @@ class TestNestedTensorSubclass(NestedTestCase):
         ):
             torch.split(nt, [1, 2], 1)
 
+    def test_views_inherit_ragged_dim(self, device):
+        # view
+        nt = random_nt_from_dims(
+            [4, None, 8, 10], device=device, dtype=torch.float32, layout=torch.jagged)
+        # inherit ragged dim via -1
+        view = nt.view(4, -1, 80)
+        self.assertEqual(nt.shape[1], view.shape[1])
+        # inherit batch and ragged dims via -1
+        view2 = nt.view(-1, -1, 80)
+        self.assertEqual(nt.shape[:2], view2.shape[:2])
+
+        # expand
+        nt = random_nt_from_dims(
+            [3, None, 1], device=device, dtype=torch.float32, layout=torch.jagged)
+        # inherit batch and ragged dims via -1
+        view = nt.expand(-1, -1, 5)
+        self.assertEqual(nt.shape[:2], view.shape[:2])
+
     def test_binary_pointwise_broadcasting(self, device):
         # (B, j0, 3, 4)
         ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), device, requires_grad=True)
