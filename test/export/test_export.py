@@ -183,7 +183,6 @@ class TestExport(TestCase):
         inputs = ([torch.randn(3, 2)], torch.randn(3, 2))
         self.assertEqual(ep(*inputs), f(*inputs))
 
-    @testing.expectedFailureNonStrict
     def test_non_strict_dynamic_shapes(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -225,7 +224,7 @@ class TestExport(TestCase):
             torch.ones(4),
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Input.*shape.*is not equal to input.*shape"
+            RuntimeError, "Expected input arg3_1.shape\[0\] to be equal to 6, but got 5"
         ):
             ep_ns(*bad_runtime_inp1)
 
@@ -235,7 +234,7 @@ class TestExport(TestCase):
             {"a": torch.zeros(5), "b": torch.ones(5)},
             torch.ones(6),
         )
-        with self.assertRaisesRegex(RuntimeError, "Input.*shape.*is specialized at"):
+        with self.assertRaisesRegex(RuntimeError, "Expected input arg7_1.shape\[0\] to be equal to 4, but got 6"):
             ep_ns(*bad_runtime_inp2)
 
         good_runtime_inp = (
@@ -295,19 +294,20 @@ class TestExport(TestCase):
             )
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
-        def fn_ddo(x):
-            y = x.nonzero()
-            z = y.shape[0]
-            if z > 2:
-                return x.cos()
-            else:
-                return x.sin()
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = x.nonzero()
+                z = y.shape[0]
+                if z > 2:
+                    return x.cos()
+                else:
+                    return x.sin()
 
         with self.assertRaisesRegex(
-            torchdynamo.exc.UserError,
+            (torchdynamo.exc.UserError, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode),
             "trying to get a value out of symbolic int"
         ):
-            _ = export(fn_ddo, (torch.tensor([2, 3, 5]),))
+            _ = export(M(), (torch.tensor([2, 3, 5]),))
 
     @testing.expectedFailureNonStrict
     def test_if_functional(self):
@@ -1040,13 +1040,14 @@ class TestExport(TestCase):
 
     @testing.expectedFailureNonStrict
     def test_args_type_checked(self):
-        def fn(x):
-            return x + 1
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
 
         inp = torch.rand(2, 2)
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "to be a tuple"):
             # Intentionally not wrapping `inp` in a tuple to trigger the error
-            _ = export(fn, inp)
+            _ = export(M(), inp)
 
     @testing.expectedFailureNonStrict
     def test_constrain_value_with_no_default(self):
@@ -1663,7 +1664,6 @@ class TestExport(TestCase):
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
     @testing.expectedFailureRetraceability
-    @testing.expectedFailureNonStrict
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2046,7 +2046,6 @@ def forward(self, l_x_):
 
     @testing.expectedFailureSerDer  # symfloat nyi
     @testing.expectedFailureRetraceability
-    @testing.expectedFailureNonStrict
     def test_sym_sqrt(self):
         import math
         class M(torch.nn.Module):
