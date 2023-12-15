@@ -1210,13 +1210,16 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // we throw exception and make the whole process to be killed.
   const auto exitMsg = c10::str(
       logPrefix(),
-      "NCCL monitor thread timeout. Basically, this could ",
-      "be due to CUDA or NCCL calls being unexpectedly blocking, ",
-      "especially when your program enters a deadlock state in watchdog "
-      "or destructors. If you don't believe this is the base, you can turn"
-      "off monitor thread by set TORCH_NCCL_ENABLE_MONITORING=0 or increase"
-      "timeout by set TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=1800 (30 mins)"
-      "If this turns out to be a real error, please file a bug to PyTorch.");
+      "ProcessGroupNCCL's watchdog got stuck for ",
+      heartbeatTimeoutInSec_,
+      "seconds without making progress in monitoring enqueued collectives. ",
+      "This typically indicates a nccl/cuda API hang blocking the watchdog, ",
+      "and could be triggered by another thread holding the GIL inside a ",
+      "cuda api, or other deadlock-prone behaviors.",
+      "If you suspect the watchdog is not actually stuck and a longer timeout would help, ",
+      "you can either increase the timeout(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
+      "or disable the heartbeat monitor(TORCH_NCCL_ENABLE_MONITORING=0)"
+      "If neither does not help, please file a bug to PyTorch.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
