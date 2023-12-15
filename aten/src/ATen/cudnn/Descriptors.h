@@ -272,7 +272,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
                                              &cudnnDestroyRNNDescriptor> {
   DropoutDescriptor dropout_desc_;
   void set(cudnnHandle_t handle,
-#if defined(USE_CUDNN_RNN_V8_API)
+#ifdef USE_CUDNN_RNN_V8_API
        int input_size,
        bool packed,
 #endif

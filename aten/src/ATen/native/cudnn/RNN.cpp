@@ -111,7 +111,7 @@ namespace {
   // RNNDescriptor
 
   struct RNNDescriptorParams {
-#if defined(USE_CUDNN_RNN_V8_API)
+#ifdef USE_CUDNN_RNN_V8_API
     int64_t input_size;
     bool packed;
 #endif
@@ -166,7 +166,7 @@ namespace {
     void set(int64_t mode, int64_t input_size, bool packed, int64_t hidden_size, int64_t proj_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
 #endif
       this->set_mode(mode);
-#if defined(USE_CUDNN_RNN_V8_API)
+#ifdef USE_CUDNN_RNN_V8_API
       this->input_size = input_size;
       this->packed = packed;
 #endif
@@ -536,7 +536,7 @@ namespace {
 #endif
           &nb_dims,
           filter_dim_a
-#if defined(USE_CUDNN_RNN_V8_API)
+#ifdef USE_CUDNN_RNN_V8_API
           ,stride_dim_a
 #endif
           ));
@@ -670,7 +670,7 @@ namespace {
 #endif
                 &nb_dims,
                 filter_dim_a
-#if defined(USE_CUDNN_RNN_V8_API)
+#ifdef USE_CUDNN_RNN_V8_API
                 ,stride_dim_a
 #endif
                 ));
@@ -1089,7 +1089,7 @@ copy_weights_to_flat_buf_views(
   RNNDescriptorParams rnn;
   rnn.set(
       mode,
-#if defined(USE_CUDNN_RNN_V8_API)
+#ifdef USE_CUDNN_RNN_V8_API
       input_size,
       false, // eqy: bogus as we do not know if the input is packed here
          // but it should not affect the weights (what are are interested in)
@@ -1378,7 +1378,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           reserve.size(0), reserve.mutable_data_ptr()));
 #endif
   } else { // inference
-#if defined(USE_CUDNN_RNN_V8_API)
+#ifdef USE_CUDNN_RNN_V8_API
     AT_CUDNN_CHECK(cudnnGetRNNTempSpaceSizes(
           handle,
           descs.rnn_desc.desc(),
