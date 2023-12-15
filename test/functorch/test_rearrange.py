@@ -53,6 +53,7 @@ equivalent_rearrange_patterns: List[Tuple[str, str]] = [
 ]
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRearrange(TestCase):
     def test_collapsed_ellipsis_errors_out(self) -> None:
         x = torch.zeros([1, 1, 1, 1, 1])

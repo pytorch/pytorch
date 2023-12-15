@@ -2,6 +2,7 @@
 import typing
 import unittest
 
+import torch
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
@@ -277,6 +278,7 @@ def filter_vmap_implementable(reg):
     return True
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFunctorchDispatcher(TestCase):
     @dispatch_registrations("CompositeImplicitAutograd", xfail_functorch_batched)
     def test_register_a_batching_rule_for_composite_implicit_autograd(

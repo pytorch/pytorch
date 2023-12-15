@@ -5,6 +5,7 @@ from torch._functorch.aot_autograd import aot_function
 from torch._functorch.compilers import nop
 import logging
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAOTLogging(LoggingTestCase):
 
     @make_logging_test(aot=logging.DEBUG)

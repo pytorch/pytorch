@@ -125,6 +125,7 @@ class MyModule(torch.nn.Module):
         return x + 1
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBenchmarkUtils(TestCase):
     def regularizeAndAssertExpectedInline(
         self, x: Any,

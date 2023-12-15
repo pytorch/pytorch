@@ -7,6 +7,7 @@ from functorch import make_fx
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMinifier(TestCase):
     def test_has_mul_minifier(self):
         def failing_f(x, y):

@@ -120,6 +120,7 @@ def run_and_compare_activation(self, fn, inps):
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMemoryEfficientOpAuthoring(TestCase):
     def test_gelu_bias(self):
         run_and_compare_activation(self, gelu_bias, [(1024,), (1024,)])
@@ -223,6 +224,7 @@ def check(f, t, delta, check_val=True, graph_input=False):
                 f"results are different {true_result}, {our_result}")  # check results are the same
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class NoChangeTestCase(TestCase):
 
     def test_nochange(self):
@@ -258,6 +260,7 @@ class NoChangeTestCase(TestCase):
         check(f, t, 0, check_val=False)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class ReduceTestCase(TestCase):
 
     def test_immutable_list_type(self):
@@ -347,6 +350,7 @@ class ReduceTestCase(TestCase):
         check(f, t, 1)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class RandomOpTestCase(TestCase):
     def test_random(self):
         def f(x):

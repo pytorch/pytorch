@@ -1,5 +1,6 @@
 # Owner(s): ["module: intel"]
 
+import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_LINUX
 import shutil
 import subprocess
@@ -7,6 +8,7 @@ import tempfile
 import unittest
 
 @unittest.skipIf(not IS_LINUX, "Only works on linux")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTorchrun(TestCase):
     def setUp(self):
         self._test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)

@@ -79,6 +79,7 @@ class ReduceMod(torch.nn.Module):
 
 
 @skipIfNoDynamoSupport
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestControlFlow(TestCase):
     def setUp(self):
         torch._dynamo.reset()
@@ -251,6 +252,7 @@ class TestControlFlow(TestCase):
 
 
 @skipIfNoDynamoSupport
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestControlFlowTraced(TestCase):
     def setUp(self):
         torch._dynamo.reset()

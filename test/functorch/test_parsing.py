@@ -27,6 +27,7 @@ SOFTWARE.
 from typing import Any, Callable, Dict
 from unittest import mock
 
+import torch
 from functorch.einops._parsing import (
     AnonymousAxis, ParsedExpression, parse_pattern, validate_rearrange_expressions, _ellipsis
 )
@@ -37,6 +38,7 @@ mock_anonymous_axis_eq: Callable[[AnonymousAxis, object], bool] = (
 )
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAnonymousAxis(TestCase):
     def test_anonymous_axes(self) -> None:
         a, b = AnonymousAxis('2'), AnonymousAxis('2')
@@ -51,6 +53,7 @@ class TestAnonymousAxis(TestCase):
             self.assertListEqual([a, 2, b], [c, 2, c])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestParsedExpression(TestCase):
     def test_elementary_axis_name(self) -> None:
         for name in ['a', 'b', 'h', 'dx', 'h1', 'zz', 'i9123', 'somelongname',
@@ -145,6 +148,7 @@ class TestParsedExpression(TestCase):
         self.assertTrue(parsed.has_ellipsis_parenthesized)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestParsingUtils(TestCase):
     def test_parse_pattern_number_of_arrows(self) -> None:
         axes_lengths: Dict[str, int] = {}
@@ -193,6 +197,7 @@ class MaliciousRepr:
         return "print('hello world!')"
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestValidateRearrangeExpressions(TestCase):
     def test_validate_axes_lengths_are_integers(self) -> None:
         axes_lengths: Dict[str, Any] = {"a": 1, "b": 2, "c": 3}
