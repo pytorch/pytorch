@@ -390,17 +390,15 @@ if torch._C._has_mkldnn:
             _visited_nodes = set()
             while len(_node_list) != 0:
                 _current_node = _node_list.pop(0)
-                if _current_node in _visited_nodes:
-                    # Skip if already visited
-                    continue
-                _visited_nodes.add(_current_node)
-                if _current_node == _ancestor_node:
-                    return True
-                elif isinstance(
-                    _current_node, torch.fx.Node
-                ) and _current_node.op not in ["placeholder", "output", "get_attr"]:
-                    for input in _current_node.all_input_nodes:
-                        _node_list.append(input)
+                if _current_node not in _visited_nodes:
+                    _visited_nodes.add(_current_node)
+                    if _current_node == _ancestor_node:
+                        return True
+                    elif isinstance(
+                        _current_node, torch.fx.Node
+                    ) and _current_node.op not in ["placeholder", "output", "get_attr"]:
+                        for input in _current_node.all_input_nodes:
+                            _node_list.append(input)
             return False
 
         return [
