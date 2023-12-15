@@ -11,6 +11,7 @@ import torch._C
 import torch.utils._pytree as pytree
 from torch import _utils_internal
 from torch._functorch.pyfunctorch import dispatch_functorch
+from torch.utils._python_dispatch import TorchDispatchMode
 
 # Query `hasattr` only once.
 
@@ -69,8 +70,6 @@ class OperatorBase:
         # API.
         self.py_kernels: Dict[torch._C.DispatchKey, Callable[..., Any]] = {}
 
-        from torch.utils._python_dispatch import TorchDispatchMode
-
         # This table allows you to override the behavior of a particular
         # operator for a particular TorchDispatchMode.  In practice,
         # we are using this mostly for ProxyTensorMode.  Modes can be
@@ -100,9 +99,7 @@ class OperatorBase:
 
     def py_impl(self, k):
         def inner(fn):
-            if inspect.isclass(k) and issubclass(
-                k, torch.utils._python_dispatch.TorchDispatchMode
-            ):
+            if inspect.isclass(k) and issubclass(k, TorchDispatchMode):
                 assert k not in self.python_key_mode_table
                 # TODO(voz): Should we replace setting torch._C.DispatchKey.Python entirely with setting mode keys?
                 self.python_key_mode_table[k] = fn
@@ -312,11 +309,12 @@ class HigherOrderOperator(OperatorBase):
         if functionality_key == torch._C.DispatchKey.PreDispatch:
             from torch.utils._python_dispatch import _pop_mode_temporarily
 
+            # The check for Python in the exclude set is so we properly respect `with no_dispatch()`
+            # calls inside of a mode.
             if (
                 _len_torch_dispatch_stack_pre_dispatch() > 0
-                and not torch._C._dispatch_tls_is_dispatch_key_excluded(
-                    DispatchKey.Python
-                )
+            ) and not torch._C._dispatch_tls_is_dispatch_key_excluded(
+                DispatchKey.Python
             ):
                 curr_mode = _get_current_dispatch_mode_pre_dispatch()
                 assert (
@@ -328,25 +326,6 @@ class HigherOrderOperator(OperatorBase):
                 handler = self.python_key_mode_table[type(curr_mode)]
                 with _pop_mode_temporarily(functionality_key) as mode:
                     return handler(mode, *args, **kwargs)
-
-        elif functionality_key in mode_stack_per_key():
-            # The place to handle DispatchKey.PreDispatch
-            curr_stack = mode_stack_per_key()[functionality_key]
-            # The check for Python in the exclude set is so we properly respect `with no_dispatch()`
-            # calls inside of a mode.
-            if len(
-                curr_stack
-            ) > 0 and not torch._C._dispatch_tls_is_dispatch_key_excluded(
-                DispatchKey.Python
-            ):
-                curr_mode = curr_stack[-1]
-                pre_dispatch_modes = mode_stack_per_key().get(
-                    DispatchKey.PreDispatch, []  # type: ignore[attr-defined]
-                )
-                handler = self.python_key_mode_table[type(curr_mode)]
-                if len(pre_dispatch_modes) > 0:
-                    with temporarily_pop_mode(pre_dispatch_modes) as mode:
-                        return handler(mode, *args, **kwargs)
 
         final_key = resolve_key(self, dispatch_key)
 
@@ -535,26 +514,6 @@ def mode_stack_per_key():
     return _mode_stack_per_key
 
 
-# Per-dispatch-key mode variant of push_mode().
-def push_mode_for_key(key, mode):
-    assert isinstance(key, torch._C.DispatchKey)
-    assert isinstance(mode, torch.utils._python_dispatch.TorchDispatchMode)
-    assert key != torch._C.DispatchKey.PreDispatch
-    if key not in mode_stack_per_key():
-        mode_stack_per_key()[key] = []
-    mode_stack_per_key()[key].append(mode)
-
-
-# Per-dispatch-key mode variant of pop_mode().
-def pop_mode_for_key(key):
-    assert isinstance(key, torch._C.DispatchKey)
-    assert key != torch._C.DispatchKey.PreDispatch
-    assert key in mode_stack_per_key()
-    curr_mode_stack = mode_stack_per_key()[key]
-    assert len(curr_mode_stack) > 0
-    return curr_mode_stack.pop()
-
-
 cached_ops = set()
 
 
@@ -707,7 +666,7 @@ class OpOverload(OperatorBase):
             if (
                 curr_stack_len > 0
                 and not torch._C._dispatch_tls_is_dispatch_key_excluded(
-                    DispatchKey.PreDispatch
+                    DispatchKey.Python
                 )
             ):
 
@@ -721,38 +680,11 @@ class OpOverload(OperatorBase):
                             _set_mode_pre_dispatch(top_mode)
 
                     with _temporarily_pop_modes_from_pre_dispatch() as curr_mode:
-                        assert hasattr(curr_mode, "__torch_dispatch__")
+                        assert isinstance(curr_mode, TorchDispatchMode)
                         overload_types = []
                         args_flattened, _ = torch.utils._pytree.tree_flatten(
                             (args, kwargs.values())
                         )
-                        for a in args_flattened:
-                            if isinstance(a, torch.Tensor) and torch._C._dispatch_keys(
-                                a
-                            ).has(torch._C.DispatchKey.Python):
-                                overload_types.append(type(a))
-                        return curr_mode.__torch_dispatch__(
-                            self, overload_types, args, kwargs
-                        )
-
-                return handler
-
-        elif functionality_key in mode_stack_per_key():
-            curr_stack = mode_stack_per_key()[functionality_key]
-            # The check for Python in the exclude set is so we properly respect `with no_dispatch()`
-            # calls inside of a mode.
-            if len(
-                curr_stack
-            ) > 0 and not torch._C._dispatch_tls_is_dispatch_key_excluded(
-                DispatchKey.Python
-            ):
-
-                def handler(*args, **kwargs):
-                    # This logic is meant to be a python parallel of handle_torch_function_no_python_arg_parser.
-                    with temporarily_pop_mode(curr_stack) as curr_mode:
-                        assert hasattr(curr_mode, "__torch_dispatch__")
-                        overload_types = []
-                        args_flattened = pytree.arg_tree_leaves(*args, **kwargs)
                         for a in args_flattened:
                             # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
                             # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
@@ -767,17 +699,13 @@ class OpOverload(OperatorBase):
                             self, overload_types, args, kwargs
                         )
 
-                # Note [Not Caching Per-Dispatch-Key Mode Handlers]
-                # Note that we're not caching this handler.  There isn't really a point, since the slow bit
-                # is the handler itself (in python).
-                # Also, not caching means that we don't have to reset the cache when any existing
-                # modes go out of scope (which in of itself takes time to loop through all operators).
+                # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
                 return handler
 
-        # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
-        cache_result = functionality_key not in mode_stack_per_key()
-
         final_key = resolve_key(self, key)
+
+        # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
+        cache_result = key != torch._C.DispatchKey.PreDispatch
 
         # TODO: We could potentially have lots of debugging wrappers against
         # dispatch keys; design some general registration mechanism instead of
