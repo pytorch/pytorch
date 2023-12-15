@@ -1208,7 +1208,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
-  // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki url here.
+  // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
+  // url here.
   const auto exitMsg = c10::str(
       logPrefix(),
       "ProcessGroupNCCL's watchdog got stuck for ",
