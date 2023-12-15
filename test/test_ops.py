@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfTorchInductor,
     slowTest,
+    unMarkDynamoStrictTest,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -125,6 +126,7 @@ aten = torch.ops.aten
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
+@unMarkDynamoStrictTest
 class TestCommon(TestCase):
     exact_dtype = True
 
@@ -669,7 +671,7 @@ class TestCommon(TestCase):
         dtype = (
             torch.float32
             if torch.float32 in supported_dtypes
-            else list(supported_dtypes)[0]
+            else next(iter(supported_dtypes))
         )
 
         # Ops from python_ref_db point to python decomps that are potentially
@@ -1470,6 +1472,7 @@ class TestCommon(TestCase):
                 )
 
 
+@unMarkDynamoStrictTest
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
     # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
@@ -1526,6 +1529,7 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
 
+@unMarkDynamoStrictTest
 class TestMathBits(TestCase):
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
@@ -1747,6 +1751,7 @@ class TestTagsMode(TorchDispatchMode):
         return rs
 
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
+@unMarkDynamoStrictTest
 class TestTags(TestCase):
     @onlyCPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
@@ -1766,6 +1771,7 @@ class TestTags(TestCase):
                 check_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
 
+@unMarkDynamoStrictTest
 class TestRefsOpsInfo(TestCase):
 
     import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft", "_refs._conversions"]
@@ -1903,6 +1909,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
         # other
+        '_refs.block_diag',  # only refs._block_diag_iterable is in decomposition table
         '_refs.empty',  # intentional; direct empty is faster and has less guards
         '_refs.empty_permuted',  # intentional; direct empty is faster and has less guards
         '_refs.expand_as',
@@ -2039,6 +2046,7 @@ fake_autocast_backward_xfails = {
     skip('pinverse'),
 }
 
+@unMarkDynamoStrictTest
 class TestFakeTensor(TestCase):
     def _test_fake_helper(self, device, dtype, op, context):
         name = op.name

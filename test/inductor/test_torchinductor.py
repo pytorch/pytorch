@@ -281,6 +281,22 @@ def check_model(
     has_lowp_args = False
     original_lowp_dtype = torch.half
 
+    if reference_in_float and exact_dtype:
+        # Store expected dtypes so we can check actual result gives the correct types
+        torch.manual_seed(0)
+        try:
+            eager_result = model(*ref_inputs, **ref_kwargs)
+        except RuntimeError:
+            # Eager model may fail if the dtype is not supported
+            eager_result = None
+
+        ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
+        expect_dtypes = [
+            x.dtype if isinstance(x, torch.Tensor) else None
+            for x in pytree.tree_leaves(eager_result)
+        ]
+        del eager_result
+
     if reference_in_float:
         # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
         def upcast_fn(x):
@@ -348,6 +364,13 @@ def check_model(
             else y
             for x, y in zip(actual_flat, correct_flat)
         )
+
+    if reference_in_float and exact_dtype:
+        for expect_dtype, actual_result in zip(expect_dtypes, actual_flat):
+            if expect_dtype is not None:
+                assert (
+                    actual_result.dtype == expect_dtype
+                ), f"dtype mismatch, expected {expect_dtype} but got {actual_result.dtype}"
 
     if reference_in_float:
         correct_flat = reference_to_expect(actual_flat, correct_flat)
@@ -1615,7 +1638,8 @@ class CommonTemplate:
                 a // b,
             )
 
-        self.common(fn, (1024, 100))
+        # FIXME: returns the wrong dtype
+        self.common(fn, (1024, 100), exact_dtype=False)
 
     def test_div9(self):
         def fn(x):
@@ -1661,6 +1685,26 @@ class CommonTemplate:
                     make_tensor(100, device="cpu", dtype=dtype, exclude_zero=True),
                 ),
             )
+
+    def test_floordiv(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Fails on CPU")
+
+        def fn_floor_input(a, i):
+            n = (i * 1.234) // 8.234
+            return a + n
+
+        self.common(
+            fn_floor_input, (make_tensor(10, device="cpu", dtype=torch.float32), 33)
+        )
+
+        def fn_int_input(a, i):
+            n = i // 8
+            return a + n
+
+        self.common(
+            fn_int_input, (make_tensor(10, device="cpu", dtype=torch.float32), 33)
+        )
 
     def test_both_scalars(self):
         def fn(a, b):
@@ -4587,6 +4631,14 @@ class CommonTemplate:
             self.assertIsNone(
                 re.search(pattern, code), msg="Found bad index_expr in code:\n" + code
             )
+
+    def test_float_index_expression_type_promotion(self):
+        # Test that float indexing expressions participate in type promotion
+        def fn(x):
+            return x + 1.0 / x.size(0)
+
+        x = torch.arange(10)
+        self.common(fn, (x,))
 
     def test_sort(self):
         def fn(a):
@@ -7929,6 +7981,40 @@ class CommonTemplate:
 
         x = torch.rand([4, 4, 3], dtype=torch.float64)
         self.common(fn, (x,))
+
+    def test_float16_to_int16(self):
+        def fn(x):
+            x_view = x.view(dtype=torch.int16)
+            return x_view.mul(2)
+
+        x = torch.ones(4, dtype=torch.float16, device=self.device)
+        ref = fn(x)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(ref, actual)
+
+    def test_bfloat16_to_int16(self):
+        def fn(a, b):
+            x = a + b
+            x_view = x.view(dtype=torch.int16)
+            return x_view.mul(2)
+
+        a = torch.ones(4, dtype=torch.bfloat16, device=self.device)
+        b = torch.ones(4, dtype=torch.bfloat16, device=self.device)
+        ref = fn(a, b)
+        actual = torch.compile(fn)(a, b)
+        self.assertEqual(ref, actual)
+
+    def test_float32_to_int32(self):
+        def fn(a, b):
+            x = a + b
+            x_view = x.view(dtype=torch.int32)
+            return x_view.mul(2)
+
+        a = torch.ones(4, dtype=torch.float32, device=self.device)
+        b = torch.ones(4, dtype=torch.float32, device=self.device)
+        ref = fn(a, b)
+        actual = torch.compile(fn)(a, b)
+        self.assertEqual(ref, actual)
 
 
 @dataclasses.dataclass
