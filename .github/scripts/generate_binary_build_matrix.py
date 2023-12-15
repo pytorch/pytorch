@@ -24,6 +24,7 @@ CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
 
 CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
+
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "11.8": (
         "nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
