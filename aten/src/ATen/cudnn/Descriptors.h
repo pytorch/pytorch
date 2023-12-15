@@ -18,7 +18,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8907
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 9000
 #define USE_CUDNN_RNN_V8_API
 #endif
 
