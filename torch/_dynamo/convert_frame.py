@@ -616,7 +616,7 @@ def _compile(
             fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
-            if e.innermost_user_frame_summary is not None:
+            if e.innermost_user_frame_summary is not None:  # type: ignore[union-attr]
                 fail_user_frame_filename = e.innermost_user_frame_summary.filename  # type: ignore[union-attr]
                 fail_user_frame_lineno = e.innermost_user_frame_summary.lineno  # type: ignore[union-attr]
             raise
@@ -624,7 +624,7 @@ def _compile(
             fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
-            if e.innermost_user_frame_summary is not None:
+            if e.innermost_user_frame_summary is not None:  # type: ignore[attr-defined]
                 fail_user_frame_filename = e.innermost_user_frame_summary.filename  # type: ignore[attr-defined]
                 fail_user_frame_lineno = e.innermost_user_frame_summary.lineno  # type: ignore[attr-defined]
             raise InternalTorchDynamoError(str(e)).with_traceback(
