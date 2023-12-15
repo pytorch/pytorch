@@ -17,7 +17,7 @@ ArrayLikeOrScalar = typing.Union[ArrayLike, Scalar]
 
 DTypeLike = typing.TypeVar("DTypeLike")
 AxisLike = typing.TypeVar("AxisLike")
-NDArray = typing.TypeVar("NDarray")
+NDArray = typing.TypeVar("NDArray")
 CastingModes = typing.TypeVar("CastingModes")
 KeepDims = typing.TypeVar("KeepDims")
 
