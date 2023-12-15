@@ -216,7 +216,19 @@ def get_constant_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     Construct a GraphModule which corresponds to the part which could be
     constant folded in provided gm.
     """
+
     constant_graph_tag(gm)
+    # We rewrite the tags, if it's a constant being directly consumed, without
+    # any folding opportunity, we keep it in main gm.
+    for node in gm.graph.nodes:
+        if node.op == "get_attr":
+            used_to_fold = False
+            for u in node.users:
+                if u.tag == CONST_MODULE_TAG:
+                    used_to_fold = True
+                    break
+            if not used_to_fold:
+                node.tag = MODULE_TAG
 
     new_graph = torch.fx.Graph()
 

@@ -572,7 +572,6 @@ def fx_codegen_and_compile(
         post_grad_graphs_log.info("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
 
     with V.set_fake_mode(fake_mode):
-        original_constants = None
         const_output_index = None
         const_graph = None
         const_code = None
