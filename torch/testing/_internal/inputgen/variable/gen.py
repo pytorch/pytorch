@@ -12,7 +12,7 @@ from torch.testing._internal.inputgen.variable.space import (
     Intervals,
     VariableSpace,
 )
-from torch.testing._internal.inputgen.variable.utils import nextafter
+from torch.testing._internal.inputgen.variable.utils import nextdown, nextup
 
 
 def gen_min_float_from_interval(r: Interval) -> Optional[float]:
@@ -21,7 +21,7 @@ def gen_min_float_from_interval(r: Interval) -> Optional[float]:
     if not r.lower_open:
         return float(r.lower)
     else:
-        next_float = nextafter(r.lower, math.inf)
+        next_float = nextup(r.lower)
         if next_float < r.upper or next_float == r.upper and not r.upper_open:
             return float(next_float)
         return None
@@ -33,7 +33,7 @@ def gen_max_float_from_interval(r: Interval) -> Optional[float]:
     if not r.upper_open:
         return float(r.upper)
     else:
-        prev_float = nextafter(r.upper, -math.inf)
+        prev_float = nextdown(r.upper)
         if prev_float > r.lower or prev_float == r.lower and not r.lower_open:
             return float(prev_float)
         return None
@@ -44,10 +44,10 @@ def gen_float_from_interval(r: Interval) -> Optional[float]:
         return None
     lower = gen_min_float_from_interval(r)
     upper = gen_max_float_from_interval(r)
-    if lower == float("-inf"):
-        lower = nextafter(lower, math.inf)
-    if upper == float("inf"):
-        upper = nextafter(upper, -math.inf)
+    if lower == -math.inf:
+        lower = nextup(lower)
+    if upper == math.inf:
+        upper = nextdown(upper)
     if lower is None or upper is None:
         return None
     elif lower > upper:
@@ -78,7 +78,7 @@ def gen_float_from_intervals(rs: Intervals) -> Optional[float]:
 def gen_min_int_from_interval(r: Interval) -> Optional[int]:
     if r.empty():
         return None
-    if r.lower not in [float("-inf"), float("inf")]:
+    if r.lower not in [-math.inf, math.inf]:
         if r.lower > INT64_MAX or (r.lower == INT64_MAX and r.lower_open):
             return None
         lower: int = math.floor(r.lower) + 1 if r.lower_open else math.ceil(r.lower)
@@ -91,7 +91,7 @@ def gen_min_int_from_interval(r: Interval) -> Optional[int]:
 def gen_max_int_from_interval(r: Interval) -> Optional[int]:
     if r.empty():
         return None
-    if r.upper not in [float("-inf"), float("inf")]:
+    if r.upper not in [-math.inf, math.inf]:
         if r.upper < INT64_MIN or (r.upper == INT64_MIN and r.upper_open):
             return None
         upper: int = math.ceil(r.upper) - 1 if r.upper_open else math.floor(r.upper)
