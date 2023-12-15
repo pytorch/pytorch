@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
     xpassIfTorchDynamo,
+    skipIfTorchDynamo,
 )
 
 # If we are going to trace through these, we should use NumPy
