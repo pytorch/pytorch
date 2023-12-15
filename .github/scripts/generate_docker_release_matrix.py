@@ -17,7 +17,7 @@ def generate_docker_matrix() -> List[Dict[str, str]]:
                     "platform": platform,
                 }
             )
-    return ret
+    return {"include": ret}
 
 
 if __name__ == "__main__":
