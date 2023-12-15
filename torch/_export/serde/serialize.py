@@ -2,7 +2,6 @@ import base64
 import copy
 import dataclasses
 import heapq
-import inspect
 import io
 import json
 import logging
@@ -153,12 +152,6 @@ _SYM_INT_OPS = {
     operator.sub,
     operator.floordiv,
     operator.mod,
-    torch.sym_sqrt,
-    torch.sym_int,
-    torch.sym_ite,
-    torch.sym_max,
-    torch.sym_min,
-    torch.sym_sqrt,
 }
 
 
@@ -169,7 +162,6 @@ _SYM_BOOL_OPS = {
     operator.ge,
     operator.lt,
     operator.gt,
-    torch.sym_not,
 }
 
 
@@ -377,7 +369,7 @@ class GraphModuleSerializer:
             meta_val = node.meta["val"]
             ex_node = Node(
                 target=self.serialize_operator(node.target),
-                inputs=self.serialize_sym_op_inputs(node.target, node.args),
+                inputs=self.serialize_sym_op_inputs(node.args),
                 outputs=[Argument.create(as_sym_int=self.serialize_sym_int_output(node.name, meta_val))],
                 metadata=self.serialize_metadata(node),
             )
@@ -386,7 +378,7 @@ class GraphModuleSerializer:
             meta_val = node.meta["val"]
             ex_node = Node(
                 target=self.serialize_operator(node.target),
-                inputs=self.serialize_sym_op_inputs(node.target, node.args),
+                inputs=self.serialize_sym_op_inputs(node.args),
                 outputs=[Argument.create(as_sym_bool=self.serialize_sym_bool_output(node.name, meta_val))],
                 metadata=self.serialize_metadata(node),
             )
@@ -461,9 +453,9 @@ class GraphModuleSerializer:
 
         return ret
 
-    def serialize_sym_op_inputs(self, op, args) -> List[NamedArgument]:
+    def serialize_sym_op_inputs(self, args) -> List[NamedArgument]:
         serialized_args = []
-        args_names = inspect.signature(op).parameters.keys()
+        args_names = ["a", "b"]
         for args_name, arg in zip(args_names, args):
             serialized_args.append(
                 NamedArgument(name=args_name, arg=self.serialize_input(arg))
@@ -1023,9 +1015,9 @@ class GraphModuleDeserializer:
         if serialized_target.startswith("_operator"):  # TODO(zhxchen17) Follow up on this.
             module = operator
             serialized_target_names = serialized_target.split(".")[1:]
-        elif serialized_target.startswith("torch"):
-            module = torch  # type: ignore[misc]
-            serialized_target_names = serialized_target.split(".")[1:]
+        elif serialized_target.startswith("torch.ops"):
+            module = torch.ops
+            serialized_target_names = serialized_target.split(".")[2:]
         else:  # TODO(zhxchen17) Don't catch all here.
             return serialized_target
 
@@ -1158,7 +1150,7 @@ class GraphModuleDeserializer:
         return self.graph
 
     def deserialize_node(self, serialized_node: Node, target: Callable) -> None:
-        if target in _SYM_BOOL_OPS or target in _SYM_INT_OPS:
+        if target.__module__ == "_operator":  # TODO(zhxchen17) Follow up on this.
             name = serialized_node.outputs[0].value.as_name
             args = self.deserialize_sym_op_inputs(serialized_node.inputs)
 
