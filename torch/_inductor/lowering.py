@@ -344,8 +344,9 @@ def broadcast_symbolic_shapes(a, b):
 
 
 def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=None):
-    if override_return_dtype is not None:
-        assert type_promotion_kind is None
+    assert override_return_dtype is None or type_promotion_kind is None, (
+        "only one of override_return_dtype or type_promotion_kind may be given"
+    )
 
     if override_return_dtype is None and type_promotion_kind is None:
         type_promotion_kind = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
