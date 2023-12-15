@@ -68,6 +68,17 @@ reapply_views_binding = Binding(
     ),
     default=None,
 )
+called_by_functionalization_binding = Binding(
+    name="called_by_functionalization",
+    nctype=NamedCType(name="called_by_functionalization", type=BaseCType(boolT)),
+    argument=Argument(
+        name="called_by_functionalization",
+        type=BaseType(BaseTy.bool),
+        default=None,
+        annotation=None,
+    ),
+    default=None,
+)
 
 
 # The lambda capture itself doesn't have a name.
@@ -105,9 +116,7 @@ def name(
     return f"at::_ops::{api_name}::call"
 
 
-def capture_arguments(
-    func: FunctionSchema, *, is_reverse: bool, need_reapply_views: bool
-) -> List[Binding]:
+def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding]:
     # capture arguments include all arguments except `self`.
     # Importantly, they don't include any C++ reference types (or else we'll get a dangling reference in the capture),
     # So any reference types (IntArrayRef) need to be converted to value types (vector<int64_t>)
@@ -117,9 +126,11 @@ def capture_arguments(
     non_self_value_bindings = [
         dispatcher.argument(a, remove_non_owning_ref_types=True) for a in non_self_args
     ]
-    all_bindings = non_self_value_bindings
-    if need_reapply_views:
-        all_bindings.insert(0, reapply_views_binding)
+
+    all_bindings = [reapply_views_binding]
+    if is_reverse:
+        all_bindings.append(called_by_functionalization_binding)
+    all_bindings.extend(non_self_value_bindings)
     return all_bindings
 
 
@@ -170,6 +181,7 @@ def inner_arguments(func: FunctionSchema, is_reverse: bool) -> List[Binding]:
                 base_binding,
                 mutated_view_binding,
                 reapply_views_binding,
+                called_by_functionalization_binding,
                 index_binding,
             ] + non_self_bindings
         else:
@@ -177,4 +189,5 @@ def inner_arguments(func: FunctionSchema, is_reverse: bool) -> List[Binding]:
                 base_binding,
                 mutated_view_binding,
                 reapply_views_binding,
+                called_by_functionalization_binding,
             ] + non_self_bindings
