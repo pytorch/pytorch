@@ -199,6 +199,7 @@ def validate_args_and_maybe_create_graph_inputs(
             args.append(new_arg)
         return args
 
+
 # See NOTE [HigherOrderOperator tracing design] for details of the design
 def speculate_subgraph(
     tx,
@@ -233,9 +234,7 @@ def speculate_subgraph(
 
     # See NOTE [Temporary argument `set_subgraph_inputs`]
     if sub_kwargs and set_subgraph_inputs != "automatic":
-        unimplemented(
-            "Use `set_subgraph_inputs='automatic` when passing `sub_kwargs`."
-        )
+        unimplemented("Use `set_subgraph_inputs=automatic` when passing `sub_kwargs`.")
 
     try:
         f, sub_args, sub_kwargs = VariableTracker.apply(
