@@ -714,25 +714,25 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_rewrite_dist_allreduce(self):
 
-            def func(tensor, pg):
-                torch.distributed.all_reduce(
-                    tensor,
-                    group=pg
-                )
+        def func(tensor, pg):
+            torch.distributed.all_reduce(
+                tensor,
+                group=pg
+            )
 
-            counter = CompileCounter()
-            compiled = torch.compile(func, backend=counter, fullgraph=True)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
 
-            inputs_compiled = torch.ones(2, device=self.device)
-            inputs_eager = torch.ones(2, device=self.device)
+        inputs_compiled = torch.ones(2, device=self.device)
+        inputs_eager = torch.ones(2, device=self.device)
 
-            compiled(inputs_compiled, GroupMember.WORLD)
-            func(inputs_eager, GroupMember.WORLD)
+        compiled(inputs_compiled, GroupMember.WORLD)
+        func(inputs_eager, GroupMember.WORLD)
 
-            assert counter.frame_count == 1
-            # should test more precisely, but the 3 is supposed to be (all_reduce, wait, copy_)
-            assert counter.op_count == 3
-            assert same(inputs_compiled, inputs_eager)
+        assert counter.frame_count == 1
+        # should test more precisely, but the 3 is supposed to be (all_reduce, wait, copy_)
+        assert counter.op_count == 3
+        assert same(inputs_compiled, inputs_eager)
 
 
 

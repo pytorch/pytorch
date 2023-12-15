@@ -786,13 +786,14 @@ def reduce_scatter_tensor_inplace(
     ), "Can't remap async version of inplace op to functional collective"
     return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
 
+
 def all_reduce_inplace(
-        tensor: torch.Tensor,
-        op: str = "sum",
-        group=None,
-        async_op: bool = False,
-        tag: str = ""
-    ):
+    tensor: torch.Tensor,
+    op: str = "sum",
+    group=None,
+    async_op: bool = False,
+    tag: str = "",
+):
     assert (
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
@@ -802,8 +803,8 @@ def all_reduce_inplace(
 
 from torch.distributed.distributed_c10d import (
     all_gather_into_tensor as legacy_allgather,
-    reduce_scatter_tensor as legacy_reducescatter,
     all_reduce as legacy_allreduce,
+    reduce_scatter_tensor as legacy_reducescatter,
 )
 
 # This dict should contain sets of functions that dynamo is allowed to remap.
