@@ -630,6 +630,7 @@ def _compile(
                     and frame_key in frame_phase_timing
                 ):
                     guard_count = len(output.guards)
+                    shape_env_guard_count = len(output.shape_env.guards)
                     graph_op_count = output.count_calls()
                     graph_node_count = len(output.graph.nodes)
                     graph_input_count = len(output.placeholders)
@@ -647,6 +648,7 @@ def _compile(
                     }
                 else:
                     guard_count = None
+                    shape_env_guard_count = None
                     graph_op_count = None
                     graph_node_count = None
                     graph_input_count = None
@@ -662,6 +664,7 @@ def _compile(
                     cache_size.num_cache_entries_with_same_id_matched_objs,
                     cache_size.num_cache_entries,
                     guard_count,
+                    shape_env_guard_count,
                     graph_op_count,
                     graph_node_count,
                     graph_input_count,
