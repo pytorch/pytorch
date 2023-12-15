@@ -10,15 +10,15 @@ from typing import List, Optional
 import torch
 from torch import distributed as dist
 from torch.cuda.amp.common import amp_definitely_not_available
-from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.distributed.fsdp import CPUOffload, MixedPrecision
-from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
+from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
