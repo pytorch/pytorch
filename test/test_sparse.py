@@ -5065,11 +5065,6 @@ class TestSparseAny(TestCase):
                      torch.Tensor.to_sparse,
                      torch.Tensor.values,
                      ):
-            if layout in sparse_compressed_layouts and func.__name__ == 'values':
-                # FIXME: RuntimeError: indices expected sparse
-                # coordinate tensor layout but got SparseCsr. Likely
-                # works when gh-107126 is fixed.
-                continue
             for x in self.generate_simple_inputs(
                     layout,
                     device=device,
