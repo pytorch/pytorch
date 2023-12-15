@@ -147,6 +147,11 @@ auto PyNode::apply(variable_list&& inputs, std::optional<PyObject*> compiler) ->
     PyTuple_SET_ITEM(pyInputs.get(), i, input);
   }
 
+  const auto& is_variable_input = py_fn->is_variable_input;
+  const auto& input_infos = py_fn->input_info;
+  // input_info only contains info from variable inputs and should be a subset
+  TORCH_INTERNAL_ASSERT(is_variable_input.size() >= input_infos.size());
+
   THPObjectPtr r;
   if (!compiler.has_value()) {
     THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
@@ -154,26 +159,42 @@ auto PyNode::apply(variable_list&& inputs, std::optional<PyObject*> compiler) ->
       throw_python_error();
     r = PyObject_CallObject(apply_fn, pyInputs.get());
   } else {
-    // The gradients returned in the backwards should match the number of inputs
-    // to the forward, and their shapes, so we create fwdInputInfos to represent
-    // shape sizes and requires_grad for each input to the forward
-    // fwdInputInfos: PyTuple[fwdInputInfo]
-    //   fwdInputInfo: PyTuple[sizes, requires_grad]
-    //     shape: PyTuple[PyLong]
-    //     requires_grad: PyBool
+    /*
+      The gradients returned in the backwards should match the number of inputs
+      to the forward, and their shapes, so we create fwdInputInfos to represent
+      shape sizes and requires_grad for each input to the forward.
+
+      For inputs that do not require gradients, we still need to return None from
+      proxy_call_backward. To do so, we use Py_None instead of a fwdInputInfo.
+
+      Structure:
+      fwdInputInfos: PyTuple[Optional[fwdInputInfo]]
+        fwdInputInfo: PyTuple[sizes, requires_grad]
+          shape: PyTuple[PyLong]
+          requires_grad: PyBool
+    */
     THPObjectPtr fwdInputInfos(
-        PyTuple_New(static_cast<Py_ssize_t>(py_fn->input_info.size())));
-    for (const auto i : c10::irange(py_fn->input_info.size())) {
+        PyTuple_New(static_cast<Py_ssize_t>(is_variable_input.size())));
+    int offset = 0;
+    for (const auto i : c10::irange(is_variable_input.size())) {
+      if (!is_variable_input[i]) {
+        // input at i does not require grad, add an offset
+        PyTuple_SET_ITEM(fwdInputInfos.get(), i, Py_None);
+        offset++;
+        continue;
+      }
+
+      int input_infos_idx = i - offset;
       PyObject* fwdInputInfo(PyTuple_New(static_cast<Py_ssize_t>(2)));
-      const auto& input_info = py_fn->input_info[i];
+      const auto& input_info = input_infos[input_infos_idx];
 
       // shape
-      std::vector<c10::SymInt> input_info_sizes = input_info.size;
+      std::vector<c10::SymInt> input_info_dims = input_info.size;
       PyObject* shape(
-          PyTuple_New(static_cast<Py_ssize_t>(input_info_sizes.size())));
-      for (const auto j : c10::irange(input_info_sizes.size())) {
+          PyTuple_New(static_cast<Py_ssize_t>(input_info_dims.size())));
+      for (const auto j : c10::irange(input_info_dims.size())) {
         int64_t size =
-            input_info_sizes[j].expect_int(); // TODO: Figure out when this fails
+            input_info_dims[j].expect_int(); // TODO: Figure out when this fails
         PyTuple_SET_ITEM(
             shape, static_cast<Py_ssize_t>(j), PyLong_FromLong(size));
       }
@@ -203,7 +224,6 @@ auto PyNode::apply(variable_list&& inputs, std::optional<PyObject*> compiler) ->
     throw_python_error();
   ensure_tuple(r);
 
-  auto& is_variable_input = py_fn->is_variable_input;
   auto num_outputs = PyTuple_GET_SIZE(r.get());
   auto num_forward_inputs = static_cast<Py_ssize_t>(is_variable_input.size());
   // Returning too many results is ok, but only as long as they're all None.

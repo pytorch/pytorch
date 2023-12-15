@@ -98,7 +98,7 @@ class AutogradCompilerInstance:
         return inputs, sizes
 
     def proxy_call_backward(
-        self, inputs, fwdInputInfos: Tuple[Tuple[Tuple[int], bool]], backward_id: int
+        self, inputs, fwdInputInfos: Tuple[Optional[Tuple[Tuple[int], bool]]], backward_id: int
     ):
         assert self.backward_proxy is not None
         assert self.saved_tensors_proxy is not None
@@ -119,8 +119,11 @@ class AutogradCompilerInstance:
         with disable_proxy_modes_tracing():
             # create proxies from sizes and requires_grad in fwdInputInfos
             for fwdInputInfo in fwdInputInfos:
-                shape, requires_grad = fwdInputInfo
-                grad_ins.append(torch.Tensor(*shape))  # creates FakeTensors
+                if fwdInputInfo is None:
+                    grad_ins.append(None)
+                else:
+                    shape, requires_grad = fwdInputInfo
+                    grad_ins.append(torch.Tensor(*shape))  # creates FakeTensors of the expected gradient shape
 
             assert len(grad_ins) == len(fwdInputInfos)
             self.bind_tensors_to_proxies(grad_ins, proxies)

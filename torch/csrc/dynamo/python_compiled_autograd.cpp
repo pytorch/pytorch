@@ -338,7 +338,6 @@ variable_list compiled_autograd(
       CompiledNodeArgs node_args(compiler_call, call);
       node_args.collect(call);
       if (node_args.cond(call.needed)) {
-        // break here
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
       }
