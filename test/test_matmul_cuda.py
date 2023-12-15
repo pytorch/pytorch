@@ -21,7 +21,7 @@ from torch.testing._internal.common_device_type import (
     tol as xtol,
     toleranceOverride,
 )
-
+from torch.testing._internal.optests import opcheck
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_JETSON,
@@ -403,6 +403,16 @@ class TestMixedDtypesLinearCuda(TestCase):
                 activation=activation,
             )
             torch.testing.assert_close(output, output_ref, rtol=rtol, atol=atol)
+
+            # Third, test opcheck for PT2 compliance
+            opcheck(torch.ops.aten._mixed_dtypes_linear, (
+                input,
+                quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
+                    weightq, dtypeq, transpose=True
+                ),
+                scale
+            ), {"bias": bias, "activation": activation}
+            )
 
         dtypeqs = [torch.int8, torch.quint4x2]
         batch_shapes = [[], [2], [2, 1]]

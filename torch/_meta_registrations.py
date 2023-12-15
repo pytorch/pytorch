@@ -3373,6 +3373,31 @@ def meta__int_mm(a, b):
     )
     return a.new_empty((a.size(0), b.size(1)), dtype=torch.int32)
 
+@register_meta([aten._mixed_dtypes_linear])
+@out_wrapper()
+def meta__mixed_dtypes_linear(input, weight, scale, bias=None, activation=None):
+    torch._check(weight.dim() == 2, lambda: "weight must be a 2D tensor")
+    torch._check(scale.dim() == 1, lambda: "scale must be a 1D tensor")
+    torch._check(bias is None or bias.dim() == 1, lambda: "bias must be a 1D tensor")
+    torch._check(input.dtype in [torch.float16, torch.bfloat16],
+        lambda: f"input must be float16 or bfloat16, not {input.dtype}"
+    )
+    torch._check(weight.dtype == torch.uint8,
+        lambda: f"weight must be uint8, not {weight.dtype}"
+    )
+    torch._check(bias is None or bias.dtype == input.dtype,
+        lambda: f"bias and input dtype must match but got {input.dtype} and {bias.dtype}"
+    )
+    torch._check(input.size(-1) == weight.size(0) or input.size(1) == weight.size(0)/2,
+        lambda: (
+                f"Incompatible matrix sizes for _mixed_dtypes_linear ({input.shape}) "
+                f"and {weight.shape})"
+        ),
+    )
+    torch._check(activation is None or activation in ["relu", "silu"],
+    lambda: f"_mixed_dtypes_linear does not support activation {activation}"
+    )
+    return input.new_empty((*input.shape[:-1], weight.size(1) * 1 if input.size(-1) == weight.size(0) else 2))
 
 @register_meta([aten._convert_weight_to_int4pack])
 def meta__convert_weight_to_int4pack(w, inner_k_tiles):

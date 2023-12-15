@@ -252,16 +252,23 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     )
 
 
-def fallback_mixed_mm(mat1, mat2, *, out):
+def fallback1_mixed_mm(mat1, mat2, *, out):
     return torch.mm(mat1, mat2.to(mat1.dtype), out=out)
 
+def fallback2_mixed_mm(mat1, mat2, *, out):
+    return (mat1.unsqueeze(2) * mat2.unsqueeze(0)).sum(dim=1)
 
-aten_fallback_mixed_mm = ExternKernelChoice(fallback_mixed_mm, None)
+
+aten_fallback1_mixed_mm = ExternKernelChoice(fallback1_mixed_mm, None)
+aten_fallback2_mixed_mm = ExternKernelChoice(fallback2_mixed_mm, None)
 
 
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
-    choices = [aten_fallback_mixed_mm.bind((mat1, mat2), layout)]
+    choices = [
+        aten_fallback1_mixed_mm.bind((mat1, mat2), layout),
+        aten_fallback2_mixed_mm.bind((mat1, mat2), layout),
+    ]
     if mat1.layout.dtype != torch.float32 and not mat2.layout.is_contiguous():
         # can't use triton kernel unless one of these is true
         return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)

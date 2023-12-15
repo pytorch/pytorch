@@ -2127,6 +2127,7 @@ make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten._scaled_mm.default, constrain_to_fx_strides)
 make_fallback(aten._weight_int4pack_mm, constrain_to_fx_strides)
+make_fallback(aten._mixed_dtypes_linear, constrain_to_fx_strides)
 
 # TODO: This is done, just need to enable support in TorchInductor for complex types.
 make_fallback(aten.view_as_complex, require_contiguous)

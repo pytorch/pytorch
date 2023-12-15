@@ -57,6 +57,7 @@ from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
 from torch.testing._internal.common_dtype import all_types
+from torch.quantization._quantized_conversions import quantized_weight_reorder_for_mixed_dtypes_linear_cutlass
 from torch.testing._internal.common_quantization import _group_quantize_tensor
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -1979,8 +1980,32 @@ class CommonTemplate:
 
     @skipIfRocm
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(not torch.cuda.is_available(), "need cuda")
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    def test_mixed_dtype_linear_contiguous(self):
+        def fn(x, w, s):
+            return torch.ops.aten._mixed_dtypes_linear(
+                x.to(torch.bfloat16).contiguous(), w, s.to(torch.bfloat16)
+            )
+
+        def get_weight_and_scales(shape, dtypeq=torch.int8):
+            w_q = torch.randint(-128, 127, shape, dtype=torch.int8, device="cuda")
+            w_pack = quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(w_q, dtypeq)
+            scales = torch.randn(shape[-1], dtype=torch.bfloat16, device="cuda").abs()
+            return w_pack, scales
+
+        self.common(
+            fn,
+            (
+                torch.randn((2, 64), device="cuda").t().contiguous().t(),
+                *get_weight_and_scales((64, 64)),
+            ),
+            check_lowp=True,
+        )
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
     @unittest.skipIf(not torch.cuda.is_available(), "need cuda")
     def test_weight_int4pack_mm_contiguous(self):
         q_group = 32
