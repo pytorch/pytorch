@@ -148,7 +148,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     case at::ScalarType::Float:
         input_type = CUDA_R_32F;
         output_type = CUDA_R_32F;
-        compute_type = CUSPARSE_COMPUTE_TF32;
+        compute_type = CUSPARSE_COMPUTE_32F;
         break;
     default:
         TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt compressed matrix multiplication.");
