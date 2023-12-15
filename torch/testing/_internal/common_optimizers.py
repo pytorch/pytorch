@@ -893,9 +893,8 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_rmsprop,
         supported_impls=("foreach", "differentiable"),
         skips=(
-            # See https://github.com/pytorch/pytorch/issues/115679
             DecorateInfo(
-                skipIfTorchDynamo(""),
+                skipIfTorchDynamo("See https://github.com/pytorch/pytorch/issues/115679"),
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
             ),
@@ -907,9 +906,8 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_rprop,
         supported_impls=("foreach", "differentiable"),
         skips=(
-            # See https://github.com/pytorch/pytorch/issues/115679
             DecorateInfo(
-                skipIfTorchDynamo(""),
+                skipIfTorchDynamo("See https://github.com/pytorch/pytorch/issues/115679"),
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
             ),
