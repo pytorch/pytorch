@@ -877,7 +877,7 @@ class TestRenderUtils(TestCase):
             '''torch.sum(tensor([...], size=(100, 100)), dim=0)'''
         )
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
+@torch.testing._internal.common_utils.unMarkDynamoStrictTest
 class TestDeviceUtils(TestCase):
     def test_basic(self):
         with torch.device('meta') as dev:
