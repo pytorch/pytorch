@@ -367,6 +367,7 @@ class TestSortAndSelect(TestCase):
         for shape in shapes:
             test(shape)
 
+    @skipIfTorchDynamo("Fails on python 3.11")
     @dtypes(torch.float)
     def test_sort_expanded_tensor(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/91420
