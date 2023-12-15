@@ -619,7 +619,7 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     # where we cannot rely on dynamo to preserve nn stack metadata in our captured graph.
     # Instead, we stash the original user nn module here, and rely on `make_fx` to grab
     # this stashed module and use it to track nn module stack metadata
-    if store_orig_mod:
+    if store_orig_mod and not hasattr(functional_call, "_orig_mod"):
         functional_call._orig_mod = mod  # type: ignore[attr-defined]
 
     return functional_call
