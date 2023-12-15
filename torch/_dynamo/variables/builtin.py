@@ -1131,7 +1131,7 @@ class BuiltinVariable(VariableTracker):
         if not name_var.is_python_constant():
             unimplemented("non-const getattr() name")
 
-        if tx.output.side_effects.is_attribute_mutation(obj):
+        if tx.output.side_effects.is_attribute_mutation(obj) and name != "grad":
             try:
                 # re-read a pending side effect?
                 return tx.output.side_effects.load_attr(obj, name)
@@ -1212,9 +1212,18 @@ class BuiltinVariable(VariableTracker):
                             else:
                                 grapharg.example.grad = None
                         return VariableBuilder(tx, source)(grapharg.example.grad)
-                unimplemented("tensor grad")
+
+                # No match for real value in inputs, fall back to
+                # var_getattr, which is sound (May produce a GetAttrVariable)
+                try:
+                    return obj.var_getattr(tx, name).clone(source=source)
+                except NotImplementedError:
+                    return GetAttrVariable(obj, name, **options)
             else:
-                unimplemented("tensor grad")
+                from .builder import wrap_fx_proxy
+
+                # Intermediaries grad, None is sound.
+                return wrap_fx_proxy(tx, obj.as_proxy().grad, **options)
         elif isinstance(
             obj,
             (
