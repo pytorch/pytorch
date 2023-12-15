@@ -71,6 +71,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif source and inspect.ismemberdescriptor(obj):
             return VariableBuilder(tx, source)(obj.__get__(self.value))
 
+        # Special handling of collections.OrderedDict.fromkeys()
+        # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
+        # collections.defaultdict, and both will be handled at UserDefinedClassVariable.call_method().
+        # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
+        # and we need duplicate code to handle both cases.
         if self.value is collections.OrderedDict and name == "fromkeys":
             return super().var_getattr(tx, name)
 
@@ -107,14 +112,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return variables.ListVariable(subs_as_vars, **options)
         elif (
-                self.value in {collections.OrderedDict, collections.defaultdict}
-                and name == "fromkeys"
-            ):
-                from .builtin import BuiltinVariable
+            self.value in {collections.OrderedDict, collections.defaultdict}
+            and name == "fromkeys"
+        ):
+            from .builtin import BuiltinVariable
 
-                return BuiltinVariable.call_custom_dict_fromkeys(
-                    tx, self.value, *args, **kwargs
-                )
+            return BuiltinVariable.call_custom_dict_fromkeys(
+                tx, self.value, *args, **kwargs
+            )
 
         return super().call_method(tx, name, args, kwargs)
 

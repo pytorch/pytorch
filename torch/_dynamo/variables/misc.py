@@ -21,7 +21,6 @@ from ..utils import (
     proxy_args_kwargs,
 )
 from .base import MutableLocal, VariableTracker
-from .dicts import DefaultDictVariable
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
