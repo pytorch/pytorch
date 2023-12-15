@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import importlib
 import logging
 import os
 import re
@@ -19,7 +18,7 @@ def pip_install(package):
 
 
 try:
-    importlib.import_module("timm")
+    import timm
 except ModuleNotFoundError:
     print("Installing PyTorch Image Models...")
     pip_install("git+https://github.com/rwightman/pytorch-image-models")

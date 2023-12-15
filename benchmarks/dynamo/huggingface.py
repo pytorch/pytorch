@@ -56,7 +56,8 @@ imports = [
 
 
 try:
-    mod = importlib.import_module("transformers")
+    import transformers as mod
+
     for cls in imports:
         if not hasattr(mod, cls):
             raise ModuleNotFoundError
