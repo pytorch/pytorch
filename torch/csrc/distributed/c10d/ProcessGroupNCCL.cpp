@@ -1208,6 +1208,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
+  // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki url here.
   const auto exitMsg = c10::str(
       logPrefix(),
       "ProcessGroupNCCL's watchdog got stuck for ",
@@ -1220,7 +1221,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       "you can either increase the timeout (TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
       "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
       "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
-      "or false positive abort; otherwise, please report a watchdog hang bug to PyTorch.");
+      "or false positive abort; otherwise, please attempt to debug the hang.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
