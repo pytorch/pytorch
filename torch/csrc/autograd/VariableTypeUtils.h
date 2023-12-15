@@ -165,6 +165,7 @@ inline at::Tensor as_view(
     bool is_bw_differentiable,
     bool is_fw_differentiable,
     std::function<at::Tensor(const at::Tensor&)> view_func = nullptr,
+    std::function<at::Tensor(const at::Tensor&)> rev_view_func = nullptr,
     CreationMeta creation_meta = CreationMeta::DEFAULT,
     bool allow_tensor_metadata_change = true) {
   // Note [View of inference tensor]
@@ -190,7 +191,7 @@ inline at::Tensor as_view(
       return make_variable_differentiable_view(
           tensor,
           diff_view_meta->get_backward_view().chain(
-              base, tensor, std::move(view_func)),
+              base, tensor, std::move(view_func), std::move(rev_view_func)),
           c10::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
@@ -198,7 +199,7 @@ inline at::Tensor as_view(
     } else {
       return make_variable_differentiable_view(
           tensor,
-          ViewInfo(base, std::move(view_func)),
+          ViewInfo(base, std::move(view_func), std::move(rev_view_func)),
           c10::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
@@ -213,9 +214,9 @@ inline at::Tensor as_view(
   if (is_bw_differentiable) {
     if (diff_view_meta && diff_view_meta->has_bw_view()) {
       const auto& base_bw_info = diff_view_meta->get_backward_view();
-      new_bw_info = base_bw_info.chain(base, tensor, view_func);
+      new_bw_info = base_bw_info.chain(base, tensor, view_func, rev_view_func);
     } else {
-      new_bw_info = ViewInfo(base, view_func);
+      new_bw_info = ViewInfo(base, view_func, rev_view_func);
     }
   } else {
     TORCH_CHECK(
@@ -227,9 +228,11 @@ inline at::Tensor as_view(
     // Check if base is a forward differentiable view
     if (diff_view_meta && diff_view_meta->has_fw_view()) {
       const auto& base_fw_info = diff_view_meta->get_forward_view();
-      new_fw_info = base_fw_info.chain(base, tensor, std::move(view_func));
+      new_fw_info = base_fw_info.chain(
+          base, tensor, std::move(view_func), std::move(rev_view_func));
     } else {
-      new_fw_info = ViewInfo(base, std::move(view_func));
+      new_fw_info =
+          ViewInfo(base, std::move(view_func), std::move(rev_view_func));
     }
   }
 
@@ -286,9 +289,15 @@ inline std::vector<at::Tensor> as_view(
       creation_meta = propagate_creation_meta(
           diff_view_meta->get_creation_meta(), creation_meta);
       const auto& base_bw_info = diff_view_meta->get_backward_view();
-      new_shared_info = ViewInfo(base_bw_info.base_, /* view_func */ nullptr);
+      new_shared_info = ViewInfo(
+          base_bw_info.base_,
+          /* view_func */ nullptr,
+          /* rev_view_func */ nullptr);
     } else {
-      new_shared_info = ViewInfo(base, /* view_func */ nullptr);
+      new_shared_info = ViewInfo(
+          base,
+          /* view_func */ nullptr,
+          /* rev_view_func */ nullptr);
     }
 
     for (at::Tensor& tensor : tensors) {
@@ -322,9 +331,15 @@ inline std::vector<at::Tensor> as_view(
           "Functions that result multiple view must have a creation meta reflecting this behavior or more restrictive.");
       // It is ok to create a ViewInfo where only the base is correct in this
       // case as inplace operations on such views are not allowed
-      new_bw_info = ViewInfo(base_bw_info.base_, /* view_func */ nullptr);
+      new_bw_info = ViewInfo(
+          base_bw_info.base_,
+          /* view_func */ nullptr,
+          /* rev_view_func */ nullptr);
     } else {
-      new_bw_info = ViewInfo(base, /* view_func */ nullptr);
+      new_bw_info = ViewInfo(
+          base,
+          /* view_func */ nullptr,
+          /* rev_view_func */ nullptr);
     }
   } else {
     TORCH_CHECK(
@@ -342,9 +357,15 @@ inline std::vector<at::Tensor> as_view(
           "Functions that result multiple view must have a creation meta reflecting this behavior or more restrictive.");
       // It is ok to create a ViewInfo where only the base is correct in this
       // case as inplace operations on such views are not allowed
-      new_fw_info = ViewInfo(base_fw_info.base_, /* view_func */ nullptr);
+      new_fw_info = ViewInfo(
+          base_fw_info.base_,
+          /* view_func */ nullptr,
+          /* rev_view_func */ nullptr);
     } else {
-      new_fw_info = ViewInfo(base, /* view_func */ nullptr);
+      new_fw_info = ViewInfo(
+          base,
+          /* view_func */ nullptr,
+          /* rev_view_func */ nullptr);
     }
   }
 
