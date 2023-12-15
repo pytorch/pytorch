@@ -759,7 +759,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-class ModuleStackTracer(PythonKeyTracer):
+class _ModuleStackTracer(PythonKeyTracer):
     """Customized version of PythonKeyTracer that retains module stack
     information in node.meta["nn_module_stack"].
 
@@ -881,7 +881,7 @@ def make_fx(f,
 
         if hasattr(f, "_orig_mod"):
             scope_root = f._orig_mod
-            fx_tracer = ModuleStackTracer(scope_root)
+            fx_tracer = _ModuleStackTracer(scope_root)
         else:
             fx_tracer = PythonKeyTracer()
         fake_tensor_mode: Any = nullcontext()
