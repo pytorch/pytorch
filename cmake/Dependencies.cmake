@@ -1192,16 +1192,6 @@ if(ANDROID)
   list(APPEND Caffe2_DEPENDENCY_LIBS log)
 endif()
 
-# ---[ Kernel asserts
-# Kernel asserts are enabled by default for CUDA and disabled for ROCm.
-# For ROCm, it can be enabled by setting ROCM_FORCE_ENABLE_GPU_ASSERTS
-if(USE_ROCM AND ROCM_FORCE_ENABLE_GPU_ASSERTS)
-  message(STATUS "Forcefully enabling kernel asserts on ROCM")
-elseif(USE_ROCM AND NOT ROCM_FORCE_ENABLE_GPU_ASSERTS)
-  message(STATUS "Disabling kernel asserts for ROCm")
-  caffe2_update_option(TORCH_DISABLE_GPU_ASSERTS ON)
-endif()
-
 # ---[ LLVM
 if(USE_LLVM)
   message(STATUS "Looking for LLVM in ${USE_LLVM}")
@@ -1249,6 +1239,7 @@ if(USE_ROCM)
       caffe2_update_option(USE_SYSTEM_NCCL ON)
     endif()
 
+
     list(APPEND HIP_CXX_FLAGS -fPIC)
     list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_AMD__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
@@ -1262,6 +1253,15 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "6.0.0")
+      list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
+    endif()
+    if(HIPBLASLT_CUSTOM_DATA_TYPE)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_DATA_TYPE)
+    endif()
+    if(HIPBLASLT_CUSTOM_COMPUTE_TYPE)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_COMPUTE_TYPE)
+    endif()
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
@@ -1287,10 +1287,23 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
+    endif()
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
 
+    # ---[ Kernel asserts
+    # Kernel asserts is disabled for ROCm by default.
+    # It can be turned on by turning on the env USE_ROCM_KERNEL_ASSERT to the build system.
+    if(USE_ROCM_KERNEL_ASSERT)
+      message(STATUS "Enabling Kernel Assert for ROCm")
+    else()
+      message(STATUS "Disabling Kernel Assert for ROCm")
+    endif()
+
+    include(${CMAKE_CURRENT_LIST_DIR}/External/oort.cmake)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
