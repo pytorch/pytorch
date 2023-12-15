@@ -1772,6 +1772,7 @@ def try_revert(
         author_login, commit_sha = validate_revert(repo, pr, comment_id=comment_id)
     except PostCommentError as e:
         return post_comment(str(e))
+
     revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
     revert_msg += f" due to {reason}" if reason is not None else ""
     revert_msg += (
@@ -1786,6 +1787,7 @@ def try_revert(
     msg += revert_msg
     repo.amend_commit_message(msg)
     repo.push(pr.default_branch(), dry_run)
+
     revert_message = (
         f"@{pr.get_pr_creator_login()} your PR has been successfully reverted."
     )
@@ -1795,8 +1797,9 @@ def try_revert(
         and not can_skip_internal_checks(pr, comment_id)
     ):
         revert_message += "\n:warning: This PR might contain internal changes"
-        revert_msg += "\ncc: @pytorch/pytorch-dev-infra"
+        revert_message += "\ncc: @pytorch/pytorch-dev-infra"
     post_comment(revert_message)
+
     if not dry_run:
         pr.add_numbered_label("reverted")
         gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
