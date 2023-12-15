@@ -1534,6 +1534,13 @@ class CudaKernelParamCache:
         return cls.cache.get(key, None)
 
 
+def _get_name_and_dir_from_path(file_path: str):
+    name_and_ext = os.path.basename(file_path)
+    name, ext = os.path.splitext(name_and_ext)
+    dir = os.path.dirname(file_path)
+    return name, dir
+
+
 class AotCodeCache:
     cache: Dict[str, str] = dict()
     clear = staticmethod(cache.clear)
@@ -1601,8 +1608,13 @@ class AotCodeCache:
                     else os.path.splitext(input_path)[0] + ".so"
                 )
 
+                name_so, dir_so = _get_name_and_dir_from_path(output_so)
+                print(f"!!! AotCodeCache --> name_so: {name_so}, dir_so: {dir_so}")
+
                 if not os.path.exists(output_so):
                     output_o = os.path.splitext(input_path)[0] + ".o"
+                    name_o, dir_o = _get_name_and_dir_from_path(output_o)
+                    print(f"!!! AotCodeCache --> name_o: {name_o}, dir_o: {dir_o}")
                     cmd = cpp_compile_command(
                         input=input_path,
                         output=output_o,
