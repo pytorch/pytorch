@@ -884,7 +884,74 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
             )
 
-        return variables.LambdaVariable(fake_cross_entropy_loss)
+        def get_fake_values_from_vt(args):
+            from ..utils import get_fake_value
+
+            fake_value_args = []
+            for arg in args:
+                if type(arg.as_proxy()) is torch.fx.proxy.Proxy:
+                    fake_value_args.append(get_fake_value(arg.as_proxy().node, tx))
+                else:
+                    # mostly handle tuple and scalar
+                    fake_value_args.append(arg.as_proxy())
+            return fake_value_args
+
+        # We need to decompose and inline the cross_entropy_loss so intermediate tensor
+        # saved can be captured by dynamo.
+        def fake_cross_entropy_loss_decompose(input, target):
+            # TODO: refactor this function
+            from functorch import make_fx
+
+            from torch._dispatch.python import enable_python_dispatcher
+            from .base import MutableLocal
+            from .builder import SourcelessBuilder
+            from .lists import BaseListVariable
+
+            fake_value_args = get_fake_values_from_vt(
+                [
+                    input,
+                    target,
+                    weight,
+                    size_average,
+                    ignore_index,
+                    reduce_arg,
+                    reduction,
+                    label_smoothing,
+                ]
+            )
+
+            with enable_python_dispatcher():
+                fx_g = make_fx(torch.nn.functional.cross_entropy, pre_dispatch=True)(
+                    *fake_value_args
+                )
+
+            def dummy_user_function_to_inline_bm(gm, args):
+                return gm(*args)
+
+            user_fn_variable = SourcelessBuilder()(tx, dummy_user_function_to_inline_bm)
+            gm_variable = SourcelessBuilder()(tx, fx_g)
+            cls = BaseListVariable.cls_for(list)
+            input_list_variable = cls(
+                [
+                    input,
+                    target,
+                    weight,
+                    size_average,
+                    ignore_index,
+                    reduce_arg,
+                    reduction,
+                    label_smoothing,
+                ],
+                mutable_local=MutableLocal(),
+            )
+
+            res_variable = tx.inline_user_function_return(
+                user_fn_variable, (gm_variable, input_list_variable), {}
+            )
+            return res_variable
+
+        # return variables.LambdaVariable(fake_cross_entropy_loss)
+        return variables.LambdaVariable(fake_cross_entropy_loss_decompose)
 
     def _call_ntuple(self, tx, args, kwargs):
         """inline behavior of torch.nn.modules.utils._ntuple"""

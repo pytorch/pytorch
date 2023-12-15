@@ -1365,23 +1365,7 @@ def wrap_fx_proxy_cls(
         if example_value is None:
             # only allow_non_graph_fake in this instance because we handle the non-fake
             # cases properly below.
-
-            def pack_hook(x):
-                # How do I create proxy here?
-                return x
-
-            def unpack_hook(x):
-                return x
-
-            if proxy.node.op == "call_function":
-                with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
-                    example_value = get_fake_value(
-                        proxy.node, tx, allow_non_graph_fake=True
-                    )
-            else:
-                example_value = get_fake_value(
-                    proxy.node, tx, allow_non_graph_fake=True
-                )
+            example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
         # Handle recursive calls here
         elif maybe_get_fake_mode(example_value) is tx.fake_mode:
             pass
