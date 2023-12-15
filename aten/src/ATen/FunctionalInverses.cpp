@@ -95,17 +95,17 @@ static Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, c10::SymIn
 // The codegen automatically generates the corresponding function declaration.
 // ----------------------------------------------------------
 
-Tensor FunctionalInverses::_fw_primal_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views, int64_t level) {
+Tensor FunctionalInverses::_fw_primal_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, int64_t level) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _fw_primal() during the functionalization pass. For now, this is not supported.");
     return Tensor();
 }
 
-Tensor FunctionalInverses::_make_dual_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views, const at::Tensor& tangent, int64_t level) {
+Tensor FunctionalInverses::_make_dual_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, const at::Tensor& tangent, int64_t level) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _make_dual() during the functionalization pass. For now, this is not supported.");
     return Tensor();
 }
 
-Tensor FunctionalInverses::view_as_real_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::view_as_real_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     if (reapply_views) {
       return at::view_as_complex(mutated_view);
     } else {
@@ -113,7 +113,7 @@ Tensor FunctionalInverses::view_as_real_copy_inverse(const Tensor& base, const T
     }
 }
 
-Tensor FunctionalInverses::view_as_complex_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::view_as_complex_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     if (reapply_views) {
       return at::view_as_real(mutated_view.resolve_conj());
     } else {
@@ -121,7 +121,7 @@ Tensor FunctionalInverses::view_as_complex_copy_inverse(const Tensor& base, cons
     }
 }
 
-Tensor FunctionalInverses::_conj_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::_conj_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     if (reapply_views) {
       return at::_conj(mutated_view);
     } else {
@@ -129,7 +129,7 @@ Tensor FunctionalInverses::_conj_copy_inverse(const Tensor& base, const Tensor& 
     }
 }
 
-Tensor FunctionalInverses::_neg_view_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::_neg_view_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     if (reapply_views) {
       return at::_neg_view(mutated_view);
     } else {
@@ -137,8 +137,8 @@ Tensor FunctionalInverses::_neg_view_copy_inverse(const Tensor& base, const Tens
     }
 }
 
-Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
-    if (reapply_views) {
+Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+    if (reapply_views && !called_by_functionalization) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
       return mutated_view.as_strided_symint(
@@ -148,8 +148,8 @@ Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Ten
     }
 }
 
-Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t offset, int64_t dim1, int64_t dim2) {
-    if (reapply_views) {
+Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, int64_t offset, int64_t dim1, int64_t dim2) {
+    if (reapply_views && !called_by_functionalization) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
       return mutated_view.as_strided_symint(
@@ -159,15 +159,15 @@ Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tenso
     }
 }
 
-Tensor FunctionalInverses::expand_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, bool implicit) {
+Tensor FunctionalInverses::expand_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, at::SymIntArrayRef size, bool implicit) {
     return at::sum_to(mutated_view, base.sym_sizes(),/*always_return_non_view=*/!reapply_views);
 }
 
-Tensor FunctionalInverses::permute_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef dims) {
+Tensor FunctionalInverses::permute_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, at::IntArrayRef dims) {
     return at::functionalization::permute_copy_inverse(mutated_view, dims, reapply_views);
 }
 
-Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, at::SymIntArrayRef stride) {
+Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, at::SymIntArrayRef size, at::SymIntArrayRef stride) {
     // Note that I'm directly calling reshape(), and ignoring the strides.
     // _reshape_alias() isn't available from user code, and is an implementation detail of reshape().
     // Specifically, passing in the strides directly can get us into trouble in cases like:
@@ -181,8 +181,8 @@ Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const
     }
 }
 
-Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::SymInt index) {
-    if (reapply_views) {
+Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, int64_t dim, c10::SymInt index) {
+    if (reapply_views && !called_by_functionalization) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
       return mutated_view.as_strided_symint(
@@ -192,17 +192,17 @@ Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Ten
     }
 }
 
-Tensor FunctionalInverses::detach_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::detach_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     // the functionalization pass doesn't care about autograd metadata - as a view, I think detach() is just an identity function
     return mutated_view;
 }
 
-Tensor FunctionalInverses::lift_fresh_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::lift_fresh_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     return mutated_view;
 }
 
-Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
-    if (reapply_views) {
+Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
+    if (reapply_views && !called_by_functionalization) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
       return mutated_view.as_strided_symint(
@@ -212,8 +212,8 @@ Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const T
     }
 }
 
-Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
-    if (reapply_views) {
+Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
+    if (reapply_views && !called_by_functionalization) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
       return mutated_view.as_strided_symint(
@@ -232,8 +232,8 @@ Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const T
     }
 }
 
-Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymIntArrayRef split_sizes, int64_t dim) {
-    if (reapply_views) {
+Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, int64_t mutated_view_idx, c10::SymIntArrayRef split_sizes, int64_t dim) {
+    if (reapply_views && !called_by_functionalization) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
       return mutated_view.as_strided_symint(
@@ -251,19 +251,19 @@ Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, con
     }
 }
 
-Tensor FunctionalInverses::squeeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::squeeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     return unsqueeze_copy_to(mutated_view, base.sym_sizes(), reapply_views);
 }
 
-Tensor FunctionalInverses::squeeze_copy_dim_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim) {
+Tensor FunctionalInverses::squeeze_copy_dim_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, int64_t dim) {
     return unsqueeze_copy_to(mutated_view, dim, base.sym_sizes(), reapply_views);
 }
 
-Tensor FunctionalInverses::squeeze_copy_dims_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, IntArrayRef dim) {
+Tensor FunctionalInverses::squeeze_copy_dims_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, IntArrayRef dim) {
     return unsqueeze_copy_to(mutated_view, dim, base.sym_sizes(), reapply_views);
 }
 
-Tensor FunctionalInverses::t_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::t_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     if (reapply_views) {
       return at::t(mutated_view);
     } else {
@@ -271,7 +271,7 @@ Tensor FunctionalInverses::t_copy_inverse(const Tensor& base, const Tensor& muta
     }
 }
 
-Tensor FunctionalInverses::transpose_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim0, int64_t dim1) {
+Tensor FunctionalInverses::transpose_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, int64_t dim0, int64_t dim1) {
     if (reapply_views) {
       return transpose(mutated_view, dim0, dim1);
     } else {
@@ -279,12 +279,12 @@ Tensor FunctionalInverses::transpose_copy_int_inverse(const Tensor& base, const 
     }
 }
 
-Tensor FunctionalInverses::_nested_view_from_buffer_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, const Tensor& nested_sizes, const Tensor& nested_strides, const Tensor& storage_offsets) {
+Tensor FunctionalInverses::_nested_view_from_buffer_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, const Tensor& nested_sizes, const Tensor& nested_strides, const Tensor& storage_offsets) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_buffer() during the functionalization pass. For now, nested tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::unsqueeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim) {
+Tensor FunctionalInverses::unsqueeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, int64_t dim) {
     if (reapply_views) {
       return at::squeeze(mutated_view, dim);
     } else {
@@ -292,53 +292,53 @@ Tensor FunctionalInverses::unsqueeze_copy_inverse(const Tensor& base, const Tens
     }
 }
 
-Tensor FunctionalInverses::_indices_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::_indices_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::_values_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::_values_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _values() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::indices_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::indices_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::values_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::values_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call values() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::_sparse_broadcast_to_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef size) {
+Tensor FunctionalInverses::_sparse_broadcast_to_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, at::IntArrayRef size) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _sparse_broadcast_to() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::crow_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::crow_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call crow_indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::col_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::col_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call col_indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::ccol_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::ccol_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call ccol_indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::row_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::row_indices_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call row_indices() during the functionalization pass. For now, sparse tensors aren't supported during functionalization");
     return Tensor();
 }
 
-Tensor FunctionalInverses::unbind_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, int64_t dim) {
-    if (reapply_views) {
+Tensor FunctionalInverses::unbind_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, int64_t mutated_view_idx, int64_t dim) {
+    if (reapply_views && !called_by_functionalization) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
       return mutated_view.as_strided_symint(
@@ -349,7 +349,7 @@ Tensor FunctionalInverses::unbind_copy_int_inverse(const Tensor& base, const Ten
     }
 }
 
-Tensor FunctionalInverses::view_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size) {
+Tensor FunctionalInverses::view_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, at::SymIntArrayRef size) {
     if (reapply_views) {
       return mutated_view.view_symint(base.sym_sizes());
     } else {
@@ -358,7 +358,7 @@ Tensor FunctionalInverses::view_copy_inverse(const Tensor& base, const Tensor& m
 }
 
 
-Tensor FunctionalInverses::view_copy_dtype_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::ScalarType dtype) {
+Tensor FunctionalInverses::view_copy_dtype_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, at::ScalarType dtype) {
     if (reapply_views) {
       return mutated_view.view(base.scalar_type());
     } else {
@@ -366,8 +366,8 @@ Tensor FunctionalInverses::view_copy_dtype_inverse(const Tensor& base, const Ten
     }
 }
 
-Tensor FunctionalInverses::unfold_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dimension, int64_t size, int64_t step) {
-    if (reapply_views) {
+Tensor FunctionalInverses::unfold_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, int64_t dimension, int64_t size, int64_t step) {
+    if (reapply_views && !called_by_functionalization) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
       return mutated_view.as_strided_symint(
@@ -375,12 +375,20 @@ Tensor FunctionalInverses::unfold_copy_inverse(const Tensor& base, const Tensor&
     } else {
       // I think autograd and the functionalization pass want the exact same thing here, but need to test to confirm.
       // unfold_backward() is safe to use here because it is NOT a view op.
-      // We'd need to add an aliasing version of unfold_backward to fix the extra memory copy.
+      // (note: technically, "reapply_views" won't do anything here and we'll have an extra memory copy.
+      // We'd need to add an aliasing version of unfold_backward to fix that though).
+      TORCH_CHECK(
+        !(reapply_views && size > step),
+        "While executing unfold, functionalization encountered a tensor being mutated that has internal overlap. \
+When using torch.compile (or running functionalization directly), this is banned \
+as the behavior is not well defined. Consider cloning the tensor before mutating it, \
+or removing the mutation from your model."
+          );
       return unfold_backward(mutated_view, base.sizes(), dimension, size, step);
     }
 }
 
-Tensor FunctionalInverses::alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
+Tensor FunctionalInverses::alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization) {
     if (reapply_views) {
       return at::alias(mutated_view);
     } else {
