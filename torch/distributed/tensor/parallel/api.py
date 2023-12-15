@@ -37,8 +37,8 @@ def parallelize_module(  # type: ignore[return]
 
     User can also specify different parallel style per module fully qualified name (FQN).
 
-    Note that ``parallelize_module`` only accepts a 1-D DeviceMesh, if you have a 2-D or N-D DeviceMesh,
-    pass in a 1-D DeviceMesh by slicing a N-D DeviceMesh to a 1-D DeviceMesh (i.e. ``device_mesh[\"tp\"]``)
+    Note that ``parallelize_module`` only accepts a 1-D :class:`DeviceMesh`, if you have a 2-D or N-D :class:`DeviceMesh`,
+    slice the DeviceMesh to a 1-D sub DeviceMesh first then pass to this API(i.e. ``device_mesh[\"tp\"]``)
 
     Args:
         module (:class:`nn.Module`):
@@ -54,7 +54,7 @@ def parallelize_module(  # type: ignore[return]
         tp_mesh_dim (int, deprecated):
             The dimension of ``device_mesh`` where we perform
             Tensor Parallelism on, this field is deprecated and will be removed in future.
-            If you have a 2-D or N-D device_mesh, consider passing in device_mesh[\"tp\"]
+            If you have a 2-D or N-D :class:`DeviceMesh`, consider passing in device_mesh[\"tp\"]
 
     Return:
         A :class:`nn.Module` object parallelized.
@@ -69,7 +69,7 @@ def parallelize_module(  # type: ignore[return]
         >>>
 
     .. note:: For complex module architecture like Attention, MLP layers, we recommend composing
-        different ParallelStyles together (i.e. ColwiseParallel and RowwiseParallel) and pass
+        different ParallelStyles together (i.e. ``ColwiseParallel`` and ``RowwiseParallel``) and pass
         as a parallelize_plan, to achieves the desired sharding computation.
     """
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
