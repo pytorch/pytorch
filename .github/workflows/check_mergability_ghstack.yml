@@ -1,0 +1,22 @@
+name: Check mergability and dependencies for ghstack prs
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  mergability-and-dependencies-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions-ecosystem/action-regex-match@v2
+        id: regex-match
+        with:
+          text: ${{ github.head_ref }}
+          regex: '^(gh/[^/]+/[0-9]+/)head$'
+
+      - uses: pytorch/test-infra/.github/workflows/pr-dependencies-check.yml@main
+        if: ${{ steps.regex-match.outputs.match != '' }}
+        with:
+          pr_number: ${{ github.event.pull_request.number }}
