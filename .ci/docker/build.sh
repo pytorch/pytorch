@@ -102,6 +102,7 @@ case "$image" in
     UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
+    USE_CUSPARSELT=1
     ;;
   pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.1.1
@@ -117,6 +118,7 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
+    USE_CUSPARSELT=1
     ;;
   pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9)
     CUDA_VERSION=11.8.0
@@ -131,6 +133,7 @@ case "$image" in
     UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
+    USE_CUSPARSELT=1
     ;;
   pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9)
     CUDA_VERSION=12.1.1
@@ -145,6 +148,7 @@ case "$image" in
     UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
+    USE_CUSPARSELT=1
     ;;
   pytorch-linux-focal-py3-clang10-onnx)
     ANACONDA_PYTHON_VERSION=3.8
