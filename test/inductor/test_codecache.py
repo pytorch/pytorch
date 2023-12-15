@@ -16,7 +16,6 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
-from torch._subclasses.fake_tensor import FakeTensorConfig
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -31,8 +30,8 @@ HAS_TRITON = has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
-FakeTensorConfig.cache_enabled = True
-FakeTensorConfig.cache_crosscheck_enabled = True
+torch._functorch.config.fake_tensor_cache_enabled = True
+torch._functorch.config.fake_tensor_cache_crosscheck_enabled = True
 
 
 class MyModel(torch.nn.Module):

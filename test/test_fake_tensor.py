@@ -9,9 +9,9 @@ import itertools
 import numpy as np
 from torch.testing._internal.jit_utils import RUN_CUDA
 from torch._subclasses.fake_tensor import (
+    _ShapeEnvSettings,
     extract_tensor_metadata,
     FakeTensor,
-    FakeTensorConfig,
     FakeTensorMode,
     FakeTensorConverter,
     DynamicOutputShapeException,
@@ -25,6 +25,8 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTIO
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.testing import rand_strided
 from torch.testing import FileCheck
+import dataclasses
+import inspect
 import unittest
 import torch._prims as prims
 import contextlib
@@ -41,10 +43,10 @@ import torch.utils._pytree as pytree
 
 aten = torch.ops.aten
 
-FakeTensorConfig.cache_enabled = True
-FakeTensorConfig.cache_crosscheck_enabled = True
+torch._functorch.config.fake_tensor_cache_enabled = True
+torch._functorch.config.fake_tensor_cache_crosscheck_enabled = True
 
-
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):
         self.assertTrue(isinstance(t, FakeTensor))
@@ -760,6 +762,7 @@ class FakeTensorTest(TestCase):
             self.assertTrue(torch._prims_common.suggest_memory_format(grad_in) == torch.channels_last)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):
         for arg in args:
@@ -856,6 +859,7 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     )
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorOpInfoTest(TestCase):
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
@@ -866,6 +870,7 @@ class FakeTensorOpInfoTest(TestCase):
             optests.fake_check(op, args, kwargs)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorConverterTest(TestCase):
     def test_memoized_conversion_to_meta(self):
         x = torch.rand(2, 2, 2)
@@ -975,6 +980,7 @@ class FakeTensorConverterTest(TestCase):
         assert y_weak() is None
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorOperatorInvariants(TestCase):
     @staticmethod
     def get_aten_op(schema):
@@ -1166,6 +1172,7 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(mode.count, 0)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorPropTest(TestCase):
     def test_fake_tensor_prop_on_nn_module(self):
         class ToyNnModuleWithParameters(torch.nn.Module):
@@ -1252,6 +1259,24 @@ class FakeTensorPropTest(TestCase):
 
 
 class FakeTensorDispatchCache(TestCase):
+    def test_shape_env_settings(self):
+        """
+        Validation that any boolean settings in ShapeEnv are present in the
+        _ShapeEnvSettings. We hope to ensure that any new settings that might
+        affect FakeTensor dispatch are included in the cache key calculation.
+        If this test fails, consider updating _ShapeEnvSettings or change this
+        test to omit checking for the new field.
+        """
+        init_sig = inspect.signature(ShapeEnv._init)
+        args = [
+            name for name, param in init_sig.parameters.items()
+            if type(param.default) is bool
+        ]
+
+        settings = [f.name for f in dataclasses.fields(_ShapeEnvSettings)]
+        for arg in args:
+            self.assertTrue(arg in settings)
+
     def _test_cache_key(self, fm, x, y, z):
         """
         Helper for all test_cache_key_* tests below. Assert that the

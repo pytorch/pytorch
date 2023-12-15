@@ -8,13 +8,25 @@ import traceback
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from weakref import ReferenceType
 
 import torch
 import torch._custom_op
 import torch._logging
 
+from torch._functorch import config
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
@@ -39,6 +51,9 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import PyTree, tree_map
 from torch.utils._stats import count, count_label
 from torch.utils.weak import WeakIdRef
+
+if TYPE_CHECKING:
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 DimList = List
 
@@ -1033,22 +1048,8 @@ def should_allow_numbers_as_tensors(func: OpOverload):
     )
 
 
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
-
-
 class FakeTensorConfig:
     debug = os.environ.get("TORCH_FAKE_TENSOR_DEBUG", "0") == "1"
-    cache_enabled = (
-        os.environ.get(
-            "TORCH_FAKE_TENSOR_DISPATCH_CACHE",
-            "0" if is_fbcode() else "1",
-        )
-        == "1"
-    )
-    cache_crosscheck_enabled = (
-        os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE_CROSSCHECK", "0") == "1"
-    )
 
 
 class FakeTensor(torch.Tensor):
@@ -1374,6 +1375,32 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
     )
 
 
+@dataclass(frozen=True)
+class _ShapeEnvSettings:
+    """
+    Encapsulates all shape env settings that could potentially affect
+    FakeTensor dispatch. Used when creating dispatch cache keys.
+    """
+
+    allow_scalar_outputs: bool
+    allow_dynamic_output_shape_ops: bool
+    assume_static_by_default: bool
+    specialize_zero_one: bool
+    duck_shape: bool
+
+    def __init__(self, env: "ShapeEnv"):
+        # Initialize this way because the class is frozen (to enable hashing):
+        object.__setattr__(self, "allow_scalar_outputs", env.allow_scalar_outputs)
+        object.__setattr__(
+            self, "allow_dynamic_output_shape_ops", env.allow_dynamic_output_shape_ops
+        )
+        object.__setattr__(
+            self, "assume_static_by_default", env.assume_static_by_default
+        )
+        object.__setattr__(self, "specialize_zero_one", env.specialize_zero_one)
+        object.__setattr__(self, "duck_shape", env.duck_shape)
+
+
 class _DispatchCacheKey(list):
     """
     Key for the FakeTensor dispatch cache. Inspired by (copied from)
@@ -1454,9 +1481,9 @@ class FakeTensorMode(TorchDispatchMode):
         else:
             self.static_shapes = shape_env is None
 
-        import torch._functorch.config
-
-        self.allow_meta = torch._functorch.config.fake_tensor_allow_meta
+        self.allow_meta = config.fake_tensor_allow_meta
+        self.cache_enabled = config.fake_tensor_cache_enabled
+        self.cache_crosscheck_enabled = config.fake_tensor_cache_crosscheck_enabled
 
         # A flag that controls, whether we want to invoke ops on mix of
         # real weights/global variables and fake inputs
@@ -1576,7 +1603,7 @@ class FakeTensorMode(TorchDispatchMode):
             if entry is not None:
                 output = self._output_from_cache_entry(entry, func, args)
                 FakeTensorMode.cache_hits += 1
-                if FakeTensorConfig.cache_crosscheck_enabled:
+                if self.cache_crosscheck_enabled:
                     # For debugging / testing: Validate that the output synthesized
                     # from the cache matches the output created by normal dispatch.
                     self._crosscheck_cache_output(output, func, types, args, kwargs)
@@ -1618,11 +1645,15 @@ class FakeTensorMode(TorchDispatchMode):
         if func == aten._unsafe_view.default:
             raise _BypassDispatchCache("unsafe view")
 
+        # TODO: Unnecessary after https://github.com/pytorch/pytorch/pull/115769
         if func == aten.set_.source_Tensor:
             raise _BypassDispatchCache("set source")
 
         if func in self.lift_fns:
             raise _BypassDispatchCache("lift")
+
+        if not torch._library.utils.is_builtin(func):
+            raise _BypassDispatchCache("non-builtin")
 
         # In order to handle storage aliasing, we need to establish the alias
         # for any view op on a cache hit. But CompositeImplicitAutograd ops may
@@ -1632,7 +1663,6 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             raise _BypassDispatchCache("CompositeImplicitAutograd")
 
-        shape_env = self.shape_env
         key_values = (
             func,
             # Translate any FakeTensor args to metadata.
@@ -1645,14 +1675,9 @@ class FakeTensorMode(TorchDispatchMode):
             # where there isn't necessarily a tensor to take the device from.
             torch._C._get_default_device(),
             # Shape env settings could affect behavior. One example seen in the wild:
-            # The disallowance of dynamic shapes could introduce a
-            # DynamicOutputShapeException where it wasn't seen on a previous instance
-            # of the same op.
-            shape_env.allow_scalar_outputs if shape_env else None,
-            shape_env.allow_dynamic_output_shape_ops if shape_env else None,
-            shape_env.assume_static_by_default if shape_env else None,
-            shape_env.specialize_zero_one if shape_env else None,
-            shape_env.duck_shape if shape_env else None,
+            # Disasllowing dynamic shapes can introduce a DynamicOutputShapeException
+            # where it wasn't seen on a previous instance of the same op.
+            _ShapeEnvSettings(self.shape_env) if self.shape_env else None,
         )
         return _DispatchCacheKey(key_values)
 
@@ -1664,9 +1689,11 @@ class FakeTensorMode(TorchDispatchMode):
         unsupported cases that should bypass caching.
         """
         if isinstance(arg, (list, tuple)):
-            return tuple(self._translate_arg(x) for x in arg)
+            translated = [self._translate_arg(x) for x in arg]
+            return tuple(translated)
         elif isinstance(arg, dict):
-            return tuple((k, self._translate_arg(v)) for k, v in arg.items())
+            translated = [(k, self._translate_arg(v)) for k, v in arg.items()]
+            return tuple(translated)
         elif isinstance(arg, (torch.SymBool, torch.SymInt, torch.SymFloat)):
             raise _BypassDispatchCache("symbolic shape")
         elif isinstance(arg, FakeTensor):
@@ -1834,6 +1861,12 @@ class FakeTensorMode(TorchDispatchMode):
         elif func is torch.ops.aten.storage_offset.default:
             return int(args[0].storage_offset())
 
+        if log.getEffectiveLevel() <= logging.DEBUG:
+            log.debug(
+                "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
+            )
+            incr = IncrementRecursionCount()
+
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]
         if func in {
@@ -1845,18 +1878,12 @@ class FakeTensorMode(TorchDispatchMode):
             with in_kernel_invocation_manager(self):
                 return func(*args, **kwargs)
 
-        if FakeTensorConfig.cache_enabled:
+        if self.cache_enabled:
             return self._cached_dispatch_impl(func, types, args, kwargs)
         else:
             return self._dispatch_impl(func, types, args, kwargs)
 
     def _dispatch_impl(self, func, types, args, kwargs):
-        if log.getEffectiveLevel() <= logging.DEBUG:
-            log.debug(
-                "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
-            )
-            incr = IncrementRecursionCount()
-
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
         flat_arg_fake_tensors = [
