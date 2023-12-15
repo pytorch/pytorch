@@ -14,6 +14,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
+#include <c10/util/CallOnce.h>
 
 #include <c10/core/SymInt.h>
 #include <c10/util/string_view.h>
@@ -176,11 +177,42 @@ bool check_sm_version(cudaDeviceProp * dprops) {
   return is_gte_lower_bound && is_lte_upper_bound;
 }
 
+#if USE_ROCM
+c10::once_flag gcn_arch_override_flag;
+const char* over_arch = nullptr;
+
+void init_gcn_arch_override() {
+  over_arch = std::getenv("PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE");
+  if (over_arch) {
+      TORCH_WARN("SDPA functions only loads value from PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE once. "
+                 "Later changes to this environment variable with os.environ "
+                 "(or other methods) will not affect SDPA function's behavior.");
+  }
+}
+#endif
+
 bool check_flash_attention_hardware_support(sdp_params const& params, bool debug) {
   // Check that the gpu is capable of running flash attention
   using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
   auto dprops = at::cuda::getCurrentDeviceProperties();
+#if USE_ROCM
+  constexpr std::string_view mi200 = "gfx90a:sramecc+:xnack-";
+  const char* real_arch = dprops->gcnArchName;
+  c10::call_once(gcn_arch_override_flag, init_gcn_arch_override);
+  const char* arch = over_arch ? over_arch : real_arch;
+  if (mi200 != arch) {
+    if (debug) {
+      TORCH_WARN(
+          "Flash attention only supports gpu architecture gfx90a, for now. Attempting to run on a ",
+          arch,
+          ".",
+          over_arch ? " This is overrided by PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE. Real architecture is " : "",
+          over_arch ? real_arch : "");
+    }
+    return false;
+  }
+#else
   if (!check_sm_version<sm80, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
@@ -192,6 +224,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
     }
     return false;
   }
+#endif
   return true;
 }
 
@@ -236,7 +269,6 @@ bool check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90(
   }
   return true;
 }
-} // namespace
 
 
 bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug) {
@@ -257,8 +289,27 @@ bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug)
   return true;
 }
 
+bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
+  // Check that all tensors are on the GPU device
+  // This should be handled by the stub dispatch, but whe call can_use_*_attention
+  // directly from python we need to ensure that the tensors are on cuda
+  if (params.query.device().type() != at::DeviceType::CUDA) {
+    if (debug) {
+      TORCH_WARN(
+          "All tensors need to be on cuda device. Got query on device: ",
+          params.query.device(),
+          ", key on device: ",
+          params.key.device(),
+          ", value on device: ",
+          params.value.device());
+    }
+    return false;
+  }
+  return true;
+}
 
-TORCH_API bool can_use_flash_attention(sdp_params const& params, bool debug) {
+} // namespace
+bool can_use_flash_attention(sdp_params const& params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
   TORCH_WARN_ONCE(!debug, "Torch was not compiled with flash attention.");
   return false;
@@ -268,6 +319,7 @@ TORCH_API bool can_use_flash_attention(sdp_params const& params, bool debug) {
   // Replace with std::to_array when we migrate to c++20
   constexpr auto general_constraints = array_of<bool (*)(sdp_params const&, bool)>(
       check_runtime_disabled_flash,
+      check_all_tensors_on_device,
       check_tensor_shapes,
       check_for_attn_mask,
       check_head_dim_size_flash,
@@ -314,7 +366,7 @@ TORCH_API bool can_use_flash_attention(sdp_params const& params, bool debug) {
   }
 }
 
-TORCH_API bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
+bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #ifndef USE_MEM_EFF_ATTENTION
   TORCH_WARN_ONCE(!debug, "Torch was not compiled with memory efficient attention.");
   return false;
@@ -328,6 +380,7 @@ TORCH_API bool can_use_mem_efficient_attention(sdp_params const& params, bool de
   //  Define gate functions that determine if a mem efficient kernel can be ran
   constexpr auto general_constraints = array_of<bool (*)(sdp_params const&, bool)>(
       check_runtime_disabled_mem_efficient,
+      check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
       check_head_dim_size_mem_efficient);

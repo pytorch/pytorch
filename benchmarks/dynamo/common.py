@@ -704,7 +704,6 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
 
 
 def speedup_experiment_onnx(
-    onnx_model_cls: Type[OnnxModelFromTorchScript],
     args,
     model_iter_fn,
     onnx_model: OnnxModel,
@@ -1069,10 +1068,7 @@ class OnnxModel(abc.ABC):
     _COMPILER_NAME: str
 
     def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
-        # Hack to get model name.
-        from torch._functorch import aot_autograd
-
-        model_name = aot_autograd.model_name
+        model_name = current_name
         self.model_dir = self._generate_onnx_model_directory(
             output_directory, self._COMPILER_NAME, model_name
         )
@@ -1763,38 +1759,48 @@ class BenchmarkRunner:
         self.model_iter_fn = None
         self.grad_scaler = DummyGradScaler()
         self.autocast = contextlib.nullcontext
+        self.autocast_arg = {}
         self.optimizer = None
         self._args = None
 
-    def setup_amp(self):
+    def setup_amp(self, current_device=None):
         if self.args.only in self.fp32_only_models:
             return
 
-        if self.args.amp and self.args.devices == ["cuda"]:
-            # AMP training can lead to small loss values which can undeflow
-            # gradient values returning in zero gradients. To solve this
-            # problem, PyTorch introduces GradScaler. GradScaler is a stateful
-            # structure, that scales the loss values to prevent underflow. Loss
-            # values are big at the beginning of training (therefore not
-            # requiring scaling), while loss value tends to be small as network
-            # starts getting better (requiring scaling). GradScaler manages all
-            # of this fine tuning, checking the gradients are turning to inf,
-            # discarding such batches.
+        devices = [current_device] if current_device else self.args.devices
+        if self.args.amp:
+            if devices == ["cuda"]:
+                # AMP training can lead to small loss values which can undeflow
+                # gradient values returning in zero gradients. To solve this
+                # problem, PyTorch introduces GradScaler. GradScaler is a stateful
+                # structure, that scales the loss values to prevent underflow. Loss
+                # values are big at the beginning of training (therefore not
+                # requiring scaling), while loss value tends to be small as network
+                # starts getting better (requiring scaling). GradScaler manages all
+                # of this fine tuning, checking the gradients are turning to inf,
+                # discarding such batches.
 
-            # Since we are not running a long iteration, default value of
-            # init_scale 65536 is going to turn all gradients to inf. Therefore,
-            # we just use a init_scale of 2.0 for benchmarking purpose.
+                # Since we are not running a long iteration, default value of
+                # init_scale 65536 is going to turn all gradients to inf. Therefore,
+                # we just use a init_scale of 2.0 for benchmarking purpose.
 
-            # Disabling Gradscaler because
-            #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
-            #  2) Current setup shares grad_scaler for eager and dynamo model,
-            #  which is bad as Gradscaler has state and can adjust the scaling
-            #  factor between eager and dynamo run, making accuracy check
-            #  harder.
-            # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
-            self.autocast = torch.cuda.amp.autocast
-        elif (self.args.bfloat16 or self.args.amp) and self.args.devices == ["cpu"]:
-            self.autocast = torch.cpu.amp.autocast
+                # Disabling Gradscaler because
+                #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
+                #  2) Current setup shares grad_scaler for eager and dynamo model,
+                #  which is bad as Gradscaler has state and can adjust the scaling
+                #  factor between eager and dynamo run, making accuracy check
+                #  harder.
+                # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+                self.autocast = torch.cuda.amp.autocast
+            if devices == ["cpu"]:
+                self.autocast = torch.cpu.amp.autocast
+            if self.args.amp_dtype:
+                amp_dtype = (
+                    torch.float16
+                    if self.args.amp_dtype == "float16"
+                    else torch.bfloat16
+                )
+                self.autocast_arg["dtype"] = amp_dtype
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
@@ -1943,12 +1949,9 @@ class BenchmarkRunner:
         try:
             self.model_iter_fn(model, example_inputs)
         except Exception as e:
-            print(f"Original Error: {str(e)}")
-            raise NotImplementedError("Eager model failed to run") from e
+            raise RuntimeError("Eager run failed") from e
 
     def maybe_cast(self, model, example_inputs):
-        model = self.deepcopy_model(model)
-        example_inputs = clone_inputs(example_inputs)
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
         return model, example_inputs
 
@@ -2150,7 +2153,8 @@ class BenchmarkRunner:
                 self.args.cosine = True
                 fp64_outputs = None
             finally:
-                del model_fp64
+                del model_fp64, inputs_fp64
+                torch.cuda.empty_cache()
 
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
                 self.args.training, current_device, name
@@ -2179,6 +2183,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
+                torch.cuda.empty_cache()
 
             # Rerun native pytorch
             reset_rng_state()
@@ -2195,9 +2200,11 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_2nd_run_fail"
                 )
+                log.exception(e)
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
+                torch.cuda.empty_cache()
 
             # Two eager runs should have exactly same result
             is_same = True
@@ -2235,7 +2242,7 @@ class BenchmarkRunner:
                     # apply export on module directly
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
-                    with self.autocast():
+                    with self.autocast(**self.autocast_arg):
                         optimized_model_iter_fn = optimize_ctx(
                             model_copy, example_inputs
                         )
@@ -2550,6 +2557,8 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
             print(status)
+        torch.cuda.empty_cache()
+
         if self.args.timing:
             from torch._dynamo.utils import op_count, print_time_report
             from torch.utils._stats import simple_call_counter
@@ -2969,7 +2978,11 @@ def parse_args(args=None):
     group_prec.add_argument(
         "--amp", action="store_true", help="use automatic mixed precision"
     )
-
+    parser.add_argument(
+        "--amp-dtype",
+        choices=("bfloat16", "float16"),
+        help="the data type used with automatic mixed precision",
+    )
     group_printout = parser.add_mutually_exclusive_group()
     group_printout.add_argument(
         "--verbose", "-v", action="store_true", help="enable verbose debug printouts"
@@ -3145,6 +3158,24 @@ def main(runner, original_dir=None, args=None):
         # single process path just uses the main process
         args.world_size = 1
         process_entry(0, runner, original_dir, args)
+
+
+def write_csv_when_exception(args, name: str, status: str, device=None):
+    print(status)
+    placeholder_batch_size = 0
+    devices = [device] if device is not None else args.devices
+    if args.accuracy:
+        headers = ["dev", "name", "batch_size", "accuracy"]
+        rows = [[device, name, placeholder_batch_size, status] for device in devices]
+    elif args.performance:
+        headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
+        rows = [[device, name, placeholder_batch_size, 0.0, 0.0] for device in devices]
+    else:
+        headers = []
+        rows = [[device, name, placeholder_batch_size, 0.0] for device in devices]
+
+    for row in rows:
+        output_csv(output_filename, headers, row)
 
 
 def run(runner, args, original_dir=None):
@@ -3517,6 +3548,7 @@ def run(runner, args, original_dir=None):
                     torch.Tensor, lambda x: x.to(device=device), example_inputs
                 )
             else:
+                name = model_name
                 try:
                     with tqdm(desc="loading model"):
                         extra_args = []
@@ -3571,12 +3603,18 @@ def run(runner, args, original_dir=None):
                                     batch_size=batch_size,
                                     extra_args=extra_args,
                                 )
-                except NotImplementedError as e:
-                    print(e)
+                except RuntimeError as e:
                     import traceback
 
+                    mode = "train" if args.training else "eval"
+                    print(f"{device:4} {mode:5} {name:34} ")
                     print(traceback.format_exc())
-                    logging.warning("%s failed to load", args.only)
+                    status = (
+                        "model_fail_to_load"
+                        if isinstance(e, NotImplementedError)
+                        else "eager_fail_to_run"
+                    )
+                    write_csv_when_exception(args, name, status, device)
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:
@@ -3630,6 +3668,7 @@ def run(runner, args, original_dir=None):
 
             else:
                 model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+            runner.setup_amp(current_device)
             runner.run_one_model(
                 name,
                 model,
@@ -3661,32 +3700,8 @@ def run(runner, args, original_dir=None):
         nmodels = len(model_names)
         for i, name in enumerate(model_names):
             current_name = name
-            placeholder_batch_size = 0
             if args.progress:
                 print(f"Running model {i+1}/{nmodels}", flush=True)
-
-            def write_csv(status):
-                if args.accuracy:
-                    headers = ["dev", "name", "batch_size", "accuracy"]
-                    rows = [
-                        [device, name, placeholder_batch_size, status]
-                        for device in args.devices
-                    ]
-                elif args.performance:
-                    headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
-                    rows = [
-                        [device, name, placeholder_batch_size, 0.0, 0.0]
-                        for device in args.devices
-                    ]
-                else:
-                    headers = []
-                    rows = [
-                        [device, name, placeholder_batch_size, 0.0]
-                        for device in args.devices
-                    ]
-
-                for row in rows:
-                    output_csv(output_filename, headers, row)
 
             try:
                 timeout = args.timeout
@@ -3696,13 +3711,11 @@ def run(runner, args, original_dir=None):
                     [sys.executable] + sys.argv + [f"--only={name}"], timeout=timeout
                 )
             except subprocess.TimeoutExpired:
-                print("TIMEOUT", file=sys.stderr)
-                write_csv("timeout")
+                write_csv_when_exception(args, name, "timeout")
             except subprocess.CalledProcessError as e:
                 print("Run failed with return code: ", e.returncode, file=sys.stderr)
                 print("Output: ", e.output, file=sys.stderr)
                 print("Error: ", e.stderr, file=sys.stderr)
-                write_csv("infra_error")
         print_summary(output_filename, print_dataframe=args.print_dataframe_summary)
 
 
