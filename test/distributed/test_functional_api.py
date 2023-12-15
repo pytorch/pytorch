@@ -607,34 +607,51 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         allreduce(torch.randn(8, device=self.device), pg=dist.group.WORLD)
 
 
-    @with_comms
+class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
+
+    @property
+    def world_size(self):
+        return 4
+
+    @skip_if_lt_x_gpu(4)
     @requires_nccl()
-    @skip_if_lt_x_gpu(WORLD_SIZE)
-    def test_permute_tensor(self):
+    @with_comms()
+    def test_permute_tensor_with_sub_group(self):
+        device = "cuda"
+        mesh_dim_names = ["dp", "tp"]
 
-        # rank0: [0., 1.], rank1: [2., 3.]
-        send_tensor = torch.arange(2, dtype=torch.float32, device="cuda") + 2 * self.rank
-        recvd_tensor = ft_c.permute_tensor(
-            send_tensor,
-            [
-                (0, 1),
-                (1, 0)
-            ],
-            group=dt.DeviceMesh("cuda", torch.arange(self.world_size))
+        mesh_2d = dt.init_device_mesh(
+            device, (2, self.world_size // 2), mesh_dim_names=mesh_dim_names
         )
 
-        # rank0: [2., 3.], rank1: [0., 1.]
-        expected = torch.arange(
-            2,
-            dtype=torch.float32,
-            device="cuda"
-        ) + 2 * ((self.rank - 1 + self.world_size) % self.world_size)
-        self.assertEqual(
-            recvd_tensor,
-            expected,
-            msg=f"Expected {expected} on {self.rank=} "
-                f"but received {recvd_tensor} instead."
-        )
+        for mesh_name in mesh_dim_names:
+            mesh = mesh_2d[mesh_name]
+            rank = mesh.get_local_rank()
+
+            # rank0: [0., 1.], rank1: [2., 3.]
+            send_tensor = torch.arange(2, dtype=torch.float32, device=device) + 2 * rank
+            recvd_tensor = ft_c.permute_tensor(
+                send_tensor,
+                [
+                    (0, 1),
+                    (1, 0)
+                ],
+                group=mesh
+            )
+
+            # rank0: [2., 3.], rank1: [0., 1.]
+            expected = torch.arange(
+                2,
+                dtype=torch.float32,
+                device=device
+            ) + 2 * ((rank - 1 + 2) % 2)
+            self.assertEqual(
+                recvd_tensor,
+                expected,
+                msg=f"Expected {expected} on {self.rank=} (local_rank={rank}), "
+                    f"but received {recvd_tensor} instead."
+            )
+
 
 
 class TestOpWaitiness(MultiThreadedTestCase):
