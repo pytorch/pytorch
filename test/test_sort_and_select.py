@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import \
 # TODO: remove this
 SIZE = 100
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSortAndSelect(TestCase):
 
     def assertIsOrdered(self, order, x, mxx, ixx, task):
