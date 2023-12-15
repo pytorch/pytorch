@@ -406,6 +406,7 @@ def _to_copy_default(func, *args, **kwargs):
         pin_memory=pin_out,
         memory_format=new_memory_format,
     )
+    new_values.copy_(inp.values())
 
     if new_layout == torch.jagged:
         # Copy to a new Python subclass NestedTensor
