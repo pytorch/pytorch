@@ -1601,6 +1601,13 @@ class CudaKernelParamCache:
         return cls.cache.get(key, None)
 
 
+def _get_name_and_dir_from_path(file_path: str):
+    name_and_ext = os.path.basename(file_path)
+    name, ext = os.path.splitext(name_and_ext)
+    dir = os.path.dirname(file_path)
+    return name, dir
+
+
 class AotCodeCache:
     cache: Dict[str, str] = dict()
     clear = staticmethod(cache.clear)
@@ -1680,10 +1687,12 @@ class AotCodeCache:
                     if specified_so_name
                     else os.path.splitext(input_path)[0] + ".so"
                 )
+                name_so, dir_so = _get_name_and_dir_from_path(output_so)
 
                 if not os.path.exists(output_so):
-                    """
                     output_o = os.path.splitext(input_path)[0] + ".o"
+                    name_o, dir_o = _get_name_and_dir_from_path(output_o)
+                    """
                     cmd = cpp_compile_command(
                         input=input_path,
                         output=output_o,
@@ -1694,12 +1703,11 @@ class AotCodeCache:
                         use_absolute_path=use_absolute_path,
                     )
                     """
-                    output_dir = os.path.dirname(input_path)
                     builder = CppBuilder(
-                        key,
+                        name_o,
                         [input_path],
                         CppTorchCudaOptions(use_cuda=cuda, aot_mode=graph.aot_mode),
-                        output_dir,
+                        dir_o,
                         compile_only=True,
                     )
                     cmd = builder.get_command_line()
@@ -1791,12 +1799,11 @@ class AotCodeCache:
                         use_absolute_path=use_absolute_path,
                     )
                     """
-                    output_dir = os.path.dirname(input_path)
                     builder = CppBuilder(
-                        key,
+                        name_so,
                         [output_o, consts_o],
                         CppTorchCudaOptions(use_cuda=cuda, aot_mode=graph.aot_mode),
-                        output_dir,
+                        dir_so,
                     )
                     cmd = builder.get_command_line()
                     log.debug("aot linkage command: %s", cmd)
