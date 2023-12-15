@@ -10,7 +10,7 @@
 
 #if !defined(__MAC_13_2) && (!defined(MAC_OS_X_VERSION_13_2) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_13_2))
 
-@implementation MPSGraphConvolution3DOpDescriptor
+@implementation FakeMPSGraphConvolution3DOpDescriptor
 - (nonnull id)copyWithZone:(nullable NSZone*)zone {
   return self;
 }

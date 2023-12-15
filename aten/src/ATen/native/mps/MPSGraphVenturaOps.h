@@ -5,7 +5,7 @@
 #if !defined(__MAC_13_2) && \
     (!defined(MAC_OS_X_VERSION_13_2) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_13_2))
 
-@interface MPSGraphConvolution3DOpDescriptor : NSObject<NSCopying>
+@interface FakeMPSGraphConvolution3DOpDescriptor : NSObject<NSCopying>
 
 @property (readwrite, nonatomic) NSUInteger strideInX;
 @property (readwrite, nonatomic) NSUInteger strideInY;
@@ -28,6 +28,8 @@
 @property (readwrite, nonatomic) NSUInteger groups;
 
 @end
+
+@compatibility_alias MPSGraphConvolution3DOpDescriptor FakeMPSGraphConvolution3DOpDescriptor;
 
 #endif
 
