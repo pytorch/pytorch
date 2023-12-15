@@ -102,9 +102,12 @@ class SymHashingDict:
         self.wrapped_dict = {}
         self.graph_input_symbols = set()
 
+    def add_input_symint_symbol(self, symbol: py_sym_types):
+        self.graph_input_symbols.update(symbol.node.expr.free_symbols)
 
     def __setitem__(self, key, value):
-        if value().node.op == "placeholder" or key.node.expr.free_symbols.issubset(self.graph_input_symbols):
+        existing_node = key.node in self.sym_node_dict
+        if not existing_node and key.node.expr.free_symbols.issubset(self.graph_input_symbols):
             self.graph_input_symbols.update(key.node.expr.free_symbols)
             self.wrapped_dict.__setitem__(wrap_to_sym_expr_hash(key), value)
         self.sym_node_dict[key.node] = value
@@ -429,6 +432,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
+
     proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
@@ -585,6 +589,11 @@ def wrap_key(f, tensors, tracer, pre_dispatch: bool):
         assert len(flat_proxies) == len(flat_tensors)
         with _pop_proxy_mode_temporarily(dk) as m:
             assert isinstance(m, ProxyTorchDispatchMode)
+
+            for arg in flat_tensors:
+                if isinstance(arg, py_sym_types):
+                    tracer.symnode_tracker.add_input_symint_symbol(arg)
+
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
         out = f(*tensors)
