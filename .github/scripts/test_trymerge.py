@@ -32,7 +32,6 @@ from trymerge import (
     main as trymerge_main,
     MandatoryChecksMissingError,
     MergeRule,
-    PostCommentError,
     RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
