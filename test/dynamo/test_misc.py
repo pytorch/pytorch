@@ -3363,7 +3363,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             outs = []
             for param in model.parameters():
                 outs.append(torch.ones(param.grad.size()))
-            return outs
+            return outs, param.grad + 1
 
         model = TrivialModel()
         # Eager
@@ -3375,6 +3375,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         ref = fn(a, b)
 
         # Compiled
+        model = TrivialModel()
         a = torch.ones([2, 2], requires_grad=True)
         b = torch.ones([2, 2])
         out = model(a)
@@ -3383,22 +3384,15 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         res = opt_fn(a, b)
+
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 4)
+        self.assertEqual(cnts.op_count, 3)
 
     def test_intermediary_tensor_grad_access(self):
         # This test creates a model, and accesses the grads
         # from its parameters and an entirely intermediary tensor.
         cnts = torch._dynamo.testing.CompileCounter()
-
-        class TrivialModel(torch.nn.Module):
-            def __init__(self):
-                super(TrivialModel, self).__init__()
-                self.linear = torch.nn.Linear(2, 1)
-
-            def forward(self, x):
-                return self.linear(x)
 
         def fn(a, b):
             intermediary = torch.ones(2, 2)
@@ -3407,8 +3401,6 @@ utils_device.CURRENT_DEVICE == None""".split(
             outs.append(intermediary.grad)
             return outs
 
-        model = TrivialModel()
-
         # Eager
         a = torch.ones([2, 2], requires_grad=True)
         b = torch.ones([2, 2])
@@ -3421,7 +3413,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         res = opt_fn(a, b)
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 2)
 
     @skipIfNotPy311
     def test_linetable_311_writer1(self):
