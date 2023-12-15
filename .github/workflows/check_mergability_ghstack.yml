@@ -5,21 +5,26 @@ on:
     types: [opened, synchronize, reopened, edited]
 
 jobs:
-  mergability-and-dependencies-check:
+  check-regex:
     runs-on: ubuntu-latest
+    outputs:
+      regex-match: ${{ steps.regex-match.outputs.match }}
     steps:
       - uses: actions/checkout@v2
 
-      - uses: actions-ecosystem/action-regex-match@v2
-        id: regex-match
+      - id: regex-match
+        uses: actions-ecosystem/action-regex-match@v2
         with:
           text: ${{ github.head_ref }}
           regex: '^(gh/[^/]+/[0-9]+/)head$'
 
-      - uses: pytorch/test-infra/.github/workflows/pr-dependencies-check.yml@main
-        if: ${{ steps.regex-match.outputs.match != '' }}
-        with:
-          pr_number: ${{ github.event.pull_request.number }}
+  pr-dependencies-check:
+    needs: check-regex
+    if: ${{ needs.check-regex.outputs.regex-match != '' }}
+    uses: pytorch/test-infra/.github/workflows/pr-dependencies-check.yml@main
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+    runs-on: ubuntu-latest
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
