@@ -205,6 +205,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     uint64_t getSequencenumber() const override;
 
+    const std::string& logPrefix() const;
+
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
 
@@ -590,6 +592,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       OpType opType);
 
  private:
+  int globalRankStart;
+  int globalRankStride;
+
   // Helper that encapsulates work shared across all collective communication
   // primitives.  The callbacks have the following signatures:
   //
@@ -694,6 +699,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Desync debug helper
   void logWorkEnd(WorkNCCL& work);
+
+  // Generates a prefix that is unique to this process group and rank, for
+  // disambiguating logs
+  const std::string& logPrefix() const;
 
  protected:
   // Function that runs as part of a separate thread aside from watchdog
@@ -823,9 +832,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::mutex monitorMutex_;
 
   bool writeDebugInfo_ = false;
-
-  // Mutex to Guard the check of writeDebugInfo_
-  std::mutex writeDebugInfoMutex_;
 
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
