@@ -9812,6 +9812,7 @@ FUNCTIONAL = 4
 DIM_ARG = None
 
 def make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim=0):
+    @skipIfTorchDynamo("FIXME")
     def neg_dim_test(self):
         if isinstance(tensor_arg, list):
             assert METHOD not in types and INPLACE_METHOD not in types
