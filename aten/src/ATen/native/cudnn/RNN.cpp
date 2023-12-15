@@ -361,7 +361,7 @@ namespace {
         batch_sizes_sum = -1; // something bogus in case we access it
       }
     }
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
     // TODO: check x for consistency with input_size?
     std::vector<TensorDescriptor> descriptors(Tensor x) const {
       auto is_input_packed = batch_sizes.size() != 0;
@@ -371,16 +371,16 @@ namespace {
         return rnn_descriptor(x[0], seq_length);
       }
     }
-#else
-    auto descriptors(Tensor x) const {
-      auto is_input_packed = batch_sizes.size() != 0;
-      if (is_input_packed) {
-        return rnn_descriptor_sequence(x, mini_batch, batch_sizes, seq_length, x.size(-1));
-      } else {
-        return rnn_descriptor(x, mini_batch, seq_length, x.size(-1));
-      }
-    }
-#endif
+//#else
+//    auto descriptors(Tensor x) const {
+//      auto is_input_packed = batch_sizes.size() != 0;
+//      if (is_input_packed) {
+//        return rnn_descriptor_sequence(x, mini_batch, batch_sizes, seq_length, x.size(-1));
+//      } else {
+//        return rnn_descriptor(x, mini_batch, seq_length, x.size(-1));
+//      }
+//    }
+//#endif
   };
 
   // Everything together
@@ -396,13 +396,13 @@ namespace {
     RNNDescriptor rnn_desc;
     // NB: this won't actually lay out the tensor descriptor pointers
     // in the right way, so you'll have to preprocess them
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
     std::vector<TensorDescriptor> x_descs;
     std::vector<TensorDescriptor> y_descs;
-#else
-    RNNDataDescriptor x_descs;
-    RNNDataDescriptor y_descs;
-#endif
+//#else
+//    RNNDataDescriptor x_descs;
+//    RNNDataDescriptor y_descs;
+//#endif
     TensorDescriptor hx_desc;
     TensorDescriptor hy_desc;
     TensorDescriptor cx_desc;
@@ -430,7 +430,7 @@ namespace {
       }
       return r;
     }
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
     std::vector<cudnnTensorDescriptor_t> get_x_descs() {
       return get_descs(x_descs);
     }
@@ -438,20 +438,20 @@ namespace {
     std::vector<cudnnTensorDescriptor_t> get_y_descs() {
       return get_descs(y_descs);
     }
-#endif
+//#endif
   };
 
   int64_t get_num_weights(cudnnHandle_t handle, const RNNDescriptor& rnn_desc,
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
                           const TensorDescriptor& x_desc,
-#endif
+//#endif
                           cudnnDataType_t datatype) {
     size_t weight_size;
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
     AT_CUDNN_CHECK(cudnnGetRNNParamsSize(handle, rnn_desc.desc(), x_desc.desc(), &weight_size, datatype));
-#else
-    AT_CUDNN_CHECK(cudnnGetRNNWeightSpaceSize(handle, rnn_desc.desc(), &weight_size));
-#endif
+//#else
+//    AT_CUDNN_CHECK(cudnnGetRNNWeightSpaceSize(handle, rnn_desc.desc(), &weight_size));
+//#endif
     auto elem_size = dataSize(datatype);
     TORCH_INTERNAL_ASSERT(weight_size % elem_size == 0, "cudnnGetRNNParamsSize returned nonsensical weight_size");
     return weight_size / elem_size;
@@ -475,10 +475,10 @@ namespace {
   void add_projection_weights(
         cudnnHandle_t handle,
         const RNNDescriptor& rnn_desc,
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
         const TensorDescriptor& x_desc,
         const FilterDescriptor& w_desc,
-#endif
+//#endif
         const Tensor& weight_buf,
         int64_t layer,
         std::vector<Tensor>& params
@@ -486,7 +486,7 @@ namespace {
     void* matrix_pointer = nullptr;
     // assuming it's LSTM which has 8 "linear layers" (i.e. 4 weights and 4 biases)
     int64_t linear_id = 8;
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
     FilterDescriptor lin_layer_mat_desc;
     AT_CUDNN_CHECK(cudnnGetRNNLinLayerMatrixParams(
         /*handle=*/handle,
@@ -498,47 +498,47 @@ namespace {
         /*linLayerID=*/linear_id,
         /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
         /*linLayerMat=*/&matrix_pointer));
-#else
-    void *unused_pointer;
-    TensorDescriptor unused_desc;
-    TensorDescriptor lin_layer_mat_desc;
-    AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
-        /*handle=*/handle,
-        /*rnnDesc=*/rnn_desc.desc(),
-        /*layer=*/layer,
-        /*wDesc=*/weight_buf.numel() * weight_buf.element_size(),
-        /*w=*/weight_buf.data_ptr(),
-        /*linLayerID=*/linear_id,
-        /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
-        /*linLayerMat=*/&matrix_pointer, unused_desc.mut_desc(), &unused_pointer));
-#endif
+//#else
+//    void *unused_pointer;
+//    TensorDescriptor unused_desc;
+//    TensorDescriptor lin_layer_mat_desc;
+//    AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
+//        /*handle=*/handle,
+//        /*rnnDesc=*/rnn_desc.desc(),
+//        /*layer=*/layer,
+//        /*wDesc=*/weight_buf.numel() * weight_buf.element_size(),
+//        /*w=*/weight_buf.data_ptr(),
+//        /*linLayerID=*/linear_id,
+//        /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
+//        /*linLayerMat=*/&matrix_pointer, unused_desc.mut_desc(), &unused_pointer));
+//#endif
 
     cudnnDataType_t data_type;
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
     cudnnTensorFormat_t format;
-#else
-    int stride_dim_a[5];
-#endif
+//#else
+//    int stride_dim_a[5];
+//#endif
     int nb_dims;
     constexpr int min_dim = 3;
     int filter_dim_a[min_dim];
     AT_CUDNN_CHECK(
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
       cudnnGetFilterNdDescriptor(
-#else
-      cudnnGetTensorNdDescriptor(
-#endif
+//#else
+//      cudnnGetTensorNdDescriptor(
+//#endif
           lin_layer_mat_desc.desc(),
           min_dim,
           &data_type,
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
           &format,
-#endif
+//#endif
           &nb_dims,
           filter_dim_a
-#ifdef USE_CUDNN_RNN_V8_API
-          ,stride_dim_a
-#endif
+//#ifdef USE_CUDNN_RNN_V8_API
+//          ,stride_dim_a
+//#endif
           ));
 
     TORCH_INTERNAL_ASSERT(nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
@@ -578,18 +578,18 @@ namespace {
       cudnnHandle_t handle,
       const RNNDescriptorParams& rnn,
       const RNNDescriptor& rnn_desc,
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
       const TensorDescriptor& x_desc,
       const FilterDescriptor& w_desc,
-#endif
+//#endif
       const Tensor& weight_buf,
       bool include_bias=true
   ) {
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
     auto cudnn_methods = { cudnnGetRNNLinLayerMatrixParams, cudnnGetRNNLinLayerBiasParams };
-#else
-    auto cudnn_methods = { true, false };
-#endif
+//#else
+//    auto cudnn_methods = { true, false };
+//#endif
     std::vector<Tensor> params;
     int64_t num_linear_layers = _num_linear_layers(rnn.mode);
     int64_t num_layers = rnn.num_directions() * rnn.num_layers;
@@ -600,7 +600,7 @@ namespace {
       for (auto cudnn_method : cudnn_methods) {
         for (const auto linear_id : c10::irange(num_linear_layers)) {
           void* matrix_pointer;
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
           FilterDescriptor lin_layer_mat_desc;
           AT_CUDNN_CHECK(cudnn_method(
                 handle,
@@ -613,66 +613,66 @@ namespace {
                 lin_layer_mat_desc.mut_desc(),
                 &matrix_pointer
                 ));
-#else
-          void *unused_pointer;
-          TensorDescriptor unused_desc;
-          TensorDescriptor lin_layer_mat_desc;
-          for (int stateless = 0; stateless < 100; stateless++) {
-          if (cudnn_method) { // matrix
-               AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
-                   handle,
-                   rnn_desc.desc(),
-                   layer,
-                   weight_buf.numel() * weight_buf.element_size(),
-                   weight_buf.data_ptr(),
-                   linear_id,
-                   lin_layer_mat_desc.mut_desc(),
-                   &matrix_pointer,
-                   unused_desc.mut_desc(),
-                   &unused_pointer
-                   ));
-          } else { // bias
-               AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
-                   handle,
-                   rnn_desc.desc(),
-                   layer,
-                   weight_buf.numel() * weight_buf.element_size(),
-                   weight_buf.data_ptr(),
-                   linear_id,
-                   unused_desc.mut_desc(),
-                   &unused_pointer,
-                   lin_layer_mat_desc.mut_desc(),
-                   &matrix_pointer
-                   ));
-          }
-          }
-#endif
+//#else
+//          void *unused_pointer;
+//          TensorDescriptor unused_desc;
+//          TensorDescriptor lin_layer_mat_desc;
+//          for (int stateless = 0; stateless < 100; stateless++) {
+//          if (cudnn_method) { // matrix
+//               AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
+//                   handle,
+//                   rnn_desc.desc(),
+//                   layer,
+//                   weight_buf.numel() * weight_buf.element_size(),
+//                   weight_buf.data_ptr(),
+//                   linear_id,
+//                   lin_layer_mat_desc.mut_desc(),
+//                   &matrix_pointer,
+//                   unused_desc.mut_desc(),
+//                   &unused_pointer
+//                   ));
+//          } else { // bias
+//               AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
+//                   handle,
+//                   rnn_desc.desc(),
+//                   layer,
+//                   weight_buf.numel() * weight_buf.element_size(),
+//                   weight_buf.data_ptr(),
+//                   linear_id,
+//                   unused_desc.mut_desc(),
+//                   &unused_pointer,
+//                   lin_layer_mat_desc.mut_desc(),
+//                   &matrix_pointer
+//                   ));
+//          }
+//          }
+//#endif
           cudnnDataType_t data_type;
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
           cudnnTensorFormat_t format;
-#else
-          int stride_dim_a[5];
-#endif
+//#else
+//          int stride_dim_a[5];
+//#endif
           int nb_dims;
           constexpr int min_dim = 3;
           int filter_dim_a[min_dim];
           AT_CUDNN_CHECK(
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
             cudnnGetFilterNdDescriptor(
-#else
-            cudnnGetTensorNdDescriptor(
-#endif
+//#else
+//            cudnnGetTensorNdDescriptor(
+//#endif
                 lin_layer_mat_desc.desc(),
                 min_dim,
                 &data_type,
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
                 &format,
-#endif
+//#endif
                 &nb_dims,
                 filter_dim_a
-#ifdef USE_CUDNN_RNN_V8_API
-                ,stride_dim_a
-#endif
+//#ifdef USE_CUDNN_RNN_V8_API
+//                ,stride_dim_a
+//#endif
                 ));
 
           TORCH_INTERNAL_ASSERT(nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
@@ -693,11 +693,11 @@ namespace {
             // I'd rather keep full cur_offset checks rather than save some CPU overhead by skipping the cudnn_method =
             // cudnnGetRNNLinLayerBiasParams iteration.
             if (include_bias ||
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
                     cudnn_method != cudnnGetRNNLinLayerBiasParams) {
-#else
-                    cudnn_method) {
-#endif
+//#else
+//                    cudnn_method) {
+//#endif
               // Generate a new parameter tensor which is a view into the weight_buf.
               std::initializer_list<int64_t> size = {
                 mat_numel * num_linear_layers / 2, 1};
