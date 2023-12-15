@@ -318,6 +318,12 @@ def fetch_sym_proxy(tracer):
         n = e.node
         if n.constant is not None:
             return n.constant
+        if e.node.expr.is_number:
+            if isinstance(e, SymBool):
+                return bool(e.node.expr)
+            elif isinstance(e, SymInt):
+                return int(e.node.expr)
+            return float(e.node.expr)
         else:
             # NB: we REQUIRE all symints to be tracked
             return get_proxy_slot(e, tracer)()
