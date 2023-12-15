@@ -621,7 +621,9 @@ class TritonTemplateCaller(ChoiceCaller):
         make_kernel_render,
         debug_extra,
         bmreq,
-        log_info: Optional[Dict[str, PrimitiveInfoType]] = None,
+        log_info: Optional[
+            Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
+        ] = None,
     ):
         super().__init__(name, input_nodes, layout)
         self.make_kernel_render = make_kernel_render
@@ -666,7 +668,7 @@ class TritonTemplateCaller(ChoiceCaller):
             )
         )
 
-    def info_dict(self) -> Dict[str, PrimitiveInfoType]:
+    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return self.log_info
 
@@ -737,7 +739,7 @@ class ExternKernelCaller(ChoiceCaller):
             )
         )
 
-    def info_dict(self) -> Dict[str, PrimitiveInfoType]:
+    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "extern",

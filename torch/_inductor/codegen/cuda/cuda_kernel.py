@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
@@ -315,7 +315,7 @@ class CUDATemplateCaller(ChoiceCaller):
         make_kernel_render: Callable[[CUDATemplateBuffer, Optional[List[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[dict[str, PrimitiveInfoType]],  # type: ignore[type-arg]
+        info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
     ):
         super().__init__(name, input_nodes, layout)
         self.category = category
@@ -347,13 +347,16 @@ class CUDATemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> Dict[str, PrimitiveInfoType]:
+    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         if self.info_kwargs is not None and "op" in self.info_kwargs:
             op: Any = self.info_kwargs["op"]
-            epilogue_node_names = [
+            epilogue_node_names: List[str] = [
                 getattr(en, "name", "no_name")
                 for en in self.info_kwargs.get("epilogue_nodes", [])  # type: ignore[union-attr]
+            ]
+            epilogue_node_strs: List[str] = [
+                str(en) for en in self.info_kwargs.get("epilogue_nodes", [])  # type: ignore[union-attr]
             ]
             return {
                 "backend": "CUDA",
@@ -364,6 +367,7 @@ class CUDATemplateCaller(ChoiceCaller):
                 "element_accumulator": str(op.accumulator_type()),
                 "op_name": str(op.procedural_name()),
                 "epilogue_node_names": epilogue_node_names,  # type: ignore[dict-item]
+                "epilogue_node_strs": epilogue_node_strs,  # type: ignore[dict-item]
                 "instruction_shape": str(
                     op.tile_description.math_instruction.instruction_shape
                 ),
