@@ -132,7 +132,7 @@ def validate_args_and_maybe_create_graph_inputs(
     sub_args,
     tracer,
     tx,
-    manually_set_subgraph_inputs,
+    set_subgraph_inputs,
     description,
 ):
     from . import AutogradFunctionContextVariable, ConstantVariable, EnumVariable
@@ -140,47 +140,64 @@ def validate_args_and_maybe_create_graph_inputs(
 
     assert tracer.parent is not None
 
-    args = []
-    for a in sub_args:
-        assert isinstance(a, VariableTracker)
-        if not manually_set_subgraph_inputs:
-            args.append(a)
-            continue
+    if set_subgraph_inputs == "flatten_manual":
+        flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
+            ListVariable(sub_args)
+        ).unpack_var_sequence(tx)
 
-        if isinstance(a, (ConstantVariable, EnumVariable)):
-            # This arg is not used in the body of the higher order op.
-            # Currently, this new input is added to make the calls
-            # happy, which expect a fixed number of arguments. In
-            # future, we can clean this up.
-            tracer.create_graph_input("const")
-            new_arg = a
-        # Weird special case, we probably want to delete it or fold it
-        # into the next case (of `a` being placeable into a graph)
-        elif isinstance(a, AutogradFunctionContextVariable):
-            tracer.create_graph_input(a.as_proxy().node.name)
-            new_arg = a
-        # If `a` can be put into a graph
-        elif a.maybe_fx_node() is not None:
-            node = a.maybe_fx_node()
-            new_proxy = tracer.create_graph_input(node.name)
-            example_value = (
-                node.meta["example_value"] if "example_value" in node.meta else None
-            )
-            new_arg = wrap_fx_proxy_cls(
-                target_cls=type(a),
-                tx=tx,
-                proxy=new_proxy,
-                example_value=example_value,
-            )
-        # If `a` cannot be put into a graph
-        else:
-            # HOPs work much better if they use speculate_subgraph(manually_set_subgraph_inputs=False).
-            raise unimplemented(
-                f"{description} with body that accepts non-Tensors as input. "
-                f"Got: {a.python_type()}"
-            )
-        args.append(new_arg)
-    return args
+        flat_inputs = validate_args_and_maybe_create_graph_inputs(
+            flat_args.unpack_var_sequence(tx),
+            tracer,
+            tx,
+            set_subgraph_inputs="manual",
+            description=description,
+        )
+
+        return _make_inlined(tx, pytree.tree_unflatten)(
+            ListVariable(flat_inputs), tree_spec
+        ).unpack_var_sequence(tx)
+    else:
+        args = []
+        for a in sub_args:
+            assert isinstance(a, VariableTracker)
+            if set_subgraph_inputs == "automatic":
+                args.append(a)
+                continue
+
+            if isinstance(a, (ConstantVariable, EnumVariable)):
+                # This arg is not used in the body of the higher order op.
+                # Currently, this new input is added to make the calls
+                # happy, which expect a fixed number of arguments. In
+                # future, we can clean this up.
+                tracer.create_graph_input("const")
+                new_arg = a
+            # Weird special case, we probably want to delete it or fold it
+            # into the next case (of `a` being placeable into a graph)
+            elif isinstance(a, AutogradFunctionContextVariable):
+                tracer.create_graph_input(a.as_proxy().node.name)
+                new_arg = a
+            # If `a` can be put into a graph
+            elif a.maybe_fx_node() is not None:
+                node = a.maybe_fx_node()
+                new_proxy = tracer.create_graph_input(node.name)
+                example_value = (
+                    node.meta["example_value"] if "example_value" in node.meta else None
+                )
+                new_arg = wrap_fx_proxy_cls(
+                    target_cls=type(a),
+                    tx=tx,
+                    proxy=new_proxy,
+                    example_value=example_value,
+                )
+            # If `a` cannot be put into a graph
+            else:
+                # HOPs work much better if they use speculate_subgraph(set_subgraph_inputs="automatic").
+                raise unimplemented(
+                    f"{description} with body that accepts non-Tensors as input. "
+                    f"Got: {a.python_type()}"
+                )
+            args.append(new_arg)
+        return args
 
 
 # See NOTE [HigherOrderOperator tracing design] for details of the design
@@ -196,14 +213,16 @@ def speculate_subgraph(
     source_target=None,
     always_restore=False,
     enable_grad=None,
-    # NOTE [Temporary argument `manually_set_subgraph_inputs`]
-    # If manually_set_subgraph_inputs=True, then we manually add
-    # the `sub_args` to `subgraph`, if False then we rely
-    # on tracer's lifting mechanism to lift these args.
+    # NOTE [Temporary argument `set_subgraph_inputs`]
+    # If set_subgraph_inputs="manual", we manually add the `sub_args` to `subgraph`,
+    # If "automatic", we rely on tracer's lifting mechanism to lift these args.
+    # If "flatten_manual", we first flatten the sub_args into a flattend list, then manually
+    # set the flattend inputs to the subgraph. This saves us from having to mapping the automatically
+    # lifted inputs back to their original position, where ordering of input matters e.g. map.
     # NOTE: Default `True` is temporary and plan is
     #       to always lift args in future and remove this
     #       argument.
-    manually_set_subgraph_inputs=True,
+    set_subgraph_inputs="manual",
     restore_side_effects=True,
     should_flatten_outputs=False,
     should_flatten_inputs=False,
@@ -214,11 +233,9 @@ def speculate_subgraph(
     if sub_kwargs is None:
         sub_kwargs = {}
 
-    # See NOTE [Temporary argument `manually_set_subgraph_inputs`]
-    if sub_kwargs and manually_set_subgraph_inputs:
-        unimplemented(
-            "Use `manually_set_subgraph_inputs=False` when passing `sub_kwargs`."
-        )
+    # See NOTE [Temporary argument `set_subgraph_inputs`]
+    if sub_kwargs and set_subgraph_inputs != "automatic":
+        unimplemented("Use `set_subgraph_inputs='automatic` when passing `sub_kwargs`.")
 
     try:
         f, sub_args, sub_kwargs = VariableTracker.apply(
@@ -228,40 +245,17 @@ def speculate_subgraph(
         )
 
         with tx.output.subtracer(source_target, tracer) as subtracer:
-            if should_flatten_inputs:
-                if sub_kwargs:
-                    unimplemented(
-                        "Passing both `should_flatten_inputs=True` and `sub_kwargs` is not supported."
-                    )
+            args = validate_args_and_maybe_create_graph_inputs(
+                sub_args, subtracer, tx, set_subgraph_inputs, description
+            )
 
-                flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
-                    ListVariable(sub_args)
-                ).unpack_var_sequence(tx)
-
-                args = validate_args_and_maybe_create_graph_inputs(
-                    flat_args.items,
-                    subtracer,
-                    tx,
-                    manually_set_subgraph_inputs=True,
-                    description=description,
-                )
-                args = _make_inlined(tx, pytree.tree_unflatten)(
-                    ListVariable(args), tree_spec
-                )
-                args = args.items
-
-            else:
-                args = validate_args_and_maybe_create_graph_inputs(
-                    sub_args, subtracer, tx, manually_set_subgraph_inputs, description
-                )
-
-                validate_args_and_maybe_create_graph_inputs(
-                    sub_kwargs.values(),
-                    subtracer,
-                    tx,
-                    manually_set_subgraph_inputs=False,
-                    description=description,
-                )
+            validate_args_and_maybe_create_graph_inputs(
+                sub_kwargs.values(),
+                subtracer,
+                tx,
+                set_subgraph_inputs="automatic",
+                description=description,
+            )
 
             autograd_ctx = (
                 dynamo_enable_grad(tx, enable_grad)
@@ -535,7 +529,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 {},
                 "cond",
                 source_target=self.value,
-                manually_set_subgraph_inputs=False,
+                set_subgraph_inputs="automatic",
                 should_flatten_outputs=True,
             )
 
@@ -771,7 +765,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             "torch.ops.higher_order.map",
             source_target=self.value,
-            manually_set_subgraph_inputs=False,
+            set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
             should_flatten_inputs=True,
         )
@@ -1291,7 +1285,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             kwargs,
             description,
             source_target=self.value,
-            manually_set_subgraph_inputs=False,
+            set_subgraph_inputs="automatic",
             should_flatten_outputs=True,
         )
 
@@ -1305,7 +1299,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_node = make_attr(tx, body_name)
 
-        # Since, we call `speculate_subgraph` with `manually_set_subgraph_inputs=False`,
+        # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
         # all the arguments are lifted.
         lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
 
