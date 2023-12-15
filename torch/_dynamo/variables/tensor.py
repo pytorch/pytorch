@@ -251,6 +251,7 @@ class TensorVariable(VariableTracker):
         # <tensor> is later changed to another type
         if result is not None and self.source is not None:
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+            result.source = AttrSource(self.source, name)
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
@@ -262,7 +263,9 @@ class TensorVariable(VariableTracker):
                 and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
             ):
                 # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
-                return variables.misc.DelayGraphBreakVariable()
+                return variables.misc.DelayGraphBreakVariable(
+                    source=AttrSource(self.source, name)
+                )
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
@@ -287,10 +290,13 @@ class TensorVariable(VariableTracker):
                 if type(static_attr) != types.GetSetDescriptorType:
                     return None
 
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
-                )
+                proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
+                if self.source is not None:
+                    return wrap_fx_proxy(
+                        tx=tx, proxy=proxy, source=AttrSource(self.source, name)
+                    )
+                else:
+                    return wrap_fx_proxy(tx=tx, proxy=proxy)
 
             result = try_generic_attr_handling()
 

@@ -3979,7 +3979,6 @@ aot_autograd_failures = {
 }
 
 symbolic_aot_autograd_failures = {
-    xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
@@ -4130,10 +4129,16 @@ class TestEagerFusionOpInfo(AOTTestCase):
 
 
 aot_autograd_module_failures = set({
+    torch.nn.CTCLoss,  # torch._subclasses.fake_tensor.DynamicOutputShapeException: aten._ctc_loss.default
     torch.nn.GaussianNLLLoss,  # RuntimeError: It appears that you're trying to get value out
                                # of a tracing tensor with aten._local_scalar_dense.default -
                                # erroring out! It's likely that this is caused by data-dependent
                                # control flow or similar.
+    torch.nn.MultiLabelMarginLoss,  # AssertionError: The values for attribute 'shape' do not match:
+                                    # torch.Size([1]) != torch.Size([]). Outputs of the operator are different in
+                                    # eager-mode PyTorch vs AOTAutograd. This means the operator will have incorrect
+                                    # output underneath torch.compile. This could be because the operator's
+                                    # implementation not traceable or that there is a bug in AOTAutograd.
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.eq compares a mask input
                                   # to a causal mask tensor, to see if Boolean is_causal should be set
                                   # for TrnasformerEncoder layers, MHA and sdp custom kernels
@@ -4151,6 +4156,10 @@ symbolic_aot_autograd_module_failures = {
                          # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
     torch.nn.FractionalMaxPool2d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
+    torch.nn.BCELoss,  # new_size = _infer_size(target.size(), weight.size())
+                       # RuntimeError: expected int at position 0, but got: SymInt
+    torch.nn.CrossEntropyLoss,  # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
+    torch.nn.NLLLoss,  # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
 }
 
 
