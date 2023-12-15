@@ -1215,17 +1215,12 @@ class BuiltinVariable(VariableTracker):
                                 grapharg.example.grad = None
                         return VariableBuilder(tx, source)(grapharg.example.grad)
 
-                # No match for real value in inputs, fall back to
-                # var_getattr, which is sound (May produce a GetAttrVariable)
-                try:
-                    return obj.var_getattr(tx, name).clone(source=source)
-                except NotImplementedError:
-                    return GetAttrVariable(obj, name, **options)
+                return obj.dynamic_getattr(tx, name)
             else:
-                from .builder import wrap_fx_proxy
-
-                # Intermediaries grad, None is sound.
-                return wrap_fx_proxy(tx, obj.as_proxy().grad, **options)
+                example_value = obj.as_proxy().node.meta["example_value"]
+                if example_value.grad is not None:
+                    unimplemented("getattr on non-None grad - NYI")
+                return ConstantVariable(None)
         elif isinstance(
             obj,
             (
