@@ -2226,7 +2226,7 @@ class FlatParamHandle:
             param_changed = getattr(module, param_name) is not param
             needs_param_writeback = (
                 param_changed  # changed parameter variable itself
-                or not _same_storage_as_data_ptr(param, flat_param.untyped_storage().data_ptr())
+                or not _same_storage(param, flat_param_tensor)
             )
             if self._skipped_use_sharded_views and (
                 param_changed or needs_param_writeback
@@ -2267,8 +2267,8 @@ class FlatParamHandle:
                     # is `flat_param._cpu_grad`, which is on CPU
                     continue
 
-                needs_grad_writeback = flat_param_grad is None or not _same_storage_as_data_ptr(
-                    param.grad, flat_param.grad.untyped_storage().data_ptr()
+                needs_grad_writeback = flat_param_grad is None or not _same_storage(
+                    param.grad, flat_param_grad
                 )
                 if needs_grad_writeback:
                     if flat_param_grad is None:
@@ -2705,11 +2705,10 @@ def _warn_use_fake_reduce(log: logging.Logger, warning: str):
     log.warning(warning)
 
 
+@torch._dynamo.allow_in_graph
 def _same_storage(a, b):
     return a._typed_storage()._data_ptr() == b._typed_storage().data_ptr()
 
-def _same_storage_as_data_ptr(a: torch.Tensor, b) -> bool:
-    return a._typed_storage()._data_ptr() == b
 
 @torch._dynamo.allow_in_graph
 def _same_storage_size(a: torch.Tensor, b: int):
@@ -2719,4 +2718,4 @@ def _same_storage_size(a: torch.Tensor, b: int):
 @torch._dynamo.allow_in_graph
 def _storage_size_allocated(tensor: Tensor):
     storage_size: int = tensor._typed_storage()._size()
-    _p_assert(storage_size > 0, "Expects storage to be allocated")
+    return storage_size > 0

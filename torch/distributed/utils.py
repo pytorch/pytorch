@@ -334,5 +334,6 @@ def _replace_by_prefix(
         state_dict[new_key] = state_dict[key]
         del state_dict[key]
 
+
 def _data_ptr_allocated(tensor: torch.Tensor) -> bool:
-    return tensor._typed_storage()._data_ptr() > 0
+    return tensor.untyped_storage().data_ptr() > 0
