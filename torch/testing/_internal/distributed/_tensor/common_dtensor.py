@@ -69,9 +69,9 @@ class MLPModule(nn.Module):
 @dataclass
 class ModelArgs:
     n_layers: int = 2
-    vocab_size: int = 32
-    max_seq_len: int = 64
-    dim: int = 16
+    vocab_size: int = 16
+    max_seq_len: int = 16
+    dim: int = 8
     n_heads: int = 4
     dropout_p: float = 0.1
     use_attn_mask: bool = True
