@@ -66,10 +66,10 @@ i16 = torch.int16  # not tested
 i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
-u8 = torch.uint8  # not tested
+u8 = torch.uint8  # not tested except upsampling and interpolate ops
 
 _ops = partial(
-    ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8]
+    ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8, u8]
 )
 
 # Success forces pass; failure forces fail; skip unconditionally skips testing
@@ -203,7 +203,6 @@ inductor_expected_failures_single_sample["cpu"] = {
         f16
     },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
-    "bernoulli": {f16, f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
     "cross": {f16},
@@ -229,7 +228,6 @@ inductor_expected_failures_single_sample["cpu"] = {
 inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "atanh": {f32},
-    "bernoulli": {f16, f32, f64},
     "cholesky": {f32, f64},
     "multinomial": {f16, f32, f64},
     "nn.functional.normalize": {f16},
@@ -350,13 +348,16 @@ inductor_override_kwargs = {
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
-    # Temporarily skip interpolate bilinear and bicubic tests:
+    # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
+    ("nn.functional.interpolate.bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
+    ("nn.functional.upsample_bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
+    ("nn.functional.interpolate.bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
+    ("nn.functional.upsample_bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
+    # Temporarily skip interpolat bicubic tests:
     "nn.functional.interpolate.bicubic": {
         "assert_equal": False,
         "check_gradient": False,
     },
-    "nn.functional.interpolate.bilinear": {"assert_equal": False},
-    "nn.functional.upsample_bilinear": {"assert_equal": False},
 }
 
 
@@ -448,6 +449,16 @@ class TestInductorOpInfo(TestCase):
         op_name = op.name
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
+
+        # Skip dtype=torch.uint8 for all ops except upsample and interpolate:
+        allowed_dtypes = [f16, f32, f64, i32, i64, b8]
+        if op_name not in (
+            "nn.functional.interpolate.bilinear",
+            "nn.functional.upsample_bilinear",
+            "nn.functional.upsample_nearest",
+        ):
+            if dtype not in allowed_dtypes:
+                raise unittest.SkipTest("Skipped!")
 
         device_type = torch.device(device).type
 
