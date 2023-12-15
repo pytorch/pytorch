@@ -1663,7 +1663,6 @@ class TestExport(TestCase):
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
     @testing.expectedFailureRetraceability
-    @testing.expectedFailureNonStrict
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
