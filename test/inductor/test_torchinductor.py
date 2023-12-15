@@ -686,6 +686,22 @@ class CommonTemplate:
                 ],
             )
 
+    def test_index_put_bf16(self):
+        def fn(inp, src, index):
+            inp2 = inp.clone()
+            inp2[index] = src
+            return inp2
+
+        for dtype in [torch.int64, torch.bool, torch.bfloat16]:
+            self.common(
+                fn,
+                [
+                    torch.zeros(3, 5, dtype=dtype),
+                    torch.ones((2, 5), dtype=dtype),
+                    torch.tensor([0, 1]),
+                ],
+            )
+
     def test_randn_generator(self):
         def fn(a, generator):
             torch.randn([20, 20], generator=generator, device=a.device)
