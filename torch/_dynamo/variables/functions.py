@@ -82,8 +82,8 @@ class BaseUserFunctionVariable(VariableTracker):
             self, list(self.self_args()) + list(args), kwargs
         )
 
-    def num_parameters(self):
-        return len(inspect.signature(self.get_function()).parameters)
+    def inspect_parameter_names(self):
+        return list(inspect.signature(self.get_function()).parameters)
 
     def closure_vars(self, tx):
         return {}
@@ -198,9 +198,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                         closure_cell_contents = AttrSource(
                             closure_cell, "cell_contents"
                         )
-                        contents_var = VariableBuilder(parent, closure_cell_contents)(
-                            cell.cell_contents
-                        )
+                        try:
+                            contents_var = VariableBuilder(
+                                parent, closure_cell_contents
+                            )(cell.cell_contents)
+                        except ValueError:
+                            # Cell has not yet been assigned
+                            contents_var = variables.DeletedVariable()
 
                         if (
                             closure_cell_contents.name()
@@ -293,8 +297,8 @@ class UserMethodVariable(UserFunctionVariable):
                 )
         return super().call_function(tx, args, kwargs)
 
-    def num_parameters(self):
-        return super().num_parameters() - 1
+    def inspect_parameter_names(self):
+        return super().inspect_parameter_names()[1:]
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
@@ -772,7 +776,10 @@ class TritonKernelVariable(VariableTracker):
             if "grid" not in kwargs:
                 raise Unsupported("Triton kernel requires to be called with a grid")
             grid = kwargs.pop("grid")
-            return self.clone(grid=grid).call_function(tx, args, kwargs)
+            # rewrite kernel.run(*args, grid=grid) to kernel[grid](*args)
+            return TritonKernelVariable(
+                kernel=self.kernel, kernel_idx=self.kernel_idx, grid=grid
+            ).call_function(tx, args, kwargs)
 
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)
