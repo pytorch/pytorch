@@ -305,6 +305,8 @@ batch_norm_cpu_collect_stats_channels_last_impl(
       }
     });
   } else {
+    /*
+    // Method 1: direct single reduction when N <= num_threads
     at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
       for (const auto c : c10::irange(begin, end)) {
         accscalar_t sum = 0;
@@ -323,6 +325,55 @@ batch_norm_cpu_collect_stats_channels_last_impl(
           _var_sum += (input_data[t * n_channel + c] - mean_data[c]) * (input_data[t * n_channel + c] - mean_data[c]);
         }
         var_sum_data[c] = _var_sum;
+      }
+    });
+    */
+
+    // Method 2: direct single reduction and vertical tile on n_channel when N <= num_threads
+    int64_t TILE_SIZE = 256;
+    // compute mean per input
+    Tensor sum = at::zeros({n_channel}, input.options());
+    scalar_t* sum_data = sum.data_ptr<scalar_t>();
+    at::parallel_for(0, (n_channel + TILE_SIZE - 1) / TILE_SIZE, 1, [&](int64_t tile_idx_begin, int64_t tile_idx_end) {
+      for (int64_t tile_idx = tile_idx_begin; tile_idx < tile_idx_end; tile_idx++) {
+        int64_t jj_begin = tile_idx * TILE_SIZE;
+        int64_t jj_end = std::min(jj_begin + TILE_SIZE, n_channel);
+        scalar_t* sum_ptr = sum_data + jj_begin;
+        scalar_t* mean_ptr = mean_data + jj_begin;
+        for (const auto i : c10::irange(N)) {
+          const scalar_t* x_ptr = input_data + (i * n_channel + jj_begin);
+          vec::map2<scalar_t>(
+            [](Vec x, Vec y) { return x + y; },
+            sum_ptr,
+            x_ptr,
+            sum_ptr,
+            jj_end - jj_begin);
+        }
+        vec::map<scalar_t>(
+          [N](Vec x) { return x / Vec(N); },
+          mean_ptr,
+          sum_ptr,
+          jj_end - jj_begin);
+      }
+    });
+
+    // compute variance per input
+    at::parallel_for(0, (n_channel + TILE_SIZE - 1) / TILE_SIZE, 1, [&](int64_t tile_idx_begin, int64_t tile_idx_end) {
+      for (int64_t tile_idx = tile_idx_begin; tile_idx < tile_idx_end; tile_idx++) {
+        int64_t jj_begin = tile_idx * TILE_SIZE;
+        int64_t jj_end = std::min(jj_begin + TILE_SIZE, n_channel);
+        scalar_t* var_sum_ptr = var_sum_data + jj_begin;
+        scalar_t* mean_ptr = mean_data + jj_begin;
+        for (const auto i : c10::irange(N)) {
+          const scalar_t* x_ptr = input_data + (i * n_channel + jj_begin);
+          vec::map3<scalar_t>(
+            [](Vec x, Vec y, Vec mean) { return y + (x - mean) * (x - mean); },
+            var_sum_ptr,
+            x_ptr,
+            var_sum_ptr,
+            mean_ptr,
+            jj_end - jj_begin);
+        }
       }
     });
   }
