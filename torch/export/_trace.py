@@ -445,11 +445,9 @@ def _export(
                 gm, sig = aot_export(Wrapper(mod), args, **kwargs)
 
                 def strip_root(x):
-                    if isinstance(x, str):
-                        if x.startswith("_export_root."):
-                            return x[len("_export_root.") :]
-                        if x.startswith("_export_root"):
-                            return x[len("_export_root") :]
+                    if isinstance(x, str) and x.startswith("_export_root"):
+                        stripped = x[len("_export_root") :]
+                        return stripped[1:] if stripped.startswith(".") else stripped
                     return x
 
                 def fixup_key(x):
