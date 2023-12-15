@@ -598,8 +598,6 @@ class TestCUSPARSELT(TestCase):
 
     @parametrize("dense_input_shape", [(128, 128)])
     def test_cslt_sparse_mm_int8_in_fp16_out(self, dense_input_shape, device):
-        assert False
-
         A = rand_sparse_semi_structured_mask(128, 128, dtype=torch.int8)
         A_compressed = torch._cslt_compress(A)
 
