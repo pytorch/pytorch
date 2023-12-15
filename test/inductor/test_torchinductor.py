@@ -296,7 +296,7 @@ def check_model(
         ]
         del eager_result
 
-    orig_model = None
+    ref_model = model
     if reference_in_float:
         # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
         def upcast_fn(x):
@@ -312,16 +312,11 @@ def check_model(
         ref_inputs = list(map(upcast_fn, example_inputs))
         ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
         if has_lowp_args and hasattr(model, "to"):
-            orig_model = copy.deepcopy(model)
-            model = model.to(torch.float)
+            ref_model = copy.deepcopy(model).to(torch.float)
 
     torch.manual_seed(0)
 
-    correct = model(*ref_inputs, **ref_kwargs)
-    # downcast the model back if needed
-    if reference_in_float and has_lowp_args and hasattr(model, "to"):
-        assert orig_model is not None
-        model = orig_model
+    correct = ref_model(*ref_inputs, **ref_kwargs)
 
     torch._inductor.metrics.reset()
 
