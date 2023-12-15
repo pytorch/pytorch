@@ -31,14 +31,14 @@ class KernelCounts(NamedTuple):
 # This maps the test name to the
 # expected kernel count
 KERNEL_COUNT_OVERRIDES = {
-    "test_rmsprop_foreach_cpu_weight_decay": 12,
-    "test_nadam_foreach_cpu_weight_decay_momentum_decay": 20,
-    "test_adamw_foreach_cuda_amsgrad_capturable": 3,
-    "test_adamw_cuda_amsgrad_capturable": 6,
-    "test_adam_cuda_amsgrad_capturable": 6,
-    "test_adadelta_foreach_cpu_weight_decay_maximize": 12,
-    "test_adadelta_foreach_cpu_rho_weight_decay": 12,
-    "test_adadelta_foreach_cpu_weight_decay": 12,
+    "test_rmsprop_foreach_weight_decay_cpu": 12,
+    "test_nadam_foreach_weight_decay_momentum_decay_cpu": 20,
+    "test_adamw_foreach_amsgrad_capturable_cuda": 3,
+    "test_adamw_amsgrad_capturable_cuda": 6,
+    "test_adam_amsgrad_capturable_cuda": 6,
+    "test_adadelta_foreach_weight_decay_maximize_cpu": 12,
+    "test_adadelta_foreach_rho_weight_decay_cpu": 12,
+    "test_adadelta_foreach_weight_decay_cpu": 12,
 }
 
 # also tracks currently supported optimizers
@@ -69,7 +69,7 @@ def build_compiled_opt_kwarg_db():
                     kwargs = dict(optim_inputs.kwargs)
                     name = (
                         f"test_{optim_info.optim_cls.__name__.lower()}"
-                        f"{'_foreach' if foreach else ''}_{device}"
+                        f"{'_foreach' if foreach else ''}"
                     )
 
                     for key in optim_inputs.kwargs:
@@ -77,8 +77,10 @@ def build_compiled_opt_kwarg_db():
                             continue
                         name += "_" + key
 
+                    name += f"_{device}"
+
                     # Eager for-loop impl doesn't support capturable ASGD
-                    if name == "test_asgd_cuda_capturable":
+                    if name == "test_asgd_capturable_cuda":
                         continue
 
                     kwargs["foreach"] = foreach
@@ -91,6 +93,15 @@ def build_compiled_opt_kwarg_db():
                             if foreach and device == "cuda"
                             else KERNEL_COUNTS[optim_info.optim_cls].singletensor
                         )
+
+                    # Note on tolerances:
+                    # test_adadelta_foreach_rho_weight_decay_cuda
+                    # Mismatched elements: 1 / 100 (1.0%)
+                    # Greatest absolute difference: 2.0936131477355957e-05 at index (2, 7) (up to 2e-05 allowed)
+                    # Greatest relative difference: 8.520411211065948e-05 at index (2, 7) (up to 1e-06 allowed)
+                    if optim_info.optim_cls is Adadelta:
+                        kwargs["rtol"] = 2e-5
+                        kwargs["atol"] = 2e-5
 
                     compiled_opt_db.append((optim_info.optim_cls, name, kwargs))
 
@@ -138,7 +149,15 @@ def compile_opt(opt_compiled, closure=None):
     return torch.compile(fn, backend="inductor", fullgraph=True)
 
 
-def make_test(optim_cls, closure=None, kernel_count=2, device="cuda:0", **kwargs):
+def make_test(
+    optim_cls,
+    closure=None,
+    kernel_count=2,
+    device="cuda",
+    atol=None,
+    rtol=None,
+    **kwargs,
+):
     def test_fn(self):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
@@ -162,27 +181,24 @@ def make_test(optim_cls, closure=None, kernel_count=2, device="cuda:0", **kwargs
             opt_eager.step()
             opt_eager.step()
 
-        # Note on tolerances:
-        # test_adadelta_foreach_cuda_rho_weight_decay
-        # Mismatched elements: 1 / 100 (1.0%)
-        # Greatest absolute difference: 2.0936131477355957e-05 at index (2, 7) (up to 2e-05 allowed)
-        # Greatest relative difference: 8.520411211065948e-05 at index (2, 7) (up to 1e-06 allowed)
         self.assertEqual(
             list(model_eager.parameters()),
             list(model_compiled.parameters()),
-            atol=2e-5,
-            rtol=2e-5,
+            atol=atol,
+            rtol=rtol,
         )
 
-        # currently we don't mutate step properly until
-        # we resolve
+        # currently we don't mutate step properly until we resolve
         # https://github.com/pytorch/pytorch/issues/115679
         if optim_cls not in (Adadelta, Rprop, RMSprop):
             for p_eager, p_compiled in zip(
                 model_eager.parameters(), model_compiled.parameters()
             ):
                 self.assertEqual(
-                    opt_eager.state[p_eager], opt_compiled.state[p_compiled]
+                    opt_eager.state[p_eager],
+                    opt_compiled.state[p_compiled],
+                    atol=atol,
+                    rtol=rtol,
                 )
 
         if self.check_kernel_count:
