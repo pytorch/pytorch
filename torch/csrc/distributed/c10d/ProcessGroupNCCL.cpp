@@ -1213,13 +1213,14 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       "ProcessGroupNCCL's watchdog got stuck for ",
       heartbeatTimeoutInSec_,
       "seconds without making progress in monitoring enqueued collectives. ",
-      "This typically indicates a nccl/cuda API hang blocking the watchdog, ",
+      "This typically indicates a NCCL/CUDA API hang blocking the watchdog, ",
       "and could be triggered by another thread holding the GIL inside a ",
-      "cuda api, or other deadlock-prone behaviors.",
+      "CUDA api, or other deadlock-prone behaviors.",
       "If you suspect the watchdog is not actually stuck and a longer timeout would help, ",
-      "you can either increase the timeout(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
-      "or disable the heartbeat monitor(TORCH_NCCL_ENABLE_MONITORING=0)"
-      "If neither does not help, please file a bug to PyTorch.");
+      "you can either increase the timeout (TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
+      "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
+      "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
+      "or false positive abort; otherwise, please report a watchdog hang bug to PyTorch.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
