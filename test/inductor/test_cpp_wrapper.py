@@ -114,6 +114,7 @@ if TEST_WITH_ROCM:
         "test_custom_op_cuda",
         "test_convolution1_cuda",
         "test_foreach_cpp_wrapper",
+        "test_index_put1",
         "test_index_put_deterministic_fallback_cuda",
         "test_index_tensor_cuda",
         "test_linear_relu",
