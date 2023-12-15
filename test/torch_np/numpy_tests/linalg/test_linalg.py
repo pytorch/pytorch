@@ -14,9 +14,9 @@ import traceback
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import numpy
+import pytest
 
 import torch
-import pytest
 
 from numpy.linalg.linalg import _multi_dot_matrix_chain_order
 from pytest import raises as assert_raises

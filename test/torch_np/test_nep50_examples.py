@@ -13,6 +13,7 @@ try:
 except ImportError:
     HAVE_NUMPY = False
 
+import torch
 import torch._numpy as tnp
 from torch._numpy import (  # noqa: F401
     array,
@@ -28,7 +29,6 @@ from torch._numpy import (  # noqa: F401
     uint8,
 )
 from torch._numpy.testing import assert_allclose
-import torch
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,

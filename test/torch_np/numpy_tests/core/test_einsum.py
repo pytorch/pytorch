@@ -5,6 +5,8 @@ import itertools
 
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
+import torch
+
 import torch._numpy as np
 from pytest import raises as assert_raises
 from torch._numpy.testing import (
@@ -21,7 +23,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-import torch
 
 skip = functools.partial(skipif, True)
 

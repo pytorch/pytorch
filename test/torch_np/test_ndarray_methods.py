@@ -4,9 +4,9 @@ import itertools
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 import numpy
-import torch
 
 import pytest
+import torch
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (

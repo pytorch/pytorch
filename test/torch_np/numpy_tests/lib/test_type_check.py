@@ -5,6 +5,8 @@ import functools
 
 from unittest import expectedFailure as xfail, skipIf as skipif
 
+import torch
+
 from pytest import raises as assert_raises
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -12,7 +14,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
-import torch
 
 
 if TEST_WITH_TORCHDYNAMO:

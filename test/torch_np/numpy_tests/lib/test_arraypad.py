@@ -2,13 +2,14 @@
 
 from unittest import skipIf as skipif
 
+import torch
+
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xpassIfTorchDynamo,
 )
-import torch
 
 
 # If we are going to trace through these, we should use NumPy

@@ -9,6 +9,7 @@ Extensive tests of this sort of functionality is in numpy_tests/core/*scalar*
 Also test the isscalar function (which is deliberately a bit more lax).
 """
 
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -18,7 +19,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
-import torch
 
 
 if TEST_WITH_TORCHDYNAMO:

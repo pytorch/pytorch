@@ -13,6 +13,8 @@ import operator
 
 from unittest import skipIf as skip, SkipTest
 
+import torch
+
 from pytest import raises as assert_raises
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -21,7 +23,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
-import torch
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np

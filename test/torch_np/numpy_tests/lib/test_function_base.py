@@ -13,9 +13,9 @@ import hypothesis
 import hypothesis.strategies as st
 
 import numpy
-import torch
 
 import pytest
+import torch
 from hypothesis.extra.numpy import arrays
 from pytest import raises as assert_raises
 

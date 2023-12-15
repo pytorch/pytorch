@@ -3,9 +3,9 @@
 from unittest import expectedFailure as xfail
 
 import numpy
+import torch
 
 import torch._numpy as tnp
-import torch
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,

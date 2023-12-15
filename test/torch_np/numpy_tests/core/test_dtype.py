@@ -12,6 +12,7 @@ from typing import Any
 from unittest import skipIf as skipif
 
 import pytest
+import torch
 from pytest import raises as assert_raises
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -22,7 +23,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
-import torch
 
 skip = functools.partial(skipif, True)
 

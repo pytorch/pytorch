@@ -20,9 +20,10 @@ from decimal import Decimal
 
 from unittest import expectedFailure as xfail, skipIf as skipif
 
-import torch
 import numpy
 import pytest
+
+import torch
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (

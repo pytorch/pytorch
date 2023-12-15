@@ -13,7 +13,6 @@ import numpy
 
 # from numpy._utils import _pep440
 import pytest
-from pytest import raises as assert_raises
 
 # from hypothesis import given, settings
 # from hypothesis.strategies import sampled_from
@@ -21,6 +20,7 @@ from pytest import raises as assert_raises
 
 
 import torch
+from pytest import raises as assert_raises
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,

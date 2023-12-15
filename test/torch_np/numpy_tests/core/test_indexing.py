@@ -11,9 +11,9 @@ from itertools import product
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import pytest
+import torch
 
 from pytest import raises as assert_raises
-import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
