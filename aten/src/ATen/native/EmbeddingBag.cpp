@@ -1782,5 +1782,4 @@ Tensor _embedding_bag_sparse_backward_symint(
   return native::embedding_backward_symint(index_grad, indices, std::move(num_weights), padding_idx,
                                     scale_grad_by_freq, true);
 }
-}
 } // namespace at::native
