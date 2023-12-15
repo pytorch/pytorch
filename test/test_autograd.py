@@ -8672,25 +8672,59 @@ get_out().sum().backward()
             self.assertTrue(err_msg in e.output.decode("utf-8"))
 
     def test_view_func_replay(self):
-        def _assert_match_metadata(a, b):
-            self.assertEqual(a.size(), b.size())
-            self.assertEqual(a.stride(), b.stride())
-            self.assertEqual(a.storage_offset(), b.storage_offset())
+        with torch.autograd._force_original_view_tracking(True):
+            def _assert_match_metadata(a, b):
+                self.assertEqual(a.size(), b.size())
+                self.assertEqual(a.stride(), b.stride())
+                self.assertEqual(a.storage_offset(), b.storage_offset())
+                self.assertEqual(a.device, b.device)
+                self.assertEqual(a.dtype, b.dtype)
 
-        def _test_op(fn, inp, args):
-            out = fn(inp, *args)
-            self.assertTrue(out._is_view)
-            self.assertTrue(out._base is inp)
+            def _test_op(fn, inp, *args):
+                outs = fn(inp, *args)
+                # handle functions that return multiple views (e.g. split)
+                if isinstance(outs, torch.Tensor):
+                    outs = [outs]
 
-            new_inp = inp.clone()
-            _assert_match_metadata(new_inp, inp)
-            new_out = out._view_func(new_inp)
-            _assert_match_metadata(new_out, out)
+                for out in outs:
+                    self.assertTrue(out._is_view())
+                    self.assertTrue(out._base is inp)
 
-        _test_op(torch.select, torch.rand(2, 2), (0, 0))
-        _test_op(torch.as_strided, torch.rand(2, 2), ((4,), (1,)))
-        _test_op(torch.view_as_complex, torch.rand(2, 2), ())
-        _test_op(torch.view_as_real, torch.rand(2, 2, dtype=torch.cfloat), ())
+                    # forward view_func
+                    new_inp = inp.clone()
+                    _assert_match_metadata(new_inp, inp)
+                    new_out = out._view_func(new_inp)
+                    _assert_match_metadata(new_out, out)
+
+                    # reverse view_func
+                    new_out = out.detach()
+                    new_inp = out._rev_view_func_unsafe(new_out)
+                    _assert_match_metadata(new_inp, inp)
+                    self.assertTrue(new_inp._is_view())
+                    self.assertTrue(new_inp._base is new_out)
+
+            # TODO: Fix commented-out ops
+            _test_op(torch.ops.aten.alias.default, torch.rand(2, 2))
+            _test_op(torch.as_strided, torch.rand(2, 2), (4,), (1,))
+            _test_op(torch.diagonal, torch.rand(4, 4))
+            _test_op(torch.ops.aten.expand.default, torch.rand(4, 1), (-1, 3))
+            _test_op(torch.narrow, torch.rand(2, 2), 0, 1, 1)
+            _test_op(torch.permute, torch.rand(2, 3, 4), (1, 0, 2))
+            _test_op(torch.select, torch.rand(2, 2), 0, 0)
+            _test_op(torch.ops.aten.slice.Tensor, torch.rand(2, 2), 1, 1, 2)
+            # _test_op(torch.split, torch.rand(2, 2), 1)
+            # _test_op(torch.split_with_sizes, torch.rand(2, 4), [1, 3], -1)
+            _test_op(torch.squeeze, torch.rand(2, 1, 4))
+            _test_op(torch.squeeze, torch.rand(2, 1, 4), 1)
+            _test_op(torch.squeeze, torch.rand(2, 1, 1, 4), [1, 2])
+            _test_op(torch.t, torch.rand(2, 4))
+            _test_op(torch.transpose, torch.rand(2, 4), 0, 1)
+            # _test_op(torch.unbind, torch.rand(1, 5))
+            _test_op(torch.ops.aten.unfold.default, torch.rand(1, 5), 1, 3, 2)
+            _test_op(torch.unsqueeze, torch.rand(2, 4), -2)
+            _test_op(torch.ops.aten.view.default, torch.rand(2, 10), (-1, 5, 2))
+            _test_op(torch.view_as_complex, torch.rand(2, 2))
+            _test_op(torch.view_as_real, torch.rand(2, 2, dtype=torch.cfloat))
 
     def test_setup_context_when_forward_has_default_args(self):
         class PowFunction(Function):

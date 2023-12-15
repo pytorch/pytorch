@@ -404,22 +404,23 @@ def emit_view_lambda(f: NativeFunction, bindings: List[Binding]) -> str:
         input_base=input_base, replay_view_call=replay_view_call
     )
 
-    # TODO: Lol actually fix this
-    if f.root_name != "narrow":
-        input_view = "input_view"
-        reverse_replay_view_call = INVERSE_VIEW_DISPATCH.substitute(
-            inverse_name=inverse_view_name(f),
-            unpacked_args=(
-                # NB: skip input_base arg
-                ["self", f"{input_view}", "true"]
-                + list(updated_unpacked_args[1:])
-            ),
-        )
-        reverse_replay_view_func = REVERSE_REPLAY_VIEW_LAMBDA_FUNC.substitute(
-            input_view=input_view, reverse_replay_view_call=reverse_replay_view_call
-        )
-    else:
-        reverse_replay_view_func = ""
+    input_view = "input_view"
+    reverse_replay_view_call = INVERSE_VIEW_DISPATCH.substitute(
+        inverse_name=inverse_view_name(f),
+        unpacked_args=[
+            "self",
+            f"{input_view}",
+            # reapply_views=
+            "true",
+            # called_by_functionalization=
+            "false",
+            # skip input_base arg
+            *updated_unpacked_args[1:],
+        ],
+    )
+    reverse_replay_view_func = REVERSE_REPLAY_VIEW_LAMBDA_FUNC.substitute(
+        input_view=input_view, reverse_replay_view_call=reverse_replay_view_call
+    )
 
     is_view_with_metadata_change = (
         "true" if cpp.name(f.func) in VIEW_FUNCTIONS_WITH_METADATA_CHANGE else "false"
