@@ -56,8 +56,7 @@ namespace {
   const int MODE_MAX = 2;
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template<typename scalar_t>
 scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
