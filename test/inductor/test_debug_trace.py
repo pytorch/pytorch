@@ -76,7 +76,7 @@ buf1: SchedulerNode(ComputedBuffer)
 buf1.writes = [MemoryDep('buf1', c0, {c0: 256})]
 buf1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
 buf1.met_dependencies = []
-buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='buf2'), can_inplace=False, is_weak=False)]
+buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='buf2'), can_inplace=False, is_weak=False), NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
 buf1.group.device = cpu
 buf1.group.iteration = ((256,), ())
 buf1.sizes = ([256], [])
@@ -97,7 +97,7 @@ buf2: ExternKernelSchedulerNode(ExternKernelOut)
 buf2.writes = [StarDep(name='buf2')]
 buf2.unmet_dependencies = [StarDep(name='buf1')]
 buf2.met_dependencies = [StarDep(name='arg1_1')]
-buf2.users = [NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
+buf2.users = [NodeUser(node=ExternKernelSchedulerNode(name='buf2'), can_inplace=False, is_weak=False), NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
 buf2.node.kernel = extern_kernels.mm""",
         )
         self.assertExpectedInline(
@@ -133,7 +133,7 @@ buf0_buf1.users = []
     buf1.writes = [MemoryDep('buf1', c0, {c0: 256})]
     buf1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
     buf1.met_dependencies = []
-    buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='buf2'), can_inplace=False, is_weak=False)]
+    buf1.users = [NodeUser(node=ExternKernelSchedulerNode(name='buf2'), can_inplace=False, is_weak=False), NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
     buf1.group.device = cpu
     buf1.group.iteration = ((256,), ())
     buf1.sizes = ([256], [])
@@ -154,7 +154,7 @@ buf2: ExternKernelSchedulerNode(ExternKernelOut)
 buf2.writes = [StarDep(name='buf2')]
 buf2.unmet_dependencies = [StarDep(name='buf1')]
 buf2.met_dependencies = [StarDep(name='arg1_1')]
-buf2.users = [NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
+buf2.users = [NodeUser(node=ExternKernelSchedulerNode(name='buf2'), can_inplace=False, is_weak=False), NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
 buf2.node.kernel = extern_kernels.mm""",
         )
         # intentionally only cleanup on success so debugging test is easier
