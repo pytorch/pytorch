@@ -57,6 +57,11 @@ def fake_tree(mode, arg, t_constraints, source, sources):
             fake_tree(mode, arg, t_constraints, GetItemSource(source, i), sources)
             for i, arg in enumerate(arg)
         ]
+    if isinstance(arg, tuple):
+        return (
+            fake_tree(mode, arg, t_constraints, GetItemSource(source, i), sources)
+            for i, arg in enumerate(arg)
+        )
     elif isinstance(arg, dict):
         return {
             k: fake_tree(mode, arg, t_constraints, GetItemSource(source, k), sources)
@@ -64,6 +69,7 @@ def fake_tree(mode, arg, t_constraints, source, sources):
         }
     # TODO(avik): data classes
     else:
+        assert isinstance(arg, torch.Tensor), f"Unsupported type of arg: {type(arg)}"
         return fakify(mode, arg, t_constraints, source, sources)
 
 
