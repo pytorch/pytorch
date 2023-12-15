@@ -39,11 +39,10 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           fetch-depth: 1
-          submodules: false
+          submodules: true
       - name: Get docker release matrix
         id: generate_matrix
         run: |
-          ls -las
           MATRIX_BLOB="$(python3 .github/scripts/generate_docker_release_matrix.py)"
           echo "${MATRIX_BLOB}"
           echo "matrix=${MATRIX_BLOB}" >> "${GITHUB_OUTPUT}"
