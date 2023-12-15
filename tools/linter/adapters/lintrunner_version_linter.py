@@ -33,7 +33,7 @@ def toVersionString(version_tuple: Tuple[int, int, int]) -> str:
 
 if __name__ == "__main__":
     version_str = (
-        subprocess.run(["lintrunner", "-V"], stdout=subprocess.PIPE)
+        subprocess.run(["lintrunner", "-V"], stdout=subprocess.PIPE, check=True)
         .stdout.decode("utf-8")
         .strip()
     )

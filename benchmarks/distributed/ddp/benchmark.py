@@ -32,7 +32,7 @@ def allgather_object(obj):
 
 
 def allgather_run(cmd):
-    proc = subprocess.run(shlex.split(cmd), capture_output=True)
+    proc = subprocess.run(shlex.split(cmd), capture_output=True, check=False)
     assert proc.returncode == 0
     return allgather_object(proc.stdout.decode("utf-8"))
 

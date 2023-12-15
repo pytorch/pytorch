@@ -30,7 +30,7 @@ class TestFunctionalAutogradBenchmark(TestCase):
             if disable_gpu:
                 cmd += ['--gpu', '-1']
 
-            res = subprocess.run(cmd)
+            res = subprocess.run(cmd, check=False)
 
             self.assertTrue(res.returncode == 0)
             # Check that something was written to the file

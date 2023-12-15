@@ -109,6 +109,7 @@ select = [
     "TRY200",
     "TRY302",
     "UP",
+    "PLW1510", # subprocess-run-without-check
 ]
 
 [tool.ruff.per-file-ignores]

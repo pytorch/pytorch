@@ -260,6 +260,7 @@ class Runner:
                 stderr=subprocess.STDOUT,
                 encoding="utf-8",
                 executable=SHELL,
+                check=False,
             )
 
             if proc.returncode:

@@ -98,6 +98,7 @@ def is_newer_hash(new_hash: str, old_hash: str, repo_name: str) -> bool:
                 f"git show --no-patch --no-notes --pretty=%ct {hash}".split(),
                 capture_output=True,
                 cwd=f"{repo_name}",
+                check=True,
             )
             .stdout.decode("utf-8")
             .strip()
@@ -133,24 +134,26 @@ def main() -> None:
             f"git rev-parse {args.branch}".split(),
             capture_output=True,
             cwd=f"{args.repo_name}",
+            check=True,
         )
         .stdout.decode("utf-8")
         .strip()
     )
     with open(f"{args.pin_folder}/{args.repo_name}.txt", "r+") as f:
         old_hash = f.read().strip()
-        subprocess.run(f"git checkout {old_hash}".split(), cwd=args.repo_name)
+        subprocess.run(f"git checkout {old_hash}".split(), cwd=args.repo_name, check=True)
         f.seek(0)
         f.truncate()
         f.write(f"{hash}\n")
     if is_newer_hash(hash, old_hash, args.repo_name):
         # if there was an update, push to branch
-        subprocess.run(f"git checkout -b {branch_name}".split())
-        subprocess.run(f"git add {args.pin_folder}/{args.repo_name}.txt".split())
+        subprocess.run(f"git checkout -b {branch_name}".split(), check=True)
+        subprocess.run(f"git add {args.pin_folder}/{args.repo_name}.txt".split(), check=True)
         subprocess.run(
-            "git commit -m".split() + [f"update {args.repo_name} commit hash"]
+            "git commit -m".split() + [f"update {args.repo_name} commit hash"],
+            check=True,
         )
-        subprocess.run(f"git push --set-upstream origin {branch_name} -f".split())
+        subprocess.run(f"git push --set-upstream origin {branch_name} -f".split(), check=True)
         print(f"changes pushed to branch {branch_name}")
         if pr_num is None:
             # no existing pr, so make a new one and approve it

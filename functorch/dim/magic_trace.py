@@ -21,9 +21,10 @@ def magic_trace(output="trace.fxt", magic_trace_cache="/tmp/magic-trace"):
                 magic_trace_cache,
                 "-q",
                 "https://github.com/janestreet/magic-trace/releases/download/v1.0.2/magic-trace",
-            ]
+            ],
+            check=True,
         )
-        subprocess.run(["chmod", "+x", magic_trace_cache])
+        subprocess.run(["chmod", "+x", magic_trace_cache], check=True)
     args = [magic_trace_cache, "attach", "-pid", str(pid), "-o", output]
     p = subprocess.Popen(args, stderr=subprocess.PIPE, encoding="utf-8")
     while True:

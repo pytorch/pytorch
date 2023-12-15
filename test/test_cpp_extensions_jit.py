@@ -34,7 +34,7 @@ def remove_build_path():
         if IS_WINDOWS:
             # rmtree returns permission error: [WinError 5] Access is denied
             # on Windows, this is a word-around
-            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
+            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE, check=True)
         else:
             shutil.rmtree(default_build_root)
 
@@ -202,7 +202,7 @@ class TestCppExtensionJIT(common.TestCase):
             if IS_WINDOWS:
                 # rmtree returns permission error: [WinError 5] Access is denied
                 # on Windows, this is a word-around
-                subprocess.run(["rm", "-rf", temp_dir], stdout=subprocess.PIPE)
+                subprocess.run(["rm", "-rf", temp_dir], stdout=subprocess.PIPE, check=True)
             else:
                 shutil.rmtree(temp_dir)
 

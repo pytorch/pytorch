@@ -30,6 +30,7 @@ def get_tag(pytorch_root: Union[str, Path]) -> str:
             cwd=pytorch_root,
             encoding="ascii",
             capture_output=True,
+            check=True,
         ).stdout.strip()
         if RELEASE_PATTERN.match(tag):
             return tag

@@ -762,6 +762,7 @@ class TestStandaloneCPPJIT(TestCase):
                     [exec_path],
                     shell=shell,
                     stdout=subprocess.PIPE,
+                    check=False,
                 )
                 self.assertEqual(r.returncode, 0)
                 self.assertEqual(
