@@ -712,8 +712,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       terminateProcessGroup_(false),
       terminateHeartbeatMonitorThread_(false),
       collectiveDebugInfoMode_(false),
-      uid_(process_group_id++),
-      intraNodeComm_(initIntraNodeComm()) {
+      uid_(process_group_id++) {
   TORCH_CHECK_WITH(
       ValueError,
       at::cuda::getNumGPUs() != 0,
@@ -788,7 +787,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
   std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
-            << "NCCL version: " << getNcclVersion()
+            << "NCCL version: " << getNcclVersion() << ", size: " << size
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -894,12 +893,6 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
       device);
   NCCLComm::split(comm[0].get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
 #endif
-}
-
-c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
-    initIntraNodeComm() {
-  return intra_node_comm::IntraNodeComm::rendezvous(
-      store_, std::to_string(uid_), rank_, size_);
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -1151,7 +1144,8 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
   // Serialize all calls to this function to avoid corrupting data, but allow
   // multiple calls in one runtime. User is responsible for preserving the
   // output file from an earlier call before a later call overwrites it.
-  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
+  static std::mutex writeDebugInfoMutex;
+  std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
   LOG(ERROR) << "ProcessGroupNCCL preparing to dump debug info.";
   if (ncclTraceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
@@ -2808,16 +2802,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
-  if (intraNodeComm_ != nullptr && tensors.size() == 1 &&
-      opts.reduceOp == ReduceOp::SUM) {
-    using namespace intra_node_comm;
-    auto algo = intraNodeComm_->selectAllReduceAlgo(tensors[0]);
-    if (algo != intra_node_comm::AllReduceAlgo::NONE) {
-      intraNodeComm_->allReduce(tensors[0], algo);
-      return c10::make_intrusive<IntraNodeCommWork>();
-    }
-  }
-
   check_gpu_tensors_different_devices(tensors);
 
   // @lint-ignore CLANGTIDY
