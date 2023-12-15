@@ -355,6 +355,10 @@ class CUDATemplateCaller(ChoiceCaller):
                 getattr(en, "name", "no_name")
                 for en in self.info_kwargs.get("epilogue_nodes", [])
             ]
+            epilogue_node_strs = [
+                str(en)
+                for en in self.info_kwargs.get("epilogue_nodes", [])
+            ]
             return {
                 "backend": "CUDA",
                 "op_type": type(op).__name__,
@@ -364,6 +368,7 @@ class CUDATemplateCaller(ChoiceCaller):
                 "element_accumulator": str(op.accumulator_type()),
                 "op_name": str(op.procedural_name()),
                 "epilogue_node_names": epilogue_node_names,
+                "epilogue_node_strs": epilogue_node_strs,
                 "instruction_shape": str(
                     op.tile_description.math_instruction.instruction_shape
                 ),
