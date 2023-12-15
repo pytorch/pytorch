@@ -76,25 +76,25 @@ py_sym_types = (SymInt, SymFloat, SymBool)
 
 
 @dataclass
-class SymExprHash:
+class _SymExprHash:
     sym_obj: py_sym_types
 
     def __hash__(self) -> int:
         return hash((type(self.sym_obj), self.sym_obj.node.expr))
 
-    def __eq__(self, value: "SymExprHash") -> bool:
-        assert isinstance(value, SymExprHash)
+    def __eq__(self, value: "_SymExprHash") -> bool:
+        assert isinstance(value, _SymExprHash)
         return self.sym_obj.node.expr == value.sym_obj.node.expr
 
 
-def wrap_to_sym_expr_hash(key):
-    return SymExprHash(key) if isinstance(key, py_sym_types) else key
+def _wrap_to_sym_expr_hash(key):
+    return _SymExprHash(key) if isinstance(key, py_sym_types) else key
 
 
 
-class SymHashingDict:
+class _SymHashingDict:
     """
-    Wrapper around a dictionary that will convert sym types to hash with SymExprHash.
+    Wrapper around a dictionary that will convert sym types to hash with _SymExprHash.
     """
     def __init__(self):
         # optimistically hash sympy expressions, if those fail, fallback to symnodes
@@ -109,19 +109,19 @@ class SymHashingDict:
         existing_node = key.node in self.sym_node_dict
         if not existing_node and key.node.expr.free_symbols.issubset(self.graph_input_symbols):
             self.graph_input_symbols.update(key.node.expr.free_symbols)
-            self.wrapped_dict.__setitem__(wrap_to_sym_expr_hash(key), value)
+            self.wrapped_dict.__setitem__(_wrap_to_sym_expr_hash(key), value)
         self.sym_node_dict[key.node] = value
 
     def __getitem__(self, key):
-        if val := self.wrapped_dict.get(wrap_to_sym_expr_hash(key), None):
+        if val := self.wrapped_dict.get(_wrap_to_sym_expr_hash(key), None):
             return val
         return self.sym_node_dict[key.node]
 
     def __contains__(self, key):
-        return (self.wrapped_dict.__contains__(wrap_to_sym_expr_hash(key))) or key.node in self.sym_node_dict
+        return (self.wrapped_dict.__contains__(_wrap_to_sym_expr_hash(key))) or key.node in self.sym_node_dict
 
     def get(self, key, default=None):
-        if val := self.wrapped_dict.get(wrap_to_sym_expr_hash(key), default) is not default:
+        if val := self.wrapped_dict.get(_wrap_to_sym_expr_hash(key), default) is not default:
             return val
         return self.sym_node_dict.get(key.node, default)
 
@@ -510,7 +510,7 @@ class PythonKeyTracer(Tracer):
     def __init__(self):
         super().__init__(autowrap_modules=())
         self.tensor_tracker = WeakTensorKeyDictionary()
-        self.symnode_tracker = SymHashingDict()  # type: ignore[var-annotated]
+        self.symnode_tracker = _SymHashingDict()  # type: ignore[var-annotated]
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
