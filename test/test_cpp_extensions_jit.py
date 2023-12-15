@@ -40,6 +40,7 @@ def remove_build_path():
 
 
 # There's only one test that runs gracheck, run slow mode manually
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionJIT(common.TestCase):
     """Tests just-in-time cpp extensions.
     Don't confuse this with the PyTorch JIT (aka TorchScript).

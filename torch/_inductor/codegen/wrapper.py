@@ -531,14 +531,14 @@ class WrapperCodeGen(CodeGen):
         self.generate_extern_kernel_alloc(fallback_kernel, args)
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
-        ending = self.ending
-        if config.memory_planning and "view_as_complex" in str(extern_kernel.kernel):
-            # view operation fallbacks cause issues since inductor
-            # doesn't know the memory is still needed and might reuse it.
-            ending = f".clone(){ending}"
         output_name = extern_kernel.get_name()
         origin_node = extern_kernel.get_origin_node()
         kernel_name = extern_kernel.codegen_kernel_name()
+        ending = self.ending
+        if config.memory_planning and "view_as_complex" in kernel_name:
+            # view operation fallbacks cause issues since inductor
+            # doesn't know the memory is still needed and might reuse it.
+            ending = f".clone(){ending}"
         self.writeline(
             f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
         )
@@ -2058,7 +2058,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         args = args + output_args
         assert (
             fallback_kernel.abi_compatible_kernel is not None
-        ), f"abi_compatible_kernel is None for {fallback_kernel.kernel=}"
+        ), f"abi_compatible_kernel is None for {fallback_kernel.python_kernel_name=}"
         self.generate_c_shim_extern_kernel_call(
             fallback_kernel.abi_compatible_kernel, args
         )
