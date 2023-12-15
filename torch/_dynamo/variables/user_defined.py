@@ -142,25 +142,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args[0],
                 mutable_local=MutableLocal(),
             )
-        elif (
-            self.value is functools.wraps
-            and not kwargs
-            and len(args) == 1
-            and (
-                args[0].source is not None or args[0].can_reconstruct(tx.output.root_tx)
-            )
-        ):
-
-            def wraps(fn):
-                if isinstance(fn, variables.NestedUserFunctionVariable):
-                    if args[0].source:
-                        reconstructible = args[0].source
-                    else:
-                        reconstructible = args[0]
-                    return fn.clone(wrapped_reconstructible=reconstructible)
-                unimplemented(f"functools.wraps({fn})")
-
-            return variables.LambdaVariable(wraps)
         elif self.value is collections.deque and not kwargs:
             if len(args) == 0:
                 items = []

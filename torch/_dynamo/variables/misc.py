@@ -747,24 +747,6 @@ class SkipFilesVariable(VariableTracker):
 
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
-        # Allowlist a few popular classes(e.g, collections.OrderedDict) calls in skip files.
-        # elif self.value is collections.OrderedDict:
-        #     return BuiltinVariable.call_custom_dict(
-        #         tx, collections.OrderedDict, *args, **kwargs
-        #     )
-        # elif (
-        #     self.value is collections.defaultdict
-        #     and len(args) <= 1
-        #     and DefaultDictVariable.is_supported_arg(args[0])
-        # ):
-        #     return DefaultDictVariable(
-        #         {},
-        #         collections.defaultdict,
-        #         args[0],
-        #         mutable_local=MutableLocal(),
-        #     )
-        # Fold through the functions(e.g, collections.namedtuple)
-        # that inputs & outputs are all python constants
         elif (
             self.value in self.fold_through_function_to_wrapper().keys()
             and check_constant_args(args, kwargs)
@@ -822,24 +804,6 @@ class SkipFilesVariable(VariableTracker):
             msg = f"'skip function {self.value.__qualname__} in file {path}'"
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
-
-    # def call_method(
-    #     self,
-    #     tx,
-    #     name,
-    #     args: "List[VariableTracker]",
-    #     kwargs: "Dict[str, VariableTracker]",
-    # ) -> "VariableTracker":
-    #     if (
-    #         self.value in {collections.OrderedDict, collections.defaultdict}
-    #         and name == "fromkeys"
-    #     ):
-    #         from .builtin import BuiltinVariable
-
-    #         return BuiltinVariable.call_custom_dict_fromkeys(
-    #             tx, self.value, *args, **kwargs
-    #         )
-    #     return super().call_method(tx, name, args, kwargs)
 
 
 class TypingVariable(VariableTracker):
