@@ -22,10 +22,8 @@ import shutil
 import signal
 import subprocess
 import sys
-import sysconfig
 import tempfile
 import threading
-import warnings
 import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
@@ -1227,6 +1225,7 @@ def pick_vec_isa() -> VecISA:
     return invalid_vec_isa
 
 
+"""
 def get_compile_only(compile_only: bool = True) -> str:
     return "-c" if compile_only else ""
 
@@ -1306,6 +1305,7 @@ def use_standard_sys_dir_headers() -> str:
         return "-nostdinc"
     else:
         return ""
+"""
 
 
 @functools.lru_cache(None)
@@ -1338,6 +1338,7 @@ def homebrew_libomp() -> Tuple[bool, str]:
         return False, ""
 
 
+'''
 def get_include_and_linking_paths(
     include_pytorch: bool = False,
     vec_isa: VecISA = invalid_vec_isa,
@@ -1555,6 +1556,7 @@ def cpp_compile_command(
             -o {out_name}
         """,
     ).strip()
+'''
 
 
 def run_command_and_check(cmd: str):
