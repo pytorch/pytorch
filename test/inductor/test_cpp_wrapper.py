@@ -5,6 +5,9 @@ from typing import NamedTuple
 
 import torch
 from torch._inductor import config
+from torch.testing._internal.common_device_type import (
+    get_desired_device_type_test_bases,
+)
 from torch.testing._internal.common_utils import (
     IS_MACOS,
     slowTest,
@@ -40,8 +43,17 @@ except unittest.SkipTest:
     raise
 
 
-RUN_CPU = HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS
-RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN
+_desired_test_bases = get_desired_device_type_test_bases()
+RUN_CPU = (
+    HAS_CPU
+    and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+    and not IS_MACOS
+)
+RUN_CUDA = (
+    HAS_CUDA
+    and any(getattr(x, "device_type", "") == "cuda" for x in _desired_test_bases)
+    and not TEST_WITH_ASAN
+)
 
 
 class CppWrapperTemplate:
@@ -183,6 +195,7 @@ if RUN_CPU:
 
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
+        BaseTest("test_bernoulli1"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
@@ -218,6 +231,7 @@ if RUN_CPU:
         BaseTest("test_custom_op"),
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
+        BaseTest("test_index_put1"),
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
@@ -364,6 +378,7 @@ if RUN_CUDA:
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_batch_norm_2d_2"),
+        BaseTest("test_bernoulli1"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
@@ -372,6 +387,7 @@ if RUN_CUDA:
         BaseTest("test_conv_backward"),
         BaseTest("test_custom_op"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
+        BaseTest("test_index_put1"),
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_index_tensor"),

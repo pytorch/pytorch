@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
 from unittest.mock import patch, call
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestModule(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -304,6 +305,8 @@ class TestModule(TestCase):
             return {name: self._traverse_obj(o, func) for name, o in obj.items()}
         elif isinstance(obj, (torch.Tensor, torch.nn.Parameter)):
             return func(obj)
+        else:
+            return obj
 
     def _retain_grad(self, obj):
         # gradients needs to be retained to check for grad. This is useful when

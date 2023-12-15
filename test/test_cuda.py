@@ -64,6 +64,7 @@ if TEST_CUDA:
 _cycles_per_ms = None
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCuda(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -2164,7 +2165,7 @@ torch.cuda.synchronize()
     def test_graph_is_current_stream_capturing(self):
         self.assertFalse(torch.cuda.is_current_stream_capturing())
 
-        if (TEST_CUDA and (not TEST_WITH_ROCM) and int(torch.version.cuda.split(".")[0]) >= 11):
+        if TEST_CUDA and (not TEST_WITH_ROCM):
             s = torch.cuda.Stream()
             with torch.cuda.stream(s):
                 g = torch.cuda.CUDAGraph()
@@ -3401,6 +3402,7 @@ exit(2)
         self.assertEqual(rc, "0")
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot(self):
@@ -3897,6 +3899,7 @@ def reconstruct_from_tensor_metadata(metadata):
 
 
 @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlockStateAbsorption(TestCase):
 
     def checkCheckpointedBlock(self, before_block, after_block):

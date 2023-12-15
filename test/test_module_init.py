@@ -83,6 +83,7 @@ def build_constructor_arg_db():
         torch.nn.L1Loss: ((), {}),
         torch.nn.LPPool1d: ((2, 3), {}),
         torch.nn.LPPool2d: ((2, 3), {}),
+        torch.nn.LPPool3d: ((2, 3), {}),
         torch.nn.LSTM: ((5, 10), {}),
         torch.nn.LSTMCell: ((5, 10), {}),
         torch.nn.LayerNorm: ((2,), {}),
@@ -527,6 +528,7 @@ def generate_tests(test_cls, constructor_arg_db):
             setattr(TestModuleInit, test_name, run_test)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestModuleInit(TestCase):
     _ignore_not_implemented_error = False
 
