@@ -44,8 +44,10 @@
 // until we use hipblas v2
 // hipify correctly maps things like CUDA_R_16F to HIP_R_16F,
 // however hipblas v1 is still using its custom type
+#ifndef HIPBLAS_V2
 #define HIP_R_16F  HIPBLAS_R_16F
 #define HIP_R_32F  HIPBLAS_R_32F
+#endif
 #else // USE_ROCM
 #define CUBLAS_HALF_TYPE __half
 #endif // USE_ROCM
@@ -614,6 +616,11 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
 #if defined(USE_ROCM)
+#if ROCM_VERSION >= 60000
+  auto compute_type = HIPBLAS_COMPUTE_32F;
+#else
+  auto compute_type = HIP_R_32F;
+#endif
     // hipblas doesn't support hipblasSgemmEx type API.
     // It has more general hipblasGemmEx API which is more close to cublasGemmEx.
     // hipblasGemmEx does D = alpha*op( A )*op( B ) + beta*C,
@@ -627,16 +634,16 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
         K,
         &alpha,
         B,
-        HIPBLAS_R_16F,
+        HIP_R_16F,
         ldb,
         A,
-        HIPBLAS_R_16F,
+        HIP_R_16F,
         lda,
         &beta,
         C,
-        HIPBLAS_R_16F,
+        HIP_R_16F,
         N,
-        HIPBLAS_R_32F, // compute type
+        compute_type,
         HIPBLAS_GEMM_DEFAULT));
 #else
     CUBLAS_ENFORCE(cublasSgemmEx(
@@ -848,6 +855,11 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
       (trans_A == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   const cublasOperation_t cu_trans_B =
       (trans_B == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000
+  auto compute_type = CUBLAS_COMPUTE_32F;
+#else
+  auto compute_type = CUDA_R_32F;
+#endif
   if (math_type == TensorProto_DataType_FLOAT) {
     thrust::device_vector<const void*> A_device(A, A + batch_size);
     thrust::device_vector<const void*> B_device(B, B + batch_size);
@@ -873,7 +885,7 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
         CUDA_R_16F,
         ldc,
         batch_size,
-        CUDA_R_32F,
+        compute_type,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // Convert alpha, beta from float -> __half
@@ -942,6 +954,11 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
       (trans_A == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   const cublasOperation_t cu_trans_B =
       (trans_B == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000
+  auto compute_type = CUBLAS_COMPUTE_32F;
+#else
+  auto compute_type = CUDA_R_32F;
+#endif
   if (math_type == TensorProto_DataType_FLOAT) {
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
@@ -967,7 +984,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
         ldc,
         C_stride,
         batch_size,
-        CUDA_R_32F,
+        compute_type,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // Convert alpha, beta from float -> __half
@@ -1055,6 +1072,11 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
 #if defined(USE_ROCM)
+#if ROCM_VERSION >= 60000
+  auto compute_type = HIPBLAS_COMPUTE_32F;
+#else
+  auto compute_type = HIP_R_32F;
+#endif
     // hipblas doesn't support hipblasSgemmEx type API.
     // It has more general hipblasGemmEx API which is more close to cublasGemmEx.
     // hipblasGemmEx does D = alpha*op( A )*op( B ) + beta*C,
@@ -1068,16 +1090,16 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
         k,
         &alpha,
         A,
-        HIPBLAS_R_16F,
+        HIP_R_16F,
         lda,
         x,
-        HIPBLAS_R_16F,
+        HIP_R_16F,
         k,
         &beta,
         y,
-        HIPBLAS_R_16F,
+        HIP_R_16F,
         ldc,
-        HIPBLAS_R_32F, // compute type
+	compute_type,
         HIPBLAS_GEMM_DEFAULT));
 #else
     CUBLAS_ENFORCE(cublasSgemmEx(
