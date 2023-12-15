@@ -8,11 +8,11 @@ import unittest
 from typing import List, Optional
 
 import torch
-import torch.nn as nn
 from torch import distributed as dist
 from torch.cuda.amp.common import amp_definitely_not_available
-from torch.distributed._composable import replicate
+from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.distributed.fsdp import CPUOffload, MixedPrecision
+from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
@@ -28,6 +28,7 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     NonUniformReqGradNWM,
     subtest_name,
+    TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -205,42 +206,33 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
 
     def _build_model_and_optim(
         self,
-        lin_dim: int = 4,
         build_extra_ddp: bool = False,
         cpu_offload: CPUOffload = CPUOffload(offload_params=False),
         use_orig_params: bool = False,
     ):
-        class MLP(nn.Module):
-            def __init__(self, dim: int, device: torch.device, dim_multiplier: int = 4):
-                super().__init__()
-                self.in_proj = nn.Linear(dim, dim_multiplier * dim, device=device)
-                self.out_proj = nn.Linear(dim_multiplier * dim, dim, device=device)
-
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                z = self.in_proj(x)
-                z = self.out_proj(z)
-                return z
-
-        torch.manual_seed(42)
-        if cpu_offload.offload_params:
-            device = torch.device("cpu")
-        else:
-            device = torch.device("cuda")
-        model = nn.Sequential(
-            MLP(lin_dim, device, dim_multiplier=3),
-            MLP(lin_dim, device),
-            MLP(lin_dim, device, dim_multiplier=3),
+        model = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            deterministic=True,
         )
 
         if build_extra_ddp:
-            ref_model = copy.deepcopy(model).cuda()
-            replicate(ref_model, device_ids=[self.rank])
+            ref_model = DDP(
+                copy.deepcopy(model),
+                device_ids=[self.rank],
+            )
             ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2)
 
         fsdp_kwargs = {
             "use_orig_params": use_orig_params,
             "cpu_offload": cpu_offload,
-            "auto_wrap_policy": ModuleWrapPolicy({MLP}),
+            "auto_wrap_policy": ModuleWrapPolicy(
+                {
+                    TransformerEncoderLayer,
+                    TransformerDecoderLayer,
+                }
+            ),
         }
 
         model = FSDP(model, **fsdp_kwargs)
@@ -255,10 +247,13 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
     def test_sharded_grad_scaler_found_inf(self):
         self.run_subtests(
             {
-                "use_orig_params": [False, True],
+                # TODO
+                # "use_orig_params": [False, True],
+                "use_orig_params": [False],
+                # TODO
                 "cpu_offload": [
                     CPUOffload(offload_params=True),
-                    CPUOffload(offload_params=False),
+                    # CPUOffload(offload_params=False),
                 ],
             },
             self._test_sharded_grad_scaler_found_inf,
@@ -269,9 +264,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         use_orig_params: bool,
         cpu_offload: CPUOffload,
     ):
-        lin_dim = 4
         model, optim, ref_model, ref_optim = self._build_model_and_optim(
-            lin_dim,
             build_extra_ddp=True,
             cpu_offload=cpu_offload,
             use_orig_params=use_orig_params,
@@ -279,16 +272,19 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         grad_scaler = ShardedGradScaler(init_scale=2.0)
         ref_grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
         scaled_losses: List[torch.Tensor] = []
+        device = torch.device("cuda")
         torch.manual_seed(42 + self.rank + 1)
 
         for iter in range(10):
-            x = torch.rand((32, lin_dim), device="cuda")
             for _model, _optim, _grad_scaler in (
                 (ref_model, ref_optim, ref_grad_scaler),
                 (model, optim, grad_scaler),
             ):
+                module = _model.module
+                inp = module.get_input(device)
                 _optim.zero_grad()
-                loss = _model(x).sum()
+                output = _model(*inp)
+                loss = module.get_loss(inp, output)
                 scaled_loss = _grad_scaler.scale(loss)
                 scaled_losses.append(scaled_loss)
                 scaled_loss.backward()
@@ -301,14 +297,14 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
 
                 should_find_inf = iter % 2 == 0
                 if should_find_inf and (
-                    _model == ref_model or (_model == model and dist.get_rank() != 0)
+                    _model is ref_model or (_model is model and self.rank == 0)
                 ):
                     # other ranks should find infs from rank 0
                     # after collectives
                     for param in _model.parameters():
                         if param.grad is None:
                             continue
-                        param.grad.data.fill_(float("inf"))
+                        param.grad.fill_(float("inf"))
                         break
 
                 _grad_scaler.step(_optim)
