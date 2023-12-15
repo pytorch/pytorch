@@ -519,9 +519,20 @@ class CppOverrides(OpOverrides):
         return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
-    def to_dtype_bitcast(x, dtype):
+    def to_dtype_bitcast(x, dtype, src_dtype):
         assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
-        return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
+        if src_dtype in (torch.float16, torch.bfloat16):
+            # c10::bit_cast requires the source and target have the bitwidth.
+            # Because the input tensor's dtype could be promoted, e.g. from float16 to
+            # float, we have to cast the tensor to its original source dtype before
+            # invoking bit_cast. We also need to convert the bit-casted tensor
+            # back to float to make sure we keep using higher precision values
+            # for the rest of the computation.
+            cast_x = f"c10::convert<{DTYPE_TO_CPP[src_dtype]}>({x})"
+            cast_x = f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({cast_x})"
+            return f"c10::convert<{DTYPE_TO_CPP[torch.float32]}>({cast_x})"
+        else:
+            return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
     def abs(x):
