@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import itertools
-import math
+from dataclasses import dataclass
 import sys
 from functools import wraps
 from typing import (
@@ -66,93 +66,105 @@ class MLPModule(nn.Module):
         self.net2.reset_parameters()
 
 
+@dataclass
+class ModelArgs:
+    n_layers: int = 2
+    vocab_size: int = 32
+    max_seq_len: int = 64
+    dim: int = 16
+    n_heads: int = 4
+    dropout_p: float = 0.1
+    use_attn_mask: bool = True
+    weight_tying: bool = True
+
 class Attention(nn.Module):
-    def __init__(self, dim, n_heads, world_size):
+    def __init__(self, args: ModelArgs):
         super().__init__()
-        self.head_dim = dim // n_heads
-        self.n_heads = n_heads
-        self.n_local_heads = n_heads // world_size
+        assert args.dim % args.n_heads == 0
+        self.head_dim = args.dim // args.n_heads
+        self.n_heads = args.n_heads
+        self.dropout_p = args.dropout_p
+        self.resid_dropout = nn.Dropout(args.dropout_p)
+        self.use_attn_mask = args.use_attn_mask
 
-        self.wq = nn.Linear(dim, dim, bias=False)
-        self.wk = nn.Linear(dim, dim, bias=False)
-        self.wv = nn.Linear(dim, dim, bias=False)
-        self.wo = nn.Linear(dim, dim, bias=False)
-
-    def forward(self, x, mask=None):
-        bsz, seqlen, _ = x.size()
-        queries, keys, values = self.wq(x), self.wk(x), self.wv(x)
-        queries = queries.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-        keys = keys.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-        values = values.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-
-        queries = queries.transpose(1, 2)  # (bsz, n_local_heads, seqlen, head_dim)
-        keys = keys.transpose(1, 2)  # (bsz, n_local_heads, seqlen, head_dim)
-        values = values.transpose(1, 2)  # (bsz, n_local_heads, seqlen, head_dim)
-        scores = torch.matmul(queries, keys.transpose(2, 3)) / math.sqrt(self.head_dim)
-        if mask is not None:
-            scores = scores + mask  # (bsz, n_local_heads, seqlen, seqlen)
-        scores = F.softmax(scores.float(), dim=-1).type_as(queries)
-        output = torch.matmul(scores, values)  # (bsz, n_local_heads, seqlen, head_dim)
-        output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
-        return self.wo(output)
-
-class FeedForward(nn.Module):
-    def __init__(self, dim, hidden_dim):
-        super().__init__()
-        self.w1 = nn.Linear(dim, hidden_dim, bias=False)
-        self.relu = nn.ReLU()
-        self.w2 = nn.Linear(hidden_dim, dim, bias=False)
+        self.wq = nn.Linear(args.dim, args.dim, bias=False)
+        self.wk = nn.Linear(args.dim, args.dim, bias=False)
+        self.wv = nn.Linear(args.dim, args.dim, bias=False)
+        self.wo = nn.Linear(args.dim, args.dim, bias=False)
 
     def forward(self, x):
-        return self.w2(self.relu(self.w1(x)))
+        bsz, seq_len, _ = x.size()
+        queries, keys, values = self.wq(x), self.wk(x), self.wv(x)
+        queries = queries.view(bsz, seq_len, self.n_heads, self.head_dim)
+        keys = keys.view(bsz, seq_len, self.n_heads, self.head_dim)
+        values = values.view(bsz, seq_len, self.n_heads, self.head_dim)
 
-class TransformerBlock(nn.Module):
-    def __init__(self, layer_id, dim, n_heads, world_size):
-        super().__init__()
-        self.layer_id = layer_id
-        self.n_heads = n_heads
-        self.dim = dim
-        self.head_dim = dim // n_heads
-        self.attention = Attention(dim, n_heads, world_size)
-        # self.attention_norm = nn.LayerNorm(dim)
-        self.feed_forward = FeedForward(dim, hidden_dim=4 * dim)
-        # self.ffn_norm = nn.LayerNorm(dim)
-
-    def forward(self, x, mask=None):
-        # h = x + self.attention.forward(self.attention_norm(x), mask)
-        h = x + self.attention.forward(x, mask)
-        # out = h + self.feed_forward.forward(self.ffn_norm(h))
-        out = h + self.feed_forward.forward(h)
-        return out
-
-# a toy transformer model, without positional encoding or dropout
-class Transformer(nn.Module):
-    def __init__(self, n_layers, vocab_size, dim, n_heads, world_size):
-        super().__init__()
-        torch.manual_seed(5)
-
-        self.tok_embeddings = nn.Embedding(vocab_size, dim)
-        self.layers = torch.nn.ModuleList()
-        for layer_id in range(n_layers):
-            self.layers.append(TransformerBlock(layer_id, dim, n_heads, world_size))
-        # self.norm = nn.LayerNorm(dim)
-        self.output = nn.Linear(dim, vocab_size, bias=False)
-
-    def forward(self, tokens):
-        _bsz, seqlen = tokens.shape
-        h = self.tok_embeddings(tokens)
+        queries = queries.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
+        keys = keys.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
+        values = values.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
 
         mask = None
-        # mask is optional depending on encoder/decoder style
-        if seqlen > 1:
-            mask = torch.full(
-                (seqlen, seqlen), float("-inf"), device=tokens.device
-            )
+        if self.use_attn_mask and seq_len > 1:
+            mask = torch.full((seq_len, seq_len), float("-inf"), device=x.device)
             mask = torch.triu(mask, diagonal=1)
+        output = F.scaled_dot_product_attention(queries, keys, values, mask, self.dropout_p if self.training else 0)
+        output = output.transpose(1, 2).contiguous().view(bsz, seq_len, -1)
+        return self.resid_dropout(self.wo(output))
 
+class FeedForward(nn.Module):
+    def __init__(self, dim, hidden_dim, dropout_p):
+        super().__init__()
+        self.w1 = nn.Linear(dim, hidden_dim)
+        self.gelu = nn.GELU()
+        self.w2 = nn.Linear(hidden_dim, dim)
+        self.resid_dropout = nn.Dropout(dropout_p)
+
+    def forward(self, x):
+        return self.resid_dropout(self.w2(self.gelu(self.w1(x))))
+
+class TransformerBlock(nn.Module):
+    def __init__(self, args: ModelArgs):
+        super().__init__()
+        self.attention_norm = nn.LayerNorm(args.dim)
+        self.attention = Attention(args)
+        self.ffn_norm = nn.LayerNorm(args.dim)
+        self.feed_forward = FeedForward(args.dim, hidden_dim=4 * args.dim, dropout_p=args.dropout_p)
+
+    def forward(self, x):
+        h = x + self.attention(self.attention_norm(x))
+        out = h + self.feed_forward(self.ffn_norm(h))
+        return out
+
+# A toy transformer model, partly inspired by the nanoGPT model:
+# https://github.com/karpathy/nanoGPT.
+class Transformer(nn.Module):
+    def __init__(self, args: ModelArgs):
+        super().__init__()
+        assert args.vocab_size is not None
+        assert args.max_seq_len is not None
+        self.max_seq_len = args.max_seq_len
+        self.tok_embeddings = nn.Embedding(args.vocab_size, args.dim)
+        self.pos_embeddings = nn.Embedding(args.max_seq_len, args.dim)
+        self.dropout = nn.Dropout(args.dropout_p)
+        self.layers = nn.ModuleList()
+        for _ in range(args.n_layers):
+            self.layers.append(TransformerBlock(args))
+        self.norm = nn.LayerNorm(args.dim)
+        self.output = nn.Linear(args.dim, args.vocab_size, bias=False)
+        if args.weight_tying:
+            self.output.weight = self.tok_embeddings.weight
+
+    def forward(self, tokens):
+        _bsz, seq_len = tokens.size()
+        assert seq_len <= self.max_seq_len
+        h = self.tok_embeddings(tokens)
+        pos = torch.arange(0, seq_len, device=tokens.device)
+        p = self.pos_embeddings(pos)  # positional embeddings of shape (seq_len, dim)
+        h = h + p
+        h = self.dropout(h)
         for layer in self.layers:
-            h = layer(h, mask)
-        # h = self.norm(h)
+            h = layer(h)
+        h = self.norm(h)
         output = self.output(h).float()
         return output
 
