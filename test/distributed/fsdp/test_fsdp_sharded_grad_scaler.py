@@ -247,13 +247,10 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
     def test_sharded_grad_scaler_found_inf(self):
         self.run_subtests(
             {
-                # TODO
-                # "use_orig_params": [False, True],
-                "use_orig_params": [False],
-                # TODO
+                "use_orig_params": [False, True],
                 "cpu_offload": [
                     CPUOffload(offload_params=True),
-                    # CPUOffload(offload_params=False),
+                    CPUOffload(offload_params=False),
                 ],
             },
             self._test_sharded_grad_scaler_found_inf,
@@ -288,13 +285,11 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                 scaled_loss = _grad_scaler.scale(loss)
                 scaled_losses.append(scaled_loss)
                 scaled_loss.backward()
-
                 orig_params = [
                     param.detach().clone()
                     for param in _model.parameters()
                     if param.grad is not None
                 ]
-
                 should_find_inf = iter % 2 == 0
                 if should_find_inf and (
                     _model is ref_model or (_model is model and self.rank == 0)
@@ -306,12 +301,9 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                             continue
                         param.grad.fill_(float("inf"))
                         break
-
                 _grad_scaler.step(_optim)
-
                 orig_scale = _grad_scaler.get_scale()
                 _grad_scaler.update()
-
                 if should_find_inf:
                     self.assertEqual(
                         _grad_scaler.get_scale(),
@@ -331,7 +323,6 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                             f"but got {_grad_scaler.get_scale()}"
                         ),
                     )
-
                 for param, orig_param in zip(
                     [param for param in _model.parameters() if param.grad is not None],
                     orig_params,
@@ -354,7 +345,6 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                                 f"optim.step but got {param} vs {orig_param}"
                             ),
                         )
-
             self.assertEqual(
                 scaled_losses[0],
                 scaled_losses[1],
