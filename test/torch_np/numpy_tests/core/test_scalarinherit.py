@@ -9,6 +9,7 @@ from unittest import skipIf as skipif
 
 import pytest
 
+import torch
 import torch._numpy as np
 from torch._numpy.testing import assert_
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -50,6 +51,7 @@ class B1(np.float64, HasNew):
 
 
 @skip(reason="scalar repr: numpy plans to make it more explicit")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestInherit(TestCase):
     def test_init(self):
         x = B(1.0)

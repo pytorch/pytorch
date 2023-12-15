@@ -10,6 +10,7 @@ from unittest import expectedFailure as xfail, skipIf as skipif
 import pytest
 from pytest import raises as assert_raises
 
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -84,6 +85,7 @@ def get_mat(n):
     return data
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestEye(TestCase):
     def test_basic(self):
         assert_equal(
@@ -144,6 +146,7 @@ class TestEye(TestCase):
         assert mat_f.flags.f_contiguous
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDiag(TestCase):
     def test_vector(self):
         vals = (100 * arange(5)).astype("l")
@@ -193,6 +196,7 @@ class TestDiag(TestCase):
         assert_raises((ValueError, RuntimeError), diag, [[[1]]])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFliplr(TestCase):
     def test_basic(self):
         assert_raises((ValueError, RuntimeError), fliplr, ones(4))
@@ -205,6 +209,7 @@ class TestFliplr(TestCase):
         assert_equal(fliplr(a), b)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFlipud(TestCase):
     def test_basic(self):
         a = get_mat(4)
@@ -217,6 +222,7 @@ class TestFlipud(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestHistogram2d(TestCase):
     def test_simple(self):
         x = array([0.41702200, 0.72032449, 1.1437481e-4, 0.302332573, 0.146755891])
@@ -326,6 +332,7 @@ class TestHistogram2d(TestCase):
             histogram2d(x, y)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTri(TestCase):
     def test_dtype(self):
         out = array([[1, 0, 0], [1, 1, 0], [1, 1, 1]])
@@ -463,6 +470,7 @@ class TestTri(TestCase):
 
 
 @xfail  # (reason="np.triu_indices == our tuple(triu_indices)")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTriuIndices(TestCase):
     def test_triu_indices(self):
         iu1 = triu_indices(4)
@@ -528,6 +536,7 @@ class TestTriuIndices(TestCase):
         )
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTrilIndicesFrom(TestCase):
     def test_exceptions(self):
         assert_raises(ValueError, tril_indices_from, np.ones((2,)))
@@ -535,6 +544,7 @@ class TestTrilIndicesFrom(TestCase):
         # assert_raises(ValueError, tril_indices_from, np.ones((2, 3)))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTriuIndicesFrom(TestCase):
     def test_exceptions(self):
         assert_raises(ValueError, triu_indices_from, np.ones((2,)))
@@ -542,6 +552,7 @@ class TestTriuIndicesFrom(TestCase):
         # assert_raises(ValueError, triu_indices_from, np.ones((2, 3)))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestVander(TestCase):
     def test_basic(self):
         c = np.array([0, 1, -2, 3])

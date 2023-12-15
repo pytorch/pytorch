@@ -3,6 +3,7 @@
 from unittest import skipIf, SkipTest
 
 import numpy
+import torch
 
 import pytest
 from pytest import raises as assert_raises
@@ -39,12 +40,14 @@ else:
     )
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFlatnonzero(TestCase):
     def test_basic(self):
         x = np.arange(-2, 3)
         assert_equal(np.flatnonzero(x), [0, 1, 3, 4])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAny(TestCase):
     def test_basic(self):
         y1 = [0, 0, 1, 0]
@@ -68,6 +71,7 @@ class TestAny(TestCase):
         assert_equal(np.any(y), y.any())
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAll(TestCase):
     def test_basic(self):
         y1 = [0, 1, 1, 0]
@@ -90,6 +94,7 @@ class TestAll(TestCase):
         assert_equal(np.all(y), y.all())
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMean(TestCase):
     def test_mean(self):
         A = [[1, 2, 3], [4, 5, 6]]
@@ -167,6 +172,7 @@ class TestMean(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSum(TestCase):
     def test_sum(self):
         m = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
@@ -325,6 +331,7 @@ fails_empty_tuple = {np.argmin, np.argmax}
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestGenericReductions(TestCase):
     """Run a set of generic tests to verify that self.func acts like a
     reduction operation.
@@ -486,6 +493,7 @@ class TestGenericReductions(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestGenericCumSumProd(TestCase):
     """Run a set of generic tests to verify that cumsum/cumprod are sane."""
 

@@ -15,6 +15,7 @@ from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import numpy
 
+import torch
 import pytest
 
 from numpy.linalg.linalg import _multi_dot_matrix_chain_order
@@ -145,6 +146,7 @@ all_tags = {
 }
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class LinalgCase:
     def __init__(self, name, a, b, tags=None):
         """
@@ -378,6 +380,7 @@ CASES += _make_generalized_cases()
 #
 # Test different routines against the above cases
 #
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class LinalgTestCase:
     TEST_CASES = CASES
 
@@ -405,6 +408,7 @@ class LinalgTestCase:
                 raise AssertionError(msg) from e
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class LinalgSquareTestCase(LinalgTestCase):
     def test_sq_cases(self):
         self.check_cases(require={"square"}, exclude={"generalized", "size-0"})
@@ -413,6 +417,7 @@ class LinalgSquareTestCase(LinalgTestCase):
         self.check_cases(require={"square", "size-0"}, exclude={"generalized"})
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class LinalgNonsquareTestCase(LinalgTestCase):
     def test_nonsq_cases(self):
         self.check_cases(require={"nonsquare"}, exclude={"generalized", "size-0"})
@@ -421,6 +426,7 @@ class LinalgNonsquareTestCase(LinalgTestCase):
         self.check_cases(require={"nonsquare", "size-0"}, exclude={"generalized"})
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class HermitianTestCase(LinalgTestCase):
     def test_herm_cases(self):
         self.check_cases(require={"hermitian"}, exclude={"generalized", "size-0"})
@@ -429,6 +435,7 @@ class HermitianTestCase(LinalgTestCase):
         self.check_cases(require={"hermitian", "size-0"}, exclude={"generalized"})
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class LinalgGeneralizedSquareTestCase(LinalgTestCase):
     @slow
     def test_generalized_sq_cases(self):
@@ -439,6 +446,7 @@ class LinalgGeneralizedSquareTestCase(LinalgTestCase):
         self.check_cases(require={"generalized", "square", "size-0"})
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class LinalgGeneralizedNonsquareTestCase(LinalgTestCase):
     @slow
     def test_generalized_nonsq_cases(self):
@@ -449,6 +457,7 @@ class LinalgGeneralizedNonsquareTestCase(LinalgTestCase):
         self.check_cases(require={"generalized", "nonsquare", "size-0"})
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class HermitianGeneralizedTestCase(LinalgTestCase):
     @slow
     def test_generalized_herm_cases(self):
@@ -490,6 +499,7 @@ def identity_like_generalized(a):
         return identity(a.shape[0])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class SolveCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
     # kept apart from TestSolve for use for testing with matrices.
     def do(self, a, b, tags):
@@ -499,6 +509,7 @@ class SolveCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSolve(SolveCases, TestCase):
     @parametrize("dtype", [single, double, csingle, cdouble])
     def test_types(self, dtype):
@@ -561,6 +572,7 @@ class TestSolve(SolveCases, TestCase):
         assert_(isinstance(result, ArraySubclass))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class InvCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
     def do(self, a, b, tags):
         a_inv = linalg.inv(a)
@@ -569,6 +581,7 @@ class InvCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestInv(InvCases, TestCase):
     @parametrize("dtype", [single, double, csingle, cdouble])
     def test_types(self, dtype):
@@ -594,6 +607,7 @@ class TestInv(InvCases, TestCase):
         assert_(isinstance(res, ArraySubclass))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class EigvalsCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
     def do(self, a, b, tags):
         ev = linalg.eigvals(a)
@@ -602,6 +616,7 @@ class EigvalsCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestEigvals(EigvalsCases, TestCase):
     @parametrize("dtype", [single, double, csingle, cdouble])
     def test_types(self, dtype):
@@ -631,6 +646,7 @@ class TestEigvals(EigvalsCases, TestCase):
         assert_(isinstance(res, np.ndarray))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class EigCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
     def do(self, a, b, tags):
         evalues, evectors = linalg.eig(a)
@@ -643,6 +659,7 @@ class EigCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestEig(EigCases, TestCase):
     @parametrize("dtype", [single, double, csingle, cdouble])
     def test_types(self, dtype):
@@ -696,6 +713,7 @@ class SVDBaseTests:
         assert_equal(s.dtype, get_real_dtype(dtype))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class SVDCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
     def do(self, a, b, tags):
         u, s, vt = linalg.svd(a, False)
@@ -710,6 +728,7 @@ class SVDCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
         assert_(consistent_subclass(vt, a))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSVD(SVDCases, SVDBaseTests, TestCase):
     def test_empty_identity(self):
         """Empty input should put an identity matrix in u or vh"""
@@ -726,6 +745,7 @@ class TestSVD(SVDCases, SVDBaseTests, TestCase):
         assert_equal(vh, np.eye(4))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class SVDHermitianCases(HermitianTestCase, HermitianGeneralizedTestCase):
     def do(self, a, b, tags):
         u, s, vt = linalg.svd(a, False, hermitian=True)
@@ -754,10 +774,12 @@ class SVDHermitianCases(HermitianTestCase, HermitianGeneralizedTestCase):
         assert_(consistent_subclass(vt, a))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSVDHermitian(SVDHermitianCases, SVDBaseTests, TestCase):
     hermitian = True
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class CondCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
     # cond(x, p) for p in (None, 2, -2)
 
@@ -819,6 +841,7 @@ class CondCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
         )
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCond(CondCases, TestCase):
     def test_basic_nonsvd(self):
         # Smoketest the non-svd norms
@@ -886,6 +909,7 @@ class TestCond(CondCases, TestCase):
             assert_(np.isfinite(c[1, 0]))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class PinvCases(
     LinalgSquareTestCase,
     LinalgNonsquareTestCase,
@@ -902,10 +926,12 @@ class PinvCases(
         assert_(consistent_subclass(a_ginv, a))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPinv(PinvCases, TestCase):
     pass
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class PinvHermitianCases(HermitianTestCase, HermitianGeneralizedTestCase):
     def do(self, a, b, tags):
         a_ginv = linalg.pinv(a, hermitian=True)
@@ -917,10 +943,12 @@ class PinvHermitianCases(HermitianTestCase, HermitianGeneralizedTestCase):
         assert_(consistent_subclass(a_ginv, a))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPinvHermitian(PinvHermitianCases, TestCase):
     pass
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class DetCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
     def do(self, a, b, tags):
         d = linalg.det(a)
@@ -941,6 +969,7 @@ class DetCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDet(DetCases, TestCase):
     def test_zero(self):
         # NB: comment out tests of type(det) == double : we return zero-dim arrays
@@ -985,6 +1014,7 @@ class TestDet(DetCases, TestCase):
         assert_(res[1].dtype.type is np.float64)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class LstsqCases(LinalgSquareTestCase, LinalgNonsquareTestCase):
     def do(self, a, b, tags):
         arr = np.asarray(a)
@@ -1016,6 +1046,7 @@ class LstsqCases(LinalgSquareTestCase, LinalgNonsquareTestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestLstsq(LstsqCases, TestCase):
     @xpassIfTorchDynamo  # (reason="Lstsq: we use the future default =None")
     def test_future_rcond(self):
@@ -1080,6 +1111,7 @@ class TestLstsq(LstsqCases, TestCase):
 # @xfail  #(reason="no block()")
 @skip  # FIXME: otherwise fails in setUp calling np.block
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMatrixPower(TestCase):
     def setUp(self):
         self.rshft_0 = np.eye(4)
@@ -1169,6 +1201,7 @@ class TestMatrixPower(TestCase):
         assert_raises(LinAlgError, matrix_power, mat, -1)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestEigvalshCases(HermitianTestCase, HermitianGeneralizedTestCase):
     def do(self, a, b, tags):
         pytest.xfail(reason="sort complex")
@@ -1184,6 +1217,7 @@ class TestEigvalshCases(HermitianTestCase, HermitianGeneralizedTestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestEigvalsh(TestCase):
     @parametrize("dtype", [single, double, csingle, cdouble])
     def test_types(self, dtype):
@@ -1238,6 +1272,7 @@ class TestEigvalsh(TestCase):
         assert_(isinstance(res, np.ndarray))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestEighCases(HermitianTestCase, HermitianGeneralizedTestCase):
     def do(self, a, b, tags):
         pytest.xfail(reason="sort complex")
@@ -1266,6 +1301,7 @@ class TestEighCases(HermitianTestCase, HermitianGeneralizedTestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestEigh(TestCase):
     @parametrize("dtype", [single, double, csingle, cdouble])
     def test_types(self, dtype):
@@ -1325,6 +1361,7 @@ class TestEigh(TestCase):
         assert_(isinstance(a, np.ndarray))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class _TestNormBase:
     dt = None
     dec = None
@@ -1338,6 +1375,7 @@ class _TestNormBase:
             assert_(issubclass(res.dtype.type, np.floating))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class _TestNormGeneral(_TestNormBase):
     def test_empty(self):
         assert_equal(norm([]), 0.0)
@@ -1516,6 +1554,7 @@ class _TestNormGeneral(_TestNormBase):
                 )
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class _TestNorm2D(_TestNormBase):
     # Define the part for 2d arrays separately, so we can subclass this
     # and run the tests using np.matrix in matrixlib.tests.test_matrix_linalg.
@@ -1634,10 +1673,12 @@ class _TestNorm2D(_TestNormBase):
         assert_raises((RuntimeError, ValueError), norm, B, None, (0, 1, 2))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class _TestNorm(_TestNorm2D, _TestNormGeneral):
     pass
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNorm_NonSystematic(TestCase):
     def test_intmin(self):
         # Non-regression test: p-norm of signed integer would previously do
@@ -1647,33 +1688,40 @@ class TestNorm_NonSystematic(TestCase):
 
 
 # Separate definitions so we can use them for matrix tests.
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class _TestNormDoubleBase(_TestNormBase, TestCase):
     dt = np.double
     dec = 12
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class _TestNormSingleBase(_TestNormBase, TestCase):
     dt = np.float32
     dec = 6
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class _TestNormInt64Base(_TestNormBase, TestCase):
     dt = np.int64
     dec = 12
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNormDouble(_TestNorm, _TestNormDoubleBase, TestCase):
     pass
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNormSingle(_TestNorm, _TestNormSingleBase, TestCase):
     pass
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNormInt64(_TestNorm, _TestNormInt64Base):
     pass
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMatrixRank(TestCase):
     def test_matrix_rank(self):
         # Full rank matrix
@@ -1723,6 +1771,7 @@ class TestMatrixRank(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestQR(TestCase):
     def check_qr(self, a):
         # This test expects the argument `a` to be an ndarray or
@@ -1870,6 +1919,7 @@ class TestQR(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCholesky(TestCase):
     # TODO: are there no other tests for cholesky?
 
@@ -1911,6 +1961,7 @@ class TestCholesky(TestCase):
         assert_(isinstance(res, np.ndarray))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMisc(TestCase):
     @xpassIfTorchDynamo  # (reason="endianness")
     def test_byteorder_check(self):
@@ -2035,6 +2086,7 @@ class TestMisc(TestCase):
             subprocess.check_call([sys.executable, "-c", code])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMultiDot(TestCase):
     def test_basic_function_with_three_arguments(self):
         # multi_dot with three arguments uses a fast hand coded algorithm to
@@ -2174,6 +2226,7 @@ class TestMultiDot(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTensorinv(TestCase):
     @parametrize(
         "arr, ind",
@@ -2222,6 +2275,7 @@ class TestTensorinv(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTensorsolve(TestCase):
     @parametrize(
         "a, axes",
@@ -2247,6 +2301,7 @@ class TestTensorsolve(TestCase):
         assert_allclose(np.tensordot(a, x, axes=len(x.shape)), b)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMisc2(TestCase):
     @xpassIfTorchDynamo  # (reason="TODO")
     def test_unsupported_commontype(self):

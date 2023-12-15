@@ -11,6 +11,7 @@ import warnings
 from unittest import skipIf
 
 import numpy
+import torch
 
 from pytest import raises as assert_raises
 from torch.testing._internal.common_utils import (
@@ -36,6 +37,7 @@ skip = functools.partial(skipIf, True)
 
 
 @skip(reason="torch.finfo is not a singleton. Why demanding it is?")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPythonFloat(TestCase):
     def test_singleton(self):
         ftype = finfo(float)
@@ -44,6 +46,7 @@ class TestPythonFloat(TestCase):
 
 
 @skip(reason="torch.finfo is not a singleton. Why demanding it is?")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestHalf(TestCase):
     def test_singleton(self):
         ftype = finfo(half)
@@ -52,6 +55,7 @@ class TestHalf(TestCase):
 
 
 @skip(reason="torch.finfo is not a singleton. Why demanding it is?")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSingle(TestCase):
     def test_singleton(self):
         ftype = finfo(single)
@@ -60,6 +64,7 @@ class TestSingle(TestCase):
 
 
 @skip(reason="torch.finfo is not a singleton. Why demanding it is?")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDouble(TestCase):
     def test_singleton(self):
         ftype = finfo(double)
@@ -67,6 +72,7 @@ class TestDouble(TestCase):
         assert_equal(id(ftype), id(ftype2))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFinfo(TestCase):
     @skipIf(numpy.__version__ < "1.23", reason=".smallest_normal is new")
     def test_basic(self):
@@ -108,6 +114,7 @@ class TestFinfo(TestCase):
             getattr(finfo(dt), attr)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIinfo(TestCase):
     def test_basic(self):
         dts = list(
@@ -135,6 +142,7 @@ class TestIinfo(TestCase):
             assert_equal(iinfo(T).max, max_calculated)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRepr(TestCase):
     def test_iinfo_repr(self):
         expected = "iinfo(min=-32768, max=32767, dtype=int16)"
@@ -156,6 +164,7 @@ def assert_ma_equal(discovered, ma_like):
             assert_equal(value.dtype, getattr(ma_like, key).dtype)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMisc(TestCase):
     @skip(reason="Instantiate {i,f}info from dtypes.")
     def test_instances(self):

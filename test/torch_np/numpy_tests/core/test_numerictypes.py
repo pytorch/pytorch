@@ -7,6 +7,7 @@ import sys
 from unittest import skipIf as skipif
 
 from pytest import raises as assert_raises
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -32,6 +33,7 @@ skip = functools.partial(skipif, True)
 #    reason="We do not disctinguish between scalar and array types."
 #    " Thus, scalars can upcast arrays."
 # )
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCommonType(TestCase):
     def test_scalar_loses1(self):
         res = np.find_common_type(["f4", "f4", "i2"], ["f8"])
@@ -54,6 +56,7 @@ class TestCommonType(TestCase):
         assert_(res == "f8")
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIsSubDType(TestCase):
     # scalar types can be promoted into dtypes
     wrappers = [np.dtype, lambda x: x]
@@ -114,6 +117,7 @@ class TestIsSubDType(TestCase):
 #    reason="We do not have (or need) np.core.numerictypes."
 #    " Our type aliases are in _dtypes.py."
 # )
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBitName(TestCase):
     def test_abstract(self):
         assert_raises(ValueError, np.core.numerictypes.bitname, np.floating)
@@ -124,6 +128,7 @@ class TestBitName(TestCase):
     sys.flags.optimize > 1,
     reason="no docstrings present to inspect when PYTHONOPTIMIZE/Py_OptimizeFlag > 1",
 )
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDocStrings(TestCase):
     def test_platform_dependent_aliases(self):
         if np.int64 is np.int_:
@@ -133,6 +138,7 @@ class TestDocStrings(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestScalarTypeNames(TestCase):
     # gh-9799
 

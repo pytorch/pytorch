@@ -4,6 +4,7 @@ import itertools
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 import numpy
+import torch
 
 import pytest
 from pytest import raises as assert_raises
@@ -27,6 +28,7 @@ else:
     from torch._numpy.testing import assert_equal
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIndexing(TestCase):
     @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attr, type of a[0, 0]")
     def test_indexing_simple(self):
@@ -43,6 +45,7 @@ class TestIndexing(TestCase):
         assert_equal(a, [[8, 2, 3], [4, 5, 6]])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestReshape(TestCase):
     @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_reshape_function(self):
@@ -94,6 +97,7 @@ class TestReshape(TestCase):
 #
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTranspose(TestCase):
     @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_transpose_function(self):
@@ -116,6 +120,7 @@ class TestTranspose(TestCase):
         assert a.transpose().tensor._base is a.tensor
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRavel(TestCase):
     @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_ravel_function(self):
@@ -134,6 +139,7 @@ class TestRavel(TestCase):
         assert a.ravel().tensor._base is a.tensor
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNonzero(TestCase):
     def test_nonzero_trivial(self):
         assert_equal(np.nonzero(np.array([])), ([],))
@@ -185,6 +191,7 @@ class TestNonzero(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestArgmaxArgminCommon(TestCase):
     sizes = [
         (),
@@ -366,6 +373,7 @@ class TestArgmaxArgminCommon(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestArgmax(TestCase):
     usg_data = [
         ([1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0], 0),
@@ -490,6 +498,7 @@ class TestArgmax(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestArgmin(TestCase):
     usg_data = [
         ([1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0], 8),
@@ -602,6 +611,7 @@ class TestArgmin(TestCase):
         assert_equal(np.argmin(a), 1)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAmax(TestCase):
     def test_basic(self):
         a = [3, 4, 5, 10, -3, -5, 6.0]
@@ -614,6 +624,7 @@ class TestAmax(TestCase):
         assert_equal(np.amax(arr), arr.max())
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAmin(TestCase):
     def test_basic(self):
         a = [3, 4, 5, 10, -3, -5, 6.0]
@@ -626,6 +637,7 @@ class TestAmin(TestCase):
         assert_equal(np.amin(arr), arr.min())
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestContains(TestCase):
     def test_contains(self):
         a = np.arange(12).reshape(3, 4)
@@ -634,6 +646,7 @@ class TestContains(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNoExtraMethods(TestCase):
     # make sure ndarray does not carry extra methods/attributes
     # >>> set(dir(a)) - set(dir(a.tensor.numpy()))
@@ -644,6 +657,7 @@ class TestNoExtraMethods(TestCase):
             getattr(a, name)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIter(TestCase):
     @skipIfTorchDynamo
     def test_iter_1d(self):

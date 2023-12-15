@@ -28,6 +28,7 @@ from torch._numpy import (  # noqa: F401
     uint8,
 )
 from torch._numpy.testing import assert_allclose
+import torch
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -88,6 +89,7 @@ examples = {
 
 @skipif(not HAVE_NUMPY, reason="NumPy not found")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNEP50Table(TestCase):
     @parametrize("example", examples)
     def test_nep50_exceptions(self, example):
@@ -153,6 +155,7 @@ corners = {
 
 @skipif(not HAVE_NUMPY, reason="NumPy not found")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCompareToNumpy(TestCase):
     @parametrize("scalar, array, dtype", itertools.product(weaks, non_weaks, dtypes))
     def test_direct_compare(self, scalar, array, dtype):

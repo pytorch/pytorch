@@ -8,6 +8,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
+import torch
 
 
 # If we are going to trace through these, we should use NumPy
@@ -20,6 +21,7 @@ else:
     from torch._numpy.testing import assert_allclose, assert_array_equal
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestConstant(TestCase):
     @xpassIfTorchDynamo  # (reason="tuple values")
     def test_check_constant(self):

@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+import torch
 
 skip = functools.partial(skipif, True)
 
@@ -32,6 +33,7 @@ global_size_dict = dict(zip(chars, sizes))
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestEinsum(TestCase):
     def test_einsum_errors(self):
         for do_opt in [True, False]:
@@ -1197,6 +1199,7 @@ class TestEinsum(TestCase):
 
 
 @skip(reason="no pytorch analog")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestEinsumPath(TestCase):
     def build_operands(self, string, size_dict=global_size_dict):
         # Builds views based off initial operands
@@ -1358,6 +1361,7 @@ class TestEinsumPath(TestCase):
             np.einsum("{}...a{}->{}...a{}".format(*sp), arr)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMisc(TestCase):
     def test_overlap(self):
         a = np.arange(9, dtype=int).reshape(3, 3)

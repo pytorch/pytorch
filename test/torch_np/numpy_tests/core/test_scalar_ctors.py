@@ -9,6 +9,7 @@ from unittest import skipIf as skipif
 
 import pytest
 
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -30,6 +31,7 @@ else:
 skip = functools.partial(skipif, True)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFromString(TestCase):
     @xpassIfTorchDynamo  # (reason="XXX: floats from strings")
     def test_floating(self):
@@ -61,6 +63,7 @@ class TestFromString(TestCase):
             np.bool_(False, garbage=True)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFromInt(TestCase):
     def test_intp(self):
         # Ticket #99
@@ -84,6 +87,7 @@ cfloat_types = [np.csingle, np.cdouble]
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestArrayFromScalar(TestCase):
     """gh-15467"""
 

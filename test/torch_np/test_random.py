@@ -7,6 +7,7 @@ from functools import partial
 
 import numpy as _np
 import pytest
+import torch
 
 import torch._dynamo.config as config
 
@@ -29,6 +30,7 @@ def control_stream(use_numpy=False):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestScalarReturn(TestCase):
     @parametrize("use_numpy", [True, False])
     @parametrize(
@@ -74,6 +76,7 @@ class TestScalarReturn(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestShuffle(TestCase):
     @parametrize("use_numpy", [True, False])
     def test_1d(self, use_numpy):
@@ -110,6 +113,7 @@ class TestShuffle(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestChoice(TestCase):
     @parametrize("use_numpy", [True, False])
     def test_choice(self, use_numpy):
@@ -122,6 +126,7 @@ class TestChoice(TestCase):
             assert_equal(x, x_1)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNumpyGlobal(TestCase):
     def test_numpy_global(self):
         with control_stream(use_numpy=True):

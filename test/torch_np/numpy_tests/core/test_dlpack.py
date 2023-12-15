@@ -35,6 +35,7 @@ IS_PYPY = False
 
 
 @skipif(numpy.__version__ < "1.24", reason="numpy.dlpack is new in numpy 1.23")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 @instantiate_parametrized_tests
 class TestDLPack(TestCase):
     @xpassIfTorchDynamo  # (reason="pytorch seems to handle refcounts differently")

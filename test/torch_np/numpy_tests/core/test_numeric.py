@@ -17,6 +17,7 @@ HAS_REFCOUNT = True
 
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
+import torch
 from hypothesis import given, strategies as st
 from hypothesis.extra import numpy as hynp
 from pytest import raises as assert_raises
@@ -63,6 +64,7 @@ skip = functools.partial(skipif, True)
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestResize(TestCase):
     def test_copies(self):
         A = np.array([[1, 2], [3, 4]])
@@ -113,6 +115,7 @@ class TestResize(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNonarrayArgs(TestCase):
     # check that non-array arguments to functions wrap them in arrays
     def test_choose(self):
@@ -344,6 +347,7 @@ class TestNonarrayArgs(TestCase):
 
 
 @xfail  # (reason="TODO")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIsscalar(TestCase):
     def test_isscalar(self):
         assert_(np.isscalar(3.1))
@@ -362,6 +366,7 @@ class TestIsscalar(TestCase):
         assert_(np.isscalar(Number()))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBoolScalar(TestCase):
     def test_logical(self):
         f = np.False_
@@ -398,6 +403,7 @@ class TestBoolScalar(TestCase):
         assert_((f ^ f) is f)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBoolArray(TestCase):
     def setUp(self):
         # offset for simd tests
@@ -486,6 +492,7 @@ class TestBoolArray(TestCase):
 
 
 @xfailIfTorchDynamo
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBoolCmp(TestCase):
     def setUp(self):
         self.f = np.ones(256, dtype=np.float32)
@@ -587,6 +594,7 @@ class TestBoolCmp(TestCase):
 
 
 @xpassIfTorchDynamo  # (reason="TODO")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSeterr(TestCase):
     def test_default(self):
         err = np.geterr()
@@ -647,6 +655,7 @@ class TestSeterr(TestCase):
 
 @xfail  # (reason="TODO")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFloatExceptions(TestCase):
     def assert_raises_fpe(self, fpeerr, flop, x, y):
         ftype = type(x)
@@ -740,6 +749,7 @@ class TestFloatExceptions(TestCase):
             assert_("underflow" in str(w[-1].message))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTypes(TestCase):
     def check_promotion_cases(self, promote_func):
         # tests that the scalars get coerced correctly.
@@ -926,6 +936,7 @@ class NIterError(Exception):
 @skip(reason="NP_VER: fails on CI")
 @xpassIfTorchDynamo  # (reason="TODO")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFromiter(TestCase):
     def makegen(self):
         return (x**2 for x in range(24))
@@ -999,6 +1010,7 @@ class TestFromiter(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNonzeroAndCountNonzero(TestCase):
     def test_count_nonzero_list(self):
         lst = [[0, 1, 2, 3], [1, 0, 0, 6]]
@@ -1131,6 +1143,7 @@ class TestNonzeroAndCountNonzero(TestCase):
         assert isinstance(np.count_nonzero(a, axis=1, keepdims=True), np.ndarray)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIndex(TestCase):
     def test_boolean(self):
         a = rand(3, 5, 8)
@@ -1151,6 +1164,7 @@ class TestIndex(TestCase):
 
 
 @xpassIfTorchDynamo  # (reason="TODO")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBinaryRepr(TestCase):
     def test_zero(self):
         assert_equal(np.binary_repr(0), "0")
@@ -1189,6 +1203,7 @@ class TestBinaryRepr(TestCase):
 
 
 @xpassIfTorchDynamo  # (reason="TODO")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBaseRepr(TestCase):
     def test_base3(self):
         assert_equal(np.base_repr(3**5, 3), "100000")
@@ -1211,6 +1226,7 @@ class TestBaseRepr(TestCase):
             np.base_repr(1, 37)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestArrayComparisons(TestCase):
     def test_array_equal(self):
         res = np.array_equal(np.array([1, 2]), np.array([1, 2]))
@@ -1295,6 +1311,7 @@ class TestArrayComparisons(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestClip(TestCase):
     def setUp(self):
         self.nr = 5
@@ -1894,6 +1911,7 @@ class TestClip(TestCase):
         assert_array_equal(result, expected)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAllclose(TestCase):
     rtol = 1e-5
     atol = 1e-8
@@ -1967,6 +1985,7 @@ class TestAllclose(TestCase):
         assert_(np.allclose(x, x, equal_nan=True))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIsclose(TestCase):
     rtol = 1e-5
     atol = 1e-8
@@ -2078,6 +2097,7 @@ class TestIsclose(TestCase):
         assert_(np.isclose(0, np.inf).item() is False)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestStdVar(TestCase):
     def setUp(self):
         self.A = np.array([1, -1, 1, -1])
@@ -2121,6 +2141,7 @@ class TestStdVar(TestCase):
         assert_array_equal(r, out)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestStdVarComplex(TestCase):
     def test_basic(self):
         A = np.array([1, 1.0j, -1, -1.0j])
@@ -2133,6 +2154,7 @@ class TestStdVarComplex(TestCase):
         assert_equal(np.std(1j), 0)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCreationFuncs(TestCase):
     # Test ones, zeros, empty and full.
 
@@ -2194,6 +2216,7 @@ class TestCreationFuncs(TestCase):
 
 @skip(reason="implement order etc")  # FIXME: make xfail
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestLikeFuncs(TestCase):
     """Test ones_like, zeros_like, empty_like and full_like"""
 
@@ -2366,6 +2389,7 @@ class TestLikeFuncs(TestCase):
             assert result.strides == (4, 1)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCorrelate(TestCase):
     def _setup(self, dt):
         self.x = np.array([1, 2, 3, 4, 5], dtype=dt)
@@ -2433,6 +2457,7 @@ class TestCorrelate(TestCase):
             np.correlate(d, k, mode=None)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestConvolve(TestCase):
     def test_object(self):
         d = [1.0] * 100
@@ -2473,12 +2498,14 @@ class TestConvolve(TestCase):
         assert_allclose(conv, [2.5], atol=1e-15)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDtypePositional(TestCase):
     def test_dtype_positional(self):
         np.empty((2,), bool)
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestArgwhere(TestCase):
     @parametrize("nd", [0, 1, 2])
     def test_nd(self, nd):
@@ -2512,6 +2539,7 @@ class TestArgwhere(TestCase):
 
 
 @xpassIfTorchDynamo  # (reason="TODO")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestStringFunction(TestCase):
     def test_set_string_function(self):
         a = np.array([1])
@@ -2526,6 +2554,7 @@ class TestStringFunction(TestCase):
         assert_equal(str(a), "[1]")
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRoll(TestCase):
     def test_roll1d(self):
         x = np.arange(10)
@@ -2584,6 +2613,7 @@ class TestRoll(TestCase):
         assert_equal(np.roll(x, 1), np.array([]))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRollaxis(TestCase):
     # expected shape indexed by (axis, start) for array of
     # shape (1, 2, 3, 4)
@@ -2656,6 +2686,7 @@ class TestRollaxis(TestCase):
             assert_(not res.flags["OWNDATA"])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMoveaxis(TestCase):
     def test_move_to_end(self):
         x = np.random.randn(5, 6, 7)
@@ -2741,6 +2772,7 @@ class TestMoveaxis(TestCase):
         assert_(isinstance(result, np.ndarray))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCross(TestCase):
     def test_2x2(self):
         u = [1, 2]
@@ -2828,6 +2860,7 @@ class TestCross(TestCase):
         assert_equal(np.cross(u, v), -z)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestOuterMisc(TestCase):
     def test_outer_out_param(self):
         arr1 = np.ones((5,))
@@ -2841,6 +2874,7 @@ class TestOuterMisc(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIndices(TestCase):
     def test_simple(self):
         [x, y] = np.indices((4, 3))
@@ -2876,6 +2910,7 @@ class TestIndices(TestCase):
 
 
 @xpassIfTorchDynamo  # (reason="TODO")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRequire(TestCase):
     flag_names = [
         "C",
@@ -2943,6 +2978,7 @@ class TestRequire(TestCase):
 
 
 @xpassIfTorchDynamo  # (reason="TODO")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBroadcast(TestCase):
     def test_broadcast_in_args(self):
         # gh-5881
@@ -3009,6 +3045,7 @@ class TestBroadcast(TestCase):
             np.broadcast([[1, 2, 3]], [[4], [5]], [6, 7])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTensordot(TestCase):
     def test_zero_dimension(self):
         # Test resolution to issue #5663

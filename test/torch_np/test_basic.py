@@ -65,6 +65,7 @@ one_arg_funcs += [getattr(_ufuncs, name) for name in ufunc_names]
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestOneArr(TestCase):
     """Base for smoke tests of one-arg functions: (array_like) -> (array_like)
 
@@ -109,6 +110,7 @@ one_arg_axis_funcs = [
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestOneArrAndAxis(TestCase):
     @parametrize("func", one_arg_axis_funcs)
     @parametrize("axis", [0, 1, -1, None])
@@ -133,6 +135,7 @@ class TestOneArrAndAxis(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestOneArrAndAxesTuple(TestCase):
     @parametrize("func", [w.transpose])
     @parametrize("axes", [(0, 2, 1), (1, 2, 0), None])
@@ -179,6 +182,7 @@ arr_shape_funcs = [
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestOneArrAndShape(TestCase):
     """Smoke test of functions (array_like, shape_like) -> array_like"""
 
@@ -220,6 +224,7 @@ one_arg_scalar_funcs = [(w.size, _np.size), (w.shape, _np.shape), (w.ndim, _np.n
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestOneArrToScalar(TestCase):
     """Smoke test of functions (array_like) -> scalar or python object."""
 
@@ -255,6 +260,7 @@ shape_funcs = [w.zeros, w.empty, w.ones, functools.partial(w.full, fill_value=42
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestShapeLikeToArray(TestCase):
     """Smoke test (shape_like) -> array."""
 
@@ -272,6 +278,7 @@ seq_funcs = [w.atleast_1d, w.atleast_2d, w.atleast_3d, w.broadcast_arrays]
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSequenceOfArrays(TestCase):
     """Smoke test (sequence of arrays) -> (sequence of arrays)."""
 
@@ -333,6 +340,7 @@ seq_to_single_funcs = [
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSequenceOfArraysToSingle(TestCase):
     """Smoke test (sequence of arrays) -> (array)."""
 
@@ -358,6 +366,7 @@ single_to_seq_funcs = (
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestArrayToSequence(TestCase):
     """Smoke test array -> (tuple of arrays)."""
 
@@ -401,6 +410,7 @@ funcs_and_args = [
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPythonArgsToArray(TestCase):
     """Smoke_test (sequence of scalars) -> (array)"""
 
@@ -410,6 +420,7 @@ class TestPythonArgsToArray(TestCase):
         assert isinstance(a, w.ndarray)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNormalizations(TestCase):
     """Smoke test generic problems with normalizations."""
 
@@ -438,6 +449,7 @@ class TestNormalizations(TestCase):
             w.eye()
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCopyTo(TestCase):
     def test_copyto_basic(self):
         dst = w.empty(4)
@@ -470,6 +482,7 @@ class TestCopyTo(TestCase):
         assert (dst == src).all()
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDivmod(TestCase):
     def test_divmod_out(self):
         x1 = w.arange(8, 15)
@@ -524,6 +537,7 @@ class TestDivmod(TestCase):
             w.divmod(1, 2, o, o, out=(o, o))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSmokeNotImpl(TestCase):
     def test_nimpl_basic(self):
         # smoke test that the "NotImplemented" annotation is picked up
@@ -532,6 +546,7 @@ class TestSmokeNotImpl(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDefaultDtype(TestCase):
     def test_defaultdtype_defaults(self):
         # by default, both floats and ints 64 bit
@@ -560,6 +575,7 @@ class TestDefaultDtype(TestCase):
 
 
 @skip(_np.__version__ <= "1.23", reason="from_dlpack is new in NumPy 1.23")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestExport(TestCase):
     def test_exported_objects(self):
         exported_fns = (
@@ -573,12 +589,14 @@ class TestExport(TestCase):
         assert len(diff) == 0, str(diff)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCtorNested(TestCase):
     def test_arrays_in_lists(self):
         lst = [[1, 2], [3, w.array(4)]]
         assert_equal(w.asarray(lst), [[1, 2], [3, 4]])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMisc(TestCase):
     def test_ndarrays_to_tensors(self):
         out = _util.ndarrays_to_tensors(((w.asarray(42), 7), 3))

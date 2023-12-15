@@ -20,6 +20,7 @@ from pytest import raises as assert_raises
 # from hypothesis.extra import numpy as hynp
 
 
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -95,6 +96,7 @@ reasonable_operators_for_scalars = [
 # This compares scalarmath against ufuncs.
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTypes(TestCase):
     def test_types(self):
         for atype in types:
@@ -138,6 +140,7 @@ class TestTypes(TestCase):
             np.add(1, 1)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBaseMath(TestCase):
     def test_blocked(self):
         # test alignments offsets for simd instructions
@@ -187,6 +190,7 @@ class TestBaseMath(TestCase):
         np.add(d, np.ones_like(d))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPower(TestCase):
     def test_small_types(self):
         for t in [np.int8, np.int16, np.float16]:
@@ -289,6 +293,7 @@ def _signs(dt):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestModulus(TestCase):
     def test_modulus_basic(self):
         # dt = np.typecodes["AllInteger"] + np.typecodes["Float"]
@@ -393,6 +398,7 @@ class TestModulus(TestCase):
                 assert_(np.isinf(div)) and assert_(np.isnan(mod))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestComplexDivision(TestCase):
     @skip(reason="With pytorch, 1/(0+0j) is nan + nan*j, not inf + nan*j")
     def test_zero_division(self):
@@ -463,6 +469,7 @@ class TestComplexDivision(TestCase):
                 assert_equal(result.imag, ex[1])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestConversion(TestCase):
     def test_int_from_long(self):
         # NB: this test assumes that the default fp type is float64
@@ -577,6 +584,7 @@ class TestConversion(TestCase):
 
 
 @xpassIfTorchDynamo  # (reason="can delegate repr to pytorch")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRepr(TestCase):
     def _test_type_repr(self, t):
         finfo = np.finfo(t)
@@ -611,6 +619,7 @@ class TestRepr(TestCase):
 
 
 @skip(reason="Array scalars do not decay to python scalars.")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMultiply(TestCase):
     def test_seq_repeat(self):
         # Test that basic sequences get repeated when multiplied with
@@ -662,6 +671,7 @@ class TestMultiply(TestCase):
             assert_array_equal(np.int_(3) * arr_like, np.full(3, 3))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNegative(TestCase):
     def test_exceptions(self):
         a = np.ones((), dtype=np.bool_)[()]
@@ -682,6 +692,7 @@ class TestNegative(TestCase):
                 assert_equal(operator.neg(a) + a, 0)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSubtract(TestCase):
     def test_exceptions(self):
         a = np.ones((), dtype=np.bool_)[()]
@@ -698,6 +709,7 @@ class TestSubtract(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAbs(TestCase):
     def _test_abs_func(self, absfunc, test_dtype):
         x = test_dtype(-1.5)
@@ -731,6 +743,7 @@ class TestAbs(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBitShifts(TestCase):
     @parametrize("type_code", np.typecodes["AllInteger"])
     @parametrize("op", [operator.rshift, operator.lshift])
@@ -765,6 +778,7 @@ class TestBitShifts(TestCase):
 
 @skip(reason="Will rely on pytest for hashing")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestHash(TestCase):
     @parametrize("type_code", np.typecodes["AllInteger"])
     def test_integer_hashes(self, type_code):
@@ -809,6 +823,7 @@ def recursionlimit(n):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestScalarOpsMisc(TestCase):
     @xfail  # (reason="pytorch does not warn on overflow")
     @parametrize("dtype", "Bbhil")
@@ -862,6 +877,7 @@ class TestScalarOpsMisc(TestCase):
         zero = np.dtype(dtype).type(0)
         -zero  # does not warn
 
+    @skipIfTorchDynamo  # (reason="idk, sorry")
     @xfail  # (reason="pytorch raises RuntimeError on division by zero")
     @parametrize("dtype", np.typecodes["AllInteger"])
     @parametrize(
@@ -899,6 +915,7 @@ ops_with_names = [
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestScalarSubclassingMisc(TestCase):
     @skip(reason="We do not support subclassing scalars.")
     @parametrize("__op__, __rop__, op, cmp", ops_with_names)

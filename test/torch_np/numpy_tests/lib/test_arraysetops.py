@@ -6,6 +6,7 @@
 from unittest import skipIf
 
 import numpy
+import torch
 
 from pytest import raises as assert_raises
 
@@ -37,6 +38,7 @@ else:
 @skipIf(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
 @xpassIfTorchDynamo  # (reason="TODO")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSetOps(TestCase):
     def test_intersect1d(self):
         # unique inputs
@@ -667,6 +669,7 @@ class TestSetOps(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestUnique(TestCase):
     def test_unique_1d(self):
         def check_all(a, b, i1, i2, c, dt):

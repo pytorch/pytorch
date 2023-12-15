@@ -7,6 +7,7 @@ from unittest import expectedFailure as xfail, skipIf as skipif
 
 from pytest import raises as assert_raises
 
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -80,6 +81,7 @@ def _add_keepdims(func):
     return wrapped
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTakeAlongAxis(TestCase):
     def test_argequivalent(self):
         """Test it translates from arg<func> to <func>"""
@@ -137,6 +139,7 @@ class TestTakeAlongAxis(TestCase):
         assert_equal(actual.shape, (3, 2, 5))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPutAlongAxis(TestCase):
     def test_replace_max(self):
         a_base = np.array([[10, 30, 20], [60, 40, 50]])
@@ -165,6 +168,7 @@ class TestPutAlongAxis(TestCase):
 
 
 @xpassIfTorchDynamo  # (reason="apply_along_axis not implemented")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestApplyAlongAxis(TestCase):
     def test_simple(self):
         a = np.ones((20, 10), "d")
@@ -295,6 +299,7 @@ class TestApplyAlongAxis(TestCase):
 
 
 @xfail  # (reason="apply_over_axes not implemented")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestApplyOverAxes(TestCase):
     def test_simple(self):
         a = np.arange(24).reshape(2, 3, 4)
@@ -302,6 +307,7 @@ class TestApplyOverAxes(TestCase):
         assert_array_equal(aoa_a, np.array([[[60], [92], [124]]]))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestExpandDims(TestCase):
     def test_functionality(self):
         s = (2, 3, 4, 5)
@@ -333,6 +339,7 @@ class TestExpandDims(TestCase):
         assert_raises(ValueError, expand_dims, a, axis=(1, 1))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestArraySplit(TestCase):
     def test_integer_0_split(self):
         a = np.arange(10)
@@ -517,6 +524,7 @@ class TestArraySplit(TestCase):
         compare_results(res, desired)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSplit(TestCase):
     # The split function is essentially the same as array_split,
     # except that it test if splitting will result in an
@@ -533,6 +541,7 @@ class TestSplit(TestCase):
         assert_raises(ValueError, split, a, 3)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestColumnStack(TestCase):
     def test_non_iterable(self):
         assert_raises(TypeError, column_stack, 1)
@@ -559,6 +568,7 @@ class TestColumnStack(TestCase):
         column_stack(np.arange(3) for _ in range(2))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDstack(TestCase):
     def test_non_iterable(self):
         assert_raises(TypeError, dstack, 1)
@@ -609,6 +619,7 @@ class TestDstack(TestCase):
 
 # array_split has more comprehensive test of splitting.
 # only do simple test on hsplit, vsplit, and dsplit
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestHsplit(TestCase):
     """Only testing for integer splits."""
 
@@ -636,6 +647,7 @@ class TestHsplit(TestCase):
         compare_results(res, desired)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestVsplit(TestCase):
     """Only testing for integer splits."""
 
@@ -661,6 +673,7 @@ class TestVsplit(TestCase):
         compare_results(res, desired)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDsplit(TestCase):
     # Only testing for integer splits.
     def test_non_iterable(self):
@@ -692,6 +705,7 @@ class TestDsplit(TestCase):
         compare_results(res, desired)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSqueeze(TestCase):
     def test_basic(self):
         a = rand(20, 10, 10, 1, 1)
@@ -750,6 +764,7 @@ class TestSqueeze(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestKron(TestCase):
     def test_basic(self):
         # Using 0-dimensional ndarray
@@ -803,6 +818,7 @@ class TestKron(TestCase):
         assert np.array_equal(k.shape, expected_shape), "Unexpected shape from kron"
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTile(TestCase):
     def test_basic(self):
         a = np.array([0, 1, 2])
@@ -843,6 +859,7 @@ class TestTile(TestCase):
 
 
 @xfail  # Maybe implement one day
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMayShareMemory(TestCase):
     def test_basic(self):
         d = np.ones((50, 60))

@@ -9,6 +9,7 @@ from pytest import raises as assert_raises
 
 skip = functools.partial(skipIf, True)
 
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -45,6 +46,7 @@ else:
     )
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestHistogram(TestCase):
     def test_simple(self):
         n = 100
@@ -432,6 +434,7 @@ class TestHistogram(TestCase):
 
 @xpassIfTorchDynamo  # (reason="TODO")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestHistogramOptimBinNums(TestCase):
     """
     Provide test coverage when using provided estimators for optimal number of
@@ -720,6 +723,7 @@ class TestHistogramOptimBinNums(TestCase):
             assert_raises(TypeError, histogram, [1, 2, 3], estimator, weights=[1, 2, 3])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestHistogramdd(TestCase):
     def test_simple(self):
         x = np.array(

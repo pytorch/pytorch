@@ -13,6 +13,7 @@ from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 import pytest
 
 from pytest import raises as assert_raises
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -48,6 +49,7 @@ skip = functools.partial(skipif, True)
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIndexing(TestCase):
     def test_index_no_floats(self):
         a = np.array([[[5]]])
@@ -504,6 +506,7 @@ class TestIndexing(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBroadcastedAssignments(TestCase):
     def assign(self, a, ind, val):
         a[ind] = val
@@ -580,6 +583,7 @@ class TestBroadcastedAssignments(TestCase):
         assert_((a[::-1] == v).all())
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFancyIndexingCast(TestCase):
     @xpassIfTorchDynamo  # (
     #    reason="XXX: low-prio to support assigning complex values on floating arrays"
@@ -609,6 +613,7 @@ class TestFancyIndexingCast(TestCase):
 
 
 @xfail  # (reason="XXX: requires broadcast() and broadcast_to()")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMultiIndexingAutomated(TestCase):
     """
     These tests use code to mimic the C-Code indexing for selection.
@@ -1038,6 +1043,7 @@ class TestMultiIndexingAutomated(TestCase):
             self._check_single_index(a, index)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFloatNonIntegerArgument(TestCase):
     """
     These test that ``TypeError`` is raised when you try to use
@@ -1097,6 +1103,7 @@ class TestFloatNonIntegerArgument(TestCase):
         assert_raises(TypeError, np.min, d, (0.2, 1.2))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBooleanIndexing(TestCase):
     # Using a boolean as integer argument/indexing is an error.
     def test_bool_as_int_argument_errors(self):
@@ -1147,6 +1154,7 @@ class TestBooleanIndexing(TestCase):
             a[idx]
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestArrayToIndexDeprecation(TestCase):
     """Creating an index from array not 0-D is an error."""
 
@@ -1166,6 +1174,7 @@ class TestArrayToIndexDeprecation(TestCase):
         assert_raises(TypeError, np.reshape, a, (a, -1))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNonIntegerArrayLike(TestCase):
     """Tests that array_likes only valid if can safely cast to integer.
 
@@ -1190,6 +1199,7 @@ class TestNonIntegerArrayLike(TestCase):
         a.__getitem__([])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMultipleEllipsisError(TestCase):
     """An index can only have a single ellipsis."""
 

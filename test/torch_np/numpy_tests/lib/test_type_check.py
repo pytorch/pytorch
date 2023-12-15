@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
+import torch
 
 
 if TEST_WITH_TORCHDYNAMO:
@@ -52,6 +53,7 @@ def assert_all(x):
 
 
 @xpassIfTorchDynamo  # (reason="common_type not implemented")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCommonType(TestCase):
     def test_basic(self):
         ai32 = np.array([[1, 2], [3, 4]], dtype=np.int32)
@@ -69,6 +71,7 @@ class TestCommonType(TestCase):
 
 
 @xfail  # (reason="not implemented")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMintypecode(TestCase):
     def test_default_1(self):
         for itype in "1bcsuwil":
@@ -119,6 +122,7 @@ class TestMintypecode(TestCase):
 
 
 @xpassIfTorchDynamo  # (reason="TODO: decide on if [1] is a scalar or not")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIsscalar(TestCase):
     def test_basic(self):
         assert_(np.isscalar(3))
@@ -128,6 +132,7 @@ class TestIsscalar(TestCase):
         assert_(np.isscalar(4.0))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestReal(TestCase):
     def test_real(self):
         y = np.random.rand(
@@ -164,6 +169,7 @@ class TestReal(TestCase):
         # assert_(not isinstance(out, np.ndarray))  # XXX: 0D tensor, not scalar
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestImag(TestCase):
     def test_real(self):
         y = np.random.rand(
@@ -200,6 +206,7 @@ class TestImag(TestCase):
         # assert_(not isinstance(out, np.ndarray))  # XXX: 0D tensor, not scalar
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIscomplex(TestCase):
     def test_fail(self):
         z = np.array([-1, 0, 1])
@@ -212,6 +219,7 @@ class TestIscomplex(TestCase):
         assert_array_equal(res, [1, 0, 0])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIsreal(TestCase):
     def test_pass(self):
         z = np.array([-1, 0, 1j])
@@ -229,6 +237,7 @@ class TestIsreal(TestCase):
         assert res.all()
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIscomplexobj(TestCase):
     def test_basic(self):
         z = np.array([-1, 0, 1])
@@ -245,6 +254,7 @@ class TestIscomplexobj(TestCase):
         assert_(not iscomplexobj([3, 1, True]))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIsrealobj(TestCase):
     def test_basic(self):
         z = np.array([-1, 0, 1])
@@ -253,6 +263,7 @@ class TestIsrealobj(TestCase):
         assert_(not isrealobj(z))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIsnan(TestCase):
     def test_goodvalues(self):
         z = np.array((-1.0, 0.0, 1.0))
@@ -278,6 +289,7 @@ class TestIsnan(TestCase):
         assert_all(np.isnan(np.array(0 + 0j) / 0.0) == 1)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIsfinite(TestCase):
     # Fixme, wrong place, isfinite now ufunc
 
@@ -305,6 +317,7 @@ class TestIsfinite(TestCase):
         assert_all(np.isfinite(np.array(1 + 1j) / 0.0) == 0)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIsinf(TestCase):
     # Fixme, wrong place, isinf now ufunc
 
@@ -337,6 +350,7 @@ class TestIsinf(TestCase):
         assert_all(np.isinf(np.array((0.0,)) / 0.0) == 0)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIsposinf(TestCase):
     def test_generic(self):
         vals = isposinf(np.array((-1.0, 0, 1)) / 0.0)
@@ -345,6 +359,7 @@ class TestIsposinf(TestCase):
         assert_(vals[2] == 1)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIsneginf(TestCase):
     def test_generic(self):
         vals = isneginf(np.array((-1.0, 0, 1)) / 0.0)
@@ -354,6 +369,7 @@ class TestIsneginf(TestCase):
 
 
 # @xfail  #(reason="not implemented")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNanToNum(TestCase):
     def test_generic(self):
         vals = nan_to_num(np.array((-1.0, 0, 1)) / 0.0)
@@ -436,6 +452,7 @@ class TestNanToNum(TestCase):
         assert isinstance(vals, np.ndarray)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRealIfClose(TestCase):
     def test_basic(self):
         a = np.random.rand(10)
@@ -449,6 +466,7 @@ class TestRealIfClose(TestCase):
 
 
 @xfail  # (reason="not implemented")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestArrayConversion(TestCase):
     def test_asfarray(self):
         a = asfarray(np.array([1, 2, 3]))

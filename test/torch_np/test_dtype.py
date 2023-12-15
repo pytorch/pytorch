@@ -5,6 +5,7 @@ from unittest import expectedFailure as xfail
 import numpy
 
 import torch._numpy as tnp
+import torch
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -47,6 +48,7 @@ for name in dtype_names:
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestConvertDType(TestCase):
     @parametrize("name, np_dtype", np_dtype_params)
     def test_convert_np_dtypes(self, name, np_dtype):

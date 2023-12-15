@@ -10,6 +10,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+import torch
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
@@ -21,6 +22,7 @@ else:
     from torch._numpy.testing import assert_array_almost_equal
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFFTShift(TestCase):
     def test_definition(self):
         x = [0, 1, 2, 3, 4, -4, -3, -2, -1]
@@ -138,6 +140,7 @@ class TestFFTShift(TestCase):
                     )
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFFTFreq(TestCase):
     def test_definition(self):
         x = [0, 1, 2, 3, 4, -4, -3, -2, -1]
@@ -148,6 +151,7 @@ class TestFFTFreq(TestCase):
         assert_array_almost_equal(10 * pi * fft.fftfreq(10, pi), x)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRFFTFreq(TestCase):
     def test_definition(self):
         x = [0, 1, 2, 3, 4]
@@ -158,6 +162,7 @@ class TestRFFTFreq(TestCase):
         assert_array_almost_equal(10 * pi * fft.rfftfreq(10, pi), x)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIRFFTN(TestCase):
     def test_not_last_axis_success(self):
         ar, ai = np.random.random((2, 16, 8, 32))

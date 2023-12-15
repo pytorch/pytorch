@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xpassIfTorchDynamo,
 )
+import torch
 
 skip = functools.partial(skipif, True)
 
@@ -47,6 +48,7 @@ def assert_dtype_not_equal(a, b):
     assert_(hash(a) != hash(b), "two different types hash to the same value !")
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 @instantiate_parametrized_tests
 class TestBuiltin(TestCase):
     @parametrize("t", [int, float, complex, np.int32])
@@ -149,6 +151,7 @@ class TestBuiltin(TestCase):
 
 
 @skip(reason="dtype attributes not yet implemented")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDtypeAttributeDeletion(TestCase):
     def test_dtype_non_writable_attributes_deletion(self):
         dt = np.dtype(np.double)
@@ -177,6 +180,7 @@ class TestDtypeAttributeDeletion(TestCase):
             assert_raises(AttributeError, delattr, dt, s)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 @instantiate_parametrized_tests
 class TestPickling(TestCase):
     def check_pickling(self, dtype):
@@ -220,6 +224,7 @@ class TestPickling(TestCase):
 
 
 @skip(reason="XXX: value-based promotions, we don't have.")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 @instantiate_parametrized_tests
 class TestPromotion(TestCase):
     """Test cases related to more complex DType promotions.  Further promotion
@@ -312,6 +317,7 @@ class TestPromotion(TestCase):
             assert np.result_type(*perm) == expected
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMisc(TestCase):
     def test_dtypes_are_true(self):
         # test for gh-6294
@@ -330,6 +336,7 @@ class TestMisc(TestCase):
             np.dtype[Any]
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFromDTypeAttribute(TestCase):
     def test_simple(self):
         class dt:
@@ -358,6 +365,7 @@ class TestFromDTypeAttribute(TestCase):
 
 @skip(reason="Parameteric dtypes, our stuff is simpler.")
 @skipif(sys.version_info < (3, 9), reason="Requires python 3.9")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 @instantiate_parametrized_tests
 class TestClassGetItem(TestCase):
     def test_dtype(self) -> None:

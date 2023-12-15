@@ -3,6 +3,7 @@
 import functools
 
 from unittest import expectedFailure as xfail, skipIf
+import torch
 
 from pytest import raises as assert_raises  # , assert_raises_regex,
 
@@ -51,6 +52,7 @@ else:
 
 @xpassIfTorchDynamo  # (reason="unravel_index not implemented")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRavelUnravelIndex(TestCase):
     def test_basic(self):
         assert_equal(np.unravel_index(2, (2, 2)), (1, 0))
@@ -225,6 +227,7 @@ class TestRavelUnravelIndex(TestCase):
 
 @xfail  # (reason="mgrid not implemented")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestGrid(TestCase):
     def test_basic(self):
         a = mgrid[-1:1:10j]
@@ -342,6 +345,7 @@ class TestGrid(TestCase):
 
 
 @xfail  # (reason="r_ not implemented")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestConcatenator(TestCase):
     def test_1d(self):
         assert_array_equal(r_[1, 2, 3, 4, 5, 6], np.array([1, 2, 3, 4, 5, 6]))
@@ -385,6 +389,7 @@ class TestConcatenator(TestCase):
 
 
 @xfail  # (reason="ndenumerate not implemented")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNdenumerate(TestCase):
     def test_basic(self):
         a = np.array([[1, 2], [3, 4]])
@@ -393,6 +398,7 @@ class TestNdenumerate(TestCase):
         )
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIndexExpression(TestCase):
     def test_regression_1(self):
         # ticket #1196
@@ -408,6 +414,7 @@ class TestIndexExpression(TestCase):
 
 
 @xfail  # (reason="ix_ not implemented")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIx_(TestCase):
     def test_regression_1(self):
         # Test empty untyped inputs create outputs of indexing type, gh-5804
@@ -450,6 +457,7 @@ class TestIx_(TestCase):
         assert_equal(x.shape, (length_of_vector,))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestC(TestCase):
     @xpassIfTorchDynamo  # (reason="c_ not implemented")
     def test_c_(self):
@@ -457,6 +465,7 @@ class TestC(TestCase):
         assert_equal(a, [[1, 2, 3, 0, 0, 4, 5, 6]])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFillDiagonal(TestCase):
     def test_basic(self):
         a = np.zeros((3, 3), dtype=int)
@@ -539,6 +548,7 @@ class TestFillDiagonal(TestCase):
             fill_diagonal(a, 2)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDiagIndices(TestCase):
     def test_diag_indices(self):
         di = diag_indices(4)
@@ -560,6 +570,7 @@ class TestDiagIndices(TestCase):
         assert_array_equal(a, np.array([[[1, 0], [0, 0]], [[0, 0], [0, 1]]]))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDiagIndicesFrom(TestCase):
     def test_diag_indices_from(self):
         x = np.random.random((4, 4))
@@ -578,6 +589,7 @@ class TestDiagIndicesFrom(TestCase):
             diag_indices_from(x)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNdIndex(TestCase):
     @xfail  # (reason="ndindex not implemented")
     def test_ndindex(self):

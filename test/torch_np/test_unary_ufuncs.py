@@ -4,6 +4,7 @@
 # do not edit manually!
 
 import numpy as np
+import torch
 
 from torch._numpy._ufuncs import *  # noqa: F403
 from torch._numpy.testing import assert_allclose
@@ -11,6 +12,7 @@ from torch._numpy.testing import assert_allclose
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestUnaryUfuncs(TestCase):
     def test_absolute(self):
         assert_allclose(np.absolute(0.5), absolute(0.5), atol=1e-14, check_dtype=False)

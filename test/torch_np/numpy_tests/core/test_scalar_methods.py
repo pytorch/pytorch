@@ -14,6 +14,7 @@ from unittest import skipIf as skipif, SkipTest
 import pytest
 
 from pytest import raises as assert_raises
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -36,6 +37,7 @@ skip = functools.partial(skipif, True)
 
 @skip(reason="XXX: scalar.as_integer_ratio not implemented")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAsIntegerRatio(TestCase):
     # derived in part from the cpython test "test_floatasratio"
 
@@ -139,6 +141,7 @@ class TestAsIntegerRatio(TestCase):
 
 @skip(reason="NP_VER: older numpies has problems with .is_integer")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIsInteger(TestCase):
     @parametrize("str_value", ["inf", "nan"])
     @parametrize("code", np.typecodes["Float"])
@@ -168,6 +171,7 @@ class TestIsInteger(TestCase):
 @skip(reason="XXX: implementation details of the type system differ")
 @skipif(sys.version_info < (3, 9), reason="Requires python 3.9")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestClassGetItem(TestCase):
     @parametrize(
         "cls",
@@ -225,6 +229,7 @@ class TestClassGetItem(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestClassGetitemMisc(TestCase):
     @skipif(sys.version_info >= (3, 9), reason="Requires python 3.8")
     @parametrize("cls", [np.number, np.complexfloating, np.int64])
@@ -236,6 +241,7 @@ class TestClassGetitemMisc(TestCase):
 
 @skip(reason="scalartype(...).bit_count() not implemented")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBitCount(TestCase):
     # derived in part from the cpython test "test_bit_count"
 

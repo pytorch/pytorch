@@ -3,6 +3,7 @@
 
 import pytest
 
+import torch
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
@@ -19,6 +20,7 @@ else:
     from torch._numpy.testing import assert_equal
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAppend(TestCase):
     # tests taken from np.append docstring
     def test_basic(self):

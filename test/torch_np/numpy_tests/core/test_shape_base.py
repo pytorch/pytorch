@@ -9,6 +9,7 @@ import numpy
 import pytest
 from pytest import raises as assert_raises
 
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -58,6 +59,7 @@ skip = functools.partial(skipif, True)
 IS_PYPY = False
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAtleast1d(TestCase):
     def test_0D_array(self):
         a = array(1)
@@ -97,6 +99,7 @@ class TestAtleast1d(TestCase):
         assert atleast_1d([[2, 3], [4, 5]]).shape == (2, 2)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAtleast2d(TestCase):
     def test_0D_array(self):
         a = array(1)
@@ -135,6 +138,7 @@ class TestAtleast2d(TestCase):
         assert atleast_2d([[[3, 1], [4, 5]], [[3, 5], [1, 2]]]).shape == (2, 2, 2)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAtleast3d(TestCase):
     def test_0D_array(self):
         a = array(1)
@@ -167,6 +171,7 @@ class TestAtleast3d(TestCase):
         assert_array_equal(res, desired)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestHstack(TestCase):
     def test_non_iterable(self):
         assert_raises(TypeError, hstack, 1)
@@ -217,6 +222,7 @@ class TestHstack(TestCase):
             hstack((a, b), casting="safe", dtype=np.int64)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestVstack(TestCase):
     def test_non_iterable(self):
         assert_raises(TypeError, vstack, 1)
@@ -274,6 +280,7 @@ class TestVstack(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestConcatenate(TestCase):
     def test_out_and_dtype_simple(self):
         # numpy raises TypeError on both out=... and dtype=...
@@ -468,6 +475,7 @@ class TestConcatenate(TestCase):
 
 
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestStackMisc(TestCase):
     @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
     def test_stack(self):
@@ -576,6 +584,7 @@ class TestStackMisc(TestCase):
 
 @xfail  # (reason="TODO: implement block(...)")
 @instantiate_parametrized_tests
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlock(TestCase):
     @pytest.fixture(params=["block", "force_concatenate", "force_slicing"])
     def block(self, request):
