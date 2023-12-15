@@ -10,7 +10,7 @@ jobs:
     outputs:
       regex-match: ${{ steps.regex-match.outputs.match }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - id: regex-match
         uses: actions-ecosystem/action-regex-match@d50fd2e7a37d0e617aea3d7ada663bd56862b9cc
