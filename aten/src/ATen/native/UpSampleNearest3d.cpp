@@ -18,7 +18,7 @@
 #include <ATen/ops/upsample_nearest3d_native.h>
 #endif
 
-namespace at::metaa {
+namespace at::meta {
 
 TORCH_META_FUNC(upsample_nearest3d) (
     const Tensor& input,
