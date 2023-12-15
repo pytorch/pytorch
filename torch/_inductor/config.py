@@ -388,6 +388,17 @@ freezing_discard_parameters: bool = False
 # should be run with this flag both on and off to make sure we have coverage.
 allow_stack_allocation: bool = True
 
+# Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
+# to maximize performance for use cases that it can accommodate at the expense of
+# generality. In brief:
+# - inputs and outputs are ArrayRefTensor<T> (note that strides are required, but the
+#   tensor must be contiguous)
+# - constant handling is unchanged because it is not a per-inference-iteration bottleneck
+#
+# When the DSO is generated in this mode, the usual interface will also be supported,
+# but performance for that interface may be degraded.
+use_minimal_arrayref_interface: bool = False
+
 
 # config specific to codegen/cpp.py
 class cpp:
