@@ -161,7 +161,7 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
             already_allocated = tensor._typed_storage()._size() == size.numel()
             if not already_allocated:
                 _p_assert(
-                    not torch._data_ptr_allocated(tensor),
+                    not _data_ptr_allocated(tensor),
                     "Tensor storage should have been resized to be 0 but got PLACEHOLDEr",
                 )
                 tensor._typed_storage()._resize_(size.numel())
@@ -332,3 +332,6 @@ def _replace_by_prefix(
         new_key = new_prefix + key[len(old_prefix) :]
         state_dict[new_key] = state_dict[key]
         del state_dict[key]
+
+def _data_ptr_allocated(tensor: torch.Tensor) -> bool:
+    return tensor.storage().data_ptr() > 0
