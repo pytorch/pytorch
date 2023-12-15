@@ -56,6 +56,7 @@ using flash_attention_fn = void (*)(
     const Tensor& philox_offset, const Tensor& debug_attn_mask,
     const Tensor& query, const Tensor& key, const Tensor& value,
     double dropout_p, bool is_causal, bool return_debug_mask,
+    c10::optional<Tensor> attn_mask,
     c10::optional<double> scale);
 
 using flash_attention_backward_fn = void (*)(
@@ -67,6 +68,7 @@ using flash_attention_backward_fn = void (*)(
     const int64_t max_q, const int64_t max_k,
     double dropout_p, bool is_causal,
     const Tensor& philox_seed, const Tensor& philox_offset,
+    c10::optional<Tensor> attn_mask,
     c10::optional<double> scale);
 
 DECLARE_DISPATCH(flash_attention_fn, flash_attention_kernel);

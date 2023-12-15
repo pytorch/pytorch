@@ -155,6 +155,7 @@ void cpu_flash_attention(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
+    c10::optional<Tensor> attn_mask,
     c10::optional<double> scale) {
   // Query (Batch x Num_heads  x Q_seq_len  x Dim_per_head)
   //    -> (Batch x Q_seq_len  x Num_heads  x Dim_per_head)
@@ -171,6 +172,10 @@ void cpu_flash_attention(
   using Vec = vec::Vectorized<accum_t>;
   accum_t scaling_factor =
       sdp::calculate_scale(query, scale).as_float_unchecked();
+  bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
+  if (has_attn_mask && is_reduced_type) {
+    attn_mask.value() = attn_mask.value().to(at::kFloat);
+  }
 
   // Sizes
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
@@ -197,6 +202,16 @@ void cpu_flash_attention(
   int64_t lStrideB = logsumexp.stride(0);
   int64_t lStrideM = logsumexp.stride(1);
   int64_t lStrideH = logsumexp.stride(2);
+  int64_t mStrideB =
+      (has_attn_mask && attn_mask.value().size(0) > 1)
+      ? attn_mask.value().stride(0)
+      : 0;
+  int64_t mStrideH =
+      (has_attn_mask && attn_mask.value().size(1) > 1)
+      ? attn_mask.value().stride(1)
+      : 0;
+  int64_t mStrideM =
+      has_attn_mask ? attn_mask.value().stride(2) : 0;
 
   int64_t qSplitSize = q_split_size > qSize ? qSize : q_split_size;
   int64_t kvSplitSize = kv_split_size > kvSize ? kvSize : kv_split_size;
@@ -220,6 +235,9 @@ void cpu_flash_attention(
   scalar_t* q_data = query.data_ptr<scalar_t>();
   scalar_t* k_data = key.data_ptr<scalar_t>();
   scalar_t* v_data = value.data_ptr<scalar_t>();
+  accum_t* mask_data = has_attn_mask
+      ? attn_mask.value().data_ptr<accum_t>()
+      : nullptr;
   scalar_t* out_data = output.data_ptr<scalar_t>();
   accum_t* lse_data = logsumexp.data_ptr<accum_t>();
   accum_t* buf_data = buf.data_ptr<accum_t>();
@@ -275,13 +293,41 @@ void cpu_flash_attention(
                 kvBlockSize - last_col - 1);
           }
         }
+        // Update attention weights with attention mask
+        // And apply scaling factor
+        // qk <- qk * scaling + attn_mask
+        if (has_attn_mask) {
+          for (int64_t row = 0; row < qBlockSize; ++row) {
+            at::vec::map2<accum_t>(
+                [scaling_factor](Vec x, Vec y) {
+                  return x * Vec(scaling_factor) + y;
+                },
+                qk_data + row * kvBlockSize,
+                qk_data + row * kvBlockSize,
+                mask_data + i * mStrideB + j * mStrideH +
+                    (m + row) * mStrideM + n,
+                kvBlockSize);
+          }
+        }
         // Update coefficients with Softmax
         accum_t tmp_max = 0, tmp_sum = 0, sum_old = 0, exp_tmp = 0;
         for (int64_t row = 0; row < qBlockSize; ++row) {
           sum_old = qk_sum_data[row];
-          // scale and max per row
-          _mul_reduce_max_fusion_kernel(qk_data + row * kvBlockSize, scaling_factor, kvBlockSize,
-                qk_data + row * kvBlockSize, tmp_max);
+          if (has_attn_mask) {
+            // max per row
+            tmp_max = at::vec::reduce_all<accum_t>(
+                [](Vec& x, Vec& y) { return at::vec::maximum(x, y); },
+                qk_data + row * kvBlockSize,
+                kvBlockSize);
+          } else {
+            // apply scaling factor and max per row in fusion
+            _mul_reduce_max_fusion_kernel(
+                qk_data + row * kvBlockSize,
+                scaling_factor,
+                kvBlockSize,
+                qk_data + row * kvBlockSize,
+                tmp_max);
+          }
           tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
           // qk <- exp(qk - max) and sum per row
           tmp_sum = tmp_max;
@@ -362,12 +408,17 @@ void cpu_flash_attention_backward(
     bool is_causal,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
+    c10::optional<Tensor> attn_mask,
     c10::optional<double> scale) {
   constexpr bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<accum_t>;
   accum_t scaling_factor =
       sdp::calculate_scale(query, scale).as_float_unchecked();
+  bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
+  if (has_attn_mask && is_reduced_type) {
+    attn_mask.value() = attn_mask.value().to(at::kFloat);
+  }
 
   // Sizes
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
@@ -397,6 +448,16 @@ void cpu_flash_attention_backward(
   int64_t lStrideB = logsumexp.stride(0);
   int64_t lStrideM = logsumexp.stride(1);
   int64_t lStrideH = logsumexp.stride(2);
+  int64_t mStrideB =
+      (has_attn_mask && attn_mask.value().size(0) > 1)
+      ? attn_mask.value().stride(0)
+      : 0;
+  int64_t mStrideH =
+      (has_attn_mask && attn_mask.value().size(1) > 1)
+      ? attn_mask.value().stride(1)
+      : 0;
+  int64_t mStrideM =
+      has_attn_mask ? attn_mask.value().stride(2) : 0;
 
   int64_t grad_qStrideB = grad_q.stride(0);
   int64_t grad_qStrideM = grad_q.stride(1);
@@ -440,6 +501,9 @@ void cpu_flash_attention_backward(
   scalar_t* q_data = query.data_ptr<scalar_t>();
   scalar_t* k_data = key.data_ptr<scalar_t>();
   scalar_t* v_data = value.data_ptr<scalar_t>();
+  accum_t* mask_data = has_attn_mask
+      ? attn_mask.value().data_ptr<accum_t>()
+      : nullptr;
   scalar_t* out_data = out.data_ptr<scalar_t>();
   accum_t* lse_data = logsumexp.data_ptr<accum_t>();
   accum_t* buf_data = buf.data_ptr<accum_t>();
@@ -492,6 +556,20 @@ void cpu_flash_attention_backward(
             static_cast<accum_t>(0),
             attn_data,
             kvBlockSize);
+          // attn <- attn + mask
+          if (has_attn_mask) {
+            for (const auto row : c10::irange(qBlockSize)) {
+              at::vec::map2<accum_t>(
+                  [](Vec x, Vec y) {
+                    return x + y;
+                  },
+                  attn_data + row * kvBlockSize,
+                  attn_data + row * kvBlockSize,
+                  mask_data + i * mStrideB + j * mStrideH +
+                      (m + row) * mStrideM + n,
+                  kvBlockSize);
+            }
+          }
           // restore self attention after softmax from logsumexp
           // attn <- exp(attn - normalizer)
           for (const auto row : c10::irange(qBlockSize)) {
@@ -628,6 +706,7 @@ void flash_attention_kernel_impl(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
+    c10::optional<Tensor> attn_mask,
     c10::optional<double> scale) {
   auto q_seq_len = query.size(2);
 
@@ -636,17 +715,20 @@ void flash_attention_kernel_impl(
       cpu_flash_attention<scalar_t, 256, 512>(
         output, logsumexp, cum_seq_q, cum_seq_k,
         max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
-        query, key, value, dropout_p, is_causal, return_debug_mask, scale);
+        query, key, value, dropout_p, is_causal, return_debug_mask,
+        attn_mask, scale);
     } else if (q_seq_len >= 192) {
       cpu_flash_attention<scalar_t, 64, 512>(
         output, logsumexp, cum_seq_q, cum_seq_k,
         max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
-        query, key, value, dropout_p, is_causal, return_debug_mask, scale);
+        query, key, value, dropout_p, is_causal, return_debug_mask,
+        attn_mask, scale);
     } else {
       cpu_flash_attention<scalar_t, 32, 512>(
         output, logsumexp, cum_seq_q, cum_seq_k,
         max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
-        query, key, value, dropout_p, is_causal, return_debug_mask, scale);
+        query, key, value, dropout_p, is_causal, return_debug_mask,
+        attn_mask, scale);
     }
   });
 }
@@ -669,6 +751,7 @@ void flash_attention_backward_kernel_impl(
     bool is_causal,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
+    c10::optional<Tensor> attn_mask,
     c10::optional<double> scale) {
   // make sure grad_out has no zero strides (broadcasted dimensions)
   // since we are going to call gemm next
@@ -682,19 +765,22 @@ void flash_attention_backward_kernel_impl(
         grad_q, grad_k, grad_v, grad_out_contig,
         query, key, value, out, logsumexp,
         cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
-        is_causal, philox_seed, philox_offset, scale);
+        is_causal, philox_seed, philox_offset,
+        attn_mask, scale);
     } else if (q_seq_len >= 192) {
       cpu_flash_attention_backward<scalar_t, 64, 512>(
         grad_q, grad_k, grad_v, grad_out_contig,
         query, key, value, out, logsumexp,
         cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
-        is_causal, philox_seed, philox_offset, scale);
+        is_causal, philox_seed, philox_offset,
+        attn_mask, scale);
     } else {
       cpu_flash_attention_backward<scalar_t, 32, 512>(
         grad_q, grad_k, grad_v, grad_out_contig,
         query, key, value, out, logsumexp,
         cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
-        is_causal, philox_seed, philox_offset, scale);
+        is_causal, philox_seed, philox_offset,
+        attn_mask, scale);
     }
   });
 }

@@ -1776,6 +1776,7 @@ class TestSDPA(NNTestCase):
     @parametrize("n_head", [1, 3])
     @parametrize("head_dim", [8, 16])
     @parametrize("causal", [True, False])
+    @parametrize("attn_mask_flag", [0, 1, 2])  # 0:No mask, 1:q dtype, 2:bool
     @parametrize("train", [True, False])
     def test_scaled_dot_product_fused_attention_vs_math_cpu(
         self,
@@ -1787,8 +1788,12 @@ class TestSDPA(NNTestCase):
         n_head,
         head_dim,
         causal,
+        attn_mask_flag,
         train,
     ):
+        if causal and attn_mask_flag:
+            # cannot both be true at the same time
+            return
         atol = 1e-5
         rtol = 5e-6
         if dtype is torch.bfloat16:
@@ -1817,16 +1822,24 @@ class TestSDPA(NNTestCase):
         k = k.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
         q = q.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        if attn_mask_flag == 1:
+            attn_mask = torch.randn((batch_size, n_head, seq_len, seq_len), device=device, dtype=dtype)
+        elif attn_mask_flag == 2:
+            attn_mask = torch.randint(0, 2, size=(1, 1, seq_len, seq_len), device=device, dtype=torch.bool)
+        else:
+            attn_mask = None
         k2 = k2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
         q2 = q2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
         v2 = v2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
 
         with sdp_kernel(**backend_map[fused_kernel]):
             actual = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=None, dropout_p=0.0, is_causal=causal)
+                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=causal)
         with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
+            if attn_mask_flag == 1 and dtype is torch.bfloat16:
+                attn_mask = attn_mask.float()
             math_ref = torch.nn.functional.scaled_dot_product_attention(
-                q2, k2, v2, attn_mask=None, dropout_p=0.0, is_causal=causal)
+                q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=causal)
 
         if dtype is torch.bfloat16:
             math_ref = math_ref.bfloat16()

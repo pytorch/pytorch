@@ -5063,6 +5063,7 @@ def meta__scaled_dot_product_flash(
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
+    attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
 ):
     batch_size = query.size(0)
@@ -5161,6 +5162,7 @@ def meta__scaled_dot_product_flash_backward(
     is_causal: bool,
     philox_seed: Tensor,
     philox_offset: Tensor,
+    attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
 ):
     if device_hint(query) != "cpu":
