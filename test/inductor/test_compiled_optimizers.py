@@ -61,16 +61,15 @@ def build_compiled_opt_kwarg_db():
             continue
 
         for optim_inputs in optim_info.optim_inputs_func():
-            for device in ["cpu", "cuda:0"]:
+            for device in ["cpu", "cuda"]:
                 for foreach in [True, False]:
                     if device == "cpu" and "capturable" in optim_inputs.kwargs:
                         continue
 
-                    is_gpu = device == "cuda:0"
                     kwargs = dict(optim_inputs.kwargs)
                     name = (
                         f"test_{optim_info.optim_cls.__name__.lower()}"
-                        f"{'_foreach' if foreach else ''}_{'cuda' if is_gpu else 'cpu'}"
+                        f"{'_foreach' if foreach else ''}_{device}"
                     )
 
                     for key in optim_inputs.kwargs:
@@ -78,7 +77,7 @@ def build_compiled_opt_kwarg_db():
                             continue
                         name += "_" + key
 
-                    # Eager doesn't support capturable ASGD
+                    # Eager for-loop impl doesn't support capturable ASGD
                     if name == "test_asgd_cuda_capturable":
                         continue
 
@@ -89,7 +88,7 @@ def build_compiled_opt_kwarg_db():
                     else:
                         kwargs["kernel_count"] = (
                             KERNEL_COUNTS[optim_info.optim_cls].multitensor
-                            if foreach and is_gpu
+                            if foreach and device == "cuda"
                             else KERNEL_COUNTS[optim_info.optim_cls].singletensor
                         )
 
@@ -163,11 +162,16 @@ def make_test(optim_cls, closure=None, kernel_count=2, device="cuda:0", **kwargs
             opt_eager.step()
             opt_eager.step()
 
+        # Note on tolerances:
+        # test_adadelta_foreach_cuda_rho_weight_decay
+        # Mismatched elements: 1 / 100 (1.0%)
+        # Greatest absolute difference: 2.0936131477355957e-05 at index (2, 7) (up to 2e-05 allowed)
+        # Greatest relative difference: 8.520411211065948e-05 at index (2, 7) (up to 1e-06 allowed)
         self.assertEqual(
             list(model_eager.parameters()),
             list(model_compiled.parameters()),
             atol=2e-5,
-            rtol=2e-3,
+            rtol=2e-5,
         )
 
         if self.check_kernel_count:
@@ -178,7 +182,7 @@ def make_test(optim_cls, closure=None, kernel_count=2, device="cuda:0", **kwargs
                 torch._inductor.metrics.generated_kernel_count, kernel_count
             )
 
-    if device == "cuda:0":
+    if device == "cuda":
         test_fn = requires_cuda()(test_fn)
 
     return test_fn
@@ -189,9 +193,9 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
     def test_fn(self):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
-        input = torch.ones([10, 10], device="cuda:0")
+        input = torch.ones([10, 10], device="cuda")
         model = torch.nn.Sequential(
-            *[torch.nn.Linear(10, 10, device="cuda:0") for _ in range(2)]
+            *[torch.nn.Linear(10, 10, device="cuda") for _ in range(2)]
         )
         model(input).sum().backward()
 
