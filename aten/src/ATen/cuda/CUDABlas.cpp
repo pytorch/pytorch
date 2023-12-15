@@ -352,17 +352,18 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   const float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
 
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000
+  auto compute_type = CUBLAS_COMPUTE_32F;
+#else
+  auto compute_type = CUDA_R_32F;
+#endif
   TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(handle,
                                   opa, opb, (int)m, (int)n, (int)k,
                                   (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
                                   b, CUDA_R_16BF, (int)ldb, strideb,
                                   (void*)&fbeta, c, CUDA_R_16BF, (int)ldc, stridec,
                                   (int)num_batches,
-#if defined(USE_ROCM) && ROCM_VERSION >= 60000
-                                  CUBLAS_COMPUTE_32F,
-#else
-                                  CUDA_R_32F,
-#endif
+                                  compute_type,
                                   CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 }
 
@@ -534,6 +535,11 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
     cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
   }
 #endif
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000
+  auto compute_type = CUBLAS_COMPUTE_32F;
+#else
+  auto compute_type = CUDA_R_32F;
+#endif
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
   TORCH_CUDABLAS_CHECK(cublasGemmEx(
       handle,
@@ -553,11 +559,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       c,
       CUDA_R_16BF,
       ldc,
-#if defined(USE_ROCM) && ROCM_VERSION >= 60000
-      CUBLAS_COMPUTE_32F,
-#else
-      CUDA_R_32F,
-#endif
+      compute_type,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 }
