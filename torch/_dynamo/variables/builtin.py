@@ -1215,15 +1215,15 @@ class BuiltinVariable(VariableTracker):
                                 grapharg.example.grad = None
                         return VariableBuilder(tx, source)(grapharg.example.grad)
 
-                    # No match for real value in inputs, fall back to
-                    # var_getattr, which is sound (May produce a GetAttrVariable)
-                    try:
-                        return obj.var_getattr(tx, name).clone(source=source)
-                    except NotImplementedError:
-                        return GetAttrVariable(obj, name, **options)
-                unimplemented("tensor grad")
+                # No match for real value in inputs, fall back to
+                # var_getattr, which is sound (May produce a GetAttrVariable)
+                try:
+                    return obj.var_getattr(tx, name).clone(source=source)
+                except NotImplementedError:
+                    return GetAttrVariable(obj, name, **options)
             else:
                 from .builder import wrap_fx_proxy
+
                 # Intermediaries grad, None is sound.
                 return wrap_fx_proxy(tx, obj.as_proxy().grad, **options)
         elif isinstance(
