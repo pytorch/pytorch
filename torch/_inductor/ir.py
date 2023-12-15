@@ -3928,6 +3928,9 @@ class ExternKernelOut(ExternKernel):
     def should_allocate(self):
         return True
 
+    def get_alias_names(self):
+        return [i.get_name() for i in self.inputs]
+
 
 class RandomSeeds(ExternKernelOut):
     def __init__(self, count: int, device: torch.device):
