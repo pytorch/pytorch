@@ -453,6 +453,7 @@ static Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
       /* is_bw_differentiable */ false,
       /* is_fw_differentiable */ false,
       /* view_func */ nullptr,
+      /* rev_view_func */ nullptr,
       /* creation_meta */ CreationMeta::DEFAULT,
       /*allow_tensor_metadata_change=*/false);
 
@@ -468,10 +469,15 @@ static Tensor _fw_primal(
     return at::alias(self);
   })();
   std::function<at::Tensor(const at::Tensor&)> func = nullptr;
+  std::function<at::Tensor(const at::Tensor&)> rev_func = nullptr;
   if (!self.unsafeGetTensorImpl()->support_as_strided()) {
     auto size_vec = self.sizes().vec();
     func = [=](const at::Tensor& input_base) {
       return input_base.view(size_vec);
+    };
+    // TODO: Is this correct?
+    rev_func = [=](const at::Tensor& input_view) {
+      return input_view.view(size_vec);
     };
   }
   auto result = as_view(
@@ -480,6 +486,7 @@ static Tensor _fw_primal(
       /* is_bw_differentiable */ true,
       /* is_fw_differentiable */ false,
       /* view_func */ std::move(func),
+      /* rev_view_func */ std::move(rev_func),
       /* creation_meta */ CREATION_META_DEFINITION);
 
   return result;
@@ -496,10 +503,15 @@ static Tensor _make_dual(
     return at::alias(primal);
   })();
   std::function<at::Tensor(const at::Tensor&)> func = nullptr;
+  std::function<at::Tensor(const at::Tensor&)> rev_func = nullptr;
   if (!primal.unsafeGetTensorImpl()->support_as_strided()) {
     auto size_vec = primal.sizes().vec();
     func = [=](const at::Tensor& input_base) {
       return input_base.view(size_vec);
+    };
+    // TODO: Is this correct?
+    rev_func = [=](const at::Tensor& input_view) {
+      return input_view.view(size_vec);
     };
   }
   auto result = as_view(
@@ -508,6 +520,7 @@ static Tensor _make_dual(
       /* is_bw_differentiable */ true,
       /* is_fw_differentiable */ false,
       /* view_func */ std::move(func),
+      /* rev_view_func */ std::move(rev_func),
       /* creation_meta */ CREATION_META_DEFINITION);
 
   return result;

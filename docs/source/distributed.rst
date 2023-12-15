@@ -177,14 +177,14 @@ Initialization
 --------------
 
 The package needs to be initialized using the :func:`torch.distributed.init_process_group`
-or :func:`torch.distributed.init_device_mesh` function before calling any other methods.
+or :func:`torch.distributed.device_mesh.init_device_mesh` function before calling any other methods.
 Both block until all processes have joined.
 
 .. autofunction:: is_available
 
 .. autofunction:: init_process_group
 
-.. autofunction:: init_device_mesh
+.. autofunction:: torch.distributed.device_mesh.init_device_mesh
 
 .. autofunction:: is_initialized
 
@@ -348,10 +348,10 @@ DeviceMesh
 DeviceMesh is a higher level abstraction that manages process groups (or NCCL communicators).
 It allows user to easily create inter node and intra node process groups without worrying about
 how to set up the ranks correctly for different sub process groups, and it helps manage those
-distributed process group easily. :func:`~torch.distributed.init_device_mesh` function can be
+distributed process group easily. :func:`~torch.distributed.device_mesh.init_device_mesh` function can be
 used to create new DeviceMesh, with a mesh shape describing the device topology.
 
-.. autoclass:: DeviceMesh
+.. autoclass:: torch.distributed.device_mesh.DeviceMesh
 
 Point-to-point communication
 ----------------------------
@@ -467,6 +467,8 @@ Collective functions
 
 .. autofunction:: monitored_barrier
 
+.. autoclass:: Work
+
 .. autoclass:: ReduceOp
 
 .. class:: reduce_op
@@ -558,6 +560,19 @@ Debugging ``torch.distributed`` applications
 
 Debugging distributed applications can be challenging due to hard to understand hangs, crashes, or inconsistent behavior across ranks. ``torch.distributed`` provides
 a suite of tools to help debug training applications in a self-serve fashion:
+
+Python Breakpoint
+^^^^^^^^^^^^^^^^^
+
+It is extremely convenient to use python's debugger in a distributed environment, but because it does not work out of the box many people do not use it at all.
+PyTorch offers a customized wrapper around pdb that streamlines the process.
+
+`torch.distributed.breakpoint` makes this process easy.  Internally, it customizes `pdb`'s breakpoint behavior in two ways but otherwise behaves as normal `pdb`.
+1. Attaches the debugger only on one rank (specified by the user).
+2. Ensures all other ranks stop, by using a `torch.distributed.barrier()` that will release once the debugged rank issues a `continue`
+3. Reroutes stdin from the child process such that it connects to your terminal.
+
+To use it, simply issue `torch.distributed.breakpoint(rank)` on all ranks, using the same value for `rank` in each case.
 
 Monitored Barrier
 ^^^^^^^^^^^^^^^^^
@@ -846,6 +861,7 @@ If you are running single node training, it may be convenient to interactively b
 .. py:module:: torch.distributed.argparse_util
 .. py:module:: torch.distributed.c10d_logger
 .. py:module:: torch.distributed.checkpoint.api
+.. py:module:: torch.distributed.checkpoint.checkpointer
 .. py:module:: torch.distributed.checkpoint.default_planner
 .. py:module:: torch.distributed.checkpoint.filesystem
 .. py:module:: torch.distributed.checkpoint.metadata

@@ -173,7 +173,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ):
         """
         Walk this object and call fn on all the VariableTracker
-        instances to produce a new VariableTracker with the results.
+        instances
         """
         if cache is None:
             cache = dict()
@@ -187,14 +187,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
                 def update_object_dict(v):
                     changed = False
-                    rv = dict(v.__dict__)
+                    rv = v.__dict__
                     for key in rv.keys():
                         if key not in v._nonvar_fields:
                             prior = rv[key]
                             rv[key] = cls.apply(fn, prior, cache, skip_fn)
                             changed = changed or prior is not rv[key]
-                    if changed:
-                        return v.clone(**rv)
+
                     return v
 
                 value = value.unwrap()
@@ -273,6 +272,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def as_proxy(self):
         raise NotImplementedError(str(self))
 
+    def maybe_fx_node(self):
+        try:
+            proxy = self.as_proxy()
+            import torch.fx
+
+            if isinstance(proxy, torch.fx.Proxy):
+                return proxy.node
+            return None
+        except NotImplementedError:
+            return None
+
     def reconstruct(self, codegen):
         raise NotImplementedError()
 
@@ -289,10 +299,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
-    def unpack_var_sequence(self, tx):
+    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
         raise NotImplementedError()
 
-    def has_unpack_var_sequence(self, tx):
+    def has_unpack_var_sequence(self, tx) -> bool:
         try:
             self.unpack_var_sequence(tx)
             return True
@@ -303,7 +313,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         unimplemented(f"inspect_parameter_names: {self}")
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        unimplemented(f"hasattr: {repr(self)}")
+        unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -330,13 +340,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def rename(self, tx, name):
-        new_name = tx.output.new_var(name)
-        if not self.mutable_local or not isinstance(self.mutable_local, MutableLocal):
-            # This is fine for objects that are not mutable locals
-            self.user_code_variable_name = new_name
-            return self
-        new_vt = self.clone(user_code_variable_name=new_name)
-        return tx.replace_all(self, new_vt)
+        self.user_code_variable_name = tx.output.new_var(name)
+        return self
 
     def realize(self) -> "VariableTracker":
         """Used by LazyVariableTracker to build the real VariableTracker"""

@@ -13,12 +13,12 @@ _tensor_symint_registry = WeakTensorKeyDictionary()
 
 def get_tensor_symint(tensor, *, coeff=1):
     global _tensor_id_counter
-    if tensor not in _tensor_symint_registry:
-        _tensor_symint_registry[tensor] = torch._C._get_singleton_int(
-            _tensor_id_counter, coeff
-        )
+    tensor_symint = _tensor_symint_registry.get(tensor)
+    if tensor_symint is None:
+        tensor_symint = torch._C._get_singleton_int(_tensor_id_counter, coeff)
         _tensor_id_counter += 1
-    return _tensor_symint_registry[tensor]
+        _tensor_symint_registry[tensor] = tensor_symint
+    return tensor_symint
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
@@ -94,16 +94,12 @@ class NestedTensor(torch.Tensor):
         B = offsets.shape[0] - 1
         if lengths is not None:
             assert B == lengths.shape[0]
-        Ds = values.shape[: self._ragged_idx - 1] + values.shape[self._ragged_idx :]
 
-        nested_size = [B]
-        nested_size.extend(Ds[: self._ragged_idx - 1])
-        nested_size.append(ragged_size)
-        nested_size.extend(Ds[self._ragged_idx - 1 :])
-        self._size = tuple(nested_size)
-
+        # subtract 1 to convert to values dim space
+        r = self._ragged_idx - 1
+        self._size = (B, *values.shape[:r], ragged_size, *values.shape[r+1:])
         stride = values.stride()
-        self._strides = (ragged_size * stride[self._ragged_idx - 1], *stride)
+        self._strides = (ragged_size * stride[r], *stride)
 
         self._values = values
         self._offsets = offsets
@@ -384,7 +380,7 @@ def jagged_from_tensor_and_lengths(
             values[offsets[0] : offsets[-1]], offsets - offsets[0]
         )
     else:
-        ret_nt = ViewNonContiguousNestedFromBuffer.apply(values, offsets, length_list)
+        ret_nt = nested_view_from_values_offsets_lengths(values, offsets, length_list)
 
     # populate metadata cache with computed seqlen extremes
     ret_nt._metadata_cache = {
