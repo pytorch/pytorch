@@ -5,7 +5,7 @@ This folder contains a work in progress simulation of a python inference server.
 The v0 version of this has a backend worker that is a single process. It loads a
 ResNet-18 checkpoint to 'cuda:0' and compiles the model. It accepts requests in
 the form of (tensor, request_time) from a `multiprocessing.Queue`, runs
-inference on the request and returns (output, request_time) in the a separate
+inference on the request and returns (output, request_time) in a separate
 response `multiprocessing.Queue`.
 
 The frontend worker is a process with three threads
@@ -20,7 +20,7 @@ For now we omit data preprocessing as well as result post-processing.
 
 ### Running a single benchmark
 
-The togglable commmand line arguments to the script are as follows:
+The togglable command line arguments to the script are as follows:
   - `num_iters` (default: 100): how many requests to send to the backend
     excluding the first warmup request
   - `batch_size` (default: 32): the batch size of the requests.
@@ -48,4 +48,4 @@ sizes with compile on and off and collect the mean and standard deviation of war
 average latency, throughput and GPU utilization for each. The `results/` directory will contain the metrics
 from running a sweep as we develop this benchmark where `results/output_{batch_size}_{compile}.md`
 will contain the mean and standard deviation of results for a given batch size and compile setting,
-if the file already exists, the metrics form the run will be appended as a new row in the markdown table.
+if the file already exists, the metrics from the run will be appended as a new row in the markdown table.
