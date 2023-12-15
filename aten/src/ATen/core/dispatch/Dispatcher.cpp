@@ -5,7 +5,16 @@
 #include <sstream>
 #include <utility>
 
+#ifdef FBCODE_CAFFE2
+#include <c10/util/static_tracepoint.h>
+#endif
+
 namespace c10 {
+
+#ifdef FBCODE_CAFFE2
+TORCH_SDT_DEFINE_SEMAPHORE(operator_start)
+TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
+#endif
 
 bool show_dispatch_trace() {
     static char const* temp = getenv("TORCH_SHOW_DISPATCH_TRACE");
@@ -508,5 +517,22 @@ void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction
   // the forward range with the corresponding Autograd's node
   guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
+#ifdef FBCODE_CAFFE2
+bool Dispatcher::profilingOperatorEvents() {
+  return TORCH_SDT_IS_ENABLED(operator_start) || TORCH_SDT_IS_ENABLED(operator_end);
+}
+
+void Dispatcher::fireOpStartUSDT(at::RecordFunction::schema_ref_t schema_ref) {
+  if (TORCH_SDT_IS_ENABLED(operator_start)) {
+    TORCH_SDT_WITH_SEMAPHORE(operator_start, schema_ref.get().name().c_str());
+  }
+}
+
+void Dispatcher::fireOpEndUSDT(at::RecordFunction::schema_ref_t schema_ref) {
+  if (TORCH_SDT_IS_ENABLED(operator_end)) {
+    TORCH_SDT_WITH_SEMAPHORE(operator_end, schema_ref.get().name().c_str());
+  }
+}
+#endif
 
 }
