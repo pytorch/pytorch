@@ -373,23 +373,6 @@ Tensor& set_(Tensor& result, Storage source) {
   return result.set_(std::move(source), 0, new_size, {});
 }
 
-bool _same_storage(at::Tensor& a, at::Tensor const& b) {
-  return a.storage().data_ptr().get() == b.storage().data_ptr().get();
-}
-
-bool _data_ptr_allocated(at::Tensor& a) {
-  return a.storage().data_ptr() > 0;
-}
-
-bool _same_storage_size(at::Tensor&a, int64_t s) {
-  size_t dtype_size = a.element_size();
-  return a.storage().nbytes() == static_cast<size_t>(s) * dtype_size;
-}
-
-bool _storage_size_allocated(at::Tensor&a) {
-  return a.storage().nbytes() > 0;
-}
-
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
 Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {

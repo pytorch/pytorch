@@ -34,7 +34,12 @@ from torch.distributed.fsdp._common_utils import (
     _set_fsdp_flattened,
     HandleTrainingState,
 )
-from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
+from torch.distributed.utils import (
+    _alloc_storage,
+    _data_ptr_allocated,
+    _free_storage,
+    _p_assert,
+)
 from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
 from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
@@ -1308,7 +1313,7 @@ class FlatParamHandle:
         if not self.uses_sharded_strategy:
             return False
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
-        already_unsharded = torch._same_storage_size(
+        already_unsharded = _same_storage_size(
             unsharded_flat_param, unsharded_flat_param.numel()
         )
         return not already_unsharded
@@ -1666,9 +1671,7 @@ class FlatParamHandle:
         # NOTE: This check is not strictly needed for correctness but is a
         # useful sanity check since the tensor should only be used internally.
         _p_assert(
-            torch._same_storage(
-                self.flat_param, self._get_padded_unsharded_flat_param()
-            ),
+            _same_storage(self.flat_param, self._get_padded_unsharded_flat_param()),
             "Expects the unpadded parameter to be a view into the padded parameter",
         )
         self.flat_param_to(torch.device("cpu"))
@@ -2180,7 +2183,7 @@ class FlatParamHandle:
             # may be different (e.g. the model changed from train to eval).
             flat_param_tensor = self._unsharded_flat_param_for_skipped_views
             _p_assert(
-                torch._data_ptr_allocated(flat_param_tensor),
+                _data_ptr_allocated(flat_param_tensor),
                 "If skipped using sharded views, the unsharded flat parameter "
                 "should be allocated",
             )
@@ -2223,7 +2226,7 @@ class FlatParamHandle:
             param_changed = getattr(module, param_name) is not param
             needs_param_writeback = (
                 param_changed  # changed parameter variable itself
-                or not torch._same_storage(param, flat_param_tensor)
+                or not _same_storage(param, flat_param_tensor)
             )
             if self._skipped_use_sharded_views and (
                 param_changed or needs_param_writeback
@@ -2264,9 +2267,8 @@ class FlatParamHandle:
                     # is `flat_param._cpu_grad`, which is on CPU
                     continue
 
-                needs_grad_writeback = (
-                    flat_param_grad is None
-                    or not torch._same_storage(param.grad, flat_param_grad)
+                needs_grad_writeback = flat_param_grad is None or not _same_storage(
+                    param.grad, flat_param_grad
                 )
                 if needs_grad_writeback:
                     if flat_param_grad is None:
@@ -2539,15 +2541,13 @@ class FlatParamHandle:
         # Compile does not resize during trace
         if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
             _p_assert(
-                torch._same_storage_size(tensor, 0),
+                _same_storage_size(tensor, 0),
                 "Expects storage to be freed but got storage with size > 0",
             )
 
     @staticmethod
     def _check_storage_allocated(tensor: Tensor):
-        _p_assert(
-            torch._storage_size_allocated(tensor), "Expects storage to be allocated"
-        )
+        _p_assert(_storage_size_allocated(tensor), "Expects storage to be allocated")
 
     def _check_low_precision_shard(self):
         _p_assert(
@@ -2703,3 +2703,18 @@ def _warn_use_fake_all_gather(log: logging.Logger, warning: str):
 @functools.lru_cache(1)
 def _warn_use_fake_reduce(log: logging.Logger, warning: str):
     log.warning(warning)
+
+
+def _same_storage(a, b):
+    return a._typed_storage()._data_ptr() == b._typed_storage()._data_ptr()
+
+
+@torch._dynamo.allow_in_graph
+def _same_storage_size(a: torch.Tensor, b: int):
+    return a._typed_storage()._size() == b
+
+
+@torch._dynamo.allow_in_graph
+def _storage_size_allocated(tensor: Tensor):
+    storage_size: int = tensor._typed_storage()._size()
+    _p_assert(storage_size > 0, "Expects storage to be allocated")
