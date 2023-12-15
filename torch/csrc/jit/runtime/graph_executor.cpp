@@ -252,7 +252,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
         captures_(capture_size),
         input_instructions_(input_size) {}
 
-  variable_list apply(variable_list&& inputs) override {
+  variable_list apply(variable_list&& inputs, std::optional<PyObject*> compiler) override {
     Stack stack;
     stack.reserve(captures_.size() + inputs.size());
 

@@ -64,7 +64,7 @@ struct ReduceAdd : public autograd::Node {
       : destination_device_(destination_device){};
   ~ReduceAdd() override {}
 
-  autograd::variable_list apply(autograd::variable_list&& inputs) override {
+  autograd::variable_list apply(autograd::variable_list&& inputs, std::optional<PyObject*> compiler = std::nullopt) override {
     TORCH_CHECK(
         !torch::autograd::compute_requires_grad(inputs),
         "ReduceAdd can only be used during the backward pass of data parallel.");

@@ -29,7 +29,7 @@ Scatter::Scatter(
 
 Scatter::~Scatter() = default;
 
-variable_list Scatter::apply(variable_list&& inputs) {
+variable_list Scatter::apply(variable_list&& inputs, std::optional<PyObject*> compiler) {
   AT_ASSERT(inputs.size() == 1);
   auto& input = inputs.front();
 
@@ -70,7 +70,7 @@ Gather::Gather(const at::Device& destination_device, int64_t dim)
 
 Gather::~Gather() = default;
 
-variable_list Gather::apply(variable_list&& inputs) {
+variable_list Gather::apply(variable_list&& inputs, std::optional<PyObject*> compiler) {
   bool all_are_zero_dim = true;
   for (const auto& input : inputs) {
     TORCH_CHECK(

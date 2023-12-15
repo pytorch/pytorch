@@ -18,7 +18,7 @@ struct TORCH_API Error : public Node {
 
   Error(std::string msg) : msg(std::move(msg)) {}
 
-  variable_list apply(variable_list&& inputs) override;
+  variable_list apply(variable_list&& inputs, std::optional<PyObject*> compiler = std::nullopt) override;
 
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(
@@ -52,7 +52,7 @@ struct TORCH_API DelayedError : public Node {
     }
   }
 
-  variable_list apply(variable_list&& inputs) override;
+  variable_list apply(variable_list&& inputs, std::optional<PyObject*> compiler = std::nullopt) override;
 
   std::string msg;
 };
@@ -62,7 +62,7 @@ struct TORCH_API UndefinedGrad : public Node {
     add_input_metadata(Node::undefined_input());
   }
 
-  variable_list apply(variable_list&& inputs) override;
+  variable_list apply(variable_list&& inputs, std::optional<PyObject*> compiler = std::nullopt) override;
 };
 
 struct TORCH_API UndefinedGradBackward : public Node {
@@ -70,7 +70,7 @@ struct TORCH_API UndefinedGradBackward : public Node {
 
   UndefinedGradBackward() = default;
 
-  variable_list apply(variable_list&& inputs) override;
+  variable_list apply(variable_list&& inputs, std::optional<PyObject*> compiler = std::nullopt) override;
 
   void compiled_args(CompiledNodeArgs& args) override {}
   variable_list apply_with_saved(
@@ -91,7 +91,7 @@ struct TORCH_API GraphRoot : public Node {
     }
   }
 
-  variable_list apply(variable_list&& inputs) override {
+  variable_list apply(variable_list&& inputs, std::optional<PyObject*> compiler = std::nullopt) override {
     return outputs;
   }
 
@@ -104,7 +104,7 @@ struct TORCH_API GraphRoot : public Node {
 };
 
 struct TORCH_API Identity : public Node {
-  variable_list apply(variable_list&& inputs) override;
+  variable_list apply(variable_list&& inputs, std::optional<PyObject*> compiler = std::nullopt) override;
 };
 
 } // namespace autograd

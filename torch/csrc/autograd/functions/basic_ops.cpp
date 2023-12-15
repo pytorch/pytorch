@@ -13,7 +13,7 @@
 namespace torch {
 namespace autograd {
 
-auto Error::apply(variable_list&& inputs) -> variable_list {
+auto Error::apply(variable_list&& inputs, std::optional<PyObject*> compiler) -> variable_list {
   throw std::runtime_error(msg);
 }
 
@@ -28,7 +28,7 @@ variable_list Error::apply_with_saved(
   TORCH_INTERNAL_ASSERT(false, "unreachable");
 }
 
-auto DelayedError::apply(variable_list&& inputs) -> variable_list {
+auto DelayedError::apply(variable_list&& inputs, std::optional<PyObject*> compiler) -> variable_list {
   tensor_list outputs;
   outputs.reserve(inputs.size());
   for (auto& var : inputs) {
@@ -40,7 +40,7 @@ auto DelayedError::apply(variable_list&& inputs) -> variable_list {
   });
 }
 
-auto UndefinedGrad::apply(variable_list&& inputs) -> variable_list {
+auto UndefinedGrad::apply(variable_list&& inputs, std::optional<PyObject*> compiler) -> variable_list {
   tensor_list outputs;
   outputs.reserve(inputs.size());
   for (auto& var : inputs) {
@@ -52,7 +52,7 @@ auto UndefinedGrad::apply(variable_list&& inputs) -> variable_list {
   });
 }
 
-auto UndefinedGradBackward::apply(variable_list&& output_grads)
+auto UndefinedGradBackward::apply(variable_list&& output_grads, std::optional<PyObject*> compiler)
     -> variable_list {
   tensor_list input_grads;
   output_grads.reserve(input_grads.size());
@@ -63,7 +63,7 @@ auto UndefinedGradBackward::apply(variable_list&& output_grads)
   return input_grads;
 }
 
-auto Identity::apply(variable_list&& grads) -> variable_list {
+auto Identity::apply(variable_list&& grads, std::optional<PyObject*> compiler) -> variable_list {
   return std::move(grads);
 }
 

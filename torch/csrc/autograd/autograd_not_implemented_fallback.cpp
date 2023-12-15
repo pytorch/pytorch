@@ -84,13 +84,13 @@ struct WarnNotImplemented : public Node {
   WarnNotImplemented(std::string op_name, size_t num_outputs)
       : op_name(std::move(op_name)), num_outputs(num_outputs) {}
 
-  variable_list apply(variable_list&& inputs) override;
+  variable_list apply(variable_list&& inputs, std::optional<PyObject*> compiler) override;
 
   std::string op_name;
   size_t num_outputs;
 };
 
-auto WarnNotImplemented::apply(variable_list&& inputs) -> variable_list {
+auto WarnNotImplemented::apply(variable_list&& inputs, std::optional<PyObject*> compiler) -> variable_list {
   warnAutogradNotImplemented(op_name);
   std::vector<at::Tensor> output(num_outputs);
   return output;

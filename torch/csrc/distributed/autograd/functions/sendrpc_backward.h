@@ -17,7 +17,7 @@ namespace autograd {
 struct TORCH_API SendRpcBackward : public torch::autograd::Node {
  public:
   torch::autograd::variable_list apply(
-      torch::autograd::variable_list&& inputs) override;
+      torch::autograd::variable_list&& inputs, std::optional<PyObject*> compiler = std::nullopt) override;
 
   // SendRpcBackward is actually the root of an autograd graph on the local
   // node. As a result, it doesn't receive any 'inputs', but rather the RPC

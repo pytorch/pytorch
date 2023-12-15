@@ -18,7 +18,7 @@
 namespace torch {
 namespace autograd {
 
-auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
+auto CopyBackwards::apply(variable_list&& grads, std::optional<PyObject*> compiler) -> variable_list {
   check_input_variables("CopyBackwards", grads, 1, -1, true);
   auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grads[0]);
   variable_list grad_inputs(2);
@@ -207,7 +207,7 @@ variable_list CopySlices::apply_with_saved(
   return result;
 }
 
-auto CopySlices::apply(variable_list&& inputs1) -> variable_list {
+auto CopySlices::apply(variable_list&& inputs1, std::optional<PyObject*> compiler) -> variable_list {
   return apply_impl(std::move(inputs1), [this](variable_list&& inputs2) {
     return (*fn)(std::move(inputs2));
   });

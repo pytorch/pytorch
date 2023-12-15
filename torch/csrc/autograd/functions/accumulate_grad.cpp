@@ -22,7 +22,7 @@ AccumulateGrad::AccumulateGrad(Variable variable_)
   add_input_metadata(variable);
 }
 
-auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
+auto AccumulateGrad::apply(variable_list&& grads, std::optional<PyObject*> compiler) -> variable_list {
   check_input_variables("AccumulateGrad", grads, 1, 0);
 
   if (!grads[0].defined())

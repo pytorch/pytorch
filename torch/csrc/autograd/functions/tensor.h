@@ -15,7 +15,7 @@ namespace torch {
 namespace autograd {
 
 struct TORCH_API CopyBackwards : public Node {
-  variable_list apply(variable_list&& grads) override;
+  variable_list apply(variable_list&& grads, std::optional<PyObject*> compiler = std::nullopt) override;
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(
       const variable_list& inputs,
@@ -167,7 +167,7 @@ struct TORCH_API CopySlices : public Node {
   template <typename T>
   variable_list apply_impl(variable_list&& inputs, const T& call_fn);
 
-  variable_list apply(variable_list&& inputs) override;
+  variable_list apply(variable_list&& inputs, std::optional<PyObject*> compiler) override;
   void release_variables() override;
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(
