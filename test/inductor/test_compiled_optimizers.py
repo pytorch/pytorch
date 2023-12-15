@@ -174,6 +174,17 @@ def make_test(optim_cls, closure=None, kernel_count=2, device="cuda:0", **kwargs
             rtol=2e-5,
         )
 
+        # currently we don't mutate step properly until
+        # we resolve
+        # https://github.com/pytorch/pytorch/issues/115679
+        if optim_cls not in (Adadelta, Rprop, RMSprop):
+            for p_eager, p_compiled in zip(
+                model_eager.parameters(), model_compiled.parameters()
+            ):
+                self.assertEqual(
+                    opt_eager.state[p_eager], opt_compiled.state[p_compiled]
+                )
+
         if self.check_kernel_count:
             # currently, we compile the step and the rest of the computation
             # separately because the step is a single element tensor
