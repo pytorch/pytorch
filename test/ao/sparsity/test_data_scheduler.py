@@ -26,6 +26,7 @@ class ImplementedDataScheduler(BaseDataScheduler):
             return self.base_param
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBaseDataScheduler(TestCase):
     def _get_data(self):
         tensor1, param1, emb1 = torch.randn(5, 5), nn.Parameter(torch.randn(10, 10)), nn.Embedding(50, 5)

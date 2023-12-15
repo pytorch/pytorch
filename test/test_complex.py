@@ -11,6 +11,7 @@ from torch.testing._internal.common_dtype import complex_types
 
 devices = (torch.device('cpu'), torch.device('cuda:0'))
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestComplexTensor(TestCase):
     @dtypes(*complex_types())
     def test_to_list(self, device, dtype):

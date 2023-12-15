@@ -31,6 +31,7 @@ def count_philox_rand(gm, args, freq):
     assert [node.target for node in gm.graph.nodes].count(torch.ops.rngprims.philox_rand.default) == freq
     return gm
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFunctionalizationRngOps(TestCase):
     @dtypes(torch.float32)
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
@@ -327,6 +328,7 @@ only_for = ("cuda",)
 instantiate_device_type_tests(TestFunctionalizationRngOps, globals(), only_for=only_for)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class NegativeTest(TestCase):
     @dtypes(torch.float32)
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)

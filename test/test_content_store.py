@@ -15,6 +15,7 @@ from torch.utils._content_store import (
 )
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestContentStore(TestCase):
     def test_basic(self, device):
         # setup test data

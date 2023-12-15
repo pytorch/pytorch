@@ -889,6 +889,7 @@ class TestSymNumberMagicMethods(TestCase):
 
 instantiate_parametrized_tests(TestSymNumberMagicMethods)
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFloorDiv(TestCase):
     @staticmethod
     def python_floordiv(x, y):
@@ -1083,6 +1084,7 @@ class TestFloorDiv(TestCase):
                 self.assertTrue(op.is_real)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDimConstraints(TestCase):
     def test_dim_constraints_reduce_congruences_simple(self):
         from sympy import Symbol

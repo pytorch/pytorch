@@ -4,6 +4,7 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestComparisonUtils(TestCase):
     def test_all_equal_no_assert(self):
         t = torch.tensor([0.5])

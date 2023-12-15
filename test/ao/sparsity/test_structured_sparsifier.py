@@ -73,6 +73,7 @@ class BottomHalfLSTMPruner(BaseStructuredSparsifier):
                 new_mask = torch.cat(masks)
                 mask.data = new_mask.data
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSaliencyPruner(TestCase):
     def test_saliency_pruner_update_mask(self):
         """Test that we prune out the row with the lowest saliency (first row)"""
@@ -160,6 +161,7 @@ class TestSaliencyPruner(TestCase):
 
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBaseStructuredSparsifier(TestCase):
     def _check_pruner_prepared(self, model, pruner, device):
         for config in pruner.groups:
@@ -918,6 +920,7 @@ class TestBaseStructuredSparsifier(TestCase):
         # linear columns correctly.
         assert out_expected.shape == out_pruned.shape
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFPGMPruner(TestCase):
     """
     Test case for the implementation of paper:

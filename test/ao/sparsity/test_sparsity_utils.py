@@ -36,6 +36,7 @@ model_list = [
 ]
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSparsityUtilFunctions(TestCase):
     def test_module_to_fqn(self):
         """

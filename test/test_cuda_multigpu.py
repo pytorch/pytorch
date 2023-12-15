@@ -38,6 +38,7 @@ if not TEST_CUDA:
     TestCase = NoTest  # noqa: F811
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaMultiGPU(TestCase):
     FIFTY_MIL_CYCLES = 50000000
 
@@ -1289,6 +1290,7 @@ t2.start()
         self.assertTrue(all(memory_allocated(torch.cuda.device(idx)) == current_alloc[idx] for idx in range(1, device_count)))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaComm(TestCase):
     def _test_broadcast(self, input):
         if not TEST_MULTIGPU:

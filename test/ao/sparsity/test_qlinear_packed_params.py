@@ -15,6 +15,7 @@ from torch.testing._internal.common_quantized import (
 )
 from torch.testing._internal.common_utils import TestCase
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestQlinearPackedParams(TestCase):
     def qlinear_packed_params_test(self, allow_non_zero_zero_points=False):
         # copied from https://pytorch.org/docs/stable/sparse.html#csr-tensor-operations,

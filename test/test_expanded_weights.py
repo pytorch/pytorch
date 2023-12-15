@@ -24,6 +24,7 @@ from torch.utils._pytree import tree_map_only
 class TestContext:
     pass
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestExpandedWeightHelperFunction(TestCase):
     def test_forward_helper(self, device):
         input = torch.randn(3, 4, device=device)
@@ -142,6 +143,7 @@ class TestExpandedWeightHelperFunction(TestCase):
         res = sum_over_all_but_batch_and_last_n(input, 4)
         self.assertEqual(res, input)
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestExpandedWeightFunctional(TestCase):
     def _compare_ew_and_for_loop_per_sample_grads(self, op, sample_input, reduction):
         input = sample_input.input
@@ -391,6 +393,7 @@ class TestExpandedWeightFunctional(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"Expected number of channels in input to be divisible"):
             F.group_norm(inp, 2)  # 5 is not divisible by 2
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestExpandedWeightModule(TestCase):
     def _do_test(self, module, input, args=None, kwargs=None, batch_first=True, atol=None, rtol=None):
         args = args or ()

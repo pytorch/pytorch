@@ -5,8 +5,10 @@ import types
 
 from torch.utils._freeze import Freezer, PATH_MARKER
 from torch.testing._internal.common_utils import run_tests, TestCase
+import torch
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFreezer(TestCase):
     """Tests the freeze.py script"""
 

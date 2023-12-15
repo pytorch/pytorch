@@ -15,6 +15,7 @@ from torch.testing._internal.common_pruning import SimpleLinear, MockSparseLinea
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBaseSparsifier(TestCase):
     def test_constructor(self):
         # Cannot instantiate the abstract base
@@ -202,6 +203,7 @@ class TestBaseSparsifier(TestCase):
         assert model.linear1.sparse_params.get('baz', None) is None
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestWeightNormSparsifier(TestCase):
     def test_constructor(self):
         model = SimpleLinear()
@@ -334,6 +336,7 @@ class TestWeightNormSparsifier(TestCase):
                 assert sparse_mask.mean() == true_sl
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNearlyDiagonalSparsifier(TestCase):
     def test_constructor(self):
         model = SimpleLinear()

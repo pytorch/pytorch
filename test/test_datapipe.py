@@ -141,6 +141,7 @@ def odd_or_even(x: int) -> int:
     return x % 2
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDataChunk(TestCase):
     def setUp(self):
         self.elements = list(range(10))
@@ -192,6 +193,7 @@ class TestDataChunk(TestCase):
         self.assertEqual(chunk, elements)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestStreamWrapper(TestCase):
     class _FakeFD:
         def __init__(self, filepath):
@@ -272,6 +274,7 @@ class TestStreamWrapper(TestCase):
             self.assertEqual(str(wrap_f), "StreamWrapper<" + str(f) + ">")
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIterableDataPipeBasic(TestCase):
     def setUp(self):
         ret = create_temp_dir_and_files()
@@ -509,6 +512,7 @@ class TestIterableDataPipeBasic(TestCase):
 
 
 @skipIfNoDataFrames
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCaptureDataFrame(TestCase):
     def get_new_df(self):
         return df_wrapper.create_dataframe([[1, 2]], columns=['a', 'b'])
@@ -533,6 +537,7 @@ class TestCaptureDataFrame(TestCase):
         self.compare_capture_and_eager(operations)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDataFramesPipes(TestCase):
     """
         Most of test will fail if pandas instaled, but no dill available.
@@ -685,6 +690,7 @@ class Add1Callable:
         return x + 1
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFunctionalIterDataPipe(TestCase):
 
     def _serialization_test_helper(self, datapipe, use_dill):
@@ -1857,6 +1863,7 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(expected_res, res_after_reset)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFunctionalMapDataPipe(TestCase):
 
     def _serialization_test_helper(self, datapipe, use_dill):
@@ -2158,6 +2165,7 @@ if _generic_namedtuple_allowed:
         data: T_co
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTyping(TestCase):
     def test_isinstance(self):
         class A(IterDataPipe):
@@ -2491,6 +2499,7 @@ class NumbersDataset(IterDataPipe):
         return self.size
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestGraph(TestCase):
     class CustomIterDataPipe(IterDataPipe):
         def add_v(self, x):
@@ -2619,6 +2628,7 @@ def unbatch(x):
     return x[0]
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSerialization(TestCase):
     @skipIfNoDill
     def test_spawn_lambdas_iter(self):
@@ -2637,6 +2647,7 @@ class TestSerialization(TestCase):
         self.assertEqual([1, 1, 2, 2, 3, 3], sorted(result))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCircularSerialization(TestCase):
     class CustomIterDataPipe(IterDataPipe):
 
@@ -2786,6 +2797,7 @@ class CustomShardingIterDataPipe(IterDataPipe):
                 yield d
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestSharding(TestCase):
 
     def _get_pipeline(self):
@@ -2986,6 +2998,7 @@ class TestSharding(TestCase):
         self.assertEqual(list(zip_dp), [(i * 3, i * 3) for i in range(13 // 3 + 1)])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIterDataPipeSingletonConstraint(TestCase):
 
     r"""
@@ -3210,6 +3223,7 @@ class TestIterDataPipeSingletonConstraint(TestCase):
             next(it1)
         self.assertEqual(1, next(it3))
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIterDataPipeCountSampleYielded(TestCase):
 
     def _yield_count_test_helper(self, datapipe, n_expected_samples):
@@ -3357,6 +3371,7 @@ class _CustomSelfNextTestDataPipe(IterDataPipe):
         return self.n
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIterDataPipeGraphFastForward(TestCase):
 
     def _fast_forward_graph_test_helper(self, datapipe, fast_forward_fn, expected_res, n_iterations=3, rng=None):

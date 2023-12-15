@@ -61,6 +61,7 @@ def _calculate_sparsity(tensor):
 # This series of tests are to check the composability goals for sparsity and quantization. Namely
 # that performing quantization and sparsity model manipulations in various orderings
 # does not cause problems
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestComposability(TestCase):
     # This test checks whether performing quantization prepare before sparse prepare
     # causes any issues and verifies that the correct observers are inserted and that
@@ -321,6 +322,7 @@ def _module_has_activation_post_process(model, fqn_of_module):
                 return True
     return False
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFxComposability(TestCase):
     r"""This series of tests checks that various steps of the quantization and sparsity flow
     compose cleanly despite variation in sequencing.

@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import torch
 from torch import nn
 
 from torch.ao.pruning import WeightNormSparsifier
@@ -18,6 +19,7 @@ class ImplementedScheduler(BaseScheduler):
             return list(self.base_sl)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestScheduler(TestCase):
     def test_constructor(self):
         model = nn.Sequential(
@@ -84,6 +86,7 @@ class TestScheduler(TestCase):
         assert sparsifier.groups[0]['sparsity_level'] == 5.0  # Epoch 1
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCubicScheduler(TestCase):
     def setUp(self):
         self.model_sparse_config = [

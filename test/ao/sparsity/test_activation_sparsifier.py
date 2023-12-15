@@ -39,6 +39,7 @@ class Model(nn.Module):
         return out
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestActivationSparsifier(TestCase):
     def _check_constructor(self, activation_sparsifier, model, defaults, sparse_config):
         """Helper function to check if the model, defaults and sparse_config are loaded correctly

@@ -6,10 +6,12 @@ import subprocess
 import tempfile
 import os
 import unittest
+import torch
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
 # This is a very simple smoke test for the functional autograd benchmarking script.
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFunctionalAutogradBenchmark(TestCase):
     def _test_runner(self, model, disable_gpu=False):
         # Note about windows:

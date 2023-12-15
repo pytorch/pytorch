@@ -28,6 +28,7 @@ from torch.testing._internal.common_quantized import (
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestQuantizedSparseKernels(TestCase):
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     @override_qengines
@@ -243,6 +244,7 @@ class SparseQuantizedModel(nn.Module):
     def forward(self, x):
         return self.linear(x)
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestQuantizedSparseLayers(TestCase):
     @override_qengines
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")

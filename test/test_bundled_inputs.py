@@ -23,6 +23,7 @@ def save_and_load(sm):
     return torch.jit.load(buffer)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBundledInputs(TestCase):
 
     def test_single_tensors(self):

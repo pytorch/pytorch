@@ -69,6 +69,7 @@ if torch.distributed.is_available():
     from torch.distributed.optim.utils import functional_optim_map, register_functional_optim
 
 @unittest.skipIf(not torch.distributed.is_available(), "These are testing distributed functions")
+@torch.testing._internal.common_utils.unMarkDynamoStrictTest
 class TestFunctionalOptimParity(TestCase):
     def _validate_parameters(self, params_1, params_2):
         for p1, p2 in zip(params_1, params_2):

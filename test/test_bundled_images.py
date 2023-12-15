@@ -48,6 +48,7 @@ def get_tensor_from_raw_BGR(im) -> torch.Tensor:
     return raw_data
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBundledImages(TestCase):
     def test_single_tensors(self):
         class SingleTensorModel(torch.nn.Module):

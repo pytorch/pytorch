@@ -14,6 +14,7 @@ except ImportError:
 
 @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
 @unittest.skipIf(not HAS_TABULATE, "tabulate not available")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCompileBenchmarkUtil(TestCase):
     def test_training_and_inference(self):
         class ToyModel(torch.nn.Module):

@@ -28,6 +28,7 @@ class ImplementedSparsifier(BaseDataSparsifier):
         linear_state['step_count'] = linear_state.get('step_count', 0) + 1
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class _BaseDataSparsiferTestCase(TestCase):
     r"""This helper test class takes in any supported type of and runs some tests.
         The user is required to pass in the data that needs to sparsified and the
@@ -215,6 +216,7 @@ class _BaseDataSparsiferTestCase(TestCase):
             assert torch.all(contained_data == weight)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
     r"""This helper test class takes in any supported type of and runs some tests.
         This inherits the TestBaseDataSparsifierRuner wherein some functions are
@@ -364,6 +366,7 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
                 assert sparse_mask.mean() == true_sl
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBaseDataSparsifier(_BaseDataSparsiferTestCase):
     """To add unit tests to support new data types for the BaseDataSparsifier, create the following
         data_list: List of tuples of name, data to be added to the constructor
@@ -508,6 +511,7 @@ class Model(nn.Module):
         self.linear2 = nn.Linear(16, 16)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestQuantizationUtils(TestCase):
     def test_ptq_sparsify_first(self):
         """The expectation is post_training_sparse_quantize function

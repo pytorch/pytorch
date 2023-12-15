@@ -36,6 +36,7 @@ class ModelUnderTest(nn.Module):
         return x
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFakeSparsity(TestCase):
     def test_masking_logic(self):
         model = nn.Linear(16, 16, bias=False)

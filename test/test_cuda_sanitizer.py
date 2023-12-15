@@ -16,6 +16,7 @@ if not TEST_CUDA:
     TestCase = NoTest  # noqa: F811
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestArgumentHandler(TestCase):
     def test_add(self):
         add_func = torch.ops.aten.add.Tensor
@@ -133,6 +134,7 @@ def event_id(i: int) -> EventId:
     return 2000 + i
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestEventHandler(TestCase):
     def setUp(self):
         self.handler = csan.EventHandler()
@@ -387,6 +389,7 @@ class TestEventHandler(TestCase):
         self.assert_bad_kernel_launch(1, stream_id(2), read_write=[tensor_id(2)])
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMessages(TestCase):
     def setUp(self):
         self.handler = csan.EventHandler()

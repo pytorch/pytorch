@@ -5,6 +5,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 from torch._C import parse_schema
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFunctionSchema(TestCase):
     def test_serialize_and_deserialize(self):
         schemas = torch._C._jit_get_all_schemas()
