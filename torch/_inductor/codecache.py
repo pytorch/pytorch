@@ -2054,16 +2054,18 @@ class CppWrapperCodeCache:
         ext = "so"
         filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
         """
-        from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppTorchOptions
+        from torch._inductor.jit_builder.cpp_builder import (
+            CppBuilder,
+            CppTorchCudaOptions,
+        )
 
-        picked_vec_isa = pick_vec_isa()
         dummy_builder = CppBuilder(
             name,
             [source_code],
-            CppTorchOptions(picked_vec_isa),
+            CppTorchCudaOptions(use_cuda=cuda),
             output_dir=cpp_wrapper_dir,
         )
-        # not call build(). just calc the output path.
+        # not call build(). just process build options and args.
         filepath = dummy_builder.get_target_file_path()
         # print(f"!!! CppWrapperCodeCache: {filepath} -- {cpp_wrapper_dir}")
 
