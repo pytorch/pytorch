@@ -24,7 +24,6 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/pr-dependencies-check.yml@main
     with:
       pr_number: ${{ github.event.pull_request.number }}
-    runs-on: ubuntu-latest
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
