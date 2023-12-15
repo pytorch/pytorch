@@ -233,7 +233,8 @@ def maybe_disable_fake_tensor_mode():
 
 def unset_proxy_mode(pre_dispatch: bool = False):
     if pre_dispatch:
-        return unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
+        mode = unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
+        return mode
     return torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
 
 def set_proxy_mode(mode, pre_dispatch: bool = False):
