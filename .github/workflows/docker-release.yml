@@ -43,6 +43,7 @@ jobs:
       - name: Get docker release matrix
         id: generate_matrix
         run: |
+          ls -las
           MATRIX_BLOB="$(python3 .github/scripts/generate_docker_release_matrix.py)"
           echo "${MATRIX_BLOB}"
           echo "matrix=${MATRIX_BLOB}" >> "${GITHUB_OUTPUT}"
