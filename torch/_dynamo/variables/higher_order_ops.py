@@ -199,7 +199,6 @@ def validate_args_and_maybe_create_graph_inputs(
             args.append(new_arg)
         return args
 
-
 # See NOTE [HigherOrderOperator tracing design] for details of the design
 def speculate_subgraph(
     tx,
@@ -225,7 +224,6 @@ def speculate_subgraph(
     set_subgraph_inputs="manual",
     restore_side_effects=True,
     should_flatten_outputs=False,
-    should_flatten_inputs=False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer=None,
@@ -235,7 +233,9 @@ def speculate_subgraph(
 
     # See NOTE [Temporary argument `set_subgraph_inputs`]
     if sub_kwargs and set_subgraph_inputs != "automatic":
-        unimplemented("Use `set_subgraph_inputs='automatic` when passing `sub_kwargs`.")
+        unimplemented(
+            "Use `set_subgraph_inputs='automatic` when passing `sub_kwargs`."
+        )
 
     try:
         f, sub_args, sub_kwargs = VariableTracker.apply(
@@ -767,7 +767,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
-            should_flatten_inputs=True,
         )
 
         body_nn_modules = dict(tx.output.nn_modules)
