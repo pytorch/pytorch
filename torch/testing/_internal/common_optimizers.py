@@ -894,7 +894,9 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         skips=(
             DecorateInfo(
-                skipIfTorchDynamo("See https://github.com/pytorch/pytorch/issues/115679"),
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
             ),
@@ -907,7 +909,9 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         skips=(
             DecorateInfo(
-                skipIfTorchDynamo("See https://github.com/pytorch/pytorch/issues/115679"),
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
             ),
