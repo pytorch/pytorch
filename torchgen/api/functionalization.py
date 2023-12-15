@@ -105,7 +105,9 @@ def name(
     return f"at::_ops::{api_name}::call"
 
 
-def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding]:
+def capture_arguments(
+    func: FunctionSchema, *, is_reverse: bool, need_reapply_views: bool
+) -> List[Binding]:
     # capture arguments include all arguments except `self`.
     # Importantly, they don't include any C++ reference types (or else we'll get a dangling reference in the capture),
     # So any reference types (IntArrayRef) need to be converted to value types (vector<int64_t>)
@@ -115,7 +117,9 @@ def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding
     non_self_value_bindings = [
         dispatcher.argument(a, remove_non_owning_ref_types=True) for a in non_self_args
     ]
-    all_bindings = [reapply_views_binding] + non_self_value_bindings
+    all_bindings = non_self_value_bindings
+    if need_reapply_views:
+        all_bindings.insert(0, reapply_views_binding)
     return all_bindings
 
 

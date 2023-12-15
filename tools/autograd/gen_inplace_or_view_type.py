@@ -158,12 +158,19 @@ CALL_DISPATCH = CodeTemplate(
 at::_ops::${unambiguous_name}::call(${unpacked_args})"""
 )
 
+INVERSE_VIEW_DISPATCH = CodeTemplate(
+    """\
+at::functionalization::FunctionalInverses::${inverse_name}(${unpacked_args})"""
+)
+
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate(
     """\
 std::function<at::Tensor(const at::Tensor&)> func=nullptr;
+std::function<at::Tensor(const at::Tensor&)> rev_func=nullptr;
 if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided() ||
     c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
   ${replay_view_func}
+  ${reverse_replay_view_func}
 }
 """
 )
@@ -172,6 +179,14 @@ REPLAY_VIEW_LAMBDA_FUNC = CodeTemplate(
     """\
 func = [=](const at::Tensor& ${input_base}) {
   return ${replay_view_call};
+};
+"""
+)
+
+REVERSE_REPLAY_VIEW_LAMBDA_FUNC = CodeTemplate(
+    """\
+rev_func = [=](const at::Tensor& ${input_view}) {
+  return ${reverse_replay_view_call};
 };
 """
 )
@@ -246,6 +261,15 @@ auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos}
 
 def unpacked_name(arg_name: str) -> str:
     return arg_name + "_"
+
+
+# e.g. select.int -> select_copy_int_inverse()
+def inverse_view_name(f: NativeFunction) -> str:
+    copy_variant = f"{f.root_name}_copy"
+    overload = f"{f.func.name.overload_name}"
+    if overload != "":
+        overload = "_" + overload
+    return f"{copy_variant}{overload}_inverse"
 
 
 def extract_bindings(f: NativeFunction) -> List[Binding]:
@@ -382,6 +406,23 @@ def emit_view_lambda(f: NativeFunction, bindings: List[Binding]) -> str:
         input_base=input_base, replay_view_call=replay_view_call
     )
 
+    # TODO: Lol actually fix this
+    if f.root_name != "narrow":
+        input_view = "input_view"
+        reverse_replay_view_call = INVERSE_VIEW_DISPATCH.substitute(
+            inverse_name=inverse_view_name(f),
+            unpacked_args=(
+                # NB: skip input_base arg
+                ["self", f"{input_view}", "true"]
+                + list(updated_unpacked_args[1:])
+            ),
+        )
+        reverse_replay_view_func = REVERSE_REPLAY_VIEW_LAMBDA_FUNC.substitute(
+            input_view=input_view, reverse_replay_view_call=reverse_replay_view_call
+        )
+    else:
+        reverse_replay_view_func = ""
+
     is_view_with_metadata_change = (
         "true" if cpp.name(f.func) in VIEW_FUNCTIONS_WITH_METADATA_CHANGE else "false"
     )
@@ -389,6 +430,7 @@ def emit_view_lambda(f: NativeFunction, bindings: List[Binding]) -> str:
     return SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE.substitute(
         is_view_with_metadata_change=is_view_with_metadata_change,
         replay_view_func=replay_view_func,
+        reverse_replay_view_func=reverse_replay_view_func,
     )
 
 
@@ -445,7 +487,7 @@ def emit_view_body(
             rhs_value = (
                 f"as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, "
                 "/* is_fw_differentiable */ true, "
-                f"/* view_func */ func, /* creation_meta */ {creation_meta})"
+                f"/* view_func */ func, /* rev_view_func */ rev_func, /* creation_meta */ {creation_meta})"
             )
     else:
         # This could be supported but we don't need it at the moment, so keeping things simple.

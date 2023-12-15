@@ -304,6 +304,24 @@ class ViewInverseSignature:
         return f"static {return_type.cpp_type()} {self.name()}({', '.join(decls)});"
 
 
+# For these views, we always want to use a scatter style inverse instead of
+# the (incorrect) as_strided() that we'd get from reapply_views=True. To accomplish
+# this, we ignore the reapply_views TLS setting for these views and purposefully pass
+# reapply_views=False to the inverse calls.
+_VIEWS_THAT_REQUIRE_SCATTER_INVERSE = set(
+    {
+        "as_strided",
+        "diagonal",
+        "select_int",
+        "slice_Tensor",
+        "split_Tensor",
+        "split_with_sizes",
+        "unbind_int",
+        "unfold",
+    }
+)
+
+
 @dataclass(frozen=True)
 class FunctionalizationLambda:
     g: NativeFunctionsViewGroup
@@ -319,7 +337,9 @@ class FunctionalizationLambda:
             functionalization.reapply_views_binding
         ]
         capture_bindings = functionalization.capture_arguments(
-            self.g.view.func, is_reverse=self.is_reverse
+            self.g.view.func,
+            is_reverse=self.is_reverse,
+            need_reapply_views=self.respects_reapply_views_tls,
         )
         # allow_expensive_conversions is set because we want to convert
         # some reference types (IntArrayRef) to value types (vector<int64_t>).
@@ -349,7 +369,9 @@ class FunctionalizationLambda:
 
         arg_ctx = functionalization.outer_arguments(is_reverse=self.is_reverse)
         capture_ctx = functionalization.capture_arguments(
-            self.g.view.func, is_reverse=self.is_reverse
+            self.g.view.func,
+            is_reverse=self.is_reverse,
+            need_reapply_views=self.respects_reapply_views_tls,
         )
         full_ctx = arg_ctx + capture_ctx
 
@@ -357,14 +379,36 @@ class FunctionalizationLambda:
         call_bindings = functionalization.inner_arguments(
             self.g.view_copy.func, is_reverse=self.is_reverse
         )
+
+        # We might need to hard-code reapply_views=False. If so, remove it from the list
+        # of bindings and keep track of where it was for "false" insertion later.
+        # (See note above for _VIEWS_THAT_REQUIRE_SCATTER_INVERSE)
+        rv_index = None
+        if not self.respects_reapply_views_tls:
+            rv_index = call_bindings.index(functionalization.reapply_views_binding)
+            call_bindings.remove(functionalization.reapply_views_binding)
+
         maybe_index = functionalization.inner_call_index(self.g.view_copy.func)
         call_exprs = [
             e.expr for e in translate.translate(full_ctx, call_bindings, method=False)
         ]
+
+        if rv_index is not None:
+            call_exprs.insert(rv_index, "false")
+
         if not self.is_reverse and maybe_index is not None:
             return f'{inner_call_name}({", ".join(call_exprs)})[{maybe_index.name}];'
         else:
             return f'{inner_call_name}({", ".join(call_exprs)});'
+
+    @property
+    def respects_reapply_views_tls(self) -> bool:
+        # See note above for _VIEWS_THAT_REQUIRE_SCATTER_INVERSE
+        return not (
+            self.is_reverse
+            and self.g.view.func.name.unambiguous_name()
+            in _VIEWS_THAT_REQUIRE_SCATTER_INVERSE
+        )
 
     @staticmethod
     def from_func(
