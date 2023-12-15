@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# flake8: noqa
 import logging
 import os
 import pathlib

@@ -251,6 +251,7 @@ class leak_checker:
         return False
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class TestMultiprocessing(TestCase):
 
