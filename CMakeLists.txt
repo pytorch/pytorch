@@ -288,7 +288,7 @@ option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the 
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
-option(TORCH_DISABLE_GPU_ASSERTS "Disable GPU asserts by default" OFF)
+option(USE_ROCM_KERNEL_ASSERT "Use Kernel Assert for ROCm" OFF)
 # Ensure that an ITT build is the default for x86 CPUs
 cmake_dependent_option(
   USE_ITT "Use Intel(R) VTune Profiler ITT functionality" ON
@@ -735,10 +735,21 @@ endif()
 include(cmake/Dependencies.cmake)
 
 # Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
+# TODO: Merge this into cmake_dependent_option as "NOT MSVC AND (USE_CUDA OR USE_ROCM)"
+#       once cmake_minimum_required is bumped to 3.22
+#       See https://cmake.org/cmake/help/latest/policy/CMP0127.html for the feature required here.
+if(MSVC)
+  set(CONFIG_FA OFF)
+elseif(USE_ROCM OR USE_CUDA)
+  set(CONFIG_FA ON)
+else()
+  set(CONFIG_FA OFF)
+endif()
+
 cmake_dependent_option(
   USE_FLASH_ATTENTION
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
-  "USE_CUDA AND NOT ROCM AND NOT MSVC AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+  "CONFIG_FA" OFF)
 
 # Flash Attention2 will error while building for sm52 while Mem Eff Attention won't
 cmake_dependent_option(
