@@ -6,6 +6,7 @@ from torch._lazy.ts_backend import init as init_ts_backend
 init_ts_backend()
 from torch._lazy import config
 from torch._lazy.extract_compiled_graph import extract_compiled_graph
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 import torch
 from torch import nn
 import dis
@@ -165,7 +166,7 @@ def maketest(module_cls, exception_msg_pattern=None, ctxmgr=None):
 
     return wrapper
 
-@torch.testing._internal.common_utils.unMarkDynamoStrictTest
+@unMarkDynamoStrictTest
 class OptimizeTest(unittest.TestCase):
     test_sub = maketest(ModuleSub)
     # Same as test_sub but force aten::sub to fallback
