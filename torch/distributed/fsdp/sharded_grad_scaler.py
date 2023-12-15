@@ -10,6 +10,33 @@ from torch.distributed.distributed_c10d import ProcessGroup
 log = logging.getLogger(__name__)
 
 
+
+# usage
+# if dist.get_rank() == 0:
+#    ForkedPdb().set_trace()
+# dist.barrier()
+
+import pdb
+import sys
+
+
+class ForkedPdb(pdb.Pdb):
+    """
+    PDB Subclass for debugging multi-processed code
+    Suggested in: https://stackoverflow.com/questions/4716533/how-to-attach-debugger-to-a-python-subproccess
+    """
+
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open("/dev/stdin")
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
+
+
+
+
 def _refresh_per_optimizer_state() -> Dict[str, Any]:
     return {"stage": OptState.READY, "found_inf_per_device": {}}
 
@@ -281,14 +308,13 @@ class ShardedGradScaler(GradScaler):
         # Synchronize the detected inf across the ranks
         optimizer_state = self._per_optimizer_states[id(optimizer)]
         future_handles = []
+        found_inf_on_cpus = []
         found_inf_on_cudas = []
 
         for found_inf in optimizer_state["found_inf_per_device"].values():
             if found_inf.device.type == "cpu":
-                # found_inf is a scalar tensor on CPU
-                # it's small enough to live in pinned memory
-                # to speed up H2D transfer
-                found_inf_on_cuda = found_inf.pin_memory().cuda()
+                found_inf_on_cpus.append(found_inf)
+                found_inf_on_cuda = found_inf.cuda()
                 found_inf_on_cudas.append(found_inf_on_cuda)
                 future_handles.append(
                     dist.all_reduce(
@@ -306,15 +332,8 @@ class ShardedGradScaler(GradScaler):
         if future_handles:
             torch.futures.wait_all(future_handles)
 
-        if found_inf_on_cudas:
-            for found_inf_on_cuda in optimizer_state["found_inf_per_device"].values():
-                if found_inf_on_cuda.device.type == "cpu":
-                    found_inf_on_cuda.copy_(found_inf_on_cudas.pop(0).cpu())
-
-        if found_inf_on_cudas:
-            raise AssertionError(
-                f"internal error: expect all found_infs to be copied from gpu to cpu, but got non-empty {found_inf_on_cudas}"
-            )
+        for found_inf_on_cpu, found_inf_on_cuda in zip(found_inf_on_cpus, found_inf_on_cudas):
+            found_inf_on_cpu.copy_(found_inf_on_cuda)
 
     def _amp_update_scale_cpu_(self, found_inf: torch.Tensor) -> None:
         """
