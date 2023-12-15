@@ -379,7 +379,12 @@ def all_to_all_single(
     return _maybe_wrap_tensor(tensor)
 
 
-def permute_tensor(self: torch.Tensor, src_dst_pairs: List[Tuple[int, int]], group: RANK_TYPES, tag: str = "") -> torch.Tensor:
+def permute_tensor(
+    self: torch.Tensor,
+    src_dst_pairs: List[Tuple[int, int]],
+    group: RANK_TYPES,
+    tag: str = "",
+) -> torch.Tensor:
     """
     Permutes the elements of the tensor according to the given source/destination pairs.
 
@@ -403,7 +408,6 @@ def permute_tensor(self: torch.Tensor, src_dst_pairs: List[Tuple[int, int]], gro
             output_split_sizes[src] = self.numel()
 
     return all_to_all_single(self, output_split_sizes, input_split_sizes, group, tag)
-
 
 
 class AsyncCollectiveTensor(torch.Tensor):
