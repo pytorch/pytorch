@@ -21,7 +21,7 @@ jobs:
   pr-dependencies-check:
     needs: check-regex
     if: ${{ needs.check-regex.outputs.regex-match != '' }}
-    uses: pytorch/test-infra/.github/workflows/pr-dependencies-check.yml@9ba44887a5bbe803c735fb392651068056e678b5
+    uses: pytorch/test-infra/.github/workflows/pr-dependencies-check.yml@main
     with:
       pr_number: ${{ github.event.pull_request.number }}
 
