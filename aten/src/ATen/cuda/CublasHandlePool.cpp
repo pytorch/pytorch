@@ -177,6 +177,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   return handle;
 }
 
+#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 cublasLtHandle_t getCurrentCUDABlasLtHandle() {
 #ifdef USE_ROCM
   int device;
@@ -203,5 +204,6 @@ cublasLtHandle_t getCurrentCUDABlasLtHandle() {
   return reinterpret_cast<cublasLtHandle_t>(getCurrentCUDABlasHandle());
 #endif
 }
+#endif
 
 } // namespace at::cuda

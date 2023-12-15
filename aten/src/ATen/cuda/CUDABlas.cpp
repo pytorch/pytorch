@@ -11,12 +11,6 @@
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 
-// cublasLT was introduced in CUDA 10.1 but we enable only for 11.1 that also
-// added bf16 support
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
-#include <cublasLt.h>
-#endif
-
 #ifdef USE_ROCM
 // until hipblas has an API to accept flags, we must use rocblas here
 #include <hipblas/hipblas.h>
