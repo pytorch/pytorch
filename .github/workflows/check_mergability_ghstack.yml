@@ -20,3 +20,7 @@ jobs:
         if: ${{ steps.regex-match.outputs.match != '' }}
         with:
           pr_number: ${{ github.event.pull_request.number }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
