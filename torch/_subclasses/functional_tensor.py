@@ -207,13 +207,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         self._mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
         # This will be turned off later for pre-dispatch functionalization
         self.decompose_composite_implicit_ops = True
-        self.pre_dispatch = pre_dispatch
         self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None  # type: ignore[attr-defined]
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
         def _get_prev_mode():
-            if self.pre_dispatch:
+            if self._dispatch_key == torch._C.DispatchKey.PreDispatch:
                 from torch._ops import _get_dispatch_mode_pre_dispatch
 
                 return _get_dispatch_mode_pre_dispatch(
