@@ -13,6 +13,7 @@
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -205,6 +206,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     uint64_t getSequencenumber() const override;
 
+    const std::string& logPrefix() const;
+
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
 
@@ -358,6 +361,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // via `ncclCommSplit`
     std::shared_ptr<ProcessGroupNCCL> split_from;
     int64_t split_color{0};
+    std::vector<uint64_t> global_ranks_in_group;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -543,6 +547,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Provide an API for users to define their own ways to store NCCL debug info.
   void registerDebugInfoWriter(std::unique_ptr<DebugInfoWriter> writer);
 
+  c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
+
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
   void abort(c10::optional<std::string> abortReason = c10::nullopt);
@@ -589,6 +595,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       OpType opType);
 
  private:
+  int globalRankStart;
+  int globalRankStride;
+
   // Helper that encapsulates work shared across all collective communication
   // primitives.  The callbacks have the following signatures:
   //
@@ -693,6 +702,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Desync debug helper
   void logWorkEnd(WorkNCCL& work);
+
+  // Generates a prefix that is unique to this process group and rank, for
+  // disambiguating logs
+  const std::string& logPrefix() const;
 
  protected:
   // Function that runs as part of a separate thread aside from watchdog
@@ -933,6 +946,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
   size_t uid_;
+
+  c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
 };
 
 TORCH_API std::string dump_nccl_trace();
