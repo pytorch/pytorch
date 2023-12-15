@@ -596,7 +596,7 @@ def run_test(
     if IS_CI:
         log_fd, log_path = tempfile.mkstemp(
             dir=REPO_ROOT / "test" / "test-reports",
-            prefix=f"{sanitize_file_name(str(test_module))}_",
+            prefix=f"{sanitize_file_name(str(test_module)[:30])}_",
             suffix="_toprint.log",
         )
         os.close(log_fd)
@@ -1021,7 +1021,7 @@ def handle_log_file(
         # other than reparse xml), print only what tests ran, rename the log
         # file so it doesn't get printed later, and do not remove logs.
         new_file = "test/test-reports/" + sanitize_file_name(
-            f"{test}_{os.urandom(8).hex()}_.log"
+            f"{test[:30]}_{os.urandom(8).hex()}_.log"
         )
         os.rename(file_path, REPO_ROOT / new_file)
         print_to_stderr(
