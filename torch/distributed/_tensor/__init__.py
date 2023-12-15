@@ -99,7 +99,7 @@ def ones(
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         layout (:class:`torch.layout`, optional): the desired layout of returned DTensor.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
@@ -142,7 +142,7 @@ def empty(
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).\
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).\
         layout (:class:`torch.layout`, optional): the desired layout of returned :class:`DTensor`.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
@@ -188,7 +188,7 @@ def full(
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         layout (:class:`torch.layout`, optional): the desired layout of returned DTensor.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
@@ -233,7 +233,7 @@ def rand(
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         layout (:class:`torch.layout`, optional): the desired layout of returned DTensor.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
@@ -277,7 +277,7 @@ def randn(
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         layout (:class:`torch.layout`, optional): the desired layout of returned DTensor.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
@@ -320,7 +320,7 @@ def zeros(
         requires_grad (bool, optional): If autograd should record operations on the
             returned :class:`DTensor`. Default: ``False``.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         layout (:class:`torch.layout`, optional): the desired layout of returned :class:`DTensor`.
             Default: ``torch.strided``.
         device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks

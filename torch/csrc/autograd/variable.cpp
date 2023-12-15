@@ -61,7 +61,8 @@ DifferentiableViewMeta::DifferentiableViewMeta(
 ViewInfo ViewInfo::chain(
     const Variable& base,
     const Variable& tensor,
-    std::function<Variable(const Variable&)> view_func) const {
+    std::function<Variable(const Variable&)> view_func,
+    std::function<Variable(const Variable&)> rev_view_func) const {
   // Set `view_func` using the root base as input.
   // `view_func` is used to recover views in backward when either as_strided is
   // not supported or the view function changes the metadata which is not
@@ -77,6 +78,13 @@ ViewInfo ViewInfo::chain(
         auto temp = prev_fn(root_base);
         return view_func(temp);
       };
+
+      // assume view_fn_ / rev_view_fn_ always exist together or neither are set
+      auto prev_rev_fn = rev_view_fn_;
+      rev_view_func = [=](const at::Tensor& root_view) {
+        auto temp = rev_view_func(root_view);
+        return prev_rev_fn(temp);
+      };
     } else {
       // current_view has a view_func and but it's parent doesn't have one
       if (base.unsafeGetTensorImpl()->support_as_strided()) {
@@ -87,6 +95,18 @@ ViewInfo ViewInfo::chain(
           auto temp = root_base.as_strided_symint(size, stride, storage_offset);
           return view_func(temp);
         };
+
+        // assume view_fn_ / rev_view_fn_ always exist together or neither are
+        // set
+        const auto& root_base = base._base();
+        auto root_base_size = root_base.sym_sizes().vec();
+        auto root_base_stride = root_base.sym_strides().vec();
+        auto root_base_storage_offset = root_base.sym_storage_offset();
+        rev_view_func = [=](const at::Tensor& root_view) {
+          auto temp = rev_view_func(root_view);
+          return temp.as_strided_symint(
+              root_base_size, root_base_stride, root_base_storage_offset);
+        };
       } else {
         // When base is a view but doesn't carry a view_fn in
         // DifferentiableViewMeta, it's a view that doesn't support inplace
@@ -96,13 +116,20 @@ ViewInfo ViewInfo::chain(
         // first call site is indeed in **forward** pass when we refresh
         // `grad_fn` triggered by inplace update. Search Note [View + Inplace
         // update for view tensor] to for the call site.
+        // TODO: Test for this case!
+        auto error_msg =
+            ("This view is the output of a function that returns multiple views."
+             "Such functions do not allow the output views to be modified inplace."
+             "You should replace the inplace operation by an out-of-place one");
+
         view_func = [=](const at::Tensor& root_base) {
-          TORCH_CHECK(
-              false,
-              "This view is the output of a function that returns multiple views."
-              "Such functions do not allow the output views to be modified inplace."
-              "You should replace the inplace operation by an out-of-place one");
+          TORCH_CHECK(false, error_msg);
           return root_base;
+        };
+
+        rev_view_func = [=](const at::Tensor& root_view) {
+          TORCH_CHECK(false, error_msg);
+          return root_view;
         };
       }
     }
@@ -117,9 +144,20 @@ ViewInfo ViewInfo::chain(
       auto temp = prev_view_fn(root_base);
       return temp.as_strided_symint(size, stride, storage_offset);
     };
+
+    // assume view_fn_ / rev_view_fn_ always exist together or neither are set
+    auto prev_rev_view_fn = rev_view_fn_;
+    auto base_size = base.sym_sizes().vec();
+    auto base_stride = base.sym_strides().vec();
+    auto base_storage_offset = base.sym_storage_offset();
+    rev_view_func = [=](const at::Tensor& root_view) {
+      auto temp = root_view.as_strided_symint(
+          base_size, base_stride, base_storage_offset);
+      return prev_rev_view_fn(temp);
+    };
   }
 
-  return ViewInfo(base_, std::move(view_func));
+  return ViewInfo(base_, std::move(view_func), std::move(rev_view_func));
 }
 
 namespace {

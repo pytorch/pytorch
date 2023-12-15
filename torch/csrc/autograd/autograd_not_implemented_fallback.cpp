@@ -567,6 +567,16 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
                 " which does not have a derivative implemented is forbidden.");
             return at::Tensor();
           },
+          /* rev_view_func=*/
+          [op_name = op_name](const at::Tensor&) {
+            // same as above for rev_view_func
+            TORCH_CHECK(
+                false,
+                "Mutating the view ",
+                op_name,
+                " which does not have a derivative implemented is forbidden.");
+            return at::Tensor();
+          },
           /* creation_meta=*/
           InferenceMode::is_enabled()
               ? CreationMeta::INFERENCE_MODE
