@@ -2195,7 +2195,7 @@ class Scheduler:
                     if self.current_device and self.current_device.type != 'cpu':
                         V.graph.wrapper_code.codegen_device_guard_exit()
                     if device.type != 'cpu':
-                        V.graph.wrapper_code.codegen_device_guard_enter(device)
+                        V.graph.wrapper_code.codegen_device_guard_enter(device.index)
                     self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)

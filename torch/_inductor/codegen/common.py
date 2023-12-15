@@ -92,14 +92,6 @@ def get_wrapper_codegen_for_device(device: str):
         device_codegens[device].wrapper_codegen if device in device_codegens else None
     )
 
-def get_api_codegen_for_device(device: str):
-
-    if device == 'cuda':
-        from .cuda.device_api_codegen import CUDADeviceApiCodeGen
-        return CUDADeviceApiCodeGen
-
-    return DeviceApiCodegen
-
 def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
     from ..ir import FlexibleLayout
 
@@ -458,6 +450,39 @@ class OpOverrides:
     def load_seed(name, offset):
         return ops.load(name, sympy.Integer(offset))
 
+class DeviceOverrides():
+
+    @classmethod
+    def py_import_get_raw_stream_as(self, name):
+        raise NotImplementedError()
+
+    @classmethod
+    def py_set_device(self, device_idx):
+        raise NotImplementedError()
+
+    @classmethod
+    def py_synchronize(self):
+        raise NotImplementedError()
+
+    @classmethod
+    def py_DeviceGuard(self, device_idx):
+        raise NotImplementedError()
+
+    @classmethod
+    def cpp_defAOTStreamGuard(self, name, stream, device_idx):
+        raise NotImplementedError()
+
+    @classmethod
+    def cpp_defStreamGuard(self, name, stream):
+        raise NotImplementedError()
+
+    @classmethod
+    def cpp_getStreamFromExternal(self, stream, device_idx):
+        raise NotImplementedError()
+
+    @classmethod
+    def cpp_defGuard(self, name, device_idx):
+        raise NotImplementedError()
 
 class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""

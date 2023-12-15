@@ -58,7 +58,7 @@ from .common import (
     TensorArg,
 )
 from .triton_utils import config_of, signature_of, signature_to_meta
-from .common import get_api_codegen_for_device
+from .cuda.device_overrides import CUDADeviceOverrides
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -819,6 +819,7 @@ class TritonKernel(Kernel):
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
+        deviceOverrides=CUDADeviceOverrides
     ):
         if pid_cache is None:
             pid_cache = {}
@@ -837,6 +838,7 @@ class TritonKernel(Kernel):
         self.index_dtype: str = index_dtype
         self.min_elem_per_thread = min_elem_per_thread
         self.last_usage: Set[str] = set()
+        self.deviceOverrides = deviceOverrides
 
         self.persistent_reduction: bool = self.should_use_persistent_reduction()
         self.no_x_dim = (
@@ -1819,7 +1821,6 @@ class TritonKernel(Kernel):
     def codegen_kernel_benchmark(self):
         result = IndentedBuffer()
         argdefs, call_args, signature = self.args.python_argdefs()
-        device_api_codegen = get_api_codegen_for_device(V.graph.scheduler.current_device.type)
         result.writelines(["", "", "def get_args():"])
         with result.indent():
             name_cnt = itertools.count()
@@ -1859,10 +1860,10 @@ class TritonKernel(Kernel):
         extra_args_str = None
         index = V.graph.scheduler.current_device.index
         with result.indent():
-            result.writeline(f"with {device_api_codegen.py_DeviceGuard(index)}:")
+            result.writeline(f"with {self.deviceOverrides.py_DeviceGuard(index)}:")
             with result.indent():
                 result.writeline(
-                    device_api_codegen.py_set_device(index)
+                    self.deviceOverrides.py_set_device(index)
                 )  # no-op to ensure context
                 for tree in self.range_trees:
                     expr = pexpr(V.graph.sizevars.size_hint(tree.numel))
@@ -1886,10 +1887,10 @@ class TritonKernel(Kernel):
         # benchmark all configs
         result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
         with result.indent():
-            result.writeline(f"with {device_api_codegen.py_DeviceGuard(str(index))}:")
+            result.writeline(f"with {self.deviceOverrides.py_DeviceGuard(str(index))}:")
             with result.indent():
                 result.writeline(
-                    device_api_codegen.py_set_device(index)
+                    self.deviceOverrides.py_set_device(index)
                 )  # no-op to ensure context
                 result.writeline(
                     f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"  # noqa: B950 line too long
@@ -1917,14 +1918,13 @@ class TritonKernel(Kernel):
         return result
 
     def imports_for_benchmark_kernel(self):
-        device_api_codegen = get_api_codegen_for_device(V.graph.scheduler.current_device.type)
         return textwrap.dedent(
             """
             from torch._dynamo.testing import rand_strided
             {}
             import torch
             from torch._inductor.triton_heuristics import grid
-        """.format(device_api_codegen.py_import_get_raw_stream_as("get_raw_stream"))
+        """.format(self.deviceOverrides.py_import_get_raw_stream_as("get_raw_stream"))
         )
 
     def codegen_kernel(self, name=None):
@@ -2270,6 +2270,8 @@ class TritonKernel(Kernel):
 
 
 class TritonScheduling(BaseScheduling):
+    deviceOverrides = CUDADeviceOverrides
+
     def __init__(self, scheduler):
         self.scheduler = scheduler
 
@@ -2632,6 +2634,7 @@ class TritonScheduling(BaseScheduling):
             reduction_hint=reduction_hint_val,
             mutations=mutations,
             index_dtype=index_dtype,
+            deviceOverrides=self.deviceOverrides
         )
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
@@ -2777,8 +2780,7 @@ class TritonScheduling(BaseScheduling):
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
-        device_api_codegen = get_api_codegen_for_device(V.graph.scheduler.current_device.type)
-        V.graph.wrapper_code.writeline(device_api_codegen.py_synchronize())
+        V.graph.wrapper_code.writeline(self.deviceOverrides.py_synchronize())
 
     def codegen_foreach(self, foreach_node):
         from .triton_foreach import ForeachKernel

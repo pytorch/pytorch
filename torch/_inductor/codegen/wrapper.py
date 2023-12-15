@@ -33,8 +33,7 @@ from ..utils import (
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, signature_to_meta
-from .cuda.device_api_codegen import CUDADeviceApiCodeGen
-from .common import get_api_codegen_for_device
+from .cuda.device_overrides import CUDADeviceOverrides
 
 pexpr = PythonPrinter().doprint
 
@@ -178,12 +177,10 @@ class MemoryPlanningState:
 
 @dataclasses.dataclass
 class EnterDeviceContextManagerLine:
-    device_type: str
     device_idx: int
     last_seen_device_guard_index: Optional[int]
 
-    def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
-        device_api_codegen = get_api_codegen_for_device(self.device_type)
+    def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack, deviceOverrides):
         if V.graph.cpp_wrapper:
             code.writeline("\n")
             if V.graph.aot_mode:
@@ -193,13 +190,13 @@ class EnterDeviceContextManagerLine:
                 if self.last_seen_device_guard_index is None:
                     if config.aot_inductor.abi_compatible:
                         code.writeline(
-                            device_api_codegen.cpp_defAOTStreamGuard("stream_guard",
+                            deviceOverrides.cpp_defAOTStreamGuard("stream_guard",
                                 "stream", "this->device_idx_")
                         )
                     else:
                         code.writeline(
-                            device_api_codegen.cpp_defStreamGuard("stream_guard",
-                                device_api_codegen.cpp_getStreamFromExternal(
+                            deviceOverrides.cpp_defStreamGuard("stream_guard",
+                                deviceOverrides.cpp_getStreamFromExternal(
                                     "stream", "this->device_idx_"))
                         )
                 else:
@@ -209,17 +206,17 @@ class EnterDeviceContextManagerLine:
             else:
                 if self.last_seen_device_guard_index is None:
                     code.writeline(
-                        device_api_codegen.cpp_defGuard("device_guard", str(self.device_idx))
+                        deviceOverrides.cpp_defGuard("device_guard", str(self.device_idx))
                     )
                 else:
                     code.writeline(f"device_guard.set_index({self.device_idx});")
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
-            code.writeline(f"with {device_api_codegen.py_DeviceGuard(self.device_idx)}:")
+            code.writeline(f"with {deviceOverrides.py_DeviceGuard(self.device_idx)}:")
             device_cm_stack.enter_context(code.indent())
             code.writeline(
-                device_api_codegen.py_set_device(self.device_idx)
+                deviceOverrides.py_set_device(self.device_idx)
             )
 
 
@@ -329,6 +326,7 @@ class WrapperCodeGen(CodeGen):
     """
     Generate outer wrapper in Python that calls the kernels.
     """
+    deviceOverrides = CUDADeviceOverrides
 
     def __init__(self):
         super().__init__()
@@ -354,7 +352,6 @@ class WrapperCodeGen(CodeGen):
         self.cached_thread_locals = set()
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], str] = {}
         self.unbacked_symbol_decls = set()
-        self.device_api_codegen = CUDADeviceApiCodeGen
 
         self.write_header()
         self.write_prefix()
@@ -420,7 +417,7 @@ class WrapperCodeGen(CodeGen):
             import triton.language as tl
             from torch._inductor.triton_heuristics import grid, start_graph, end_graph
             {}
-            """.format(self.device_api_codegen.py_import_get_raw_stream_as("get_raw_stream"))
+            """.format(self.deviceOverrides.py_import_get_raw_stream_as("get_raw_stream"))
         )
 
     def add_meta_once(self, meta):
@@ -462,7 +459,7 @@ class WrapperCodeGen(CodeGen):
         )
         with self.prefix.indent():
             if config.triton.debug_sync_graph:
-                self.prefix.writeline(self.device_api_codegen.py_synchronize())
+                self.prefix.writeline(self.deviceOverrides.py_synchronize())
             inp_len = len(V.graph.graph_inputs.keys())
             if inp_len != 0:
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
@@ -482,13 +479,13 @@ class WrapperCodeGen(CodeGen):
     def next_kernel_suffix(self):
         return f"{next(self._names_iter)}"
 
-    def codegen_device_guard_enter(self, device):
+    def codegen_device_guard_enter(self, device_idx):
         self.writeline(
             EnterDeviceContextManagerLine(
-                device.type, device.index, self.last_seen_device_guard_index
+                device_idx, self.last_seen_device_guard_index
             )
         )
-        self.last_seen_device_guard_index = device.index
+        self.last_seen_device_guard_index = device_idx
 
     def codegen_device_guard_exit(self):
         self.writeline(ExitDeviceContextManagerLine())
@@ -606,7 +603,7 @@ class WrapperCodeGen(CodeGen):
                         ExitDeviceContextManagerLine,
                     ),
                 ):
-                    line.codegen(self.wrapper_call, device_cm_stack)
+                    line.codegen(self.wrapper_call, device_cm_stack, self.deviceOverrides)
                 else:
                     self.wrapper_call.writeline(line)
 

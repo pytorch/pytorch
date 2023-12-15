@@ -1,6 +1,6 @@
-from ..device_api_codegen import DeviceApiCodeGen
+from ..common import DeviceOverrides
 
-class CUDADeviceApiCodeGen(DeviceApiCodeGen):
+class CUDADeviceOverrides(DeviceOverrides):
     @classmethod
     def py_import_get_raw_stream_as(self, name):
         return f"from torch._C import _cuda_getCurrentRawStream as {name}"
