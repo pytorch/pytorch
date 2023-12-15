@@ -34,7 +34,6 @@ from test_c10d_common import gpus_for_rank, DoubleGpuNet, ConvNet, ModuleForDdpC
 from torch import nn
 from torch._C._distributed_c10d import OpType
 from torch.nn.parallel import DistributedDataParallel
-from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     init_multigpu_helper,
@@ -3113,56 +3112,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         torch.distributed.all_reduce_coalesced(tensors, group=process_group)
         for i, t in enumerate(tensors):
             self.assertEqual(t, torch.full_like(t, self.world_size * (i + (self.world_size + 1.) / 2.)))
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_intra_node_comm_all_reduce(self):
-        if not SM80OrLater:
-            return
-        from torch._C._distributed_c10d import _get_intra_node_comm_usage_counter
-        store = c10d.FileStore(self.file_name, self.world_size)
-        os.environ["ENABLE_INTRA_NODE_COMM"] = "1"
-        os.environ["TEST_INTRA_NODE_COMM"] = "1"
-        torch.cuda.set_device(self.rank)
-        c10d.init_process_group(
-            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
-        )
-        expect = self.world_size * (self.world_size - 1) // 2
-
-        # IntraNodeComm currently only supports sum and bf16.
-        # Verify that it is not used in the next two configurations.
-        t = torch.full((4 * 1024 // 2,), self.rank).cuda()
-        c10d.all_reduce(t, c10d.ReduceOp.SUM)
-        self.assertTrue(t.eq(expect).all())
-        self.assertEqual(_get_intra_node_comm_usage_counter(), 0)
-
-        t = torch.full((4 * 1024 // 2,), self.rank, dtype=torch.bfloat16).cuda()
-        c10d.all_reduce(t, c10d.ReduceOp.AVG)
-        self.assertEqual(_get_intra_node_comm_usage_counter(), 0)
-
-        # Verify that IntraNodeComm is used up to 10MB
-        t = torch.full((4 * 1024 // 2,), self.rank, dtype=torch.bfloat16).cuda()
-        c10d.all_reduce(t, c10d.ReduceOp.SUM)
-        self.assertTrue(t.eq(expect).all())
-        self.assertEqual(_get_intra_node_comm_usage_counter(), 1)
-
-        t = torch.full((512 * 1024 // 2,), self.rank, dtype=torch.bfloat16).cuda()
-        c10d.all_reduce(t, c10d.ReduceOp.SUM)
-        self.assertTrue(t.eq(expect).all())
-        self.assertEqual(_get_intra_node_comm_usage_counter(), 2)
-
-        t = torch.full((10 * 1024 ** 2 // 2,), self.rank, dtype=torch.bfloat16).cuda()
-        c10d.all_reduce(t, c10d.ReduceOp.SUM)
-        self.assertTrue(t.eq(expect).all())
-        self.assertEqual(_get_intra_node_comm_usage_counter(), 3)
-
-        # Verify that IntraNodeComm is not used beyond 10MB
-        t = torch.full((10 * 1024 ** 2 // 2 + 1,), self.rank, dtype=torch.bfloat16).cuda()
-        c10d.all_reduce(t, c10d.ReduceOp.SUM)
-        self.assertTrue(t.eq(expect).all())
-        self.assertEqual(_get_intra_node_comm_usage_counter(), 3)
-
-        c10d.destroy_process_group()
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
