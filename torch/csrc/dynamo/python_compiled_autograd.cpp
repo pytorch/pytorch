@@ -304,8 +304,6 @@ variable_list compiled_autograd(
     GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
-  std::cout << "compiled_autograd on graph_root=" << graph_root->name()
-            << std::endl;
   TORCH_CHECK(
       output_edges.empty() || !accumulate_grad,
       "specifying inputs= with .backward() not yet implemented for compiled autograd")
@@ -332,7 +330,6 @@ variable_list compiled_autograd(
 
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
-    std::cout << "visiting node: " << fn->name() << std::endl;
     worklist.pop_back();
     NodeCall& call = compiler_call.node_calls.lookup(fn);
     calls.emplace_back(&call);
@@ -341,7 +338,6 @@ variable_list compiled_autograd(
       CompiledNodeArgs node_args(compiler_call, call);
       node_args.collect(call);
       if (node_args.cond(call.needed)) {
-        std::cout << "collecting from node: " << fn->name() << std::endl;
         // break here
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
@@ -390,13 +386,7 @@ variable_list compiled_autograd(
       // at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
       // if (C10_UNLIKELY(step_callbacks.has_value())) { ... }
 
-      // autograd engine sets the inputs in each node
-      std::cout << "Visiting " << call.node->name() << std::endl;
-      auto& input_buffer = input_buffers.lookup(call.node.get());
-      variable_list inputs = input_buffer.buffer;
-      // should the inputs for all nodes sum up to the inputs at
-      // call_begin_capture?
-      std::cout << "line393 inputs.size=" << inputs.size() << std::endl;
+      variable_list inputs = input_buffers.lookup(call.node.get()).buffer;
 
       if (!call.tensor_pre_hooks.empty()) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
@@ -432,8 +422,6 @@ variable_list compiled_autograd(
       }
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
-      std::cout << "apply_with_saved: " << call.node->name()
-                << ", with inputs.size()=" << inputs.size() << std::endl;
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
 
       saved.debug_asserts();

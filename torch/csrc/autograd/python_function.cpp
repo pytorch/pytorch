@@ -222,9 +222,6 @@ auto PyNode::apply(variable_list&& inputs, std::optional<PyObject*> compiler) ->
   }
 
   // Now the number of gradients should match
-  std::cout << "eager apply: num_inputs_bwd=" << num_inputs
-            << ", num_outputs_bwd=" << num_outputs
-            << ", num_forward_inputs=" << num_forward_inputs << std::endl;
   if (num_outputs != num_forward_inputs) {
     std::string msg("function ");
     msg += name() + " returned an incorrect number of gradients (expected ";
@@ -298,7 +295,6 @@ auto PyNode::name() const -> std::string {
 }
 
 void PyNode::compiled_args(CompiledNodeArgs& args) {
-  std::cout << "PyNode::compiled_args" << std::endl;
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
   THPObjectPtr pykey(PyObject_CallMethodNoArgs(obj, method_name));
@@ -361,7 +357,6 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
 variable_list PyNode::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
-  std::cout << "PyNode::apply_with_saved" << std::endl;
   auto f = (THPFunction*)obj;
   TORCH_INTERNAL_ASSERT(!f->compiled_autograd_tracing);
   saved.before(f->compiled_autograd_symints);
