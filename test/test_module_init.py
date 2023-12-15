@@ -528,7 +528,6 @@ def generate_tests(test_cls, constructor_arg_db):
             setattr(TestModuleInit, test_name, run_test)
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestModuleInit(TestCase):
     _ignore_not_implemented_error = False
 
