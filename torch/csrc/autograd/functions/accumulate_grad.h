@@ -41,7 +41,8 @@ namespace autograd {
 struct TORCH_API AccumulateGrad : public Node {
   explicit AccumulateGrad(Variable variable_);
 
-  variable_list apply(variable_list&& grads, std::optional<PyObject*> compiler) override;
+  variable_list apply(variable_list&& grads, std::optional<PyObject*> compiler)
+      override;
 
   std::vector<std::unique_ptr<FunctionPreHook>>& tensor_pre_hooks() noexcept
       override {

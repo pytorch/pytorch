@@ -5,7 +5,8 @@ namespace distributed {
 namespace autograd {
 
 torch::autograd::variable_list SendRpcBackward::apply(
-    torch::autograd::variable_list&& inputs, std::optional<PyObject*> compiler) {
+    torch::autograd::variable_list&& inputs,
+    std::optional<PyObject*> compiler) {
   TORCH_INTERNAL_ASSERT(
       inputs.empty(), "SendRpcBackward should receive no inputs");
 

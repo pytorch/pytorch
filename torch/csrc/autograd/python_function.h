@@ -30,7 +30,8 @@ namespace autograd {
 struct PyNode : public Node {
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
-  variable_list apply(variable_list&& inputs, std::optional<PyObject*> compiler) override;
+  variable_list apply(variable_list&& inputs, std::optional<PyObject*> compiler)
+      override;
 
   void release_variables() override;
   std::string name() const override;

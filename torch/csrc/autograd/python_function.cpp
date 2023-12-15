@@ -115,10 +115,17 @@ namespace autograd {
 // NOTE: this function is written in a way that assumes it's only called for
 // backward; it's used by engine.cpp.  This is responsible for forwarding a call
 // from C++'s Node::apply to a Python method "apply".
-auto PyNode::apply(variable_list&& inputs, std::optional<PyObject*> compiler) -> variable_list {
+auto PyNode::apply(variable_list&& inputs, std::optional<PyObject*> compiler)
+    -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
+
+  auto zeros_without_gil = [](const VariableInfo& variable,
+                              at::OptionalDeviceGuard& device_guard) {
+    pybind11::gil_scoped_release gil;
+    return variable.zeros(device_guard);
+  };
 
   // Massage a C++ variable_list into a Python arguments tuple
   auto num_inputs = inputs.size();
@@ -134,11 +141,6 @@ auto PyNode::apply(variable_list&& inputs, std::optional<PyObject*> compiler) ->
          !py_fn->materialize_non_diff_grads)) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
-      auto zeros_without_gil = [](const VariableInfo& variable,
-                                  at::OptionalDeviceGuard& device_guard) {
-        pybind11::gil_scoped_release gil;
-        return variable.zeros(device_guard);
-      };
       input =
           THPVariable_Wrap(zeros_without_gil(output_info[i], _device_guard));
     }
@@ -153,60 +155,28 @@ auto PyNode::apply(variable_list&& inputs, std::optional<PyObject*> compiler) ->
   TORCH_INTERNAL_ASSERT(is_variable_input.size() >= input_infos.size());
 
   THPObjectPtr r;
-  if (!compiler.has_value()) {
+  if (!compiler.has_value() || name() == "CompiledFunctionBackward") {
     THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
     if (!apply_fn)
       throw_python_error();
     r = PyObject_CallObject(apply_fn, pyInputs.get());
   } else {
-    /*
-      The gradients returned in the backwards should match the number of inputs
-      to the forward, and their shapes, so we create fwdInputInfos to represent
-      shape sizes and requires_grad for each input to the forward.
-
-      For inputs that do not require gradients, we still need to return None from
-      proxy_call_backward. To do so, we use Py_None instead of a fwdInputInfo.
-
-      Structure:
-      fwdInputInfos: PyTuple[Optional[fwdInputInfo]]
-        fwdInputInfo: PyTuple[sizes, requires_grad]
-          shape: PyTuple[PyLong]
-          requires_grad: PyBool
-    */
-    THPObjectPtr fwdInputInfos(
+    // The gradients returned in the backwards should match the number of inputs
+    // to the forward, and their shapes, so we pass the fwdInputs
+    THPObjectPtr fwdInputs(
         PyTuple_New(static_cast<Py_ssize_t>(is_variable_input.size())));
     int offset = 0;
     for (const auto i : c10::irange(is_variable_input.size())) {
       if (!is_variable_input[i]) {
-        // input at i does not require grad, add an offset
-        PyTuple_SET_ITEM(fwdInputInfos.get(), i, Py_None);
+        // input at i is not a variable, add an offset
+        PyTuple_SET_ITEM(fwdInputs.get(), i, Py_None);
         offset++;
         continue;
       }
 
-      int input_infos_idx = i - offset;
-      PyObject* fwdInputInfo(PyTuple_New(static_cast<Py_ssize_t>(2)));
-      const auto& input_info = input_infos[input_infos_idx];
-
-      // shape
-      std::vector<c10::SymInt> input_info_dims = input_info.size;
-      PyObject* shape(
-          PyTuple_New(static_cast<Py_ssize_t>(input_info_dims.size())));
-      for (const auto j : c10::irange(input_info_dims.size())) {
-        int64_t size =
-            input_info_dims[j].expect_int(); // TODO: Figure out when this fails
-        PyTuple_SET_ITEM(
-            shape, static_cast<Py_ssize_t>(j), PyLong_FromLong(size));
-      }
-      PyTuple_SET_ITEM(fwdInputInfo, static_cast<Py_ssize_t>(0), shape);
-
-      // requires_grad
-      PyObject* requires_grad =
-          PyBool_FromLong(static_cast<long>(input_info.requires_grad));
-      PyTuple_SET_ITEM(fwdInputInfo, static_cast<Py_ssize_t>(1), requires_grad);
-
+      const auto& input_info = input_infos[i - offset];
       PyTuple_SET_ITEM(
-          fwdInputInfos.get(), static_cast<Py_ssize_t>(i), fwdInputInfo);
+          fwdInputs.get(), static_cast<Py_ssize_t>(i), THPVariable_Wrap(zeros_without_gil(input_info, _device_guard)));
     }
     TORCH_INTERNAL_ASSERT(
         _backward_idx.has_value(),
@@ -216,7 +186,7 @@ auto PyNode::apply(variable_list&& inputs, std::optional<PyObject*> compiler) ->
         "proxy_call_backward",
         "OOi",
         pyInputs.get(),
-        fwdInputInfos.get(),
+        fwdInputs.get(),
         *_backward_idx);
   }
 

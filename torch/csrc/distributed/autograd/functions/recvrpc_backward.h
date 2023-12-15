@@ -26,7 +26,8 @@ class TORCH_API RecvRpcBackward : public torch::autograd::Node {
       rpc::DeviceMap deviceMap);
 
   torch::autograd::variable_list apply(
-      torch::autograd::variable_list&& grads, std::optional<PyObject*> compiler = std::nullopt) override;
+      torch::autograd::variable_list&& grads,
+      std::optional<PyObject*> compiler = std::nullopt) override;
 
  private:
   const AutogradMetadata autogradMetadata_;
