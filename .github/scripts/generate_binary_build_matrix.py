@@ -16,6 +16,9 @@ from typing import Dict, List, Optional, Tuple
 CUDA_ARCHES = ["11.8", "12.1"]
 
 
+CUDA_ARCHES_FULL_VERSION =  {"11.8": "11.8.0", "12.1": "12.1.1"}
+
+
 ROCM_ARCHES = ["5.6", "5.7"]
 
 

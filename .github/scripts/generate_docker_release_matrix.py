@@ -7,11 +7,12 @@ DOCKER_IMAGE_TYPES = ["runtime", "devel"]
 
 def generate_docker_matrix() -> List[Dict[str, str]]:
     ret: List[Dict[str, str]] = []
-    for cuda in generate_binary_build_matrix.CUDA_ARCHES:
+    for cuda, version in generate_binary_build_matrix.CUDA_ARCHES_FULL_VERSION:
         for image in DOCKER_IMAGE_TYPES:
             ret.append(
                 {
                     "cuda": cuda,
+                    "cuda_full_version": version,
                     "image_type": image,
                     "platform": "linux/arm64,linux/amd64",
                 }
