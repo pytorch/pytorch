@@ -9608,6 +9608,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     # FIXME: move to test_linalg
     @torch.inference_mode()
+    @skipIfTorchDynamo("seems flaky")
     def test_bmm_multithreaded(self):
         device = 'cpu'
         num_threads = torch.get_num_threads()
