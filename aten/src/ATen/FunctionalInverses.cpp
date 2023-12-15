@@ -160,7 +160,14 @@ Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tenso
 }
 
 Tensor FunctionalInverses::expand_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, at::SymIntArrayRef size, bool implicit) {
-    return at::sum_to(mutated_view, base.sym_sizes(),/*always_return_non_view=*/!reapply_views);
+    if (reapply_views && !called_by_functionalization) {
+      // NB: assumes mutated_view is an expanded view of base.
+      // We should NOT do this for functionalization
+      return mutated_view.as_strided_symint(
+          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+    } else {
+      return at::sum_to(mutated_view, base.sym_sizes(),/*always_return_non_view=*/!reapply_views);
+    }
 }
 
 Tensor FunctionalInverses::permute_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, bool called_by_functionalization, at::IntArrayRef dims) {
