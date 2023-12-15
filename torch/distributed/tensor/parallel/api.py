@@ -37,8 +37,8 @@ def parallelize_module(  # type: ignore[return]
 
     User can also specify different parallel style per module fully qualified name (FQN).
 
-    Note that `parallelize_module` only accepts a 1-D DeviceMesh, if you have a 2-D or N-D DeviceMesh,
-    pass in a 1-D DeviceMesh by slicing a N-D DeviceMesh to a 1-D DeviceMesh (i.e. device_mesh[\"tp\"])
+    Note that ``parallelize_module`` only accepts a 1-D DeviceMesh, if you have a 2-D or N-D DeviceMesh,
+    pass in a 1-D DeviceMesh by slicing a N-D DeviceMesh to a 1-D DeviceMesh (i.e. ``device_mesh[\"tp\"]``)
 
     Args:
         module (:class:`nn.Module`):
