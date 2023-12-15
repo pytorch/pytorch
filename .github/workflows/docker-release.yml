@@ -33,7 +33,7 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: [self-hosted, linux.large]
     outputs:
-      release-matrix: ${{ steps.generate-matrix.outputs.release-matrix }}
+      generate_matrix: ${{ steps.generate-matrix.outputs.generate_matrix }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -54,7 +54,7 @@ jobs:
     timeout-minutes: 240
     needs: generate-matrix
     strategy:
-      matrix: ${{ fromJson(needs.generate-matrix.outputs.release-matrix) }}
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.generate_matrix) }}
       fail-fast: false
     env:
       BUILD_IMAGE_TYPE: ${{ matrix.image_type }}
