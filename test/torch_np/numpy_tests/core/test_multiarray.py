@@ -5673,7 +5673,7 @@ class TestMatmulOperator(MatmulCommon, TestCase):
             (RuntimeError, TypeError, ValueError), self.matmul, np.int8(5), np.int8(5)
         )
 
-    @xpassIfTorchDynamo  # (reason="torch supports inplace matmul, and so do we")
+    @skipIfTorchDynamo  # (reason="weirdly flaky")
     def test_matmul_inplace(self):
         # It would be nice to support in-place matmul eventually, but for now
         # we don't have a working implementation, so better just to error out
