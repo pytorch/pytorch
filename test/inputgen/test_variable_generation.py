@@ -1,5 +1,7 @@
 # Owner(s): ["module: tests"]
 
+import math
+
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.inputgen.variable.gen import VariableGenerator
@@ -8,6 +10,27 @@ from torch.testing._internal.inputgen.variable.type import (
     ScalarDtype,
     SUPPORTED_TENSOR_DTYPES,
 )
+from torch.testing._internal.inputgen.variable.utils import nextdown, nextup
+
+
+class TestUtils(TestCase):
+    def test_nextup(self):
+        self.assertEqual(nextup(-math.inf), -1.7976931348623157e308)
+        self.assertEqual(nextup(-5e-324), 0.0)
+        self.assertEqual(nextup(0.0), 5e-324)
+        self.assertEqual(nextup(0.9999999999999999), 1.0),
+        self.assertEqual(nextup(1.0), 1.0000000000000002)
+        self.assertEqual(nextup(1.7976931348623157e308), math.inf)
+        self.assertEqual(nextup(math.inf), math.inf)
+
+    def test_nextdown(self):
+        self.assertEqual(nextdown(math.inf), 1.7976931348623157e308)
+        self.assertEqual(nextdown(1.0000000000000002), 1.0)
+        self.assertEqual(nextdown(1.0), 0.9999999999999999),
+        self.assertEqual(nextdown(5e-324), 0.0)
+        self.assertEqual(nextdown(0.0), -5e-324)
+        self.assertEqual(nextdown(-1.7976931348623157e308), -math.inf)
+        self.assertEqual(nextdown(-math.inf), -math.inf)
 
 
 class TestVariableGenerator(TestCase):
