@@ -29,7 +29,7 @@ env:
   WITH_PUSH: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
 
 jobs:
-   generate-matrix:
+  generate-matrix:
     if: github.repository_owner == 'pytorch'
     runs-on: [self-hosted, linux.large]
     outputs:
@@ -43,7 +43,7 @@ jobs:
       - name: Get docker release matrix
         id: generate_matrix
         run: |
-          MATRIX_BLOB="$(python3 .githun/scripts/generate_docker_release_matrix.py)"
+          MATRIX_BLOB="$(python3 .github/scripts/generate_docker_release_matrix.py)"
           echo "${MATRIX_BLOB}"
           echo "matrix=${MATRIX_BLOB}" >> "${GITHUB_OUTPUT}"
 
