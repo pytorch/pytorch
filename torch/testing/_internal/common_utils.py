@@ -1402,9 +1402,15 @@ def markDynamoStrictTest(cls_or_func=None, nopython=False):
         @wraps(fn)
         def wrapper(*args, **kwargs):
             torch._dynamo.reset()
+            prev_cache_size_limit = torch._dynamo.config.cache_size_limit
+            prev_accumulated_cache_size_limit = torch._dynamo.config.accumulated_cache_size_limit
+            torch._dynamo.config.patch(cache_size_limit=1000000)
+            torch._dynamo.config.patch(accumulated_cache_size_limit=1000000)
             with unittest.mock.patch("torch._dynamo.config.suppress_errors", False):
                 fn(*args, **kwargs)
             torch._dynamo.reset()
+            torch._dynamo.config.patch(cache_size_limit=prev_cache_size_limit)
+            torch._dynamo.config.patch(accumulated_cache_size_limit=prev_accumulated_cache_size_limit)
         return wrapper
 
     if cls_or_func is None:
