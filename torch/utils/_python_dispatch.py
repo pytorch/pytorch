@@ -110,7 +110,6 @@ def _push_mode(mode, k: Optional[DispatchKey] = None):
     for op in get_cached_ops():
         for key in ks:
             op._uncache_dispatch(key)
-
     _set_mode_pre_dispatch(mode)
 
 
