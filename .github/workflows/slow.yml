@@ -92,7 +92,7 @@ jobs:
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
+          { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.2" },
         ]}
 
   linux-focal-rocm5_6-py3_8-test:
