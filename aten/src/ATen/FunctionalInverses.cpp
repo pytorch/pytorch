@@ -138,13 +138,25 @@ Tensor FunctionalInverses::_neg_view_copy_inverse(const Tensor& base, const Tens
 }
 
 Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
-    // Pessimism: we can't reapply views for as_strided_scatter.
-    return base.as_strided_scatter_symint(mutated_view, size, stride, std::move(storage_offset));
+    if (reapply_views) {
+      // NB: assumes mutated_view is a narrowed view of base.
+      // We should NOT do this for functionalization
+      return mutated_view.as_strided_symint(
+          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+    } else {
+      return base.as_strided_scatter_symint(mutated_view, size, stride, std::move(storage_offset));
+    }
 }
 
 Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t offset, int64_t dim1, int64_t dim2) {
-    // Pessimism: we can't reapply views for slice_scatter.
-    return base.diagonal_scatter(mutated_view, offset, dim1, dim2);
+    if (reapply_views) {
+      // NB: assumes mutated_view is a narrowed view of base.
+      // We should NOT do this for functionalization
+      return mutated_view.as_strided_symint(
+          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+    } else {
+      return base.diagonal_scatter(mutated_view, offset, dim1, dim2);
+    }
 }
 
 Tensor FunctionalInverses::expand_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, bool implicit) {
@@ -170,8 +182,14 @@ Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const
 }
 
 Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::SymInt index) {
-    // Pessimism: we can't reapply views for slice_scatter.
-    return base.select_scatter_symint(mutated_view, dim, std::move(index));
+    if (reapply_views) {
+      // NB: assumes mutated_view is a narrowed view of base.
+      // We should NOT do this for functionalization
+      return mutated_view.as_strided_symint(
+          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+    } else {
+      return base.select_scatter_symint(mutated_view, dim, std::move(index));
+    }
 }
 
 Tensor FunctionalInverses::detach_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
@@ -184,35 +202,53 @@ Tensor FunctionalInverses::lift_fresh_copy_inverse(const Tensor& base, const Ten
 }
 
 Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
-    // Pessimism: we can't reapply views for slice_scatter.
-    return base.slice_scatter_symint(mutated_view, dim, std::move(start), std::move(end), std::move(step));
+    if (reapply_views) {
+      // NB: assumes mutated_view is a narrowed view of base.
+      // We should NOT do this for functionalization
+      return mutated_view.as_strided_symint(
+          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+    } else {
+      return base.slice_scatter_symint(mutated_view, dim, std::move(start), std::move(end), std::move(step));
+    }
 }
 
 Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
-    // It would be nice if this logic could be re-used from autograd's split_backward(), but I don't think it can.
-    // For functionalization, we have only have one of the tensors from the TensorList outputed by split(), and we want to layer i
-    // on top of the base tensor.
-    // For autograd, we have all of the tensors outputted by split() and we just want to stack them.
-    dim = at::maybe_wrap_dim(dim, base.dim());
-    auto dim_size = base.sym_size(dim);
-    auto start = split_size * mutated_view_idx;
-    auto end = split_size + start;
-    if (end > dim_size) end = dim_size;
-    // Pessimism: we can't reapply views for slice_scatter.
-    return base.slice_scatter_symint(mutated_view, dim, start, end, 1);
+    if (reapply_views) {
+      // NB: assumes mutated_view is a narrowed view of base.
+      // We should NOT do this for functionalization
+      return mutated_view.as_strided_symint(
+          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+    } else {
+      // It would be nice if this logic could be re-used from autograd's split_backward(), but I don't think it can.
+      // For functionalization, we have only have one of the tensors from the TensorList outputed by split(), and we want to layer i
+      // on top of the base tensor.
+      // For autograd, we have all of the tensors outputted by split() and we just want to stack them.
+      dim = at::maybe_wrap_dim(dim, base.dim());
+      auto dim_size = base.sym_size(dim);
+      auto start = split_size * mutated_view_idx;
+      auto end = split_size + start;
+      if (end > dim_size) end = dim_size;
+      return base.slice_scatter_symint(mutated_view, dim, start, end, 1);
+    }
 }
 
 Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymIntArrayRef split_sizes, int64_t dim) {
-    dim = at::maybe_wrap_dim(dim, base.dim());
-    auto dim_size = base.sym_size(dim);
-    c10::SymInt start = 0;
-    for (auto i = 0; i < mutated_view_idx; ++i) {
-        start += split_sizes[i];
+    if (reapply_views) {
+      // NB: assumes mutated_view is a narrowed view of base.
+      // We should NOT do this for functionalization
+      return mutated_view.as_strided_symint(
+          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+    } else {
+      dim = at::maybe_wrap_dim(dim, base.dim());
+      auto dim_size = base.sym_size(dim);
+      c10::SymInt start = 0;
+      for (auto i = 0; i < mutated_view_idx; ++i) {
+          start += split_sizes[i];
+      }
+      auto end = start + split_sizes[mutated_view_idx];
+      if (end > dim_size) end = dim_size;
+      return base.slice_scatter_symint(mutated_view, dim, start, end, 1);
     }
-    auto end = start + split_sizes[mutated_view_idx];
-    if (end > dim_size) end = dim_size;
-    // Pessimism: we can't reapply views for slice_scatter.
-    return base.slice_scatter_symint(mutated_view, dim, start, end, 1);
 }
 
 Tensor FunctionalInverses::squeeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
@@ -302,9 +338,15 @@ Tensor FunctionalInverses::row_indices_copy_inverse(const at::Tensor& base, cons
 }
 
 Tensor FunctionalInverses::unbind_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, int64_t dim) {
-    dim = at::maybe_wrap_dim(dim, base.sizes().size());
-    // Pessimism: we can't reapply views for select_scatter.
-    return base.select_scatter(mutated_view, dim, mutated_view_idx);
+    if (reapply_views) {
+      // NB: assumes mutated_view is a narrowed view of base.
+      // We should NOT do this for functionalization
+      return mutated_view.as_strided_symint(
+          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+    } else {
+      dim = at::maybe_wrap_dim(dim, base.sizes().size());
+      return base.select_scatter(mutated_view, dim, mutated_view_idx);
+    }
 }
 
 Tensor FunctionalInverses::view_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size) {
@@ -325,18 +367,17 @@ Tensor FunctionalInverses::view_copy_dtype_inverse(const Tensor& base, const Ten
 }
 
 Tensor FunctionalInverses::unfold_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dimension, int64_t size, int64_t step) {
-    // I think autograd and the functionalization pass want the exact same thing here, but need to test to confirm.
-    // unfold_backward() is safe to use here because it is NOT a view op.
-    // (note: technically, "reapply_views" won't do anything here and we'll have an extra memory copy.
-    // We'd need to add an aliasing version of unfold_backward to fix that though).
-    TORCH_CHECK(
-      !(reapply_views && size > step),
-      "While executing unfold, functionalization encountered a tensor being mutated that has internal overlap. \
-When using torch.compile (or running functionalization directly), this is banned \
-as the behavior is not well defined. Consider cloning the tensor before mutating it, \
-or removing the mutation from your model."
-        );
-    return unfold_backward(mutated_view, base.sizes(), dimension, size, step);
+    if (reapply_views) {
+      // NB: assumes mutated_view is a narrowed view of base.
+      // We should NOT do this for functionalization
+      return mutated_view.as_strided_symint(
+          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+    } else {
+      // I think autograd and the functionalization pass want the exact same thing here, but need to test to confirm.
+      // unfold_backward() is safe to use here because it is NOT a view op.
+      // We'd need to add an aliasing version of unfold_backward to fix the extra memory copy.
+      return unfold_backward(mutated_view, base.sizes(), dimension, size, step);
+    }
 }
 
 Tensor FunctionalInverses::alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
