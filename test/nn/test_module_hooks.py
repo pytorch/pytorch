@@ -183,6 +183,7 @@ class DummyContextManager:
         self.input.append(-1)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestModuleHooks(TestCase):
     @parametrize_test("named_tuple", (True, False))
     def test_forward_hooks(self, named_tuple):
@@ -549,6 +550,7 @@ class TestModuleHooks(TestCase):
 def _hook_to_pickle(*args, **kwargs):
     pass
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestStateDictHooks(TestCase):
 
     def test_load_state_dict_pre_hook(self):
@@ -751,6 +753,8 @@ class TestStateDictHooks(TestCase):
             self.assertTrue(called)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
+@skipIfTorchDynamo("really does not work that well -- flaky errors during teardown")
 class TestModuleGlobalHooks(TestCase):
 
     def tearDown(self):
@@ -936,6 +940,7 @@ class TestModuleGlobalHooks(TestCase):
         self.assertEqual(len(handle.hooks_dict_ref()), 0)
         self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_forward_forward_hook_removable(self):
         """
         This test is to test when multiple forward hook functions can be registered
@@ -1033,6 +1038,7 @@ class TestModuleGlobalHooks(TestCase):
         self.assertTrue(local_backward_called and global_backward_called)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestModuleHookNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True

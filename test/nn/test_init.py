@@ -14,6 +14,7 @@ import torch.nn.functional as F
 if TEST_SCIPY:
     from scipy import stats
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNNInit(TestCase):
     def setUp(self):
         super().setUp()

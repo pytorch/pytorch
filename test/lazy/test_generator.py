@@ -8,6 +8,7 @@ from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, T
 torch._lazy.ts_backend.init()
 
 
+@torch.testing._internal.common_utils.unMarkDynamoStrictTest
 class LazyGeneratorTest(TestCase):
     def test_generator(self):
         """

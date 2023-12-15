@@ -165,6 +165,7 @@ def maketest(module_cls, exception_msg_pattern=None, ctxmgr=None):
 
     return wrapper
 
+@torch.testing._internal.common_utils.unMarkDynamoStrictTest
 class OptimizeTest(unittest.TestCase):
     test_sub = maketest(ModuleSub)
     # Same as test_sub but force aten::sub to fallback

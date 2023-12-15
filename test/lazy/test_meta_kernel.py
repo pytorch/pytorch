@@ -8,6 +8,7 @@ import torch._lazy.ts_backend
 
 torch._lazy.ts_backend.init()
 
+@torch.testing._internal.common_utils.unMarkDynamoStrictTest
 class TestMetaKernel(TestCase):
 
     def test_addmm_invalid_dtype(self):

@@ -18,6 +18,7 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import gradcheck
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNNParametrization(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -1546,6 +1547,7 @@ class TestNNParametrization(NNTestCase):
         self.assertEqual(m(input), m2(input))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNNParametrizationDevice(NNTestCase):
     def test_weight_norm_parametrization(self, device):
         for dtype in [torch.float, torch.bfloat16]:

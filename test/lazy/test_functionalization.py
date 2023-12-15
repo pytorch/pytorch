@@ -8,6 +8,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 torch._lazy.ts_backend.init()
 
 
+@torch.testing._internal.common_utils.unMarkDynamoStrictTest
 class LazyFuncionalizationTest(TestCase):
     def test_lazy_init_with_view(self):
         def f(device, reset_storage=False):

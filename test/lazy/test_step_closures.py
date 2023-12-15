@@ -10,6 +10,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 torch._lazy.ts_backend.init()
 
 
+@torch.testing._internal.common_utils.unMarkDynamoStrictTest
 class ClosuresTest(TestCase):
     def test_synchronous(self):
         flag = Event()

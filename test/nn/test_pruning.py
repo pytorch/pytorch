@@ -11,6 +11,7 @@ from torch.testing._internal.common_utils import TEST_NUMPY, TemporaryFileName, 
     instantiate_parametrized_tests, run_tests
 from torch.testing._internal.common_nn import NNTestCase
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPruningNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True

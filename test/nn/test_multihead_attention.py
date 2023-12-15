@@ -22,6 +22,7 @@ if TEST_NUMPY:
 # update test/run_test.py to list it, otherwise it will NOT be run in
 # CI.
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMultiheadAttentionNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -522,6 +523,7 @@ class TestMultiheadAttentionNN(NNTestCase):
         mha(nt, nt, nt)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
     def test_multihead_self_attn_two_masks_fast_path(self, device):
         """

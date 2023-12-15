@@ -14,6 +14,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 import torch.nn.functional as F
 import torch.nn as nn
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDropoutNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -81,6 +82,7 @@ class TestDropoutNN(NNTestCase):
         self.assertRaises(ValueError, lambda: F.dropout(v, -0.1))
         self.assertRaises(ValueError, lambda: F.dropout(v, 1.1))
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDropoutNNDeviceType(NNTestCase):
     def _test_dropout(self, cls, device, input, memory_format=torch.contiguous_format):
         p = 0.2

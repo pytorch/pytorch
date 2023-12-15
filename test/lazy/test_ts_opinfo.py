@@ -101,6 +101,7 @@ def clone_move(t):
     copy_t = t.detach().clone().requires_grad_(True).to(device=dev)
     return copy_t
 
+@torch.testing._internal.common_utils.unMarkDynamoStrictTest
 class TestLazyTensor(JitTestCase):
 
 
@@ -168,6 +169,7 @@ class TestLazyTensor(JitTestCase):
         torch.testing.assert_close(out_ref.cpu(), out.cpu())
 
 
+@torch.testing._internal.common_utils.unMarkDynamoStrictTest
 class TestLazyOpInfo(TestCase):
 
     @ops([op for op in op_db
@@ -290,6 +292,7 @@ class TestLazyOpInfo(TestCase):
 instantiate_device_type_tests(TestLazyOpInfo, globals(), only_for="cpu")
 
 
+@torch.testing._internal.common_utils.unMarkDynamoStrictTest
 class TestLazyDynamicOps(TestCase):
     @classmethod
     def setUpClass(cls) -> None:

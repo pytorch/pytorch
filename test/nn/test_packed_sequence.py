@@ -8,6 +8,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 import torch.nn.utils.rnn as rnn_utils
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class PackedSequenceTest(TestCase):
 
     _type_by_name = {

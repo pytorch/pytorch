@@ -13,6 +13,7 @@ class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
     pass
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestLazyModules(TestCase):
 
     @suppress_warnings

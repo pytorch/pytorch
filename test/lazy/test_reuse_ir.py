@@ -17,6 +17,7 @@ def get_test_device():
     return 'cuda' if 'LTC_TS_CUDA' in os.environ else 'cpu'
 
 @unittest.skipIf(IS_WINDOWS, "To be fixed")
+@torch.testing._internal.common_utils.unMarkDynamoStrictTest
 class TestLazyReuseIr(TestCase):
     def testAdd(self):
         device = get_test_device()

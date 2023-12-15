@@ -16,6 +16,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestEmbeddingNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -240,6 +241,7 @@ class TestEmbeddingNN(NNTestCase):
         self.assertEqual(ref_out, out)
         self.assertEqual(ref_out, out2)
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestEmbeddingNNDeviceType(NNTestCase):
     def test_embedding_dense_grad(self, device):
         with set_default_dtype(torch.double):
