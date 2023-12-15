@@ -9,12 +9,11 @@ def generate_docker_matrix() -> List[Dict[str, str]]:
     ret: List[Dict[str, str]] = []
     for cuda in generate_binary_build_matrix.CUDA_ARCHES:
         for image in DOCKER_IMAGE_TYPES:
-            platform = "linux/arm64,linux/amd64" if image == "runtime" else "linux/amd6"
             ret.append(
                 {
                     "cuda": cuda,
                     "image_type": image,
-                    "platform": platform,
+                    "platform": "linux/arm64,linux/amd64",
                 }
             )
     return {"include": ret}
