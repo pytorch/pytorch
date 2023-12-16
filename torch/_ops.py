@@ -509,7 +509,7 @@ class OpOverload(OperatorBase):
             *self._schema.name.split("::"), self._overloadname
         )
 
-    def __call__(self_, *args, **kwargs):
+    def __call__(self_, *args, **kwargs):  # noqa: B902
         # use `self_` to avoid naming collide with aten ops arguments that
         # named "self". This way, all the aten ops can be called by kwargs.
         return self_._op(*args, **(kwargs or {}))
@@ -749,7 +749,7 @@ class OpOverloadPacket:
     def __iter__(self):
         return iter(self._dir)
 
-    def __call__(self_, *args, **kwargs):
+    def __call__(self_, *args, **kwargs):  # noqa: B902
         # use `self_` to avoid naming collide with aten ops arguments that
         # named "self". This way, all the aten ops can be called by kwargs.
 
