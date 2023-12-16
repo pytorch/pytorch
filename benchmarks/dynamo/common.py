@@ -132,6 +132,7 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
 
 # These models currently fail accuracy with eager Adam optimizer
 # so we use SGD when running the full benchmarks
+# https://github.com/pytorch/pytorch/issues/115966
 BENCHMARK_USE_SGD = {
     # TorchBench
     "BERT_pytorch",
@@ -157,6 +158,7 @@ BENCHMARK_USE_SGD = {
     "timm_vision_transformer",
     "timm_vovnet",
     "vgg16",
+    "hf_T5",  # Fails dynamic https://github.com/pytorch/pytorch/issues/115968
     # HF
     "AlbertForMaskedLM",
     "BartForCausalLM",
