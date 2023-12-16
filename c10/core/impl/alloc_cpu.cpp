@@ -50,7 +50,7 @@ void memset_junk(void* data, size_t num) {
   }
 }
 
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
 static inline bool is_thp_alloc_enabled() {
   static bool value = [&] {
     const char* ptr = std::getenv("THP_MEM_ALLOC_ENABLE");
