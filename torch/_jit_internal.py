@@ -641,7 +641,7 @@ class _IgnoreContextManager(contextlib.AbstractContextManager):
 
 def ignore(drop=False, **kwargs):
     """
-    Indicate (decorator) to the compiler that a function or method should be ignored and left as a Python function.
+    Indicate to the compiler that a function or method should be ignored and left as a Python function.
 
     This allows you to leave code in your model that is not yet TorchScript compatible.
     If called from TorchScript, ignored functions will dispatch the call to the Python interpreter.
