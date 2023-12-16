@@ -424,12 +424,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.w1 = torch.nn.Linear(16, 16, bias=False)
                 self.w2 = torch.nn.Linear(16, 16, bias=False)
 
-            def forward(self, x):
-                return F.silu(self.w1(x)) * F.relu(self.w2(x))
+            def forward(self, x1, x2):
+                return F.silu(self.w1(x1)) * F.relu(self.w2(x2))
 
         mod = M().to(torch.bfloat16).eval()
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            v = torch.randn(2, 4, 16).to(torch.bfloat16)
+            v1 = torch.randn(2, 4, 16).to(torch.bfloat16)
+            v2 = v1.clone()
             # 1. view(match_count=4, match_nodes=4).
             # 2. mm to packed linear(match_count=2, match_nodes=2).
             # 3. view+linear+view to linear(match_count=2, match_nodes=6).
@@ -438,7 +439,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
             match_count = 10
             match_nodes = 19
-            self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
+            self._test_common(
+                mod, (v1, v2), match_count, match_nodes, rtol=1e-2, atol=1e-2
+            )
 
     def _qconv2d_cpu_test_helper(self, int8_mixed_bf16=False):
         class M(torch.nn.Module):
@@ -1773,19 +1776,22 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 self.w1 = torch.nn.Linear(16, 16, bias=False)
                 self.w2 = torch.nn.Linear(16, 16, bias=False)
 
-            def forward(self, x):
-                return F.silu(self.w1(x)) * F.relu(self.w2(x))
+            def forward(self, x1, x2):
+                return F.silu(self.w1(x1)) * F.relu(self.w2(x2))
 
         mod = M().to(torch.bfloat16).eval()
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            v = torch.randn(2, 4, 16).to(torch.bfloat16)
+            v1 = torch.randn(2, 4, 16).to(torch.bfloat16)
+            v2 = v1.clone()
             # 1. view(match_count=4, match_nodes=4).
             # 2. mm to packed linear(match_count=2, match_nodes=2).
             # 3. view+linear+view to linear(match_count=2, match_nodes=6).
 
             match_count = 8
             match_nodes = 12
-            self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
+            self._test_common(
+                mod, (v1, v2), match_count, match_nodes, rtol=1e-2, atol=1e-2
+            )
 
     def test_qconv2d_maxpool2d_linear_dynamic_cpu(self, include_ops=None):
         r"""
