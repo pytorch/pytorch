@@ -447,11 +447,11 @@ namespace {
 #endif
                           cudnnDataType_t datatype) {
     size_t weight_size;
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
     AT_CUDNN_CHECK(cudnnGetRNNParamsSize(handle, rnn_desc.desc(), x_desc.desc(), &weight_size, datatype));
-//#else
-//    AT_CUDNN_CHECK(cudnnGetRNNWeightSpaceSize(handle, rnn_desc.desc(), &weight_size));
-//#endif
+#else
+    AT_CUDNN_CHECK(cudnnGetRNNWeightSpaceSize(handle, rnn_desc.desc(), &weight_size));
+#endif
     auto elem_size = dataSize(datatype);
     TORCH_INTERNAL_ASSERT(weight_size % elem_size == 0, "cudnnGetRNNParamsSize returned nonsensical weight_size");
     return weight_size / elem_size;
@@ -475,10 +475,10 @@ namespace {
   void add_projection_weights(
         cudnnHandle_t handle,
         const RNNDescriptor& rnn_desc,
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
         const TensorDescriptor& x_desc,
         const FilterDescriptor& w_desc,
-//#endif
+#endif
         const Tensor& weight_buf,
         int64_t layer,
         std::vector<Tensor>& params
@@ -486,7 +486,7 @@ namespace {
     void* matrix_pointer = nullptr;
     // assuming it's LSTM which has 8 "linear layers" (i.e. 4 weights and 4 biases)
     int64_t linear_id = 8;
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
     FilterDescriptor lin_layer_mat_desc;
     AT_CUDNN_CHECK(cudnnGetRNNLinLayerMatrixParams(
         /*handle=*/handle,
@@ -498,47 +498,47 @@ namespace {
         /*linLayerID=*/linear_id,
         /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
         /*linLayerMat=*/&matrix_pointer));
-//#else
-//    void *unused_pointer;
-//    TensorDescriptor unused_desc;
-//    TensorDescriptor lin_layer_mat_desc;
-//    AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
-//        /*handle=*/handle,
-//        /*rnnDesc=*/rnn_desc.desc(),
-//        /*layer=*/layer,
-//        /*wDesc=*/weight_buf.numel() * weight_buf.element_size(),
-//        /*w=*/weight_buf.data_ptr(),
-//        /*linLayerID=*/linear_id,
-//        /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
-//        /*linLayerMat=*/&matrix_pointer, unused_desc.mut_desc(), &unused_pointer));
-//#endif
+#else
+    void *unused_pointer;
+    TensorDescriptor unused_desc;
+    TensorDescriptor lin_layer_mat_desc;
+    AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
+        /*handle=*/handle,
+        /*rnnDesc=*/rnn_desc.desc(),
+        /*layer=*/layer,
+        /*wDesc=*/weight_buf.numel() * weight_buf.element_size(),
+        /*w=*/weight_buf.data_ptr(),
+        /*linLayerID=*/linear_id,
+        /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
+        /*linLayerMat=*/&matrix_pointer, unused_desc.mut_desc(), &unused_pointer));
+#endif
 
     cudnnDataType_t data_type;
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
     cudnnTensorFormat_t format;
-//#else
-//    int stride_dim_a[5];
-//#endif
+#else
+    int stride_dim_a[5];
+#endif
     int nb_dims;
     constexpr int min_dim = 3;
     int filter_dim_a[min_dim];
     AT_CUDNN_CHECK(
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
       cudnnGetFilterNdDescriptor(
-//#else
-//      cudnnGetTensorNdDescriptor(
-//#endif
+#else
+      cudnnGetTensorNdDescriptor(
+#endif
           lin_layer_mat_desc.desc(),
           min_dim,
           &data_type,
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
           &format,
-//#endif
+#endif
           &nb_dims,
           filter_dim_a
-//#ifdef USE_CUDNN_RNN_V8_API
-//          ,stride_dim_a
-//#endif
+#ifdef USE_CUDNN_RNN_V8_API
+          ,stride_dim_a
+#endif
           ));
 
     TORCH_INTERNAL_ASSERT(nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
