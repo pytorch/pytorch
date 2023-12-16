@@ -1127,10 +1127,6 @@ class InvalidVecISA(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
 
-invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2()]
-
-
 def x86_isa_checker() -> List[str]:
     from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppOptions
     from torch._inductor.jit_builder.isa_help_code_store import get_x86_isa_detect_code
@@ -1183,6 +1179,11 @@ def x86_isa_checker() -> List[str]:
         print(f"!!! x86 isa --> avx2: {avx2}, avx512: {avx512}")
 
         return supported_isa
+
+
+invalid_vec_isa = InvalidVecISA()
+# Add more ISA to below list.
+supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 
 
 @functools.lru_cache(None)
@@ -2123,6 +2124,11 @@ class CppWrapperCodeCache:
                         extra_ldflags,
                     ) = dummy_builder.convert_to_cpp_extension_args()
 
+                    """
+                    TODO: consider to use CppBuilder replace load_inline.
+                    It maybe improve build speed:
+                    https://github.com/xuhancn/x86_isa_help?tab=readme-ov-file#build-speed-compared-between-ctypes-and-cpp_extension-load
+                    """
                     mod = torch.utils.cpp_extension.load_inline(
                         name=name,
                         build_directory=cpp_wrapper_dir,

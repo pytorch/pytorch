@@ -706,6 +706,25 @@ class CppTorchCudaOptions(CppTorchOptions):
 
 
 class CppBuilder:
+    """
+    CppBuilder is a cpp jit builder, and it supports both Windows, Linux and MacOS.
+    Args:
+        name:
+            1. Build target name, the final target file will append extension type automatically.
+            2. Due to the CppBuilder is supports mutliple OS, it will maintains ext for OS difference.
+
+        sources:
+            Source code file list to be built.
+
+        BuildOption:
+            Build options to the builder.
+
+        output_dir:
+            1. The output_dir the taget file will output to.
+            2. The default value is empty string, and then the use current dir as output dir.
+            3. Final target file: output_dir/name.ext
+    """
+
     def get_shared_lib_ext(self) -> str:
         SHARED_LIB_EXT = ".dll" if _IS_WINDOWS else ".so"
         return SHARED_LIB_EXT
@@ -739,7 +758,7 @@ class CppBuilder:
 
         self._compile_only = compile_only
 
-        if output_dir is None:
+        if len(output_dir) == 0:
             self._output_dir = os.path.dirname(os.path.abspath(__file__))
         else:
             self._output_dir = output_dir
