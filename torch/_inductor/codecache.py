@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import copyreg
+import ctypes
 import dataclasses
 import functools
 import hashlib
@@ -21,10 +22,8 @@ import shutil
 import signal
 import subprocess
 import sys
-import sysconfig
 import tempfile
 import threading
-import warnings
 import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
@@ -48,6 +47,7 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
+
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
@@ -85,6 +85,8 @@ else:
     def use_global_cache() -> bool:
         return False
 
+
+_IS_WINDOWS = sys.platform == "win32"
 
 LOCK_TIMEOUT = 600
 
@@ -1028,6 +1030,8 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)
     def __bool__(self) -> bool:
+        from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppTorchOptions
+
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
@@ -1040,20 +1044,19 @@ cdll.LoadLibrary("__lib_path__")
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
-            output_path = input_path[:-3] + "so"
-            build_cmd = shlex.split(
-                cpp_compile_command(
-                    input_path, output_path, warning_all=False, vec_isa=self
-                )
+            output_dir = os.path.dirname(input_path)
+            x86_isa_help_builder = CppBuilder(
+                key, [input_path], CppTorchOptions(self), output_dir
             )
             try:
                 # Check build result
-                compile_file(input_path, output_path, build_cmd)
+                # compile_file(input_path, output_path, build_cmd)
+                status, target_file = x86_isa_help_builder.build()
                 subprocess.check_call(
                     [
                         sys.executable,
                         "-c",
-                        VecISA._avx_py_load.replace("__lib_path__", output_path),
+                        VecISA._avx_py_load.replace("__lib_path__", target_file),
                     ],
                     stderr=subprocess.DEVNULL,
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
@@ -1068,7 +1071,11 @@ cdll.LoadLibrary("__lib_path__")
 class VecAVX512(VecISA):
     _bit_width = 512
     _macro = "-DCPU_CAPABILITY_AVX512"
-    _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+    _arch_flags = (
+        "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+        if not _IS_WINDOWS
+        else "/arch:AVX512"
+    )  # TODO: use cflags
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
     def __str__(self) -> str:
@@ -1081,7 +1088,9 @@ class VecAVX512(VecISA):
 class VecAVX2(VecISA):
     _bit_width = 256
     _macro = "-DCPU_CAPABILITY_AVX2"
-    _arch_flags = "-mavx2 -mfma"
+    _arch_flags = (
+        "-mavx2 -mfma" if not _IS_WINDOWS else "/arch:AVX2"
+    )  # TODO: use cflags
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
@@ -1122,31 +1131,85 @@ invalid_vec_isa = InvalidVecISA()
 supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 
 
-# Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
-# might have too much redundant content that is useless for ISA check. Hence,
-# we only cache some key isa information.
+def x86_isa_checker() -> List[str]:
+    from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppOptions
+    from torch._inductor.jit_builder.isa_help_code_store import get_x86_isa_detect_code
+
+    supported_isa: List[str] = []
+
+    def _check_and_append_supported_isa(
+        dest: List[str], isa_supported: bool, isa_name: str
+    ):
+        if isa_supported is True:
+            dest.append(isa_name)
+
+    Arch = platform.machine()
+    """
+    Arch value is x86_64 on Linux, and the value is AMD64 on Windows.
+    """
+    if Arch != "x86_64" and Arch != "AMD64":
+        return supported_isa
+
+    cpp_code = get_x86_isa_detect_code()
+
+    key, input_path = write(cpp_code, "cpp")
+
+    from filelock import FileLock
+
+    lock_dir = get_lock_dir()
+    lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+    with lock:
+        output_dir = os.path.dirname(input_path)
+        x86_isa_help_builder = CppBuilder(key, [input_path], CppOptions(), output_dir)
+        status, target_file = x86_isa_help_builder.build()
+
+        # 1. open the shared library
+        isa_help_lib = ctypes.CDLL(target_file)
+
+        # 2. tell Python the argument and result types of function
+        isa_help_lib.check_avx2_feature.restype = ctypes.c_bool
+        isa_help_lib.check_avx2_feature.argtypes = []
+
+        isa_help_lib.check_avx512_feature.restype = ctypes.c_bool
+        isa_help_lib.check_avx512_feature.argtypes = []
+
+        # 3. call cpp backend and get result
+        avx2 = isa_help_lib.check_avx2_feature()
+        avx512 = isa_help_lib.check_avx512_feature()
+
+        _check_and_append_supported_isa(supported_isa, avx2, "avx2")
+        _check_and_append_supported_isa(supported_isa, avx512, "avx512")
+
+        print(f"!!! x86 isa --> avx2: {avx2}, avx512: {avx512}")
+
+        return supported_isa
+
+
 @functools.lru_cache(None)
 def valid_vec_isa_list() -> List[VecISA]:
-    if sys.platform != "linux":
+    cur_os = sys.platform
+    if cur_os != "linux" and cur_os != "win32":
         return []
 
     if platform.machine() == "s390x":
         return [VecZVECTOR()]
 
     isa_list = []
-    with open("/proc/cpuinfo") as _cpu_info:
-        _cpu_info_content = _cpu_info.read()
-        for isa in supported_vec_isa_list:
-            if str(isa) in _cpu_info_content and isa:
-                isa_list.append(isa)
-        return isa_list
+    _cpu_supported_isa = x86_isa_checker()
+    for isa in supported_vec_isa_list:
+        if str(isa) in _cpu_supported_isa:
+            isa_list.append(isa)
+    return isa_list
+
+
+# valid_vec_isa_list only need setup once.
+_valid_vec_isa_list = valid_vec_isa_list()
 
 
 def pick_vec_isa() -> VecISA:
     if config.is_fbcode():
         return VecAVX2()
 
-    _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
@@ -1162,6 +1225,7 @@ def pick_vec_isa() -> VecISA:
     return invalid_vec_isa
 
 
+"""
 def get_compile_only(compile_only: bool = True) -> str:
     return "-c" if compile_only else ""
 
@@ -1241,6 +1305,7 @@ def use_standard_sys_dir_headers() -> str:
         return "-nostdinc"
     else:
         return ""
+"""
 
 
 @functools.lru_cache(None)
@@ -1273,6 +1338,7 @@ def homebrew_libomp() -> Tuple[bool, str]:
         return False, ""
 
 
+'''
 def get_include_and_linking_paths(
     include_pytorch: bool = False,
     vec_isa: VecISA = invalid_vec_isa,
@@ -1491,6 +1557,7 @@ def cpp_compile_command(
             -o {out_name}
         """,
     ).strip()
+'''
 
 
 def run_command_and_check(cmd: str):
@@ -1535,6 +1602,13 @@ class CudaKernelParamCache:
         return cls.cache.get(key, None)
 
 
+def _get_name_and_dir_from_path(file_path: str):
+    name_and_ext = os.path.basename(file_path)
+    name, ext = os.path.splitext(name_and_ext)
+    dir = os.path.dirname(file_path)
+    return name, dir
+
+
 class AotCodeCache:
     cache: Dict[str, str] = dict()
     clear = staticmethod(cache.clear)
@@ -1547,12 +1621,25 @@ class AotCodeCache:
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> str:
-        picked_vec_isa = pick_vec_isa()
+        from torch._inductor.jit_builder.cpp_builder import (
+            CppBuilder,
+            CppTorchCudaOptions,
+        )
+
+        """
         cpp_command = repr(
             cpp_compile_command(
                 "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
             )
         )
+        """
+        isa_seed = CppBuilder(
+            "i",
+            ["o"],
+            CppTorchCudaOptions(use_cuda=cuda, aot_mode=graph.aot_mode),
+            compile_only=True,
+        )
+
         fbcode_aot_cpu_re = False
         use_absolute_path = False
         if config.is_fbcode():
@@ -1574,7 +1661,7 @@ class AotCodeCache:
         key, input_path = write(
             source_code,
             "cpp",
-            extra=cpp_command,
+            extra=isa_seed.get_command_line(),
             specified_dir=specified_output_path,
         )
 
@@ -1601,9 +1688,12 @@ class AotCodeCache:
                     if specified_so_name
                     else os.path.splitext(input_path)[0] + ".so"
                 )
+                name_so, dir_so = _get_name_and_dir_from_path(output_so)
 
                 if not os.path.exists(output_so):
                     output_o = os.path.splitext(input_path)[0] + ".o"
+                    name_o, dir_o = _get_name_and_dir_from_path(output_o)
+                    """
                     cmd = cpp_compile_command(
                         input=input_path,
                         output=output_o,
@@ -1613,12 +1703,23 @@ class AotCodeCache:
                         compile_only=True,
                         use_absolute_path=use_absolute_path,
                     )
+                    """
+                    builder = CppBuilder(
+                        name_o,
+                        [input_path],
+                        CppTorchCudaOptions(use_cuda=cuda, aot_mode=graph.aot_mode),
+                        dir_o,
+                        compile_only=True,
+                    )
+                    cmd = builder.get_command_line()
                     log.debug("aot compilation command: %s", cmd)
                     if fbcode_aot_cpu_re:
-                        compile_file(input_path, output_o, cmd.split())
+                        # compile_file(input_path, output_o, cmd.split())
+                        status, output_o = builder.build()
                         os.chmod(output_o, 0o644)
                     else:
-                        run_command_and_check(cmd)
+                        # run_command_and_check(cmd)
+                        status, output_o = builder.build()
 
                     def _to_bytes(t: torch.Tensor) -> bytes:
                         # This serializes the tensor's untyped_storage to bytes by accessing
@@ -1689,6 +1790,7 @@ class AotCodeCache:
                     for cmd in symbol_list:
                         run_command_and_check(cmd)
 
+                    """
                     cmd = cpp_compile_command(
                         input=[output_o, consts_o],
                         output=output_so,
@@ -1697,12 +1799,22 @@ class AotCodeCache:
                         aot_mode=graph.aot_mode,
                         use_absolute_path=use_absolute_path,
                     )
+                    """
+                    builder = CppBuilder(
+                        name_so,
+                        [output_o, consts_o],
+                        CppTorchCudaOptions(use_cuda=cuda, aot_mode=graph.aot_mode),
+                        dir_so,
+                    )
+                    cmd = builder.get_command_line()
                     log.debug("aot linkage command: %s", cmd)
                     if fbcode_aot_cpu_re:
-                        compile_file([output_o, consts_o], output_so, cmd.split())
+                        # compile_file([output_o, consts_o], output_so, cmd.split())
+                        status, output_so = builder.build()
                         os.chmod(output_so, 0o755)
                     else:
-                        run_command_and_check(cmd)
+                        # run_command_and_check(cmd)
+                        status, output_so = builder.build()
                 else:
                     log.debug(
                         "aot_inductor dynamic library already exist: %s", output_so
@@ -1824,24 +1936,29 @@ class CppCodeCache:
 
     @classmethod
     def load(cls, source_code: str) -> CDLL:
+        from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppTorchOptions
+
         picked_vec_isa = pick_vec_isa()
-        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
-        key, input_path = write(source_code, "cpp", extra=cpp_command)
+        isa_seed = CppBuilder("i", ["o"], CppTorchOptions(picked_vec_isa))
+        # write will calc source_code hash, but we need split same code with different
+        # ISAs. get a command_line which contains isa parameters as a seed, what make
+        # hash value different with multiple Isa.
+        hash_seed = isa_seed.get_command_line()
+        key, input_path = write(source_code, "cpp", extra=hash_seed)
         if key not in cls.cache:
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_path = input_path[:-3] + "so"
-                if not os.path.exists(output_path):
-                    cmd = shlex.split(
-                        cpp_compile_command(
-                            input=input_path, output=output_path, vec_isa=picked_vec_isa
-                        )
-                    )
-                    compile_file(input_path, output_path, cmd)
-                cls.cache[key] = cls._load_library(output_path)
+                output_dir = os.path.dirname(input_path)
+                builder = CppBuilder(
+                    key, [input_path], CppTorchOptions(picked_vec_isa), output_dir
+                )
+                target_file = builder.get_target_file_path()
+                if not os.path.exists(target_file):
+                    status, target_file = builder.build()
+                cls.cache[key] = cls._load_library(target_file)
                 cls.cache[key].key = key  # type: ignore[attr-defined]
 
         return cls.cache[key]
@@ -1941,8 +2058,25 @@ class CppWrapperCodeCache:
         if not os.path.exists(cpp_wrapper_dir):
             os.makedirs(cpp_wrapper_dir)
 
+        """
         ext = "so"
         filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
+        """
+        from torch._inductor.jit_builder.cpp_builder import (
+            CppBuilder,
+            CppTorchCudaOptions,
+        )
+
+        dummy_builder = CppBuilder(
+            name,
+            [source_code],
+            CppTorchCudaOptions(use_cuda=cuda),
+            output_dir=cpp_wrapper_dir,
+        )
+        # not call build(). just process build options and args.
+        filepath = dummy_builder.get_target_file_path()
+        # print(f"!!! CppWrapperCodeCache: {filepath} -- {cpp_wrapper_dir}")
+
         log.debug("Cpp wrapper code path %s", filepath)
 
         if key not in cls.cache:
@@ -1955,6 +2089,7 @@ class CppWrapperCodeCache:
                 if not os.path.exists(filepath):
                     log.debug("Cpp wrapper building %s", filepath)
 
+                    """
                     _cpp_flags = cpp_flags()
                     _opt_flags = optimization_flags()
                     _shared = get_shared()
@@ -1980,6 +2115,13 @@ class CppWrapperCodeCache:
                     # For the default python wrapper, the compilation and linking are done in one command thus -ffast-math
                     # will take effect in both compilation and linking.
                     extra_ldflags = f"{_shared} {_lpaths} {_libs} -ffast-math"
+                    """
+
+                    (
+                        include_dirs,
+                        extra_cflags,
+                        extra_ldflags,
+                    ) = dummy_builder.convert_to_cpp_extension_args()
 
                     mod = torch.utils.cpp_extension.load_inline(
                         name=name,
@@ -1988,7 +2130,7 @@ class CppWrapperCodeCache:
                         functions=[func_name],
                         extra_cflags=[extra_cflags],
                         extra_ldflags=[extra_ldflags],
-                        extra_include_paths=_ipaths,
+                        extra_include_paths=[include_dirs],
                         use_pch=True,
                     )
                     log.debug("Cpp wrapper done building %s", filepath)
