@@ -74,6 +74,7 @@ if TEST_WITH_ROCM:
         "test_custom_op_cuda",
         "test_convolution1_cuda",
         "test_foreach_cpp_wrapper_cuda",
+        "test_index_put1",
         "test_index_put_deterministic_fallback_cuda",
         "test_index_tensor_cuda",
         "test_linear_relu_cuda",
@@ -153,6 +154,7 @@ if RUN_CUDA:
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_batch_norm_2d_2"),
+        BaseTest("test_bernoulli1"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
@@ -161,6 +163,7 @@ if RUN_CUDA:
         BaseTest("test_conv_backward"),
         BaseTest("test_custom_op"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
+        BaseTest("test_index_put1"),
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_index_tensor"),
