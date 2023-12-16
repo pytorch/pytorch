@@ -729,7 +729,6 @@ class VariableBuilder:
                 source=self.source,
             )
         elif (
-            # istype(value, (type, types.FunctionType))
             is_function(value)
             and skipfiles.check(value, is_inlined_call=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
