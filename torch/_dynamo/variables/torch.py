@@ -714,6 +714,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             from functorch import make_fx
 
             from torch._dispatch.python import enable_python_dispatcher
+            from torch._dynamo import compiled_autograd
             from ..utils import get_fake_value
             from .base import MutableLocal
             from .builder import SourcelessBuilder
@@ -728,7 +729,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 fn_.name(), torch._C.DispatchKey.CompositeImplicitAutograd
             )
 
-            if allowed_torch_fn and not definanilly_no_composite_kernel:
+            # only do decompoization for backward
+            in_compiled_backward = compiled_autograd.compiled_autograd_enabled
+
+            if (
+                allowed_torch_fn
+                and not definanilly_no_composite_kernel
+                and not in_compiled_backward
+            ):
                 # convert he arguments from VariableTracker to fake tensors + constants again
                 fake_value_args = []
                 # TODO(JackCaoG): include kwargs handling here

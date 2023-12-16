@@ -284,7 +284,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     map_fake_tensor_to_tensor_variable(x) for x in input
                 ]
                 for i in range(len(input)):
-                    if tensor_variables[i] == None:
+                    if tensor_variables[i] is None:
                         print(i)
                         print(input[i])
                         print(id(input[i]))
