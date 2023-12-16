@@ -442,7 +442,7 @@ def get_type_hint_captures(fn):
 
 
 def createResolutionCallbackForClassMethods(cls):
-    """Pull pulls closed-over variables from all methods defined in a class into a dictionary and uses that to resolve variables."""
+    """Pulls closed-over variables from all methods defined in a class into a dictionary and uses that to resolve variables."""
     # cls is a type here, so `ismethod` is false since the methods on the type
     # aren't bound to anything, so Python treats them as regular functions
     fns = [
