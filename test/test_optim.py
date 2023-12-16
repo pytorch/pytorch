@@ -7,8 +7,9 @@ from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 from torch.testing._internal.common_optimizers import optim_db, optims, OptimizerErrorEnum
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, skipMPS
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import markDynamoStrictTest, run_tests, TestCase
 
+@markDynamoStrictTest
 class TestOptimRenewed(TestCase):
 
     @onlyCPU
@@ -66,20 +67,20 @@ class TestOptimRenewed(TestCase):
                 # foreach/fused optimizers should be tested with a
                 # zero_size tensor as its last param.
                 # ref: https://github.com/pytorch/pytorch/issues/100701
-                empty_params = [torch.empty((), device=device, dtype=dtype)]
-                params = list(model.parameters()) + empty_params
+                empty_param = torch.empty((), device=device, dtype=dtype, requires_grad=True)
+                empty_param.grad = torch.rand_like(empty_param)
+                params = list(model.parameters()) + [empty_param]
 
                 optimizer = optim_cls(params, **kwargs)
 
                 for i in range(kIterations):
                     optimizer.zero_grad()
-                    output = model(input)
-                    loss = output.sum()
-                    loss.backward()
 
                     # Test that step behaves as expected (a no-op) when grads are set to None
-                    if i == 3:
-                        optimizer.zero_grad(set_to_none=True)
+                    if i != 3:
+                        output = model(input)
+                        loss = output.sum()
+                        loss.backward()
 
                     optimizer.step()
 
