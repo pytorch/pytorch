@@ -11,12 +11,6 @@
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 
-// cublasLT was introduced in CUDA 10.1 but we enable only for 11.1 that also
-// added bf16 support
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
-#include <cublasLt.h>
-#endif
-
 #ifdef USE_ROCM
 // until hipblas has an API to accept flags, we must use rocblas here
 #include <hipblas/hipblas.h>
@@ -352,17 +346,18 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   const float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
 
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000
+  auto compute_type = CUBLAS_COMPUTE_32F;
+#else
+  auto compute_type = CUDA_R_32F;
+#endif
   TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(handle,
                                   opa, opb, (int)m, (int)n, (int)k,
                                   (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
                                   b, CUDA_R_16BF, (int)ldb, strideb,
                                   (void*)&fbeta, c, CUDA_R_16BF, (int)ldc, stridec,
                                   (int)num_batches,
-#if defined(USE_ROCM) && ROCM_VERSION >= 60000
-                                  CUBLAS_COMPUTE_32F,
-#else
-                                  CUDA_R_32F,
-#endif
+                                  compute_type,
                                   CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 }
 
@@ -534,6 +529,11 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
     cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
   }
 #endif
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000
+  auto compute_type = CUBLAS_COMPUTE_32F;
+#else
+  auto compute_type = CUDA_R_32F;
+#endif
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
   TORCH_CUDABLAS_CHECK(cublasGemmEx(
       handle,
@@ -553,11 +553,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       c,
       CUDA_R_16BF,
       ldc,
-#if defined(USE_ROCM) && ROCM_VERSION >= 60000
-      CUBLAS_COMPUTE_32F,
-#else
-      CUDA_R_32F,
-#endif
+      compute_type,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 }
@@ -778,8 +774,7 @@ void gemm_and_bias(
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
-  cublasLtHandle_t ltHandle =
-      reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
+  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
   TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
       ltHandle,
       computeDesc.descriptor(),
@@ -955,8 +950,7 @@ void scaled_gemm(
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
-  cublasLtHandle_t ltHandle =
-      reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
+  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
   TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
       ltHandle,
       computeDesc.descriptor(),
@@ -1050,8 +1044,7 @@ void int8_gemm(
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
   CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
 
-  cublasLtHandle_t ltHandle =
-      reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
+  cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
 
   // cublas team: alpha and beta need to be the same dtype as of scaleType
   at::opmath_type<int32_t> alpha_val = 1;

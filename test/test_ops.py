@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfTorchInductor,
     slowTest,
+    unMarkDynamoStrictTest,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -125,6 +126,7 @@ aten = torch.ops.aten
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
+@unMarkDynamoStrictTest
 class TestCommon(TestCase):
     exact_dtype = True
 
@@ -1470,6 +1472,7 @@ class TestCommon(TestCase):
                 )
 
 
+@unMarkDynamoStrictTest
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
     # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
@@ -1526,6 +1529,7 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
 
+@unMarkDynamoStrictTest
 class TestMathBits(TestCase):
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
@@ -1747,6 +1751,7 @@ class TestTagsMode(TorchDispatchMode):
         return rs
 
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
+@unMarkDynamoStrictTest
 class TestTags(TestCase):
     @onlyCPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
@@ -1773,6 +1778,7 @@ class TestSelfKwarg(TestCase):
         torch.ops.aten.reshape.default(self=torch.rand(1,2), shape=[2])
         torch.ops.aten.min.default(self=torch.rand(100))
 
+@unMarkDynamoStrictTest
 class TestRefsOpsInfo(TestCase):
 
     import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft", "_refs._conversions"]
@@ -2047,6 +2053,7 @@ fake_autocast_backward_xfails = {
     skip('pinverse'),
 }
 
+@unMarkDynamoStrictTest
 class TestFakeTensor(TestCase):
     def _test_fake_helper(self, device, dtype, op, context):
         name = op.name
