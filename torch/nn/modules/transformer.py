@@ -589,6 +589,9 @@ class TransformerEncoderLayer(Module):
             self.activation_relu_or_gelu = 0
         self.activation = activation
 
+        # An escape hatch to optionally disable fast path.
+        self.disable_sparsity_fast_path = False
+
     def __setstate__(self, state):
         super().__setstate__(state)
         if not hasattr(self, 'activation'):
@@ -635,8 +638,10 @@ class TransformerEncoderLayer(Module):
             check_other=False,
         )
 
+        why_not_sparsity_fast_path = ""
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
-        why_not_sparsity_fast_path = ''
+        if self.disable_sparsity_fast_path:
+            why_not_sparsity_fast_path = "Fast path is disabled manually"
         if not src.dim() == 3:
             why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
         elif self.training:
