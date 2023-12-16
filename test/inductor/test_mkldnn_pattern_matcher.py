@@ -414,7 +414,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.assertEqual(out, mod(v, other), rtol=1e-2, atol=1e-2)
                 # TODO - assert fusions work code
 
-    def test_multi_linear_share_same_input(self):
+    def test_linear_fusion_with_3d_input(self):
         # llama pattern.
         class M(torch.nn.Module):
             def __init__(
@@ -1766,7 +1766,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
         v = torch.randn(x_shape, dtype=torch.float32)
         self._test_common(mod, (v,), 0, 0)
 
-    def test_multi_linear_share_same_input_dynamic(self):
+    def test_linear_fusion_with_3d_input_dynamic(self):
         # llama pattern.
         class M(torch.nn.Module):
             def __init__(
