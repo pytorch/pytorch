@@ -453,7 +453,10 @@ def _compile(
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
+    fail_type: Optional[str] = None
     fail_reason: Optional[str] = None
+    fail_user_frame_filename: Optional[str] = None
+    fail_user_frame_lineno: Optional[int] = None
     speculation_log = SpeculationLog()
 
     @preserve_global_state
@@ -610,12 +613,20 @@ def _compile(
             UncapturedHigherOrderOpError,
             BisectValidationException,
         ) as e:
+            fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
+            if e.innermost_user_frame_summary is not None:  # type: ignore[union-attr]
+                fail_user_frame_filename = e.innermost_user_frame_summary.filename  # type: ignore[union-attr]
+                fail_user_frame_lineno = e.innermost_user_frame_summary.lineno  # type: ignore[union-attr]
             raise
         except Exception as e:
+            fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
+            if e.innermost_user_frame_summary is not None:  # type: ignore[attr-defined]
+                fail_user_frame_filename = e.innermost_user_frame_summary.filename  # type: ignore[attr-defined]
+                fail_user_frame_lineno = e.innermost_user_frame_summary.lineno  # type: ignore[attr-defined]
             raise InternalTorchDynamoError(str(e)).with_traceback(
                 e.__traceback__
             ) from None
@@ -630,6 +641,7 @@ def _compile(
                     and frame_key in frame_phase_timing
                 ):
                     guard_count = len(output.guards)
+                    shape_env_guard_count = len(output.shape_env.guards)
                     graph_op_count = output.count_calls()
                     graph_node_count = len(output.graph.nodes)
                     graph_input_count = len(output.placeholders)
@@ -647,6 +659,7 @@ def _compile(
                     }
                 else:
                     guard_count = None
+                    shape_env_guard_count = None
                     graph_op_count = None
                     graph_node_count = None
                     graph_input_count = None
@@ -662,12 +675,16 @@ def _compile(
                     cache_size.num_cache_entries_with_same_id_matched_objs,
                     cache_size.num_cache_entries,
                     guard_count,
+                    shape_env_guard_count,
                     graph_op_count,
                     graph_node_count,
                     graph_input_count,
                     entire_frame_compile_time,
                     backend_compile_time,
+                    fail_type,
                     fail_reason,
+                    fail_user_frame_filename,
+                    fail_user_frame_lineno,
                     non_compliant_ops,
                     compliant_custom_ops,
                 )
