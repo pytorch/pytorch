@@ -409,8 +409,7 @@ extern "C" void dtrsm_(char *side, char *uplo, char *trans, char *diag, int *n, 
 extern "C" void strsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, float *alpha, float *a, int *lda, float *b, int *ldb);
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC(linalg_ldl_factor_ex)
 (const Tensor& self, bool hermitian, bool check_errors) {
@@ -775,9 +774,9 @@ TORCH_META_FUNC(linalg_lu)(const Tensor& A, bool pivot) {
   set_output_raw_strided(2, sizes, {}, A.options(), {});
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 #if AT_BUILD_WITH_LAPACK()
 // Define the per-batch functions to be used in the main implementation of the batched
@@ -4036,4 +4035,4 @@ Tensor linalg_vander_symint(
   auto ones =  result.new_ones_symint(shape);
   return at::cat({std::move(ones), std::move(result)}, /*dim=*/ -1);
 }
-}}  // namespace at::native
+}  // namespace at::native
