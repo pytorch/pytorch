@@ -2061,8 +2061,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.rand([1])
         self.assertEqual(fn(x), torch._dynamo.optimize("eager")(fn)(x))
 
-    @unittest.skipIf(not has_detectron2(), "requires detectron2")
     def test_multi_import(self):
+        if not has_detectron2():
+            raise unittest.SkipTest("requires detectron2")
+
         @torch._dynamo.optimize("eager", nopython=True)
         def to_bitmasks(boxes):
             from detectron2.layers.mask_ops import (
