@@ -1375,7 +1375,7 @@ static inline int64_t get_mkldnn_matmul_min_size() {
 static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
   const int64_t min_dim = get_mkldnn_matmul_min_dim();
   const int64_t min_size = get_mkldnn_matmul_min_size();
-  return m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
+  return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
 
 
@@ -1497,8 +1497,7 @@ static void addmm_impl_cpu_(
   // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
   // additionally have support for running kernel with BF16 instructions
-  static bool can_use_mkldnn = true;
-  if (can_use_mkldnn && transpose_c) {
+  if (transpose_c) {
     bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
     if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
       try {
@@ -1506,9 +1505,9 @@ static void addmm_impl_cpu_(
         // We have dispatched to ACL GEMM for single precision float
         // so do not need to dispatch to BLAS GEMM below
         dispatched = true;
-      } catch(const std::runtime_error& e) {
+      } catch (const std::exception& e) {
         TORCH_WARN("mkldnn_matmul failed, switching to BLAS gemm:", e.what());
-        can_use_mkldnn = false;
+        at::globalContext().setUserEnabledMkldnn(false);
       }
     }
   }
@@ -1758,8 +1757,13 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
 
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
   if (apply_heur && use_mkldnn_lower_precision_matmul(batch1, batch2, self_or_result)) {
+    try {
       mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
       return;
+    } catch (const std::exception& e) {
+      TORCH_WARN("mkldnn_matmul failed, switching to baddbmm:", e.what());
+      at::globalContext().setUserEnabledMkldnn(false);
+    }
   }
 
   if (contraction_size * res_rows * res_cols < 400) {
