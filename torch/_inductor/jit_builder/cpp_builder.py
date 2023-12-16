@@ -16,6 +16,8 @@ from torch._inductor import config, exc
 from torch._inductor.codecache import VecISA
 
 if config.is_fbcode():
+    from triton.fb import build_paths  # noqa: F401
+
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
         log_global_cache_stats,
@@ -341,13 +343,23 @@ def _use_fb_internal_macros() -> List[str]:
 
 
 def _use_standard_sys_dir_headers() -> List[str]:
+    cflags = []
+    include_dirs = []
     if _IS_WINDOWS:
-        return []
+        return cflags, include_dirs
 
     if config.is_fbcode():
-        return ["nostdinc"]
-    else:
-        return []
+        cflags.append("nostdinc")
+        include_dirs.append(build_paths.sleef())
+        include_dirs.append(build_paths.cc_include())
+        include_dirs.append(build_paths.libgcc())
+        include_dirs.append(build_paths.libgcc_arch())
+        include_dirs.append(build_paths.libgcc_backward())
+        include_dirs.append(build_paths.glibc())
+        include_dirs.append(build_paths.linux_kernel())
+        include_dirs.append("include")
+
+    return cflags, include_dirs
 
 
 @functools.lru_cache
@@ -481,6 +493,7 @@ def _get_openmp_args(cpp_compiler):
     else:
         if config.is_fbcode():
             libs.append("omp")
+            include_dir_paths.append(build_paths.openmp())
         else:
             if is_clang(cpp_compiler):
                 # TODO: fix issue, can't find omp.h
@@ -505,7 +518,7 @@ def get_cpp_torch_options(cpp_compiler, chosen_isa: VecISA, aot_mode: bool = Fal
     torch_cpp_wrapper_definations = _get_torch_cpp_wrapper_defination()
     use_custom_generated_macros_definations = _use_custom_generated_macros()
 
-    sys_dir_header_cflags = _use_standard_sys_dir_headers()
+    sys_dir_header_cflags, sys_dir_header_include_dirs = _use_standard_sys_dir_headers()
 
     isa_macros, isa_ps_args_build_flags = _get_build_args_of_chosen_isa(chosen_isa)
 
@@ -534,7 +547,12 @@ def get_cpp_torch_options(cpp_compiler, chosen_isa: VecISA, aot_mode: bool = Fal
         + isa_macros
         + fb_macro_passthough_args
     )
-    include_dirs = python_include_dirs + torch_include_dirs + omp_include_dir_paths
+    include_dirs = (
+        sys_dir_header_include_dirs
+        + python_include_dirs
+        + torch_include_dirs
+        + omp_include_dir_paths
+    )
     cflags = sys_dir_header_cflags + omp_cflags
     ldflags = omp_ldflags
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
@@ -596,7 +614,15 @@ def _get_cuda_related_args(aot_mode: bool):
     libraries: List[str] = []
     passthough_args: List[str] = []
 
+    # if not use cuda, don't call this function.
     use_cuda = True
+
+    if (
+        config.is_fbcode()
+        and "CUDA_HOME" not in os.environ
+        and "CUDA_PATH" not in os.environ
+    ):
+        os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
 
     from torch.utils import cpp_extension
 
@@ -609,18 +635,29 @@ def _get_cuda_related_args(aot_mode: bool):
         if config.is_fbcode():
             libraries += ["cuda"]
         else:
-            libraries += ["c10_cuda", "cuda", "torch_cuda"]
+            if config.is_fbcode():
+                libraries += ["cuda"]
+            else:
+                libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
     if aot_mode:
         cpp_prefix_include_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
         include_dirs += cpp_prefix_include_dir
         definations.append("USE_CUDA")
 
-        if not _IS_WINDOWS:
-            # TODO: make static link better on Linux.
-            passthough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
+        if config.is_fbcode():
+            include_dirs.append(build_paths.cuda())
+            # This is a special treatment for Meta internal cuda-12 where all libs
+            # are in lib/cuda-12 and lib/cuda-12/stubs
+
+            # TODO_FB_CODE: process libcudart_static.a
+
         else:
-            libraries.append("cudart_static")
+            if not _IS_WINDOWS:
+                # TODO: make static link better on Linux.
+                passthough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
+            else:
+                libraries.append("cudart_static")
 
     return (
         definations,
