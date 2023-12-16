@@ -148,6 +148,8 @@ class BuildOptionsBase:
         # Some args is hard to abstract to OS compatable, passthough it directly.
         self._passthough_args: List[str] = []
 
+        self._aot_mode = False
+
     def _remove_duplicate_options(self):
         self._definations = _remove_duplication_in_list(self._definations)
         self._include_dirs = _remove_duplication_in_list(self._include_dirs)
@@ -180,6 +182,9 @@ class BuildOptionsBase:
 
     def get_passthough_args(self) -> List[str]:
         return self._passthough_args
+
+    def get_aot_mode(self) -> bool:
+        return self._aot_mode
 
 
 def _get_warning_all_cflag(warning_all: bool = True) -> List[str]:
@@ -342,9 +347,9 @@ def _use_fb_internal_macros() -> List[str]:
         return []
 
 
-def _use_standard_sys_dir_headers() -> List[str]:
-    cflags = []
-    include_dirs = []
+def _use_standard_sys_dir_headers():
+    cflags: List[str] = []
+    include_dirs: List[str] = []
     if _IS_WINDOWS:
         return cflags, include_dirs
 
@@ -585,6 +590,8 @@ class CppTorchOptions(CppOptions):
     def __init__(self, chosen_isa: VecISA, aot_mode: bool = False) -> None:
         super().__init__()
 
+        self._aot_mode = aot_mode
+
         (
             torch_definations,
             torch_include_dirs,
@@ -777,6 +784,7 @@ class CppBuilder:
         BuildOption: BuildOptionsBase,
         output_dir: str = "",
         compile_only: bool = False,
+        use_absolute_path: bool = False,
     ) -> None:
         self._compiler = ""
         self._cflags_args = ""
@@ -791,7 +799,20 @@ class CppBuilder:
         self._target_file = ""
 
         self._name = name
-        self._sources_args = " ".join(sources)
+
+        if config.is_fbcode():
+            if BuildOption.get_aot_mode() and use_absolute_path:
+                # We need to copy any absolute-path torch includes
+                inp_name = [os.path.basename(i) for i in sources]
+                self._sources_args = " ".join(inp_name)
+
+            if is_clang(self._compiler):
+                self._passthough_parameters_args += " --rtlib=compiler-rt"
+                self._passthough_parameters_args += " -fuse-ld=lld"
+                self._passthough_parameters_args += " -B" + build_paths.glibc_lib()
+                self._passthough_parameters_args += " -L" + build_paths.glibc_lib()
+        else:
+            self._sources_args = " ".join(sources)
 
         self._compile_only = compile_only
 
