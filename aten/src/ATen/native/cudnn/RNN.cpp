@@ -111,10 +111,10 @@ namespace {
   // RNNDescriptor
 
   struct RNNDescriptorParams {
-//#ifdef USE_CUDNN_RNN_V8_API
-//    int64_t input_size;
-//    bool packed;
-//#endif
+#ifdef USE_CUDNN_RNN_V8_API
+    int64_t input_size;
+    bool packed;
+#endif
     int64_t hidden_size;
     int64_t proj_size;
     int64_t num_layers;
@@ -160,16 +160,16 @@ namespace {
       this->algo = algo;
     }
 
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
     void set(int64_t mode, int64_t hidden_size, int64_t proj_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
-//#else
-//    void set(int64_t mode, int64_t input_size, bool packed, int64_t hidden_size, int64_t proj_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
-//#endif
+#else
+    void set(int64_t mode, int64_t input_size, bool packed, int64_t hidden_size, int64_t proj_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
+#endif
       this->set_mode(mode);
-//#ifdef USE_CUDNN_RNN_V8_API
-//      this->input_size = input_size;
-//      this->packed = packed;
-//#endif
+#ifdef USE_CUDNN_RNN_V8_API
+      this->input_size = input_size;
+      this->packed = packed;
+#endif
       this->hidden_size = hidden_size;
       this->proj_size = proj_size;
       this->num_layers = num_layers;
@@ -180,11 +180,11 @@ namespace {
 
     RNNDescriptor descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
       RNNDescriptor rnn_desc;
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
       rnn_desc.set(handle, hidden_size, proj_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, input_datatype, algo, at::globalContext().allowTF32CuDNN());
-//#else
-//      rnn_desc.set(handle, input_size, packed, hidden_size, proj_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, input_datatype, algo, at::globalContext().allowTF32CuDNN());
-//#endif
+#else
+      rnn_desc.set(handle, input_size, packed, hidden_size, proj_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, input_datatype, algo, at::globalContext().allowTF32CuDNN());
+#endif
       return rnn_desc;
     }
 
@@ -204,7 +204,7 @@ namespace {
   };
 
   // TensorDescriptor list
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
   std::vector<TensorDescriptor> rnn_descriptor_sequence(const Tensor& tensor, IntArrayRef batch_sizes) {
     std::vector<TensorDescriptor> descriptors(batch_sizes.size());
     size_t i = 0;
@@ -227,40 +227,40 @@ namespace {
     }
     return descriptors;
   }
-//#else
-//  auto rnn_descriptor_sequence(const Tensor& tensor, const int batch_size, IntArrayRef batch_sizes, const int seq_len, const int vector_size) { // packed case
-//    RNNDataDescriptor r;
-//    std::vector<int> seqLengthArray(batch_size, 1);
-//    // cuDNN wants the sequence lenghts for a packed batch as if they
-//    // were unpacked, e.g., for the
-//    // Sequence 1: ABCD
-//    // Sequence 2: EF
-//    // Sequence 3: G
-//    // case below, this would be [4, 2, 1] (has length == mini_batch)
-//    // TODO(eqy): There's probably a smarter way to do this than O(SN)
-//    for (auto it = batch_sizes.begin(); it != batch_sizes.end(); it++) {
-//      // everyone starts at sequence length 1 so we skip an iteration
-//      if (it == batch_sizes.begin()) {
-//        continue;
-//      }
-//      for (int idx = 0; idx < *it; idx++) {
-//        seqLengthArray[idx]++;
-//      }
-//    }
-//    r.set(tensor, CUDNN_RNN_DATA_LAYOUT_SEQ_MAJOR_PACKED, seq_len, batch_size, vector_size, seqLengthArray.data());
-//    return r;
-//  }
-//
-//  auto rnn_descriptor(const Tensor& tensor, const int batch_size, const int seq_len, const int vector_size) {
-//    RNNDataDescriptor r;
-//    // NB: Looks like even if batch_first is true here we always want SEQ_MAJOR_UNPACKED, because the input
-//    // appears to be transposed if it is barch-major
-//    const auto layout = CUDNN_RNN_DATA_LAYOUT_SEQ_MAJOR_UNPACKED;
-//    std::vector<int> seqLengthArray(batch_size, seq_len);
-//    r.set(tensor, layout, seq_len, batch_size, vector_size, seqLengthArray.data());
-//    return r;
-//  }
-//#endif
+#else
+  auto rnn_descriptor_sequence(const Tensor& tensor, const int batch_size, IntArrayRef batch_sizes, const int seq_len, const int vector_size) { // packed case
+    RNNDataDescriptor r;
+    std::vector<int> seqLengthArray(batch_size, 1);
+    // cuDNN wants the sequence lenghts for a packed batch as if they
+    // were unpacked, e.g., for the
+    // Sequence 1: ABCD
+    // Sequence 2: EF
+    // Sequence 3: G
+    // case below, this would be [4, 2, 1] (has length == mini_batch)
+    // TODO(eqy): There's probably a smarter way to do this than O(SN)
+    for (auto it = batch_sizes.begin(); it != batch_sizes.end(); it++) {
+      // everyone starts at sequence length 1 so we skip an iteration
+      if (it == batch_sizes.begin()) {
+        continue;
+      }
+      for (int idx = 0; idx < *it; idx++) {
+        seqLengthArray[idx]++;
+      }
+    }
+    r.set(tensor, CUDNN_RNN_DATA_LAYOUT_SEQ_MAJOR_PACKED, seq_len, batch_size, vector_size, seqLengthArray.data());
+    return r;
+  }
+
+  auto rnn_descriptor(const Tensor& tensor, const int batch_size, const int seq_len, const int vector_size) {
+    RNNDataDescriptor r;
+    // NB: Looks like even if batch_first is true here we always want SEQ_MAJOR_UNPACKED, because the input
+    // appears to be transposed if it is barch-major
+    const auto layout = CUDNN_RNN_DATA_LAYOUT_SEQ_MAJOR_UNPACKED;
+    std::vector<int> seqLengthArray(batch_size, seq_len);
+    r.set(tensor, layout, seq_len, batch_size, vector_size, seqLengthArray.data());
+    return r;
+  }
+#endif
 
   // The best way to understand the meaning of the values stored in
   // this struct is to consider each of the possible ways our
@@ -361,7 +361,7 @@ namespace {
         batch_sizes_sum = -1; // something bogus in case we access it
       }
     }
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
     // TODO: check x for consistency with input_size?
     std::vector<TensorDescriptor> descriptors(Tensor x) const {
       auto is_input_packed = batch_sizes.size() != 0;
@@ -371,16 +371,16 @@ namespace {
         return rnn_descriptor(x[0], seq_length);
       }
     }
-//#else
-//    auto descriptors(Tensor x) const {
-//      auto is_input_packed = batch_sizes.size() != 0;
-//      if (is_input_packed) {
-//        return rnn_descriptor_sequence(x, mini_batch, batch_sizes, seq_length, x.size(-1));
-//      } else {
-//        return rnn_descriptor(x, mini_batch, seq_length, x.size(-1));
-//      }
-//    }
-//#endif
+#else
+    auto descriptors(Tensor x) const {
+      auto is_input_packed = batch_sizes.size() != 0;
+      if (is_input_packed) {
+        return rnn_descriptor_sequence(x, mini_batch, batch_sizes, seq_length, x.size(-1));
+      } else {
+        return rnn_descriptor(x, mini_batch, seq_length, x.size(-1));
+      }
+    }
+#endif
   };
 
   // Everything together
@@ -396,13 +396,13 @@ namespace {
     RNNDescriptor rnn_desc;
     // NB: this won't actually lay out the tensor descriptor pointers
     // in the right way, so you'll have to preprocess them
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
     std::vector<TensorDescriptor> x_descs;
     std::vector<TensorDescriptor> y_descs;
-//#else
-//    RNNDataDescriptor x_descs;
-//    RNNDataDescriptor y_descs;
-//#endif
+#else
+    RNNDataDescriptor x_descs;
+    RNNDataDescriptor y_descs;
+#endif
     TensorDescriptor hx_desc;
     TensorDescriptor hy_desc;
     TensorDescriptor cx_desc;
@@ -430,7 +430,7 @@ namespace {
       }
       return r;
     }
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
     std::vector<cudnnTensorDescriptor_t> get_x_descs() {
       return get_descs(x_descs);
     }
@@ -438,13 +438,13 @@ namespace {
     std::vector<cudnnTensorDescriptor_t> get_y_descs() {
       return get_descs(y_descs);
     }
-//#endif
+#endif
   };
 
   int64_t get_num_weights(cudnnHandle_t handle, const RNNDescriptor& rnn_desc,
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
                           const TensorDescriptor& x_desc,
-//#endif
+#endif
                           cudnnDataType_t datatype) {
     size_t weight_size;
 //#ifndef USE_CUDNN_RNN_V8_API
