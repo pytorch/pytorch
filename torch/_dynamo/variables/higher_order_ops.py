@@ -718,11 +718,8 @@ def non_single_tensor_return_unsupported(api, ret):
 
 
 class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def call_function(
-        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
-    ) -> VariableTracker:
+    def _check_args(self, args, kwargs):
         from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
-        from .builder import wrap_fx_proxy_cls
 
         if len(kwargs) > 0:
             unimplemented(
@@ -733,21 +730,50 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             UserFunctionVariable,
             NestedUserFunctionVariable,
         )
-        assert type(args[1].realize()) is TensorVariable
 
-        sample_shape = get_fake_value(args[1].as_proxy().node, tx).size()
+        assert only_consist_of(args[1], TensorVariable)
+        xs_proxy = args[1].as_proxy()
+        flat_proxies, xs_spec = pytree.tree_flatten(xs_proxy)
+        xs_example_values = [p.node.meta["example_value"] for p in flat_proxies]
 
-        if len(sample_shape) < 1 or sample_shape[0] == 0:
+        same_first_dim_msg = "map expects all mapped tensors to have the same size in the first dimension."
+        s0 = xs_example_values[0].size()[0]
+        if s0 == 0:
             unimplemented(
-                "map() operator doesn't support scalar or zero-sized tensors during tracing."
+                "map expects all mapped tensors to have non-zero size in the first dimension."
             )
+        for t in xs_example_values[1:]:
+            s1 = t.size()[0]
+            if type(s0) != type(s1):
+                unimplemented(same_first_dim_msg)
+
+            if isinstance(s0, int):
+                if s0 != s1:
+                    unimplemented(same_first_dim_msg)
+            elif isinstance(s0, torch.SymInt):
+                if s0 is not s1:
+                    unimplemented(same_first_dim_msg)
+            else:
+                unimplemented(f"Unknow type for tensor sizes, got {s0} and {s1}")
+
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        from . import TensorVariable
+        from .builder import SourcelessBuilder, wrap_fx_proxy_cls
+
+        self._check_args(args, kwargs)
 
         # To get the example output from map() we will need to provide at least one sample to
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
-        first_dim = wrap_fx_proxy_cls(
-            target_cls=TensorVariable, tx=tx, proxy=args[1].as_proxy()[0]
+        sliced_examples = pytree.tree_map(
+            lambda proxy: wrap_fx_proxy_cls(
+                TensorVariable, tx, proxy[0], proxy.node.meta["example_value"][0]
+            ),
+            args[1].as_proxy(),
         )
+        sliced_vars = SourcelessBuilder()(tx, sliced_examples)
 
         # TODO: Support kwargs
         (
@@ -758,7 +784,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx,
             args[0],
             [
-                first_dim,
+                sliced_vars,
                 *args[2:],
             ],
             {},
@@ -779,10 +805,15 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_node = make_attr(tx, body_name)
 
+        flat_mapped, spec = pytree.tree_flatten(args[1].as_proxy())
         p_args = (
             body_node,
-            1,  # right now we only supports num_mapped = 1
-            *([arg.as_proxy() for arg in args[1:]] + list(body_lifted_freevars.keys())),
+            len(flat_mapped),
+            *(
+                flat_mapped
+                + [arg.as_proxy() for arg in args[2:]]
+                + list(body_lifted_freevars.keys())
+            ),
         )
         return _call_function_and_unflatten_output(
             tx, torch.ops.higher_order.map_impl, p_args, {}, body_r, body_spec

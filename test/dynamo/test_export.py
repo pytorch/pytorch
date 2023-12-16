@@ -1787,7 +1787,7 @@ def forward(self, l_x_):
         xs = torch.randn(0, 2)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "zero-sized tensor",
+            "non-zero size in the first dimension",
         ):
             out_graph, _ = torch._dynamo.export(mod)(xs)
 
