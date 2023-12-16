@@ -766,35 +766,16 @@ class SkipFilesVariable(VariableTracker):
             )
         ):
 
-        #     def wraps(fn):
-        #         if isinstance(fn, variables.NestedUserFunctionVariable):
-        #             if args[0].source:
-        #                 reconstructible = args[0].source
-        #             else:
-        #                 reconstructible = args[0]
-        #             return fn.clone(wrapped_reconstructible=reconstructible)
-        #         unimplemented(f"functools.wraps({fn})")
+            def wraps(fn):
+                if isinstance(fn, variables.NestedUserFunctionVariable):
+                    if args[0].source:
+                        reconstructible = args[0].source
+                    else:
+                        reconstructible = args[0]
+                    return fn.clone(wrapped_reconstructible=reconstructible)
+                unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps)
-        elif self.value is collections.deque and not kwargs:
-            if len(args) == 0:
-                items = []
-            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                items = args[0].unpack_var_sequence(tx)
-            else:
-                unimplemented("deque() with more than 1 arg not supported")
-            return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
-        elif self.value is functools.partial:
-            if not args:
-                unimplemented("functools.partial malformed")
-            # The first arg, a callable (the ctor below will assert on types)
-            fn = args[0]
-            rest_args = args[1:]
-            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
-            # args and keywords
-            return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs
-            )
         else:
             try:
                 path = inspect.getfile(self.value)
