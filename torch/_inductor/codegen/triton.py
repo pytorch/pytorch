@@ -115,6 +115,15 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"tl.abs({self._print(expr.args[0])})"
 
+    def _print_FloorDiv(self, expr):
+        if expr.is_integer:
+            return super()._print_FloorDiv(expr)
+
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"tl.math.floor({x} / {div})"
+
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint

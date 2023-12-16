@@ -406,14 +406,14 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
     AtenTensorHandle input,
     AtenTensorHandle weight,
     AtenTensorHandle bias, // optional argument
-    int64_t* stride_ptr,
+    const int64_t* stride_ptr,
     int64_t stride_size,
-    int64_t* padding_ptr,
+    const int64_t* padding_ptr,
     int64_t padding_size,
-    int64_t* dilation_ptr,
+    const int64_t* dilation_ptr,
     int64_t dilation_size,
     int transposed,
-    int64_t* output_padding_ptr,
+    const int64_t* output_padding_ptr,
     int64_t output_padding_size,
     int64_t groups,
     AtenTensorHandle* out // returns new reference
