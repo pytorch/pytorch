@@ -1775,7 +1775,7 @@ class TestSelfKwarg(TestCase):
         """Verify that we can call the aten ops with all kwargs even if the
         argument's name is "self"
         """
-        torch.ops.aten.reshape.default(self=torch.rand(1,2), shape=[2])
+        torch.ops.aten.reshape.default(self=torch.rand(1, 2), shape=[2])
         torch.ops.aten.min.default(self=torch.rand(100))
 
 @unMarkDynamoStrictTest
