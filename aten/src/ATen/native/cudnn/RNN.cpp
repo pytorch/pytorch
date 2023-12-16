@@ -514,31 +514,31 @@ namespace {
 #endif
 
     cudnnDataType_t data_type;
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
     cudnnTensorFormat_t format;
-#else
-    int stride_dim_a[5];
-#endif
+//#else
+//    int stride_dim_a[5];
+//#endif
     int nb_dims;
     constexpr int min_dim = 3;
     int filter_dim_a[min_dim];
     AT_CUDNN_CHECK(
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
       cudnnGetFilterNdDescriptor(
-#else
-      cudnnGetTensorNdDescriptor(
-#endif
+//#else
+//      cudnnGetTensorNdDescriptor(
+//#endif
           lin_layer_mat_desc.desc(),
           min_dim,
           &data_type,
-#ifndef USE_CUDNN_RNN_V8_API
+//#ifndef USE_CUDNN_RNN_V8_API
           &format,
-#endif
+//#endif
           &nb_dims,
           filter_dim_a
-#ifdef USE_CUDNN_RNN_V8_API
-          ,stride_dim_a
-#endif
+//#ifdef USE_CUDNN_RNN_V8_API
+//          ,stride_dim_a
+//#endif
           ));
 
     TORCH_INTERNAL_ASSERT(nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
