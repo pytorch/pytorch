@@ -728,13 +728,6 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif istype(value, type) and value in itertools.__dict__.values():
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return SkipFilesVariable(
-                value,
-                skipfiles.check_verbose(value, is_inlined_call=True).reason,
-                source=self.source,
-            )
         elif (
             # istype(value, (type, types.FunctionType))
             is_function(value)

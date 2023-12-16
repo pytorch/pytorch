@@ -4,7 +4,6 @@ import functools
 import importlib
 import inspect
 import itertools
-import random
 import sys
 import threading
 import types
@@ -19,7 +18,7 @@ from .. import variables
 from ..allowed_functions import is_allowed
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
+from ..source import AttrSource, GetItemSource, ODictGetItemSource
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -307,17 +306,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             kwargs,
         )
 
-    @staticmethod
-    @functools.lru_cache(None)
-    def _supported_random_functions():
-        fns = {
-            random.random,
-            random.randint,
-            random.randrange,
-            random.uniform,
-        }
-        return fns
-
     def _maybe_get_baseclass_method(self, name):
         if name not in getattr(self.value, "__dict__", {}):
             try:
@@ -425,34 +413,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ]
         return super().unpack_var_sequence(tx)
 
-    def is_supported_random(self):
-        try:
-            return self.value in self._supported_random_functions()
-        except TypeError:
-            # TypeError: unhashable type
-            return False
-
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .. import trace_rules
-        from .builder import VariableBuilder
 
-        if (
-            self.is_supported_random()
-            and all(k.is_python_constant() for k in args)
-            and all(v.is_python_constant() for v in kwargs.values())
-        ):
-            args = [x.as_python_constant() for x in args]
-            kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            random_call_index = len(tx.random_calls)
-            example_value = self.value(*args, **kwargs)
-            source = RandomValueSource(random_call_index)
-            tx.random_calls.append((self.value, args, kwargs))
-            return VariableBuilder(tx, source).wrap_unspecialized_primitive(
-                example_value
-            )
-        elif istype(self.value, types.MethodType):
+        if istype(self.value, types.MethodType):
             func = self.value.__func__
             obj = self.value.__self__
             if (
@@ -464,16 +430,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return variables.TorchCtxManagerClassVariable(
                     obj.__class__
                 ).call_function(tx, args, kwargs)
-
-            if (
-                func is torch.autograd.grad_mode.inference_mode.clone
-                and obj.__class__ is torch.autograd.grad_mode.inference_mode
-            ):
-                # simulate the inference_mode.clone implementation
-                var = variables.ConstantVariable(obj.mode)
-                return variables.TorchCtxManagerClassVariable(
-                    obj.__class__
-                ).call_function(tx, [var], kwargs)
         elif (
             istype(self.value, functools.partial)
             and is_allowed(self.value.func)

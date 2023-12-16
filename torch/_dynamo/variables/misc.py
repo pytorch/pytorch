@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import inspect
 import itertools
+import random
 import sys
 import types
 from typing import Dict, List
@@ -13,11 +14,18 @@ from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
+from ..source import (
+    AttrSource,
+    GetItemSource,
+    ODictGetItemSource,
+    RandomValueSource,
+    TypeSource,
+)
 from ..utils import (
     check_constant_args,
     identity,
     is_tensor_base_attr_getter,
+    istype,
     proxy_args_kwargs,
 )
 from .base import MutableLocal, VariableTracker
@@ -739,10 +747,28 @@ class SkipFilesVariable(VariableTracker):
             collections.namedtuple: variables.UserDefinedClassVariable,
         }
 
+    @staticmethod
+    @functools.lru_cache(None)
+    def _supported_random_functions():
+        fns = {
+            random.random,
+            random.randint,
+            random.randrange,
+            random.uniform,
+        }
+        return fns
+
+    def is_supported_random(self):
+        try:
+            return self.value in self._supported_random_functions()
+        except TypeError:
+            # TypeError: unhashable type
+            return False
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from .builtin import BuiltinVariable
+        from .builder import VariableBuilder
 
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
@@ -756,6 +782,20 @@ class SkipFilesVariable(VariableTracker):
             )
             return self.fold_through_function_to_wrapper().get(self.value)(
                 value, mutable_local=MutableLocal()
+            )
+        elif (
+            self.is_supported_random()
+            and all(k.is_python_constant() for k in args)
+            and all(v.is_python_constant() for v in kwargs.values())
+        ):
+            args = [x.as_python_constant() for x in args]
+            kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            random_call_index = len(tx.random_calls)
+            example_value = self.value(*args, **kwargs)
+            source = RandomValueSource(random_call_index)
+            tx.random_calls.append((self.value, args, kwargs))
+            return VariableBuilder(tx, source).wrap_unspecialized_primitive(
+                example_value
             )
         elif (
             self.value is functools.wraps
@@ -776,6 +816,18 @@ class SkipFilesVariable(VariableTracker):
                 unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps)
+        elif istype(self.value, types.MethodType):
+            func = self.value.__func__
+            obj = self.value.__self__
+            if (
+                func is torch.autograd.grad_mode.inference_mode.clone
+                and obj.__class__ is torch.autograd.grad_mode.inference_mode
+            ):
+                # simulate the inference_mode.clone implementation
+                var = variables.ConstantVariable(obj.mode)
+                return variables.TorchCtxManagerClassVariable(
+                    obj.__class__
+                ).call_function(tx, [var], kwargs)
         else:
             try:
                 path = inspect.getfile(self.value)
