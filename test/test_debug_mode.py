@@ -22,12 +22,12 @@ def debug_mode(enable_debug_mode: bool):
     This context manager can be used to temporarily enable or disable debug mode
     Upon exiting the context manager, the previous state of the flag will be restored.
     """
-    previous_mode: bool = torch._C.get_runtime_debug()
+    previous_mode: bool = torch._C._get_runtime_debug()
     try:
-        torch._C.set_runtime_debug(enable_debug_mode)
+        torch._C._set_runtime_debug(enable_debug_mode)
         yield {}
     finally:
-        torch._C.set_runtime_debug(previous_mode)
+        torch._C._set_runtime_debug(previous_mode)
 
 
 class TestDebugMode(TestCase):
