@@ -725,6 +725,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // for dump completion.
   std::future<bool> launchAsyncDebugDump();
 
+  // Helper to wait up to the specified timeout and then abandon the dump.
+  // Logs on timeout, and asserts the future's status is as expected.
+  void waitForDumpOrTimeout(std::future<bool>& fut, size_t timeout_sec = 30);
+
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
   // We are working on enabling more useful debug information for watchdog
@@ -835,9 +839,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::mutex monitorMutex_;
 
   bool writeDebugInfo_ = false;
-
-  // Mutex to Guard the check of writeDebugInfo_
-  std::mutex writeDebugInfoMutex_;
 
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
