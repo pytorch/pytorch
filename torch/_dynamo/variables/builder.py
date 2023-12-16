@@ -705,6 +705,12 @@ class VariableBuilder:
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
+        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return PythonModuleVariable(
+                value,
+                source=self.source,
+            )
         elif is_allowed(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchVariable(
@@ -753,12 +759,6 @@ class VariableBuilder:
             return UserMethodVariable(
                 value.__func__,
                 self_obj,
-                source=self.source,
-            )
-        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return PythonModuleVariable(
-                value,
                 source=self.source,
             )
         elif isinstance(value, types.GetSetDescriptorType):
