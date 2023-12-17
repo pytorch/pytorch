@@ -893,6 +893,7 @@ def _run_from_cache(compiled_graph: CompiledFxGraph, inputs: List[Any]) -> Any:
     return compiled_graph.compiled_artifact(inputs)
 
 
+# TODO: move to cpp_builder.py
 def cpp_compiler() -> str:
     if config.is_fbcode():
         return build_paths.cc()
@@ -956,6 +957,7 @@ def install_gcc_via_conda() -> str:
     return cxx_path
 
 
+r"""
 def is_gcc() -> bool:
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler()))
 
@@ -969,6 +971,7 @@ def is_apple_clang() -> bool:
     cxx = cpp_compiler()
     version_string = subprocess.check_output([cxx, "--version"]).decode("utf8")
     return "Apple" in version_string.splitlines()[0]
+"""
 
 
 class VecISA:

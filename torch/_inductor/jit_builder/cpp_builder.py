@@ -116,8 +116,12 @@ def run_command_line(cmd_line, cwd=None):
     return status
 
 
-def is_gcc(cpp_compiler) -> bool:
+def _is_gcc(cpp_compiler) -> bool:
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
+
+
+def is_gcc() -> bool:
+    return _is_gcc(_get_cpp_compiler())
 
 
 def is_clang(cpp_compiler) -> bool:
