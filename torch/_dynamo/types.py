@@ -1,10 +1,10 @@
 import dataclasses
+import pickle
 import sys
 import types
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Union
 
 from typing_extensions import TypeAlias
-
 
 if sys.version_info >= (3, 11):
     from torch._C._dynamo import eval_frame
@@ -47,6 +47,92 @@ class GuardFn(Protocol):
 class GuardedCode:
     code: types.CodeType
     check_fn: GuardFn
+    frame: types.FrameType
+    name: str
+    compiled_fn: Any
+    global_alias_table: Dict[str, str]
+    resume_fn_name: str
+    resume_fn_code: types.CodeType
+    unique_id: int
+
+    def serialize(self, file):
+        code_attrs = torch._dynamo.utils.attrs_code_object(self.code)
+        if self.resume_fn_code:
+            resume_fn_code_attrs = torch._dynamo.utils.attrs_code_object(self.resume_fn_code)
+        else:
+            resume_fn_code_attrs = None
+
+        # annoying
+        unique_id = torch._dynamo.bytecode_transformation._unique_id_counter
+        if hasattr(self.compiled_fn, "get_compiler_config"):
+            del self.compiled_fn.get_compiler_config
+
+        guarded_code_struct = (
+            code_attrs, # code_attrs
+            self.name, # name
+            self.compiled_fn, # compiled fn
+            self.global_alias_table, # aliases
+            self.resume_fn_name, # resume fn name
+            resume_fn_code_attrs, # resume fn
+            unique_id # id
+        )
+        pickle.dump(guarded_code_struct, file)
+
+    @staticmethod
+    def deserialize(file, frame):
+        try:
+            serialized = file.read()
+            (
+                attributes, # code_attrs
+                fn_name, # name
+                compiled_fn, # compiled_fn
+                global_alias_table, # aliases
+                resume_fn_name, # resume fn name
+                resume_fn_code_attrs, # resume fn
+                unique_id_serialized, # id
+            ) = pickle.loads(serialized)
+
+            if next(torch._dynamo.bytecode_transformation._unique_id_counter) > next(unique_id_serialized):
+                unique_id = torch._dynamo.bytecode_transformation._unique_id_counter
+            else:
+                unique_id = unique_id_serialized
+            torch._dynamo.bytecode_transformation._unique_id_counter = unique_id
+            frame.f_globals[fn_name] = compiled_fn
+
+            for alias, name in global_alias_table.items():
+                frame.f_globals[alias] = eval(name, frame.f_globals)
+
+            code_obj = types.CodeType(*attributes)
+            if resume_fn_code_attrs:
+                resume_fn_code_obj = types.CodeType(*resume_fn_code_attrs)
+                frame.f_globals[resume_fn_name] = types.FunctionType(resume_fn_code_obj, frame.f_globals, resume_fn_name)
+            else:
+                resume_fn_code_obj = None
+
+            def compile_function_from_string(func_str):
+                namespace = {}
+                exec(func_str, namespace)
+                return namespace['function']
+
+            yolo_guard = """\
+def function(*args, **kwargs):
+    return True
+"""
+
+            check_fn = compile_function_from_string(yolo_guard)
+            return GuardedCode(
+                code_obj,
+                check_fn,
+                frame,
+                fn_name,
+                compiled_fn,
+                global_alias_table,
+                resume_fn_name,
+                resume_fn_code_obj,
+                unique_id,
+            )
+        except Exception as e:
+            return None
 
 
 class DynamoCallbackFn(Protocol):

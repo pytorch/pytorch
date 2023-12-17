@@ -70,6 +70,7 @@ from .utils import (
     cprofile_wrapper,
     dynamo_timed,
     format_bytecode,
+    frame_code_to_unique_frame_id,
     frame_phase_timing,
     gen_record_file_name,
     increment_frame,
@@ -85,6 +86,7 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
+recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
 
 
@@ -505,6 +507,7 @@ def _compile(
             check_inst_exn_tab_entries_valid(instructions)
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
+
     @dynamo_timed(phase_name="entire_frame_compile")
     def compile_inner(
         code: types.CodeType,
@@ -615,12 +618,24 @@ def _compile(
 
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
+
+        serialize_table = output.to_serialize
         check_fn = CheckFunctionManager(
             output,
             hooks.guard_fail_fn if hooks else None,
         )
 
-        guarded_code = GuardedCode(out_code, check_fn.check_fn)
+        guarded_code = GuardedCode(
+            code=out_code,
+            check_fn=check_fn.check_fn,
+            name=serialize_table["compiled_fn_name"],
+            compiled_fn=serialize_table["compiled_fn"],
+            global_alias_table=serialize_table["global_alias_table"],
+            resume_fn_name=serialize_table.get("resume_fn_name", None),
+            resume_fn_code=serialize_table.get("resume_fn_code", None),
+            frame=frame,
+            unique_id=torch._dynamo.bytecode_transformation._unique_id_counter,
+        )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
             # We should not run the guard_export_fn when Dynamo does not
@@ -631,6 +646,7 @@ def _compile(
             hooks.guard_export_fn(output.guards)
 
         output.local_scope.clear()
+
         return guarded_code
 
     with compile_context(CompileContext(compile_id)):
@@ -726,14 +742,49 @@ def _compile(
                 log_compilation_event(metrics)
 
 
-def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
+# TODO(voz): A better location for the util
+def _placeholder_remote_write(unique_frame_id, guarded_code):
+    # TODO(voz): A better location for the file
+    file_path = f"/tmp/{unique_frame_id}.pkl"
+    with open(file_path, "wb") as file:
+        guarded_code.serialize(file)
+
+
+def _placeholder_remote_fetch(unique_frame_id, frame):
+    try:
+        file_path = f"/tmp/{unique_frame_id}.pkl"
+        with open(file_path, "rb") as file:
+            return GuardedCode.deserialize(file, frame)
+    except Exception as e:
+        return None
+
+
+def convert_frame(compiler_fn: CompilerFn, hooks: Hooks, serialize=False):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
     def _convert_frame(frame: types.FrameType, cache_entry, hooks: Hooks, frame_state):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_entry, hooks, frame_state)
+            result = None
+            if serialize:
+                unique_frame_id = frame_code_to_unique_frame_id(frame.f_code)
+                recompiles_log.debug(f"Cache Lookup - {unique_frame_id}")
+                guarded_code = _placeholder_remote_fetch(unique_frame_id, frame)
+                if guarded_code:
+                    result = guarded_code
+            if not result:
+                if serialize:
+                    recompiles_log.debug(f"Cache Miss - {unique_frame_id}")
+                result = inner_convert(frame, cache_entry, hooks, frame_state)
+                if serialize:
+                    # Will raise if it cannot serialize
+                    _placeholder_remote_write(unique_frame_id, guarded_code=result)
+                    recompiles_log.debug(f"Cache Write - {unique_frame_id}")
+            else:
+                if serialize:
+                    recompiles_log.debug(f"Cache Hit - {unique_frame_id}")
+
             counters["frames"]["ok"] += 1
             return result
         except Exception as e:

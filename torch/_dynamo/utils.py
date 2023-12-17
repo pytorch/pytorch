@@ -2325,6 +2325,79 @@ def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bo
     )
 
 
+def check_module_str(ref_str, module_str):
+    return ref_str == module_str
+
+
+def attrs_code_object(code_obj):
+    if not isinstance(code_obj, types.CodeType):
+        raise TypeError("Object must be a code object")
+
+    # TODO(voz): Audit which of these we need, surely not most
+    # for how we use it.
+    attributes = (
+        code_obj.co_argcount,
+        code_obj.co_posonlyargcount,
+        code_obj.co_kwonlyargcount,
+        code_obj.co_nlocals,
+        code_obj.co_stacksize,
+        code_obj.co_flags,
+        code_obj.co_code,
+        code_obj.co_consts,
+        code_obj.co_names,
+        code_obj.co_varnames,
+        code_obj.co_filename,
+        code_obj.co_name,
+        code_obj.co_firstlineno,
+        code_obj.co_lnotab,
+        code_obj.co_freevars,
+        code_obj.co_cellvars,
+    )
+
+    return attributes
+
+
+def attrs_function(func):
+    if not isinstance(func, types.FunctionType):
+        raise TypeError("Object must be a function")
+
+    closure = None
+    if func.__closure__:
+        closure = [c.cell_contents for c in func.__closure__]
+
+    func_data = {
+        "code": attrs_code_object(func.__code__),
+        "name": func.__name__,
+        "defaults": func.__defaults__,
+        "closure": closure,
+    }
+
+    return func_data
+
+
+def deserialize_code_object(attrs):
+    return types.CodeType(*attrs)
+
+
+def deserialize_function_object_from_file(func_data):
+    closure = None
+    if func_data["closure"] is not None:
+        closure = tuple(types.CellType(c) for c in func_data["closure"])
+
+    return types.FunctionType(
+        deserialize_code_object(func_data["code"]),
+        globals(),  # You might need to adjust the globals depending on the context
+        func_data["name"],
+        func_data["defaults"],
+        closure,
+    )
+
+
+def frame_code_to_unique_frame_id(f_code):
+    import hashlib
+
+    return hashlib.md5(str(attrs_code_object(f_code)).encode()).hexdigest()
+
 # see note [Tensor Fakification and Symbol Caching]
 def to_fake_tensor(t, fake_mode):
     symbolic_context = None

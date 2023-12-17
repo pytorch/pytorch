@@ -585,6 +585,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     random_calls: List[
         Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
     ]
+    global_alias_table = {}
 
     def mark_inconsistent_side_effects(self):
         """
@@ -936,6 +937,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         else:
             value = importlib.import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
+
+        self.global_alias_table[alias] = module_name
         f_globals = self.output.global_scope
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
@@ -1967,6 +1970,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.random_calls = []
 
         self.strict_checks_enabled = False
+        self.global_alias_table = {}
 
         if sys.version_info >= (3, 10):
             from .resume_execution import (
@@ -2177,12 +2181,15 @@ class InstructionTranslator(InstructionTranslatorBase):
             ] = orig_graphmodule_maybe
 
         if new_code.co_freevars:
+            # TODO(voz): Support this for serialization
             cg.make_function_with_closure(name, new_code, True, stack_len)
         else:
             self.output.install_global(
                 name, types.FunctionType(new_code, self.f_globals, name)
             )
             cg.extend_output(cg.load_function_name(name, True, stack_len))
+            self.output.to_serialize["resume_fn_name"] = name
+            self.output.to_serialize["resume_fn_code"] = new_code
 
         cg.extend_output([cg.create_load(k) for k in argnames])
         cg.extend_output(create_call_function(nargs, False))
@@ -2337,6 +2344,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             tracer = InliningInstructionTranslator(
                 parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
             )
+
+        tracer.global_alias_table = parent.global_alias_table
 
         strict_ctx: Any = contextlib.nullcontext()
         if parent.strict_checks_enabled:

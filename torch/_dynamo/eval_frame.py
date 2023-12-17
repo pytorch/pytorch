@@ -313,6 +313,7 @@ class _TorchDynamoContext:
         export=False,
         dynamic=None,
         compiler_config=None,
+        serialize=False,
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -324,6 +325,7 @@ class _TorchDynamoContext:
         self.export = export
         self.dynamic = dynamic
         self.compiler_config = compiler_config
+        self.serialize = serialize
         patch_fn()
 
     def __enter__(self):
@@ -352,6 +354,7 @@ class _TorchDynamoContext:
         self.backend_cache_manager.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
+
         # public api for compiler config/options
         def get_compiler_config():
             return self.compiler_config
@@ -376,7 +379,9 @@ class _TorchDynamoContext:
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
             assert not hasattr(new_mod, "get_compiler_config")
-            new_mod.get_compiler_config = get_compiler_config
+            # TODO(voz): Enable w/ serialize
+            if not self.serialize:
+                new_mod.get_compiler_config = get_compiler_config
 
             return new_mod
         assert callable(fn)
@@ -451,7 +456,8 @@ class _TorchDynamoContext:
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
         assert not hasattr(_fn, "get_compiler_config")
-        _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+        if not self.serialize:
+            _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
@@ -505,6 +511,7 @@ class OptimizeContext(_TorchDynamoContext):
         export=False,
         dynamic=None,
         compiler_config=None,
+        serialize=False,
     ):
         def on_enter():
             install_generation_tagging_init()
@@ -518,6 +525,7 @@ class OptimizeContext(_TorchDynamoContext):
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
+            serialize=serialize,
         )
 
 
@@ -607,6 +615,7 @@ def _optimize_catch_errors(
     export=False,
     dynamic=None,
     compiler_config=None,
+    serialize=False,
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
@@ -615,6 +624,7 @@ def _optimize_catch_errors(
         export=export,
         dynamic=dynamic,
         compiler_config=compiler_config,
+        serialize=serialize
     )
 
 
@@ -660,6 +670,7 @@ def optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
+    _serialize=False,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -708,15 +719,19 @@ def optimize(
             backend,
             dynamic=dynamic,
             hooks=hooks,
+            serialize=_serialize
         )
+
+    callback = convert_frame.convert_frame(backend, hooks=hooks, serialize=_serialize)
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks=hooks),
+        callback,
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
         compiler_config=backend.get_compiler_config()
         if hasattr(backend, "get_compiler_config")
         else None,
+        serialize=_serialize,
     )
 
 
@@ -1409,6 +1424,7 @@ def optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=None,
+    serialize=False,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -1426,6 +1442,7 @@ def optimize_assert(
         backend_ctx_ctor,
         export=export,
         dynamic=dynamic,
+        serialize=serialize,
     )
 
 
