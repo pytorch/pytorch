@@ -123,7 +123,11 @@ def check_ragged_dim_same(
 # match those of the specified size
 def raggedness_matches(nt, size):
     end = nt._ragged_idx + 1
-    return list(nt._size[:end]) == list(size[:end])
+    nt_ragged = nt._size[:end]
+    size_ragged = size[:end]
+    return len(nt_ragged) == len(size_ragged) and (
+        all(ns == s or s == -1 for ns, s in zip(nt_ragged, size_ragged))
+    )
 
 
 def squeeze_leading_ones(t):
@@ -385,8 +389,6 @@ def linear_default(func, *args, **kwargs):
     )
 
     inp = new_kwargs.pop("input")
-    weight = new_kwargs["weight"]
-    bias = new_kwargs["bias"]
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
@@ -567,7 +569,6 @@ def unsqueeze_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     values = inp._values
-    offsets = inp.offsets
 
     # Account for collapsed jagged dim
     dim = new_kwargs["dim"]
