@@ -326,13 +326,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 pass
         return None
 
-    def is_supported_random(self):
-        try:
-            return self.value in self._supported_random_functions()
-        except TypeError:
-            # TypeError: unhashable type
-            return False
-
     def call_method(
         self,
         tx,
@@ -431,6 +424,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 for k in range(len(self.value))
             ]
         return super().unpack_var_sequence(tx)
+
+    def is_supported_random(self):
+        try:
+            return self.value in self._supported_random_functions()
+        except TypeError:
+            # TypeError: unhashable type
+            return False
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"

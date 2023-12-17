@@ -744,6 +744,8 @@ class SkipFilesVariable(VariableTracker):
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
+        # Fold through the functions(e.g, collections.namedtuple)
+        # that inputs & outputs are all python constants
         elif (
             self.value in self.fold_through_function_to_wrapper().keys()
             and check_constant_args(args, kwargs)
