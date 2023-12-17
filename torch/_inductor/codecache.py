@@ -957,11 +957,11 @@ def install_gcc_via_conda() -> str:
     return cxx_path
 
 
-r"""
 def is_gcc() -> bool:
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler()))
 
 
+r"""
 def is_clang() -> bool:
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
 

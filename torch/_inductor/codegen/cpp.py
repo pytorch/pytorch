@@ -15,7 +15,6 @@ import torch
 import torch.fx
 from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
-from torch._inductor.jit_builder.cpp_builder import is_gcc
 from torch._prims_common import is_float_dtype
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
@@ -3294,7 +3293,7 @@ class LoopLevel:
             line1 = ""
         elif self.simd_omp:
             line1 = f"#pragma omp {simd}{reduction}"
-        elif not self.reduction_var_map and is_gcc():
+        elif not self.reduction_var_map and codecache.is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
