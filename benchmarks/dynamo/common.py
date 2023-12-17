@@ -195,6 +195,8 @@ BENCHMARK_USE_SGD = {
     "sebotnet33ts_256",
     "swsl_resnext101_32x16d",
     "tf_efficientnet_b0",
+    "ghostnet_100",
+    "gmixer_24_224",
 }
 
 # These models OOM in CI
