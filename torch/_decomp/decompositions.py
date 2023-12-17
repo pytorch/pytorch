@@ -301,8 +301,8 @@ def _prelu_kernel_backward(
 def rrelu_with_noise(
     self: Tensor,
     noise: Tensor,
-    lower: float,
-    upper: float,
+    lower: float = 1.0 / 8,
+    upper: float = 1.0 / 3,
     training: bool = False,
     generator: Optional[torch.Generator] = None,
 ) -> Tensor:
