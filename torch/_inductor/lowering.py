@@ -161,7 +161,7 @@ def is_boolean_type(x):
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
     def construct_input(inp):
-        if isinstance(inp, (Number, sympy.Symbol)):
+        if isinstance(inp, (Number, sympy.Expr)):
             return inp
         else:
             assert hasattr(inp, "get_dtype")
@@ -198,7 +198,9 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
         else:
             # FIXME that's a crude approximation for promoting args
             promoting_args = [
-                a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
+                a
+                for a in args
+                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "get_dtype")
             ]
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
@@ -341,12 +343,19 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
-def promote_constants(inputs, override_return_dtype=None):
+def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=None):
+    assert (
+        override_return_dtype is None or type_promotion_kind is None
+    ), "only one of override_return_dtype or type_promotion_kind may be given"
+
+    if override_return_dtype is None and type_promotion_kind is None:
+        type_promotion_kind = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+
     if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
         return inputs
     if all(isinstance(x, (int, float, sympy.Symbol)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
-            *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            *inputs, type_promotion_kind=type_promotion_kind
         )
 
         def const_func(x):
@@ -524,7 +533,8 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
 
 
 def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
-    if x.get_dtype() == dtype:
+    x_dtype = x.get_dtype()
+    if x_dtype == dtype:
         return clone(x) if copy else x
 
     def _get_primitive_bitwidth(dtype):
@@ -533,15 +543,20 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
         else:
             return torch.iinfo(dtype).bits
 
-    src_bits = _get_primitive_bitwidth(x.get_dtype())
+    src_bits = _get_primitive_bitwidth(x_dtype)
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
         raise NotImplementedError(
-            f"bitcast {x.get_dtype()} to different bitwidth type {dtype} is not supported yet."
+            f"bitcast {x_dtype} to different bitwidth type {dtype} is not supported yet."
         )
 
     def _to_dtype_bitcast(x):
-        return ops.to_dtype_bitcast(x, dtype)
+        # Because we may promote tensor type from float16 or bfloat16
+        # to float, we will need to pass the original src dtype (i.e. x_dtype),
+        # which is used for correctly constructing type conversion before bitcast,
+        # which requires the bitwidth of the input tensor type is the same as the
+        # target type.
+        return ops.to_dtype_bitcast(x, dtype, x_dtype)
 
     return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
 
@@ -2137,7 +2152,6 @@ make_fallback(aten.addbmm)
 make_fallback(aten.addmv, warn=False)
 make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten.avg_pool3d)
-make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
@@ -4827,11 +4841,16 @@ def div_prim(a, b):
     return make_pointwise(fn)(a, b)
 
 
-div = register_lowering(
+@register_lowering(
     [aten.true_divide, aten.div.Tensor],
     broadcast=True,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)(div_prim)
+)
+def div(a, b):
+    a, b = promote_constants(
+        (a, b), type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    )
+    return div_prim(a, b)
 
 
 @register_lowering([aten.fmod, prims.fmod], broadcast=True)
@@ -4886,7 +4905,7 @@ def cumsum(x, axis=None, dtype=None):
         dtype = torch.int64
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, scan_op="sum")
+    result = ir.Scan.create(**kwargs, combine_fn=ops.add, init=0)
     if result is None:
         return fallback_cumsum(x, dim=axis, dtype=dtype)
     return result
@@ -4900,7 +4919,7 @@ def cumprod(x, axis=None, dtype=None):
         dtype = torch.int64
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, scan_op="prod")
+    result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)
     if result is None:
         return fallback_cumprod(x, dim=axis, dtype=dtype)
     return result
