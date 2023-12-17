@@ -661,8 +661,18 @@ def _get_cuda_related_args(aot_mode: bool):
             # This is a special treatment for Meta internal cuda-12 where all libs
             # are in lib/cuda-12 and lib/cuda-12/stubs
 
-            # TODO_FB_CODE: process libcudart_static.a
-
+            # TODO: Verify process libcudart_static.a
+            for i, path in enumerate(libraries_dirs):
+                if path.startswith(os.environ["CUDA_HOME"]) and not os.path.exists(
+                    f"{path}/libcudart_static.a"
+                ):
+                    for root, dirs, files in os.walk(path):
+                        if "libcudart_static.a" in files:
+                            libraries_dirs[i] = os.path.join(path, root)
+                            libraries_dirs.append(
+                                os.path.join(libraries_dirs[i], "stubs")
+                            )
+                            break
         else:
             if not _IS_WINDOWS:
                 # TODO: make static link better on Linux.
