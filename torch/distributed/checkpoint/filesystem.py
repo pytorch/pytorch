@@ -1,53 +1,38 @@
-from abc import ABC, abstractmethod
-import queue
-import threading
 import collections
-
-from dataclasses import dataclass
-import os
 import dataclasses
 import io
+import os
 import pickle
-from typing import Optional, List, Union, Dict, cast
+import queue
+import threading
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from pathlib import Path
+from typing import cast, Dict, List, Optional, Union
 
 import torch
+import torch.distributed as dist
 from torch import Tensor
+from torch._utils import _get_device_module
+from torch.distributed._shard._utils import narrow_tensor_by_index
+from torch.distributed.checkpoint.checkpointer import Checkpointer
 from torch.futures import Future
-from pathlib import Path
 
-from .metadata import (
-    Metadata,
-    MetadataIndex,
-)
-from .storage import (
-    StorageReader,
-    StorageWriter,
-    WriteResult,
-)
-
+from .metadata import Metadata, MetadataIndex
 from .planner import (
     LoadItemType,
-    LoadPlanner,
     LoadPlan,
+    LoadPlanner,
+    ReadItem,
     SavePlan,
     SavePlanner,
-    ReadItem,
     WriteItem,
     WriteItemType,
 )
-
+from .storage import StorageReader, StorageWriter, WriteResult
 from .utils import _create_file_view
 
-import torch.distributed as dist
-from torch.distributed.checkpoint.checkpointer import Checkpointer
-from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch._utils import _get_device_module
-
-__all__ = [
-    "FileSystemWriter",
-    "FileSystemReader",
-    "FileSystemCheckpointer"
-]
+__all__ = ["FileSystemWriter", "FileSystemReader", "FileSystemCheckpointer"]
 
 
 @dataclass
@@ -150,10 +135,7 @@ class _OverlappingCpuLoader(_TensorLoader):
 
     def _refill(self):
         with self.device_module.stream(self.stream):
-            while (
-                not self._done
-                and self.in_flight_data < self.inflight_threshhold
-            ):
+            while not self._done and self.in_flight_data < self.inflight_threshhold:
                 _, obj = self.items[self.idx]
                 self.idx += 1
                 tensor = self.resolve_fun(obj).detach()
@@ -211,9 +193,7 @@ def _item_size(item: WriteItem) -> int:
     return size * torch._utils._element_size(dtype)
 
 
-def _split_by_size_and_type(
-    bins, items: List[WriteItem]
-) -> List[List[WriteItem]]:
+def _split_by_size_and_type(bins, items: List[WriteItem]) -> List[List[WriteItem]]:
     if bins == 1:
         return [items]
 
@@ -276,16 +256,12 @@ def _write_files_from_queue(
                     planner.resolve_data,
                 )
 
-            tensor_w = [
-                wi for wi in write_items if wi.type != WriteItemType.BYTE_IO
-            ]
+            tensor_w = [wi for wi in write_items if wi.type != WriteItemType.BYTE_IO]
             for write_item in tensor_w:
                 loader.add(_item_size(write_item), write_item)
             loader.start_loading()
 
-            bytes_w = [
-                wi for wi in write_items if wi.type == WriteItemType.BYTE_IO
-            ]
+            bytes_w = [wi for wi in write_items if wi.type == WriteItemType.BYTE_IO]
             write_results = []
 
             with file_name.open("wb") as stream:
@@ -358,9 +334,7 @@ class FileSystemWriter(StorageWriter):
         self.path.mkdir(parents=True, exist_ok=True)
         return plan
 
-    def prepare_global_plan(
-        self, global_plan: List[SavePlan]
-    ) -> List[SavePlan]:
+    def prepare_global_plan(self, global_plan: List[SavePlan]) -> List[SavePlan]:
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
             for i, plan in enumerate(global_plan)
@@ -383,9 +357,7 @@ class FileSystemWriter(StorageWriter):
 
         file_queue: queue.Queue = queue.Queue()
         if self.single_file_per_rank:
-            for bucket in _split_by_size_and_type(
-                self.thread_count, plan.items
-            ):
+            for bucket in _split_by_size_and_type(self.thread_count, plan.items):
                 file_name = gen_file()
                 file_queue.put((self.path / file_name, file_name, bucket))
         else:
@@ -432,9 +404,7 @@ class FileSystemWriter(StorageWriter):
             fut.set_result(res)
             return fut
 
-    def finish(
-        self, metadata: Metadata, results: List[List[WriteResult]]
-    ) -> None:
+    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
         storage_md = dict()
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
@@ -507,10 +477,9 @@ class FileSystemReader(StorageReader):
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         return plan
 
-    def prepare_global_plan(
-        self, global_plan: List[LoadPlan]
-    ) -> List[LoadPlan]:
+    def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan
+
 
 class FileSystemCheckpointer(Checkpointer):
     """An implementation of :py:class:`torch.distributed.checkpoint.checkpointer.Checkpointer`
@@ -547,11 +516,7 @@ class FileSystemCheckpointer(Checkpointer):
         """
 
         storage_writer = FileSystemWriter(
-            path,
-            single_file_per_rank,
-            sync_files,
-            thread_count,
-            per_thread_copy_ahead
+            path, single_file_per_rank, sync_files, thread_count, per_thread_copy_ahead
         )
         storage_reader = FileSystemReader(path)
 
@@ -562,5 +527,5 @@ class FileSystemCheckpointer(Checkpointer):
             coordinator_rank=coordinator_rank,
             no_dist=no_dist,
             load_planner=load_planner,
-            save_planner=save_planner
+            save_planner=save_planner,
         )

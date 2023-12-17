@@ -13,7 +13,6 @@ from torch.export.exported_program import (
     SymIntArgument,
     TensorArgument,
 )
-from torch.fx import GraphModule
 from .utils import _check_input_constraints_pre_hook
 
 
@@ -45,14 +44,78 @@ def _assign_attr(
         to_module.register_buffer(field, from_obj)
 
 
-class _UnflattenedModule(torch.fx.GraphModule):
+class InterpreterModule(torch.nn.Module):
+    """A module that uses torch.fx.Interpreter to execute instead of the usual
+    codegen that GraphModule uses. This provides better stack trace information
+    and makes it easier to debug execution.
+    """
+
+    def __init__(
+        self,
+        graph: torch.fx.Graph,
+        module_call_signature: Optional[ModuleCallSignature],
+    ):
+        super().__init__()
+        self.graph = graph
+        self.graph.owning_module = self
+        self.module_call_signature = module_call_signature
+
+    def forward(self, *args, **kwargs):
+        assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
+        if torch._dynamo.is_compiling():
+            # Dynamo cannot trace through torch.fx.Interpreter, so fall back to
+            # GraphModule codegen in this instance.
+            return self.graph_module(*args, **kwargs)
+        else:
+            if kwargs:
+                # Handle **kwargs. FX only natively supports positional
+                # arguments (through placeholders). So in order to pass in
+                # kwargs, we must correspond the names of the placeholders with
+                # the keys in the kwarg dict.
+                arg_list = list(args)
+                kwarg_names = self.arg_names[len(arg_list) :]
+                for kwarg_name in kwarg_names:
+                    if kwarg_name in kwargs:
+                        arg_list.append(kwargs[kwarg_name])
+
+                # Assert that the kwargs passed in exactly match the positional
+                # arguments specified by the GraphModule. This should be
+                # guaranteed by the unflattening process.
+                assert len(kwarg_names) == len(kwargs)
+                assert len(arg_list) == len(self.arg_names)
+                args = tuple(arg_list)
+
+            return torch.fx.Interpreter(self, graph=self.graph).run(
+                *args, enable_io_processing=False
+            )
+
+    def finalize(self):
+        # We need to "finalize" because GraphModule populates its own state_dict
+        # based on the get_attrs observed in the graph. So we need to fully
+        # construct the graph and call _sink_params before generating this
+        # GraphModule.
+
+        # need to set `graph_module` directly on the dict to avoid it getting
+        # registered as a submodule.
+        self.__dict__["graph_module"] = torch.fx.GraphModule(self, self.graph)
+        self.graph.lint()
+
+        # Cache arg names for kwarg handling (see forward())
+        self.arg_names = []
+        for node in self.graph.nodes:
+            if node.op == "placeholder":
+                self.arg_names.append(node.target)
+
+
+class _UnflattenedModule(torch.nn.Module):
     def __init__(self, export_module: ExportedProgram):
+        super().__init__()
         if export_module.graph_signature.backward_signature is not None:
             raise ValueError("Unflattening on JointExportModule NYI")
-        super().__init__({}, torch.fx.Graph(), "_UnflattenedModule")
 
         export_graph = deepcopy(export_module.graph)
         self.graph_signature = deepcopy(export_module.graph_signature)
+        self.graph = torch.fx.Graph()
         self.module_call_graph = deepcopy(export_module.module_call_graph)
         _inplace_buffer_mutations(export_graph, self.graph_signature)
         _outline_submodules(export_graph, self)
@@ -93,7 +156,7 @@ class _UnflattenedModule(torch.fx.GraphModule):
                     continue
                 assert node.name not in inputs_to_state
 
-    def __call__(self, *args, **kwargs):
+    def forward(self, *args, **kwargs):
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
         assert self.module_call_graph[0].fqn == ""
         signature = self.module_call_graph[0].signature
@@ -106,7 +169,9 @@ class _UnflattenedModule(torch.fx.GraphModule):
             )
 
         # TODO(zhxchen17) Use lineno map to dump the original stacktrace during error handling.
-        tree_out = super().__call__(*flat_args)
+        tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
+            *flat_args, enable_io_processing=False
+        )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
 
 
@@ -194,7 +259,7 @@ def compute_accessor(parent_fqn: str, child_fqn: str) -> str:
     return ".".join(child_split[len(parent_split) :])
 
 
-def _verify_graph_equivalence(x: torch.fx.GraphModule, y: torch.fx.GraphModule):
+def _verify_graph_equivalence(x: torch.nn.Module, y: torch.nn.Module):
     def graph_dump(graph: torch.fx.Graph) -> str:
         ret = []
         nodes_idx: Dict[int, int] = {}
@@ -218,7 +283,7 @@ def _verify_graph_equivalence(x: torch.fx.GraphModule, y: torch.fx.GraphModule):
     assert graph_dump(x.graph) == graph_dump(y.graph)
 
 
-def _add_spec(gm: torch.fx.GraphModule, spec) -> str:
+def _add_spec(gm: torch.nn.Module, spec) -> str:
     i = 0
     while hasattr(gm, f"_spec_{i}"):
         i += 1
@@ -227,13 +292,13 @@ def _add_spec(gm: torch.fx.GraphModule, spec) -> str:
     return name
 
 
-def _generate_flatten(gm: torch.fx.GraphModule, node, spec) -> torch.fx.Node:
+def _generate_flatten(gm: torch.nn.Module, node, spec) -> torch.fx.Node:
     name = _add_spec(gm, spec)
     spec_node = gm.graph.get_attr(name)
     return gm.graph.call_function(fx_pytree.tree_flatten_spec, (node, spec_node))
 
 
-def _generate_unflatten(gm: torch.fx.GraphModule, nodes, spec) -> torch.fx.Node:
+def _generate_unflatten(gm: torch.nn.Module, nodes, spec) -> torch.fx.Node:
     name = _add_spec(gm, spec)
     spec_node = gm.graph.get_attr(name)
     return gm.graph.call_function(pytree.tree_unflatten, (nodes, spec_node))
@@ -243,15 +308,17 @@ class ModuleFrame:
     def __init__(
         self,
         flat_graph,
+        nodes,
         seen_nodes,
         seen_modules,
         parent,
         module_stack,
         module_id,
         module_call_graph: Dict[str, ModuleCallSignature],
-        graph_module=None,
+        module: Optional[torch.nn.Module] = None,
     ):
         self.flat_graph = flat_graph
+        self.nodes = nodes
         self.seen_nodes = seen_nodes
         self.seen_modules = seen_modules
         self.parent = parent
@@ -262,32 +329,19 @@ class ModuleFrame:
         self.verbose = False
 
         self.fqn = self.module_stack[-1]
-        if graph_module is not None:
-            self.graph_module = graph_module
+        if module is not None:
+            self.module = module
         else:
-            # InterpreterModule doesn't work with torch.compile:
-            # 1. in-place compile: nn.Module compile the forward function, and if we overwrite __call__,
-            # in-place compile will not be effective
-            # 2. out-of-place compile: there are a lot of graph guard failures on "self" in the
-            # InterpreterModule
-            # self.graph_module = InterpreterModule(
-            self.graph_module = torch.fx.GraphModule(
-                {},
-                torch.fx.Graph(),
-                self.fqn,
+            self.module = InterpreterModule(
+                torch.fx.Graph(), module_call_graph.get(self.fqn)
             )
-            self.graph_module.meta["module_call_signature"] = module_call_graph.get(
-                self.fqn
-            )
-
         if self.module_id in self.seen_modules:
             self.cached_graph_module = self.seen_modules[self.module_id]
         else:
             self.cached_graph_module = None
-            self.seen_modules[self.module_id] = self.graph_module
+            self.seen_modules[self.module_id] = self.module
 
-        self.nodes = list(self.flat_graph.nodes)
-        self.graph = self.graph_module.graph
+        self.graph = self.module.graph
 
         # Mapping of nodes in the flat graph to nodes in this graph.
         self.node_map: Dict[torch.fx.Node, torch.fx.Node] = {}
@@ -296,9 +350,9 @@ class ModuleFrame:
         self.parent_call_module: Optional[torch.fx.Node] = None
         if parent is not None:
             accessor = compute_accessor(parent.fqn, self.fqn)
-            parent.graph_module.add_submodule(
+            parent.module.add_module(
                 accessor,
-                self.graph_module
+                self.module
                 if self.cached_graph_module is None
                 else self.cached_graph_module,
             )
@@ -312,22 +366,20 @@ class ModuleFrame:
             assert args_spec.context is None
             assert kwargs_spec.context is not None
 
-            with self.graph_module.graph.inserting_after(None):
+            with self.graph.inserting_after(None):
                 arg_nodes = []
                 for idx in range(len(args_spec.children_specs)):
-                    arg_nodes.append(
-                        self.graph_module.graph.placeholder(f"_positional_arg_{idx}")
-                    )
+                    arg_nodes.append(self.graph.placeholder(f"_positional_arg_{idx}"))
                 kwarg_nodes = {}
                 for name in kwargs_spec.context:
-                    kwarg_nodes[name] = self.graph_module.graph.placeholder(name)
+                    kwarg_nodes[name] = self.graph.placeholder(name)
                 flat_args = _generate_flatten(
-                    self.graph_module,
+                    self.module,
                     (tuple(arg_nodes), kwarg_nodes),
                     signature.in_spec,
                 )
                 for idx, arg in enumerate(signature.inputs):
-                    flat_arg_node = self.graph_module.graph.create_node(
+                    flat_arg_node = self.graph.create_node(
                         op="call_function",
                         target=operator.getitem,
                         args=(flat_args, idx),
@@ -341,19 +393,19 @@ class ModuleFrame:
                     self.node_to_placeholder[self.seen_nodes[arg.name]] = flat_arg_node
 
             with self.parent.graph.inserting_before(self.parent_call_module):
-                nodes: List[Optional[torch.fx.Node]] = []
+                input_nodes: List[Optional[torch.fx.Node]] = []
                 for input in signature.inputs:
                     if isinstance(input, ConstantArgument) and input.value is None:
-                        nodes.append(None)
+                        input_nodes.append(None)
                     else:
                         assert isinstance(input, (TensorArgument, SymIntArgument))
-                        nodes.append(
+                        input_nodes.append(
                             self.parent.remap_input(self.seen_nodes[input.name])
                         )
 
                 inputs_node = _generate_unflatten(
-                    self.parent.graph_module,
-                    nodes,
+                    self.parent.module,
+                    input_nodes,
                     signature.in_spec,
                 )
 
@@ -413,7 +465,7 @@ class ModuleFrame:
                     )
 
             tree_out_node = _generate_unflatten(
-                self.graph_module,
+                self.module,
                 tuple(
                     self.node_map[self.seen_nodes[output.name]]
                     for output in orig_outputs
@@ -421,7 +473,7 @@ class ModuleFrame:
                 signature.out_spec,
             )
             parent_out: Optional[torch.fx.Node] = _generate_flatten(
-                self.parent.graph_module, self.parent_call_module, signature.out_spec
+                self.parent.module, self.parent_call_module, signature.out_spec
             )
             graph_outputs: Union[torch.fx.Node, List[torch.fx.Node]] = tree_out_node
         else:
@@ -443,10 +495,6 @@ class ModuleFrame:
 
         self.graph.output(graph_outputs)
 
-        # lint to ensure correctness
-        self.graph.lint()
-        self.graph_module.recompile()
-
         # Rewrite outputs in parent module
         if parent_out is None:
             return
@@ -460,7 +508,7 @@ class ModuleFrame:
                 self.parent.node_map[orig_output] = proxy_out
 
         if self.cached_graph_module is not None:
-            _verify_graph_equivalence(self.cached_graph_module, self.graph_module)
+            _verify_graph_equivalence(self.cached_graph_module, self.module)
 
     def copy_node(self, node):
         self.print("copying", node.format_node())
@@ -540,6 +588,7 @@ class ModuleFrame:
                 # counter. Once it is complete, continue from that point.
                 node_idx = ModuleFrame(
                     self.flat_graph,
+                    self.nodes,
                     self.seen_nodes,
                     self.seen_modules,
                     self,
@@ -557,11 +606,12 @@ class ModuleFrame:
             node_idx += 1
 
 
-def _outline_submodules(orig_graph: torch.fx.Graph, root_module: torch.fx.GraphModule):
+def _outline_submodules(orig_graph: torch.fx.Graph, root_module: _UnflattenedModule):
     seen_nodes: Dict[str, torch.fx.Node] = {}
     seen_modules: Dict[int, torch.nn.Module] = {}
     ModuleFrame(
         orig_graph,
+        tuple(orig_graph.nodes),
         seen_nodes,
         seen_modules,
         None,
@@ -572,12 +622,12 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: torch.fx.GraphM
             for entry in root_module.module_call_graph
             if entry.signature
         },
-        graph_module=root_module,
+        module=root_module,
     ).run_outer()
 
 
 def _sink_params(
-    module: GraphModule,
+    module: torch.nn.Module,
     inputs_to_state: Dict[str, str],
     scope: List[str],
 ):
@@ -594,10 +644,13 @@ def _sink_params(
     scope: tracks where we are in the module hierarchy, so that we can emit the
         right `getattr(self, "foo.bar")` calls, etc.
     """
+    # We need to use _modules here instead of named_children(), because we
+    # explicitly want duplicate modules to show up in the traversal.
     for name, submodule in module._modules.items():
-        _sink_params(cast(GraphModule, submodule), inputs_to_state, scope + [name])
+        _sink_params(cast(torch.nn.Module, submodule), inputs_to_state, scope + [name])
 
-    if not isinstance(module, GraphModule):
+    if not hasattr(module, "graph"):
+        # Not all modules have graphs defined, if they are empty modules with no operations (like ParameterList)
         return
 
     graph = module.graph
@@ -632,7 +685,8 @@ def _sink_params(
 
             node.replace_all_uses_with(new_node, propagate_meta=True)
         graph.erase_node(node)
-    module.recompile()
+    if isinstance(module, InterpreterModule):
+        module.finalize()
 
 
 def _recursive_getattr(obj, attr_path):
