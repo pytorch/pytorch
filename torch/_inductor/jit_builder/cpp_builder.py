@@ -1,9 +1,11 @@
 import errno
 import functools
+import logging
 import os
 import platform
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import sysconfig
@@ -13,7 +15,8 @@ from typing import List, Tuple
 
 import torch
 from torch._inductor import config, exc
-from torch._inductor.codecache import VecISA
+from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT, VecISA
+from torch._inductor.utils import cache_dir
 
 if config.is_fbcode():
     from triton.fb import build_paths  # noqa: F401
@@ -48,14 +51,92 @@ _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
 
+log = logging.getLogger(__name__)
+
+
+@functools.lru_cache(1)
+def cpp_compiler_search(search: str) -> str:
+    for cxx in search:
+        try:
+            if cxx is None:
+                # gxx package is only available for Linux
+                # according to https://anaconda.org/conda-forge/gxx/
+                if sys.platform != "linux":
+                    continue
+                # Do not install GXX by default
+                if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
+                    continue
+                from filelock import FileLock
+
+                lock_dir = get_lock_dir()
+                lock = FileLock(
+                    os.path.join(lock_dir, "g++.lock"), timeout=LOCK_TIMEOUT
+                )
+                with lock:
+                    cxx = install_gcc_via_conda()
+            subprocess.check_output([cxx, "--version"])
+            return cxx
+        except (subprocess.SubprocessError, FileNotFoundError, ImportError):
+            continue
+    raise exc.InvalidCxxCompiler()
+
+
+def install_gcc_via_conda() -> str:
+    """On older systems, this is a quick way to get a modern compiler"""
+    prefix = os.path.join(cache_dir(), "gcc")
+    cxx_path = os.path.join(prefix, "bin", "g++")
+    if not os.path.exists(cxx_path):
+        log.info("Downloading GCC via conda")
+        conda = os.environ.get("CONDA_EXE", "conda")
+        if conda is None:
+            conda = shutil.which("conda")
+        if conda is not None:
+            subprocess.check_call(
+                [
+                    conda,
+                    "create",
+                    f"--prefix={prefix}",
+                    "--channel=conda-forge",
+                    "--quiet",
+                    "-y",
+                    "python=3.8",
+                    "gxx",
+                ],
+                stdout=subprocess.PIPE,
+            )
+    return cxx_path
+
+
 def _get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
     else:
-        from torch._inductor.codecache import cpp_compiler
-
-        compiler = cpp_compiler()
+        if config.is_fbcode():
+            compiler = build_paths.cc()
+        if isinstance(config.cpp.cxx, (list, tuple)):
+            search = tuple(config.cpp.cxx)
+        else:
+            search = (config.cpp.cxx,)
+        compiler = cpp_compiler_search(search)
     return compiler
+
+
+def _is_gcc(cpp_compiler) -> bool:
+    return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
+
+
+def is_gcc() -> bool:
+    return _is_gcc(_get_cpp_compiler())
+
+
+def is_clang(cpp_compiler) -> bool:
+    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
+
+
+@functools.lru_cache(None)
+def is_apple_clang(cpp_compiler) -> bool:
+    version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
+    return "Apple" in version_string.splitlines()[0]
 
 
 def _append_list(dest_list: List[str], src_list: List[str]):
@@ -114,24 +195,6 @@ def run_command_line(cmd_line, cwd=None):
             output += instruction
         raise exc.CppCompileError(cmd, output) from e
     return status
-
-
-def _is_gcc(cpp_compiler) -> bool:
-    return bool(re.search(r"(gcc|g\+\+)", cpp_compiler))
-
-
-def is_gcc() -> bool:
-    return _is_gcc(_get_cpp_compiler())
-
-
-def is_clang(cpp_compiler) -> bool:
-    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
-
-
-@functools.lru_cache(None)
-def is_apple_clang(cpp_compiler) -> bool:
-    version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
-    return "Apple" in version_string.splitlines()[0]
 
 
 class BuildOptionsBase:
