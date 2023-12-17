@@ -28,6 +28,7 @@ from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
     IteratorVariable,
+    ItertoolsVariable,
     RepeatIteratorVariable,
 )
 from .lazy import LazyVariableTracker
@@ -39,6 +40,7 @@ from .lists import (
     RangeVariable,
     RestrictedListSubclassVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .misc import (
@@ -95,6 +97,7 @@ __all__ = [
     "GradModeVariable",
     "InspectSignatureVariable",
     "IteratorVariable",
+    "ItertoolsVariable",
     "LambdaVariable",
     "LazyVariableTracker",
     "ListIteratorVariable",
