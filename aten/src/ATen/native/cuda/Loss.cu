@@ -44,8 +44,12 @@ void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& 
         scalar_t input_val,
         scalar_t target_val
       ) -> scalar_t {
+        const scalar_t zero = 0;
         const scalar_t one = 1;
         const scalar_t epsilon = EPSILON;
+
+        CUDA_KERNEL_ASSERT(input_val >= zero && input_val <= one);
+        CUDA_KERNEL_ASSERT(target_val >= zero && target_val <= one);
 
         scalar_t grad_input_denominator = max(
           (one - input_val) * input_val,

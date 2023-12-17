@@ -361,14 +361,35 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
 
     Tensor loss;
     auto max_val = (-input).clamp_min_(0);
-    if (pos_weight.defined()) {
-        // pos_weight need to be broadcasted, thus mul(target) is not inplace.
-        auto log_weight = (pos_weight - 1).mul(target).add_(1);
-        loss = (1 - target).mul_(input).add_(log_weight.mul_(((-max_val).exp_().add_((-input - max_val).exp_())).log_().add_(max_val)));
-    } else {
-        loss = (1 - target).mul_(input).add_(max_val).add_((-max_val).exp_().add_((-input -max_val).exp_()).log_());
-    }
+    auto iter = TensorIteratorConfig()
+      .add_output(loss)
+      .add_owned_input(input)
+      .add_owned_input(target)
+      .add_owned_input(max_val)
+      .build();
 
+    AT_DISPATCH_FLOATING_TYPES(loss.scalar_type(), "binary_cross_entropy_with_logits", [&] {
+        at::native::cpu_kernel(
+            iter,
+            [] (scalar_t input_val, scalar_t target_val, scalar_t max_val) {
+                TORCH_CHECK(
+                    (input_val >= 0) && (input_val <= 1),
+                    "all elements of input should be between 0 and 1"
+                );
+                TORCH_CHECK(
+                    (target_val >= 0) && (target_val <= 1),
+                    "all elements of target should be between 0 and 1"
+                );
+
+                if (pos_weight.defined()) {
+                  // pos_weight need to be broadcasted, thus mul(target) is not inplace.
+                  auto log_weight = (scalar_t(pos_weight) - scalar_t(1)) * (target_val) + (scalar_t(1));
+                  return (scalar_t(1) - target_val) * (input_val) + (log_weight * ((std::exp(-max_val) + std::log(std::exp(-input_val - max_val))) + (max_val)));
+                }
+                return (scalar_t(1) - target_val) * (input_val) + (max_val) + (std::exp(-max_val) + std::log(std::exp(-input_val - max_val)));
+            }
+        );
+    });
     if (weight.defined()) {
         loss.mul_(weight);
     }
