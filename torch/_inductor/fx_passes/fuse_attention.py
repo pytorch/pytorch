@@ -557,6 +557,12 @@ def _sfdp_init():
 
     for key, register_replacement_kwargs in _get_sfdp_patterns():
         search_fn_pattern = get_serialized_pattern(key)
+        is_inference = "inference" in key
         register_replacement(
-            **register_replacement_kwargs, search_fn_pattern=search_fn_pattern
+            **register_replacement_kwargs,
+            search_fn_pattern=search_fn_pattern,
+            # one graph without dropout and another graph with dropout
+            # their inference graph will be the same because dropout is nop in inference
+            # e.g. `_sfdp_pattern_1_inference` and `_sfdp_pattern_3_inference`
+            allow_duplicate=is_inference,
         )
