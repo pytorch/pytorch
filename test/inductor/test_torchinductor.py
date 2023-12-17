@@ -1627,8 +1627,7 @@ class CommonTemplate:
                 a // b,
             )
 
-        # FIXME: returns the wrong dtype
-        self.common(fn, (1024, 100), exact_dtype=False)
+        self.common(fn, (1024, 100))
 
     def test_div9(self):
         def fn(x):
