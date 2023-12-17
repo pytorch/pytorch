@@ -1124,9 +1124,8 @@ class CommonTemplate:
         def fn(a):
             return torch.var(a)
 
-        run_test = functools.partial(self.common, atol=atol, rtol=rtol)
-        run_test(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
-        run_test(fn, (torch.rand((14923), dtype=torch.float16),))
+        self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
+        self.common(fn, (torch.rand((14923), dtype=torch.float16),))
 
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
