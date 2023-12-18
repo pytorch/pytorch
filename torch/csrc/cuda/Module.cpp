@@ -892,6 +892,11 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
+#if !USE_ROCM
+      // NVIDA only property
+      .def_readonly(
+          "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
+#endif // USE_ROCM
       // HIP-only property; reuse name attribute for CUDA builds
       .def_readonly(
           "gcnArchName",
@@ -1270,8 +1275,6 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   if (!m)
     throw python_error();
 
-  bool has_half = true;
-
   auto set_module_attr = [&](const char* name, PyObject* v) {
     // PyObject_SetAttrString doesn't steal reference. So no need to incref.
     if (PyObject_SetAttrString(m, name, v) < 0) {
@@ -1280,7 +1283,6 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   };
 
   set_module_attr("has_magma", at::hasMAGMA() ? Py_True : Py_False);
-  set_module_attr("has_half", has_half ? Py_True : Py_False);
 
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));

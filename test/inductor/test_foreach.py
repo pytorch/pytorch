@@ -139,9 +139,9 @@ class ForeachTests(TestCase):
             ),
         )
 
-    # called in test_cpp_wrapper.py
+    # called in test_cuda_cpp_wrapper.py
     @requires_cuda()
-    def test_foreach_cpp_wrapper(self):
+    def test_foreach_cpp_wrapper_cuda(self):
         self._test_single_list(op=torch._foreach_add)
 
     @requires_cuda()

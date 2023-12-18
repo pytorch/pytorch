@@ -25,6 +25,7 @@ from ..utils import (
     build_checkpoint_variable,
     check_constant_args,
     get_custom_getattr,
+    has_torch_function,
     is_namedtuple_cls,
     is_utils_checkpoint,
     istype,
@@ -181,6 +182,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif variables.DataClassVariable.is_matching_cls(self.value):
             options = {"mutable_local": MutableLocal()}
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
+        elif (
+            variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
+            and self.source
+        ):
+            return variables.RestrictedListSubclassVariable(
+                variables.BuiltinVariable(list).call_function(tx, args, kwargs).items,
+                user_cls=self.value,
+                user_cls_source=self.source,
+                mutable_local=MutableLocal(),
+            )
 
         return super().call_function(tx, args, kwargs)
 
@@ -216,6 +227,32 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def python_type(self):
         return self.value_type
+
+    def torch_function_check(self):
+        assert has_torch_function(
+            self
+        ), f"calling torch function on object without __torch_function__ {self}"
+
+    def get_torch_fn(self, tx):
+        self.torch_function_check()
+        from .torch_function import build_torch_function_fn
+
+        return build_torch_function_fn(tx, self.value, self.source)
+
+    def call_torch_function(self, tx, fn, types, args, kwargs):
+        self.torch_function_check()
+
+        from .torch_function import _get_subclass_type_var, call_torch_function
+
+        return call_torch_function(
+            tx,
+            _get_subclass_type_var(tx, self),
+            self.get_torch_fn(tx),
+            fn,
+            types,
+            args,
+            kwargs,
+        )
 
     @staticmethod
     @functools.lru_cache(None)
@@ -501,7 +538,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if dynamic_subobj.__self__ is not self.value:
                     unimplemented("__self__ mismatch for bound method")
                 func = subobj.__func__
-                source = AttrSource(source, "__func__") if source else None
             else:
                 assert isinstance(subobj, types.FunctionType)
                 func = subobj
