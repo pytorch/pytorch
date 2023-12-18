@@ -602,14 +602,14 @@ Tensor empty_sparse_compressed(
   // Therefore, avoid using empty to create sparse compressed
   // tensors. Instead, use compressed sparse constructors directly or
   // other factory functions such as torch.zeros, etc.
-  return at::native::_sparse_compressed_tensor_unsafe(compressed_indices,
-                                                      plain_indices,
-                                                      values,
-                                                      size,
-                                                      dtype,
-                                                      layout,
-                                                      device,
-                                                      pin_memory);
+  return at::_sparse_compressed_tensor_unsafe(compressed_indices,
+                                              plain_indices,
+                                              values,
+                                              size,
+                                              dtype,
+                                              layout,
+                                              device,
+                                              pin_memory);
 }
 
 const Tensor& resize_sparse_csr_(
