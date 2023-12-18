@@ -641,6 +641,8 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      -1,
+      -1,
       static_cast<int>(devices_.size())); // worldSize
   synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
@@ -806,6 +808,38 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
 
+  if (options_->global_ranks_in_group.empty()) {
+    this->globalRankStart = 0;
+  } else {
+    this->globalRankStart = options_->global_ranks_in_group[0];
+  }
+
+  if (options_->global_ranks_in_group.empty()) {
+    this->globalRankStride = 1;
+  } else if (options_->global_ranks_in_group.size() == 1) {
+    this->globalRankStride = 0;
+  } else {
+    bool ranksAreStrided = true;
+    int startRank = options_->global_ranks_in_group[0];
+    int stride =
+        options_->global_ranks_in_group[1] - options_->global_ranks_in_group[0];
+    for (std::vector<uint64_t>::size_type i = 0;
+         i < options_->global_ranks_in_group.size();
+         i++) {
+      if (options_->global_ranks_in_group[i] != startRank + i * stride) {
+        ranksAreStrided = false;
+        break;
+      }
+    }
+
+    if (ranksAreStrided) {
+      this->globalRankStride = options_->global_ranks_in_group[1] -
+          options_->global_ranks_in_group[0];
+    } else {
+      this->globalRankStride = -1;
+    }
+  }
+
   RECORD_PARAM_COMMS(
       0, // seq
       this->getID(),
@@ -816,6 +850,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       size_); // worldSize
 
   // Attach hooks to cache allocator to trigger the hooks whenever a traced
@@ -2774,6 +2810,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
@@ -2800,6 +2838,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
       // I'm not sure what in,outSplitSizes mean here.
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
@@ -2826,6 +2866,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
@@ -2889,6 +2931,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   return collective(
@@ -2931,6 +2975,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   int dev_in_group = 0;
@@ -2995,6 +3041,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_oop(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   int dev_in_group{0};
@@ -3053,6 +3101,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
         tensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
         std::vector<int64_t>(), // outSplitSize
+        globalRankStart, // globalRankStart
+        globalRankStride, // globalRankStride
         this->getSize()); // worldSize
 
     return collective(
@@ -3196,6 +3246,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
         tensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
         std::vector<int64_t>(), // outSplitSizes
+        globalRankStart, // globalRankStart
+        globalRankStride, // globalRankStride
         this->getSize()); // worldSize
 
     return collective(
@@ -3315,6 +3367,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
       tensor.scalar_type(), // dtype
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   auto inputs = std::vector<at::Tensor>{inputTensor};
@@ -3403,6 +3457,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   std::vector<at::Device> devices;
@@ -3484,6 +3540,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         inputTensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
         std::vector<int64_t>(), // outSplitSizes
+        globalRankStart, // globalRankStart
+        globalRankStride, // globalRankStride
         this->getSize()); // worldSize
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
@@ -3526,6 +3584,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         inputTensor.scalar_type(), // dType
         inputSplitSizes, // inSplitSizes
         outputSplitSizes, // outSplitSizes
+        globalRankStart, // globalRankStart
+        globalRankStride, // globalRankStride
         this->getSize()); // worldSize
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
@@ -3602,6 +3662,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       inputTensors.front().scalar_type(), // dType
       inSplitSizes, // inSplitSizes
       outSplitSizes, // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   std::vector<at::Tensor> inputTensor0 = {inputTensors[0]};
@@ -3653,6 +3715,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   auto ret = pointToPoint(
@@ -3691,6 +3755,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   auto ret = pointToPoint(
@@ -3851,6 +3917,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSize
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash inputTensors and
@@ -3938,6 +4006,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSize
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash outputTensors and
@@ -4009,6 +4079,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSize
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
       this->getSize()); // worldSize
 
   // just a wrapper to fit the collective interface
