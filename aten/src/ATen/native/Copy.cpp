@@ -130,8 +130,7 @@ bool is_supported_device(Device device) {
 
 } // namespace
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
@@ -351,5 +350,4 @@ void _propagate_xla_data(const Tensor& input, const Tensor& output) {
 
 DEFINE_DISPATCH(copy_stub);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
