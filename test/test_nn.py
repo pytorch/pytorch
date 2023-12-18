@@ -71,6 +71,7 @@ if TEST_NUMPY:
 # update test/run_test.py to list it, otherwise it will NOT be run in
 # CI.
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -2115,6 +2116,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
                          ' with instruction set support avx2 or newer.')
+    @skipIfTorchDynamo("how do i install fbgemm?")
     def test_fb_fc_packed(self):
         X = np.random.rand(16, 16).astype(np.float32) - 0.5
         W = np.random.rand(16, 16).astype(np.float32) - 0.5
@@ -7343,6 +7345,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaises(RuntimeError):
             res = arg_class(*arg_4)
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),), dtype=np.double),
@@ -7383,6 +7386,7 @@ class TestFusionEval(TestCase):
         self.assertEqual(Y_ref, Y_hat, msg="Conv+BN(non-affine) fusion results are off")
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestConstantPadNd(TestCase):
     def test_constant_pad_nd(self):
         a = torch.tensor([[1, 2], [3, 4]])
@@ -7404,6 +7408,7 @@ class TestConstantPadNd(TestCase):
         self.assertTrue(nhwc_padded.is_contiguous(memory_format=torch.channels_last))
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAddRelu(TestCase):
     def test_add_relu(self):
         a = torch.rand((7, 11))
@@ -7857,6 +7862,7 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 # end TestNN.test_affine_* helpers
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNNDeviceType(NNTestCase):
     def _test_InstanceNorm_general(self, cls, input, device, dtype=torch.float):
         # default case track_running_stats=False
@@ -12894,6 +12900,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(y, y_ref)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFunctionalPickle(TestCase):
 
     # issue gh-38137
@@ -12902,6 +12909,7 @@ class TestFunctionalPickle(TestCase):
         s = pickle.dumps(F.softsign)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFusionUtils(TestCase):
     def test_fuse_conv_bn_requires_grad(self):
         conv = torch.nn.Conv2d(3, 3, 3)
