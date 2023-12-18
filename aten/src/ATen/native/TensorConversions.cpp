@@ -62,8 +62,7 @@
 #include <algorithm>
 #include <numeric>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 // dense_to_sparse_{csr,bsr,csc,bsc} common helpers
@@ -2010,5 +2009,4 @@ std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
   }
   return outs;
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -161,7 +161,7 @@ def is_boolean_type(x):
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
     def construct_input(inp):
-        if isinstance(inp, (Number, sympy.Symbol)):
+        if isinstance(inp, (Number, sympy.Expr)):
             return inp
         else:
             assert hasattr(inp, "get_dtype")
@@ -198,7 +198,9 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
         else:
             # FIXME that's a crude approximation for promoting args
             promoting_args = [
-                a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
+                a
+                for a in args
+                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "get_dtype")
             ]
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
@@ -341,12 +343,19 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
-def promote_constants(inputs, override_return_dtype=None):
+def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=None):
+    assert (
+        override_return_dtype is None or type_promotion_kind is None
+    ), "only one of override_return_dtype or type_promotion_kind may be given"
+
+    if override_return_dtype is None and type_promotion_kind is None:
+        type_promotion_kind = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+
     if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
         return inputs
     if all(isinstance(x, (int, float, sympy.Symbol)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
-            *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            *inputs, type_promotion_kind=type_promotion_kind
         )
 
         def const_func(x):
@@ -4832,11 +4841,16 @@ def div_prim(a, b):
     return make_pointwise(fn)(a, b)
 
 
-div = register_lowering(
+@register_lowering(
     [aten.true_divide, aten.div.Tensor],
     broadcast=True,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)(div_prim)
+)
+def div(a, b):
+    a, b = promote_constants(
+        (a, b), type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    )
+    return div_prim(a, b)
 
 
 @register_lowering([aten.fmod, prims.fmod], broadcast=True)
