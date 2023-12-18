@@ -213,16 +213,16 @@ def speculate_subgraph(
     source_target=None,
     always_restore=False,
     enable_grad=None,
-    # NOTE [Temporary argument `set_subgraph_inputs`]
-    # If set_subgraph_inputs="manual", we manually add the `sub_args` to `subgraph`,
-    # If "automatic", we rely on tracer's lifting mechanism to lift these args.
-    # If "flatten_manual", we first flatten the sub_args into a flattend list, then manually
-    # set the flattend inputs to the subgraph. This saves us from having to mapping the automatically
-    # lifted inputs back to their original position, where ordering of input matters e.g. map.
-    # NOTE: Default `True` is temporary and plan is
-    #       to always lift args in future and remove this
-    #       argument.
-    set_subgraph_inputs="manual",
+    # NOTE [argument `set_subgraph_inputs`]
+    # set_subgraph_inputs controls what how to construct subgraphs' placeholders from sub_args.
+    # 1. if your HOP supports arbitrary inputs, use set_subtraph_inputs="automatic" (most recommended).
+    # 2. if your HOP supports only Tensor and symnode inputs, use set_subgraph_inputs="flatten_manual" (recommended).
+    # If sub_args contain Pytree structure (e.g. dict/list/tuple/set), the sub_args will be flattened first.
+    # Then the flattend args are manually set as subgraph's placeholders.
+    # 3. if your HOP must preserve inputs that are not tensor or symnode as placeholders e.g. AutogradFunctionContextVariable
+    # use set_subgraph_inputs="manual" (not recommended). We do not recommend it in general because it has the
+    # restriction that user need to manually control how to create placeholders and VariableTrackers for the args.
+    set_subgraph_inputs="automatic",
     restore_side_effects=True,
     should_flatten_outputs=False,
     # Pass in an originating tracer - this is needed for preserving context
@@ -528,7 +528,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 {},
                 "cond",
                 source_target=self.value,
-                set_subgraph_inputs="automatic",
                 should_flatten_outputs=True,
             )
 
@@ -891,6 +890,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             # See NOTE [HACK: Enable autograd while tracing function]
             enable_grad=True,
+            set_subgraph_inputs="manual",
         )
 
         body_name = add_subgraph(
@@ -1095,6 +1095,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 {},
                 "torch.vmap",
                 source_target=self.value,
+                set_subgraph_inputs="manual",
             )
 
         body_name = add_subgraph(
@@ -1229,6 +1230,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             restore_side_effects=False,
             tracer=tracer,
             enable_grad=enable_grad,
+            set_subgraph_inputs="manual",
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
@@ -1283,7 +1285,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             kwargs,
             description,
             source_target=self.value,
-            set_subgraph_inputs="automatic",
             should_flatten_outputs=True,
         )
 
