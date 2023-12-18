@@ -8,7 +8,7 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 
 from torch.distributed._tensor._collective_utils import mesh_broadcast, mesh_scatter
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed.device_mesh import DeviceMesh
 
 
 class Placement:
