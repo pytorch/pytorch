@@ -320,8 +320,7 @@ class Round(sympy.Function):
         if number.is_integer:
             return number
         elif isinstance(number, sympy.Number):
-            value_type = int if isinstance(number, sympy.Integer) else float
-            return sympy.Integer(round(value_type(number)))
+            return sympy.Integer(round(float(number)))
 
     def __int__(self):
         # This will only ever be called when computing size hints. At that point, self.args[0] should be a number and
