@@ -10,7 +10,6 @@ import itertools
 import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 import types
-import operator
 
 
 FALLBACK_REGEX = r'There is a performance drop'
@@ -1082,15 +1081,15 @@ class TestVmapOperators(Namespace.TestVmapBase):
         cases = [
             # Basic arithmetic
             make_case(torch.add),
-            make_case(operator.add),
+            make_case(lambda x, y: x + y),
             make_case(torch.sub),
-            make_case(operator.sub),
+            make_case(lambda x, y: x - y),
             make_case(torch.mul),
-            make_case(operator.mul),
+            make_case(lambda x, y: x * y),
             make_case(torch.div, input_getter=TensorFactory.randp1),
-            make_case(operator.truediv, input_getter=TensorFactory.randp1),
+            make_case(lambda x, y: x / y, input_getter=TensorFactory.randp1),
             make_case(torch.pow, input_getter=TensorFactory.randp1),
-            make_case(operator.pow, input_getter=TensorFactory.randp1),
+            make_case(lambda x, y: x ** y, input_getter=TensorFactory.randp1),
         ]
         test = self._vmap_test
 
@@ -1377,12 +1376,12 @@ class TestVmapOperators(Namespace.TestVmapBase):
         B0, B1 = 7, 11
 
         ops = (
-            torch.eq, operator.eq,
-            torch.gt, operator.gt,
-            torch.ge, operator.ge,
-            torch.le, operator.le,
-            torch.lt, operator.lt,
-            torch.ne, operator.ne,
+            torch.eq, lambda x, y: x == y,
+            torch.gt, lambda x, y: x > y,
+            torch.ge, lambda x, y: x >= y,
+            torch.le, lambda x, y: x <= y,
+            torch.lt, lambda x, y: x < y,
+            torch.ne, lambda x, y: x != y,
         )
 
         for op in ops:
@@ -2288,19 +2287,19 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
     def test_add(self, device):
         self._test_arithmetic(torch.add, device, test_grad_grad=False)
-        self._test_arithmetic(operator.add, device, test_grad_grad=False)
+        self._test_arithmetic(lambda x, y: x + y, device, test_grad_grad=False)
 
     def test_sub(self, device):
         self._test_arithmetic(torch.sub, device, test_grad_grad=False)
-        self._test_arithmetic(operator.sub, device, test_grad_grad=False)
+        self._test_arithmetic(lambda x, y: x - y, device, test_grad_grad=False)
 
     def test_mul(self, device):
         self._test_arithmetic(torch.mul, device)
-        self._test_arithmetic(operator.mul, device)
+        self._test_arithmetic(lambda x, y: x * y, device)
 
     def test_div(self, device):
         self._test_arithmetic(torch.div, device)
-        self._test_arithmetic(operator.truediv, device)
+        self._test_arithmetic(lambda x, y: x / y, device)
 
     @allowVmapFallbackUsage
     def test_binary_cross_entropy(self, device):
