@@ -113,8 +113,8 @@ class OptionalArrayRef final {
           std::is_assignable<ArrayRef<T>&, U&&>::value,
       OptionalArrayRef&>
   operator=(U&& value) noexcept(
-      std::is_nothrow_constructible<ArrayRef<T>, U&&>::value&&
-          std::is_nothrow_assignable<ArrayRef<T>&, U&&>::value) {
+      std::is_nothrow_constructible<ArrayRef<T>, U&&>::value &&
+      std::is_nothrow_assignable<ArrayRef<T>&, U&&>::value) {
     wrapped_opt_array_ref = value;
     return *this;
   }
