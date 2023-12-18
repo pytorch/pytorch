@@ -73,6 +73,7 @@ reference_filtered_ops = list(filter(lambda op: op.ref is not None, unary_ufuncs
 
 # TODO: port test_unary_out_op_mem_overlap
 # TODO: add test for inplace variants erroring on broadcasted inputs
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestUnaryUfuncs(TestCase):
     exact_dtype = True
 
