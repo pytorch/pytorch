@@ -578,10 +578,10 @@ namespace {
       cudnnHandle_t handle,
       const RNNDescriptorParams& rnn,
       const RNNDescriptor& rnn_desc,
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
       const TensorDescriptor& x_desc,
       const FilterDescriptor& w_desc,
-//#endif
+#endif
       const Tensor& weight_buf,
       bool include_bias=true
   ) {
