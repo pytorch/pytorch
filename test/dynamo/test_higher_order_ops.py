@@ -1273,13 +1273,13 @@ def forward(self, getitem, getitem_1, getitem_2, getitem_3, getitem_4, getitem_5
             return control_flow.map(inner_f, xs, y)
 
         y = torch.ones(1)
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
             x = (torch.randn(3, 4), torch.randn(2, 4))
-            torch.compile(fn, backend="eager", fullgraph=True)(x, y)
+            torch.compile(fn, backend="eager")(x, y)
 
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
             x = (torch.randn(0, 4), torch.randn(0, 4))
-            torch.compile(fn, backend="eager", fullgraph=True)(x, y)
+            torch.compile(fn, backend="eager")(x, y)
 
     def test_map_kwargs(self):
         cnt = CompileCounter()
@@ -1289,8 +1289,8 @@ def forward(self, getitem, getitem_1, getitem_2, getitem_3, getitem_4, getitem_5
             return control_flow.map(lambda x: x.sin(), x=x)
 
         x = torch.randn(3)
-        self.assertRaises(TypeError, lambda: f(x))
-        self.assertEqual(cnt.frame_count, 0)
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
+            f(x)
 
     def test_map_symint_input(self):
         backend = EagerAndRecordGraphs()
@@ -1689,12 +1689,10 @@ def forward(self):
         mod_for_compile = torch.compile(mod, backend=cnt, dynamic=True, fullgraph=False)
         mod_for_eager = Module()
 
-        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-        # There is graph break right when we enter body of map
-        self.assertEqual(len(backend.graphs), 0)
-        self.assertEqual(
-            res, mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-        )
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
+            mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+
+        res = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
     def test_map_side_effect(self):
         backend = EagerAndRecordGraphs()
@@ -1721,14 +1719,13 @@ def forward(self):
         mod_for_compile = torch.compile(mod, backend=cnt, dynamic=True, fullgraph=False)
         mod_for_eager = Module()
 
-        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
+            mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
+            mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
-        eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-        eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-
-        self.assertEqual(len(backend.graphs), 0)
-        self.assertEqual(res, eager)
+        eager_res = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        eager_res = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
     def test_wrap_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
