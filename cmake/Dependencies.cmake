@@ -467,8 +467,6 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
     # We build static version of cpuinfo but link
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
-    # Need to set this to avoid conflict with XNNPACK's clog external project
-    set(CLOG_SOURCE_DIR "${CPUINFO_SOURCE_DIR}/deps/clog")
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 endif()
@@ -619,7 +617,13 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     # Disable ARM BF16 and FP16 vector for now; unused and causes build failures because
     # these new ISA features may not be supported on older compilers
     set(XNNPACK_ENABLE_ARM_BF16 OFF CACHE BOOL "")
-    set(XNNPACK_ENABLE_ARM_FP16_VECTOR OFF CACHE BOOL "")
+
+    # Disable AVXVNNI for now, older clang versions seem not to support it
+    # (clang 12 is where avx-vnni support is added)
+    set(XNNPACK_ENABLE_AVXVNNI OFF CACHE BOOL "")
+
+    # Disable I8MM For CI since clang 9 does not support neon i8mm.
+    set(XNNPACK_ENABLE_ARM_I8MM OFF CACHE BOOL "")
 
     # Setting this global PIC flag for all XNNPACK targets.
     # This is needed for Object libraries within XNNPACK which must
@@ -1253,6 +1257,15 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "6.0.0")
+      list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
+    endif()
+    if(HIPBLASLT_CUSTOM_DATA_TYPE)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_DATA_TYPE)
+    endif()
+    if(HIPBLASLT_CUSTOM_COMPUTE_TYPE)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_COMPUTE_TYPE)
+    endif()
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
@@ -1278,6 +1291,9 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
+    endif()
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
@@ -1291,7 +1307,6 @@ if(USE_ROCM)
       message(STATUS "Disabling Kernel Assert for ROCm")
     endif()
 
-    include(${CMAKE_CURRENT_LIST_DIR}/External/oort.cmake)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
