@@ -2,7 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 
-#if defined(USE_ROCM) || (!AT_CUDNN_ENABLED() && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8900)
+#if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || (defined(CUDNN_VERSION) && CUDNN_VERSION < 8900)
 
 namespace at { namespace native {
 
