@@ -29,14 +29,14 @@
 // have weird signatures that are not supported by autograd, and (2)
 // see this bug https://github.com/pytorch/pytorch/issues/30102
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 struct Node;
 
-}} // namespace torch::autograd
+} // namespace torch::autograd
 
-namespace at {
-namespace impl {
+
+namespace at::impl {
 
 struct TORCH_API VariableHooksInterface {
   virtual ~VariableHooksInterface() = default;
@@ -72,4 +72,4 @@ struct TORCH_API VariableHooksRegisterer {
   }
 };
 
-}} // namespace at::impl
+} // namespace at::impl
