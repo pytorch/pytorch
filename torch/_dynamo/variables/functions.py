@@ -199,9 +199,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                         closure_cell_contents = AttrSource(
                             closure_cell, "cell_contents"
                         )
-                        contents_var = VariableBuilder(parent, closure_cell_contents)(
-                            cell.cell_contents
-                        )
+                        try:
+                            contents_var = VariableBuilder(
+                                parent, closure_cell_contents
+                            )(cell.cell_contents)
+                        except ValueError:
+                            # Cell has not yet been assigned
+                            contents_var = variables.DeletedVariable()
 
                         if (
                             closure_cell_contents.name()
@@ -775,7 +779,10 @@ class TritonKernelVariable(VariableTracker):
             if "grid" not in kwargs:
                 raise Unsupported("Triton kernel requires to be called with a grid")
             grid = kwargs.pop("grid")
-            return self.clone(grid=grid).call_function(tx, args, kwargs)
+            # rewrite kernel.run(*args, grid=grid) to kernel[grid](*args)
+            return TritonKernelVariable(
+                kernel=self.kernel, kernel_idx=self.kernel_idx, grid=grid
+            ).call_function(tx, args, kwargs)
 
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)

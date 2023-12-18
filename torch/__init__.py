@@ -343,6 +343,10 @@ class SymFloat:
     def __sym_int__(self):
         raise AssertionError("type stub not overridden")
 
+    def is_integer(self):
+        """Return True if the float is an integer."""
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
         return self.node.str()
 

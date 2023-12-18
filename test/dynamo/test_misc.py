@@ -950,9 +950,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # Filter out id-matches that won't reproduce run to run
         guard_code = filter(
-            lambda line: not any(
-                banned in line for banned in ["id", "lookup_backend", "config_hash"]
-            ),
+            lambda line: "id" not in line and "lookup_backend" not in line,
             sorted(guard_code),
         )
         guard_code_str = "\n".join(guard_code)
@@ -1594,6 +1592,25 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.testing.standard_test(
             self, fn, 1, expected_ops=6, expected_ops_dynamic=ifdynstaticdefault(6, 18)
         )
+
+    def test_list_iadd_side_effect(self):
+        def fn(a, b):
+            a += [b]
+            torch._dynamo.graph_break()
+            return a
+
+        a = [1, 2, 3]
+        b = torch.ones(2, 2)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+
+        exp = fn(a, b)
+
+        a = [1, 2, 3]
+        b = torch.ones(2, 2)
+        act = opt_fn(a, b)
+
+        self.assertEqual(exp, act)
 
     def test_user_getattr1(self):
         class MyConfig(dict):
@@ -2915,6 +2932,27 @@ utils_device.CURRENT_DEVICE == None""".split(
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(cnts.op_count, 3)
             cnts.clear()
+
+    def test_closure_with_mutation_and_graph_break(self):
+        def fn():
+            x = torch.zeros(1)
+
+            def subfunc():
+                x[0] = backup
+
+            if x[0] >= -1e5:
+                pass
+
+            backup = 1
+            subfunc()
+            return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        expected = fn()
+        actual = opt_fn()
+        self.assertTrue(same(expected, actual))
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_closure_out_of_scope_cell_with_cond(self):
         # Test closure with out-of-scope cell variable, used in a cond
@@ -8049,7 +8087,6 @@ def ___make_guard_fn():
             return [t * k for t in yield_from_gen(t_list)]
 
         t_list = [torch.randn([2, 3])] * 3
-        multiplier = torch.tensor([10])
         eager = yield_from_fn(t_list, 2)
         counter = CompileCounter()
         compiled = torch._dynamo.optimize(counter)(yield_from_fn)(t_list, 2)

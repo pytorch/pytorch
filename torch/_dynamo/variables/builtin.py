@@ -361,18 +361,15 @@ class BuiltinVariable(VariableTracker):
         ]
         op_handlers[operator.add].extend(list_like_addition_handlers)
 
-        def list_iadd_handler(tx, a, b, options):
+        def list_iadd_handler(tx, a, b, _):
             if not a.mutable_local or not b.has_unpack_var_sequence(tx):
                 # Handler doesn't apply
                 return None
 
-            return tx.replace_all(
-                a,
-                ListVariable(
-                    list(a.items) + list(b.unpack_var_sequence(tx)),
-                    **options,
-                ),
-            )
+            seq = b.unpack_var_sequence(tx)
+            tx.output.side_effects.mutation(a)
+            a.items.extend(seq)
+            return a
 
         list_like_iadd_handlers = [
             (
@@ -1122,6 +1119,7 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
+            TorchInGraphFunctionVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1232,9 +1230,13 @@ class BuiltinVariable(VariableTracker):
             ),
         ):
             try:
-                return obj.var_getattr(tx, name).clone(source=source)
+                return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
+        elif isinstance(obj, TorchInGraphFunctionVariable):
+            member = getattr(obj.value, name)
+            if trace_rules.lookup(member) is not None:
+                return trace_rules.lookup(member)(member, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
             if is_utils_checkpoint(member):
@@ -1257,7 +1259,7 @@ class BuiltinVariable(VariableTracker):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
             try:
-                return obj.var_getattr(tx, name).clone(source=source)
+                return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
 
@@ -1331,9 +1333,21 @@ class BuiltinVariable(VariableTracker):
                         {},
                     )
                     _lower_version_count_by_1(obj.as_proxy().node.meta["example_value"])
-                    # This handles options prop, guards and ends with a clone
-                    # Step 4 - replace all reference to the current object with the new one
-                    return tx.replace_all(obj, out)
+                    # Step 4 - Annoying metadata transfer
+                    obj.proxy = out.proxy
+                    obj.dtype = out.dtype
+                    obj.device = out.device
+                    obj.layout = out.layout
+                    obj.ndim = out.ndim
+                    obj.size = out.size
+                    obj.stride = out.stride
+                    obj.requires_grad = out.requires_grad
+                    obj.is_quantized = out.is_quantized
+                    obj.is_contiguous = out.is_contiguous
+                    obj.is_sparse = out.is_sparse
+                    obj.class_type = out.class_type
+                    obj.specialized_value = out.specialized_value
+                    return obj
 
             tx.output.side_effects.store_attr(obj, name, val)
             return val

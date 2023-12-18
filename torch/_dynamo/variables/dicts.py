@@ -136,16 +136,11 @@ class ConstDictVariable(VariableTracker):
         ):
             assert not kwargs and len(args) == 2
             k = ConstDictVariable.get_key(tx, args[0])
-
+            tx.output.side_effects.mutation(self)
             if is_valid_global_ref_key(k):
                 tx.store_global_weakref(global_key_name(k), k)
-            newval = dict(val)
-            newval[k] = args[1]
-
-            return tx.replace_all(
-                self,
-                self.modifed(newval),
-            )
+            self.items[k] = args[1]
+            return ConstantVariable.create(None)
         elif (
             name in ("pop", "get")
             and len(args) == 2
@@ -170,21 +165,19 @@ class ConstDictVariable(VariableTracker):
             and ConstDictVariable.is_valid_key(args[0])
             and self.mutable_local
         ):
-            newval = dict(val)
-            result = newval.pop(ConstDictVariable.get_key(tx, args[0]))
-            tx.replace_all(self, self.modifed(newval))
-            return result
+            tx.output.side_effects.mutation(self)
+            var = self.items.pop(ConstDictVariable.get_key(tx, args[0]))
+            return var
         elif (
             name == "update"
             and len(args) == 1
             and isinstance(args[0], ConstDictVariable)
             and self.mutable_local
         ):
-            newval = dict(val)
-            newval.update(args[0].items)
-            newval.update(kwargs)  # all keys in kwargs are valid (`str`s)
-            result = self.modifed(newval)
-            return tx.replace_all(self, result)
+            tx.output.side_effects.mutation(self)
+            self.items.update(args[0].items)
+            self.items.update(kwargs)  # all keys in kwargs are valid (`str`s)
+            return ConstantVariable.create(None)
         elif (
             name == "update"
             and len(args) == 1
@@ -198,14 +191,13 @@ class ConstDictVariable(VariableTracker):
             )
             and self.mutable_local
         ):
-            newval = dict(val)
+            tx.output.side_effects.mutation(self)
             for x in args[0].unpack_var_sequence(tx):
                 k, v = x.unpack_var_sequence(tx)
                 assert ConstDictVariable.is_valid_key(k)
-                newval[ConstDictVariable.get_key(k)] = v
-            newval.update(kwargs)  # all keys in kwargs are valid (`str`s)
-            result = self.modifed(newval)
-            return tx.replace_all(self, result)
+                self.items[ConstDictVariable.get_key(k)] = v
+            self.items.update(kwargs)  # all keys in kwargs are valid (`str`s)
+            return ConstantVariable.create(None)
         elif (
             name in ("get", "__getattr__")
             and args
@@ -315,10 +307,9 @@ class DefaultDictVariable(ConstDictVariable):
                 else:
                     if is_valid_global_ref_key(k):
                         tx.store_global_weakref(global_key_name(k), k)
-                    new_val = dict(self.items)
                     default_var = self.default_factory.call_function(tx, [], {})
-                    new_val[k] = default_var
-                    tx.replace_all(self, self.modifed(new_val))
+                    tx.output.side_effects.mutation(self)
+                    self.items[k] = default_var
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -426,8 +417,6 @@ class SetVariable(VariableTracker):
                         if alias_guard:
                             install_guard(e.vt.source.make_guard(alias_guard))
 
-        return self.items
-
     def call_method(
         self,
         tx,
@@ -441,23 +430,14 @@ class SetVariable(VariableTracker):
         if name == "add" and args and self.mutable_local:
             assert not kwargs
             item = args[0]
-            result = SetVariable(
-                tx,
-                self._add(tx, item),
-                mutable_local=self.mutable_local,
-            )
-            tx.replace_all(self, result)
+            tx.output.side_effects.mutation(self)
+            self._add(tx, item)
             return ConstantVariable.create(None)
         elif name == "pop" and self.mutable_local:
             assert not kwargs
             assert not args
-            items = list(self.items)
-            result = items.pop()
-            tx.replace_all(
-                self,
-                SetVariable(tx, items, regen_guards=False, **options),
-            )
-            return result
+            tx.output.side_effects.mutation(self)
+            return self.items.pop()
         elif name == "__len__":
             return ConstantVariable.create(len(self.items))
         elif name == "__contains__":

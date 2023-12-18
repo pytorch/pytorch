@@ -385,11 +385,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
 
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.CONFIG_HASH_MATCH))
-
-    def guard_has_graph_break(self):
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.HAS_GRAPH_BREAK))
-
     def add_cleanup_hook(self, fn: Callable[[], Any]):
         self.cleanup_hooks.append(fn)
 
@@ -717,7 +712,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 name,
                 **options,
             )
-            return self.side_effects.track_object_existing(source, target, vt)
+            return self.side_effects.track_object_existing(target, vt)
 
         assert not isinstance(source, ParamBufferSource)
 
@@ -822,11 +817,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         raise AssertionError("unreachable")
 
     def compile_subgraph(
-        self,
-        tx,
-        partial_convert=False,
-        reason: Optional[GraphCompileReason] = None,
-        compile_return_value=False,
+        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
     ):
         """
         Generate a subgraph to continue execution on user code.
@@ -839,10 +830,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
         self.should_exit = True
-
-        if not compile_return_value:
-            # invalid graph to be cache hit for nopython
-            self.guard_has_graph_break()
 
         log.debug("COMPILING GRAPH due to %s", reason)
 
@@ -948,7 +935,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             pass1 = PyCodegen(tx, root, graph_output_var)
             self.side_effects.codegen_hooks(pass1)
             self.side_effects.codegen_save_tempvars(pass1)
-            pass1.restore_stack(stack_values, skip_cache=tx.export)
+            pass1.restore_stack(stack_values, value_from_source=not tx.export)
             self.side_effects.codegen_update_mutated(pass1)
 
             # one more time now that we have established tempvars
@@ -960,7 +947,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             )
             self.side_effects.codegen_hooks(pass2)
             self.side_effects.codegen_save_tempvars(pass2)
-            pass2.restore_stack(stack_values, skip_cache=tx.export)
+            pass2.restore_stack(stack_values, value_from_source=not tx.export)
             self.side_effects.codegen_update_mutated(pass2)
 
             output = []
