@@ -1,6 +1,5 @@
 import contextlib
 import functools
-import itertools
 import logging
 
 from typing import Dict, List, Optional
@@ -9,7 +8,6 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
@@ -374,8 +372,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return OutDtypeHigherOrderVariable(value, source, **kwargs)
         elif value is torch._functorch.eager_transforms.grad_impl:
             return FunctorchGradHigherOrderVariable(value, source, **kwargs)
-        elif value is torch._functorch.vmap.vmap_impl:
-            return FunctorchVmapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "trampoline_autograd_fwd",
             "trampoline_autograd_bwd",
@@ -990,166 +986,6 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ).call_method(tx, "contiguous", (), {})
                     items.append(proxy)
                 return TupleVariable([TupleVariable(items), aux])
-
-
-class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        from . import ConstantVariable, TensorVariable
-        from .builder import wrap_fx_proxy
-
-        if not torch._dynamo.config.capture_func_transforms:
-            unimplemented(
-                "torch.func.vmap capture is disabled, "
-                "it can be turned on by setting "
-                "`torch._dynamo.config.capture_func_transforms=True`"
-            )
-
-        # unpack args
-        fn = args[0]
-        in_dims = args[1]
-        out_dims = args[2]
-        randomness = args[3]
-        chunk_size = args[4]
-        batch_input_args = args[5:]
-
-        if not isinstance(in_dims, (ConstantVariable, TupleVariable)):
-            unimplemented("torch.func.vmap: in_dims is not an int or tuple variable.")
-
-        if not isinstance(out_dims, (ConstantVariable, TupleVariable)):
-            unimplemented("torch.func.vmap: out_dims is not an int or tuple variable.")
-
-        if len(kwargs) > 0:
-            unimplemented(
-                "NYI - torch.func.vmap: kwargs arguments are currently unsupported."
-            )
-
-        if chunk_size.value is not None:
-            unimplemented(
-                "NYI - torch.func.vmap is not implemented when chunk_size is passed"
-            )
-
-        # Trace into tree_flatten with the list of batch_input_args.
-        flat_args, arg_spec = _make_inlined(tx, pytree.tree_flatten)(
-            ListVariable(batch_input_args)
-        ).unpack_var_sequence(tx)
-
-        # Transform in_dims into a list if it's not an integer literal.
-        in_dims_v = (
-            in_dims
-            if isinstance(in_dims.as_python_constant(), int)
-            else BuiltinVariable(list).call_function(tx, [in_dims], {})
-        )
-
-        # Trace into _broadcast_to_and_flatten with the transformed in_dims.
-        broadcasted_in_dims = _make_inlined(tx, pytree._broadcast_to_and_flatten)(
-            in_dims_v, arg_spec
-        )
-
-        # We want to pass unbatched input to speculate subgraph.
-        # So we loop through the inputs and select only one sample
-        # from the batch.
-        unbatched_input_args = []
-        for arg, in_dim in zip(
-            flat_args.unpack_var_sequence(tx),
-            broadcasted_in_dims.unpack_var_sequence(tx),
-        ):
-            if in_dim is not None:
-                assert isinstance(arg, TensorVariable)
-                unbatched_arg = arg.call_method(
-                    tx, "select", [in_dim, ConstantVariable.create(0)], {}
-                )
-                unbatched_input_args.append(unbatched_arg)
-            else:
-                unbatched_input_args.append(arg)
-
-        # Ban ops like `stride`, `storage_offset` in the traced functions.
-        # NOTE: We are conservatively banning more ops (vmap should be able
-        #       to handle a few of them).
-        with tx.strict_translation_mode():
-            # trace through the function with unbatched inputs.
-            _, body_graph, body_lifted_freevars = speculate_subgraph(
-                tx,
-                fn,
-                # Returns a ListVariable, since that's where we started flattening.
-                # However, we really want to pass the inner Python list as argument.
-                _make_inlined(tx, pytree.tree_unflatten)(
-                    ListVariable(unbatched_input_args), arg_spec
-                ).unpack_var_sequence(tx),
-                {},
-                "torch.vmap",
-                source_target=self.value,
-            )
-
-        body_name = add_subgraph(
-            tx,
-            self.source,
-            "vmap_body",
-            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
-        )
-        body_node = make_attr(tx, body_name)
-
-        # body_lifted_variable should not be treated as batched.
-        # So here we update `in_dims` to reflect that.
-        # NOTE: updated_in_dims is flat list, it is ok for now
-        #       as speculate_subgraph does not supports functions with non-Tensor args.
-        #       (so we graph-break above)
-        updated_in_dims = TupleVariable(
-            broadcasted_in_dims.unpack_var_sequence(tx)
-            + [
-                ConstantVariable.create(None),
-            ]
-            * len(body_lifted_freevars)
-        )
-
-        vmap_proxy_args = (
-            body_node,
-            *(arg.as_proxy() for arg in (updated_in_dims, out_dims, randomness)),
-        )
-        # vmap_proxy corresponds to `vmap_proxy = vmap(fn, *vmap_args, **vmap_kwargs)`
-        vmap_proxy = tx.output.create_proxy(
-            "call_function",
-            torch.func.vmap,
-            args=tuple(vmap_proxy_args),
-            kwargs={},
-            name="vmap_proxy",
-        )
-
-        proxy_batched_fn_args = tuple(
-            arg.as_proxy() for arg in batch_input_args
-        ) + tuple(body_lifted_freevars)
-
-        # We compute the example_value by actually calling
-        # `vmap` with FakeTensors.
-        fake_batched_fn_args = itertools.chain(
-            (get_fake_value(arg.as_proxy().node, tx) for arg in batch_input_args),
-            (get_fake_value(arg.node, tx) for arg in body_lifted_freevars),
-        )
-        actual_in_dims = tuple(
-            pytree.tree_map(lambda x: x.value, updated_in_dims.items)
-        )
-
-        # NOTE: `body_graph` might have operators which
-        # will create new tensors. So it is required
-        # that we run `vmap` under FakeMode.
-        with tx.fake_mode, enable_python_dispatcher():
-            example_value = torch._functorch.vmap.vmap_impl(
-                torch.fx.GraphModule(tx.output.nn_modules, body_graph),
-                actual_in_dims,
-                out_dims.as_python_constant(),
-                randomness.value,
-                chunk_size.value,
-                *fake_batched_fn_args,
-            )
-
-        # proxy corresponds to `call = vmap_proxy(*batched_fn_args, **batched_fn_kwargs)`
-        proxy = vmap_proxy(*proxy_batched_fn_args)
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=proxy,
-            example_value=example_value,
-        )
 
 
 class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable):
