@@ -406,9 +406,12 @@ class CppPrinter(ExprPrinter):
     def _print_RoundDecimal(self, expr):
         assert len(expr.args) == 2
         number, ndigits = expr.args
-        assert isinstance(ndigits, sympy.Integer)
-        cpp_type = INDEX_TYPE if number.is_integer else "double"
-        return f"static_cast<{cpp_type}>(std::nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits})"
+        if number.is_integer:
+            assert ndigits < 0, f"ndigits < 0 should have been filtered by the sympy function"
+            raise ValueError(
+                f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
+            )
+        return f"static_cast<double>(std::nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits})"
 
 
 # A function to print, useful for printing sympy symbols.
