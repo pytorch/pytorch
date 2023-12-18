@@ -236,6 +236,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_input_idxs: List[int] = []
         self.name_to_buffer: Dict[str, ir.Buffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
+
+        self.name_to_users_snapshot: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
+
         self.creation_time = time.time()
         self.name = "GraphLowering"
         self.cpp_wrapper = cpp_wrapper

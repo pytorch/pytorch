@@ -544,6 +544,47 @@ def fx_codegen_and_compile(
                     else:
                         output_strides.append(None)
 
+            for buffer in graph.buffers:
+                from .ir import MutationLayout, Pointwise, FlexibleLayout
+
+                # Here we say this buffer is created by of the src.data:
+                # src.data.layout = MutationLayout(dst)
+                # https://github.com/pytorch/pytorch/blob/34fe850d0083688abf0a27f3e864723f0858aab1/torch/_inductor/ir.py#L2709-L2711
+                if isinstance(buffer.layout, MutationLayout):
+                    # mutation_names = [dst_name]
+                    mutation_names = buffer.get_mutation_names()
+                    for mutation_name in mutation_names:
+                        # mutation_buf is dst
+                        mutation_buf = graph.get_buffer(mutation_name)
+                        # TODO<Leslie> how to we know whether we need to do the lazy copy of this buffer? Can we say:
+                        # we care if any mutation_buf_user created after src.data.layout = MutationLayout(dst)
+                        if graph.name_to_users_snapshot[mutation_name] != graph.name_to_users[mutation_name]:
+                            # if mutation_name has users added after we mark src.data.layout = MutationLayout(dst)
+                            # 2.1 Do the lazy copies
+                            src = buffer
+                            dst = mutation_buf
+                            src = Pointwise.create(
+                                device=src.get_device(),
+                                dtype=src.get_dtype(),
+                                inner_fn=src.make_loader(),
+                                ranges=[
+                                    graph.sizevars.guard_equals(a, b)
+                                    for a, b in zip(src.get_size(), dst.get_size())
+                                ],
+                            ).data
+                            src.realize()
+
+                            # Set the copied buf's layout to MutationLayout
+                            src.data.layout = MutationLayout(dst)
+
+                            # 2.3 reset original buffer's layout to FlexibleLayout
+                            buffer.data.layout = FlexibleLayout(
+                                device=src.get_device(),
+                                dtype=src.get_dtype(),
+                                size=src.get_size(),
+                            )
+                            
+
             compiled_fn = graph.compile_to_fn()
 
             if V.aot_compilation is True:

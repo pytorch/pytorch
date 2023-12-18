@@ -2687,28 +2687,33 @@ class MutationLayout(Layout):
         if isinstance(src, TensorBox):
             src = src.data
 
-        # We copy the contents of src into dst. In most cases this should
-        # be fused into a single kernel by the scheduler.
-        # NOTE: We cannot change src's layout to mutate dst directly as this
-        # would alias src to dst, which is not correct as further mutations to
-        # dst would effect users of src. However if there are no more users of
-        # dst, we can alias src to dst.
-        src.realize_hint()
+        # # We copy the contents of src into dst. In most cases this should
+        # # be fused into a single kernel by the scheduler.
+        # # NOTE: We cannot change src's layout to mutate dst directly as this
+        # # would alias src to dst, which is not correct as further mutations to
+        # # dst would effect users of src. However if there are no more users of
+        # # dst, we can alias src to dst.
+        # src.realize_hint()
 
-        if not unsafe_alias:
-            src = Pointwise.create(
-                device=src.get_device(),
-                dtype=src.get_dtype(),
-                inner_fn=src.make_loader(),
-                ranges=[
-                    V.graph.sizevars.guard_equals(a, b)
-                    for a, b in zip(src.get_size(), dst.get_size())
-                ],
-            ).data
+        # if not unsafe_alias:
+        #     src = Pointwise.create(
+        #         device=src.get_device(),
+        #         dtype=src.get_dtype(),
+        #         inner_fn=src.make_loader(),
+        #         ranges=[
+        #             V.graph.sizevars.guard_equals(a, b)
+        #             for a, b in zip(src.get_size(), dst.get_size())
+        #         ],
+        #     ).data
+
+        # TODO<leslie> fix the zero_element_mutation issue as: 
+        # python -u -m pytest -s -v test_torchinductor.py -k test_zero_element_mutation
 
         src.realize()
         assert isinstance(src.data.layout, FlexibleLayout)
         src.data.layout = MutationLayout(dst)
+        assert dst.get_name() not in V.graph.name_to_users_snapshot, "TODO: can we mutate src twice?"
+        V.graph.name_to_users_snapshot[dst.get_name()] = V.graph.name_to_users[dst.get_name()]
         return src.data
 
     def as_fixed(self):
