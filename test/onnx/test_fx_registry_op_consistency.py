@@ -482,11 +482,29 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
+        "linspace",
+        dtypes=(torch.int64, torch.int32,),
+        reason="fixme: Results do not match with PyTorch. https://github.com/microsoft/onnxscript/issues/854",
+    ),
+    xfail(
+        "linspace",
+        variant_name="tensor_overload",
+        dtypes=(torch.int64, torch.int32,),
+        reason="fixme: Results do not match with PyTorch. https://github.com/microsoft/onnxscript/issues/854",
+    ),
+    xfail(
         "log_normal",
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
     xfail(
         "log_softmax",
+        dtypes=(torch.float16,),
+        reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/16438",
+    ),
+    xfail(
+        "log_softmax",
+        variant_name="with_dtype",
+        dtypes=(torch.float16,),
         reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/16438",
     ),
     xfail(
@@ -508,6 +526,15 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "logical_xor",
         dtypes=onnx_test_common.FLOAT_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_script_does_not_support("Xor", "float, int"),
+    ),
+    xfail(
+        "logsumexp",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ReduceLogSumExp", "bool, int"),
+    ),
+    xfail(
+        "masked.logsumexp",
+        reason="fixme: https://github.com/onnx/onnx/issues/4986",
     ),
     xfail(
         "masked.amax",
@@ -539,6 +566,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "masked.log_softmax",
+        dtypes=(torch.float16,),
         reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/16438",
     ),
     xfail(
@@ -551,16 +579,40 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
+        "masked.prod",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Where", "bool"),
+    ),
+    xfail(
         "masked_select",
         reason=onnx_test_common.reason_dynamo_does_not_support("aten.masked_select.default"),
     ),
     xfail(
         "masked.softmax",
+        dtypes=(torch.float16,),
         reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/16438",
     ),
     xfail(
         "masked.softmin",
+        dtypes=(torch.float16,),
         reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/16438",
+    ),
+    xfail(
+        "max",
+        variant_name="reduction_no_dim",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ReduceMax", "bool"),
+    ),
+    xfail(
+        "max",
+        variant_name="reduction_with_dim",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ReduceMax", "bool"),
+    ),
+    xfail(
+        "max",
+        variant_name="reduction_with_dim",
+        reason="https://github.com/onnx/onnx/issues/4986",
     ),
     xfail(
         "min",
@@ -620,6 +672,33 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("AveragePool", "int"),
     ),
     xfail(
+        "nn.functional.conv_transpose1d",
+        dtypes=(torch.int64,),
+        reason=onnx_test_common.reason_onnx_does_not_support("Conv1d", "int64"),
+    ),
+    xfail(
+        "nn.functional.conv_transpose2d",
+        dtypes=(torch.int64,),
+        reason=onnx_test_common.reason_onnx_does_not_support("Conv2d", "int64"),
+    ),
+    xfail(
+        "nn.functional.conv_transpose3d",
+        dtypes=(torch.int64,),
+        reason=onnx_test_common.reason_onnx_does_not_support("Conv3d", "int64"),
+    ),
+    skip(
+        "nn.functional.conv_transpose1d",
+        reason="fixme: Assertion error: result mismatch",
+    ),
+    skip(
+        "nn.functional.conv_transpose2d",
+        reason="fixme: Assertion error: result mismatch",
+    ),
+    skip(
+        "nn.functional.conv_transpose3d",
+        reason="fixme: Assertion error: result mismatch",
+    ),
+    xfail(
         "nn.functional.conv1d",
         dtypes=(torch.int64,),
         reason=onnx_test_common.reason_onnx_does_not_support("Conv1d", "int64"),
@@ -635,23 +714,51 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Conv3d", "int64"),
     ),
     xfail(
+        "nn.functional.ctc_loss",
+        reason=onnx_test_common.reason_dynamo_does_not_support("aten.ctc_loss.default"),
+    ),
+    xfail(
         "nn.functional.dropout",
-        reason=onnx_test_common.reason_dynamo_does_not_support("Dropout"),
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
     xfail(
-        "nn.functional.linear",
-        dtypes=onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Gemm", "int"),
+        "nn.functional.dropout2d",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
     xfail(
-        "nn.functional.max_pool2d",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Max_pool2d"),
+        "nn.functional.dropout3d",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
     xfail(
-        "nn.functional.max_pool3d",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Max_pool3d"),
+        "nn.functional.feature_alpha_dropout",
+        variant_name="with_train",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
+        "nn.functional.feature_alpha_dropout",
+        variant_name="without_train",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
+        "nn.functional.fractional_max_pool2d",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
+        "nn.functional.fractional_max_pool3d",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
+        "nn.functional.gaussian_nll_loss",
+        reason=onnx_test_common.reason_dynamo_does_not_support("aten.gaussian_nll_loss"),
+    ),
+    xfail(
+        "nn.functional.grid_sample",
+        reason="fixme: Assertion error: result mismatch",
+    ),
+    xfail(
+        "nn.functional.group_norm",
+        dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("GroupNormalization", "float16"),
     ),
     xfail(
         "nn.functional.instance_norm",
@@ -669,6 +776,29 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("avgpool", "float16, int64"),
     ),
     xfail(
+        "nn.functional.linear",
+        dtypes=onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Gemm", "int"),
+    ),
+    xfail(
+        "nn.functional.max_pool2d",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Max_pool2d"),
+    ),
+    xfail(
+        "nn.functional.max_pool3d",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Max_pool3d"),
+    ),
+    xfail(
+        "nn.functional.multi_head_attention_forward",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
+        "nn.functional.one_hot",
+        reason=onnx_test_common.reason_dynamo_does_not_support("data-dependent"),
+    ),
+    xfail(
         "nn.functional.pad",
         variant_name="replicate",
         reason="fixme: ORT error: padding size",
@@ -676,6 +806,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "nn.functional.pad",
         variant_name="replicate_negative",
+        reason="fixme: Assertion error: result mismatch",
+    ),
+    xfail(
+        "nn.functional.pad",
+        variant_name="reflect",
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
@@ -721,6 +856,24 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "nonzero",
         dtypes=(torch.int8, torch.int16),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("NonZero", "int8, int16"),
+    ),
+    xfail(
+        "normal",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
+        "normal",
+        variant_name="in_place",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
+        "normal",
+        variant_name="number_mean",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
+        "pca_lowrank",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
     xfail(
         "quantile",
@@ -793,6 +946,25 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="ONNX doesn't support reduce='mean' option",
     ),
     xfail(
+        "sign",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_script_does_not_support("Sign", "bool"),
+    ),
+    xfail(
+        "softmax",
+        dtypes=(torch.float16,),
+        reason="ORT error: https://github.com/microsoft/onnxruntime/issues/16438"
+    ),
+    xfail(
+        "sparse.mm",
+        variant_name="reduce",
+        reason=onnx_test_common.reason_dynamo_does_not_support("InternalTorchDynamoError: Sparse CSR tensors do not have strides"),
+    ),
+    xfail(
+        "sparse.sampled_addmm",
+        reason=onnx_test_common.reason_dynamo_does_not_support("InternalTorchDynamoError: Sparse CSR tensors do not have strides"),
+    ),
+    xfail(
         "special.erfcx",
         dtypes=onnx_test_common.INT_TYPES + onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Erf", "int, bool"),
@@ -834,6 +1006,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
+        "svd_lowrank",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
         "std_mean",
         reason="fixme: NotImplementedError: Type promotion does not support node output of list or tuple."
     ),
@@ -863,6 +1039,26 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
+        "tril",
+        dtypes=onnx_test_common.BOOL_TYPES + (torch.int32,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("trilu", "bool, int32"),
+    ),
+    xfail(
+        "triu",
+        dtypes=onnx_test_common.BOOL_TYPES + (torch.int32,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("trilu", "bool, int32"),
+    ),
+    xfail(
+        "trunc",
+        dtypes=onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Floor", "int"),
+    ),
+    xfail(
+        "unbind",
+        dtypes=(torch.float16,) + onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Split, SplitToSequence", "float16, bool"),
+    ),
+    xfail(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Unflatten")
     ),
@@ -871,13 +1067,32 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
     xfail(
+        "unique",
+        reason=onnx_test_common.reason_dynamo_does_not_support("aten.unique_consecutive.default"),
+    ),
+    xfail(
         "unique_consecutive",
         reason=onnx_test_common.reason_dynamo_does_not_support("aten.unique_consecutive.default"),
+    ),
+    xfail(
+        "unravel_index",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_script_does_not_support("Floor", "bool, int"),
     ),
     xfail(
         "unsafe_split",
         dtypes=(torch.float16, torch.bool),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Split, SplitToSequence", "float16, bool"),
+    ),
+    xfail(
+        "unsafe_chunk",
+        dtypes=(torch.float16, torch.bool),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Split, SplitToSequence", "float16, bool"),
+    ),
+    xfail(
+        "where",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Where", "bool"),
     )
 )
 # fmt: on
@@ -965,22 +1180,37 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     xfail(
-        "lialg.multi_dot",
-        matcher=lambda sample: len(sample.input.shape) == 0,
-        reason="fixme: Assertion error: result mismatch",
-    ),
-    xfail(
-        "masked.logsumexp",
-        matcher=lambda sample: len(sample.input.shape) == 0
-        and sample.kwargs.get("dim") is not None
-        and sample.kwargs.get("dim") != (),
-        reason="fixme: https://github.com/onnx/onnx/issues/4986",
+        "linalg.vecdot",
+        matcher=lambda sample: torch.numel(sample.input) == 0
+        and len(sample.input.shape) > 1
+        and (
+            (sample.input.shape[0] == 0 and sample.kwargs.get("dim") == 0)
+            or (sample.input.shape[1] == 0 and sample.kwargs.get("dim") == 1)
+            or (sample.input.shape[1] == 0 and sample.kwargs.get("dim") is None)
+        ),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("Sum"),
     ),
     skip(
-        # NOTE: result mismatch: nan vs inf
-        "masked.logsumexp",
-        matcher=lambda sample: torch.isinf(sample.input).any(),
-        reason="fixme: Assertion error: result mismatch",
+        "log_softmax",
+        matcher=lambda sample: len(sample.input.shape) == 0,
+        reason="fixme: LogSoftMax does not support empty tensor as input",
+    ),
+    skip(
+        "log_softmax",
+        variant_name="with_dtype",
+        matcher=lambda sample: len(sample.input.shape) == 0,
+        reason="fixme: LogSoftMax does not support empty tensor as input",
+    ),
+    xfail(
+        "logsumexp",
+        matcher=lambda sample: isinstance(sample.input, torch.Tensor)
+        and len(sample.input.shape) == 0,
+        reason="fixme: IsScalar",
+    ),
+    skip(
+        "masked.log_softmax",
+        matcher=lambda sample: len(sample.input.shape) == 0,
+        reason="fixme: LogSoftMax does not support empty tensor as input",
     ),
     xfail(
         "min",
@@ -1035,6 +1265,21 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="Flaky failure: https://github.com/pytorch/pytorch/issues/115106",
     ),
     skip(
+        "nn.functional.conv_transpose1d",
+        matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
+        reason="String padding is not accepted by aten::conv1d",
+    ),
+    skip(
+        "nn.functional.conv_transpose2d",
+        matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
+        reason="String padding is not accepted by aten::conv2d",
+    ),
+    skip(
+        "nn.functional.conv_transpose3d",
+        matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
+        reason="String padding is not accepted by aten::conv3d",
+    ),
+    skip(
         "nn.functional.conv1d",
         matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
         reason="String padding is not accepted by aten::conv1d",
@@ -1069,6 +1314,13 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
         github_issue="https://github.com/microsoft/onnxscript/issues/1056",
     ),
+    xfail(
+        "nn.functional.group_norm",
+        matcher=lambda sample: torch.numel(sample.input) == 0,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Reshape", "empty tensor"
+        ),
+    ),
     skip(
         "nn.functional.max_pool3d",
         matcher=lambda sample: sample.kwargs.get("ceil_mode") is True
@@ -1100,6 +1352,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         # ONNX has not include_self parameter and default is include_self=True mode
         matcher=lambda sample: sample.kwargs.get("include_self") is False,
         reason="ONNX does't support include_self=False option",
+    ),
+    skip(
+        "softmax",
+        matcher=lambda sample: len(sample.input.shape) == 0,
+        reason="fixme: LogSoftMax does not support empty tensor as input",
     ),
     xfail(
         "split",
@@ -1229,7 +1486,7 @@ def _run_test_output_match(
         dtype,
         requires_grad=False,
     )
-    print(f"Running op {op} and name {op.name} on {device} with dtype={dtype}")
+    print(f"op.name: {op}")
     for i, cpu_sample in enumerate(samples):
         inputs = (cpu_sample.input, *cpu_sample.args)
         # Provide the repr to subtest because tensors are not serializable in parallel test runs
@@ -1309,6 +1566,7 @@ def _run_test_output_match(
                     atol=atol,
                     only_check_shape=(op.name in test_suite.only_shape_check_list),
                 )
+                print("cpu_sample", cpu_sample)
                 # except:
                 #     import pdb; pdb.set_trace()
 
@@ -1383,17 +1641,23 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "diff": [1e-2, 5e-2],
         "gradient": [3e-3, 4e-3],
         "linalg.multi_dot": [3e-2, 1e-3],
-        "masked.logsumexp": [3e-3, 4e-4],
+        "linalg.vecdot": [1e-2, 2e-2],
+        "linspace": [2e-2, 2e-3],
         "nn.functional.batch_norm": [3e-2, 1e-3],
         "nn.functional.binary_cross_entropy": [3e-2, 1e-3],
         "nn.functional.binary_cross_entropy_with_logits": [3e-2, 1e-3],
+        "nn.functional.cosine_similarity": [3e-2, 1e-3],
         "nn.functional.hinge_embedding_loss": [4e-1, 3e-3],
         "nn.functional.kl_div": [2e-3, 2e-4],
+        "nn.functional.poisson_nll_loss": [3e-2, 1e-3],
+        "nn.functional.multilabel_soft_margin_loss": [1e-3, 5e-3],
         "native_batch_norm": [3e-2, 1e-3],
         "dot": [3e-2, 1e-3],
         "logit": [3e-2, 1e-3],
         "rsub": [3e-2, 1e-3],
         "sub": [3e-2, 1e-3],
+        "trapezoid": [1e-3, 7e-3],
+        "trapz": [1e-3, 7e-3],
     }
 
     @common_device_type.ops(
