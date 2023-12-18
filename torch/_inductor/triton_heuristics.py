@@ -363,6 +363,7 @@ class CachingAutotuner(KernelInterface):
                 assert hasattr(
                     obj, attr2
                 ), f"{obj} should have either {attr1} or {attr2}"
+                return getattr(obj, attr2)
 
         scope["runner"] = _getattr(binary, "run", "c_wrapper")
         scope["function"] = _getattr(binary, "function", "cu_function")
