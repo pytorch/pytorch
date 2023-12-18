@@ -199,8 +199,7 @@ class HipblasltGemmOp : public Callable<GemmParams<T>> {
 
       size_t workspace_size = GetHipblasltWorkspaceSize();
 
-      hipblasLtHandle_t op_handle;
-      TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&op_handle));
+      auto op_handle = at::cuda::getCurrentCUDABlasLtHandle();
 
       size_t ret_workspace_size = 0;
       auto status = hipblaslt_ext::matmulIsAlgoSupported(op_handle,
@@ -251,7 +250,6 @@ class HipblasltGemmOp : public Callable<GemmParams<T>> {
       TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_a));
       TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_b));
       TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_c));
-      TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(op_handle));
       if (workspace_size > 0) {
         c10::cuda::CUDACachingAllocator::raw_delete(workspace_buffer);
       }
