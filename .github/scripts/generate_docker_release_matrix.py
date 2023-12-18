@@ -1,3 +1,15 @@
+#!/usr/bin/env python3
+
+"""Generates a matrix for docker releases through github actions
+
+Will output a condensed version of the matrix. Will include fllowing:
+    * CUDA version short
+    * CUDA full verison
+    * CUDNN version short
+    * Image type either runtime or devel
+    * Platform linux/arm64,linux/amd64
+
+"""
 
 import json
 import generate_binary_build_matrix
