@@ -42,10 +42,9 @@
  * The maximum number of GPUs that we recognizes. Increasing this beyond the
  * initial limit of 16 broke Caffe2 testing, hence the ifdef guards.
  */
-#ifndef BUILD_CAFFE2
-// When building PyTorch
-#define C10_COMPILE_TIME_MAX_GPUS 64
-#else
-// When building Caffe2
+#ifdef FBCODE_CAFFE2
+// fbcode depends on this value being 16
 #define C10_COMPILE_TIME_MAX_GPUS 16
+#else
+#define C10_COMPILE_TIME_MAX_GPUS 64
 #endif
