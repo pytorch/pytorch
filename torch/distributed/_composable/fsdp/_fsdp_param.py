@@ -246,7 +246,7 @@ class FSDPParam:
         else:
             if _mesh_resources.get_parent_mesh(self.mesh_info.mesh) is not None:
                 raise NotImplementedError(
-                    "For 1D DP, using a parent mesh is not supported"
+                    "For pure FSDP/HSDP, using a parent mesh is not supported"
                 )
             self._global_mesh = self.mesh_info.mesh
             self._global_placements = (Shard(0),)

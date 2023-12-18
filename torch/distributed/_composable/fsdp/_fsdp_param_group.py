@@ -124,11 +124,8 @@ class FSDPParamGroup:
         # Whether to reduce-scatter or all-reduce gradients, respectively
         # (defaulted to true and can be set to false to save communication
         # during gradient accumulation)
-        self._reduce_scatter_grads: bool = True
-        self._all_reduce_grads: bool = True
-        # Whether to wait for the gradient sync at the end of backward, which
-        # can be disabled if microbatching the backward
-        self._wait_for_grad_sync: bool = True
+        self.reduce_scatter_grads: bool = True
+        self.all_reduce_grads: bool = True
         self._init_gradient_divide_factors()
 
         # - CUDA events for stream synchronization
@@ -347,7 +344,7 @@ class FSDPParamGroup:
         self._training_state = TrainingState.POST_BACKWARD
         for fsdp_param in self.fsdp_params:
             fsdp_param.accumulate_unsharded_grad_if_needed()
-        if not self._reduce_scatter_grads:
+        if not self.reduce_scatter_grads:
             with torch.profiler.record_function("FSDP::post_backward_reshard"):
                 # Reshard parameters before casting to the accumulated
                 # gradient (of higher precision) to minimize peak memory
@@ -387,22 +384,21 @@ class FSDPParamGroup:
                 self._gradient_postdivide_factor,
             )
 
-    def finalize_backward(self):
+    def finalize_backward(self, wait_for_grad_sync: bool):
         log.info("finalizing backward for %s", self._module_fqn)
-        current_stream = torch.cuda.current_stream()
-        for fsdp_param in self.fsdp_params:
+        if any(
+            fsdp_param.state != ShardedState.SHARDED for fsdp_param in self.fsdp_params
+        ):
             # Reshard any unsharded parameters, which should mainly happen for
             # the root's parameters since its inputs may not require gradient
-            if fsdp_param.state != ShardedState.SHARDED:
-                log.info(
-                    "running post-backward hook in finalize for %s", self._module_fqn
-                )
-                self._post_backward()
-            if self._wait_for_grad_sync and fsdp_param._grad_offload_event is not None:
+            log.info("running post-backward hook in finalize for %s", self._module_fqn)
+            self._post_backward()
+        for fsdp_param in self.fsdp_params:
+            if wait_for_grad_sync and fsdp_param._grad_offload_event is not None:
                 fsdp_param._grad_offload_event.synchronize()
                 fsdp_param._grad_offload_event = None
-        if self._wait_for_grad_sync and self._reduce_scatter_view_out_event is not None:
-            current_stream.wait_event(self._reduce_scatter_view_out_event)
+        if wait_for_grad_sync and self._reduce_scatter_view_out_event is not None:
+            torch.cuda.current_stream().wait_event(self._reduce_scatter_view_out_event)
             self._reduce_scatter_view_out_event = None
         self._training_state = TrainingState.IDLE
         self._post_forward_index = None
@@ -459,15 +455,6 @@ class FSDPParamGroup:
             yield
         finally:
             self._training_state = old_training_state
-
-    def set_reduce_scatter_grads(self, reduce_scatter_grads: bool):
-        self._reduce_scatter_grads = reduce_scatter_grads
-
-    def set_all_reduce_grads(self, all_reduce_grads: bool):
-        self._all_reduce_grads = all_reduce_grads
-
-    def set_wait_for_grad_sync(self, wait_for_grad_sync: bool):
-        self._wait_for_grad_sync = wait_for_grad_sync
 
     # Hook Registration #
     def _register_post_backward_hook(

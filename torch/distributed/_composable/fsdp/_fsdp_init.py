@@ -120,13 +120,13 @@ def _get_managed_modules(root_module: nn.Module) -> List[nn.Module]:
 @torch.no_grad()
 def _materialize_meta_modules(
     modules: List[nn.Module],
-    param_init_fn: Optional[Callable[[nn.Module], None]],
+    module_init_fn: Optional[Callable[[nn.Module], None]],
     device: torch.device,
 ) -> None:
-    if param_init_fn is not None:
-        if not callable(param_init_fn):
+    if module_init_fn is not None:
+        if not callable(module_init_fn):
             raise ValueError(
-                f"Expects param_init_fn to be a callable but got {type(param_init_fn)}"
+                f"Expects module_init_fn to be a callable but got {type(module_init_fn)}"
             )
     for module in modules:
         module_states = list(_get_module_states_nonrecurse(module))
@@ -135,7 +135,7 @@ def _materialize_meta_modules(
         ignore_mask = [getattr(t, FSDP_IGNORED, False) for t in module_states]
         if all(ignore_mask) or not any(t.is_meta for t in module_states):
             continue
-        if param_init_fn is None:
+        if module_init_fn is None:
             module.to_empty(device=device, recurse=False)
             # Assume that each module's `reset_parameters()` only initializes
             # its own parameters and not those of its children, and only call
@@ -150,14 +150,14 @@ def _materialize_meta_modules(
                 )
                 raise e
         else:
-            param_init_fn(module)
+            module_init_fn(module)
         # Get references again since materializing from meta device can
         # construct new tensor objects
         module_states = list(_get_module_states_nonrecurse(module))
         if len(module_states) != len(ignore_mask):
-            if param_init_fn is not None:
-                fn_str = "param_init_fn"
-                suffix_str = f"{param_init_fn} on {type(module)}"
+            if module_init_fn is not None:
+                fn_str = "module_init_fn"
+                suffix_str = f"{module_init_fn} on {type(module)}"
             else:
                 fn_str = "reset_parameters"
                 suffix_str = f"{type(module)}"

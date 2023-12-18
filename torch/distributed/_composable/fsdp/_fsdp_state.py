@@ -39,6 +39,7 @@ class FSDPState(_State):
     typically is only true of the root module's state.
     """
 
+    _module: nn.Module
     _default_stream: torch.cuda.Stream
     _all_gather_copy_in_stream: torch.cuda.Stream
     _all_gather_stream: torch.cuda.Stream
@@ -47,7 +48,6 @@ class FSDPState(_State):
     _all_gather_state: AllGatherStateHolder
 
     def __init__(self):
-        self._module: nn.Module = nn.ModuleList()  # for typing
         self._fsdp_param_group: Optional[FSDPParamGroup] = None
         self._mp_policy = MixedPrecisionPolicy()
         self._device = torch.device("cpu")
@@ -61,6 +61,8 @@ class FSDPState(_State):
         # Attributes only used on the root state:
         self._root_post_backward_final_callback_queued: Optional[bool] = None
         self._all_state_refs: List[weakref.ReferenceType[FSDPState]] = []
+        # Whether to wait for the gradient sync at the end of backward, which
+        # can be disabled if microbatching the backward
         self._wait_for_grad_sync: bool = True
 
     def _root_pre_forward(
@@ -116,17 +118,15 @@ class FSDPState(_State):
         for state_ref in self._all_state_refs:
             state = state_ref()
             assert state is not None, "FSDPState deallocated"
-            if state._fsdp_param_group:
-                state._fsdp_param_group.default_stream = self._default_stream
-                state._fsdp_param_group.all_gather_copy_in_stream = (
+            if fsdp_param_group := state._fsdp_param_group:
+                fsdp_param_group.default_stream = self._default_stream
+                fsdp_param_group.all_gather_copy_in_stream = (
                     self._all_gather_copy_in_stream
                 )
-                state._fsdp_param_group.all_gather_stream = self._all_gather_stream
-                state._fsdp_param_group.reduce_scatter_stream = (
-                    self._reduce_scatter_stream
-                )
-                state._fsdp_param_group.all_gather_state = self._all_gather_state
-                state._fsdp_param_group.post_forward_order = self._post_forward_order
+                fsdp_param_group.all_gather_stream = self._all_gather_stream
+                fsdp_param_group.reduce_scatter_stream = self._reduce_scatter_stream
+                fsdp_param_group.all_gather_state = self._all_gather_state
+                fsdp_param_group.post_forward_order = self._post_forward_order
 
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""
@@ -154,7 +154,7 @@ class FSDPState(_State):
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         # When composing with module-hook-based activation checkpointing, the
         # the pre-backward hook is responsible for the unshard
-        if self._in_pre_backward:
+        if self._training_state == TrainingState.PRE_BACKWARD:
             return args, kwargs
         self._training_state = TrainingState.FORWARD
         self._root_pre_forward(module, args, kwargs)
@@ -171,7 +171,7 @@ class FSDPState(_State):
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
         # When composing with module-hook-based activation checkpointing, the
         # post-backward hook is responsible for the reshard
-        if self._in_pre_backward:
+        if self._training_state == TrainingState.PRE_BACKWARD:
             return output
         if self._fsdp_param_group:
             output = self._fsdp_param_group.post_forward(module, input, output)
@@ -210,7 +210,7 @@ class FSDPState(_State):
                 assert state is not None, "FSDPState deallocated"
                 state._training_state = TrainingState.IDLE
                 if state._fsdp_param_group:
-                    state._fsdp_param_group.finalize_backward()
+                    state._fsdp_param_group.finalize_backward(self._wait_for_grad_sync)
             if not self._wait_for_grad_sync:
                 return
             self._root_post_backward_final_callback_queued = False
@@ -220,6 +220,7 @@ class FSDPState(_State):
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
+        # TODO: Refactor following https://github.com/pytorch/pytorch/pull/115628
 
         def _register_hook(tensor: torch.Tensor):
             if tensor.requires_grad:
@@ -237,24 +238,6 @@ class FSDPState(_State):
         Variable._execution_engine.queue_callback(
             self._root_post_backward_final_callback
         )
-
-    # Utilities #
-    def _set_reduce_scatter_grads(self, reduce_scatter_grads: bool) -> None:
-        if self._fsdp_param_group:
-            self._fsdp_param_group.set_reduce_scatter_grads(reduce_scatter_grads)
-
-    def _set_all_reduce_grads(self, all_reduce_grads: bool) -> None:
-        if self._fsdp_param_group:
-            self._fsdp_param_group.set_all_reduce_grads(all_reduce_grads)
-
-    def _set_wait_for_gradient_sync(self, wait_for_grad_sync: bool) -> None:
-        self._wait_for_grad_sync = wait_for_grad_sync
-        if self._fsdp_param_group:
-            self._fsdp_param_group.set_wait_for_grad_sync(wait_for_grad_sync)
-
-    @property
-    def _in_pre_backward(self) -> bool:
-        return self._training_state == TrainingState.PRE_BACKWARD
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:

@@ -61,24 +61,21 @@ def fully_shard(
         raise ValueError(
             f"fully_shard does not support containers that do not implement forward: {module}"
         )
-    offload_type = offload_policy.offload_type
     device = _normalize_device(device)
+    if (offload_type := offload_policy.offload_type) not in (None, "cpu"):
+        raise NotImplementedError(f"Offloading only supports 'cpu', not {offload_type}")
     if device == torch.device("meta") and offload_type == "cpu":
         raise ValueError("device='meta' is not supported with CPU offloading")
-    offload_type = offload_policy.offload_type
-    if offload_type is not None and offload_type != "cpu":
-        raise NotImplementedError(f"Offloading only supports 'cpu', not {offload_type}")
     if (
         comm_policy.forward_prefetch_limit != 1
         or comm_policy.backward_prefetch_limit != 1
     ):
         raise NotImplementedError("Setting the prefetch policy is not supported yet")
 
-    if mesh is None:
-        mesh = _init_default_fully_shard_mesh(device.type)
-    elif mesh.ndim not in (1, 2):
+    mesh = mesh or _init_default_fully_shard_mesh(device.type)
+    if mesh.ndim not in (1, 2):
         raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
-    if mesh.ndim == 1:
+    elif mesh.ndim == 1:
         mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
     elif mesh.ndim == 2:
         mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
@@ -103,7 +100,9 @@ def fully_shard(
     )
 
     managed_modules = _get_managed_modules(module)
-    _materialize_meta_modules(managed_modules, init_policy.param_init_fn, state._device)
+    _materialize_meta_modules(
+        managed_modules, init_policy.module_init_fn, state._device
+    )
     named_params = {p: n for n, p in module.named_parameters()}
     params, buffers = _get_managed_states(managed_modules, named_params)
     _move_params_and_buffers_to_device(
@@ -215,9 +214,9 @@ class FSDP:
             else [_get_module_fsdp_state(submodule) for submodule in module.modules()]
         )
         for state in states:
-            if state:
-                state._set_reduce_scatter_grads(requires_gradient_sync)
-                state._set_all_reduce_grads(requires_gradient_sync)
+            if state and (fsdp_param_group := state._fsdp_param_group):
+                fsdp_param_group.reduce_scatter_grads = requires_gradient_sync
+                fsdp_param_group.all_reduce_grads = requires_gradient_sync
 
     def set_requires_all_reduce(self, requires_all_reduce: bool, recurse: bool = True):
         """
@@ -232,8 +231,8 @@ class FSDP:
             else [_get_module_fsdp_state(submodule) for submodule in module.modules()]
         )
         for state in states:
-            if state:
-                state._set_all_reduce_grads(requires_all_reduce)
+            if state and (fsdp_param_group := state._fsdp_param_group):
+                fsdp_param_group.all_reduce_grads = requires_all_reduce
 
     # TODO: Expose a method for manually waiting on the gradient sync.
     def set_wait_for_gradient_sync(self, wait_for_gradient_sync: bool):
@@ -248,7 +247,7 @@ class FSDP:
         state = _get_module_fsdp_state(module)
         if state is None or not state._is_root:
             raise AssertionError(f"Expects to be called on a root FSDP, not {module}")
-        state._set_wait_for_gradient_sync(wait_for_gradient_sync)
+        state._wait_for_grad_sync = wait_for_gradient_sync
 
     # We can properly allow `_apply` once we have: https://github.com/pytorch/pytorch/issues/113045
     def _apply(self, *args: Any, **kwargs):

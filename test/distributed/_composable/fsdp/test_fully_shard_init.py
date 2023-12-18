@@ -158,10 +158,10 @@ class TestFullyShardInit(FSDPTest):
         """
         Tests initializing a meta-device module to CUDA both with the default
         :meth:`reset_parameters` path and with a user-specified
-        ``param_init_fn``.
+        ``module_init_fn``.
         """
 
-        def param_init_fn(module: nn.Module) -> None:
+        def module_init_fn(module: nn.Module) -> None:
             if any(param.is_meta for param in module.parameters(recurse=False)) or any(
                 buf.is_meta for buf in module.buffers(recurse=False)
             ):
@@ -169,13 +169,13 @@ class TestFullyShardInit(FSDPTest):
                 module.reset_parameters()
 
         self.run_subtests(
-            {"param_init_fn": [None, param_init_fn]},
+            {"module_init_fn": [None, module_init_fn]},
             self._test_meta_device_module,
         )
 
     def _test_meta_device_module(
         self,
-        param_init_fn: Optional[Callable],
+        module_init_fn: Optional[Callable],
     ):
         ref_model = ModelWithParamsAndBuffers(device=torch.device("cuda"))
         for module in (
@@ -189,7 +189,7 @@ class TestFullyShardInit(FSDPTest):
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
         model = ModelWithParamsAndBuffers(device=torch.device("meta"))
-        init_policy = InitPolicy(param_init_fn=param_init_fn)
+        init_policy = InitPolicy(module_init_fn=module_init_fn)
         for module in (model.l3.lin1, model.l3.lin2, model.l3.buf_mod, model.l4, model):
             fully_shard(module, init_policy=init_policy)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
@@ -269,23 +269,23 @@ class TestFSDPInitMultiThread(FSDPTestMultiThread):
             fully_shard(module, mesh=cpu_mesh, device="cuda")
 
     @skip_if_lt_x_gpu(2)
-    def test_invalid_param_init_fn_raises(self):
+    def test_invalid_module_init_fn_raises(self):
         model = nn.Linear(3, 3, device="meta")
         with self.assertRaisesRegex(
-            ValueError, "Expects param_init_fn to be a callable but got <class 'int'>"
+            ValueError, "Expects module_init_fn to be a callable but got <class 'int'>"
         ):
-            fully_shard(model, init_policy=InitPolicy(param_init_fn=42))
+            fully_shard(model, init_policy=InitPolicy(module_init_fn=42))
 
-        def param_init_fn(module: nn.Module):
+        def module_init_fn(module: nn.Module):
             module.register_parameter("p", nn.Parameter(torch.empty((3,))))
 
         model = nn.Linear(3, 3, device="meta")
         with self.assertRaisesRegex(
             AssertionError,
-            r"Calling param_init_fn changed the module's registered parameters "
+            r"Calling module_init_fn changed the module's registered parameters "
             r"or buffers \(before 2 vs. after 3\), which is unsupported",
         ):
-            fully_shard(model, init_policy=InitPolicy(param_init_fn=param_init_fn))
+            fully_shard(model, init_policy=InitPolicy(module_init_fn=module_init_fn))
 
     @skip_if_lt_x_gpu(2)
     def test_cuda_device(self):

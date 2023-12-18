@@ -9,7 +9,7 @@ import torch.nn as nn
 class InitPolicy:
     """
     Attributes:
-        param_init_fn (Optional[Callable[[nn.Module], None]]): This function
+        module_init_fn (Optional[Callable[[nn.Module], None]]): This function
             is called on managed meta-device modules to materialize and
             initialize them. This should only modify parameters/buffers for the
             passed-in module and not any of its children since FSDP will call
@@ -18,7 +18,7 @@ class InitPolicy:
             buffers from rank 0 to all ranks before sharding them.
     """
 
-    param_init_fn: Optional[Callable[[nn.Module], None]] = None
+    module_init_fn: Optional[Callable[[nn.Module], None]] = None
     sync_module_states: bool = False
 
 
