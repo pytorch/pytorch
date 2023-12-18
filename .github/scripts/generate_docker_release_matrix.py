@@ -12,8 +12,9 @@ Will output a condensed version of the matrix. Will include fllowing:
 """
 
 import json
-import generate_binary_build_matrix
 from typing import Dict, List
+
+import generate_binary_build_matrix
 
 DOCKER_IMAGE_TYPES = ["runtime", "devel"]
 
@@ -25,7 +26,9 @@ def generate_docker_matrix() -> Dict[str, List[Dict[str, str]]]:
                 {
                     "cuda": cuda,
                     "cuda_full_version": version,
-                    "cudnn_version": generate_binary_build_matrix.CUDA_ARCHES_CUDNN_VERSION[cuda],
+                    "cudnn_version": generate_binary_build_matrix.CUDA_ARCHES_CUDNN_VERSION[
+                        cuda
+                    ],
                     "image_type": image,
                     "platform": "linux/arm64,linux/amd64",
                 }
