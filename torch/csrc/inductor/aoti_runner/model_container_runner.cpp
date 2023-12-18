@@ -34,8 +34,11 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
   get_call_spec_func_ = reinterpret_cast<decltype(get_call_spec_func_)>(
       model_so_->sym("AOTInductorModelContainerGetCallSpec"));
 
-  AOTI_RUNTIME_ERROR_CODE_CHECK(
-      create_func_(&container_handle_, num_models, is_cpu, cubin_dir.c_str()));
+  AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
+      &container_handle_,
+      num_models,
+      is_cpu,
+      cubin_dir.empty() ? nullptr : cubin_dir.c_str()));
 
   /*
   #ifdef FBCODE_CAFFE2
