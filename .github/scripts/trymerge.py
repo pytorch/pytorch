@@ -1743,15 +1743,10 @@ def validate_revert(
             f"Will not revert as @{author_login} is not one of "
             f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
         )
-    skip_internal_checks = can_skip_internal_checks(pr, comment_id)
-
-    # Ignore associated diff it PR does not have internal changes
-    if pr.has_no_connected_diff():
-        skip_internal_checks = True
 
     # Raises exception if matching rule is not found, but ignores all status checks
     find_matching_merge_rule(
-        pr, repo, skip_mandatory_checks=True, skip_internal_checks=skip_internal_checks
+        pr, repo, skip_mandatory_checks=True, skip_internal_checks=True
     )
     commit_sha = pr.get_merge_commit()
     if commit_sha is None:
@@ -1759,13 +1754,6 @@ def validate_revert(
         if len(commits) == 0:
             raise PostCommentError("Can't find any commits resolving PR")
         commit_sha = commits[0]
-    msg = repo.commit_message(commit_sha)
-    rc = RE_DIFF_REV.search(msg)
-    if rc is not None and not skip_internal_checks:
-        raise PostCommentError(
-            f"Can't revert PR that was landed via phabricator as {rc.group(1)}.  "
-            + "Please revert by going to the internal diff and clicking Unland."
-        )
     return (author_login, commit_sha)
 
 
@@ -1784,6 +1772,7 @@ def try_revert(
         author_login, commit_sha = validate_revert(repo, pr, comment_id=comment_id)
     except PostCommentError as e:
         return post_comment(str(e))
+
     revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
     revert_msg += f" due to {reason}" if reason is not None else ""
     revert_msg += (
@@ -1798,9 +1787,19 @@ def try_revert(
     msg += revert_msg
     repo.amend_commit_message(msg)
     repo.push(pr.default_branch(), dry_run)
-    post_comment(
+
+    revert_message = (
         f"@{pr.get_pr_creator_login()} your PR has been successfully reverted."
     )
+    if (
+        pr.has_internal_changes()
+        and not pr.has_no_connected_diff()
+        and not can_skip_internal_checks(pr, comment_id)
+    ):
+        revert_message += "\n:warning: This PR might contain internal changes"
+        revert_message += "\ncc: @pytorch/pytorch-dev-infra"
+    post_comment(revert_message)
+
     if not dry_run:
         pr.add_numbered_label("reverted")
         gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
