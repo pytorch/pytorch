@@ -80,12 +80,14 @@ class BoundVars:
 
                 result[key] = make_fn(subblock)
 
-            else:
-                assert "set_indirect" in key
+            elif "set_indirect" in key:
                 idx = int(key[len("set_indirect") :])
                 var = self.loop_body.indirect_vars[idx]
                 indirect = partial(self.set_indirect, var)
                 result[key] = indirect
+            else:
+                assert "scan" in key
+                result[key] = submodules[key]
 
         return result
 
