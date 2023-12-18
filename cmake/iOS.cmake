@@ -7,7 +7,7 @@
 # IOS_PLATFORM = OS (default) or SIMULATOR
 #   This decides if SDKS will be selected from the iPhoneOS.platform or iPhoneSimulator.platform folders
 #   OS - the default, used to build for iPhone and iPad physical devices, which have an arm arch.
-#   SIMULATOR - used to build for the Simulator platforms, which have an x86 arch.
+#   SIMULATOR - used to build for the Simulator platforms, which now uses arm64 arch.
 #
 # CMAKE_IOS_DEVELOPER_ROOT = automatic(default) or /path/to/platform/Developer folder
 #   By default this location is automatcially chosen based on the IOS_PLATFORM value above.
@@ -41,7 +41,7 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "" CACHE STRING "Force unset of the deployment t
 # Determine the cmake host system version so we know where to find the iOS SDKs
 find_program(CMAKE_UNAME uname /bin /usr/bin /usr/local/bin)
 if(CMAKE_UNAME)
-    exec_program(uname ARGS -r OUTPUT_VARIABLE CMAKE_HOST_SYSTEM_VERSION)
+    execute_process(COMMAND uname -r OUTPUT_VARIABLE CMAKE_HOST_SYSTEM_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE)
     string(REGEX REPLACE "^([0-9]+)\\.([0-9]+).*$" "\\1" DARWIN_MAJOR_VERSION "${CMAKE_HOST_SYSTEM_VERSION}")
 endif(CMAKE_UNAME)
 
@@ -127,7 +127,11 @@ set(IOS_DEPLOYMENT_TARGET ${IOS_DEPLOYMENT_TARGET} CACHE STRING "Minimum iOS ver
 
 # Setup iOS developer location unless specified manually with CMAKE_IOS_DEVELOPER_ROOT
 # Note Xcode 4.3 changed the installation location, choose the most recent one available
-exec_program(/usr/bin/xcode-select ARGS -print-path OUTPUT_VARIABLE CMAKE_XCODE_DEVELOPER_DIR)
+execute_process(
+    COMMAND /usr/bin/xcode-select -print-path
+    OUTPUT_VARIABLE CMAKE_XCODE_DEVELOPER_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 set(XCODE_POST_43_ROOT "${CMAKE_XCODE_DEVELOPER_DIR}/Platforms/${IOS_PLATFORM_LOCATION}/Developer")
 set(XCODE_PRE_43_ROOT "/Developer/Platforms/${IOS_PLATFORM_LOCATION}/Developer")
 if(NOT CMAKE_IOS_DEVELOPER_ROOT)
@@ -160,7 +164,7 @@ set(CMAKE_OSX_SYSROOT ${CMAKE_IOS_SDK_ROOT} CACHE PATH "Sysroot used for iOS sup
 if(IOS_PLATFORM STREQUAL "OS")
     set(DEFAULT_IOS_ARCH "arm64")
 elseif(IOS_PLATFORM STREQUAL "SIMULATOR")
-    set(DEFAULT_IOS_ARCH "x86_64")
+    set(DEFAULT_IOS_ARCH "arm64")
 elseif(IOS_PLATFORM STREQUAL "WATCHOS")
     set(DEFAULT_IOS_ARCH "armv7k;arm64_32")
 endif()

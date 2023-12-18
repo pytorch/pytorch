@@ -62,7 +62,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 enum GEMMAndBiasActivationEpilogue {
   None,
   RELU,
@@ -115,13 +115,14 @@ void scaled_gemm(
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
-    const void* bias,
+    const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
     const void* result_scale_ptr,
     int64_t result_ld,
     ScalarType result_dtype,
-    void* amax_ptr);
+    void* amax_ptr,
+    bool use_fast_accum);
 #endif
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \
@@ -148,7 +149,7 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
 
-#if defined(USE_ROCM) && ROCM_VERSION <= 55000
+#if defined(USE_ROCM) && ROCM_VERSION <= 50500
 // ROCm 5.6 hipblas matches the const Dtype *A API, but prior hipblas does not.
 #define CUDABLAS_TRSM_ARGTYPES(Dtype)                                  \
   hipblasHandle_t handle, hipblasSideMode_t side, hipblasFillMode_t uplo, \

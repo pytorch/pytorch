@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::Clip_6"
-    name: "Constant_0"
+    name: "Constant_2"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -17,7 +17,7 @@ graph {
   }
   node {
     output: "onnx::Clip_7"
-    name: "Constant_1"
+    name: "Constant_3"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -33,7 +33,7 @@ graph {
     input: "onnx::Clip_6"
     input: "onnx::Clip_7"
     output: "5"
-    name: "Clip_2"
+    name: "Clip_4"
     op_type: "Clip"
   }
   name: "main_graph"

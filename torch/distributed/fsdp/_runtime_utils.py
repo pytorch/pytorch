@@ -1,7 +1,6 @@
 import functools
 import logging
 from enum import auto, Enum
-from itertools import chain
 from typing import Any, Callable, Dict, List, no_type_check, Optional, Set, Tuple
 
 import torch
@@ -37,7 +36,7 @@ from torch.distributed.utils import (
     _p_assert,
     _to_kwargs,
 )
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 log = logging.getLogger(__name__)
 
@@ -254,11 +253,6 @@ def _share_state_and_init_handle_attrs(
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
-        # TODO: remove this if check after we integrate device_mesh in Composable APIs.
-        # Currently, it is needed since root_state of composable APIs doesn't have DeviceMesh passed in yet.
-        if hasattr(root_state, "_device_mesh"):
-            fsdp_state._device_mesh = root_state._device_mesh
-            fsdp_state._enable_extension = root_state._enable_extension
     for attr_name, attr_values in attr_name_to_values.items():
         if len(attr_values) != 1:
             raise ValueError(
@@ -352,10 +346,9 @@ def _reshard(
             free_event.record()
             state._free_event_queue.enqueue(free_event)
     handle.post_reshard()
-    # Since we prefetch entire handles keys at a time, conservatively mark
-    # the entire key as no longer prefetched once we free at least one
-    if free_unsharded_flat_param:
-        handle._prefetched = False
+    # Flat parameter freed or not, we always have to "unshard" the parameter
+    # upon next access to get its shape correct.
+    handle._prefetched = False
 
 
 def _unshard_grads(
@@ -599,6 +592,7 @@ def _root_pre_forward(
                     handles.append(fsdp_state._handle)
             for handle in handles:
                 handle._needs_pre_forward_unshard = True
+                handle._prefetched = False
         _wait_for_computation_stream(
             state._device_handle.current_stream(),
             state._unshard_stream,
@@ -835,10 +829,15 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
     )
     if state._comm_hook is None:  # default path
         _div_if_needed(padded_unsharded_grad, state._gradient_predivide_factor)
+        pg = (
+            handle._fake_process_group
+            if handle._use_fake_reduce
+            else state.process_group
+        )
         dist.reduce_scatter_tensor(
             new_sharded_grad,
             padded_unsharded_grad,
-            group=state.process_group,
+            group=pg,
         )
         if uses_hybrid_sharded_strategy:
             state._all_reduce_stream.wait_stream(state._post_backward_stream)
@@ -1151,15 +1150,21 @@ def _finalize_params(
     if not handle:
         return
     flat_param = handle.flat_param
-    if hasattr(flat_param, "_post_backward_hook_state"):
-        post_backward_hook_state_len = len(flat_param._post_backward_hook_state)
-        expected_post_backward_hook_state_len = int(flat_param.requires_grad) + 1
-        _p_assert(
-            post_backward_hook_state_len == expected_post_backward_hook_state_len,
-            f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
-        )
-        flat_param._post_backward_hook_state[-1].remove()
-        delattr(flat_param, "_post_backward_hook_state")
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        if hasattr(flat_param, "_post_backward_hook_handle"):
+            pbhs_handle = flat_param._post_backward_hook_handle
+            pbhs_handle.remove()
+            del flat_param._post_backward_hook_handle
+    else:
+        if hasattr(flat_param, "_post_backward_hook_state"):
+            post_backward_hook_state_len = len(flat_param._post_backward_hook_state)
+            expected_post_backward_hook_state_len = int(flat_param.requires_grad) + 1
+            _p_assert(
+                post_backward_hook_state_len == expected_post_backward_hook_state_len,
+                f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
+            )
+            flat_param._post_backward_hook_state[-1].remove()
+            delattr(flat_param, "_post_backward_hook_state")
     if flat_param.requires_grad:
         if not state._sync_gradients:
             # Preserve the gradient accumulation state if not synchronizing
@@ -1412,22 +1417,31 @@ def _register_post_backward_hook(
     if not handle:
         return
     flat_param = handle.flat_param
-    already_registered = hasattr(flat_param, "_post_backward_hook_state")
-    if already_registered or not flat_param.requires_grad:
-        return
-    # Get the `AccumulateGrad` object
-    temp_flat_param = flat_param.expand_as(flat_param)
-    _p_assert(
-        temp_flat_param.grad_fn is not None,
-        "The `grad_fn` is needed to access the `AccumulateGrad` and "
-        "register the post-backward hook",
-    )
-    acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
-    assert acc_grad is not None
-    hook_handle = acc_grad.register_hook(
-        functools.partial(_post_backward_hook, state, handle)
-    )
-    flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
+
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        already_registered = hasattr(flat_param, "_post_backward_hook_handle")
+        if already_registered or not flat_param.requires_grad:
+            return
+        hook = functools.partial(_post_backward_hook, state, handle)
+        hook_handle = flat_param.register_post_accumulate_grad_hook(hook)
+        flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined]
+    else:
+        already_registered = hasattr(flat_param, "_post_backward_hook_state")
+        if already_registered or not flat_param.requires_grad:
+            return
+        # Get the `AccumulateGrad` object
+        temp_flat_param = flat_param.expand_as(flat_param)
+        _p_assert(
+            temp_flat_param.grad_fn is not None,
+            "The `grad_fn` is needed to access the `AccumulateGrad` and "
+            "register the post-backward hook",
+        )
+        acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
+        assert acc_grad is not None
+        hook_handle = acc_grad.register_hook(
+            functools.partial(_post_backward_hook, state, handle)
+        )
+        flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
 
 
 def _register_post_backward_reshard_only_hook(
@@ -1451,21 +1465,28 @@ def _register_post_backward_reshard_only_hook(
     inp_tensors: Optional[List[torch.Tensor]] = None
     if not handle:
         return
-    if handle.flat_param.requires_grad:
+    flat_param = handle.flat_param
+
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        already_registered = hasattr(flat_param, "_post_backward_hook_handle")
+    else:
+        already_registered = hasattr(flat_param, "_post_backward_hook_state")
+
+    if already_registered or flat_param.requires_grad:
         return
     if inp_tensors is None:
-        args_list, _ = tree_flatten(args)
-        kwargs_list, _ = tree_flatten(kwargs)
+        args_flat = pytree.arg_tree_leaves(*args, **kwargs)
         inp_tensors = [
-            obj
-            for obj in chain(args_list, kwargs_list)
-            if torch.is_tensor(obj) and obj.requires_grad
+            obj for obj in args_flat if torch.is_tensor(obj) and obj.requires_grad
         ]
     assert inp_tensors is not None  # mypy
     hook_handle = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard, state, handle)
     )
-    handle.flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined, assignment]
+    else:
+        flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
 
 
 @no_type_check

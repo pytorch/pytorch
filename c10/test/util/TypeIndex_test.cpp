@@ -172,6 +172,7 @@ struct Functor final {
 };
 #if C10_TYPENAME_SUPPORTS_CONSTEXPR
 static_assert(
+    // NOLINTNEXTLINE(misc-redundant-expression)
     get_fully_qualified_type_name<std::string(int64_t, const Type<int>&)>() ==
         get_fully_qualified_type_name<
             typename c10::guts::infer_function_traits_t<Functor>::func_type>(),

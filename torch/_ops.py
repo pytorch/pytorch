@@ -7,7 +7,7 @@ import types
 from typing import Any, Callable, Dict, List, Type, Union
 
 import torch._C
-
+import torch.utils._pytree as pytree
 from torch import _utils_internal
 from torch._functorch.pyfunctorch import dispatch_functorch
 
@@ -231,30 +231,32 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
-_global_higher_order_ops = {}
 _higher_order_ops = {}
+
+_HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
+    DispatchKey.PythonDispatcher,  # type: ignore[attr-defined]
+    DispatchKey.PythonTLSSnapshot,  # type: ignore[attr-defined]
+    DispatchKey.ADInplaceOrView,
+    DispatchKey.BackendSelect,
+    DispatchKey.AutocastCPU,  # type: ignore[attr-defined]
+    DispatchKey.AutocastCUDA,  # type: ignore[attr-defined]
+]
 
 
 class HigherOrderOperator(OperatorBase):
-    # _deprecated_global_ns: Whether or not the HigherOrderOperator appears as:
-    # (True) torch.ops.{name}
-    # (False) torch.ops.higher_order.{name}
+    # The HigherOrderOperator will appear as torch.ops.higher_order.{name}
     #
     # If you're creating a new HigherOrderOperator, please do not change the
     # default. Adding operators to the global torch.ops namespace is a bad
     # practice due to name collisions.
-    def __init__(self, name, *, _deprecated_global_ns=False):
+    def __init__(self, name):
         super().__init__()
         self._name = name
 
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
         self.__name__ = name
-        if _deprecated_global_ns:
-            _global_higher_order_ops[name] = self
-            self._ns = None
-        else:
-            _higher_order_ops[name] = self
-            self._ns = "higher_order"
+        _higher_order_ops[name] = self
+        self._ns = "higher_order"
 
         # For a normal HigherOrderOperator instance, we will change its __module__ from torch._ops to
         # torch._ops.higher_order.
@@ -264,6 +266,14 @@ class HigherOrderOperator(OperatorBase):
             self_name_space = "." + self.namespace if self.namespace else ""
             self.__module__ = self.__module__ + self_name_space
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
+
+        for dispatch_key in _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
+            self.fallthrough(dispatch_key)
+
+    def py_impl(self, k):
+        if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
+            self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
+        return super().py_impl(k)
 
     @property
     def namespace(self):
@@ -322,7 +332,11 @@ class HigherOrderOperator(OperatorBase):
 
         # This can current fail due to backend fallbacks.  You just have to
         # register them by hand for HigherOrderOperator.
-        assert final_key in self.py_kernels, f"{dispatch_key} -> {final_key}"
+        if final_key not in self.py_kernels:
+            raise NotImplementedError(
+                f"could not find kernel for HigherOrderOperator {self._name} "
+                f"at dispatch key {final_key} (resolved from {dispatch_key})"
+            )
         self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
         kernel = self.py_kernels[final_key]
         # It's illegal to register DispatchKey to py_kernels, since there's no
@@ -359,10 +373,7 @@ class HigherOrderOperator(OperatorBase):
 
 
 def _to_flat_tuple(args, kwargs):
-    flat_args, _ = torch.utils._pytree.tree_flatten(args)
-    flat_kwargs, _ = torch.utils._pytree.tree_flatten(kwargs)
-    flat_all = flat_args + flat_kwargs
-    return flat_all
+    return pytree.arg_tree_leaves(*args, **kwargs)
 
 
 def _compute_keyset(args, kwargs, non_fallthrough_keys):
@@ -473,6 +484,9 @@ class OpOverload(OperatorBase):
         self.__qualname__ = self._name
         self.__annotations__ = {}
 
+        # If the OpOverload was constructed from a Library.def in Python.
+        self._defined_in_python = self.__qualname__ in torch.library._defs
+
         # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
         is_write = None
         for a in self._schema.arguments:
@@ -495,8 +509,10 @@ class OpOverload(OperatorBase):
             *self._schema.name.split("::"), self._overloadname
         )
 
-    def __call__(self, *args, **kwargs):
-        return self._op(*args, **kwargs or {})
+    def __call__(self_, *args, **kwargs):  # noqa: B902
+        # use `self_` to avoid naming collide with aten ops arguments that
+        # named "self". This way, all the aten ops can be called by kwargs.
+        return self_._op(*args, **(kwargs or {}))
 
     def __hash__(self):
         return hash(self._op)
@@ -591,9 +607,7 @@ class OpOverload(OperatorBase):
                     with temporarily_pop_mode(curr_stack) as curr_mode:
                         assert hasattr(curr_mode, "__torch_dispatch__")
                         overload_types = []
-                        args_flattened, _ = torch.utils._pytree.tree_flatten(
-                            (args, kwargs.values())
-                        )
+                        args_flattened = pytree.arg_tree_leaves(*args, **kwargs)
                         for a in args_flattened:
                             # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
                             # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
@@ -735,12 +749,15 @@ class OpOverloadPacket:
     def __iter__(self):
         return iter(self._dir)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self_, *args, **kwargs):  # noqa: B902
+        # use `self_` to avoid naming collide with aten ops arguments that
+        # named "self". This way, all the aten ops can be called by kwargs.
+
         # overloading __call__ to ensure torch.ops.foo.bar()
         # is still callable from JIT
         # We save the function ptr as the `op` attribute on
         # OpOverloadPacket to access it here.
-        return self._op(*args, **kwargs or {})
+        return self_._op(*args, **(kwargs or {}))
 
     # TODO: use this to make a __dir__
     def overloads(self):
@@ -755,7 +772,7 @@ class OpOverloadPacket:
 # correct one at runtime and always calls into the boxed version of the method
 # Autograd codegen creates VariableType, TracerType,
 # inplace or view type and python bindings.
-# Aten codegen generates tensor methods for the the tensor class.
+# Aten codegen generates tensor methods for the tensor class.
 
 # _OpNamespace is a subclass of ModuleType because the torch script
 # allows attribute lookups on modules only. Since we want torch.ops.foo.bar()
@@ -806,6 +823,10 @@ class _OpNamespace(types.ModuleType):
         qualified_op_name = f"{namespace_name}::{op_name}"
         try:
             op, overload_names = torch._C._jit_get_operation(qualified_op_name)
+            if op is None:
+                raise AttributeError(
+                    f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
+                )
         except RuntimeError as e:
             # Turn this into AttributeError so getattr(obj, key, default)
             # works (this is called by TorchScript with __origin__)
@@ -850,9 +871,6 @@ class _Ops(types.ModuleType):
     def __init__(self):
         super().__init__("torch.ops")
         self.loaded_libraries = set()
-        self._global_higher_order_op_namespace = _PyOpNamespace(
-            "torch.ops", _global_higher_order_ops
-        )
         self._higher_order_op_namespace = _PyOpNamespace(
             "torch.ops.higher_order", _higher_order_ops
         )
@@ -860,8 +878,6 @@ class _Ops(types.ModuleType):
 
     def __getattr__(self, name):
         # Check if the name is a HigherOrderOperator
-        if name in self._global_higher_order_op_namespace._ops:
-            return getattr(self._global_higher_order_op_namespace, name)
         if name == "higher_order":
             return self._higher_order_op_namespace
 

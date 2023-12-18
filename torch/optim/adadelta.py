@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _view_as_real)
 from typing import List, Optional
 
 __all__ = ["Adadelta", "adadelta"]
@@ -49,9 +49,11 @@ class Adadelta(Optimizer):
             group.setdefault("differentiable", False)
 
     def _init_group(self, group, params_with_grad, grads, square_avgs, acc_deltas):
+        has_complex = False
         for p in group["params"]:
             if p.grad is None:
                 continue
+            has_complex |= torch.is_complex(p)
             params_with_grad.append(p)
             if p.grad.is_sparse:
                 raise RuntimeError("Adadelta does not support sparse gradients")
@@ -73,10 +75,11 @@ class Adadelta(Optimizer):
             acc_deltas.append(state["acc_delta"])
 
             state["step"] += 1
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -102,7 +105,7 @@ class Adadelta(Optimizer):
                 group["differentiable"],
             )
 
-            self._init_group(group, params_with_grad, grads, square_avgs, acc_deltas)
+            has_complex = self._init_group(group, params_with_grad, grads, square_avgs, acc_deltas)
 
             adadelta(
                 params_with_grad,
@@ -116,6 +119,7 @@ class Adadelta(Optimizer):
                 foreach=foreach,
                 maximize=maximize,
                 differentiable=differentiable,
+                has_complex=has_complex,
             )
 
         return loss
@@ -153,9 +157,11 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         rho (float, optional): coefficient used for computing a running average
-            of squared gradients (default: 0.9)
+            of squared gradients (default: 0.9). A higher value of `rho` will
+            result in a slower average, which can be helpful for preventing
+            oscillations in the learning process.
         eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-6)
+            numerical stability (default: 1e-6).
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
@@ -178,6 +184,7 @@ def adadelta(
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     foreach: Optional[bool] = None,
     differentiable: bool = False,
+    has_complex: bool = False,
     *,
     lr: float,
     rho: float,
@@ -189,7 +196,6 @@ def adadelta(
 
     See :class:`~torch.optim.Adadelta` for details.
     """
-
     # We still respect when the user inputs False for foreach.
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
@@ -213,6 +219,7 @@ def adadelta(
         weight_decay=weight_decay,
         maximize=maximize,
         differentiable=differentiable,
+        has_complex=has_complex,
     )
 
 
@@ -228,6 +235,7 @@ def _single_tensor_adadelta(
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     for (param, grad, square_avg, acc_delta) in zip(
@@ -268,6 +276,7 @@ def _multi_tensor_adadelta(
     eps: float,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     assert not differentiable, "_foreach ops don't support autograd"
@@ -279,6 +288,9 @@ def _multi_tensor_adadelta(
     for ((device_params, device_grads, device_square_avgs, device_acc_deltas), _) in grouped_tensors.values():
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
+
+        if has_complex:
+            _view_as_real(device_params, device_grads, device_square_avgs, device_acc_deltas)
 
         if weight_decay != 0:
             # Re-use the intermediate memory (device_grads) already allocated for maximize

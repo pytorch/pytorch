@@ -1,3 +1,4 @@
+#include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/vulkan/impl/Common.h>
 #include <ATen/native/vulkan/impl/Packing.h>
 
@@ -17,6 +18,20 @@ api::ShaderInfo get_nchw_to_image_shader(const vTensor& v_dst) {
             return VK_KERNEL(nchw_to_image_int8);
           case c10::ScalarType::QInt32:
             return VK_KERNEL(nchw_to_image_int32);
+          default:
+            TORCH_CHECK(
+                false,
+                "Vulkan quantization currently not supported for dtype ",
+                v_dst.dtype());
+        }
+      case api::StorageType::TEXTURE_2D:
+        switch (v_dst.dtype()) {
+          case c10::ScalarType::QUInt8:
+            return VK_KERNEL(nchw_to_image2d_uint8);
+          case c10::ScalarType::QInt8:
+            return VK_KERNEL(nchw_to_image2d_int8);
+          case c10::ScalarType::QInt32:
+            return VK_KERNEL(nchw_to_image2d_int32);
           default:
             TORCH_CHECK(
                 false,
@@ -148,7 +163,7 @@ void record_nchw_to_image_op(
       params.buffer());
 }
 
-void record_image_to_nchw_op(
+bool record_image_to_nchw_op(
     api::Context* const context,
     api::ShaderInfo& compute_shader,
     vTensor& v_src,
@@ -192,7 +207,7 @@ void record_image_to_nchw_op(
   }
 
   api::UniformParamsBuffer params(context, block);
-  context->submit_compute_job(
+  return context->submit_compute_job(
       // shader descriptor
       compute_shader,
       // pipeline barrier
@@ -248,7 +263,7 @@ void record_nchw_to_buffer_op(
       cpu_buffer_metadata.buffer());
 }
 
-void record_buffer_to_nchw_op(
+bool record_buffer_to_nchw_op(
     api::Context* const context,
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
@@ -262,7 +277,7 @@ void record_buffer_to_nchw_op(
   api::UniformParamsBuffer cpu_buffer_metadata(
       context, v_src.get_cpu_buffer_metadata());
 
-  context->submit_compute_job(
+  return context->submit_compute_job(
       // shader descriptor
       VK_KERNEL(buffer_to_buffer),
       // pipeline barrier
@@ -281,6 +296,71 @@ void record_buffer_to_nchw_op(
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
       v_src.buffer_metadata());
+}
+
+vTensor channel_image_repacking(
+    const vTensor& v_input,
+    api::GPUMemoryLayout target_layout,
+    const api::ShaderInfo& shader_descriptor) {
+  api::Context* const context = api::context();
+
+  vTensor v_output{
+      context,
+      v_input.sizes(),
+      v_input.dtype(),
+      v_input.storage_type(),
+      target_layout,
+  };
+
+  // Required to determine how to insert memory barriers in the command buffer
+  api::PipelineBarrier pipeline_barrier{};
+
+  // The shader assumes a 4d nchw to calculate the lookup coordinate.
+  // If the input is not 4d, we need to pad it with 1's on the front.
+  const struct Block final {
+    api::utils::ivec4 sizes;
+  } block{
+      api::utils::make_ivec4_prepadded1(v_input.sizes()),
+  };
+
+  api::UniformParamsBuffer params(context, block);
+
+  context->submit_compute_job(
+      // shader descriptor
+      // VK_KERNEL(packing_channel_to_height),
+      shader_descriptor,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_output.extents(),
+      // local work group size
+      adaptive_work_group_size(v_output.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::COMPUTE,
+          api::MemoryAccessType::WRITE),
+      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+      // params buffer
+      params.buffer());
+
+  return v_output;
+}
+
+vTensor convert_image_channels_packed_to_height_packed(const vTensor& v_input) {
+  return channel_image_repacking(
+      v_input,
+      api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED,
+      VK_KERNEL(convert_channels_to_height_packed));
+}
+
+vTensor convert_image_channels_packed_to_width_packed(const vTensor& v_input) {
+  return channel_image_repacking(
+      v_input,
+      api::GPUMemoryLayout::TENSOR_WIDTH_PACKED,
+      VK_KERNEL(convert_channels_to_width_packed));
 }
 
 } // namespace packing

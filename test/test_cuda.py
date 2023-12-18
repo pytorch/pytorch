@@ -29,7 +29,8 @@ from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_CUDA, TEST_CUDA_GRAPH, TEST_WITH_ROCM, TEST_NUMPY, \
     get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
-from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, _create_scaling_case, _create_scaling_models_optimizers
+from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
+    _create_scaling_case, _create_scaling_models_optimizers, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 from torch.utils.viz._cycles import observe_tensor_cycles
 
@@ -63,6 +64,7 @@ if TEST_CUDA:
 _cycles_per_ms = None
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCuda(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -75,6 +77,28 @@ class TestCuda(TestCase):
     def tearDown(self):
         del self.autocast_lists
         super().tearDown()
+
+    def test_pinned_memory_with_cudaregister(self):
+        torch.cuda.memory._set_allocator_settings("pinned_use_cuda_host_register:True,pinned_num_register_threads:8")
+        t = torch.ones(20)
+        self.assertFalse(t.is_pinned())
+        try:
+            pinned_t = torch.ones(1 << 21).pin_memory()
+            self.assertTrue(pinned_t.is_pinned())
+            pinned_t = torch.ones(1 << 24).pin_memory()
+            self.assertTrue(pinned_t.is_pinned())
+        except RuntimeError as e:
+            # Some GPUs don't support same address space on host and device side
+            pass
+
+    def test_pinned_memory_with_cudaregister_multithread(self):
+        num_threads = 4
+        threads = [threading.Thread(target=self.test_pinned_memory_with_cudaregister)
+                   for t in range(num_threads)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
     def test_cudart_register(self):
         t = torch.ones(20)
@@ -274,6 +298,7 @@ class TestCuda(TestCase):
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "temporarily disabled for async")
+    @unittest.skipIf(_get_torch_cuda_version() >= (12, 2), "skipped as explicit workspace allocation is removed")
     def test_cublas_workspace_explicit_allocation(self):
         a = torch.randn(7, 7, device='cuda', requires_grad=False)
         default_workspace_size = 4096 * 2 * 1024 + 16 * 8 * 1024  # :4096:2:16:8
@@ -856,7 +881,7 @@ except RuntimeError as e:
             @staticmethod
             def backward(ctx, grad):
                 self.assertEqual(torch.cuda.current_stream(), ctx.stream)
-                # delays the operation in the the background stream
+                # delays the operation in the background stream
                 torch.cuda._sleep(1000 * 5000)
                 return grad * ctx.val, None
 
@@ -2140,7 +2165,7 @@ torch.cuda.synchronize()
     def test_graph_is_current_stream_capturing(self):
         self.assertFalse(torch.cuda.is_current_stream_capturing())
 
-        if (TEST_CUDA and (not TEST_WITH_ROCM) and int(torch.version.cuda.split(".")[0]) >= 11):
+        if TEST_CUDA and (not TEST_WITH_ROCM):
             s = torch.cuda.Stream()
             with torch.cuda.stream(s):
                 g = torch.cuda.CUDAGraph()
@@ -3377,6 +3402,7 @@ exit(2)
         self.assertEqual(rc, "0")
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot(self):
@@ -3677,6 +3703,15 @@ class TestCudaMallocAsync(TestCase):
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:none")
 
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("pinned_use_cuda_host_register:none")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:none")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:1024")
+
 
     def test_raises_oom(self):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
@@ -3864,6 +3899,7 @@ def reconstruct_from_tensor_metadata(metadata):
 
 
 @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlockStateAbsorption(TestCase):
 
     def checkCheckpointedBlock(self, before_block, after_block):

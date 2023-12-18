@@ -212,6 +212,9 @@ try:
             self.validator.add_assertion(number >= 0)
             return number ** 0.5
 
+        def abs(self, number: z3.ArithRef) -> z3.ArithRef:
+            return z3.Abs(number)
+
     # Lifts a callable to be used in Z3.
     #
     # This function replaces the given 'op' by a function that:
@@ -221,7 +224,7 @@ try:
     #   2. Calls an operation that corresponds to 'op', but works with Z3
     #      inhabitants (left as is if it works as is)
     def z3op(op: Callable, validator: "TranslationValidator") -> Callable:
-        from torch.fx.experimental.symbolic_shapes import sym_sqrt
+        from torch.fx.experimental.sym_node import sym_sqrt
 
         # Operations that have booleans as their argument.
         # This is needed because the argument of some FX nodes were
@@ -263,6 +266,7 @@ try:
             operator.floordiv: lift(ops.floordiv),
             operator.truediv: lift(ops.div),
             operator.mod: lift(ops.mod),
+            operator.abs: lift(ops.abs),
 
             # Math module.
             math.ceil: lift(ops.ceil),
@@ -272,6 +276,7 @@ try:
             torch.sym_float: lift(ops.to_real),
             torch.sym_max: lift(ops.max),
             torch.sym_min: lift(ops.min),
+            torch.sym_ite: lift(lambda b, t, f: t if b else f),
             sym_sqrt: lift(ops.sqrt),
             # Not lifted because we only use this function as a
             # marker for adding the expression as validator input.
@@ -358,6 +363,8 @@ try:
                 "not_": z3.Not,
                 "floor": self._ops.floor,
                 "ceil": self._ops.ceil,
+                "minimum": self._ops.min,
+                "maximum": self._ops.max,
             }
 
             if name in REPLACEMENT:
@@ -541,7 +548,7 @@ else:
         "ValidationException", "BisectValidationException",
     ]
 
-from torch._dynamo import config
+from torch.fx.experimental import _config as config
 
 def translation_validation_enabled() -> bool:
     # Checks everytime this function is called, in case the Dynamo
@@ -598,7 +605,7 @@ class BisectValidationException(TorchDynamoException):
     def __init__(self, validation_exc, expr, failed_action, traced_node):
         self.msg = f"translation validation failed when {failed_action}: {expr}"
         self.details = f"""\
-Failure ocurred while running node:
+Failure occurred while running node:
     {traced_node.format_node()}
 
 {validation_exc.details}"""
@@ -643,6 +650,7 @@ def bisect(shape_env):
             tuple(new_with_shape_env(shape_env, s) for s in fake.size()),
             tuple(new_with_shape_env(shape_env, s) for s in fake.stride()),
             new_with_shape_env(shape_env, fake.storage_offset()),
+            fake.is_nested,
         )
 
     # Checks whether the given shape_env fails when produce_guards is called.
@@ -655,7 +663,7 @@ def bisect(shape_env):
             shape_env.produce_guards(
                 [new_with_shape_env(shape_env, a.fake) for a in tracked_fakes],
                 [a.source for a in tracked_fakes],
-                constraint_inputs=[a.constraint_dims for a in tracked_fakes],
+                input_contexts=[a.symbolic_context for a in tracked_fakes],
             )
             return None
         except ValidationException as e:
@@ -678,7 +686,7 @@ def bisect(shape_env):
         log.info("translation validation succeeded: no errors found.")
         return
 
-    if not shape_env.should_record_events or torch._dynamo.config.translation_validation_no_bisect:
+    if not shape_env.should_record_events or config.translation_validation_no_bisect:
         # Bisection is off.
         # Return the last ValidationException we got.
         raise last_exception

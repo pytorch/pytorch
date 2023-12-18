@@ -6,10 +6,16 @@
 
 import torch
 import functools
+import threading
 from torch import Tensor
 from typing import Any, Callable, Optional, Tuple, Union, List
-from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten, TreeSpec
-from .pytree_hacks import tree_map_
+from torch.utils._pytree import (
+    tree_flatten,
+    tree_unflatten,
+    tree_map_,
+    _broadcast_to_and_flatten,
+    TreeSpec,
+)
 from functools import partial
 import os
 import itertools
@@ -214,6 +220,7 @@ def _get_name(func: Callable):
 
 
 DECOMPOSITIONS_LOADED = False
+DECOMPOSITIONS_LOCK = threading.Lock()
 VMAP_DECOMPOSITIONS_LIB = None
 
 # torch.package, Python 3.11, and torch.jit-less environments are unhappy with
@@ -222,35 +229,40 @@ def lazy_load_decompositions():
     global DECOMPOSITIONS_LOADED
     if DECOMPOSITIONS_LOADED:
         return
-    DECOMPOSITIONS_LOADED = True
 
-    if not (os.environ.get("PYTORCH_JIT", "1") == "1" and __debug__):
-        return
-    # use an alternate way to register an operator into the decomposition table
-    # _register_jit_decomposition doesn't work for some operators, e.g. addr,
-    #  because the Tensor types generated cannot be unioned by torchscript
-    # decomp should be type OpOverload
-    global VMAP_DECOMPOSITIONS_LIB
-    VMAP_DECOMPOSITIONS_LIB = torch.library.Library("aten", "IMPL", "FuncTorchBatched")
+    with DECOMPOSITIONS_LOCK:
+        if DECOMPOSITIONS_LOADED:
+            return
 
-    from torch._decomp import decomposition_table
+        if not (os.environ.get("PYTORCH_JIT", "1") == "1" and __debug__):
+            DECOMPOSITIONS_LOADED = True
+            return
 
-    def _register_python_decomposition_vmap(decomp):
-        if decomp in decomposition_table:
-            VMAP_DECOMPOSITIONS_LIB.impl(decomp, decomposition_table[decomp])
-        else:
-            raise RuntimeError(f"could not find decomposition for {decomp}")
+        # use an alternate way to register an operator into the decomposition table
+        # _register_jit_decomposition doesn't work for some operators, e.g. addr,
+        #  because the Tensor types generated cannot be unioned by torchscript
+        # decomp should be type OpOverload
+        global VMAP_DECOMPOSITIONS_LIB
+        VMAP_DECOMPOSITIONS_LIB = torch.library.Library("aten", "IMPL", "FuncTorchBatched")
 
+        from torch._decomp import decomposition_table
 
-    _register_python_decomposition_vmap(torch.ops.aten.mse_loss_backward.default)
-    _register_python_decomposition_vmap(torch.ops.aten.smooth_l1_loss_backward.default)
-    _register_python_decomposition_vmap(torch.ops.aten.huber_loss_backward.default)
-    _register_python_decomposition_vmap(torch.ops.aten.nll_loss_forward.default)
-    _register_python_decomposition_vmap(torch.ops.aten.nll_loss2d_forward.default)
-    _register_python_decomposition_vmap(torch.ops.aten.nll_loss_backward.default)
-    _register_python_decomposition_vmap(torch.ops.aten.nll_loss2d_backward.default)
-    _register_python_decomposition_vmap(torch.ops.aten.addr.default)
+        def _register_python_decomposition_vmap(decomp):
+            if decomp in decomposition_table:
+                VMAP_DECOMPOSITIONS_LIB.impl(decomp, decomposition_table[decomp])
+            else:
+                raise RuntimeError(f"could not find decomposition for {decomp}")
 
+        _register_python_decomposition_vmap(torch.ops.aten.mse_loss_backward.default)
+        _register_python_decomposition_vmap(torch.ops.aten.smooth_l1_loss_backward.default)
+        _register_python_decomposition_vmap(torch.ops.aten.huber_loss_backward.default)
+        _register_python_decomposition_vmap(torch.ops.aten.nll_loss_forward.default)
+        _register_python_decomposition_vmap(torch.ops.aten.nll_loss2d_forward.default)
+        _register_python_decomposition_vmap(torch.ops.aten.nll_loss_backward.default)
+        _register_python_decomposition_vmap(torch.ops.aten.nll_loss2d_backward.default)
+        _register_python_decomposition_vmap(torch.ops.aten.addr.default)
+
+        DECOMPOSITIONS_LOADED = True
 
 def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
     lazy_load_decompositions()
@@ -365,7 +377,7 @@ def _chunked_vmap(func, flat_in_dims, chunks_flat_args, args_spec, out_dims, ran
     return tree_unflatten(flat_output, arg_spec)
 
 
-# Vmap refactored helper funcions:
+# Vmap refactored helper functions:
 def _check_randomness_arg(randomness):
     if randomness not in ['error', 'different', 'same']:
         raise RuntimeError(f"Only allowed values for randomness are 'error', 'different', or 'same'. Got {randomness}")

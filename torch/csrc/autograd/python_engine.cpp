@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
+#include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/utils/pybind.h>
@@ -105,6 +106,7 @@ void PythonEngine::thread_on_exception(
     std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
+  // See Note [ Persisting PyErr state across autograd engine threads ]
   auto python_err = dynamic_cast<python_error*>(&e);
   if (python_err) {
     python_err->persist();
@@ -285,45 +287,68 @@ PyObject* THPEngine_run_backward(
 
   std::vector<Edge> output_edges;
   if (inputs != nullptr) {
+    TORCH_CHECK(
+        PyTuple_CheckExact(inputs), "inputs to run_backward must be a tuple");
     int num_inputs = PyTuple_GET_SIZE(inputs);
     output_edges.reserve(num_inputs);
     for (const auto i : c10::irange(num_inputs)) {
       PyObject* input = PyTuple_GET_ITEM(inputs, i);
-      THPUtils_assert(
-          THPVariable_Check(input),
-          "all inputs have to be Tensors, but got %s",
-          THPUtils_typename(input));
-      const auto& tensor = THPVariable_Unpack(input);
-      TORCH_CHECK(
-          !isBatchedTensor(tensor),
-          "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
-          "torch.vmap. We do not support the case where any inputs are ",
-          "vmapped tensors (input ",
-          i,
-          " is being vmapped over). Please "
-          "call autograd.grad() outside torch.vmap or file a bug report "
-          "with your use case.")
-      const auto output_nr = tensor.output_nr();
-      auto grad_fn = tensor.grad_fn();
-      if (!grad_fn) {
-        grad_fn = torch::autograd::impl::try_get_grad_accumulator(tensor);
-      }
-      if (accumulate_grad) {
-        tensor.retain_grad();
-      }
-      THPUtils_assert(
-          tensor.requires_grad(),
-          "One of the differentiated Tensors does not require grad");
-      if (!grad_fn) {
-        // NOTE [ Autograd Unreachable Input ]
-        // Since input has no grad_accumulator, its guaranteed to be
-        // unreachable. We initialize an edge pointing to a non-nullptr Node so
-        // nodes in the graph (e.g., mul when an operand is scalar) that have
-        // edges pointing to nullptr don't get erroneously assigned `needed =
-        // True` in exec_info.
-        output_edges.emplace_back(std::make_shared<Identity>(), 0);
+      if (THPVariable_Check(input)) {
+        const auto& tensor = THPVariable_Unpack(input);
+        TORCH_CHECK(
+            !isBatchedTensor(tensor),
+            "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
+            "torch.vmap. We do not support the case where any inputs are ",
+            "vmapped tensors (input ",
+            i,
+            " is being vmapped over). Please "
+            "call autograd.grad() outside torch.vmap or file a bug report "
+            "with your use case.")
+        const auto output_nr = tensor.output_nr();
+        auto grad_fn = tensor.grad_fn();
+        if (!grad_fn) {
+          grad_fn = torch::autograd::impl::try_get_grad_accumulator(tensor);
+        }
+        if (accumulate_grad) {
+          tensor.retain_grad();
+        }
+        THPUtils_assert(
+            tensor.requires_grad(),
+            "One of the differentiated Tensors does not require grad");
+        if (!grad_fn) {
+          // NOTE [ Autograd Unreachable Input ]
+          // Since input has no grad_accumulator, its guaranteed to be
+          // unreachable. We initialize an edge pointing to a non-nullptr Node
+          // so nodes in the graph (e.g., mul when an operand is scalar) that
+          // have edges pointing to nullptr don't get erroneously assigned
+          // `needed = True` in exec_info.
+          output_edges.emplace_back(std::make_shared<Identity>(), 0);
+        } else {
+          output_edges.emplace_back(grad_fn, output_nr);
+        }
+      } else if (PyObject_IsInstance(input, THPGradientEdgeClass)) {
+        auto node = PyTuple_GetItem(input, 0);
+        bool isTHPFunction = THPFunction_Check(node);
+        bool isTHPCppFunction = THPCppFunction_Check(node);
+        THPUtils_assert(
+            isTHPFunction || isTHPCppFunction,
+            "GradientEdge first object must be an autograd.graph.Node "
+            "but got %s",
+            THPUtils_typename(node));
+        std::shared_ptr<torch::autograd::Node> node_sp;
+        if (isTHPFunction) {
+          node_sp = ((THPFunction*)node)->cdata.lock();
+        } else {
+          node_sp = ((torch::autograd::THPCppFunction*)node)->cdata;
+        }
+
+        auto output_nr = THPUtils_unpackUInt32(PyTuple_GetItem(input, 1));
+        output_edges.emplace_back(node_sp, output_nr);
       } else {
-        output_edges.emplace_back(grad_fn, output_nr);
+        THPUtils_assert(
+            false,
+            "all inputs have to be Tensors or GradientEdges, but got %s",
+            THPUtils_typename(input));
       }
     }
   }
@@ -368,8 +393,25 @@ PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
   engine.queue_callback([callback]() {
     pybind11::gil_scoped_acquire gil;
     THPObjectPtr result{PyObject_CallFunctionObjArgs(callback.get(), nullptr)};
-    if (!result)
-      throw python_error();
+    if (!result) {
+      // Note [ Persisting PyErr state across autograd engine threads ]
+      //
+      // Since the autograd engine is multi-threaded, and Python error state is
+      // local to each thread, it must preserve the python error from the worker
+      // thread and rethrow it as-is in the calling thread. This is done via
+      // persisting the error in the two places that can encounter Python
+      // errors: (1) evaluate function and (2) queued callbacks.
+      //
+      // TODO: the engine is not actually responsible for persisting the error
+      // in the custom autograd Function case today! See the note above
+      // `raise_python_error()` function in python_function.cpp and
+      // python_hooks.cpp for more details. Persisting an extra time in the
+      // engine is fine because doing so is a no-op when the python_error has
+      // already been persisted.
+      python_error err;
+      err.persist();
+      throw std::move(err);
+    }
   });
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -422,6 +464,7 @@ PyTypeObject THPEngineType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */

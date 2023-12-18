@@ -51,6 +51,7 @@ class DummyModule:
         return 0
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionOpenRgistration(common.TestCase):
     """Tests Open Device Registration with C++ extensions.
     """
@@ -183,6 +184,13 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(self.module.custom_abs_called())
             torch.abs(foo_input_data)
             self.assertTrue(self.module.custom_abs_called())
+
+        def test_open_device_quantized():
+            torch.utils.rename_privateuse1_backend('foo')
+            input_data = torch.randn(3, 4, 5, dtype=torch.float32, device="cpu").to("foo")
+            quantized_tensor = torch.quantize_per_tensor(input_data, 0.1, 10, torch.qint8)
+            self.assertEqual(quantized_tensor.device, torch.device('foo:0'))
+            self.assertEqual(quantized_tensor.dtype, torch.qint8)
 
         def test_open_device_random():
             with torch.random.fork_rng(device_type="foo"):
@@ -491,6 +499,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_type()
         test_open_device_faketensor()
         test_open_device_named_tensor()
+        test_open_device_quantized()
 
         test_compile_autograd_function_returns_self()
         test_compile_autograd_function_aliasing()

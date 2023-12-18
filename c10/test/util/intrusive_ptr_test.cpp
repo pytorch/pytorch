@@ -2,7 +2,6 @@
 
 #include <gtest/gtest.h>
 #include <map>
-#include <memory>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -22,7 +21,7 @@ using c10::weak_intrusive_ptr;
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Wself-assign-overloaded"
 #endif
-
+// NOLINTBEGIN(clang-analyzer-cplusplus*)
 namespace {
 class SomeClass0Parameters : public intrusive_ptr_target {};
 class SomeClass1Parameter : public intrusive_ptr_target {
@@ -92,7 +91,7 @@ static_assert(NullType1::singleton() != NullType2::singleton());
 } // namespace
 
 static_assert(
-    std::is_same<SomeClass, intrusive_ptr<SomeClass>::element_type>::value,
+    std::is_same_v<SomeClass, intrusive_ptr<SomeClass>::element_type>,
     "intrusive_ptr<T>::element_type is wrong");
 
 TEST(MakeIntrusiveTest, ClassWith0Parameters) {
@@ -1716,7 +1715,7 @@ struct WeakReferenceToSelf : public intrusive_ptr_target {
 } // namespace
 
 static_assert(
-    std::is_same<SomeClass, weak_intrusive_ptr<SomeClass>::element_type>::value,
+    std::is_same_v<SomeClass, weak_intrusive_ptr<SomeClass>::element_type>,
     "weak_intrusive_ptr<T>::element_type is wrong");
 
 TEST(
@@ -3544,3 +3543,4 @@ TEST(
   p->ptr = weak_intrusive_ptr<intrusive_ptr_target>(
       intrusive_ptr<intrusive_ptr_target>(p));
 }
+// NOLINTEND(clang-analyzer-cplusplus*)
