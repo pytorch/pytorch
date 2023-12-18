@@ -9,7 +9,7 @@ from .default_planner import DefaultSavePlanner
 from .metadata import Metadata, STATE_DICT_TYPE
 from .planner import SavePlanner
 from .storage import StorageWriter
-from .utils import _DistWrapper
+from .utils import _DistWrapper, _profile
 
 __all__ = ["save_state_dict", "save"]
 
@@ -24,13 +24,20 @@ def save_state_dict(
 ) -> Metadata:
     """This method is deprecated. Please switch to 'save'."""
     warnings.warn(
-        "'save_state_dict' is deprecated and will be removed in future versions. Please use 'save' instead."
+        "'save_state_dict' is deprecated and will be removed in future versions."
+        "Please use 'save' instead."
     )
 
     # TODO: test returning `save` here instead.
-    return _save_state_dict(
-        state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner
-    )
+    with _profile():
+        return _save_state_dict(
+            state_dict,
+            storage_writer,
+            process_group,
+            coordinator_rank,
+            no_dist,
+            planner,
+        )
 
 
 def save(
@@ -105,20 +112,21 @@ def save(
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
-    dumpable_state_dict = {}
-    for key, elem in state_dict.items():
-        dumpable_state_dict[key] = (
-            elem.state_dict() if isinstance(elem, Stateful) else elem
-        )
+    with _profile():
+        dumpable_state_dict = {}
+        for key, elem in state_dict.items():
+            dumpable_state_dict[key] = (
+                elem.state_dict() if isinstance(elem, Stateful) else elem
+            )
 
-    return _save_state_dict(
-        dumpable_state_dict,
-        storage_writer,
-        process_group,
-        coordinator_rank,
-        no_dist,
-        planner,
-    )
+        return _save_state_dict(
+            dumpable_state_dict,
+            storage_writer,
+            process_group,
+            coordinator_rank,
+            no_dist,
+            planner,
+        )
 
 
 def _save_state_dict(
