@@ -101,8 +101,7 @@
 #include <string>
 #include <utility>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 void window_function_checks(
     const char* function_name,
@@ -1851,5 +1850,4 @@ Tensor rand(
 
 DEFINE_DISPATCH(kaiser_window_stub);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
