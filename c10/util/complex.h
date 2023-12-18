@@ -168,13 +168,11 @@ struct alignas(sizeof(T) * 2) complex {
   // c10::complex<double>
   template <typename U = T>
   C10_HOST_DEVICE explicit constexpr complex(
-      const std::enable_if_t<std::is_same<U, float>::value, complex<double>>&
-          other)
+      const std::enable_if_t<std::is_same_v<U, float>, complex<double>>& other)
       : real_(other.real_), imag_(other.imag_) {}
   template <typename U = T>
   C10_HOST_DEVICE constexpr complex(
-      const std::enable_if_t<std::is_same<U, double>::value, complex<float>>&
-          other)
+      const std::enable_if_t<std::is_same_v<U, double>, complex<float>>& other)
       : real_(other.real_), imag_(other.imag_) {}
 
   constexpr complex<T>& operator=(T re) {
@@ -332,19 +330,19 @@ struct alignas(sizeof(T) * 2) complex {
 
 namespace complex_literals {
 
-constexpr complex<float> operator"" _if(long double imag) {
+constexpr complex<float> operator""_if(long double imag) {
   return complex<float>(0.0f, static_cast<float>(imag));
 }
 
-constexpr complex<double> operator"" _id(long double imag) {
+constexpr complex<double> operator""_id(long double imag) {
   return complex<double>(0.0, static_cast<double>(imag));
 }
 
-constexpr complex<float> operator"" _if(unsigned long long imag) {
+constexpr complex<float> operator""_if(unsigned long long imag) {
   return complex<float>(0.0f, static_cast<float>(imag));
 }
 
-constexpr complex<double> operator"" _id(unsigned long long imag) {
+constexpr complex<double> operator""_id(unsigned long long imag) {
   return complex<double>(0.0, static_cast<double>(imag));
 }
 
