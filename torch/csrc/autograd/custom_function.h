@@ -177,9 +177,7 @@ struct TORCH_API VariableInfo {
 // T::backward().
 template <class T>
 struct CppNode : public Node {
-  variable_list apply(
-      variable_list&& inputs,
-      std::optional<PyObject*> compiler = std::nullopt) override;
+  variable_list apply(variable_list&& inputs) override;
   AutogradContext ctx_;
   std::vector<bool> is_variable_input_;
   std::vector<VariableInfo> input_info_;
@@ -350,9 +348,7 @@ auto Function<T>::apply(Args&&... args)
 // The logic here is the same as PyNode::apply, so changes to it should be done
 // in both the places
 template <class T>
-variable_list CppNode<T>::apply(
-    variable_list&& inputs,
-    std::optional<PyObject*> compiler) {
+variable_list CppNode<T>::apply(variable_list&& inputs) {
   at::OptionalDeviceGuard _device_guard;
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

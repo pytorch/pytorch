@@ -59,12 +59,9 @@ class AutogradCompilerInstance:
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
-        args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
+        self.args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
         sizes_proxy = self.fx_tracer.create_proxy("placeholder", "sizes", (), {})
         self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
-        self.backward_proxy = self.fx_tracer.create_proxy(
-            "placeholder", "backward", (), {}
-        )
         self.saved_tensors_proxy = self.fx_tracer.create_proxy(
             "placeholder", "saved_tensors", (), {}
         )
@@ -74,7 +71,7 @@ class AutogradCompilerInstance:
             self.wrap_fake(x, self.source("inputs", idx))
             for idx, x in enumerate(inputs)
         ]
-        proxies = [args_proxy[i] for i in range(len(inputs))]
+        proxies = [self.args_proxy[i] for i in range(len(inputs))]
         self.bind_tensors_to_proxies(inputs, proxies)
 
         # size inputs to symints
@@ -101,12 +98,14 @@ class AutogradCompilerInstance:
         self,
         inputs,
         outputs,
-        backward_id: int,
+        backward_idx: int,
+        saved_tensors_start_idx: int,
+        saved_tensors_end_idx: int,
     ):
-        assert self.backward_proxy is not None
+        assert self.hooks_proxy is not None
         assert self.saved_tensors_proxy is not None
-        backward_fn = self.backward_proxy[backward_id]
-        saved_variables = self.saved_tensors_proxy[backward_id]
+        backward_fn = self.hooks_proxy[backward_idx]
+        saved_variables = self.args_proxy[saved_tensors_start_idx:saved_tensors_end_idx]
         proxies = self.fx_tracer.create_proxy(
             kind="call_function",
             target=call_backward,

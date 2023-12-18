@@ -21,9 +21,7 @@ RecvRpcBackward::RecvRpcBackward(
       fromWorkerId_(fromWorkerId),
       deviceMap_(std::move(deviceMap)) {}
 
-variable_list RecvRpcBackward::apply(
-    variable_list&& grads,
-    std::optional<PyObject*> compiler) {
+variable_list RecvRpcBackward::apply(variable_list&& grads) {
   std::vector<Variable> outputGrads;
   for (const auto i : c10::irange(grads.size())) {
     const auto& grad = grads[i];

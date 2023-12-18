@@ -52,7 +52,7 @@ struct ${op} : public ${superclass} {
 struct TORCH_API ${op} : public ${superclass} {
 #endif
   using ${superclass}::${superclass};
-  variable_list apply(variable_list&& grads, std::optional<PyObject*> compiler = std::nullopt) override;
+  variable_list apply(variable_list&& grads) override;
   std::string name() const override { return "${op}"; }
   void release_variables() override {
     ${thread_lock}
@@ -78,7 +78,7 @@ void will_release_variables() override {
 
 FUNCTION_DEFINITION = CodeTemplate(
     """\
-variable_list ${op}::apply(variable_list&& grads, std::optional<PyObject*> compiler) {
+variable_list ${op}::apply(variable_list&& grads) {
   ${thread_lock}
   ${asserts}
   IndexRangeGenerator gen;

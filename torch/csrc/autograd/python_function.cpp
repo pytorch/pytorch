@@ -72,41 +72,6 @@ void throw_python_error() {
   throw std::move(err);
 }
 
-static PyObject* unpack_saved_variables(
-    THPFunction* self,
-    const std::function<PyObject*(const Variable&)>& unpack_fn) {
-  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
-  auto& saved_variables = self->saved_variables;
-  if (saved_variables.empty())
-    return PyTuple_New(0);
-
-  auto num_saved = saved_variables.size();
-  THPObjectPtr saved(PyTuple_New(static_cast<Py_ssize_t>(num_saved)));
-  if (!saved)
-    return nullptr;
-  auto saved_for = self->cdata.lock();
-  // This is really a true assert, because we've already tested for the
-  // self->has_freed_buffers case at the beginning of this function:
-  // buffers are freed when PyNode dies; if the buffers are not freed,
-  // PyNode must be live.  (Note that the buffers could be freed
-  // even though the PyNode is live, but that doesn't matter here
-  // because we will never hit this line of code if the buffers are freed--
-  // and in any case saved_for will be non-NULL.)
-  TORCH_INTERNAL_ASSERT(saved_for);
-  for (const auto i : c10::irange(num_saved)) {
-    auto unpacked_var = saved_variables[i].unpack(saved_for);
-    THPObjectPtr value;
-    if (!unpacked_var.defined()) {
-      Py_INCREF(Py_None);
-      value = Py_None;
-    } else {
-      value = unpack_fn(unpacked_var);
-    }
-    PyTuple_SET_ITEM(saved.get(), i, value.release());
-  }
-  return saved.release();
-}
-
 } // namespace
 
 namespace torch {
@@ -115,8 +80,107 @@ namespace autograd {
 // NOTE: this function is written in a way that assumes it's only called for
 // backward; it's used by engine.cpp.  This is responsible for forwarding a call
 // from C++'s Node::apply to a Python method "apply".
-auto PyNode::apply(variable_list&& inputs, std::optional<PyObject*> compiler)
-    -> variable_list {
+auto PyNode::apply(variable_list&& inputs) -> variable_list {
+  pybind11::gil_scoped_acquire gil;
+  at::OptionalDeviceGuard _device_guard;
+  THPFunction* py_fn = (THPFunction*)obj;
+
+  // Massage a C++ variable_list into a Python arguments tuple
+  auto num_inputs = inputs.size();
+  THPObjectPtr pyInputs(PyTuple_New(static_cast<Py_ssize_t>(num_inputs)));
+  if (!pyInputs)
+    throw_python_error();
+  auto& output_info = py_fn->output_info;
+  for (const auto i : c10::irange(num_inputs)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    PyObject* input;
+    if (inputs[i].defined() || !py_fn->materialize_grads ||
+        (input_metadata(i).was_default_constructed() &&
+         !py_fn->materialize_non_diff_grads)) {
+      input = THPVariable_Wrap(inputs[i]);
+    } else {
+      auto zeros_without_gil = [](const VariableInfo& variable,
+                                  at::OptionalDeviceGuard& device_guard) {
+        pybind11::gil_scoped_release gil;
+        return variable.zeros(device_guard);
+      };
+      input =
+          THPVariable_Wrap(zeros_without_gil(output_info[i], _device_guard));
+    }
+    if (!input)
+      throw_python_error();
+    PyTuple_SET_ITEM(pyInputs.get(), i, input);
+  }
+
+  THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
+  if (!apply_fn)
+    throw_python_error();
+  THPObjectPtr r(PyObject_CallObject(apply_fn, pyInputs.get()));
+  if (!r)
+    throw_python_error();
+  ensure_tuple(r);
+
+  auto& is_variable_input = py_fn->is_variable_input;
+  auto num_outputs = PyTuple_GET_SIZE(r.get());
+  auto num_forward_inputs = static_cast<Py_ssize_t>(is_variable_input.size());
+  // Returning too many results is ok, but only as long as they're all None.
+  // Truncate the result tuple in that case.
+  if (num_outputs > num_forward_inputs) {
+    bool all_none = true;
+    for (const auto i : c10::irange(num_forward_inputs, num_outputs)) {
+      all_none &= PyTuple_GET_ITEM(r.get(), i) == Py_None;
+    }
+    if (all_none) {
+      num_outputs = num_forward_inputs;
+      r = PyTuple_GetSlice(r.get(), 0, num_forward_inputs);
+      if (!r)
+        throw_python_error();
+    }
+  }
+
+  // Now the number of gradients should match
+  if (num_outputs != num_forward_inputs) {
+    std::string msg("function ");
+    msg += name() + " returned an incorrect number of gradients (expected ";
+    msg += std::to_string(num_forward_inputs) + ", got ";
+    msg += std::to_string(num_outputs) + ")";
+    throw std::runtime_error(msg);
+  }
+
+  // Massage the Python results tuple back into a C++ variable_list
+  variable_list results;
+  results.reserve(num_outputs);
+  for (int i = 0; i != num_outputs; ++i) {
+    PyObject* output = PyTuple_GET_ITEM(r.get(), i);
+    bool was_variable = is_variable_input[i];
+    if (!was_variable) {
+      if (output != Py_None) {
+        std::string msg("function ");
+        msg += name() + " returned a gradient different than None at position ";
+        msg += std::to_string(i + 1) +
+            ", but the corresponding forward input was not a Variable";
+        throw std::runtime_error(msg);
+      }
+      continue;
+    }
+    if (output == Py_None) {
+      results.emplace_back();
+    } else {
+      if (!THPVariable_Check(output)) {
+        std::string msg("expected Variable or None (got ");
+        msg += THPUtils_typename(output);
+        msg += ")";
+        throw std::runtime_error(msg);
+      }
+      results.emplace_back(THPVariable_Unpack(output));
+    }
+  }
+
+  return results;
+}
+
+// WIP: refactor this function
+auto PyNode::compiled_apply(variable_list&& inputs, std::optional<PyObject*> compiler) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
@@ -154,41 +218,35 @@ auto PyNode::apply(variable_list&& inputs, std::optional<PyObject*> compiler)
   // input_info only contains info from variable inputs and should be a subset
   TORCH_INTERNAL_ASSERT(is_variable_input.size() >= input_infos.size());
 
-  THPObjectPtr r;
-  if (!compiler.has_value() || name() == "CompiledFunctionBackward") {
-    THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
-    if (!apply_fn)
-      throw_python_error();
-    r = PyObject_CallObject(apply_fn, pyInputs.get());
-  } else {
-    // The gradients returned in the backwards should match the number of inputs
-    // to the forward, and their shapes, so we pass the fwdInputs
-    THPObjectPtr fwdInputs(
-        PyTuple_New(static_cast<Py_ssize_t>(is_variable_input.size())));
-    int offset = 0;
-    for (const auto i : c10::irange(is_variable_input.size())) {
-      if (!is_variable_input[i]) {
-        // input at i is not a variable, add an offset
-        PyTuple_SET_ITEM(fwdInputs.get(), i, Py_None);
-        offset++;
-        continue;
-      }
-
-      const auto& input_info = input_infos[i - offset];
-      PyTuple_SET_ITEM(
-          fwdInputs.get(), static_cast<Py_ssize_t>(i), THPVariable_Wrap(zeros_without_gil(input_info, _device_guard)));
+  // The gradients returned in the backwards should match the number of inputs
+  // to the forward, and their shapes, so we pass the fwdInputs
+  THPObjectPtr fwdInputs(
+      PyTuple_New(static_cast<Py_ssize_t>(is_variable_input.size())));
+  int offset = 0;
+  for (const auto i : c10::irange(is_variable_input.size())) {
+    if (!is_variable_input[i]) {
+      // input at i is not a variable, add an offset
+      PyTuple_SET_ITEM(fwdInputs.get(), i, Py_None);
+      offset++;
+      continue;
     }
-    TORCH_INTERNAL_ASSERT(
-        _backward_idx.has_value(),
-        "_backward_idx should already be set by compiled_args, called before apply_with_saved");
-    r = PyObject_CallMethod(
-        *compiler,
-        "proxy_call_backward",
-        "OOi",
-        pyInputs.get(),
-        fwdInputs.get(),
-        *_backward_idx);
+
+    const auto& input_info = input_infos[i - offset];
+    PyTuple_SET_ITEM(
+        fwdInputs.get(), static_cast<Py_ssize_t>(i), THPVariable_Wrap(zeros_without_gil(input_info, _device_guard)));
   }
+  TORCH_INTERNAL_ASSERT(
+      _backward_idx.has_value() && _saved_tensors_start_idx.has_value() && _saved_tensors_end_idx.has_value(),
+      "indices should already be set by compiled_args, called before apply_with_saved");
+  THPObjectPtr r(PyObject_CallMethod(
+      *compiler,
+      "proxy_call_backward",
+      "OOiii",
+      pyInputs.get(),
+      fwdInputs.get(),
+      *_backward_idx,
+      *_saved_tensors_start_idx,
+      *_saved_tensors_end_idx));
 
   if (!r)
     throw_python_error();
@@ -320,7 +378,9 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->compiled_autograd_symints);
   args.set_default_dyn_type(prior);
 
+  _saved_tensors_start_idx = args.get_current_graph_inputs_size();
   args.collect(f->saved_variables);
+  _saved_tensors_end_idx = args.get_current_graph_inputs_size();
   args.collect(f->materialize_grads);
   args.collect(f->is_variable_input);
   args.collect(f->needs_input_grad);
@@ -333,15 +393,8 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   PyObject* forward_cls(PyObject_GetAttr(obj, forward_cls_name));
   static PyObject* backward_name = PyUnicode_InternFromString("backward");
   PyObject* backward(PyObject_GetAttr(forward_cls, backward_name));
-  int backward_idx =
+  _backward_idx =
       args.add_backward(c10::SafePyObject(backward, getPyInterpreter()));
-
-  PyObject* saved_tensors(unpack_saved_variables(
-      f, [](const Variable& var) { return THPVariable_Wrap(var); }));
-  int saved_tensors_idx = args.add_saved_tensors(
-      c10::SafePyObject(saved_tensors, getPyInterpreter()));
-  TORCH_INTERNAL_ASSERT(backward_idx == saved_tensors_idx);
-  _backward_idx = backward_idx;
 }
 
 variable_list PyNode::apply_with_saved(
@@ -356,7 +409,12 @@ variable_list PyNode::apply_with_saved(
   saved.before(f->output_info);
   saved.before(f->input_info);
   f->compiled_autograd_tracing = true;
-  auto result = apply(variable_list(inputs), saved.get_py_compiler());
+  variable_list result;
+  if (name() == "CompiledFunctionBackward") {
+    result = apply(variable_list(inputs));
+  } else {
+    result = compiled_apply(variable_list(inputs), saved.get_py_compiler());
+  }
   f->compiled_autograd_tracing = false;
   saved.after(f->compiled_autograd_symints);
   saved.after(f->saved_variables);
@@ -1352,6 +1410,42 @@ int THPFunction_set_materialize_non_diff_grads(
   self->materialize_non_diff_grads = (value == Py_True);
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
+}
+
+
+static PyObject* unpack_saved_variables(
+    THPFunction* self,
+    const std::function<PyObject*(const Variable&)>& unpack_fn) {
+  THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
+  auto& saved_variables = self->saved_variables;
+  if (saved_variables.empty())
+    return PyTuple_New(0);
+
+  auto num_saved = saved_variables.size();
+  THPObjectPtr saved(PyTuple_New(static_cast<Py_ssize_t>(num_saved)));
+  if (!saved)
+    return nullptr;
+  auto saved_for = self->cdata.lock();
+  // This is really a true assert, because we've already tested for the
+  // self->has_freed_buffers case at the beginning of this function:
+  // buffers are freed when PyNode dies; if the buffers are not freed,
+  // PyNode must be live.  (Note that the buffers could be freed
+  // even though the PyNode is live, but that doesn't matter here
+  // because we will never hit this line of code if the buffers are freed--
+  // and in any case saved_for will be non-NULL.)
+  TORCH_INTERNAL_ASSERT(saved_for);
+  for (const auto i : c10::irange(num_saved)) {
+    auto unpacked_var = saved_variables[i].unpack(saved_for);
+    THPObjectPtr value;
+    if (!unpacked_var.defined()) {
+      Py_INCREF(Py_None);
+      value = Py_None;
+    } else {
+      value = unpack_fn(unpacked_var);
+    }
+    PyTuple_SET_ITEM(saved.get(), i, value.release());
+  }
+  return saved.release();
 }
 
 PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {

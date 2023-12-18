@@ -476,14 +476,12 @@ variable_list compiled_autograd(
   THPObjectPtr inputs(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
   THPObjectPtr hooks(wrap_pyobject_list(compiler_call.hooks));
-  THPObjectPtr backwards(wrap_pyobject_list(compiler_call.backwards));
   THPObjectPtr saved_tensors(wrap_pyobject_list(compiler_call.saved_tensors));
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->compiled_fn.get(),
       inputs.get(),
       sizes.get(),
       hooks.get(),
-      backwards.get(),
       saved_tensors.get(),
       NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
