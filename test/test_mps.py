@@ -242,6 +242,7 @@ def mps_ops_modifier(ops):
         'chunk',
         'clone',
         'contiguous',
+        'diagflat',
         'empty',
         'empty_permuted',
         'empty_strided',
