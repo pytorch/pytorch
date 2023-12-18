@@ -3,9 +3,9 @@
 #include <string>
 #include <vector>
 
-#include <torch/csrc/inductor/aoti_model_container_runner.h>
+#include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #ifdef USE_CUDA
-#include <torch/csrc/inductor/aoti_model_container_runner_cuda.h>
+#include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
 #include <torch/script.h>
 #include <torch/torch.h>
