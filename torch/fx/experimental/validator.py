@@ -229,7 +229,7 @@ try:
             # Assuming 'round half up' is the default case, we need to correct ..., -3.5, -1.5, 0.5, 2.5, 4.5, ...
             # to round down, i.e. use the 'round half down' strategy
             return z3.If(
-                self.mod(((number * 2) - 1), z3.IntVal(4)) == 0,
+                self.mod(number, z3.IntVal(2)) == 0.5,
                 self.ceil(number - 0.5),
                 self.floor(number + 0.5),
             )
