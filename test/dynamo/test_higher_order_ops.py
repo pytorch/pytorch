@@ -3592,8 +3592,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, y):
             return torch.cos(
-                torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y),
-                use_reentrant=True,
+                torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y, use_reentrant=True),
             )
 
         x = torch.randn(4, 4, requires_grad=True)
