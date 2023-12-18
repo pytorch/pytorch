@@ -23,6 +23,8 @@ from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
 from .codegen.common import (
+    DeviceOpOverrides,
+    get_device_op_overrides,
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
     register_backend_for_device,
@@ -220,6 +222,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_buffers: Set[str] = set()
         self.never_reuse_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
+        self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
         self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
@@ -1006,6 +1009,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         only_cpu = len(device_types) == 0
         device_type = "cpu" if only_cpu else device_types.pop()
+
+        self.device_ops = get_device_op_overrides(device_type)
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
         assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
