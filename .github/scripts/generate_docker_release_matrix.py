@@ -5,7 +5,7 @@ from typing import Dict, List
 
 DOCKER_IMAGE_TYPES = ["runtime", "devel"]
 
-def generate_docker_matrix() -> List[Dict[str, str]]:
+def generate_docker_matrix() -> Dict[str, List[Dict[str, str]]]:
     ret: List[Dict[str, str]] = []
     for cuda, version in generate_binary_build_matrix.CUDA_ARCHES_FULL_VERSION.items():
         for image in DOCKER_IMAGE_TYPES:
@@ -13,6 +13,7 @@ def generate_docker_matrix() -> List[Dict[str, str]]:
                 {
                     "cuda": cuda,
                     "cuda_full_version": version,
+                    "cudnn_version": generate_binary_build_matrix.CUDA_ARCHES_CUDNN_VERSION[cuda],
                     "image_type": image,
                     "platform": "linux/arm64,linux/amd64",
                 }

@@ -59,8 +59,8 @@ jobs:
     env:
       BUILD_IMAGE_TYPE: ${{ matrix.image_type }}
       BUILD_PLATFORMS: ${{ matrix.platform }}
-      CUDA_VERSION: ${{ matrix.cuda }}
-      CUDA_FULL_VERSION: ${{ matrix.cuda_full_version }}
+      CUDA_VERSION: ${{ matrix.cuda_full_version }}
+      CUDNN_VERSION: ${{ matrix.cudnn_version }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
