@@ -34,14 +34,14 @@ class TORCH_API AOTIModelContainerRunner {
       bool validate_full_updates);
   void swap_constant_buffer();
 
-  std::vector<const char*> get_call_spec();
+  std::vector<std::string> get_call_spec();
 
  protected:
   AOTIModelContainerRunner(
-      const char* model_so_path,
+      const std::string& model_so_path,
       size_t num_models,
       bool is_cpu,
-      const char* cubin_dir);
+      const std::string& cubin_dir);
 
   std::unique_ptr<at::DynamicLibrary> model_so_;
   decltype(&AOTInductorModelContainerCreate) create_func_{nullptr};

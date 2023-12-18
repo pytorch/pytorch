@@ -34,10 +34,10 @@ void test_aoti(const std::string& device) {
   std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
   if (device == "cuda") {
     runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
-        model_so_path.c_str());
+        model_so_path);
   } else if (device == "cpu") {
     runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
-        model_so_path.c_str());
+        model_so_path);
   } else {
     testing::AssertionFailure() << "unsupported device: " << device;
   }
@@ -106,10 +106,10 @@ void test_aoti_constants_update(const std::string& device) {
   std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
   if (device == "cuda") {
     runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
-        model_so_path.c_str());
+        model_so_path);
   } else if (device == "cpu") {
     runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
-        model_so_path.c_str());
+        model_so_path);
   } else {
     testing::AssertionFailure() << "unsupported device: " << device;
   }

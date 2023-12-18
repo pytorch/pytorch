@@ -5,8 +5,10 @@
 namespace torch::inductor {
 class TORCH_API AOTIModelContainerRunnerCpu : public AOTIModelContainerRunner {
  public:
-  AOTIModelContainerRunnerCpu(const char* model_so_path, size_t num_models = 1)
-      : AOTIModelContainerRunner(model_so_path, num_models, true, nullptr) {}
+  AOTIModelContainerRunnerCpu(
+      const std::string& model_so_path,
+      size_t num_models = 1)
+      : AOTIModelContainerRunner(model_so_path, num_models, true, "") {}
 };
 
 } // namespace torch::inductor
