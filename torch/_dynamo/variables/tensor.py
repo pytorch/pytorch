@@ -159,6 +159,8 @@ class TensorVariable(VariableTracker):
             )
             props["stride"] = tuple(value.stride())
             if torch._C._functorch.is_batchedtensor(value):
+                # Batched tensors does not support contiguity patterns, so
+                # we refrain from computing the `is_contiguous` property
                 props["is_contiguous"] = None
             else:
                 props["is_contiguous"] = tuple(
