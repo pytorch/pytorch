@@ -1076,10 +1076,9 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
   }
 }
 
-void abortCommsFromMap(
+void ProcessGroupNCCL::abortCommsFromMap(
     std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
         ncclCommsMap,
-    const int rank,
     c10::optional<std::string> abortReason) {
   // The process may control multiple devices, loop through the communicators on
   // each device
