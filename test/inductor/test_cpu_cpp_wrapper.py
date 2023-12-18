@@ -1,4 +1,4 @@
-# Owner(s): ["module: inductor"]
+# Owner(s): ["oncall: cpu inductor"]
 import sys
 import unittest
 from typing import NamedTuple
@@ -11,30 +11,22 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_MACOS,
     slowTest,
-    TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU
 
 
 try:
     try:
         from . import (
             test_cpu_repro,
-            test_foreach,
             test_mkldnn_pattern_matcher,
-            test_pattern_matcher,
-            test_select_algorithm,
             test_torchinductor,
             test_torchinductor_dynamic_shapes,
         )
     except ImportError:
         import test_cpu_repro
-        import test_foreach
         import test_mkldnn_pattern_matcher
-        import test_pattern_matcher
-        import test_select_algorithm
         import test_torchinductor
         import test_torchinductor_dynamic_shapes
 except unittest.SkipTest:
@@ -49,18 +41,9 @@ RUN_CPU = (
     and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
     and not IS_MACOS
 )
-RUN_CUDA = (
-    HAS_CUDA
-    and any(getattr(x, "device_type", "") == "cuda" for x in _desired_test_bases)
-    and not TEST_WITH_ASAN
-)
 
 
 class CppWrapperTemplate:
-    pass
-
-
-class CudaWrapperTemplate:
     pass
 
 
@@ -70,14 +53,6 @@ class TestCppWrapper(TorchTestCase):
 
 class DynamicShapesCppWrapperCpuTests(TorchTestCase):
     device = "cpu"
-
-
-class TestCudaWrapper(TorchTestCase):
-    device = "cuda"
-
-
-class DynamicShapesCudaWrapperCudaTests(TorchTestCase):
-    device = "cuda"
 
 
 test_failures_cpp_wrapper = {
@@ -96,42 +71,6 @@ test_failures_cpp_wrapper = {
         ("cpp_wrapper",), is_skip=True
     ),
 }
-
-test_failures_cuda_wrapper = {
-    "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",), is_skip=True
-    ),
-}
-
-if TEST_WITH_ROCM:
-    # Current skips for ROCm - mostly all Tensor-likes failures, need to undergo investigation.
-    rocm_exclude_list = [
-        "test_addmm",
-        "test_batch_norm_2d_2_cuda",
-        "test_bmm1_cuda",
-        "test_cat_cuda",
-        "test_cat_slice_cat",
-        "test_custom_op_cuda",
-        "test_convolution1_cuda",
-        "test_foreach_cpp_wrapper",
-        "test_index_put_deterministic_fallback_cuda",
-        "test_index_tensor_cuda",
-        "test_linear_relu",
-        "test_multi_device_cuda",
-        "test_mm_plus_mm2",
-        "test_sum_dtype_cuda",
-        "test_transpose_cuda",
-    ]
-
-    # Create skip entries for both the cuda and cuda_dynamic_shapes variants
-    for test_name in rocm_exclude_list:
-        dynamic_shapes_test_name = f"{test_name}_dynamic_shapes"
-        test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
-            ("cuda_wrapper",), is_skip=True
-        )
-        test_failures_cuda_wrapper[
-            dynamic_shapes_test_name
-        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
 
 
 def make_test_case(
@@ -176,7 +115,7 @@ def make_test_case(
     fn.__dict__ = copy.deepcopy(func.__dict__)
     if condition:
         setattr(
-            CppWrapperTemplate if device == "cpu" else CudaWrapperTemplate,
+            CppWrapperTemplate,
             test_name,
             fn,
         )
@@ -365,101 +304,9 @@ if RUN_CPU:
         xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
-if RUN_CUDA:
-
-    class BaseTest(NamedTuple):
-        name: str
-        device: str = "cuda"
-        tests: TorchTestCase = test_torchinductor.CudaTests()
-
-    # Maintain two separate test lists for cuda and cpp for now
-    for item in [
-        BaseTest("test_as_strided"),  # buffer reuse
-        BaseTest("test_batch_norm_2d_2"),
-        BaseTest("test_bitwise"),  # int32
-        BaseTest("test_bmm1"),
-        BaseTest("test_bmm2"),
-        BaseTest("test_cat"),  # alias
-        BaseTest("test_convolution1"),
-        BaseTest("test_conv_backward"),
-        BaseTest("test_custom_op"),
-        BaseTest("test_embedding_bag"),  # test default FallbackKernel
-        BaseTest("test_index_put_deterministic_fallback"),
-        BaseTest("test_adding_tensor_offsets"),
-        BaseTest("test_index_tensor"),
-        BaseTest("test_linear1"),
-        BaseTest("test_linear2"),
-        BaseTest("test_mm_views"),
-        BaseTest("test_multi_device"),
-        BaseTest("test_multi_threading"),
-        BaseTest("test_profiler_mark_wrapper_call"),
-        BaseTest("test_reduction1"),  # Reduction
-        BaseTest("test_relu"),  # multiple inputs
-        BaseTest("test_repeat_interleave_2"),
-        BaseTest("test_scalar_input"),
-        BaseTest("test_scaled_dot_product_attention"),
-        BaseTest("test_scaled_dot_product_efficient_attention"),
-        BaseTest("test_sort"),
-        BaseTest("test_silu"),  # single input, single output
-        BaseTest("test_sum_dtype"),  # float64
-        BaseTest("test_sum_int"),  # bool, int64, int8, uint8
-        BaseTest("test_transpose"),  # multiple outputs, buffer clear
-        BaseTest(
-            "test_foreach_cpp_wrapper",
-            device=None,
-            tests=test_foreach.ForeachTests(),
-        ),  # test foreach
-        BaseTest(
-            "test_cat_slice_cat",
-            device=None,
-            tests=test_pattern_matcher.TestPatternMatcher(),
-        ),
-        BaseTest(
-            "test_addmm",
-            device=None,
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
-        BaseTest(
-            "test_linear_relu",
-            device=None,
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
-        # TODO: Re-enable this test after fixing cuda wrapper for conv Triton templates with dynamic shapes.
-        # This test is unstable: it succeeds when an ATEN kernel is used, and fails when a Triton kernel is used.
-        # Currently it passes on CI (an ATEN kernel is chosen) and fails locally (a Triton kernel is chosen).
-        # Ideally, it should succeed for whatever kernels.
-        # BaseTest(
-        #     "test_convolution1",
-        #     device=None,
-        #     tests=test_select_algorithm.TestSelectAlgorithm(),
-        # ),
-        BaseTest(
-            "test_mm_plus_mm2",
-            device=None,
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
-        BaseTest("test_fft_real_input"),
-        BaseTest("test_fft_real_input_real_output"),
-    ]:
-        make_test_case(item.name, item.device, item.tests)
-
-    test_torchinductor.copy_tests(
-        CudaWrapperTemplate, TestCudaWrapper, "cuda_wrapper", test_failures_cuda_wrapper
-    )
-
-    DynamicShapesCudaWrapperTemplate = (
-        test_torchinductor_dynamic_shapes.make_dynamic_cls(CudaWrapperTemplate)
-    )
-
-    test_torchinductor.copy_tests(
-        DynamicShapesCudaWrapperTemplate,
-        DynamicShapesCudaWrapperCudaTests,
-        "cuda_wrapper",
-        test_failures_cuda_wrapper,
-    )
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if RUN_CPU or RUN_CUDA:
+    if RUN_CPU:
         run_tests(needs="filelock")
