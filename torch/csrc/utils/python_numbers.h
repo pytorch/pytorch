@@ -52,25 +52,25 @@ inline bool THPUtils_checkLong(PyObject* obj) {
 }
 
 inline int32_t THPUtils_unpackInt(PyObject* obj) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int overflow;
+  int overflow = 1;
   long value = PyLong_AsLongAndOverflow(obj, &overflow);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
   }
   if (overflow != 0) {
-    throw std::runtime_error("Overflow when unpacking long");
+    throw std::runtime_error("Overflow when unpacking int");
   }
+  // Note: int32_min is excluded from the range, as its the only value
+  // which does not have a defined behavior for unary minus operator
   if (value > std::numeric_limits<int32_t>::max() ||
-      value < std::numeric_limits<int32_t>::min()) {
-    throw std::runtime_error("Overflow when unpacking long");
+      value <= std::numeric_limits<int32_t>::min()) {
+    throw std::runtime_error("Overflow when unpacking int");
   }
-  return (int32_t)value;
+  return static_cast<int32_t>(value);
 }
 
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int overflow;
+  int overflow = 1;
   long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
@@ -78,7 +78,13 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
   if (overflow != 0) {
     throw std::runtime_error("Overflow when unpacking long");
   }
-  return (int64_t)value;
+  // int64_min is weird, as its the only value where unary minus
+  // behavior is undefined, though many modern compilers belive
+  // that -int_min == int_min, see https://godbolt.org/z/Wxhh44ocr
+  if (value == std::numeric_limits<int64_t>::min()) {
+    throw std::runtime_error("Overflow when unpacking long");
+  }
+  return static_cast<int64_t>(value);
 }
 
 inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
