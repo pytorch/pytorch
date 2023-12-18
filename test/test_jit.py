@@ -144,7 +144,6 @@ import unittest
 import warnings
 import zipfile
 import tracemalloc
-import operator
 
 
 def canonical(graph):
@@ -1705,7 +1704,7 @@ graph(%Ra, %Rb):
             w = torch.abs(x * x * x + y) + Variable(torch.ones(1))
             return z, w
 
-        torch.jit.verify(f, (x, y), loss_fn=operator.mul, devices=[])
+        torch.jit.verify(f, (x, y), loss_fn=lambda z, w: z * w, devices=[])
 
     # TODO: adapt to a GraphExecutor test
     @unittest.skip("Need to instrument GraphExecutors a bit more")
