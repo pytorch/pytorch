@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
+#include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 
 namespace torch::inductor {
 
