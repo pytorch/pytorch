@@ -536,7 +536,7 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 2, 5)
 
-    def test_cat_slice_cat_cuda(self):
+    def test_cat_slice_cat(self):
         def fn(a, b):
             cat_1 = torch.ops.aten.cat.default([a, b], 1)
             slice_1 = torch.ops.aten.slice.Tensor(cat_1, 0, 0, 9223372036854775807)
