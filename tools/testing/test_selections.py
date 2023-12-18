@@ -75,9 +75,9 @@ def get_with_pytest_shard(
             return None
 
         for test_class in test_classes:
-            class_duration = test_class_times.get(test_file, {}).get(test_class, None)
-            if class_duration is None:
-                return None
+            class_duration = test_class_times.get(test_file, {}).get(test_class, 0)
+            # if class_duration is None:
+            #     return None
             if class_duration:
                 duration += class_duration
         return duration
