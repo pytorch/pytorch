@@ -590,6 +590,11 @@ class TestSparseCompressed(TestCase):
                     layout
                 )
 
+            compressed_indices = torch.tensor([0, 0], dtype=index_dtype)
+            plain_indices = torch.tensor([], dtype=index_dtype)
+            torch._validate_compressed_sparse_indices(layout in {torch.sparse_csr, torch.sparse_bsr},
+                                                      compressed_indices, plain_indices, 1, 1, 0)
+
     def _generate_invalid_input(self, layout, device):
         from functools import partial
 
