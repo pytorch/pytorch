@@ -332,4 +332,5 @@ class RoundDecimal(sympy.Function):
     @classmethod
     def eval(cls, number, ndigits):
         if isinstance(number, sympy.Number) and isinstance(ndigits, sympy.Number):
-            return sympy.Integer(round(float(number), int(ndigits)))
+            value = round(float(number), int(ndigits))
+            return (sympy.Integer if number.is_Integer else sympy.Float)(value)
