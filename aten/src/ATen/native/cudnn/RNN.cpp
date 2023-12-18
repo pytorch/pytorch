@@ -514,11 +514,11 @@ namespace {
 #endif
 
     cudnnDataType_t data_type;
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
     cudnnTensorFormat_t format;
-//#else
-//    int stride_dim_a[5];
-//#endif
+#else
+    int stride_dim_a[5];
+#endif
     int nb_dims;
     constexpr int min_dim = 3;
     int filter_dim_a[min_dim];
@@ -585,11 +585,11 @@ namespace {
       const Tensor& weight_buf,
       bool include_bias=true
   ) {
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
     auto cudnn_methods = { cudnnGetRNNLinLayerMatrixParams, cudnnGetRNNLinLayerBiasParams };
-//#else
-//    auto cudnn_methods = { true, false };
-//#endif
+#else
+    auto cudnn_methods = { true, false };
+#endif
     std::vector<Tensor> params;
     int64_t num_linear_layers = _num_linear_layers(rnn.mode);
     int64_t num_layers = rnn.num_directions() * rnn.num_layers;
@@ -600,7 +600,7 @@ namespace {
       for (auto cudnn_method : cudnn_methods) {
         for (const auto linear_id : c10::irange(num_linear_layers)) {
           void* matrix_pointer;
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
           FilterDescriptor lin_layer_mat_desc;
           AT_CUDNN_CHECK(cudnn_method(
                 handle,
@@ -613,46 +613,46 @@ namespace {
                 lin_layer_mat_desc.mut_desc(),
                 &matrix_pointer
                 ));
-//#else
-//          void *unused_pointer;
-//          TensorDescriptor unused_desc;
-//          TensorDescriptor lin_layer_mat_desc;
-//          for (int stateless = 0; stateless < 100; stateless++) {
-//          if (cudnn_method) { // matrix
-//               AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
-//                   handle,
-//                   rnn_desc.desc(),
-//                   layer,
-//                   weight_buf.numel() * weight_buf.element_size(),
-//                   weight_buf.data_ptr(),
-//                   linear_id,
-//                   lin_layer_mat_desc.mut_desc(),
-//                   &matrix_pointer,
-//                   unused_desc.mut_desc(),
-//                   &unused_pointer
-//                   ));
-//          } else { // bias
-//               AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
-//                   handle,
-//                   rnn_desc.desc(),
-//                   layer,
-//                   weight_buf.numel() * weight_buf.element_size(),
-//                   weight_buf.data_ptr(),
-//                   linear_id,
-//                   unused_desc.mut_desc(),
-//                   &unused_pointer,
-//                   lin_layer_mat_desc.mut_desc(),
-//                   &matrix_pointer
-//                   ));
-//          }
-//          }
-//#endif
+#else
+          void *unused_pointer;
+          TensorDescriptor unused_desc;
+          TensorDescriptor lin_layer_mat_desc;
+          for (int stateless = 0; stateless < 100; stateless++) {
+          if (cudnn_method) { // matrix
+               AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
+                   handle,
+                   rnn_desc.desc(),
+                   layer,
+                   weight_buf.numel() * weight_buf.element_size(),
+                   weight_buf.data_ptr(),
+                   linear_id,
+                   lin_layer_mat_desc.mut_desc(),
+                   &matrix_pointer,
+                   unused_desc.mut_desc(),
+                   &unused_pointer
+                   ));
+          } else { // bias
+               AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
+                   handle,
+                   rnn_desc.desc(),
+                   layer,
+                   weight_buf.numel() * weight_buf.element_size(),
+                   weight_buf.data_ptr(),
+                   linear_id,
+                   unused_desc.mut_desc(),
+                   &unused_pointer,
+                   lin_layer_mat_desc.mut_desc(),
+                   &matrix_pointer
+                   ));
+          }
+          }
+#endif
           cudnnDataType_t data_type;
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
           cudnnTensorFormat_t format;
-//#else
-//          int stride_dim_a[5];
-//#endif
+#else
+          int stride_dim_a[5];
+#endif
           int nb_dims;
           constexpr int min_dim = 3;
           int filter_dim_a[min_dim];
