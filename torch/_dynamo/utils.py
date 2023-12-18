@@ -588,12 +588,16 @@ class CompilationMetrics:
     cache_size: int
     accumulated_cache_size: int
     guard_count: Optional[int]
+    shape_env_guard_count: Optional[int]
     graph_op_count: Optional[int]
     graph_node_count: Optional[int]
     graph_input_count: Optional[int]
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
+    fail_type: Optional[str]
     fail_reason: Optional[str]
+    fail_user_frame_filename: Optional[str]
+    fail_user_frame_lineno: Optional[int]
     non_compliant_ops: Set[str]
     compliant_custom_ops: Set[str]
 
@@ -2329,6 +2333,10 @@ def is_tensor_base_attr_getter(value):
         and value.__name__ == "__get__"
         and value.__self__.__objclass__ is torch._C._TensorBase  # type: ignore[attr-defined]
     )
+
+
+def is_torch_function_object(value):
+    return hasattr(value, "__torch_function__")
 
 
 def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
