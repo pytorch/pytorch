@@ -24,9 +24,8 @@ class TORCH_API AOTIModelContainerRunner {
   ~AOTIModelContainerRunner();
 
   std::vector<at::Tensor> run(
-      std::vector<at::Tensor> inputs,
-      AOTInductorStreamHandle cuda_stream_handle = nullptr,
-      AOTIProxyExecutorHandle proxy_executor_handle = nullptr);
+      std::vector<at::Tensor>& inputs,
+      AOTInductorStreamHandle cuda_stream_handle = nullptr);
 
   void update_inactive_constant_buffer(const TensorConstantMap& const_map);
   void update_constant_buffer(
@@ -37,13 +36,13 @@ class TORCH_API AOTIModelContainerRunner {
 
   std::vector<const char*> get_call_spec();
 
+ protected:
   AOTIModelContainerRunner(
-      const char* model_path,
+      const char* model_so_path,
       size_t num_models,
       bool is_cpu,
       const char* cubin_dir);
 
- protected:
   std::unique_ptr<at::DynamicLibrary> model_so_;
   decltype(&AOTInductorModelContainerCreate) create_func_{nullptr};
   decltype(&AOTInductorModelContainerDelete) delete_func_{nullptr};
@@ -58,6 +57,7 @@ class TORCH_API AOTIModelContainerRunner {
       swap_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerGetCallSpec) get_call_spec_func_{nullptr};
   AOTInductorModelContainerHandle container_handle_ = nullptr;
+  AOTIProxyExecutorHandle proxy_executor_handle_ = nullptr;
 };
 
 } // namespace torch::inductor
