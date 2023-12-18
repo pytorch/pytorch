@@ -57,8 +57,6 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PR_BODY: ${{ github.event.pull_request.body }}
-      PYTORCH_RETRY_TEST_CASES: 1
-      PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
     steps:
       - name: Clean up leftover processes on MacOS pet runner
         continue-on-error: true
