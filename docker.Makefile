@@ -1,15 +1,16 @@
 DOCKER_REGISTRY          ?= docker.io
 DOCKER_ORG               ?= $(shell docker info 2>/dev/null | sed '/Username:/!d;s/.* //')
 DOCKER_IMAGE             ?= pytorch
-DOCKER_FULL_NAME          = $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(DOCKER_IMAGE)
+CUDA_VERSION_SHORT       ?= 12.1
+CUDA_VERSION             ?= 12.1.1
+CUDNN_VERSION            ?= 8
+DOCKER_FULL_NAME          = $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(DOCKER_IMAGE)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)
 
 ifeq ("$(DOCKER_ORG)","")
 $(warning WARNING: No docker user found using results from whoami)
 DOCKER_ORG                = $(shell whoami)
 endif
 
-CUDA_VERSION             ?= 12.1.1
-CUDNN_VERSION            ?= 8
 BASE_RUNTIME              = ubuntu:22.04
 BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-devel-ubuntu22.04
 CMAKE_VARS               ?=
