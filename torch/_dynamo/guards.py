@@ -27,6 +27,8 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
+import operator
+
 import torch
 import torch.utils._device
 from torch._dynamo.source import (
@@ -111,7 +113,7 @@ CLOSURE_VARS = {
     "___dict_param_key_ids": dict_param_key_ids,
     "___dict_const_keys": dict_const_keys,
     "___dict_version": dict_version,
-    "___dict_contains": lambda a, b: a in b,
+    "___dict_contains": operator.contains,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,

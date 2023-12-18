@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import enum
 import functools
+import operator
 import pprint
 import re
 import unittest
@@ -989,7 +990,7 @@ class GraphModule(torch.nn.Module):
 
     def test_wrap_kwarg(self):
         def f(x, y):
-            return wrap(lambda x, y: x + y, x, y=y)
+            return wrap(operator.add, x, y=y)
 
         x = torch.randn(3)
         y = torch.randn(3, 3)
@@ -997,7 +998,7 @@ class GraphModule(torch.nn.Module):
 
     def test_wrap_kwarg_int(self):
         def f(x, y):
-            return wrap(lambda x, y: x + y, x, y=y)
+            return wrap(operator.add, x, y=y)
 
         x = torch.randn(3)
         y = 8
@@ -1971,7 +1972,7 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(3)
 
         def f(x):
-            return wrap(lambda x, y: x + y, x, y)
+            return wrap(operator.add, x, y)
 
         x = torch.randn(3)
         self._test_wrap_simple(f, default_args_generator((x,)), 3)
@@ -3068,7 +3069,7 @@ class GraphModule(torch.nn.Module):
     @config.patch(capture_func_transforms=True)
     def test_vmap_over_vmap_two_inputs(self):
         def fn(x, y):
-            return torch.func.vmap(torch.func.vmap(lambda x, y: x + y, in_dims=1))(x, y)
+            return torch.func.vmap(torch.func.vmap(operator.add, in_dims=1))(x, y)
 
         x = torch.randn(3, 3, 3)
         y = torch.randn(3, 3, 3)
@@ -3285,7 +3286,7 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(2, 3)
 
         def fn(x, y):
-            return torch.func.vmap(lambda x, y: x + y)(x, y=y)
+            return torch.func.vmap(operator.add)(x, y=y)
 
         actual = fn(x, y)
         expected = torch.compile(fn, backend="aot_eager", fullgraph=False)(x, y)
