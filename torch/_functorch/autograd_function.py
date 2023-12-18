@@ -640,22 +640,18 @@ class AutogradFunctionApply(HigherOrderOperator):
         super().__init__("autograd_function_apply")
 
     def __call__(self, fwd, bwd, *fwd_args):
+        saved_values = None
+
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *args):
-                output, saved_tensors, saved_attrs = fwd(None, *args)
-                ctx.save_for_backward(*saved_tensors)
-                ctx.saved_attrs = saved_attrs
+                nonlocal saved_values
+                output, saved_values = fwd(None, *args)
                 return output
 
             @staticmethod
             def backward(ctx, grad):
-                return bwd(
-                    None,
-                    len(ctx.saved_tensors),
-                    *ctx.saved_tensors,
-                    grad,
-                    **ctx.saved_attrs)
+                return bwd(None, grad, *saved_values)
 
         return ApplyTemplate.apply(*fwd_args)
 

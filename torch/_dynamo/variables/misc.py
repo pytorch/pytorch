@@ -352,9 +352,6 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.apply(visit, (args, kwargs))
 
-        ctx = AutogradFunctionContextVariable.create(tx)
-        args = [ctx, *args]
-
         if (
             requires_grad
             and torch.is_grad_enabled()
@@ -378,16 +375,11 @@ class AutogradFunctionVariable(VariableTracker):
             if jvp_fn is not torch.autograd.Function.jvp:
                 unimplemented("NYI - User defind jvp")
 
-            from .higher_order_ops import (
-                AutogradFunctionApplyVariable,
-                TorchHigherOrderOperatorVariable,
-            )
-
-            trampoline_autograd_apply = produce_trampoline_autograd_apply(self.fn_cls)
             trampoline_autograd_fwd = produce_trampoline_autograd_fwd(self.fn_cls)
             trampoline_autograd_bwd = produce_trampoline_autograd_bwd(self.fn_cls)
-            trampoline_autograd_bwd_with_saved = (
-                produce_trampoline_autograd_bwd_with_saved(self.fn_cls)
+
+            module_source = AttrSource(
+                tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
             )
 
             # NOTE [On Tracing autograd.Function w/ grad]
@@ -407,49 +399,21 @@ class AutogradFunctionVariable(VariableTracker):
             # and that we can inline properly here. Inlining is required in order to be able to ensure that the
             # soundness evaluation works as described above.
 
-            module_source = AttrSource(
-                tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
-            )
-            fwd_bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
-                tx.output,
-                parent=tx.output.current_tracer,
-                source_target="autograd.Function",
-            )
-            higher_order_autograd_fn = TorchHigherOrderOperatorVariable.make(
-                trampoline_autograd_fwd,
-                source=AttrSource(module_source, "forward"),
-                fwd_bwd_tracer=fwd_bwd_tracer,
-            )
-            speculated_fwd_result = higher_order_autograd_fn.call_function(
-                tx, args, kwargs
-            )
+            from .higher_order_ops import AutogradFunctionApplyVariable
 
-            if isinstance(speculated_fwd_result, variables.TupleVariable):
-                bwd_args = [ctx, *speculated_fwd_result.items]
-            else:
-                bwd_args = [ctx, speculated_fwd_result]
-
-            TorchHigherOrderOperatorVariable.make(
-                trampoline_autograd_bwd,
-                source=AttrSource(module_source, "backward"),
-                fwd_bwd_tracer=fwd_bwd_tracer,
-            ).call_function(tx, bwd_args, {})
-
-            # If fwd and backward are sound, we want apply in the graph.
-            # We don't want backward because we are tracing forwards.
-            # And we don't want backwards for the obvious reasons.
-            args = args[1:]  # Drop context
             return AutogradFunctionApplyVariable(
                 trampoline_autograd_fwd,
-                trampoline_autograd_bwd_with_saved,
+                trampoline_autograd_bwd,
                 source=module_source,
             ).call_function(tx, args, kwargs)
 
+        source = None
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), "forward")
-        else:
-            source = None
+
         fn = self.fn_cls.forward
+        ctx = AutogradFunctionContextVariable.create(tx)
+        args = [ctx, *args]
         if isinstance(fn, types.FunctionType):
             return variables.UserFunctionVariable(fn, source=source).call_function(
                 tx, args, kwargs
