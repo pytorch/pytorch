@@ -64,13 +64,6 @@ bool mkldnn_bf32_gemm(
       return false;
     }
 
-bool use_mkldnn_lower_precision_matmul(
-    const Tensor& mat1,
-    const Tensor& mat2,
-    const Tensor& result) {
-    return false;
-}
-
 bool use_mkldnn_bf32_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
@@ -385,13 +378,6 @@ bool use_mkldnn_fp16_matmul(
       mat1.numel() != 0 &&
       mat2.numel() != 0 &&
       checksize(mat1, mat2));
-}
-
-bool use_mkldnn_lower_precision_matmul(
-    const Tensor& mat1,
-    const Tensor& mat2,
-    const Tensor& result) {
-    return (use_mkldnn_bf16_matmul(mat1, mat2, result) || use_mkldnn_fp16_matmul(mat1, mat2, result));
 }
 
 bool use_mkldnn_bf32_matmul(

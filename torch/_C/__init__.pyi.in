@@ -1090,6 +1090,8 @@ def _get_math_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_math(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
 def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
 def _set_mkldnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledMkldnn
+def _get_mkldnn_bf32_matmul_enabled() -> _bool: ...  # THPModule_allowBF32MkldnnMatmul
+def _set_mkldnn_bf32_matmul_enabled(arg: _bool) -> None: ...  # THPModule_setAllowBF32MkldnnMatmul
 def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN
 def _set_cudnn_benchmark(arg: _bool) -> None: ...  # THPModule_setBenchmarkCuDNN
 def _get_cudnn_deterministic() -> _bool: ...  # THPModule_deterministicCuDNN
