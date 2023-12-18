@@ -738,10 +738,8 @@ def gen_functionalization_registration(
         if str(f.func.name) == "resize_":
             # See Note [resize_ in Functionalization]
             return []
-        if str(f.func.name.name) == "set_":
-            # set_ is a crazy op that swaps out storage
-            return []
-        assert not f.is_view_op
+        if str(f.func.name.name) != "set_":
+            assert not f.is_view_op
         # functionalization needs to generate and register kernels for inplace ops.
         # We *also* need to directly register CompositeImplicitAUtograd kernels
         # so that they decompose properly before functioanlization.
