@@ -212,11 +212,11 @@ struct sha1 {
     process_byte_impl(
         static_cast<unsigned char>((bit_count_high >> 16) & 0xFF));
     process_byte_impl(static_cast<unsigned char>((bit_count_high >> 8) & 0xFF));
-    process_byte_impl(static_cast<unsigned char>((bit_count_high)&0xFF));
+    process_byte_impl(static_cast<unsigned char>((bit_count_high) & 0xFF));
     process_byte_impl(static_cast<unsigned char>((bit_count_low >> 24) & 0xFF));
     process_byte_impl(static_cast<unsigned char>((bit_count_low >> 16) & 0xFF));
     process_byte_impl(static_cast<unsigned char>((bit_count_low >> 8) & 0xFF));
-    process_byte_impl(static_cast<unsigned char>((bit_count_low)&0xFF));
+    process_byte_impl(static_cast<unsigned char>((bit_count_low) & 0xFF));
 
     // get final digest
     digest[0] = h_[0];

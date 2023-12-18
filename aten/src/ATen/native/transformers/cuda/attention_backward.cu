@@ -212,7 +212,7 @@ _efficient_attention_backward(
     TORCH_CHECK(cu_seqlens_q->size(0) == cu_seqlens_k->size(0));
     TORCH_CHECK(query.size(0) == 1, "cu_seqlen only supports batch_size=1");
     TORCH_CHECK(max_seqlen_q > 0, "max_seqlen_q required with `cu_seqlens_q`");
-    TORCH_CHECK(max_seqlen_k > 0, "max_seqlen_q required with `cu_seqlens_q`");
+    TORCH_CHECK(max_seqlen_k > 0, "max_seqlen_k required with `cu_seqlens_k`");
     TORCH_CHECK(
         max_seqlen_k <= key.size(1), "Invalid max_seqlen_k:", max_seqlen_k);
     TORCH_CHECK(
