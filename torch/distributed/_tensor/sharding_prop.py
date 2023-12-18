@@ -218,6 +218,13 @@ class ShardingPropagator:
 
             op_strategy = self.op_strategy_funcs[op_schema.op](mesh, strategy_schema)
 
+            def _assert_output_spec(spec_obj, idx) -> DTensorSpec:
+                if isinstance(spec_obj, DTensorSpec):
+                    return spec_obj
+                else:
+                    assert isinstance(spec_obj[idx], DTensorSpec)
+                    return spec_obj[idx]
+
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
                 output_strategy = self._select_strategy(op_strategy)
@@ -226,7 +233,8 @@ class ShardingPropagator:
                 expected_input_specs = []
                 for idx, input_spec in enumerate(op_schema.args_spec):
                     desired_spec = (
-                        output_strategy.output_spec
+                        # TODO: change here
+                        _assert_output_spec(output_strategy.output_spec, idx)
                         if output_strategy.input_specs is None
                         else output_strategy.input_specs[idx]
                     )
@@ -244,19 +252,23 @@ class ShardingPropagator:
 
                 if op_schema.return_type_tuple_tensors():
                     # for ops return multiple tensors, make output spec return same spec
-                    # returned from the op strategy
-                    output_spec: OutputSpecType = tuple(
-                        [
-                            # create a new DTensorSpec with the same placement as the
-                            # output_spec in output_strategy
-                            DTensorSpec(
-                                mesh=output_strategy.output_spec.mesh,
-                                placements=output_strategy.output_spec.placements,
-                                tensor_meta=output_strategy.output_spec.tensor_meta,
-                            )
-                            for _ in range(len(op_schema.op._schema.returns))
-                        ]
-                    )
+                    # returned from the op strategy if the output_spec is not a list
+                    output_spec_obj = output_strategy.output_spec
+                    if isinstance(output_spec_obj, DTensorSpec):
+                        output_spec: OutputSpecType = tuple(
+                            [
+                                # create a new DTensorSpec with the same placement as the
+                                # output_spec in output_strategy
+                                DTensorSpec(
+                                    mesh=output_strategy.output_spec.mesh,
+                                    placements=output_strategy.output_spec.placements,
+                                    tensor_meta=output_strategy.output_spec.tensor_meta,
+                                )
+                                for _ in range(len(op_schema.op._schema.returns))
+                            ]
+                        )
+                    else:
+                        output_spec = output_strategy.output_spec
                 elif op_schema.return_type_tensor():
                     output_spec = output_strategy.output_spec
                 else:
@@ -285,49 +297,31 @@ class ShardingPropagator:
                 needs_redistribute = False
                 suggestion_args: List[object] = []
                 for arg in op_schema.args_schema:
-                    if op_strategy.op_type == 0:
-                        if isinstance(arg, (list, tuple)) and isinstance(
-                            arg[0], DTensorSpec
-                        ):
-                            expected_input_spec_list = []
-                            for idx, arg_spec in enumerate(arg):
-                                out_spec = out_spec_list[idx]
-                                # we expect ops whose op_type is 0 have no None output
-                                assert isinstance(out_spec, DTensorSpec)
-                                if arg_spec.placements != out_spec.placements:
-                                    needs_redistribute = True
-                                expected_input_spec_list.append(out_spec)
-                            suggestion_args.append(
-                                tuple(expected_input_spec_list)
-                                if isinstance(arg, tuple)
-                                else expected_input_spec_list
-                            )
-                        elif isinstance(arg, DTensorSpec):
-                            expected_input_spec = out_spec_list[0]
+                    if isinstance(arg, (list, tuple)) and isinstance(
+                        arg[0], DTensorSpec
+                    ):
+                        expected_input_spec_list = []
+                        for idx, arg_spec in enumerate(arg):
+                            out_spec = out_spec_list[idx]
                             # we expect ops whose op_type is 0 have no None output
-                            assert isinstance(expected_input_spec, DTensorSpec)
-                            if arg.placements != expected_input_spec.placements:
+                            assert isinstance(out_spec, DTensorSpec)
+                            if arg_spec.placements != out_spec.placements:
                                 needs_redistribute = True
-                            suggestion_args.append(expected_input_spec)
-                        else:
-                            suggestion_args.append(arg)
-                    elif op_strategy.op_type == 1:
-                        idx = 0
-                        for arg_spec in op_schema.args_schema:
-                            if isinstance(arg_spec, DTensorSpec) and input_specs_list:
-                                if (
-                                    arg_spec.placements
-                                    != input_specs_list[idx].placements
-                                ):
-                                    needs_redistribute = True
-                                suggestion_args.append(input_specs_list[idx])
-                                idx += 1
-                            else:
-                                suggestion_args.append(arg_spec)
-                    else:
-                        raise ValueError(
-                            f"Invalid TupleStrategy op type: op_type={op_strategy.op_type}"
+                            expected_input_spec_list.append(out_spec)
+                        suggestion_args.append(
+                            tuple(expected_input_spec_list)
+                            if isinstance(arg, tuple)
+                            else expected_input_spec_list
                         )
+                    elif isinstance(arg, DTensorSpec):
+                        expected_input_spec = out_spec_list[0]
+                        # we expect ops whose op_type is 0 have no None output
+                        assert isinstance(expected_input_spec, DTensorSpec)
+                        if arg.placements != expected_input_spec.placements:
+                            needs_redistribute = True
+                        suggestion_args.append(expected_input_spec)
+                    else:
+                        suggestion_args.append(arg)
 
                 suggestion_schema = None
                 if needs_redistribute:

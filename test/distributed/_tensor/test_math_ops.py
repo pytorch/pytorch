@@ -280,8 +280,23 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(y_local, y_dist.full_tensor())
 
             # backward step
+            comm_mode = CommDebugMode()
             y_local.sum().backward()
-            y_dist.sum().backward()
+            with comm_mode:
+                y_dist.sum().backward()
+
+            self.assertEqual(
+                comm_mode.get_total_counts(),
+                0,
+                f"comm count={comm_mode.get_total_counts()}, "
+                f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
+            )
+
+            if elementwise_affine:
+                print(layer_norm_dist.weight.grad.placements)
+                print(layer_norm_dist.bias.grad.placements)
+
+            print(f"x grad: {x_dist.grad.placements}")
             self.assertEqual(x_local.grad, x_dist.grad.full_tensor())
 
 
