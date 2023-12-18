@@ -234,7 +234,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inputs = (
                 # rank0: [0., 1.], rank1: [2., 3.]
                 torch.arange(2, dtype=torch.float32, device="cuda") + 2 * self.rank,
-                [1,0],
+                [1, 0],
             )
             compiled = torch.compile(func)
             out = compiled(*inputs, **self.get_world_trs())
