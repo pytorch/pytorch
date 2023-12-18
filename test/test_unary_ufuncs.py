@@ -73,7 +73,6 @@ reference_filtered_ops = list(filter(lambda op: op.ref is not None, unary_ufuncs
 
 # TODO: port test_unary_out_op_mem_overlap
 # TODO: add test for inplace variants erroring on broadcasted inputs
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestUnaryUfuncs(TestCase):
     exact_dtype = True
 
@@ -287,6 +286,7 @@ class TestUnaryUfuncs(TestCase):
 
     @suppress_warnings
     @ops(reference_filtered_ops)
+    @torch.testing._internal.common_utils.markDynamoStrictTest
     def test_reference_numerics_large(self, device, dtype, op):
         if dtype in (torch.bool, torch.uint8, torch.int8):
             raise self.skipTest("bool, uint8, and int8 dtypes have no large values")
