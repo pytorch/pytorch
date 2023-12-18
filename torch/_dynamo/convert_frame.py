@@ -692,6 +692,7 @@ def _compile(
                 }
             else:
                 guard_count = None
+                shape_env_guard_count = None
                 graph_op_count = None
                 graph_node_count = None
                 graph_input_count = None
@@ -707,12 +708,16 @@ def _compile(
                 cache_size.num_cache_entries_with_same_id_matched_objs,
                 cache_size.num_cache_entries,
                 guard_count,
+                shape_env_guard_count,
                 graph_op_count,
                 graph_node_count,
                 graph_input_count,
                 entire_frame_compile_time,
                 backend_compile_time,
+                fail_type,
                 fail_reason,
+                fail_user_frame_filename,
+                fail_user_frame_lineno,
                 non_compliant_ops,
                 compliant_custom_ops,
             )
