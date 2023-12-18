@@ -143,6 +143,8 @@ class TORCH_API Context {
   void setUserEnabledCuDNN(bool e);
   bool userEnabledMkldnn() const;
   void setUserEnabledMkldnn(bool e);
+  bool allowBF32MkldnnMatmul() const;
+  void setAllowBF32MkldnnMatmul(bool);
   bool benchmarkCuDNN() const;
   void setBenchmarkCuDNN(bool);
   int benchmarkLimitCuDNN() const;

@@ -44,6 +44,14 @@ void Context::setUserEnabledMkldnn(bool e) {
   enabled_mkldnn = e;
 }
 
+bool Context::allowBF32MkldnnMatmul() const {
+  return float32_matmul_precision == at::Float32MatmulPrecision::MEDIUM;
+}
+
+void Context::setAllowBF32MkldnnMatmul(bool b) {
+  float32_matmul_precision = b ? at::Float32MatmulPrecision::MEDIUM : float32_matmul_precision;
+}
+
 bool Context::deterministicCuDNN() const {
   return deterministic_cudnn;
 }

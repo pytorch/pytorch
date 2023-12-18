@@ -702,6 +702,23 @@ PyObject* THPModule_userEnabledMkldnn(PyObject* _unused, PyObject* noargs) {
     Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setAllowBF32MkldnnMatmul(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_allow_bf32_mkldnn_matmul expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowBF32MkldnnMatmul(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject* THPModule_allowBF32MkldnnMatmul(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().allowBF32MkldnnMatmul()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setDeterministicCuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   THPUtils_assert(
@@ -1186,6 +1203,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_set_cudnn_enabled", THPModule_setUserEnabledCuDNN, METH_O, nullptr},
     {"_get_mkldnn_enabled", THPModule_userEnabledMkldnn, METH_NOARGS, nullptr},
     {"_set_mkldnn_enabled", THPModule_setUserEnabledMkldnn, METH_O, nullptr},
+    {"_get_mkldnn_bf32_matmul_enabled",
+     THPModule_allowBF32MkldnnMatmul,
+     METH_NOARGS,
+     nullptr},
+    {"_set_mkldnn_bf32_matmul_enabled",
+     THPModule_setAllowBF32MkldnnMatmul,
+     METH_O,
+     nullptr},
     {"_get_cudnn_allow_tf32", THPModule_allowTF32CuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_allow_tf32", THPModule_setAllowTF32CuDNN, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},
