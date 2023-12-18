@@ -549,6 +549,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
+  // Helper function for iteratively aborting communicators in the provided map
+  void abortCommsFromMap(
+      std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
+          ncclCommsMap,
+      c10::optional<std::string> abortReason);
+
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
   void abort(c10::optional<std::string> abortReason = c10::nullopt);
