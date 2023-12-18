@@ -1,18 +1,14 @@
-from typing import Optional
 import warnings
+from typing import Optional
 
 import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.stateful import Stateful
-from .planner import SavePlanner
+
 from .default_planner import DefaultSavePlanner
-
-
-from .storage import (
-    StorageWriter,
-)
-
 from .metadata import Metadata, STATE_DICT_TYPE
+from .planner import SavePlanner
+from .storage import StorageWriter
 from .utils import _DistWrapper
 
 __all__ = ["save_state_dict", "save"]
@@ -32,7 +28,10 @@ def save_state_dict(
     )
 
     # TODO: test returning `save` here instead.
-    return _save_state_dict(state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner)
+    return _save_state_dict(
+        state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner
+    )
+
 
 def save(
     state_dict: STATE_DICT_TYPE,
@@ -108,7 +107,9 @@ def save(
 
     dumpable_state_dict = {}
     for key, elem in state_dict.items():
-        dumpable_state_dict[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
+        dumpable_state_dict[key] = (
+            elem.state_dict() if isinstance(elem, Stateful) else elem
+        )
 
     return _save_state_dict(
         dumpable_state_dict,
@@ -116,8 +117,9 @@ def save(
         process_group,
         coordinator_rank,
         no_dist,
-        planner
+        planner,
     )
+
 
 def _save_state_dict(
     state_dict: STATE_DICT_TYPE,
@@ -127,7 +129,6 @@ def _save_state_dict(
     no_dist: bool = False,
     planner: Optional[SavePlanner] = None,
 ) -> Metadata:
-
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
@@ -149,9 +150,7 @@ def _save_state_dict(
         nonlocal global_metatadata
 
         assert planner is not None
-        all_local_plans, global_metatadata = planner.create_global_plan(
-            all_local_plans
-        )
+        all_local_plans, global_metatadata = planner.create_global_plan(all_local_plans)
         all_local_plans = storage_writer.prepare_global_plan(all_local_plans)
         return all_local_plans
 

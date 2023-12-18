@@ -1129,7 +1129,7 @@ class BuiltinVariable(VariableTracker):
         if not name_var.is_python_constant():
             unimplemented("non-const getattr() name")
 
-        if tx.output.side_effects.is_attribute_mutation(obj):
+        if tx.output.side_effects.is_attribute_mutation(obj) and name != "grad":
             try:
                 # re-read a pending side effect?
                 return tx.output.side_effects.load_attr(obj, name)
@@ -1210,9 +1210,13 @@ class BuiltinVariable(VariableTracker):
                             else:
                                 grapharg.example.grad = None
                         return VariableBuilder(tx, source)(grapharg.example.grad)
-                unimplemented("tensor grad")
+
+                return obj.dynamic_getattr(tx, name)
             else:
-                unimplemented("tensor grad")
+                example_value = obj.as_proxy().node.meta["example_value"]
+                if example_value.grad is not None:
+                    unimplemented("getattr on non-None grad - NYI")
+                return ConstantVariable(None)
         elif isinstance(
             obj,
             (
