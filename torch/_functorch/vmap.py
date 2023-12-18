@@ -274,17 +274,10 @@ def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
         return _chunked_vmap(func, flat_in_dims, chunks_flat_args,
                              args_spec, out_dims, randomness, **kwargs)
 
-    from torch._dynamo import disable
-
-    # remove @disable once #114306 is fixed
-    @disable
-    def wrapper():
-        # If chunk_size is not specified.
-        return _flat_vmap(
-            func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs
-        )
-
-    return wrapper()
+    # If chunk_size is not specified.
+    return _flat_vmap(
+        func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs
+    )
 
 def get_chunk_sizes(total_elems, chunk_size):
     n_chunks = n_chunks = total_elems // chunk_size
