@@ -320,7 +320,8 @@ class Round(sympy.Function):
         if number.is_integer:
             return number
         elif isinstance(number, sympy.Number):
-            return sympy.Integer(round(float(number)))
+            value_type = int if number.is_integer else float
+            return sympy.Integer(round(value_type(number)))
 
     def __int__(self):
         # This will only ever be called when computing size hints. At that point, self.args[0] should be a number and
@@ -331,6 +332,6 @@ class Round(sympy.Function):
 class RoundDecimal(sympy.Function):
     @classmethod
     def eval(cls, number, ndigits):
-        if isinstance(number, sympy.Number) and isinstance(ndigits, sympy.Number):
-            value = round(float(number), int(ndigits))
-            return (sympy.Integer if number.is_Integer else sympy.Float)(value)
+        if isinstance(number, sympy.Number) and isinstance(ndigits, sympy.Integer):
+            value_type, output_type = (int, sympy.Integer) if number.is_integer else (float, sympy.Float)
+            return output_type(round(value_type(number), int(ndigits)))
