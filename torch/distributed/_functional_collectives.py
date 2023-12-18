@@ -381,12 +381,13 @@ def all_to_all_single(
 
 def permute_tensor(
     self: torch.Tensor,
-    src_dst_pairs: List[Tuple[int, int]],
+    src_dst: List[int],
     group: RANK_TYPES,
     tag: str = "",
 ) -> torch.Tensor:
     """
-    Permutes the elements of the tensor according to the given source/destination pairs.
+    Permutes the elements of the tensor according to the given source/destination pairs. `src_dst` should
+    be defined such that src_dst[m] == n means m sends to n.
 
     Group can be one of:
         List[int]: ranks participating in the collective.
@@ -400,8 +401,7 @@ def permute_tensor(
 
     output_split_sizes = [0] * group_size
     input_split_sizes = [0] * group_size
-    print(f"{dist.get_rank()=} {dist.get_rank(local_pg)=}")
-    for src, dst in src_dst_pairs:
+    for src, dst in enumerate(src_dst):
         if src == dist.get_rank(local_pg):
             input_split_sizes[dst] = self.numel()
         if dst == dist.get_rank(local_pg):

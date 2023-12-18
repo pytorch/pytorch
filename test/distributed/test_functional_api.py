@@ -632,10 +632,7 @@ class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
             send_tensor = torch.arange(2, dtype=torch.float32, device=device) + 2 * rank
             recvd_tensor = ft_c.permute_tensor(
                 send_tensor,
-                [
-                    (0, 1),
-                    (1, 0)
-                ],
+                [1,0],
                 group=mesh
             )
 
