@@ -253,11 +253,6 @@ def _share_state_and_init_handle_attrs(
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
-        # TODO: remove this if check after we integrate device_mesh in Composable APIs.
-        # Currently, it is needed since root_state of composable APIs doesn't have DeviceMesh passed in yet.
-        if hasattr(root_state, "_device_mesh"):
-            fsdp_state._device_mesh = root_state._device_mesh
-            fsdp_state._fsdp_extension = root_state._fsdp_extension
     for attr_name, attr_values in attr_name_to_values.items():
         if len(attr_values) != 1:
             raise ValueError(
@@ -1155,15 +1150,21 @@ def _finalize_params(
     if not handle:
         return
     flat_param = handle.flat_param
-    if hasattr(flat_param, "_post_backward_hook_state"):
-        post_backward_hook_state_len = len(flat_param._post_backward_hook_state)
-        expected_post_backward_hook_state_len = int(flat_param.requires_grad) + 1
-        _p_assert(
-            post_backward_hook_state_len == expected_post_backward_hook_state_len,
-            f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
-        )
-        flat_param._post_backward_hook_state[-1].remove()
-        delattr(flat_param, "_post_backward_hook_state")
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        if hasattr(flat_param, "_post_backward_hook_handle"):
+            pbhs_handle = flat_param._post_backward_hook_handle
+            pbhs_handle.remove()
+            del flat_param._post_backward_hook_handle
+    else:
+        if hasattr(flat_param, "_post_backward_hook_state"):
+            post_backward_hook_state_len = len(flat_param._post_backward_hook_state)
+            expected_post_backward_hook_state_len = int(flat_param.requires_grad) + 1
+            _p_assert(
+                post_backward_hook_state_len == expected_post_backward_hook_state_len,
+                f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
+            )
+            flat_param._post_backward_hook_state[-1].remove()
+            delattr(flat_param, "_post_backward_hook_state")
     if flat_param.requires_grad:
         if not state._sync_gradients:
             # Preserve the gradient accumulation state if not synchronizing
@@ -1416,22 +1417,31 @@ def _register_post_backward_hook(
     if not handle:
         return
     flat_param = handle.flat_param
-    already_registered = hasattr(flat_param, "_post_backward_hook_state")
-    if already_registered or not flat_param.requires_grad:
-        return
-    # Get the `AccumulateGrad` object
-    temp_flat_param = flat_param.expand_as(flat_param)
-    _p_assert(
-        temp_flat_param.grad_fn is not None,
-        "The `grad_fn` is needed to access the `AccumulateGrad` and "
-        "register the post-backward hook",
-    )
-    acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
-    assert acc_grad is not None
-    hook_handle = acc_grad.register_hook(
-        functools.partial(_post_backward_hook, state, handle)
-    )
-    flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
+
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        already_registered = hasattr(flat_param, "_post_backward_hook_handle")
+        if already_registered or not flat_param.requires_grad:
+            return
+        hook = functools.partial(_post_backward_hook, state, handle)
+        hook_handle = flat_param.register_post_accumulate_grad_hook(hook)
+        flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined]
+    else:
+        already_registered = hasattr(flat_param, "_post_backward_hook_state")
+        if already_registered or not flat_param.requires_grad:
+            return
+        # Get the `AccumulateGrad` object
+        temp_flat_param = flat_param.expand_as(flat_param)
+        _p_assert(
+            temp_flat_param.grad_fn is not None,
+            "The `grad_fn` is needed to access the `AccumulateGrad` and "
+            "register the post-backward hook",
+        )
+        acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
+        assert acc_grad is not None
+        hook_handle = acc_grad.register_hook(
+            functools.partial(_post_backward_hook, state, handle)
+        )
+        flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
 
 
 def _register_post_backward_reshard_only_hook(
@@ -1456,7 +1466,12 @@ def _register_post_backward_reshard_only_hook(
     if not handle:
         return
     flat_param = handle.flat_param
-    already_registered = hasattr(flat_param, "_post_backward_hook_state")
+
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        already_registered = hasattr(flat_param, "_post_backward_hook_handle")
+    else:
+        already_registered = hasattr(flat_param, "_post_backward_hook_state")
+
     if already_registered or flat_param.requires_grad:
         return
     if inp_tensors is None:
@@ -1468,7 +1483,10 @@ def _register_post_backward_reshard_only_hook(
     hook_handle = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard, state, handle)
     )
-    flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined, assignment]
+    else:
+        flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
 
 
 @no_type_check
