@@ -3439,6 +3439,7 @@ def _upsample_linear(
     if not input.is_floating_point():
         result = result.round()
 
+    result = result.to(input.dtype)
     return result
 
 
