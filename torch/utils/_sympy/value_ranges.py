@@ -10,6 +10,7 @@ from typing import Union, Dict, Optional, SupportsFloat
 
 from torch._prims_common import dtype_to_type
 from .interp import sympy_interp
+from .functions import Round, RoundDecimal
 
 log = logging.getLogger(__name__)
 
@@ -445,19 +446,16 @@ class SymPyValueRangeAnalysis:
 
     @classmethod
     def round(cls, number, ndigits=None):
-        if ndigits is not None:
+        if ndigits is None:
+            fn = Round
+        else:
             assert ndigits.is_singleton()
             ndigits = ndigits.lower
+            # We can't use functools.partial here since sympy doesn't support keyword arguments, but we have to bind
+            # the second parameter.
+            fn = lambda number: RoundDecimal(number, ndigits)  # noqa: E731
 
-        # Negative ndigits not just affect the decimal, but the integer part as well
-        if ndigits is None or ndigits >= 0:
-            lower = sympy.floor(number.lower)
-            upper = sympy.ceiling(number.upper)
-        else:
-            lower = sympy.floor(number.lower * 10 ** ndigits) * 10 ** -ndigits
-            upper = sympy.floor(number.upper * 10 ** ndigits) * 10 ** -ndigits
-
-        return ValueRanges(lower, upper)
+        return ValueRanges.increasing_map(number, fn)
 
     # It's used in some models on symints
     @staticmethod
