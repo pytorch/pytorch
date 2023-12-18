@@ -3303,7 +3303,6 @@ def _upsample_linear_vec(input, output_size, align_corners, scale_factors):
 
 
 @register_decomposition([aten.upsample_linear1d.default, aten.upsample_linear1d.out])
-@aten.upsample_linear1d.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 @pw_cast_for_opmath
 def upsample_linear1d(
@@ -3334,7 +3333,6 @@ def upsample_bilinear2d(
 @register_decomposition(
     [aten.upsample_trilinear3d.default, aten.upsample_trilinear3d.out]
 )
-@aten.upsample_trilinear3d.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 @pw_cast_for_opmath
 def upsample_trilinear3d(
@@ -3379,14 +3377,15 @@ def _upsample_linear(
         # First Calculate scaling factor
         scale_factor = _compute_scale(inp, out, align_corners, scales)
         _, dtype = utils.elementwise_dtypes(
-            input, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+            input,
+            type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         )
         # We have to create arange with int64 dtype and use .to in order to avoid
         # additional kernels creation in inductor and get a perf slowdown
         i = torch.arange(out, device=input.device).to(dtype=dtype)
 
         x_f32 = _compute_source_index(scale_factor, i, align_corners).clamp(min=0.0)
-        x_f32 = x_f32.reshape(len(x_f32), *[1]*(nsqueeze))
+        x_f32 = x_f32.reshape(len(x_f32), *[1] * (nsqueeze))
         x = x_f32.to(torch.int64)
 
         # We are using torch.where instead of torch.clamp below due to an expected failure
@@ -3399,11 +3398,14 @@ def _upsample_linear(
         return x_f32, x, xp1
 
     dtype = torch.float32 if not input.is_floating_point() else input.dtype
-    values = [get_values(inp, out, scales, d - 1 - i) for i, (inp, out, scales) in enumerate(zip(inp_size, output_size, scales))]
+    values = [
+        get_values(inp, out, scales, d - 1 - i)
+        for i, (inp, out, scales) in enumerate(zip(inp_size, output_size, scales))
+    ]
     xs_f32, xs, xp1s = list(zip(*values))
 
     vs = []
-    for a in product(*[[0, 1]]*d):
+    for a in product(*[[0, 1]] * d):
         idx = [None, None] + [xs[k] if a[k] == 0 else xp1s[k] for k in range(d)]
         v = aten._unsafe_index(input, idx)
         if not input.is_floating_point():
@@ -3413,8 +3415,8 @@ def _upsample_linear(
     for i in reversed(range(d)):
         xscale = (xs_f32[i] - xs[i]).clamp(0.0, 1.0).to(dtype)
         qs = []
-        for j in range(len(vs)//2):
-            v1, v2 = vs[2*j], vs[2*j + 1]
+        for j in range(len(vs) // 2):
+            v1, v2 = vs[2 * j], vs[2 * j + 1]
             # x1 * (1 - alpha) + x2 * alpha == x1 + (x2 - x1) * alpha
             q = v1 + torch.mul(v2 - v1, xscale)
             qs.append(q)
