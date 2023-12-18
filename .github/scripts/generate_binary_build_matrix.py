@@ -30,7 +30,6 @@ CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
 
 CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
-<<<<<<< HEAD
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = (
     "nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
     "nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -45,83 +44,6 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = (
     "nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "
     "triton==2.1.0; platform_system == 'Linux' and platform_machine == 'x86_64'"
 )
-=======
-
-PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
-    "11.8": (
-        "nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
-        "nvidia-cuda-runtime-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-cupti-cu11==11.8.87; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu11==8.7.0.84; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas-cu11==11.11.3.6; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-curand-cu11==10.3.0.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusolver-cu11==11.4.1.48; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu11==2.19.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'"
-    ),
-    "12.1": (
-        "nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
-        "nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu12==8.9.2.26; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu12==2.19.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'"
-    ),
-}
-
-
-def get_nccl_submodule_version() -> str:
-    from pathlib import Path
-
-    nccl_version_mk = (
-        Path(__file__).absolute().parent.parent.parent
-        / "third_party"
-        / "nccl"
-        / "nccl"
-        / "makefiles"
-        / "version.mk"
-    )
-    if not nccl_version_mk.exists():
-        raise RuntimeError(
-            "Please make sure that nccl submodule is checked out when importing this script"
-        )
-    with nccl_version_mk.open("r") as f:
-        content = f.read()
-    d = {}
-    for l in content.split("\n"):
-        if not l.startswith("NCCL_"):
-            continue
-        (k, v) = l.split(":=")
-        d[k.strip()] = v.strip()
-    return f"{d['NCCL_MAJOR']}.{d['NCCL_MINOR']}.{d['NCCL_PATCH']}"
-
-
-def get_nccl_wheel_version(arch_version: str) -> str:
-    import re
-
-    requirements = map(
-        str.strip, re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version])
-    )
-    return next(x for x in requirements if x.startswith("nvidia-nccl-cu")).split("==")[
-        1
-    ]
-
-
-def validate_nccl_dep_consistency(arch_version: str) -> None:
-    wheel_ver = get_nccl_wheel_version(arch_version)
-    submodule_ver = get_nccl_submodule_version()
-    if wheel_ver != submodule_ver:
-        raise RuntimeError(
-            f"NCCL submodule version {submodule_ver} differs from wheel version {wheel_ver}"
-        )
->>>>>>> 7b6210e8a49 (Use matrix generate script for docker release workflows (#115949))
 
 
 def arch_type(arch_version: str) -> str:
