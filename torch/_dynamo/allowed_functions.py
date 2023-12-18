@@ -249,7 +249,6 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
             "torch.optim.",
             "torch.nn.modules.rnn.",
             "torch._dynamo.",
-            # "torch._functorch.vmap",
             "torch._C._dynamo.",
             "torch._inductor.",
             "torch._C.inductor.",
