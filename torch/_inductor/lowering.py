@@ -2130,6 +2130,16 @@ make_fallback(
     sdpa_constraint,
     warn=False,
 )
+make_fallback(
+    aten._scaled_dot_product_flash_attention_mask.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention_mask_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
 make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
 make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)

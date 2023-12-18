@@ -172,10 +172,6 @@ void cpu_flash_attention(
   using Vec = vec::Vectorized<accum_t>;
   accum_t scaling_factor =
       sdp::calculate_scale(query, scale).as_float_unchecked();
-  bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
-  if (has_attn_mask && is_reduced_type) {
-    attn_mask.value() = attn_mask.value().to(at::kFloat);
-  }
 
   // Sizes
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
@@ -185,6 +181,28 @@ void cpu_flash_attention(
   int64_t kvSize = value.size(1);
   int64_t num_head = query.size(2);
   int64_t headSize = query.size(3);
+
+  bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
+  if (has_attn_mask) {
+    if (is_reduced_type) {
+      attn_mask.value() = attn_mask.value().to(at::kFloat);
+    }
+    int64_t attn_mask_size_0 = 1;
+    int64_t attn_mask_size_1 = 1;
+    if (attn_mask.value().dim() == 3
+        && attn_mask.value().size(0) == batchSize * num_head) {
+      attn_mask_size_0 = batchSize;
+      attn_mask_size_1 = num_head;
+    } else if (attn_mask.value().dim() == 4) {
+      if (attn_mask.value().size(0) == batchSize) {
+        attn_mask_size_0 = batchSize;
+      }
+      if (attn_mask.value().size(1) == num_head) {
+        attn_mask_size_1 = num_head;
+      }
+    }
+    attn_mask.value() = attn_mask.value().view({attn_mask_size_0, attn_mask_size_1, qSize, kvSize});
+  }
 
   // Strides
   int64_t qStrideB = query.stride(0);
@@ -415,10 +433,6 @@ void cpu_flash_attention_backward(
   using Vec = vec::Vectorized<accum_t>;
   accum_t scaling_factor =
       sdp::calculate_scale(query, scale).as_float_unchecked();
-  bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
-  if (has_attn_mask && is_reduced_type) {
-    attn_mask.value() = attn_mask.value().to(at::kFloat);
-  }
 
   // Sizes
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
@@ -431,6 +445,28 @@ void cpu_flash_attention_backward(
   int64_t kvSize = value.size(1);
   int64_t num_head = query.size(2);
   int64_t headSize = query.size(3);
+
+  bool has_attn_mask = attn_mask.has_value() && attn_mask.value().numel();
+  if (has_attn_mask) {
+    if (is_reduced_type) {
+      attn_mask.value() = attn_mask.value().to(at::kFloat);
+    }
+    int64_t attn_mask_size_0 = 1;
+    int64_t attn_mask_size_1 = 1;
+    if (attn_mask.value().dim() == 3
+        && attn_mask.value().size(0) == batchSize * num_head) {
+      attn_mask_size_0 = batchSize;
+      attn_mask_size_1 = num_head;
+    } else if (attn_mask.value().dim() == 4) {
+      if (attn_mask.value().size(0) == batchSize) {
+        attn_mask_size_0 = batchSize;
+      }
+      if (attn_mask.value().size(1) == num_head) {
+        attn_mask_size_1 = num_head;
+      }
+    }
+    attn_mask.value() = attn_mask.value().view({attn_mask_size_0, attn_mask_size_1, qSize, kvSize});
+  }
 
   // Strides
   int64_t qStrideB = query.stride(0);

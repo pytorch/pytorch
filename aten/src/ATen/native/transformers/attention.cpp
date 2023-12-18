@@ -37,6 +37,10 @@
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_backward_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_mask.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_mask_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_mask_backward.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_mask_backward_native.h>
 #include <ATen/ops/_softmax.h>
 #include <ATen/ops/_transform_bias_rescale_qkv.h>
 #include <ATen/ops/_transform_bias_rescale_qkv_native.h>
@@ -654,15 +658,12 @@ Tensor scaled_dot_product_attention(
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
       }
       // For the CPU case we do not need to pad the last dim
-      // if (attn_mask.has_value()) {
-      //   return std::get<0>(at::_scaled_dot_product_flash_attention(
-      //     query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, attn_mask, scale));
-      // }
-      // auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
-      //     query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale);
-      // return std::get<0>(out_lse_softmax);
-      return std::get<0>(at::_scaled_dot_product_flash_attention(
+      if (attn_mask.has_value()) {
+        return std::get<0>(at::_scaled_dot_product_flash_attention_mask(
           query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, attn_mask, scale));
+      }
+      return std::get<0>(at::_scaled_dot_product_flash_attention(
+          query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale));
     }
     case sdp::SDPBackend::efficient_attention: {
       bool compute_logsumexp =
@@ -786,6 +787,9 @@ _scaled_dot_product_flash_attention_mask_cpu(
   TORCH_CHECK(!attn_mask.has_value() ||
           dtype == attn_mask.value().scalar_type(),
     "scaled_dot_product_attention_flash_attention: Attention mask is the same data type as query");
+  TORCH_CHECK(!attn_mask.has_value() ||
+          (attn_mask.value().dim() >= 2 && attn_mask.value().dim() <= 4),
+    "scaled_dot_product_attention_flash_attention: Attention mask dim in {2, 3, 4}");
 
   at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
   const auto accumulate_dtype = toOpMathType(dtype);
@@ -851,6 +855,7 @@ _scaled_dot_product_flash_attention_mask_backward_cpu(
   grad_k = grad_k.transpose(1, 2);
   grad_v = grad_v.transpose(1, 2);
 
+  // do not support grad of attention mask for now
   return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v));
 }
 
@@ -872,45 +877,8 @@ _scaled_dot_product_flash_attention_cpu(
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
-  const auto dtype = query.scalar_type();
-  int64_t batchSize = query.size(0);
-  int64_t qSize = query.size(2);
-  int64_t num_head = query.size(1);
-  int64_t headSize = query.size(3);
-
-  TORCH_CHECK(c10::isFloatingType(dtype) && dtype != ScalarType::Half,
-    "scaled_dot_product_attention_flash_attention: Expected data type in FP32, FP64, BF16, but got ", dtype, " instead.");
-  TORCH_CHECK(query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
-    "scaled_dot_product_attention_flash_attention: Accept only 4 dims inputs shape of {B, H, T, K}");
-  TORCH_CHECK(dropout_p == 0.0,
-    "scaled_dot_product_attention_flash_attention: Currently do not support dropout > 0");
-  TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
-    "scaled_dot_product_attention_flash_attention: Q/K/V should have the same head size");
-  TORCH_CHECK(return_debug_mask == false,
-    "scaled_dot_product_attention_flash_attention: Currently do not support 'return_debug_mask'");
-
-  at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
-  const auto accumulate_dtype = toOpMathType(dtype);
-  at::Tensor logsumexp = at::empty({batchSize, qSize, num_head},
-      query.options().dtype(accumulate_dtype));
-  at::Tensor cum_seq_q = at::empty({}, at::kLong);
-  at::Tensor cum_seq_k = at::empty({}, at::kLong);
-  int64_t max_q = 0;
-  int64_t max_k = 0;
-  at::Tensor philox_seed = at::empty({}, at::kLong);
-  at::Tensor philox_offset = at::empty({}, at::kLong);
-  at::Tensor debug_attn_mask = at::empty({}, query.options());
-
-  flash_attention_kernel(kCPU, output, logsumexp, cum_seq_q, cum_seq_k,
-      max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
-      query, key, value, dropout_p, is_causal, return_debug_mask, c10::nullopt, scale);
-
-  output = output.transpose(1, 2);
-  logsumexp = logsumexp.transpose(1, 2);
-
-  return std::make_tuple(std::move(output), std::move(logsumexp),
-      std::move(cum_seq_q), std::move(cum_seq_k), max_q, max_k,
-      std::move(philox_seed), std::move(philox_offset), std::move(debug_attn_mask));
+  return _scaled_dot_product_flash_attention_mask_cpu(
+        query, key, value, dropout_p, is_causal, return_debug_mask, c10::nullopt, scale);
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor>
@@ -930,29 +898,9 @@ _scaled_dot_product_flash_attention_backward_cpu(
     const Tensor& philox_seed,
     const Tensor& philox_offset,
     c10::optional<double> scale) {
-  if (!grad_out.defined()) {
-    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
-  }
-  auto grad_out_t = grad_out.transpose(1, 2);
-  auto q_t = query.transpose(1, 2);
-  auto k_t = key.transpose(1, 2);
-  auto v_t = value.transpose(1, 2);
-  auto o_t = out.transpose(1, 2);
-  auto lse_t = logsumexp.transpose(1, 2);
-
-  auto grad_q = at::zeros(q_t.sizes(), query.options());
-  auto grad_k = at::zeros(k_t.sizes(), key.options());
-  auto grad_v = at::zeros(v_t.sizes(), value.options());
-
-  flash_attention_backward_kernel(kCPU, grad_q, grad_k, grad_v,
-      grad_out_t, q_t, k_t, v_t, o_t, lse_t, cum_seq_q, cum_seq_k,
-      max_q, max_k, dropout_p, is_causal, philox_seed, philox_offset, c10::nullopt, scale);
-
-  grad_q = grad_q.transpose(1, 2);
-  grad_k = grad_k.transpose(1, 2);
-  grad_v = grad_v.transpose(1, 2);
-
-  return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v));
+  return _scaled_dot_product_flash_attention_mask_backward_cpu(
+        grad_out, query, key, value, out, logsumexp, cum_seq_q, cum_seq_k,
+        max_q, max_k, dropout_p, is_causal, philox_seed, philox_offset, c10::nullopt, scale);
 }
 
 Tensor triton_multi_head_attention(

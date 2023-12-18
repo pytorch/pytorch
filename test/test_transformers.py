@@ -1776,7 +1776,6 @@ class TestSDPA(NNTestCase):
     @parametrize("n_head", [1, 3])
     @parametrize("head_dim", [8, 16])
     @parametrize("causal", [True, False])
-    @parametrize("attn_mask_flag", [0, 1, 2])  # 0:No mask, 1:q dtype, 2:bool
     @parametrize("train", [True, False])
     def test_scaled_dot_product_fused_attention_vs_math_cpu(
         self,
@@ -1788,12 +1787,8 @@ class TestSDPA(NNTestCase):
         n_head,
         head_dim,
         causal,
-        attn_mask_flag,
         train,
     ):
-        if causal and attn_mask_flag:
-            # cannot both be true at the same time
-            return
         atol = 1e-5
         rtol = 5e-6
         if dtype is torch.bfloat16:
@@ -1822,24 +1817,99 @@ class TestSDPA(NNTestCase):
         k = k.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
         q = q.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
-        if attn_mask_flag == 1:
-            attn_mask = torch.randn((batch_size, n_head, seq_len, seq_len), device=device, dtype=dtype)
-        elif attn_mask_flag == 2:
-            attn_mask = torch.randint(0, 2, size=(1, 1, seq_len, seq_len), device=device, dtype=torch.bool)
-        else:
-            attn_mask = None
         k2 = k2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
         q2 = q2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
         v2 = v2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
 
         with sdp_kernel(**backend_map[fused_kernel]):
             actual = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=causal)
+                q, k, v, attn_mask=None, dropout_p=0.0, is_causal=causal)
         with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
-            if attn_mask_flag == 1 and dtype is torch.bfloat16:
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
+                q2, k2, v2, attn_mask=None, dropout_p=0.0, is_causal=causal)
+
+        if dtype is torch.bfloat16:
+            math_ref = math_ref.bfloat16()
+
+        self.assertEqual(actual, math_ref, atol=atol, rtol=rtol)
+
+        if train:
+            actual.sum().backward()
+            math_ref.sum().backward()
+
+            grad_x, grad_x2 = x.grad, x2.grad
+            grad_q_actual, grad_k_actual, grad_v_actual = grad_x.split(n_embd, dim=2)
+            grad_q_ref, grad_k_ref, grad_v_ref = grad_x2.split(n_embd, dim=2)
+
+            self.assertEqual(grad_q_actual, grad_q_ref, atol=atol, rtol=rtol)
+            self.assertEqual(grad_k_actual, grad_k_ref, atol=atol, rtol=rtol)
+            self.assertEqual(grad_v_actual, grad_v_ref, atol=atol, rtol=rtol)
+
+    @onlyCPU
+    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
+    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16])
+    @parametrize("batch_size", [2, 12])
+    @parametrize("seq_len", [267, 1030])
+    @parametrize("n_head", [1, 3])
+    @parametrize("head_dim", [8, 16])
+    @parametrize("bool_mask", [0, 1])
+    @parametrize("train", [True, False])
+    def test_scaled_dot_product_fused_attention_mask_vs_math_cpu(
+        self,
+        device,
+        fused_kernel,
+        dtype,
+        batch_size,
+        seq_len,
+        n_head,
+        head_dim,
+        bool_mask,
+        train,
+    ):
+        atol = 1e-5
+        rtol = 5e-6
+        if dtype is torch.bfloat16:
+            atol = 5e-2
+            rtol = 5e-2
+
+        n_embd = n_head * head_dim
+        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, packed=True, requires_grad=False)
+        shape = SdpaShape(batch_size, n_head, seq_len, head_dim)
+        x = make_tensor(shape)
+        x2 = x.clone()
+
+        if train:
+            x.requires_grad_(True)
+            x2.requires_grad_(True)
+
+        q, k, v = x.split(n_embd, dim=2)
+        q2, k2, v2 = x2.split(n_embd, dim=2)
+
+        if dtype is torch.bfloat16:
+            q2 = q2.float()
+            k2 = k2.float()
+            v2 = v2.float()
+        # (B, nh, T, hs)
+        k = k.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        q = q.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        v = v.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        mask_shape = (batch_size, n_head, seq_len, seq_len)
+        if bool_mask:
+            attn_mask = torch.randint(0, 2, size=mask_shape, dtype=torch.bool, device=device)
+        else:
+            attn_mask = torch.randn(mask_shape, dtype=dtype, device=device)
+        k2 = k2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        q2 = q2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+        v2 = v2.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
+
+        with sdp_kernel(**backend_map[fused_kernel]):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
+            if not bool_mask and dtype is torch.bfloat16:
                 attn_mask = attn_mask.float()
             math_ref = torch.nn.functional.scaled_dot_product_attention(
-                q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=causal)
+                q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
 
         if dtype is torch.bfloat16:
             math_ref = math_ref.bfloat16()
