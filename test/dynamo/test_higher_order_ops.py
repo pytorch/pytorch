@@ -3527,7 +3527,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
                 y,
                 use_reentrant=True,
                 preserve_rng_state=False,
-                use_reentrant=True,
             )
 
         x = torch.randn(4, 4, requires_grad=True)
