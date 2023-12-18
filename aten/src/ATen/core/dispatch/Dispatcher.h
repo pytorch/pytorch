@@ -234,6 +234,8 @@ public:
    */
   void throwIfHasAbstractImplPyStub(OperatorName op_name);
 
+  c10::optional<std::pair<const char*, const char*>> getAbstractImplPyStub(OperatorName op_name);
+
   /**
    * Register a new operator by name.
    */
@@ -305,6 +307,12 @@ private:
   static int64_t sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey);
   static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey);
   static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, c10::ArrayRef<const c10::IValue> args);
+
+  #ifdef FBCODE_CAFFE2
+  static bool profilingOperatorEvents();
+  static void fireOpStartUSDT(at::RecordFunction::schema_ref_t schema_ref);
+  static void fireOpEndUSDT(at::RecordFunction::schema_ref_t schema_ref);
+  #endif // FBCODE_CAFFE2
 
   OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
   OperatorHandle findOrRegisterName_(const OperatorName& op_name);
@@ -668,7 +676,23 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandl
     return callWithDispatchKeySlowPath<Return, Args...>(op, *step_callbacks, dispatchKeySet, kernel, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
+
+#ifdef FBCODE_CAFFE2
+  if(profilingOperatorEvents()) {
+    struct FireOpRAII {
+       FireOpRAII(at::RecordFunction::schema_ref_t schema_ref) : schema_ref_(schema_ref) {
+           fireOpStartUSDT(schema_ref);
+        }
+       ~FireOpRAII() { fireOpEndUSDT(schema_ref_); }
+       at::RecordFunction::schema_ref_t schema_ref_;
+    } event(op.schema());
+    return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
+  } else {
+    return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
+  }
+#else
+    return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
+#endif // FBCODE_CAFFE2
 }
 
 // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&

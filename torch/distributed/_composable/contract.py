@@ -185,16 +185,10 @@ def contract(state_cls: Type[_State] = _State):
     return inner
 
 
-def _get_registry(module: nn.Module) -> Dict[str, RegistryItem]:
+def _get_registry(module: nn.Module) -> Optional[Dict[str, RegistryItem]]:
     r"""
     Get an ``OrderedDict`` of composable APIs that have been applied to the
-    ``module``, indexed by the API name.
+    ``module``, indexed by the API name. If no API has been applied, then this
+    returns ``None``.
     """
-    registry = getattr(module, REGISTRY_KEY, None)
-    if registry is None:
-        # https://github.com/pytorch/pytorch/issues/107054
-        default_registry: Dict[str, RegistryItem] = OrderedDict()
-        setattr(module, REGISTRY_KEY, default_registry)
-        return default_registry
-    else:
-        return registry
+    return getattr(module, REGISTRY_KEY, None)

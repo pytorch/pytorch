@@ -17,8 +17,8 @@ layout(set = 0, binding = 0, rgba8ui) uniform PRECISION restrict writeonly uimag
  * Input Textures
  */
 layout(set = 0, binding = 1) uniform PRECISION isampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION isampler3D uKernel;
-layout(set = 0, binding = 3) uniform PRECISION isampler3D uBias;
+layout(set = 0, binding = 2) uniform PRECISION isampler2D uKernel;
+layout(set = 0, binding = 3) uniform PRECISION isampler2D uBias;
 
 /*
  * Params Buffer
@@ -100,7 +100,7 @@ void main() {
 
   vec4 sum[4];
   sum[0] = dequantize(
-      texelFetch(uBias, ivec3(gpos.z, 0, 0), 0),
+      texelFetch(uBias, ivec2(gpos.z, 0), 0),
       uBlock.scales.w,
       uBlock.zero_points.w);
   for (int i = 1; i < 4; ++i) {
@@ -114,27 +114,29 @@ void main() {
     // channel (IC) dim is along the x axis, and the batch (OC) dim is along
     // the z axis.
     const vec4 ktex_0 = dequantize(
-        texelFetch(uKernel, ivec3(z + 0, gpos.z, 0), 0),
+        texelFetch(uKernel, ivec2(z + 0, gpos.z), 0),
         uBlock.scales.z,
         uBlock.zero_points.z);
     const vec4 ktex_1 = dequantize(
-        texelFetch(uKernel, ivec3(z + 1, gpos.z, 0), 0),
+        texelFetch(uKernel, ivec2(z + 1, gpos.z), 0),
         uBlock.scales.z,
         uBlock.zero_points.z);
     const vec4 ktex_2 = dequantize(
-        texelFetch(uKernel, ivec3(z + 2, gpos.z, 0), 0),
+        texelFetch(uKernel, ivec2(z + 2, gpos.z), 0),
         uBlock.scales.z,
         uBlock.zero_points.z);
     const vec4 ktex_3 = dequantize(
-        texelFetch(uKernel, ivec3(z + 3, gpos.z, 0), 0),
+        texelFetch(uKernel, ivec2(z + 3, gpos.z), 0),
         uBlock.scales.z,
         uBlock.zero_points.z);
 
+    vec4 in_tex[4];
     for (int i = 0; i < 4; ++i) {
-      const vec4 in_tex = dequantize(
+      in_tex[i] = dequantize(
           texelFetch(uInput, ivec3(ipos[i], z4), 0),
           uBlock.scales.y,
           uBlock.zero_points.y);
+    }
 
       // To explain the calculations below, the contents one in_tex and the
       // group of 4 texels loaded from uKernel are shown:
@@ -151,7 +153,7 @@ void main() {
       //   | x |              | A0 | A1 | A2 | A3 |
       //   +---+              +----+----+----+----+
       //
-      // In the uKernel graphic, cells sharing the the same letter are from
+      // In the uKernel graphic, cells sharing the same letter are from
       // the same batch/output channel index, and the number denotes a unique
       // channel index. To calculate the output texel, the following
       // calculation is performed:
@@ -169,10 +171,11 @@ void main() {
       //  which is what is expressed in the following calculations. This is done
       //  for each output position.
 
-      sum[i] = fma(in_tex.xxxx, ktex_0, sum[i]);
-      sum[i] = fma(in_tex.yyyy, ktex_1, sum[i]);
-      sum[i] = fma(in_tex.zzzz, ktex_2, sum[i]);
-      sum[i] = fma(in_tex.wwww, ktex_3, sum[i]);
+    for (int i = 0; i < 4; ++i) {
+      sum[i] = fma(in_tex[i].xxxx, ktex_0, sum[i]);
+      sum[i] = fma(in_tex[i].yyyy, ktex_1, sum[i]);
+      sum[i] = fma(in_tex[i].zzzz, ktex_2, sum[i]);
+      sum[i] = fma(in_tex[i].wwww, ktex_3, sum[i]);
     }
   }
 

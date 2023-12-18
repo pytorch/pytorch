@@ -133,7 +133,7 @@ TEST(TestException, TestCustomException) {
       {def},
       // class PythonResolver is defined in
       // torch/csrc/jit/python/script_init.cpp. It's not in a header file so I
-      // can not use it. Create a SimpleResolver insteand
+      // can not use it. Create a SimpleResolver instead
       {std::make_shared<SimpleResolver>()},
       nullptr);
   torch::jit::GraphFunction* gf =

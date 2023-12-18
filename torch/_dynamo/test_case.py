@@ -1,5 +1,6 @@
 import contextlib
 import importlib
+import logging
 import sys
 
 import torch
@@ -12,6 +13,8 @@ from torch.testing._internal.common_utils import (
 )
 
 from . import config, reset, utils
+
+log = logging.getLogger(__name__)
 
 
 def run_tests(needs=()):
@@ -49,10 +52,15 @@ class TestCase(TorchTestCase):
         super().setUpClass()
         cls._exit_stack = contextlib.ExitStack()
         cls._exit_stack.enter_context(
-            config.patch(raise_on_ctx_manager_usage=True, suppress_errors=False),
+            config.patch(
+                raise_on_ctx_manager_usage=True,
+                suppress_errors=False,
+                log_compilation_metrics=False,
+            ),
         )
 
     def setUp(self):
+        self._prior_is_grad_enabled = torch.is_grad_enabled()
         super().setUp()
         reset()
         utils.counters.clear()
@@ -63,3 +71,6 @@ class TestCase(TorchTestCase):
         reset()
         utils.counters.clear()
         super().tearDown()
+        if self._prior_is_grad_enabled is not torch.is_grad_enabled():
+            log.warning("Running test changed grad mode")
+            torch.set_grad_enabled(self._prior_is_grad_enabled)

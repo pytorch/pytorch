@@ -8,6 +8,7 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/IPUHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/detail/MTIAHooksInterface.h>
 #include <ATen/detail/ORTHooksInterface.h>
@@ -46,6 +47,8 @@ class TORCH_API Context {
       return at::detail::getMPSHooks().getDefaultMPSGenerator();
     } else if (device_type == at::kXPU) {
       return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
+    } else if (device_type == at::kIPU) {
+      return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
     } else if (device_type == at::kPrivateUse1) {
       return at::GetPrivateUse1HooksInterface()->getDefaultGenerator(
           device.index());
@@ -202,6 +205,8 @@ class TORCH_API Context {
   bool deterministicAlgorithms() const;
   bool deterministicAlgorithmsWarnOnly() const;
   void setDeterministicAlgorithms(bool, bool);
+  bool deterministicFillUninitializedMemory() const;
+  void setDeterministicFillUninitializedMemory(bool);
 
   // Note [Writing Nondeterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -298,6 +303,7 @@ class TORCH_API Context {
   bool deterministic_cudnn = false;
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
+  bool _deterministic_fill_uninitialized_memory = true;
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;

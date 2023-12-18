@@ -28,8 +28,8 @@ class Partition:
 
     def add_node(self, node):
         input_nodes: Dict[Node, None] = {}
-        map_arg(node.args, lambda n: input_nodes.setdefault(n))
-        map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
+        map_arg(node.args, input_nodes.setdefault)
+        map_arg(node.kwargs, input_nodes.setdefault)
         # Add current node's input nodes if they are placeholder or constants
         for n in input_nodes:
             if n.op in {"placeholder", "get_attr"}:
@@ -43,8 +43,8 @@ class Partition:
             self.nodes.remove(node)
             # Collect the node's input nodes
             input_nodes: Dict[Node, None] = {}
-            map_arg(node.args, lambda n: input_nodes.setdefault(n))
-            map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
+            map_arg(node.args, input_nodes.setdefault)
+            map_arg(node.kwargs, input_nodes.setdefault)
             # Check if an input node is a placeholder or get_attr,
             # and this input node is not used by some other nodes in this partition,
             # the remove this input node
@@ -104,8 +104,8 @@ def get_extra_size_of(node: Node, nodes: Set[Node]) -> int:
     """
     # Find all its input nodes
     input_nodes: Dict[Node, None] = {}
-    map_arg(node.args, lambda n: input_nodes.setdefault(n))
-    map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
+    map_arg(node.args, input_nodes.setdefault)
+    map_arg(node.kwargs, input_nodes.setdefault)
     # Calculate total size of related nodes
     total_size_of_input_nodes = 0
     for n in input_nodes:
@@ -138,8 +138,8 @@ def get_latency_of_one_partition(
             if node.op in {"placeholder", "get_attr"}:
                 continue
             input_nodes: Dict[Node, None] = {}
-            map_arg(node.args, lambda n: input_nodes.setdefault(n))
-            map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
+            map_arg(node.args, input_nodes.setdefault)
+            map_arg(node.kwargs, input_nodes.setdefault)
             # If a node has no input nodes in this partition,
             # or its input nodes in this partition are placeholders and get_attrs
             # this node is on the top bfs level in this partition
@@ -255,8 +255,8 @@ def get_comm_latency_between(
     # and added to comm_size
     for node in child_partition.nodes:
         input_nodes: Dict[Node, None] = {}
-        map_arg(node.args, lambda n: input_nodes.setdefault(n))
-        map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
+        map_arg(node.args, input_nodes.setdefault)
+        map_arg(node.kwargs, input_nodes.setdefault)
         for n in input_nodes:
             if n in parent_partition.nodes and n not in visited_nodes:
                 size_bytes = getattr(n, "size_bytes", None)

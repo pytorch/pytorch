@@ -20,8 +20,9 @@ def _is_orthogonal(Q, eps=None):
 
 
 def _make_orthogonal(A):
-    """ Assume that A is a tall matrix.
-    Compute the Q factor s.t. A = QR (A may be complex) and diag(R) is real and non-negative
+    """Assume that A is a tall matrix.
+
+    Compute the Q factor s.t. A = QR (A may be complex) and diag(R) is real and non-negative.
     """
     X, tau = torch.geqrf(A)
     Q = torch.linalg.householder_product(X, tau)
@@ -175,7 +176,7 @@ def orthogonal(module: Module,
                orthogonal_map: Optional[str] = None,
                *,
                use_trivialization: bool = True) -> Module:
-    r"""Applies an orthogonal or unitary parametrization to a matrix or a batch of matrices.
+    r"""Apply an orthogonal or unitary parametrization to a matrix or a batch of matrices.
 
     Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`, the parametrized
     matrix :math:`Q \in \mathbb{K}^{m \times n}` is **orthogonal** as
@@ -306,7 +307,7 @@ class _WeightNorm(Module):
 
 
 def weight_norm(module: Module, name: str = 'weight', dim: int = 0):
-    r"""Applies weight normalization to a parameter in the given module.
+    r"""Apply weight normalization to a parameter in the given module.
 
     .. math::
          \mathbf{w} = g \dfrac{\mathbf{v}}{\|\mathbf{v}\|}
@@ -480,7 +481,7 @@ def spectral_norm(module: Module,
                   n_power_iterations: int = 1,
                   eps: float = 1e-12,
                   dim: Optional[int] = None) -> Module:
-    r"""Applies spectral normalization to a parameter in the given module.
+    r"""Apply spectral normalization to a parameter in the given module.
 
     .. math::
         \mathbf{W}_{SN} = \dfrac{\mathbf{W}}{\sigma(\mathbf{W})},

@@ -29,8 +29,7 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/serialization/export.h>
 
-namespace torch {
-namespace onnx {
+namespace torch::onnx {
 
 using namespace torch::jit;
 
@@ -296,5 +295,4 @@ void initONNXBindings(PyObject* module) {
   onnx.attr("_CAFFE2_ATEN_FALLBACK") = false;
 #endif
 }
-} // namespace onnx
-} // namespace torch
+} // namespace torch::onnx

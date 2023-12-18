@@ -19,6 +19,8 @@ RUN_ID = 56
 RUN_NUMBER = 123
 RUN_ATTEMPT = 3
 PR_NUMBER = 6789
+JOB_ID = 234
+JOB_NAME = "some-job-name"
 
 
 class TestUploadStats(unittest.TestCase):
@@ -36,6 +38,8 @@ class TestUploadStats(unittest.TestCase):
                 "GITHUB_RUN_ID": str(RUN_ID),
                 "GITHUB_RUN_NUMBER": str(RUN_NUMBER),
                 "GITHUB_RUN_ATTEMPT": str(RUN_ATTEMPT),
+                "JOB_ID": str(JOB_ID),
+                "JOB_NAME": str(JOB_NAME),
             },
             clear=True,  # Don't read any preset env vars
         ).start()
@@ -67,6 +71,8 @@ class TestUploadStats(unittest.TestCase):
             "run_attempt": RUN_ATTEMPT,
             "some_number": 123,
             "float_number": decimal.Decimal(str(32.34)),
+            "job_id": JOB_ID,
+            "job_name": JOB_NAME,
         }
 
         # Preserve the metric emitted

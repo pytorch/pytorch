@@ -70,6 +70,16 @@ AOTIRuntimeError AOTInductorModelContainerRun(
     AOTInductorStreamHandle stream_handle,
     AOTIProxyExecutorHandle proxy_executor_handle);
 
+// Setup the inactive constant buffer in model container with provided
+// ConstantMap
+AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorConstantMapHandle constant_map_handle);
+
+// Swap the constant buffer being used to the inactive one.
+AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
+    AOTInductorModelContainerHandle container_handle);
+
 // Retrieves the number of inputs for the model.
 AOTIRuntimeError AOTInductorModelContainerGetNumInputs(
     AOTInductorModelContainerHandle container_handle,
@@ -81,12 +91,6 @@ AOTIRuntimeError AOTInductorModelContainerGetInputName(
     size_t input_idx,
     const char** ret_input_names);
 
-// Retrieves the input dtype at the given index.
-AOTIRuntimeError AOTInductorModelContainerGetInputDtype(
-    AOTInductorModelContainerHandle container_handle,
-    size_t input_idx,
-    const char** ret_input_dtypes);
-
 // Retrieves the number of outputs for the model.
 AOTIRuntimeError AOTInductorModelContainerGetNumOutputs(
     AOTInductorModelContainerHandle container_handle,
@@ -97,26 +101,6 @@ AOTIRuntimeError AOTInductorModelContainerGetOutputName(
     AOTInductorModelContainerHandle container_handle,
     size_t output_idx,
     const char** ret_output_names);
-
-// Retrieves the output dtype at the given index.
-AOTIRuntimeError AOTInductorModelContainerGetOutputDtype(
-    AOTInductorModelContainerHandle container_handle,
-    size_t output_idx,
-    const char** ret_output_dtypes);
-
-// Retieves the input shape with the maximum dimension size for each dimension.
-AOTIRuntimeError AOTInductorModelContainerGetMaxInputShape(
-    AOTInductorModelContainerHandle container_handle,
-    size_t input_idx,
-    const int64_t** ret_input_sizes,
-    int64_t* ret_input_ndim);
-
-// Retieves the output shape with the maximum dimension size for each dimension.
-AOTIRuntimeError AOTInductorModelContainerGetMaxOutputShape(
-    AOTInductorModelContainerHandle container_handle,
-    size_t output_idx,
-    const int64_t** ret_output_sizes,
-    int64_t* ret_output_ndim);
 
 // Creates an AOTInductorModel instance.  This is a thin and light wrapper
 // around the compiled model; it doesn't handle concurrency, queueing, device
@@ -136,7 +120,22 @@ AOTIRuntimeError AOTInductorModelRun(
     AtenTensorHandle* input_handles,
     AtenTensorHandle* output_handles);
 
+// Replace AOTInductorModel's constant map. Note it doesn't handle concurrency
+// so be sure to handle ordering if AOTInductorModelRun is ran concurrently.
+AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
+    AOTInductorModelHandle model_handle,
+    AOTInductorConstantMapHandle constant_map_handle);
+
 // Delete an AOTInductorModel created by AOTInductorModelCreate.
 AOTIRuntimeError AOTInductorModelDelete(AOTInductorModelHandle model_handle);
+
+AOTIRuntimeError AOTInductorModelGetNumOutputs(
+    AOTInductorModelHandle model_handle,
+    size_t* ret_num_outputs);
+
+AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
+    AOTInductorModelContainerHandle container_handle,
+    const char** in_spec,
+    const char** out_spec);
 
 } // extern "C"
