@@ -106,8 +106,7 @@ else:
                     len(child_mesh_dim_names) == 1
                 ), "The child mesh can only be a 1D mesh."
                 child_mesh_dim_name = child_mesh_dim_names[0]
-                if parent_mesh.mesh_dim_names:
-                    return parent_mesh._get_mesh_dim_by_name(child_mesh_dim_name)
+                return self.get_mesh_dim_by_name(parent_mesh, child_mesh_dim_name)
             return None
 
         @staticmethod
@@ -119,6 +118,23 @@ else:
             # ProcessGroup can't tell us this info so we have to infer it, assume
             # homogeneous hardware for now
             return get_world_size() // _MeshEnv.num_devices_per_host(device_type)
+
+        def get_mesh_dim_by_name(
+            self, device_mesh: "DeviceMesh", mesh_dim_name: str
+        ) -> int:
+            if (
+                device_mesh.mesh_dim_names is None
+                or len(device_mesh.mesh_dim_names) == 0
+            ):
+                raise KeyError(
+                    "No `mesh_dim_names` found.",
+                )
+            if mesh_dim_name not in device_mesh.mesh_dim_names:
+                raise KeyError(
+                    f"Mesh dimension '{mesh_dim_name}' does not exist.",
+                    f"Available mesh dimensions are: mesh_dim_names={device_mesh.mesh_dim_names}",
+                )
+            return device_mesh.mesh_dim_names.index(mesh_dim_name)  # type: ignore[union-attr]
 
     _mesh_resources: _MeshEnv = _MeshEnv()
 
@@ -350,7 +366,7 @@ else:
                 raise RuntimeError(
                     f"Cannot slice a DeviceMesh with {self.mesh.ndim} dimension."
                 )
-            mesh_dim = self._get_mesh_dim_by_name(mesh_dim_name)
+            mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim_name)
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
 
             return submesh
@@ -380,7 +396,7 @@ else:
 
             if mesh_dim is not None:
                 if isinstance(mesh_dim, str):
-                    mesh_dim = self._get_mesh_dim_by_name(mesh_dim)
+                    mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
                 return not_none(
                     _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
                 )
@@ -459,18 +475,6 @@ else:
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
-
-        def _get_mesh_dim_by_name(self, mesh_dim_name: str) -> int:
-            if self.mesh_dim_names is None or len(self.mesh_dim_names) == 0:
-                raise KeyError(
-                    "No `mesh_dim_names` found.",
-                )
-            if mesh_dim_name not in self.mesh_dim_names:
-                raise KeyError(
-                    f"Mesh dimension '{mesh_dim_name}' does not exist.",
-                    f"Available mesh dimensions are: {self.mesh_dim_names}",
-                )
-            return self.mesh_dim_names.index(mesh_dim_name)  # type: ignore[union-attr]
 
     def init_device_mesh(
         device_type: str,
