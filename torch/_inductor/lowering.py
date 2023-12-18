@@ -3494,8 +3494,7 @@ def upsample_bicubic2d_default(
 def _reflection_padnd_backward(grad_output, x, padding):
     dim = len(padding) // 2
 
-    dhw = x.get_size()[-dim:]
-    dhw = [V.graph.sizevars.evaluate_static_shape(h) - 1 for h in dhw]
+    dhw = [h - 1 for h in x.get_size()[-dim:]]
     grad_loader = grad_output.make_loader()
 
     padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
