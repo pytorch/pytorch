@@ -816,7 +816,7 @@ class TestScalarOpsMisc(TestCase):
         "operation",
         [
             lambda min, max: max + max,
-            operator.sub,
+            lambda min, max: min - max,
             lambda min, max: max * max,
         ],
     )
@@ -835,9 +835,9 @@ class TestScalarOpsMisc(TestCase):
         [
             lambda min, neg_1: -min,
             lambda min, neg_1: abs(min),
-            operator.mul,
+            lambda min, neg_1: min * neg_1,
             subtest(
-                operator.floordiv,
+                lambda min, neg_1: min // neg_1,
                 decorators=[skip(reason="broken on some platforms")],
             ),
         ],
@@ -867,8 +867,8 @@ class TestScalarOpsMisc(TestCase):
     @parametrize(
         "operation",
         [
-            operator.floordiv,
-            operator.mod,
+            lambda val, zero: val // zero,
+            lambda val, zero: val % zero,
         ],
     )
     def test_scalar_integer_operation_divbyzero(self, dtype, operation):

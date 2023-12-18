@@ -61,7 +61,6 @@ from torch.testing._internal.common_dtype import (
     get_all_qint_dtypes,
 )
 from torch.testing._internal.two_tensor import TwoTensor
-import operator
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -1143,7 +1142,7 @@ class TestTorchDeviceType(TestCase):
             elif fn == "masked_fill":
                 return t0_fn(t1 < 0.5, 1.0)
             elif fn == "map":
-                return t0_fn(t1, operator.add)
+                return t0_fn(t1, lambda x, y: x + y)
             elif fn == "map2":
                 return t0_fn(t1, t2, lambda x, y, z: x + y + z)
             elif fn in fns_3_args:
@@ -4840,15 +4839,15 @@ else:
                 lambda x, y: y.addcmul(x, y, value=2),
             ]
             bias_fns = [
-                operator.add,
+                lambda x, b: x + b,
                 lambda x, b: b + x,
             ]
             fns = [
                 lambda x, y: x.clone(),
                 lambda x, y: x + 3,
                 lambda x, y: 3 * x,
-                operator.add,
-                operator.mul,
+                lambda x, y: x + y,
+                lambda x, y: x * y,
                 lambda x, y: abs(x),
                 lambda x, y: x.abs(),
                 lambda x, y: x.abs_(),
@@ -7659,7 +7658,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         x = torch.autograd.Variable(torch.randn(3, 3))
         y = torch.autograd.Variable(torch.randn(3))
         res = x.clone()
-        res.map_(y, operator.add)
+        res.map_(y, lambda a, b: a + b)
         self.assertEqual(res, x + y)
         self.assertRaisesRegex(TypeError, "not callable", lambda: res.map_(y, "str"))
 
