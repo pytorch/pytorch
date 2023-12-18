@@ -1759,6 +1759,8 @@ def _canonicalize_graph(sorted_inputs, sorted_outputs, graph) -> Graph:
             return None
         elif a.as_memory_format is not None:
             return None
+        elif a.as_layout is not None:
+            return None
         elif a.as_device is not None:
             return None
         elif a.as_bool is not None:
