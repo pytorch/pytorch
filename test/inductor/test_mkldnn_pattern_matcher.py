@@ -1134,6 +1134,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
         """
         self._qlinear_unary_cpu_test_helper(unary_op=torch.nn.GELU())
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qlinear_gelu_int8_mixed_bf16(self):
+        r"""
+        This testcase will quantize a Linear->GELU pattern with int8_mixed_bf16 quantization.
+        """
+        self._qlinear_unary_cpu_test_helper(
+            unary_op=torch.nn.GELU(), int8_mixed_bf16=True
+        )
+
     def _qlinear_dequant_promotion_cpu_test_helper(self, int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(

@@ -35,12 +35,15 @@ quantization.
 """
 
 
-def _may_generate_pattern_with_dtype_convert(pattern, dtype=Arg(), dtype_convert=True):
+def _may_generate_pattern_with_dtype_convert(
+    pattern, dtype=Arg(), dtype_convert=True, users=1
+):
     if dtype_convert:
         return CallFunction(
             prims.convert_element_type.default,
             pattern,
             dtype,
+            _users=users,
         )
     else:
         return pattern
@@ -118,8 +121,8 @@ dequantize_qconv_pt2e_pattern = CallFunction(
 )
 
 
-def get_qlinear(users=1):
-    return CallFunction(
+def get_qlinear(users=1, is_bf16=False):
+    computation_call = CallFunction(
         torch.ops.onednn.qlinear_pointwise.default,
         KeywordArg("x"),
         KeywordArg("x_scale"),
@@ -135,6 +138,9 @@ def get_qlinear(users=1):
         KeywordArg("postop_args"),
         KeywordArg("postop_algorithm"),
         _users=users,
+    )
+    return _may_generate_pattern_with_dtype_convert(
+        computation_call, dtype=KeywordArg("to_float"), dtype_convert=is_bf16, users=2
     )
 
 
@@ -567,6 +573,8 @@ def _register_quantization_unary_fusion():
                 original_pattern_output_dtype=original_pattern_output_dtype,
             )
 
+        is_bf16 = True if original_pattern_output_dtype == torch.bfloat16 else False
+
         # QLinear
         # Priority 1 to match: QLinear Unary pattern with int8 output
         linear_unary_replace_patterns = {
@@ -579,12 +587,12 @@ def _register_quantization_unary_fusion():
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
-                _gelu_fusion_erf(get_qlinear(2)),
-                dtype=original_pattern_output_dtype,
+                _gelu_fusion_erf(get_qlinear(1 if is_bf16 else 2, is_bf16)),
+                dtype=torch.float32,
             ),
             UnaryAttr("gelu", [], "tanh"): generate_pattern_with_output_quant(
-                _gelu_fusion_tanh(get_qlinear(4)),
-                dtype=original_pattern_output_dtype,
+                _gelu_fusion_tanh(get_qlinear(1 if is_bf16 else 4, is_bf16)),
+                dtype=torch.float32,
             ),
         }
 
@@ -603,8 +611,12 @@ def _register_quantization_unary_fusion():
             UnaryAttr("relu", [], ""): generate_pattern_with_unary(
                 get_qlinear(1), aten.relu.default
             ),
-            UnaryAttr("gelu", [], "none"): _gelu_fusion_erf(get_qlinear(2)),
-            UnaryAttr("gelu", [], "tanh"): _gelu_fusion_tanh(get_qlinear(4)),
+            UnaryAttr("gelu", [], "none"): _gelu_fusion_erf(
+                get_qlinear(1 if is_bf16 else 2, is_bf16)
+            ),
+            UnaryAttr("gelu", [], "tanh"): _gelu_fusion_tanh(
+                get_qlinear(1 if is_bf16 else 4, is_bf16)
+            ),
         }
 
         for unary_attr, patterns in linear_unary_replace_float_out_patterns.items():
