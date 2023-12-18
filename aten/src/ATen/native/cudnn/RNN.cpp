@@ -657,11 +657,11 @@ namespace {
           constexpr int min_dim = 3;
           int filter_dim_a[min_dim];
           AT_CUDNN_CHECK(
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
             cudnnGetFilterNdDescriptor(
-//#else
-//            cudnnGetTensorNdDescriptor(
-//#endif
+#else
+            cudnnGetTensorNdDescriptor(
+#endif
                 lin_layer_mat_desc.desc(),
                 min_dim,
                 &data_type,
@@ -693,11 +693,11 @@ namespace {
             // I'd rather keep full cur_offset checks rather than save some CPU overhead by skipping the cudnn_method =
             // cudnnGetRNNLinLayerBiasParams iteration.
             if (include_bias ||
-//#ifndef USE_CUDNN_RNN_V8_API
+#ifndef USE_CUDNN_RNN_V8_API
                     cudnn_method != cudnnGetRNNLinLayerBiasParams) {
-//#else
-//                    cudnn_method) {
-//#endif
+#else
+                    cudnn_method) {
+#endif
               // Generate a new parameter tensor which is a view into the weight_buf.
               std::initializer_list<int64_t> size = {
                 mat_numel * num_linear_layers / 2, 1};
