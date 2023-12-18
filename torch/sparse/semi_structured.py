@@ -7,25 +7,14 @@ import torch
 
 __all__ = [
     "SparseSemiStructuredTensor",
+    "SparseSemiStructuredTensorCUTLASS"
+    "SparseSemiStructuredTensorCUSPARSELT"
     "to_sparse_semi_structured",
 ]
 
 _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
     "_SEMI_STRUCTURED_SPARSE_CONFIG", "sparse_min_rows sparse_min_cols dense_min_rows dense_min_cols"
 )
-_DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG_CUTLASS = {
-    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 128, 16, 16),
-    torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 64, 8, 8),
-    torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 64, 8, 8),
-    torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 4, 4)
-}
-
-_DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG_CUSPARSELT = {
-    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(32, 32, 16, 16),
-    torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
-    torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(16, 16, 8, 8),
-    torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(8, 8, 4, 4)
-}
 
 class SparseSemiStructuredTensor:
     _FORCE_CUTLASS = True
