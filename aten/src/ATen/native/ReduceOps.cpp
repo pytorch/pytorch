@@ -1009,7 +1009,12 @@ static void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacin
   // Helper for gradient function to make sure input data satisfies prerequisites
   TORCH_CHECK(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
   if (spacing_size.has_value() && !dim.has_value()) {
-    TORCH_CHECK(spacing_size.value() == 1 || spacing_size.value() == self.dim(), "torch.gradient expected spacing to be unspecified, a scalar or a list of length ", self.dim(), " but got a list of length ", spacing_size.value());
+    // NOTE: If spacing was given as a scalar, the callers of this function
+    // create a spacing vector of the expected size, and this check passes
+    TORCH_CHECK(spacing_size.value() == self.dim(),
+      "torch.gradient expected spacing to be unspecified, a scalar, or a list ",
+      "of length equal to 'self.dim() = ", self.dim(), "', since dim argument ",
+      "was not given, but got a list of length ", spacing_size.value());
   }
   if (spacing_size.has_value() && dim.has_value()) {
     TORCH_CHECK(spacing_size.value() == static_cast<int64_t>(dim.value().size()),
