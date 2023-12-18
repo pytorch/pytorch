@@ -2211,6 +2211,16 @@ class TestVmapOperators(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(functools.partial(baz, memory_format=torch.channels_last_3d))(tensor)
 
+        for mf in (torch.channels_last, torch.channels_last_3d):
+            @torch.compile(backend="eager", fullgraph=True)
+            def f(x):
+                if x.is_contiguous(memory_format=mf):
+                    return x.sin()
+                return x.cos()
+
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(f)(torch.randn(3, 3))
+
     def test_unsqueeze(self):
         op = torch.unsqueeze
         test = self._vmap_view_test
