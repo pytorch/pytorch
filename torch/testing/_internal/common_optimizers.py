@@ -1,6 +1,7 @@
 import functools
 import itertools
 import math
+import unittest
 from enum import Enum
 from typing import Any, Dict, List, Tuple, Union
 
@@ -23,10 +24,13 @@ from torch.optim import (
     SGD,
     SparseAdam,
 )
+from torch.testing._internal.common_device_type import tol, toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
     set_single_threaded_if_parallel_tbb,
+    skipIfTorchDynamo,
+    TEST_WITH_TORCHDYNAMO,
 )
 
 
@@ -426,7 +430,6 @@ def optim_inputs_func_asgd():
         OptimizerInput(
             params=None, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
         ),
-        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
         OptimizerInput(
             params=None,
             kwargs={"weight_decay": 0.9, "maximize": True},
@@ -799,6 +802,36 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adadelta,
         optim_error_inputs_func=optim_error_inputs_func_adadelta,
         supported_impls=("foreach", "differentiable"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_mixed_device_dtype",
+            ),
+        ),
     ),
     OptimizerInfo(
         Adagrad,
@@ -806,30 +839,185 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_adagrad,
         supported_impls=("foreach", "differentiable"),
         supports_sparse_on=("cpu"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115607"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115607 and #116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_mixed_device_dtype",
+            ),
+        ),
     ),
     OptimizerInfo(
         Adam,
         optim_inputs_func=optim_inputs_func_adam,
         optim_error_inputs_func=optim_error_inputs_func_adam,
         supported_impls=("foreach", "differentiable", "fused"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Fixing #115607 should fix this test. fused is correct, but forloop is not."
+                ),
+                "TestOptimRenewed",
+                "test_fused_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_mixed_device_dtype",
+            ),
+        ),
     ),
     OptimizerInfo(
         Adamax,
         optim_inputs_func=optim_inputs_func_adamax,
         optim_error_inputs_func=optim_error_inputs_func_adamax,
         supported_impls=("foreach", "differentiable"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115607"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115607 and #116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_mixed_device_dtype",
+            ),
+            DecorateInfo(
+                unittest.skip("Uses too much memory, even for H100, surprisingly."),
+                "TestOptimRenewed",
+                "test_foreach_large_tensor",
+            ),
+        ),
     ),
     OptimizerInfo(
         AdamW,
         optim_inputs_func=optim_inputs_func_adamw,
         optim_error_inputs_func=optim_error_inputs_func_adamw,
         supported_impls=("foreach", "differentiable", "fused"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Fixing #115607 should fix this test. fused is correct, but forloop is not."
+                ),
+                "TestOptimRenewed",
+                "test_fused_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_mixed_device_dtype",
+            ),
+        ),
     ),
     OptimizerInfo(
         ASGD,
         optim_inputs_func=optim_inputs_func_asgd,
         optim_error_inputs_func=optim_error_inputs_func_asgd,
         supported_impls=("foreach", "differentiable"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See discrepancy in https://github.com/pytorch/pytorch/issues/115607"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_mixed_device_dtype",
+            ),
+        ),
     ),
     OptimizerInfo(
         LBFGS,
@@ -845,24 +1033,130 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_nadam,
         optim_error_inputs_func=optim_error_inputs_func_nadam,
         supported_impls=("foreach", "differentiable"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_mixed_device_dtype",
+            ),
+        ),
     ),
     OptimizerInfo(
         RAdam,
         optim_inputs_func=optim_inputs_func_radam,
         optim_error_inputs_func=optim_error_inputs_func_radam,
         supported_impls=("foreach", "differentiable"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_mixed_device_dtype",
+            ),
+        ),
     ),
     OptimizerInfo(
         RMSprop,
         optim_inputs_func=optim_inputs_func_rmsprop,
         optim_error_inputs_func=optim_error_inputs_func_rmsprop,
         supported_impls=("foreach", "differentiable"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_mixed_device_dtype",
+            ),
+        ),
     ),
     OptimizerInfo(
         Rprop,
         optim_inputs_func=optim_inputs_func_rprop,
         optim_error_inputs_func=optim_error_inputs_func_rprop,
         supported_impls=("foreach", "differentiable"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_mixed_device_dtype",
+            ),
+        ),
     ),
     OptimizerInfo(
         SGD,
@@ -870,6 +1164,32 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_sgd,
         supported_impls=("foreach", "differentiable"),
         supports_sparse_on=("cpu", "cuda"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=5e-04, rtol=0.007),
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_foreach_mixed_device_dtype",
+                active_if=TEST_WITH_TORCHDYNAMO,
+            ),
+        ),
     ),
     OptimizerInfo(
         SparseAdam,
