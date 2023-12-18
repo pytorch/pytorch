@@ -634,7 +634,9 @@ def allow_mutation_on_saved_tensors():
             _allow_mutation_on_saved_tensors_enabled = False
 
 
-def _engine_run_backward(t_outputs, *args, **kwargs):
+def _apply_hooks_on_graph_outputs(t_outputs: List[torch.Tensor]):
+    grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
+
     def iter_graph(roots):
         if not roots:
             return
@@ -655,26 +657,26 @@ def _engine_run_backward(t_outputs, *args, **kwargs):
 
             yield node
 
-    def apply_hooks_on_graph(roots: List):
-        def prehook(grad_output):
-            node = torch._C._current_autograd_node()
-            log_str = f"Executing: {node} with grad_output: {grad_output}"
-            log.info(log_str)
+    def prehook(grad_output):
+        node = torch._C._current_autograd_node()
+        log_str = f"Executing: {node} with grad_output: {grad_output}"
+        log.info(log_str)
 
-        handles = []
-        for node in iter_graph(roots):
-            handles.append(node.register_prehook(prehook))
+    handles = []
+    for node in iter_graph(grad_fns):
+        handles.append(node.register_prehook(prehook))
 
-        def unregister_hooks():
-            for handle in handles:
-                handle.remove()
+    def unregister_hooks():
+        for handle in handles:
+            handle.remove()
 
-        return unregister_hooks
+    return unregister_hooks
 
-    grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
+
+def _engine_run_backward(t_outputs, *args, **kwargs):
     attach_logging_hooks = log.getEffectiveLevel() <= logging.INFO
     if attach_logging_hooks:
-        unregister_hooks = apply_hooks_on_graph(grad_fns)
+        unregister_hooks = _apply_hooks_on_graph_outputs(t_outputs)
     try:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, *args, **kwargs
