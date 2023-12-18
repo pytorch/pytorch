@@ -6,13 +6,13 @@
 
 #if defined(__CUDA_ARCH__)
 #include <c10/cuda/CUDAMathCompat.h>
-#define compat_copysign c10::cuda::compat::copysign
+#define C10_COMPAT_COPYSIGN c10::cuda::compat::copysign
 #elif defined(__HIPCC__)
 #include <c10/hip/HIPMathCompat.h>
-#define compat_copysign c10::hip::compat::copysign
+#define C10_COMPAT_COPYSIGN c10::hip::compat::copysign
 #else
 #include <c10/util/copysign.h>
-#define compat_copysign c10::copysign
+#define C10_COMPAT_COPYSIGN c10::copysign
 #endif
 
 // The functions in this file should be header-only as it is used under
@@ -51,7 +51,7 @@ inline C10_HOST_DEVICE scalar_t div_floor_floating(scalar_t a, scalar_t b)
       floordiv += scalar_t(1.0);
     }
   } else {
-    floordiv = compat_copysign(scalar_t(0), a / b);
+    floordiv = C10_COMPAT_COPYSIGN(scalar_t(0), a / b);
   }
   return floordiv;
 }
