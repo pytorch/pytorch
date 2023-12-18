@@ -2099,13 +2099,17 @@ class TritonKernel(Kernel):
                     from torch._inductor.ir import TileHint
                     from torch._inductor.triton_heuristics import AutotuneHint, {heuristics}
                     from torch._inductor.utils import instance_descriptor
-                    try:
-                        from triton.compiler.compiler import AttrsDescriptor
-                    except ImportError:
-                        pass  # ignore
                     from torch._inductor import triton_helpers
                 """
             )
+
+            # import AttrsDescriptor if the triton version is new enough to have this
+            # class defined.
+            import triton.compiler.compiler
+
+            if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
+                code.splice("from triton.compiler.compiler import AttrsDescriptor")
+
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
 
