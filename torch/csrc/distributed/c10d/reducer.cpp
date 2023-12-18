@@ -951,6 +951,22 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
   // do any extra synchronization here.
   const auto& tensor = bucket.gradients;
 
+  // TODO(@egienvalue): remove special case after view ops are fully
+  // supported on MTIA.
+  // If the bucket.gradients is on MTIA, bucket.bucket_views_in might not
+  // point to the same storage as bucket.gradients due to the special
+  // memory layout. It has to explicitly copy the data back to 1-D gradients.
+  if (tensor.is_mtia()) {
+    for (const auto i : c10::irange(bucket.variables.size())) {
+      const auto offset = bucket.offsets[i];
+      const auto length = bucket.lengths[i];
+      if (!bucket.bucket_views_in[i].is_alias_of(tensor)) {
+        tensor.narrow(0, offset, length)
+            .copy_(bucket.bucket_views_in[i].flatten());
+      }
+    }
+  }
+
   GradBucket grad_bucket(
       next_bucket_,
       buckets_.size(),
@@ -1206,7 +1222,12 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
     auto& v = bucket.variables[i];
     const auto offset = bucket.offsets[i];
     const auto length = bucket.lengths[i];
-    if (v.is_non_overlapping_and_dense()) {
+    // TODO(@egienvalue): remove special case after view ops are fully
+    // supported on MTIA.
+    // In general, on MTIA, due to the special memory layout, it doesn't
+    // support as_strided which creates a view tensor and aten::view will
+    // create a new tensor on MTIA for now.
+    if (v.is_non_overlapping_and_dense() && !v.is_mtia()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
@@ -1257,7 +1278,12 @@ void Reducer::populate_bucket_views_out(
     const auto& v = bucket.variables[i];
     const auto offset = bucket.offsets[i];
     const auto length = bucket.lengths[i];
-    if (v.is_non_overlapping_and_dense()) {
+    // TODO(@egienvalue): remove special case after view ops are fully
+    // supported on MTIA.
+    // In general, on MTIA, due to the special memory layout, it doesn't
+    // support as_strided which creates a view tensor and aten::view will
+    // create a new tensor on MTIA for now.
+    if (v.is_non_overlapping_and_dense() && !v.is_mtia()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
