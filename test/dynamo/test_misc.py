@@ -3382,6 +3382,77 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertTrue(same(ref, res))
 
+    def test_source_non_input_grad_access(self):
+        # This test creates a model, and accesses the grads
+        # from its parameter. This means that within dynamo,
+        # the tensor we are reading the grad from HAS a source,
+        # but is not known to graphargs.
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        class TrivialModel(torch.nn.Module):
+            def __init__(self):
+                super(TrivialModel, self).__init__()
+                self.linear = torch.nn.Linear(2, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def fn(a, b):
+            outs = []
+            for param in model.parameters():
+                outs.append(torch.ones(param.grad.size()))
+            return outs, param.grad + 1
+
+        model = TrivialModel()
+        # Eager
+        a = torch.ones([2, 2], requires_grad=True)
+        b = torch.ones([2, 2])
+        out = model(a)
+        out_sum = out.sum()
+        out_sum.backward()
+        ref = fn(a, b)
+
+        # Compiled
+        model = TrivialModel()
+        a = torch.ones([2, 2], requires_grad=True)
+        b = torch.ones([2, 2])
+        out = model(a)
+        out_sum = out.sum()
+        out_sum.backward()
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        res = opt_fn(a, b)
+
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 3)
+
+    def test_intermediary_tensor_grad_access(self):
+        # This test creates a model, and accesses the grads
+        # from its parameters and an entirely intermediary tensor.
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(a, b):
+            intermediary = torch.ones(2, 2)
+            c = a + intermediary
+            outs = []
+            outs.append(intermediary.grad)
+            return outs
+
+        # Eager
+        a = torch.ones([2, 2], requires_grad=True)
+        b = torch.ones([2, 2])
+        ref = fn(a, b)
+
+        # Compiled
+        a = torch.ones([2, 2], requires_grad=True)
+        b = torch.ones([2, 2])
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        res = opt_fn(a, b)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
     @skipIfNotPy311
     def test_linetable_311_writer1(self):
         def fn():
