@@ -393,6 +393,10 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 2
         number, ndigits = expr.args
         assert isinstance(ndigits, sympy.Integer)
+
+        if number.is_integer and ndigits >= 0:
+            return self._print(number)
+
         return f"round({self._print(number)}, {ndigits})"
 
 
