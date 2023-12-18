@@ -502,7 +502,7 @@ class TestGenericPytree(TestCase):
             subtest(cxx_pytree, name="cxx"),
         ],
     )
-    def test_treemap(self, pytree_impl):
+    def test_tree_map(self, pytree_impl):
         def run_test(pytree):
             def f(x):
                 return x * 3
@@ -536,7 +536,40 @@ class TestGenericPytree(TestCase):
             subtest(cxx_pytree, name="cxx"),
         ],
     )
-    def test_tree_only(self, pytree_impl):
+    def test_tree_map_multi_inputs(self, pytree_impl):
+        def run_test(pytree):
+            def f(x, y, z):
+                return x, [y, (z, 0)]
+
+            pytree_x = pytree
+            pytree_y = pytree_impl.tree_map(lambda x: (x + 1,), pytree)
+            pytree_z = pytree_impl.tree_map(lambda x: {"a": x * 2, "b": 2}, pytree)
+
+            self.assertEqual(
+                pytree_impl.tree_map(f, pytree_x, pytree_y, pytree_z),
+                pytree_impl.tree_map(
+                    lambda x: f(x, (x + 1,), {"a": x * 2, "b": 2}), pytree
+                ),
+            )
+
+        cases = [
+            [()],
+            ([],),
+            {"a": ()},
+            {"a": 1, "b": [{"c": 2}]},
+            {"a": 0, "b": [2, {"c": 3}, 4], "c": (5, 6)},
+        ]
+        for case in cases:
+            run_test(case)
+
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
+            subtest(cxx_pytree, name="cxx"),
+        ],
+    )
+    def test_tree_map_only(self, pytree_impl):
         self.assertEqual(
             pytree_impl.tree_map_only(int, lambda x: x + 2, [0, "a"]), [2, "a"]
         )

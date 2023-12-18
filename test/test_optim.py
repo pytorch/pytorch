@@ -7,8 +7,9 @@ from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 from torch.testing._internal.common_optimizers import optim_db, optims, OptimizerErrorEnum
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, onlyCUDA, skipMPS
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import markDynamoStrictTest, run_tests, TestCase
 
+@markDynamoStrictTest
 class TestOptimRenewed(TestCase):
 
     @onlyCPU
@@ -79,20 +80,20 @@ class TestOptimRenewed(TestCase):
                 # foreach/fused optimizers should be tested with a
                 # zero_size tensor as its last param.
                 # ref: https://github.com/pytorch/pytorch/issues/100701
-                empty_params = [torch.empty((), device=device, dtype=dtype)]
-                params = list(model.parameters()) + empty_params
+                empty_param = torch.empty((), device=device, dtype=dtype, requires_grad=True)
+                empty_param.grad = torch.rand_like(empty_param)
+                params = list(model.parameters()) + [empty_param]
 
                 optimizer = optim_cls(params, **kwargs)
 
                 for i in range(kIterations):
                     optimizer.zero_grad()
-                    output = model(input)
-                    loss = output.sum()
-                    loss.backward()
 
                     # Test that step behaves as expected (a no-op) when grads are set to None
-                    if i == 3:
-                        optimizer.zero_grad(set_to_none=True)
+                    if i != 3:
+                        output = model(input)
+                        loss = output.sum()
+                        loss.backward()
 
                     optimizer.step()
 
@@ -126,24 +127,22 @@ class TestOptimRenewed(TestCase):
     def test_set_default_dtype_works_with_foreach(self, device, dtype, optim_info):
         # https://github.com/pytorch/pytorch/issues/110940
         # We coerce step to always be float32 regardless of the default dtype
-        old_default_dtype = torch.tensor(0.0).dtype
+        old_default_dtype = torch.get_default_dtype()
         for default_dtype in [torch.float64, torch.float16]:
-            try:
-                torch.set_default_dtype(default_dtype)
-                self._test_derived_optimizers(
-                    device,
-                    dtype,
-                    optim_info,
-                    "foreach",
-                    reduced_precision=default_dtype == torch.float16
-                )
-            finally:
-                torch.set_default_dtype(old_default_dtype)
+            torch.set_default_dtype(default_dtype)
+            self._test_derived_optimizers(
+                device,
+                dtype,
+                optim_info,
+                "foreach",
+                reduced_precision=default_dtype == torch.float16
+            )
+            torch.set_default_dtype(old_default_dtype)
 
 
     @onlyCUDA
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float64])
-    def test_fused(self, device, dtype, optim_info):
+    def test_fused_matches_forloop(self, device, dtype, optim_info):
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
 
