@@ -170,8 +170,6 @@ def _validate_map_inputs(args):
     f = args[0]
     xs = args[1]
     invalid_reason = []
-    if not callable(f):
-        invalid_reason.append("Expect f to be callable. Got " + str(f))
 
     flat_xs, xs_spec = pytree.tree_flatten(xs)
     if not all(isinstance(t, torch.Tensor) for t in flat_xs):
