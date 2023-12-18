@@ -1421,12 +1421,14 @@ class _DispatchCacheKey(list):
 class _DispatchCacheEntry:
     """
     Entry type for the FakeTensor dispatch cache. Accounts for two possibilities:
-    1) We need to create a new FakeTensor given Tensor metadata. 2) The op is an
-    in-place op and we need to alias the given input.
+    1) The op is inplace, and a hit means we need to alias the argument at a given
+    index. 2) We need to synthesize a new FakeTensor given tensor metadata. For view
+    ops, we further capture the index of the arg to alias.
     """
 
+    inplace_idx: Optional[int] = None
     metadata: Optional[TensorMetadata] = None
-    arg_idx: Optional[int] = None
+    view_idx: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -1750,19 +1752,31 @@ class FakeTensorMode(TorchDispatchMode):
         # If this is an in-place op, the entry records which input arg is aliased.
         for idx in range(len(args)):
             if id(args[idx]) == id(output):
-                return _DispatchCacheEntry(None, idx)
+                return _DispatchCacheEntry(
+                    inplace_idx=idx, metadata=None, view_idx=None
+                )
 
         # Otherwise, create an entry that records the output tensor's metadata.
+        view_idx = None
+        if func.is_view:
+            idxs = [i for i, t in enumerate(args) if isinstance(t, torch.Tensor)]
+            assert len(idxs) == 1
+            view_idx = idxs[0]
+
+        metadata = extract_tensor_metadata(output)
+        entry = _DispatchCacheEntry(
+            inplace_idx=None, metadata=metadata, view_idx=view_idx
+        )
+
         # N.B.: Some checks for bypassing the cache would be performed on the
         # output tensor synthesized from the cached metadata. As an optimization,
         # we can synthesize a tensor here and do the checks on that instance.
         # This approach keeps the (more frequent) cache-hit path as lightweight
         # as possible.
-        entry = _DispatchCacheEntry(extract_tensor_metadata(output), None)
+        synth_output = self._output_from_cache_entry(entry, func, args)
 
         # Make sure the dispatch_key_set from the synthesized output tensor will
         # be the same.
-        synth_output = self._output_from_cache_entry(entry, func, args)
         synth_key_set = torch._C._dispatch_key_set(synth_output)
         key_set = torch._C._dispatch_key_set(output)
         if synth_key_set != key_set:
@@ -1776,9 +1790,9 @@ class FakeTensorMode(TorchDispatchMode):
         """
         Create a new FakeTensor from the cache entry.
         """
-        if entry.arg_idx is not None:
+        if entry.inplace_idx is not None:
             # This is an in-place op; return the aliased arg.
-            return args[entry.arg_idx]
+            return args[entry.inplace_idx]
 
         # Synthesize a new FakeTensor with the cached metadata.
         metadata = entry.metadata
@@ -1793,17 +1807,20 @@ class FakeTensorMode(TorchDispatchMode):
             requires_grad=metadata.requires_grad,
         )
 
-        torch._C._set_conj(empty, metadata.is_conj)
-        torch._C._set_neg(empty, metadata.is_neg)
+        if metadata.is_conj:
+            torch._C._set_conj(empty, True)
+        if metadata.is_neg:
+            torch._C._set_neg(empty, True)
 
-        if func.is_view or metadata.storage_offset != 0:
-            if func.is_view:
-                # For view ops, the storage should be the same as the input.
-                tensor_args = [t for t in args if isinstance(t, torch.Tensor)]
-                assert len(tensor_args) == 1
-                storage = tensor_args[0].untyped_storage()
-            else:
-                storage = empty.untyped_storage()
+        if func.is_view:
+            # For view ops, the storage should be the same as the tensor input.
+            storage = args[entry.view_idx].untyped_storage()
+            with in_kernel_invocation_manager(self):
+                empty.set_(
+                    storage, metadata.storage_offset, metadata.shape, metadata.stride
+                )
+        elif metadata.storage_offset != 0:
+            storage = empty.untyped_storage()
             with in_kernel_invocation_manager(self):
                 empty.set_(
                     storage, metadata.storage_offset, metadata.shape, metadata.stride
