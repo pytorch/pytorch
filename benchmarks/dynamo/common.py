@@ -197,6 +197,7 @@ BENCHMARK_USE_SGD = {
     "tf_efficientnet_b0",
     "ghostnet_100",
     "gmixer_24_224",
+    "tinynet_a",
 }
 
 # These models OOM in CI
