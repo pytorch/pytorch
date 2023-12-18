@@ -2,7 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 
-#if !AT_CUDNN_ENABLED() && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8900
+#if defined(USE_ROCM) || (!AT_CUDNN_ENABLED() && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8900)
 
 namespace at { namespace native {
 
@@ -22,7 +22,7 @@ void run_cudnn_LLM_fprop(int64_t b,
                  Tensor& o,
                  Tensor& dropoutseed,
                  Tensor& dropoutoffset) {
-    TORCH_CHECK(false, "PyTorch was not compiled with cuDNN enabled!");
+    TORCH_CHECK(false, "PyTorch was not compiled with cuDNN Flash Attention enabled!");
 }
 
 }} // namespace at::native
@@ -207,7 +207,7 @@ auto build_graph_and_tensors(int64_t b,
                                        .set_dim({1, 1, 1, 1})
                                        .set_stride({1, 1, 1, 1})
                                        .set_data_type(fe::DataType_t::INT32));
-    auto scaled_dot_product_flash_attention_options = fe::graph::Scaled_dot_product_flash_attention_attributes()
+    auto scaled_dot_product_flash_attention_options = fe::graph::SDPA_attributes()
                                                           .set_name("flash_attention")
                                                           .set_is_inference(return_softmaxstats == false)
                                                           .set_causal_mask(is_causal)
