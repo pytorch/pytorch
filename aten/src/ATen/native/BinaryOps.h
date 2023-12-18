@@ -4,16 +4,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/TypeSafeSignMath.h>
-#if defined(__CUDA_ARCH__)
-#include <c10/cuda/CUDAMathCompat.h>
-#define compat_copysign c10::cuda::compat::copysign
-#elif defined(__HIPCC__)
-#include <c10/hip/HIPMathCompat.h>
-#define compat_copysign c10::hip::compat::copysign
-#else
-#include <c10/util/copysign.h>
-#define compat_copysign c10::copysign
-#endif
 
 
 namespace at {
