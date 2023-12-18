@@ -132,10 +132,6 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 2
         number, ndigits = expr.args
         assert isinstance(ndigits, sympy.Integer)
-
-        if number.is_integer and ndigits >= 0:
-            return self._print(number)
-
         return f"tl.math.nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits}"
 
 
