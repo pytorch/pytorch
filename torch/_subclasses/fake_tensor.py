@@ -660,6 +660,48 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     return FakeTensor(fake_mode, out, out_device)
 
 
+def is_builtin(op):
+    return op.namespace in ("aten", "prims", "prim")
+
+
+@register_op_impl(lambda func: is_builtin(func) and "foreach" in func.name())
+def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
+    tensor_lists = []
+    for arg in itertools.chain(args, kwargs.values()):
+        if (
+            isinstance(arg, (list, tuple))
+            and len(arg)
+            and isinstance(arg[0], torch.Tensor)
+        ):
+            tensor_lists.append(arg)
+
+    with in_kernel_invocation_manager(fake_mode):
+        out_meta = func(*args, **kwargs)
+
+    if not out_meta:
+        return out_meta
+
+    assert tensor_lists
+    out_fake = []
+
+    for i, meta_t in enumerate(out_meta):
+        device = tensor_lists[0][i].device
+        for j in range(1, len(tensor_lists)):
+            other_device = tensor_lists[j][i].device
+            torch._check(
+                other_device == device,
+                lambda: f"found two different devices {device}, {other_device}",
+            )
+
+        out_fake.append(
+            fake_mode.fake_tensor_converter.from_meta_and_device(
+                fake_mode, meta_t, device
+            )
+        )
+
+    return out_fake
+
+
 # Dont default to default device handling,
 # Since op can take in non-zero sized cpu
 # index tensors with cuda self
