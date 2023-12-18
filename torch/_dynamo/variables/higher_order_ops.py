@@ -213,16 +213,16 @@ def speculate_subgraph(
     source_target=None,
     always_restore=False,
     enable_grad=None,
-    # NOTE [Temporary argument `set_subgraph_inputs`]
-    # If set_subgraph_inputs="manual", we manually add the `sub_args` to `subgraph`,
-    # If "automatic", we rely on tracer's lifting mechanism to lift these args.
-    # If "flatten_manual", we first flatten the sub_args into a flattend list, then manually
-    # set the flattend inputs to the subgraph. This saves us from having to mapping the automatically
-    # lifted inputs back to their original position, where ordering of input matters e.g. map.
-    # NOTE: Default `True` is temporary and plan is
-    #       to always lift args in future and remove this
-    #       argument.
-    set_subgraph_inputs="manual",
+    # NOTE [argument `set_subgraph_inputs`]
+    # set_subgraph_inputs controls what how to construct subgraphs' placeholders from sub_args.
+    # 1. if your HOP supports arbitrary inputs, use set_subtraph_inputs="automatic" (most recommended).
+    # 2. if your HOP supports only Tensor and symnode inputs, use set_subgraph_inputs="flatten_manual" (recommended).
+    # If sub_args contain Pytree structure (e.g. dict/list/tuple/set), the sub_args will be flattened first.
+    # Then the flattend args are manually set as subgraph's placeholders.
+    # 3. if your HOP must preserve inputs that are not tensor or symnode as placeholders e.g. AutogradFunctionContextVariable
+    # use set_subgraph_inputs="manual" (not recommended). We do not recommend it in general because it has the
+    # restriction that user need to manually control how to create placeholders and VariableTrackers for the args.
+    set_subgraph_inputs="automatic",
     restore_side_effects=True,
     should_flatten_outputs=False,
     # Pass in an originating tracer - this is needed for preserving context
@@ -528,7 +528,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 {},
                 "cond",
                 source_target=self.value,
-                set_subgraph_inputs="automatic",
                 should_flatten_outputs=True,
             )
 
@@ -718,51 +717,21 @@ def non_single_tensor_return_unsupported(api, ret):
 
 
 class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def _check_args(self, args, kwargs):
-        from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
-
-        if len(kwargs) > 0:
-            unimplemented(
-                "torch.ops.higher_order.map: kwargs are not supported in the map operator."
-            )
-
-        assert type(args[0].realize()) in (
-            UserFunctionVariable,
-            NestedUserFunctionVariable,
-        )
-
-        assert only_consist_of(args[1], TensorVariable)
-        xs_proxy = args[1].as_proxy()
-        flat_proxies, xs_spec = pytree.tree_flatten(xs_proxy)
-        xs_example_values = [p.node.meta["example_value"] for p in flat_proxies]
-
-        same_first_dim_msg = "map expects all mapped tensors to have the same size in the first dimension."
-        s0 = xs_example_values[0].size()[0]
-        if s0 == 0:
-            unimplemented(
-                "map expects all mapped tensors to have non-zero size in the first dimension."
-            )
-        for t in xs_example_values[1:]:
-            s1 = t.size()[0]
-            if type(s0) != type(s1):
-                unimplemented(same_first_dim_msg)
-
-            if isinstance(s0, int):
-                if s0 != s1:
-                    unimplemented(same_first_dim_msg)
-            elif isinstance(s0, torch.SymInt):
-                if s0 is not s1:
-                    unimplemented(same_first_dim_msg)
-            else:
-                unimplemented(f"Unknow type for tensor sizes, got {s0} and {s1}")
-
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from . import TensorVariable
+        from torch._higher_order_ops.map import _validate_map_inputs
+        from . import ListVariable, TensorVariable
         from .builder import SourcelessBuilder, wrap_fx_proxy_cls
 
-        self._check_args(args, kwargs)
+        if len(kwargs) > 0:
+            unimplemented("map: kwargs are not supported in the map operator.")
+
+        invalid_reasons = _make_inlined(tx, _validate_map_inputs)(
+            ListVariable(args)
+        ).as_python_constant()
+        if invalid_reasons:
+            unimplemented("Got invalid inputs for map:\n" + "\n".join(invalid_reasons))
 
         # To get the example output from map() we will need to provide at least one sample to
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
@@ -922,6 +891,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             # See NOTE [HACK: Enable autograd while tracing function]
             enable_grad=True,
+            set_subgraph_inputs="manual",
         )
 
         body_name = add_subgraph(
@@ -1126,6 +1096,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 {},
                 "torch.vmap",
                 source_target=self.value,
+                set_subgraph_inputs="manual",
             )
 
         body_name = add_subgraph(
@@ -1260,6 +1231,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             restore_side_effects=False,
             tracer=tracer,
             enable_grad=enable_grad,
+            set_subgraph_inputs="manual",
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
@@ -1314,7 +1286,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             kwargs,
             description,
             source_target=self.value,
-            set_subgraph_inputs="automatic",
             should_flatten_outputs=True,
         )
 

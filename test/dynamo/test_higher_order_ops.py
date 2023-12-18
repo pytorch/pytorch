@@ -1129,10 +1129,10 @@ class GraphModule(torch.nn.Module):
                 graph,
                 """\
 def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
-    l_xs_ = L_xs_
+    xs_1 = L_xs_
     l_y_ = L_y_
     map_body_1 = self.map_body_1
-    map_impl = torch.ops.higher_order.map_impl(map_body_1, 1, l_xs_, l_y_);  map_body_1 = l_xs_ = l_y_ = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_1, 1, xs_1, l_y_);  map_body_1 = xs_1 = l_y_ = None
     getitem_1 = map_impl[0];  map_impl = None
     return (getitem_1,)""",
             )
@@ -1161,9 +1161,9 @@ def forward(self, getitem, l_y_):
                 graph,
                 """\
 def forward(self, L_x_ : torch.Tensor):
-    l_x_ = L_x_
+    xs_1 = L_x_
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_);  map_body_0 = l_x_ = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, xs_1);  map_body_0 = xs_1 = None
     getitem_1 = map_impl[0]
     getitem_2 = map_impl[1];  map_impl = None
     return (getitem_1, getitem_2)""",
@@ -1197,9 +1197,9 @@ def forward(self, getitem):
                 graph,
                 """\
 def forward(self, L_x_ : torch.Tensor):
-    l_x_ = L_x_
+    xs_1 = L_x_
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_);  map_body_0 = l_x_ = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, xs_1);  map_body_0 = xs_1 = None
     getitem_1 = map_impl[0]
     getitem_2 = map_impl[1]
     getitem_3 = map_impl[2]
@@ -1232,16 +1232,16 @@ def forward(self, getitem):
                 graph,
                 """\
 def forward(self, L_xs_0_ : torch.Tensor, L_xs_1_0_0_0_ : torch.Tensor, L_xs_2_ : torch.Tensor, L_xs_3_0_ : torch.Tensor, L_xs_3_1_0_ : torch.Tensor, L_xs_3_2_ : torch.Tensor, L_xs_4_g_ : torch.Tensor, L_y_ : torch.Tensor):
-    l_xs_0_ = L_xs_0_
-    l_xs_1_0_0_0_ = L_xs_1_0_0_0_
-    l_xs_2_ = L_xs_2_
-    l_xs_3_0_ = L_xs_3_0_
-    l_xs_3_1_0_ = L_xs_3_1_0_
-    l_xs_3_2_ = L_xs_3_2_
-    l_xs_4_g_ = L_xs_4_g_
+    xs = L_xs_0_
+    xs_1 = L_xs_1_0_0_0_
+    xs_2 = L_xs_2_
+    xs_3 = L_xs_3_0_
+    xs_4 = L_xs_3_1_0_
+    xs_5 = L_xs_3_2_
+    xs_6 = L_xs_4_g_
     l_y_ = L_y_
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 7, l_xs_0_, l_xs_1_0_0_0_, l_xs_2_, l_xs_3_0_, l_xs_3_1_0_, l_xs_3_2_, l_xs_4_g_, l_y_);  map_body_0 = l_xs_0_ = l_xs_1_0_0_0_ = l_xs_2_ = l_xs_3_0_ = l_xs_3_1_0_ = l_xs_3_2_ = l_xs_4_g_ = l_y_ = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 7, xs, xs_1, xs_2, xs_3, xs_4, xs_5, xs_6, l_y_);  map_body_0 = xs = xs_1 = xs_2 = xs_3 = xs_4 = xs_5 = xs_6 = l_y_ = None
     getitem_7 = map_impl[0]
     getitem_8 = map_impl[1]
     getitem_9 = map_impl[2]
@@ -1249,8 +1249,8 @@ def forward(self, L_xs_0_ : torch.Tensor, L_xs_1_0_0_0_ : torch.Tensor, L_xs_2_ 
     getitem_11 = map_impl[4]
     getitem_12 = map_impl[5]
     getitem_13 = map_impl[6];  map_impl = None
-    return (getitem_7, getitem_8, getitem_9, getitem_10, getitem_11, getitem_12, getitem_13)""",
-            )  # noqa: B950
+    return (getitem_7, getitem_8, getitem_9, getitem_10, getitem_11, getitem_12, getitem_13)""",  # noqa: B950
+            )
             self.assertExpectedInline(
                 body_graph,
                 """\
@@ -1262,8 +1262,24 @@ def forward(self, getitem, getitem_1, getitem_2, getitem_3, getitem_4, getitem_5
     add_4 = getitem_4 + l_y_;  getitem_4 = None
     add_5 = getitem_5 + l_y_;  getitem_5 = None
     add_6 = getitem_6 + l_y_;  getitem_6 = l_y_ = None
-    return (add, add_1, add_2, add_3, add_4, add_5, add_6)""",
-            )  # noqa: B950
+    return (add, add_1, add_2, add_3, add_4, add_5, add_6)""",  # noqa: B950
+            )
+
+    def test_map_raise_error_for_invalid_inputs(self):
+        def inner_f(x, y):
+            return pytree.tree_map(lambda x: x + y, x)
+
+        def fn(xs, y):
+            return control_flow.map(inner_f, xs, y)
+
+        y = torch.ones(1)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            x = (torch.randn(3, 4), torch.randn(2, 4))
+            torch.compile(fn, backend="eager", fullgraph=True)(x, y)
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            x = (torch.randn(0, 4), torch.randn(0, 4))
+            torch.compile(fn, backend="eager", fullgraph=True)(x, y)
 
     def test_map_kwargs(self):
         cnt = CompileCounter()
@@ -1295,9 +1311,9 @@ def forward(self, getitem, getitem_1, getitem_2, getitem_3, getitem_4, getitem_5
                 graph,
                 """\
 def forward(self, L_x_ : torch.Tensor):
-    l_x_ = L_x_
+    xs_1 = L_x_
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, xs_1, 3);  map_body_0 = xs_1 = None
     getitem_1 = map_impl[0];  map_impl = None
     return (getitem_1,)""",
             )
@@ -1329,9 +1345,9 @@ def forward(self, getitem, const):
                 graph,
                 """\
 def forward(self, L_x_ : torch.Tensor):
-    l_x_ = L_x_
+    xs_1 = L_x_
     map_body_0 = self.map_body_0
-    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, xs_1, 3);  map_body_0 = xs_1 = None
     getitem_1 = map_impl[0];  map_impl = None
     return (getitem_1,)""",
             )

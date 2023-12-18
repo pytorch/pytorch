@@ -1787,7 +1787,7 @@ def forward(self, l_x_):
         xs = torch.randn(0, 2)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "non-zero size in the first dimension",
+            "Got invalid inputs for map",
         ):
             out_graph, _ = torch._dynamo.export(mod)(xs)
 
