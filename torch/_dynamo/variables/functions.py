@@ -82,6 +82,16 @@ class BaseUserFunctionVariable(VariableTracker):
             self, list(self.self_args()) + list(args), kwargs
         )
 
+    def call_hasattr(self, tx, name: str) -> VariableTracker:
+        result = False
+
+        try:
+            result = hasattr(self.get_function(), name)
+        except NotImplementedError:
+            if name == "__name__" and isinstance(self, NestedUserFunctionVariable):
+                result = True
+        return variables.ConstantVariable.create(result)
+
     def inspect_parameter_names(self):
         return list(inspect.signature(self.get_function()).parameters)
 
