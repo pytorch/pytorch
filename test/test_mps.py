@@ -676,6 +676,8 @@ def mps_ops_modifier(ops):
         'log_normal': None,
         'bfloat16': None,
         'cdouble': None,
+        'cfloat': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float16, torch.float32],
+        'chalf': None,
         'double': None,
         'nn.functional.softminwith_dtype': None,
         'log_softmaxwith_dtype': None,
