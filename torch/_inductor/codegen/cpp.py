@@ -407,7 +407,8 @@ class CppPrinter(ExprPrinter):
         assert len(expr.args) == 2
         number, ndigits = expr.args
         if number.is_integer:
-            assert ndigits < 0, f"ndigits < 0 should have been filtered by the sympy function"
+            # ndigits < 0 should have been filtered by the sympy function
+            assert ndigits < 0
             raise ValueError(
                 f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
             )

@@ -247,22 +247,16 @@ class ExprPrinterTests(TorchTestCase):
         )
 
         expr = RoundDecimal(sympy.Symbol("x", integer=True), ndigits)
-        self.assertEqual(pexpr(expr), "x" if ndigits >= 0 else f"round(x, {ndigits})")
         if ndigits >= 0:
-
-            self.assertEqual(
-                cexpr(expr),
-                "x"
-            )
-            self.assertEqual(
-                texpr(expr),
-                "x"
-            )
+            for do_print in [pexpr, cexpr, texpr]:
+                self.assertEqual(do_print(expr), "x")
         else:
+            self.assertEqual(pexpr(expr), f"round(x, {ndigits})")
             for do_print in [cexpr, texpr]:
-                with self.assertRaisesRegex(ValueError, "only non-negative ndigits are currently supported"):
+                with self.assertRaisesRegex(
+                    ValueError, "only non-negative ndigits are currently supported"
+                ):
                     do_print(expr)
-
 
     def test_print_floor_div(self):
         for integer in [True, False]:
