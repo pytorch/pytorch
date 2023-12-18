@@ -8,6 +8,7 @@ from os.path import abspath, dirname
 from typing import Any, Dict, Set, Type, TYPE_CHECKING
 
 import torch
+from torch.nn.attention import bias
 
 # to configure logging for dynamo, aot, and inductor
 # use the following API in the torch._logging module
@@ -115,7 +116,7 @@ guard_nn_modules_using_dict_tags = True
 # We do NOT currently support __torch_dispatch__.  The implementation is
 # currently buggy, the main show stopper for nontrivial use is
 # https://github.com/pytorch/torchdynamo/issues/1952
-traceable_tensor_subclasses: Set[Type[Any]] = set()
+traceable_tensor_subclasses: Set[Type[Any]] = {bias.CausalBias,}
 
 # Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
 # This is a good way to get your model to work one way or another, but you may

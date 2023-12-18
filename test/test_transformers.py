@@ -3206,7 +3206,7 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
-class TestAttnMasks(NNTestCase):
+class TestAttnBias(NNTestCase):
 
     def run_test(self, device, compile, make_q, make_kv, attn_bias=None,
                  forw_tolerances: Optional[Tolerances] = None, grad_tolerances: Optional[Tolerances] = None):
@@ -3354,7 +3354,7 @@ instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
-instantiate_device_type_tests(TestAttnMasks, globals(), only_for=device_types)
+instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types)
 
 if __name__ == '__main__':
     run_tests()
