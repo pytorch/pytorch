@@ -1098,6 +1098,7 @@ torch.cuda.synchronize()
                 self.assertTrue(r != 0)
 
 
+
     # Compare non-fused optimizer vs fused one as the fused one unscales gradients
     # inside its cuda kernel unlike the other.
     def test_grad_scaling_autocast_fused_optimizers(self):
