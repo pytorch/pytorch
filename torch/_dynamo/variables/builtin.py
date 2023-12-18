@@ -98,6 +98,7 @@ class BuiltinVariable(VariableTracker):
             chr,
             divmod,
             float,
+            getattr,
             int,
             len,
             max,

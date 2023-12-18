@@ -1451,6 +1451,9 @@ def get_fake_values_from_nodes(tx, nodes):
     def visit(n: torch.fx.Node):
         return n.meta["example_value"]
 
+    # unwrap proxy nodes
+    nodes = tree_map_only(fx.Proxy, lambda x: x.node, nodes)
+
     args_kwargs = torch.fx.node.map_arg(nodes, visit)
     return tree_map_only(
         torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), args_kwargs
