@@ -495,6 +495,7 @@ def run_test(
     extra_unittest_args=None,
     env=None,
 ) -> int:
+    start = time.time()
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_unittest_args.copy()
     test_file = test_module.name
@@ -646,11 +647,11 @@ def run_test(
             # can accept code 4 too just in case a new non-test binary file
             # comes up in the future.
             ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
-
-    if IS_CI:
-        handle_log_file(
-            test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun
-        )
+    print(f"{test_module} took {time.time() - start}, expected {test_module.time}")
+    # if IS_CI:
+    #     handle_log_file(
+    #         test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun
+    #     )
     return ret_code
 
 
@@ -1514,7 +1515,7 @@ def run_test_module(
         test_name = test.name
 
         # Printing the date here can help diagnose which tests are slow
-        print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
+        # print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
         handler = CUSTOM_HANDLERS.get(test_name, run_test)
         return_code = handler(test, test_directory, options)
         assert isinstance(return_code, int) and not isinstance(
