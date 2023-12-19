@@ -124,6 +124,21 @@ class TritonPrinter(PythonPrinter):
         div = self.paren(self.doprint(div))
         return f"tl.math.floor({x} / {div})"
 
+    def _print_Round(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.llrint({self._print(expr.args[0])})"
+
+    def _print_RoundDecimal(self, expr):
+        assert len(expr.args) == 2
+        number, ndigits = expr.args
+        if number.is_integer:
+            # ndigits < 0 should have been filtered by the sympy function
+            assert ndigits < 0
+            raise ValueError(
+                f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
+            )
+        return f"tl.math.nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits}"
+
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
