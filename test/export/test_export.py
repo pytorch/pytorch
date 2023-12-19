@@ -1412,7 +1412,8 @@ class TestExport(TestCase):
         example_inputs = (torch.randn(1, 3, 3, 3),)
         m = CondBranchClassMethod()
         m.eval()
-        # TODO (tmanlaibaatar) It doesn't work on aot_export yet
+        # TODO (tmanlaibaatar) Setting functional IR doesn't work on aot_export yet
+        # as the branch source_fn is not captured.
         gm = capture_pre_autograd_graph(m, example_inputs, _functional_pre_dispatch_IR=False)
 
         actual_source_fns = []
@@ -1420,7 +1421,6 @@ class TestExport(TestCase):
             for node in mod.graph.nodes:
                 if node.name in {"sin", "cos"}:
                     source_fn_st = node.meta.get("source_fn_stack", None)
-                    print(source_fn_st)
                     if source_fn_st is not None:
                         source_names = []
                         for source_fn in source_fn_st:
@@ -1725,10 +1725,10 @@ def forward(self, l_x_):
         inp = torch.randn(4, 4)
         gm = capture_pre_autograd_graph(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3], _functional_pre_dispatch_IR=True)
 
-        with self.assertRaisesRegex(RuntimeError, "l_x_.shape\[1\]"):
+        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\]"):
             gm(torch.randn(2, 2))
 
-        with self.assertRaisesRegex(RuntimeError, "l_x_.shape\[1\]"):
+        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\]"):
             torch.export.export(gm, (torch.randn(2, 2),))
 
         ep = torch.export.export(gm, (torch.randn(5, 4),), dynamic_shapes=({0: torch.export.Dim("dim", min=3)},))
@@ -2024,6 +2024,7 @@ def forward(self, l_x_):
         self.assertTrue(torch.allclose(torch_gm(test_inp), orig_eager(test_inp)))
 
         pre_autograd_gm = capture_pre_autograd_graph(orig_eager, (torch.rand(2, 3),), {})
+        print(pre_autograd_gm.graph)
         for k, v in orig_eager.state_dict().items():
             normalized_k = k.replace(".", "_")
             self.assertIn(normalized_k, pre_autograd_gm.state_dict())
