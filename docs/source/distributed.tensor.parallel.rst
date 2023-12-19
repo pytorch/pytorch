@@ -32,7 +32,7 @@ Tensor Parallelism supports the following parallel styles:
 To simply configure the nn.Module's inputs and outputs with DTensor layouts
 and perform necessary layout redistributions, without distribute the module
 parameters to DTensors, the following classes can be used in
-the ``parallelize_plan``of ``parallelize_module``:
+the ``parallelize_plan`` of ``parallelize_module``:
 
 .. autoclass:: torch.distributed.tensor.parallel.PrepareModuleInput
   :members:
