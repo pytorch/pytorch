@@ -1010,8 +1010,8 @@ def load(
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
                 if mmap:
-                    if not isinstance(f, str):
-                        raise ValueError("f must be a string filename in order to use mmap argument")
+                    if not _is_path(f):
+                        raise ValueError("f must be a file path in order to use the mmap argument")
                     size = os.path.getsize(f)
                     overall_storage = torch.UntypedStorage.from_file(f, False, size)
                 if weights_only:
