@@ -6,7 +6,9 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch._custom_ops import impl_abstract
+from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
+
 from . import _functional_collectives_impl as fun_col_impl
 from ._functional_collectives_impl import _register_tensor_wrapper
 
@@ -96,7 +98,7 @@ RANK_TYPES = Union[
     List[int],
     List[List[int]],
     dist.ProcessGroup,
-    "dist._tensor.DeviceMesh",
+    DeviceMesh,
     Tuple["dist._tensor.DeviceMesh", int],
 ]
 
@@ -490,9 +492,6 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
     By having this be part of the explicit eager codepath, we avoid having to specialize behavior inside
     torchdynamo and can still interoperate with processgroup objects or other untraceable forms.
     """
-    # Cannot import on the top level to avoid circular imports
-    import torch.distributed._tensor as dt
-
     # had to define this hack _inside_ expand_group to avoid
     # graph_break [('torch.* op returned non-Tensor int
     # caused by 'cast_*` functions being treated as 'torch.*' ops (iiuc)
@@ -534,7 +533,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
         rankset = dist.get_process_group_ranks(group)
         group_size = len(rankset)
         tag = tag or c10d._get_group_tag(group)
-    elif isinstance(group, dt.DeviceMesh):
+    elif isinstance(group, DeviceMesh):
         assert (
             group.ndim == 1
         ), "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
@@ -544,7 +543,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
     elif isinstance(group, tuple):
         if (
             len(group) == 2
-            and isinstance(group[0], dt.DeviceMesh)
+            and isinstance(group[0], DeviceMesh)
             and isinstance(group[1], int)
         ):
             dmesh = group[0]

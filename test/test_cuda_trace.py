@@ -16,6 +16,7 @@ if not TEST_CUDA:
     TestCase = NoTest  # noqa: F811
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaTrace(TestCase):
     def setUp(self):
         torch._C._activate_cuda_trace()
