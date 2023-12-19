@@ -485,7 +485,6 @@ def _get_dispatch_mode_pre_dispatch(mode_key):
 
 def _get_current_dispatch_mode_pre_dispatch():
     stack_len = mode_stack_state_for_pre_dispatch().count()
-    # Return a user mode on the stack if there are any
     if stack_len == 2:
         return mode_stack_state_for_pre_dispatch().get(1)
     if stack_len == 1:
@@ -567,8 +566,10 @@ class OpOverload(OperatorBase):
             *self._schema.name.split("::"), self._overloadname
         )
 
-    def __call__(self, *args, **kwargs):
-        return self._op(*args, **(kwargs or {}))
+    def __call__(self_, *args, **kwargs):  # noqa: B902
+        # use `self_` to avoid naming collide with aten ops arguments that
+        # named "self". This way, all the aten ops can be called by kwargs.
+        return self_._op(*args, **(kwargs or {}))
 
     def __hash__(self):
         return hash(self._op)
@@ -687,7 +688,11 @@ class OpOverload(OperatorBase):
                             self, overload_types, args, kwargs
                         )
 
-                # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
+                # Note [Not Caching Per-Dispatch-Key Mode Handlers]
+                # Note that we're not caching this handler.  There isn't really a point, since the slow bit
+                # is the handler itself (in python).
+                # Also, not caching means that we don't have to reset the cache when any existing
+                # modes go out of scope (which in of itself takes time to loop through all operators).
                 return handler
 
         final_key = resolve_key(self, key)
@@ -810,12 +815,15 @@ class OpOverloadPacket:
     def __iter__(self):
         return iter(self._dir)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self_, *args, **kwargs):  # noqa: B902
+        # use `self_` to avoid naming collide with aten ops arguments that
+        # named "self". This way, all the aten ops can be called by kwargs.
+
         # overloading __call__ to ensure torch.ops.foo.bar()
         # is still callable from JIT
         # We save the function ptr as the `op` attribute on
         # OpOverloadPacket to access it here.
-        return self._op(*args, **(kwargs or {}))
+        return self_._op(*args, **(kwargs or {}))
 
     # TODO: use this to make a __dir__
     def overloads(self):
