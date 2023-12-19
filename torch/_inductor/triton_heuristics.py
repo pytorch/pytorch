@@ -355,6 +355,23 @@ class CachingAutotuner(KernelInterface):
             "set_device": torch.cuda.set_device,
             "current_device": torch.cuda.current_device,
         }
+
+        def _getattr(obj, attr1, attr2):
+            if hasattr(obj, attr1):
+                return getattr(obj, attr1)
+            else:
+                assert hasattr(
+                    obj, attr2
+                ), f"{obj} should have either {attr1} or {attr2}"
+                return getattr(obj, attr2)
+
+        scope["runner"] = _getattr(binary, "run", "c_wrapper")
+        scope["function"] = _getattr(binary, "function", "cu_function")
+        cluster_dims = _getattr(binary, "cluster_dims", "clusterDims")
+        scope["cta_args"] = (
+            (binary.num_ctas, *cluster_dims) if hasattr(binary, "num_ctas") else ()
+        )
+
         exec(
             f"""
             def launcher({', '.join(def_args)}, grid, stream):
@@ -363,30 +380,10 @@ class CachingAutotuner(KernelInterface):
                 else:
                     grid_0, grid_1, grid_2 = grid
 
-                if hasattr(bin, "run"):
-                    runner = bin.run
-                else:
-                    runner = bin.c_wrapper
-
-                if hasattr(bin, "cluster_dims"):
-                    cluster_dims = bin.cluster_dims
-                else:
-                    cluster_dims = bin.clusterDims
-
-                if hasattr(bin, "function"):
-                    function = bin.function
-                else:
-                    function = bin.cu_function
-
-                if hasattr(bin, "num_ctas"):
-                    runner(grid_0, grid_1, grid_2, bin.num_warps,
-                                bin.num_ctas, *cluster_dims, bin.shared,
-                                stream, function, None, None, None,
-                                {', '.join(call_args)})
-                else:
-                    runner(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
-                                stream, function, None, None, None,
-                                {', '.join(call_args)})
+                runner(grid_0, grid_1, grid_2, bin.num_warps,
+                            *cta_args, bin.shared,
+                            stream, function, None, None, None,
+                            {', '.join(call_args)})
                 return bin
             """.lstrip(),
             scope,
