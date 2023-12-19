@@ -484,11 +484,12 @@ class basic_string_view final {
   }
 
   template <class Condition>
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   constexpr size_type find_first_if_(size_type pos, Condition&& condition)
       const noexcept {
     if (pos + 1 <= size()) {
       for (size_type cur = pos; cur < size(); ++cur) {
-        if (std::forward<Condition>(condition)(at_(cur))) {
+        if (condition(at_(cur))) {
           return cur;
         }
       }
@@ -497,13 +498,14 @@ class basic_string_view final {
   }
 
   template <class Condition>
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   constexpr size_type find_last_if_(size_type pos, Condition&& condition)
       const noexcept {
     // Write it iteratively. This is faster.
     if (size() > 0) {
       pos = std::min(size() - 1, pos);
       do {
-        if (std::forward<Condition>(condition)(at_(pos))) {
+        if (condition(at_(pos))) {
           return pos;
         }
       } while (pos-- > 0);
