@@ -56,6 +56,7 @@ from .source import (
     GlobalSource,
     GlobalWeakRefSource,
     LocalSource,
+    NNModuleSource,
     Source,
 )
 from .utils import (
@@ -2065,10 +2066,21 @@ class InstructionTranslator(InstructionTranslatorBase):
             vars.extend(cells_and_freevars)
             cells_and_freevars_set = set(cells_and_freevars)
 
+            def _source_dispatch(key, obj):
+                def _make_source():
+                    return LocalSource(
+                        key, cell_or_freevar=key in cells_and_freevars_set
+                    )
+
+                if isinstance(obj, torch.nn.Module):
+                    return NNModuleSource(_make_source())
+                else:
+                    return _make_source()
+
             self.symbolic_locals = {
                 k: variables.LazyVariableTracker.create(
                     f_locals[k],
-                    source=LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
+                    source=_source_dispatch(k, f_locals[k]),
                 )
                 for k in vars
                 if k in f_locals

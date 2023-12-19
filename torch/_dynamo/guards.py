@@ -1070,15 +1070,17 @@ class CheckFunctionManager:
                         converted.append(dim.node.maybe_as_int())
                 return converted
 
-            dynamic_dims_sizes = [
-                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["size"])
-                for t in tensor_check_examples
-            ]
+            dynamic_dims_sizes = []
+            dynamic_dims_strides = []
 
-            dynamic_dims_strides = [
-                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"])
-                for t in tensor_check_examples
-            ]
+            for i, t in enumerate(tensor_check_examples):
+                assert (
+                    t in self.output_graph.tensor_weakref_to_sizes_strides
+                ), f"Invariant violated, tensor named {tensor_check_names[i]} not found"
+
+                tensor_info = self.output_graph.tensor_weakref_to_sizes_strides[t]
+                dynamic_dims_sizes.append(convert(tensor_info["size"]))
+                dynamic_dims_strides.append(convert(tensor_info["stride"]))
 
             tensor_guards = TensorGuards(
                 *tensor_check_examples,
