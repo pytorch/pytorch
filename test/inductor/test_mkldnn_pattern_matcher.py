@@ -1,4 +1,4 @@
-# Owner(s): ["module: inductor"]
+# Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import copy
 import itertools
@@ -712,81 +712,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 check_quantization=True,
                 matcher_check_fn=matcher_check_fn,
             )
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_qconv2d_add_3(self):
-        r"""
-        This testcase will test below model:
-             x
-           /   \
-        conv1  maxpool
-          \    /   \
-           add    conv2
-            \     /
-              cat
-        Based on default recipe of x86InductorQuantizer, we will see this pattern after convert:
-        qconv1    maxpool
-         \           |
-          \         q1
-           \       /   \
-            \     dq1  qconv2
-             \   /
-              add
-               |
-               q2
-        Since q1 has 2 users and qconv2 is not ancestor node of qconv1, we shouldn't fuse:
-                int8
-                 /
-        qconv1 dq1
-           \   /
-            add
-             |
-             q2
-             |
-            int8
-        Instead we can match and fuse this pattern into qconv_binary:
-        qconv1  fp32
-            \   /
-             add
-              |
-             fp32
-        """
-
-        class M(torch.nn.Module):
-            def __init__(
-                self,
-            ):
-                super().__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, kernel_size=3, stride=1)
-                self.conv2 = torch.nn.Conv2d(3, 3, kernel_size=1, stride=1)
-                self.maxpool = torch.nn.MaxPool2d(
-                    kernel_size=3, stride=1, padding=0, dilation=1
-                )
-
-            def forward(self, x):
-                tmp1 = self.conv1(x)
-                tmp2 = self.maxpool(x)
-                add = torch.add(tmp1, tmp2)
-                tmp3 = self.conv2(tmp2)
-                return torch.cat((add, tmp3), dim=1)
-
-        mod = M().eval()
-        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
-
-        def matcher_check_fn():
-            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_count"], 1)
-            # The matched qconv binary pattern should have 2 nodes [qconv, add]
-            # instead of 11 which has dequant in binary input and output quant
-            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_nodes"], 2)
-
-        self._test_common(
-            mod,
-            (v,),
-            check_quantization=True,
-            matcher_check_fn=matcher_check_fn,
-        )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -1572,7 +1497,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_conv2d_binary_inplace_fusion_pass_cpu(
         self, include_ops=None, exclude_ops=None
     ):
-        class Model_v1(torch.nn.Module):
+        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
@@ -1583,42 +1508,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 conv_out = self.conv(x)
                 return torch.add(conv_out, other.relu())
 
-        class Model_v2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-                self.conv2 = torch.nn.Conv2d(
-                    in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-                self.conv3 = torch.nn.Conv2d(
-                    in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-
-            def forward(self, x, _):
-                conv_out1 = self.conv(x)
-                pow_out = torch.pow(conv_out1, 2)
-                conv_out2 = self.conv2(pow_out)
-                conv_out3 = self.conv3(conv_out2)
-                res = torch.add(conv_out3, pow_out)
-                return res
-
-        input = torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last)
-        others = [
-            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
+        inputs = [
+            torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last),
             torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
         ]
-        mod_v1 = Model_v1().to(memory_format=torch.channels_last).eval()
-        mod_v2 = Model_v2().to(memory_format=torch.channels_last).eval()
+        mod = Model().to(memory_format=torch.channels_last).eval()
 
         if include_ops is None:
             include_ops = ["mkldnn._convolution_pointwise_.binary"]
         if exclude_ops is None:
             exclude_ops = ["mkldnn._convolution_pointwise.binary"]
 
-        for other, mod in zip(others, [mod_v1, mod_v2]):
-            self._test_code_common(mod, (input, other), include_ops, exclude_ops)
+        self._test_code_common(mod, inputs, include_ops, exclude_ops)
 
     def test_conv2d_binary_inplace_fusion_failed_cpu(
         self, include_ops=None, exclude_ops=None
@@ -1647,40 +1548,20 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 conv_out = self.conv(x)
                 return torch.add(conv_out, other[1:2, :, :, :]), other
 
-        class Model_v3(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-                self.conv2 = torch.nn.Conv2d(
-                    in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1
-                )
-
-            def forward(self, x, _):
-                pow_out = torch.pow(self.conv(x), 2)
-                other2 = F.relu(pow_out)
-                conv_out2 = self.conv2(pow_out)
-                res = torch.add(conv_out2, pow_out)
-                res = res + other2
-                return res
-
         input = torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last)
         others = [
             torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
             torch.randn(2, 32, 28, 28).to(memory_format=torch.channels_last),
-            torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
         ]
         mod_v1 = Model_v1().to(memory_format=torch.channels_last).eval()
         mod_v2 = Model_v2().to(memory_format=torch.channels_last).eval()
-        mod_v3 = Model_v3().to(memory_format=torch.channels_last).eval()
 
         if include_ops is None:
             include_ops = ["mkldnn._convolution_pointwise.binary"]
         if exclude_ops is None:
             exclude_ops = ["mkldnn._convolution_pointwise_.binary"]
 
-        for other, mod in zip(others, [mod_v1, mod_v2, mod_v3]):
+        for other, mod in zip(others, [mod_v1, mod_v2]):
             self._test_code_common(mod, (input, other), include_ops, exclude_ops)
 
     def test_conv2d_binary_fusion_failed(self):
