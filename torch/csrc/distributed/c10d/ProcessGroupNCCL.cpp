@@ -712,8 +712,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       terminateProcessGroup_(false),
       terminateHeartbeatMonitorThread_(false),
       collectiveDebugInfoMode_(false),
-      uid_(process_group_id++),
-      intraNodeComm_(initIntraNodeComm()) {
+      uid_(process_group_id++) {
   TORCH_CHECK_WITH(
       ValueError,
       at::cuda::getNumGPUs() != 0,
@@ -894,12 +893,6 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
       device);
   NCCLComm::split(comm[0].get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
 #endif
-}
-
-c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
-    initIntraNodeComm() {
-  return intra_node_comm::IntraNodeComm::rendezvous(
-      store_, std::to_string(uid_), rank_, size_);
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -2846,16 +2839,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
-  if (intraNodeComm_ != nullptr && tensors.size() == 1 &&
-      opts.reduceOp == ReduceOp::SUM) {
-    using namespace intra_node_comm;
-    auto algo = intraNodeComm_->selectAllReduceAlgo(tensors[0]);
-    if (algo != intra_node_comm::AllReduceAlgo::NONE) {
-      intraNodeComm_->allReduce(tensors[0], algo);
-      return c10::make_intrusive<IntraNodeCommWork>();
-    }
-  }
-
   check_gpu_tensors_different_devices(tensors);
 
   // @lint-ignore CLANGTIDY
