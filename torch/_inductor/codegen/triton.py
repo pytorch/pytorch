@@ -98,10 +98,14 @@ class IndexingOptions:
 class TritonPrinter(PythonPrinter):
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        return f"tl.math.floor({self.paren(self._print(expr.args[0]))})"
+        return f"tl.math.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+
+    def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
 
     def _helper_sqrt(self, expr):
-        return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
+        return f"tl.math.sqrt({self._print(expr)}.to(tl.float32))"
 
     def _print_Where(self, expr):
         c = self.doprint(expr.args[0])
@@ -140,7 +144,22 @@ class TritonPrinter(PythonPrinter):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
-        return f"tl.math.floor({x} / {div})"
+        return f"tl.math.floor({x} / {div}).to({V.kernel.index_dtype})"
+
+    def _print_Round(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.llrint({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+
+    def _print_RoundDecimal(self, expr):
+        assert len(expr.args) == 2
+        number, ndigits = expr.args
+        if number.is_integer:
+            # ndigits < 0 should have been filtered by the sympy function
+            assert ndigits < 0
+            raise ValueError(
+                f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
+            )
+        return f"tl.math.nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits}"
 
 
 texpr = TritonPrinter().doprint
@@ -1678,14 +1697,18 @@ class TritonKernel(Kernel):
         def where_cond(tval, fval):
             if not cond:
                 return tval
-            return f"tl.where({cond}, {tval}, {fval})"
+            return TritonKernelOverrides.where(cond, tval, fval)
 
         if self.persistent_reduction:
             default = ir.Reduction.default_value(reduction_type, src_dtype)
-            default = self._map_tuple_or_scalar(triton_constant, default)
 
             def _mask_value(value, default):
-                return self.cse.generate(self.compute, where_cond(value, default))
+                # TODO: int1 seems to be broken on triton-rocm
+                mask_dtype = torch.int8 if src_dtype == torch.bool else src_dtype
+                other = self.cse.generate(
+                    self.compute, TritonKernelOverrides.constant(default, mask_dtype)
+                )
+                return self.cse.generate(self.compute, where_cond(value, other))
 
             if isinstance(value, tuple):
                 masked_value = [_mask_value(v, d) for v, d in zip(value, default)]

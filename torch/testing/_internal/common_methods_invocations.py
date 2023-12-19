@@ -14281,6 +14281,12 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip('This is '), 'TestInductorOpInfo', 'test_comprehensive'),
             # skip for sm < 80
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace',
+                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace',
+                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
                          device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),),
     ),
     OpInfo(
@@ -20197,6 +20203,12 @@ python_ref_db = [
         torch_opinfo_name="mvlgamma",
         torch_opinfo_variant_name="mvlgamma_p_1",
         skips=skips_mvlgamma(),
+        decorators=(
+            DecorateInfo(torch.testing._internal.common_utils.markDynamoStrictTest, 'TestUnaryUfuncs',
+                         'test_reference_numerics_large'),
+            DecorateInfo(torch.testing._internal.common_utils.xfailIfTorchDynamo, 'TestUnaryUfuncs',
+                         'test_reference_numerics_large'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.multigammaln",
