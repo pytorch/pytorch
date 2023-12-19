@@ -3877,9 +3877,9 @@ class ExternKernel(InputsKernel):
         return r
 
     def __str__(self):
-        kernel_name = getattr(self, "kernel", None)
+        kernel_name = getattr(self, "python_kernel_name", None)
         lines = [
-            f"kernel={kernel_name!r}",
+            f"python_kernel_name={kernel_name!r}",
         ]
         lines += [
             f"{field.name}={getattr(self, field.name)}"
@@ -3902,7 +3902,7 @@ class ExternKernelOut(ExternKernel):
             self.output_view,
             self.codegen_reference(),
             args,
-            self.cpp_kernel_name if V.graph.cpp_wrapper else self.kernel,
+            self.cpp_kernel_name if V.graph.cpp_wrapper else self.python_kernel_name,
         )
 
     def __init__(
@@ -3912,7 +3912,7 @@ class ExternKernelOut(ExternKernel):
         constant_args=(),
         kwargs=None,
         output_view=None,
-        kernel=None,
+        python_kernel_name=None,
         cpp_kernel_name=None,
         ordered_kwargs_for_cpp_kernel=(),
     ):
@@ -3921,7 +3921,7 @@ class ExternKernelOut(ExternKernel):
         )
         self.output_view = output_view
         self.name = V.graph.register_buffer(self)
-        self.kernel = kernel
+        self.python_kernel_name = python_kernel_name
         self.cpp_kernel_name = cpp_kernel_name
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
 
@@ -3940,14 +3940,14 @@ class RandomSeeds(ExternKernelOut):
             ),
             inputs=[],
             constant_args=[limits.min, limits.max, [count]],
-            kernel="aten.randint.low_out",
+            python_kernel_name="aten.randint.low_out",
             cpp_kernel_name="at::randint_out",
         )
 
 
 class ExternKernelAlloc(ExternKernel):
     def codegen_kernel_name(self):
-        return self.cpp_kernel_name if V.graph.cpp_wrapper else self.kernel
+        return self.cpp_kernel_name if V.graph.cpp_wrapper else self.python_kernel_name
 
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
@@ -3962,7 +3962,7 @@ class ExternKernelAlloc(ExternKernel):
         inputs,
         constant_args=(),
         kwargs=None,
-        kernel=None,
+        python_kernel_name=None,
         cpp_kernel_name=None,
         ordered_kwargs_for_cpp_kernel=(),
     ):
@@ -3970,7 +3970,7 @@ class ExternKernelAlloc(ExternKernel):
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
         )
         self.name = V.graph.register_buffer(self)
-        self.kernel = kernel
+        self.python_kernel_name = python_kernel_name
         self.cpp_kernel_name = cpp_kernel_name
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
 
@@ -4110,12 +4110,10 @@ class InplaceBernoulliFallback(ExternKernel):
     This needs to be a custom class to handle mutation properly
     """
 
-    kernel = "aten.bernoulli_"
-
     def codegen(self, wrapper):
         (x,) = (t.codegen_reference() for t in self.inputs)
         wrapper.writeline(
-            f"{self.kernel}({x}, {', '.join(map(repr, self.constant_args))})"
+            f"{self.python_kernel_name}({x}, {', '.join(map(repr, self.constant_args))})"
         )
 
     def should_allocate(self):
@@ -4135,6 +4133,7 @@ class InplaceBernoulliFallback(ExternKernel):
             constant_args,
         )
         self.name = V.graph.register_buffer(self)
+        self.python_kernel_name = "aten.bernoulli_"
         mark_node_as_mutating(self, x)
 
 
@@ -4143,11 +4142,9 @@ class AccumulateGrad(ExternKernel):
     This needs to be a custom class to handle mutation properly
     """
 
-    kernel = "inductor_ops.accumulate_grad_"
-
     def codegen(self, wrapper):
         (variable, new_grad) = (t.codegen_reference() for t in self.inputs)
-        wrapper.writeline(f"{self.kernel}({variable}, {new_grad})")
+        wrapper.writeline(f"{self.python_kernel_name}({variable}, {new_grad})")
 
     def should_allocate(self):
         return False
@@ -4165,6 +4162,7 @@ class AccumulateGrad(ExternKernel):
             self.unwrap_storage([variable, new_grad]),
         )
         self.name = V.graph.register_buffer(self)
+        self.python_kernel_name = "inductor_ops.accumulate_grad_"
         mark_node_as_mutating(self, variable)
 
 
@@ -4192,7 +4190,7 @@ class ScatterFallback(ExternKernel):
         wrapper.generate_scatter_fallback(
             x,
             [x, self.constant_args[0], index, src],
-            self.cpp_kernel_name if V.graph.cpp_wrapper else self.kernel,
+            self.cpp_kernel_name if V.graph.cpp_wrapper else self.python_kernel_name,
             self.fn,
             self.src_is_tensor,
             reduce,
@@ -4239,7 +4237,7 @@ class ScatterFallback(ExternKernel):
     ):
         assert fn in {"aten.scatter_", "aten.scatter_reduce_"}
         self.src_is_tensor = isinstance(src, TensorBox)
-        self.kernel = fn
+        self.python_kernel_name = fn
         self.fn = fn
 
         constant_args: Tuple[Any, ...]
@@ -4281,7 +4279,10 @@ class IndexPutFallback(ExternKernel):
         args = [x, indices_str, values, *self.codegen_const_args()]
         wrapper.writeline(
             wrapper.wrap_kernel_call(
-                self.cpp_kernel_name if V.graph.cpp_wrapper else self.kernel, args
+                self.cpp_kernel_name
+                if V.graph.cpp_wrapper
+                else self.python_kernel_name,
+                args,
             )
         )
 
@@ -4306,7 +4307,7 @@ class IndexPutFallback(ExternKernel):
         )
         self.name = V.graph.register_buffer(self)
         self.cpp_kernel_name = "at::index_put_"
-        self.kernel = "aten.index_put_"
+        self.python_kernel_name = "aten.index_put_"
         mark_node_as_mutating(self, x)
 
 
@@ -4430,7 +4431,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
-        V.graph.warn_fallback(self.kernel)
+        V.graph.warn_fallback(self.python_kernel_name)
 
     def set_cpp_kernel(self, kernel):
         from .codegen.wrapper import get_cpp_op_schema
@@ -4464,7 +4465,7 @@ class FallbackKernel(ExternKernelAlloc):
         ]
 
     def is_legacy_abi_kernel(self):
-        return "_scaled_dot_product_flash_attention" in str(self.kernel)
+        return "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
 
     def get_arg_default_value(self, pos):
         assert hasattr(
@@ -4480,7 +4481,7 @@ class FallbackKernel(ExternKernelAlloc):
     # However, we don't expect we would end up with too many of such rules.
     def _get_abi_compatible_kernel(self):
         if not V.graph.cpp_wrapper:
-            return self.kernel
+            return self.python_kernel_name
 
         def sdpa_ver_fn():
             # For sdpa, we need the v2 version only if any optional
@@ -4508,7 +4509,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
-        # Now we setup abi_compatible_kernel after self.kernel
+        # Now we setup abi_compatible_kernel after self.python_kernel_name
         # and kwargs are adjusted appropriately.
         self.abi_compatible_kernel = self._get_abi_compatible_kernel()
 
@@ -4688,11 +4689,11 @@ class FallbackKernel(ExternKernelAlloc):
                         if x.kwarg_only
                     }
             else:
-                self.kernel = f"aten.{op_base_name}"
+                self.python_kernel_name = f"aten.{op_base_name}"
 
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
-                self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
+                self.python_kernel_name = f"torch._prims.rng_prims.{kernel.__name__}"
             else:
                 raise NotImplementedError(
                     "Unable to find HigherOrderOperator kernel name"
@@ -4703,7 +4704,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.use_runtime_dispatch = True
                 self.set_cpp_kernel(kernel)
             else:
-                self.kernel = (
+                self.python_kernel_name = (
                     f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
                 )
 
@@ -4821,7 +4822,7 @@ class ComplexView(ExternKernelAlloc):
     def __init__(
         self,
         layout,
-        kernel,
+        python_kernel_name,
         tensor_args,
         nontensor_args,
     ):
@@ -4834,7 +4835,7 @@ class ComplexView(ExternKernelAlloc):
         # abi-compatible mode, where we retrieve outputs by pass each individual
         # output through the abi-compatible interface.
         self.outputs: Sequence[Any] = []
-        self.kernel = kernel
+        self.python_kernel_name = python_kernel_name
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
@@ -4851,7 +4852,7 @@ class ComplexView(ExternKernelAlloc):
         assert device, "Not sure where to find device info"
 
         packed = ComplexView(
-            MultiOutputLayout(device), kernel, tensor_args, non_tensor_args
+            MultiOutputLayout(device), str(kernel), tensor_args, non_tensor_args
         )
 
         layout = FixedLayout(
@@ -5113,14 +5114,13 @@ class ConvolutionUnary(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-        kernel="torch.ops.mkldnn._convolution_pointwise",
     ):
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
-            kernel="torch.ops.mkldnn._convolution_pointwise",
+            python_kernel_name="torch.ops.mkldnn._convolution_pointwise",
             cpp_kernel_name="mkldnn::_convolution_pointwise",
         )
         self.cpp_kernel_key = "convolution_pointwise"
@@ -5140,7 +5140,7 @@ class ConvolutionUnary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.cpp_kernel_name if V.graph.cpp_wrapper else self.kernel,
+            self.cpp_kernel_name if V.graph.cpp_wrapper else self.python_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5190,7 +5190,7 @@ class ConvolutionBinary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            kernel="torch.ops.mkldnn._convolution_pointwise.binary",
+            python_kernel_name="torch.ops.mkldnn._convolution_pointwise.binary",
             cpp_kernel_name="mkldnn::_convolution_pointwise",
         )
         self.cpp_kernel_overload_name = "binary"
@@ -5280,7 +5280,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             reordered_inputs,
             constant_args,
             None,
-            kernel="torch.ops.mkldnn._convolution_pointwise_.binary",
+            python_kernel_name="torch.ops.mkldnn._convolution_pointwise_.binary",
             cpp_kernel_name="mkldnn::_convolution_pointwise_",
         )
         self.cpp_kernel_overload_name = "binary"
@@ -5376,7 +5376,7 @@ class MKLPackedLinear(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            kernel="torch.ops.mkl._mkl_linear",
+            python_kernel_name="torch.ops.mkl._mkl_linear",
             cpp_kernel_name="mkl::_mkl_linear",
         )
         self.cpp_kernel_key = "mkl_linear"
@@ -5429,7 +5429,7 @@ class LinearUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            kernel="torch.ops.mkldnn._linear_pointwise",
+            python_kernel_name="torch.ops.mkldnn._linear_pointwise",
             cpp_kernel_name="mkldnn::_linear_pointwise",
         )
         self.cpp_kernel_key = "linear_pointwise"
@@ -5494,7 +5494,7 @@ class LinearBinary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            kernel="torch.ops.mkldnn._linear_pointwise.binary",
+            python_kernel_name="torch.ops.mkldnn._linear_pointwise.binary",
             cpp_kernel_name="mkldnn::_linear_pointwise",
         )
         self.cpp_kernel_overload_name = "binary"
@@ -5561,7 +5561,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            kernel="torch.ops.mkldnn._convolution_transpose_pointwise",
+            python_kernel_name="torch.ops.mkldnn._convolution_transpose_pointwise",
             cpp_kernel_name="mkldnn::_convolution_transpose_pointwise",
         )
         self.cpp_kernel_key = "convolution_transpose_pointwise"
@@ -5645,7 +5645,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            kernel="aten.mkldnn_rnn_layer",
+            python_kernel_name="aten.mkldnn_rnn_layer",
             cpp_kernel_name="at::mkldnn_rnn_layer",
         )
 
@@ -5765,7 +5765,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            kernel="torch.ops.onednn.qconv2d_pointwise",
+            python_kernel_name="torch.ops.onednn.qconv2d_pointwise",
             cpp_kernel_name="onednn::qconv2d_pointwise",
         )
         self.cpp_kernel_key = "qconv2d_pointwise"
@@ -5935,7 +5935,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            kernel="torch.ops.onednn.qconv2d_pointwise.binary",
+            python_kernel_name="torch.ops.onednn.qconv2d_pointwise.binary",
             cpp_kernel_name="onednn::qconv2d_pointwise",
         )
         self.cpp_kernel_overload_name = "binary"
@@ -6135,7 +6135,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            kernel="torch.ops.onednn.qlinear_pointwise",
+            python_kernel_name="torch.ops.onednn.qlinear_pointwise",
             cpp_kernel_name="onednn::qlinear_pointwise",
         )
         self.cpp_kernel_key = "qlinear_pointwise"
