@@ -1,10 +1,10 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::Div_1"
-    name: "Constant_0"
+    name: "Constant_3"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -19,18 +19,18 @@ graph {
     input: "onnx::Div_0"
     input: "onnx::Div_1"
     output: "onnx::Erf_2"
-    name: "Div_1"
+    name: "Div_4"
     op_type: "Div"
   }
   node {
     input: "onnx::Erf_2"
     output: "onnx::Add_3"
-    name: "Erf_2"
+    name: "Erf_5"
     op_type: "Erf"
   }
   node {
     output: "onnx::Add_4"
-    name: "Constant_3"
+    name: "Constant_6"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -45,19 +45,19 @@ graph {
     input: "onnx::Add_3"
     input: "onnx::Add_4"
     output: "onnx::Mul_5"
-    name: "Add_4"
+    name: "Add_7"
     op_type: "Add"
   }
   node {
     input: "onnx::Div_0"
     input: "onnx::Mul_5"
     output: "onnx::Mul_6"
-    name: "Mul_5"
+    name: "Mul_8"
     op_type: "Mul"
   }
   node {
     output: "onnx::Mul_7"
-    name: "Constant_6"
+    name: "Constant_9"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -72,10 +72,10 @@ graph {
     input: "onnx::Mul_6"
     input: "onnx::Mul_7"
     output: "8"
-    name: "Mul_7"
+    name: "Mul_10"
     op_type: "Mul"
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Div_0"
     type {
@@ -122,5 +122,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }

@@ -367,7 +367,7 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
   // this point. We also compute the number of dimensions before and after that
   // are not being index.
   Tensor linearIndex;
-  int64_t emptyBefore = 0, emptyAfter = 0, nElemBefore = 1, nElemAfter = 1, strideBefore =0;
+  int64_t nElemBefore = 1, nElemAfter = 1, strideBefore =0;
   for (const auto i: c10::irange(src.dim())) {
     if (indices[i].defined()) {
       // Cast index to the longType matching src's device
@@ -382,10 +382,8 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
         }
       }
     } else if (linearIndex.defined()) {
-      emptyAfter++;
       nElemAfter *= src.size(i);
     } else {
-      emptyBefore++;
       nElemBefore *= src.size(i);
     }
   }
@@ -457,6 +455,9 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
     }
     if (nElemBefore > 1) {
       expanded_size.insert(expanded_size.begin(), nElemBefore);
+    }
+    if (sliceSize > 1) {
+      expanded_size.insert(expanded_size.end(), sliceSize);
     }
     expandedValue = expandedValue.expand(expanded_size);
   }

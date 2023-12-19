@@ -21,4 +21,5 @@ TEST(SymIntTest, ConcreteInts) {
 TEST(SymIntTest, CheckRange) {
   EXPECT_FALSE(SymInt::check_range(INT64_MIN));
 }
+
 #endif

@@ -92,6 +92,35 @@ def max_with_index(value, index, dim):
 
 
 @triton.jit
+def welford_reduce(value, mean, m2, weight):
+    delta = value - mean
+    new_weight = weight + 1
+    new_mean = mean + delta / new_weight
+    return (
+        new_mean,
+        m2 + delta * (value - new_mean),
+        new_weight,
+    )
+
+
+@triton.jit
+def welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
+    delta = mean_2 - mean_1
+    new_weight = weight_1 + weight_2
+    w2_over_w = tl.where(new_weight == 0.0, 0.0, weight_2 / new_weight)
+    return (
+        mean_1 + delta * w2_over_w,
+        m2_1 + m2_2 + delta * delta * weight_1 * w2_over_w,
+        new_weight,
+    )
+
+
+@triton.jit
+def welford(mean, m2, weight, dim):
+    return tl.reduce((mean, m2, weight), dim, welford_combine)
+
+
+@triton.jit
 def device_assert_then(cond, msg, r):
     tl.device_assert(cond, msg)
     return r
@@ -117,3 +146,37 @@ def _any_combine(a, b):
 @triton.jit
 def any(a, dim):
     return tl.reduce(a, dim, _any_combine)
+
+
+@triton.jit
+def bucketize_binary_search(
+    values,  # 1D tensor
+    offsets_ptr,
+    indexing_dtype,
+    right,  # bool: if true, use intervals closed on the left; see [Note: Inductor bucketize op]
+    OFFSETS_SIZE: int,
+    BLOCK_SHAPE,  # tuple/list of block shape
+):
+    """
+    See [Note: Inductor bucketize op]
+    """
+
+    low = tl.zeros(BLOCK_SHAPE, dtype=indexing_dtype)
+    high = tl.full(BLOCK_SHAPE, OFFSETS_SIZE, dtype=indexing_dtype)
+
+    full_range = OFFSETS_SIZE + 1
+    while full_range > 1:
+        mid = (high + low) // 2
+        mask = mid < OFFSETS_SIZE
+        bucket_upper_bound = tl.load(offsets_ptr + mid, mask=mask)
+        if right:
+            is_above = values >= bucket_upper_bound
+        else:
+            is_above = values > bucket_upper_bound
+
+        low = tl.where(is_above & mask, mid + 1, low)
+        high = tl.where(is_above, high, mid)
+
+        full_range = (full_range + 1) // 2
+
+    return low

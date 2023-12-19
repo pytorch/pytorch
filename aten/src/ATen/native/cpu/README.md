@@ -40,7 +40,12 @@ three steps:
 
 4. Write your actual kernel (e.g., `your_kernel`) in the
    cpu directory, and register it to
-   the dispatch using `REGISTER_DISPATCH(fnNameImpl, &your_kernel)`.
+   the dispatch using `REGISTER_DISPATCH(fnNameImpl, &your_kernel)`, if
+   it does not perform as well with AVX512, as it does with AVX2.
+   Otherwise, if it performs well with AVX512, register it with `ALSO_REGISTER_AVX512_DISPATCH(fnNameImpl, &your_kernel)`.
+   Compute-intensive kernels tend to perform better with AVX512, than with AVX2.
+   Comparing AVX2 & AVX512 variants of a kernel can be done by registering a kernel with `ALSO_REGISTER_AVX512_DISPATCH(fnNameImpl, &your_kernel)`, building from source, and then benchmarking the kernel's performance by running a benchmarking script with the environment variables `ATEN_CPU_CAPABILITY=avx2` and `ATEN_CPU_CAPABILITY=avx512`, respectively.
+   tcmalloc/jemalloc can be preloaded for minimal run-to-run variation.
 
 There are plenty of existing examples, look at them for more details.
 

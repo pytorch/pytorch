@@ -21,6 +21,7 @@ class CheckpointImpl(Enum):
 class ActivationWrapper(torch.nn.Module):
     """
     Base class for Activation Checkpoint and Activation Offload.
+
     Not meant to be instantiated directly.
     """
 
@@ -56,7 +57,8 @@ class ActivationWrapper(torch.nn.Module):
         **kwargs,
     ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
         """
-        Overrides :meth:`named_parameters()` to intercept parameter names and
+        Override :meth:`named_parameters()` to intercept parameter names.
+
         remove all occurrences of ``_CHECKPOINT_PREFIX``.
         """
         for param_name, param in super().named_parameters(*args, **kwargs):
@@ -70,12 +72,12 @@ class ActivationWrapper(torch.nn.Module):
         *args: Any,
     ) -> Dict[str, Any]:
         """
-        _post_state_dict_hook() is called after the state_dict() of this
-        FSDP module is executed. For ``checkpoint_wrapper``, it will strip
-        checkpoint-wrapped module prefix so that this module can be loaded into
-        non-checkpointed modules. It would still be able to be loaded into
-        checkpoint-wrapped modules as this class adds the prefix back before
-        loading the state_dict.
+        _post_state_dict_hook() is called after the state_dict() of this FSDP module is executed.
+
+        For ``checkpoint_wrapper``, it will strip checkpoint-wrapped module prefix,
+        so that this module can be loaded into non-checkpointed modules.
+        It would still be able to be loaded into checkpoint-wrapped modules as this class,
+        adds the prefix back before loading the state_dict.
         """
         _replace_by_prefix(state_dict, f"{prefix}{_CHECKPOINT_PREFIX}", prefix)
         return state_dict
@@ -88,8 +90,9 @@ class ActivationWrapper(torch.nn.Module):
         *args: Any,
     ) -> None:
         """
-        ``_pre_state_dict_hook` is called before ``self._load_from_state_dict()``
-        is called. For ``checkpoint_wrapper``, it will add back the module
+        ``_pre_state_dict_hook` is called before ``self._load_from_state_dict()`` is called.
+
+        For ``checkpoint_wrapper``, it will add back the module
         prefix so that non-checkpointed modules can be loaded into
         checkpoint_wrapper modules properly.
         """
@@ -107,17 +110,17 @@ class OffloadWrapper(ActivationWrapper):
 
 class CheckpointWrapper(ActivationWrapper):
     """
-    An ``nn.Module`` that wraps another ``nn.Module`` with checkpointing. Note that this
-    module is not meant to be used directly, but instead it is to be used
-    through the ``checkpoint_wrapper`` function.
+    An ``nn.Module`` that wraps another ``nn.Module`` with checkpointing.
+
+    Note that this module is not meant to be used directly but instead,
+    it is to be used through the ``checkpoint_wrapper`` function.
     """
 
     def __init__(
         self,
         mod: torch.nn.Module,
-        checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT,
+        checkpoint_impl: CheckpointImpl = CheckpointImpl.NO_REENTRANT,
         checkpoint_fn=None,
-        *checkpoint_fn_args,
         **checkpoint_fn_kwargs,
     ):
         super().__init__(mod)
@@ -127,14 +130,12 @@ class CheckpointWrapper(ActivationWrapper):
             self.checkpoint_fn = partial(
                 torch_utils_checkpoint,
                 use_reentrant=(self.checkpoint_impl == CheckpointImpl.REENTRANT),
-                *checkpoint_fn_args,
                 **checkpoint_fn_kwargs,
             )
         else:
             # Construct user-specified checkpoint function.
             self.checkpoint_fn = partial(
                 checkpoint_fn,
-                *checkpoint_fn_args,
                 **checkpoint_fn_kwargs,
             )
 
@@ -171,12 +172,13 @@ class CheckpointWrapper(ActivationWrapper):
 
 def offload_wrapper(module: torch.nn.Module) -> torch.nn.Module:
     """
-    A convenience wrapper for activation offloading to CPU. If the module is wrapped
-    with this function, all subsequent calls to the module will automatically
-    offload intermediate activations to the CPU. Wrappers with activation
-    offload can be composed with ones that do recomputation-based
+    Wrap a module for activation offloading to CPU.
+
+    Offloads intermediate activations to the CPU for modules wrapped with this function.
+    Wrappers with activation offload can be composed with ones that do recomputation-based
     checkpoint to trade off increased compute versus increased CPU
     memory usage and additional H2D transfers.
+
     Usage::
         offloaded_module = offload_wrapper(module)
         outputs = checkpointed_module(inputs)
@@ -192,16 +194,16 @@ def offload_wrapper(module: torch.nn.Module) -> torch.nn.Module:
 
 def checkpoint_wrapper(
     module: torch.nn.Module,
-    checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT,
+    checkpoint_impl: CheckpointImpl = CheckpointImpl.NO_REENTRANT,
     checkpoint_fn=None,
-    *checkpoint_fn_args,
     **checkpoint_fn_kwargs,
 ) -> torch.nn.Module:
     """
-    A convenience wrapper for activation checkpointing. If the module is wrapped
-    with this function, all subsequent calls to the module will automatically
-    perform checkpointing without the user having to explicitly call ``checkpoint``
-    function.
+    Wrap a module for activation checkpointing.
+
+    If the module is wrapped with this function, all subsequent calls to the module will,
+    automatically perform checkpointing without the user having to explicitly call ``checkpoint`` function.
+
     Usage::
         checkpointed_module = checkpoint_wrapper(module)
         outputs = checkpointed_module(inputs)
@@ -219,7 +221,6 @@ def checkpoint_wrapper(
             Functional checkpoint implementation to use. If this is specified,
             it will be used over the default ``torch.utils.checkpoint.checkpoint``
             implementation and the `checkpoint_impl` argument will be ignored.
-        *checkpoint_fn_args: (Sequence[Any]): Arguments to pass into `checkpoint_fn`.
         **checkpoint_fn_kwargs: (Dict[str, Any]): Keyword arguments to pass into `checkpoint_fn`.
 
     Returns:
@@ -238,7 +239,6 @@ def checkpoint_wrapper(
         module,
         checkpoint_impl,
         checkpoint_fn,
-        *checkpoint_fn_args,
         **checkpoint_fn_kwargs,
     )
 
@@ -250,8 +250,9 @@ def apply_activation_checkpointing(
     auto_wrap_policy: Optional[Callable[[nn.Module, bool, int], bool]] = None,
 ):
     """
-    Applies :func:`checkpoint_wrapper` to modules within `model` based on a user-defined
-    configuration. For each module within `model`, the `check_fn` is used to decide
+    Apply :func:`checkpoint_wrapper` to modules within `model` based on a user-defined configuration.
+
+    For each module within `model`, the `check_fn` is used to decide
     whether `module` should be wrapped with :func:`checkpoint_wrapper` or not.
 
     Note::
@@ -283,7 +284,8 @@ def apply_activation_checkpointing(
     """
     # TODO: Importing inside function to avoid circular import issue between FSDP and
     # checkpoint_wrapper. This can be resolved once wrap() APIs are decoupled from FSDP code.
-    from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy
+    from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy, _Policy
+    from torch.distributed.fsdp._wrap_utils import _construct_wrap_fn, _post_order_apply
 
     policy = (
         auto_wrap_policy
@@ -291,11 +293,16 @@ def apply_activation_checkpointing(
         else partial(lambda_auto_wrap_policy, lambda_fn=check_fn)
     )
     if not callable(policy):
-        if not hasattr(policy, "policy") or not callable(policy.policy):  # type: ignore[attr-defined]
-            raise RuntimeError(
-                f"Expected {policy} to be callable or have a callable ``policy`` attribute."
+        if not isinstance(policy, _Policy):
+            raise ValueError(
+                f"Expected {policy} to be callable or be a pre-defined wrap policy"
             )
-        policy = policy.policy  # type: ignore[attr-defined]
+        target_module_to_kwargs = policy._run_policy(
+            model, ignored_modules=set(), root_kwargs={}
+        )
+        wrap_fn = _construct_wrap_fn(model, target_module_to_kwargs, checkpoint_wrapper_fn)
+        _post_order_apply(model, wrap_fn)
+        return
 
     _recursive_wrap(
         module=model,

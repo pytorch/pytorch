@@ -1,4 +1,5 @@
 #include <ATen/autocast_mode.h>
+#include <ATen/core/Generator.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
@@ -27,8 +28,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -292,7 +292,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           auto s = pop(stack).toString();
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type sz;
-          int64_t val = static_cast<int64_t>(c10::stoll(s->string(), &sz));
+          int64_t val = static_cast<int64_t>(std::stoll(s->string(), &sz));
           if (sz == s->string().size()) {
             push(stack, val);
           } else {
@@ -349,7 +349,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           auto s = pop(stack).toString();
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type sz;
-          double b = c10::stod(s->string(), &sz);
+          double b = std::stod(s->string(), &sz);
           if (sz == s->string().size()) {
             push(stack, b);
           } else {
@@ -1060,6 +1060,21 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
+            "aten::_unsafe_index.Tensor_hacked_twin(Tensor self, Tensor[] indices) -> Tensor"),
+        [](Stack& stack) {
+          auto indices = pop(stack).to<c10::List<at::Tensor>>();
+          c10::List<c10::optional<at::Tensor>> opt_list_indices;
+          opt_list_indices.reserve(indices.size());
+          for (const auto& ten : indices) {
+            opt_list_indices.push_back(ten);
+          }
+          auto self = pop(stack).toTensor();
+          auto result = at::_unsafe_index(self, opt_list_indices);
+          push(stack, std::move(result));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
             "aten::_index_put_impl_.hacked_twin(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)"),
         [](Stack& stack) {
           auto unsafe = pop(stack).toBool();
@@ -1113,6 +1128,24 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           push(stack, std::move(result));
         },
         aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::_unsafe_index_put.hacked_twin(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor"),
+        [](Stack& stack) {
+          auto accumulate = pop(stack).toBool();
+          auto values = pop(stack).toTensor();
+          auto indices = pop(stack).to<c10::List<at::Tensor>>();
+          c10::List<c10::optional<at::Tensor>> opt_list_indices;
+          opt_list_indices.reserve(indices.size());
+          for (const auto& ten : indices) {
+            opt_list_indices.push_back(ten);
+          }
+          auto self = pop(stack).toTensor();
+          auto result =
+              at::_unsafe_index_put(self, opt_list_indices, values, accumulate);
+          push(stack, std::move(result));
+        },
+        aliasAnalysisFromSchema()),
     // reference function parse_to_conversion in python_arg_parsing.h
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
@@ -1155,6 +1188,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           at::Tensor a;
           pop(stack, a);
           push(stack, a.is_xla());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_mtia(Tensor a) -> bool"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_mtia());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2453,6 +2494,44 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         [](Stack& stack) { at::manual_seed(pop(stack).toInt()); },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::Generator(*, Device? device=None, int? seed=None) -> Generator"),
+        [](Stack& stack) {
+          auto seed = pop(stack).toOptional<int64_t>();
+          auto device = pop(stack).toOptional<c10::Device>();
+          push(
+              stack,
+              torch::jit::make_generator_for_device(
+                  device.value_or(c10::Device("cpu")), seed));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::initial_seed(Generator self) -> int"),
+        [](Stack& stack) {
+          auto generator = pop(stack);
+          auto current_seed = generator.toGenerator().current_seed();
+          push(stack, (int64_t)current_seed);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::manual_seed.generator(Generator(a!) self, int seed) -> Generator(a!)"),
+        [](Stack& stack) {
+          auto seed = pop(stack).toInt();
+          auto generator = pop(stack);
+          generator.toGenerator().set_current_seed(seed);
+          push(stack, generator);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::seed(Generator(a!) self) -> int"),
+        [](Stack& stack) {
+          auto generator = pop(stack);
+          auto current_seed = generator.toGenerator().seed();
+          push(stack, (int64_t)current_seed);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::cuda(Tensor(a) self) -> Tensor(a|b)"),
         [](Stack& stack) {
           at::Tensor a;
@@ -3327,5 +3406,4 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
 RegisterOperators reg2(createOperators(opGenArgs2));
 
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

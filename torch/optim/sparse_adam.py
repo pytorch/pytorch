@@ -7,37 +7,33 @@ __all__ = ['SparseAdam']
 class SparseAdam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, maximize: bool = False):
         if not 0.0 < lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 < eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
+            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
 
-        params = list(params)
+        defaults = dict(lr=lr, betas=betas, eps=eps, maximize=maximize)
+        super().__init__(params, defaults)
 
         sparse_params = []
-        for index, param in enumerate(params):
-            if isinstance(param, dict):
-                # given param group, convert given params to a list first before iterating
-                param['params'] = list(param.get("params", []))
-                for d_index, d_param in enumerate(param['params']):
-                    if d_param.is_sparse:
-                        sparse_params.append([index, d_index])
-            elif param.is_sparse:
-                sparse_params.append(index)
+        for index, param_group in enumerate(self.param_groups):
+            assert isinstance(param_group, dict), f"param_groups must be a list of dicts, but got {type(param_group)}"
+            # given param group, convert given params to a list first before iterating
+            for d_index, d_param in enumerate(param_group['params']):
+                if d_param.is_sparse:
+                    sparse_params.append([index, d_index])
         if sparse_params:
             raise ValueError(
                 f"Sparse params at indices {sparse_params}: SparseAdam requires dense parameter tensors"
             )
 
-        defaults = dict(lr=lr, betas=betas, eps=eps, maximize=maximize)
-        super().__init__(params, defaults)
 
     @torch.no_grad()
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -97,7 +93,7 @@ class SparseAdam(Optimizer):
 
         return loss
 
-SparseAdam.__doc__ = r"""SparseAdam implements a masked version of the Adam algorithm
+SparseAdam.__doc__ = fr"""SparseAdam implements a masked version of the Adam algorithm
     suitable for sparse gradients. Currently, due to implementation constraints (explained
     below), SparseAdam is only intended for a narrow subset of use cases, specifically
     parameters of a dense layout with gradients of a sparse layout. This occurs in a
@@ -150,9 +146,9 @@ SparseAdam.__doc__ = r"""SparseAdam implements a masked version of the Adam algo
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
-        {maximize}
+        {_maximize_doc}
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
 
-    """.format(maximize=_maximize_doc)
+    """

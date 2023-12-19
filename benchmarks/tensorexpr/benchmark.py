@@ -1,10 +1,12 @@
 import contextlib
-import numpy as np
+import json
 import os
 import time
-from . import tensor_engine
+
+import numpy as np
 import torch
-import json
+
+from . import tensor_engine
 
 
 class Benchmark:
@@ -21,7 +23,7 @@ class Benchmark:
         elif mode == "fwd":
             self.requires_grad = False
         else:
-            raise ValueError("invalid mode: %s" % (mode))
+            raise ValueError(f"invalid mode: {mode}")
         self.result_grad = None
         self.grad_variables = []
         self.engine = tensor_engine.get_engine()
@@ -41,8 +43,7 @@ class Benchmark:
             setattr(self, method, method_engine)
 
     def forward(self):
-        """do one step worth of computation
-        """
+        """do one step worth of computation"""
         raise ValueError("this method should be reimplemented by subclass")
 
     def check(self):
@@ -53,26 +54,18 @@ class Benchmark:
         )
 
     def config(self):
-        """returns an array for the current benchmark configs
-        """
+        """returns an array for the current benchmark configs"""
         raise ValueError("this method should be reimplemented by subclass")
 
     def desc(self):
-        """return the description of the current benchmark
-        """
+        """return the description of the current benchmark"""
         config = self.config()
         config_str = "_".join([str(x) for x in config])
         device = self.device
         if "NNC_NUM_THREADS" in os.environ:
             num_threads_str = os.environ["NNC_NUM_THREADS"]
             device += num_threads_str
-        return "%s: %s_%s_%s_%s" % (
-            self.engine.mode,
-            self.module(),
-            self.mode,
-            device,
-            config_str,
-        )
+        return f"{self.engine.mode}: {self.module()}_{self.mode}_{device}_{config_str}"
 
     @staticmethod
     def module():
@@ -90,7 +83,7 @@ class Benchmark:
         """A benchmark child class should return true if it utilizes the input iter arg"""
         return False
 
-    def dtype_to_bytes(self) :
+    def dtype_to_bytes(self):
         return torch.tensor(0, dtype=self.dtype).element_size()
 
     @staticmethod
@@ -102,7 +95,9 @@ class Benchmark:
         return True
 
     def rand(self, shape, device=None, dtype=None, requires_grad=False):
-        v = self.engine.rand(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+        v = self.engine.rand(
+            shape, device=device, dtype=dtype, requires_grad=requires_grad
+        )
         if requires_grad:
             self.grad_variables.append(v)
         return v
@@ -121,12 +116,12 @@ class Benchmark:
 
     def run(self, args):
         self.print_ir = args.print_ir
-        if args.cuda_fuser == "old" :
+        if args.cuda_fuser == "old":
             torch._C._jit_override_can_fuse_on_gpu(True)
-            if args.print_kernel :
-                os.environ['PYTORCH_FUSION_DEBUG'] = '1'
+            if args.print_kernel:
+                os.environ["PYTORCH_FUSION_DEBUG"] = "1"
             return self.run_impl(True)
-        elif args.cuda_fuser == "te" :
+        elif args.cuda_fuser == "te":
             torch._C._jit_set_texpr_fuser_enabled(True)
             with cuda_pointwise_context(
                 args.cuda_pointwise_loop_levels,
@@ -134,17 +129,17 @@ class Benchmark:
                 args.cuda_pointwise_block_size,
             ):
                 return self.run_impl(True)
-        elif args.cuda_fuser == "nvf" :
+        elif args.cuda_fuser == "nvf":
             torch._C._jit_set_nvfuser_enabled(True)
             torch._C._jit_set_profiling_executor(True)
             torch._C._jit_set_profiling_mode(True)
             torch._C._jit_override_can_fuse_on_cpu(False)
             torch._C._jit_override_can_fuse_on_gpu(False)
             torch._C._jit_set_bailout_depth(20)
-            if args.print_kernel :
-                os.environ['PYTORCH_CUDA_FUSER_DEBUG'] = '1'
+            if args.print_kernel:
+                os.environ["PYTORCH_CUDA_FUSER_DEBUG"] = "1"
             return self.run_impl(True)
-        else :
+        else:
             return self.run_impl(False)
 
     def run_impl(self, use_fuser):
@@ -163,7 +158,7 @@ class Benchmark:
                 time_start = time.time()
 
             if i == 0:
-                if self.jit_mode == "trace" and use_fuser :
+                if self.jit_mode == "trace" and use_fuser:
                     self.bm_jit = torch.jit.trace(
                         self.forward, example_inputs=self.inputs, check_trace=False
                     )
@@ -173,7 +168,7 @@ class Benchmark:
                     print("Warning: no reference result for ", self.module())
             elif i == 1:
                 # The fusion graph is visible after the first iter is executed
-                if self.jit_mode == "trace" and use_fuser and self.print_ir :
+                if self.jit_mode == "trace" and use_fuser and self.print_ir:
                     print(self.bm_jit.graph_for(*self.inputs))
             z = self.compute()
             if self.mode == "both":
@@ -193,7 +188,10 @@ class Benchmark:
             "desc": self.desc(),
             "us": iter_time * 1e6,
             "sol": memory_workload["sol"] * self.dtype_to_bytes() / iter_time / 1e9,
-            "algorithmic": memory_workload["algorithmic"] * self.dtype_to_bytes() / iter_time / 1e9,
+            "algorithmic": memory_workload["algorithmic"]
+            * self.dtype_to_bytes()
+            / iter_time
+            / 1e9,
         }
         if compute_workload:
             result_dict["compute_workload"] = compute_workload / iter_time / 1e9
@@ -203,14 +201,14 @@ class Benchmark:
         if self.output_type == "json":
             print(json.dumps(result_dict))
         elif self.output_type == "stdout":
-            msg = "%s: %.2f us, SOL %.2f GB/s, algorithmic %.2f GB/s" % (
+            msg = "{}: {:.2f} us, SOL {:.2f} GB/s, algorithmic {:.2f} GB/s".format(
                 result_dict["desc"],
                 result_dict["us"],
                 result_dict["sol"],
                 result_dict["algorithmic"],
             )
             if "compute_workload" in result_dict:
-                msg += ", compute %.2f Gops/s" % result_dict["compute_workload"]
+                msg += f", compute {result_dict['compute_workload']:.2f} Gops/s"
             print(msg)
         else:
             raise Exception("Unknown output_type " + self.output_type)
@@ -238,15 +236,16 @@ def cuda_pointwise_context(loop_levels, block_count, block_size):
         if block_size:
             torch._C._jit_set_te_cuda_pointwise_block_size(old_block_size)
 
+
 # Auxiliary class to facilitate dynamic input shape
 class DynamicShape:
-    r'''
+    r"""
     An Auxiliary class for dynamic shape benchmarks
 
     Pre-computes input with random shapes and also
     modifies the compute method so in each call the
     fuser sees a different input tensor shape
-    '''
+    """
 
     # Number of random inputs in an instance
     SAMPLE_SIZE = 100
@@ -254,7 +253,9 @@ class DynamicShape:
     def __init__(self, dynamic_range=1.2):
         self._input_samples = []
         self._input_sample_index = 0
-        self._dynamic_range = 1. / dynamic_range if dynamic_range > 1.0 else dynamic_range
+        self._dynamic_range = (
+            1.0 / dynamic_range if dynamic_range > 1.0 else dynamic_range
+        )
         self._enable_dynamic_shapes = True
 
     # Returns the input test case that current index points to
@@ -297,9 +298,7 @@ class DynamicShape:
         if not self._enable_dynamic_shapes:
             return shape
         ratios = np.random.uniform(self._dynamic_range, 1.0, len(shape))
-        dyn_shape = list(
-            np.multiply(shape, ratios).astype(int)
-        )
+        dyn_shape = list(np.multiply(shape, ratios).astype(int))
         return dyn_shape
 
 

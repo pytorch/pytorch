@@ -72,8 +72,7 @@
 #include <utility>
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
 static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
   // Bail out for dtypes unsupported by the sorting algorithm to keep the interface consistent.
@@ -261,9 +260,9 @@ TORCH_PRECOMPUTE_META_FUNC2(min, dim)(const Tensor& self, int64_t dim, bool keep
       .set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(where_kernel); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -369,6 +368,18 @@ Tensor isreal(const Tensor& self) {
   return at::imag(self) == 0;
 }
 
+
+#if !defined(C10_MOBILE)
+#define _AT_DISPATCH_INF_TYPES(TYPE, NAME, ...)                          \
+        AT_DISPATCH_FLOATING_TYPES_AND3( kHalf, kBFloat16, kFloat8_e5m2, \
+            TYPE, NAME, __VA_ARGS__)
+#else
+#define _AT_DISPATCH_INF_TYPES(TYPE, NAME, ...)           \
+        AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, \
+            TYPE, NAME, __VA_ARGS__)
+#endif
+
+
 Tensor isinf(const Tensor &self) {
   // Note: Integral tensor values are never infinite
   if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
@@ -381,7 +392,7 @@ Tensor isinf(const Tensor &self) {
           (at::isinf(at::imag(self)));
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "isinf", [&]() {
+  return _AT_DISPATCH_INF_TYPES(self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
   });
 }
@@ -397,7 +408,7 @@ Tensor isfinite(const Tensor& self) {
     return at::isfinite(at::real(self)).__iand__(at::isfinite(at::imag(self)));
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "isfinite", [&]() {
+  return _AT_DISPATCH_INF_TYPES(self.scalar_type(), "isfinite", [&]() {
     return (self == self) * (self.abs() != std::numeric_limits<scalar_t>::infinity());
   });
 }
@@ -415,7 +426,7 @@ Tensor _functional_assert_async_msg_cpu(
   c10::string_view assert_msg,
   const Tensor& dep_token) {
   _assert_async_msg_cpu(self, assert_msg);
-  return dep_token;
+  return dep_token.clone();
 }
 
 
@@ -839,5 +850,4 @@ TORCH_IMPL_FUNC(isneginf_out) (const Tensor& self, const Tensor& result) {
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

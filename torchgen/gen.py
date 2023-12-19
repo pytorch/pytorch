@@ -4,7 +4,7 @@ import json
 import os
 import pathlib
 from collections import defaultdict, namedtuple, OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Any,
     Callable,
@@ -212,7 +212,7 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> Set[str]:
 def parse_tags_yaml(path: str) -> Set[str]:
     global _GLOBAL_PARSE_TAGS_YAML_CACHE
     if path not in _GLOBAL_PARSE_TAGS_YAML_CACHE:
-        with open(path, "r") as f:
+        with open(path) as f:
             es = yaml.load(f, Loader=LineLoader)
             _GLOBAL_PARSE_TAGS_YAML_CACHE[path] = parse_tags_yaml_struct(es, path=path)
 
@@ -233,7 +233,7 @@ def parse_native_yaml(
 
         # if a loaded yaml is provided, use that instead of reading from path
         if loaded_yaml is None:
-            with open(path, "r") as f:
+            with open(path) as f:
                 es = yaml.load(f, Loader=LineLoader)
         else:
             es = loaded_yaml
@@ -542,13 +542,21 @@ def static_dispatch(
 @dataclass(frozen=True)
 class RegisterSchema:
     selector: SelectiveBuilder
+    known_tags: Dict[str, int] = field(default_factory=dict)
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
         tags = "{" + ", ".join(f"at::Tag::{tag}" for tag in sorted(f.tags)) + "}"
-        return f"m.def({cpp_string(str(f.func))}, {tags});\n"
+        if tags == "{}":
+            return f"m.def({cpp_string(str(f.func))}, {{}});\n"
+        maybe_tags = ""
+        if tags not in self.known_tags:
+            idx = len(self.known_tags)
+            self.known_tags[tags] = idx
+            maybe_tags = f"const std::vector<at::Tag> tags_{idx} = {tags};\n"
+        return f"{maybe_tags}m.def({cpp_string(str(f.func))}, tags_{self.known_tags[tags]});\n"
 
 
 # Generates Operators.h and Operators.cpp.
@@ -1846,13 +1854,13 @@ def gen_per_operator_headers(
 ) -> None:
     # For CMake builds, split operator declarations into separate headers in
     # the ATen/ops folder to split up header dependencies
-    functions_by_root_name: Dict[str, List[NativeFunction]] = defaultdict(lambda: [])
+    functions_by_root_name: Dict[str, List[NativeFunction]] = defaultdict(list)
     for fn in native_functions:
         functions_by_root_name[fn.root_name].append(fn)
 
     grouped_functions_by_root_name: Dict[
         str, List[Union[NativeFunction, NativeFunctionsGroup]]
-    ] = defaultdict(lambda: [])
+    ] = defaultdict(list)
     for group in grouped_native_functions:
         name = group.root_name
         grouped_functions_by_root_name[name].append(group)

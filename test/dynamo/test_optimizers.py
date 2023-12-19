@@ -20,30 +20,36 @@ model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
 model(input).sum().backward()
 
 
+def get_optimizer_step(opt, closure=None):
+    # run the patcher so that step has the expected structure
+    torch._dynamo.eval_frame.TorchPatcher.patch()
+
+    # unwrap step to avoid a deliberate graph break due to
+    # a limitation of functionalization/no_grad detection
+    # see the [Note on graph break] in optimizer.py
+    # This ignores the outer _use_grad_if_differentiable wrapper, which is fine for now
+    # as dynamo does not support differentiable optimizers anyway
+    step_fn = opt.step.__wrapped__
+    if closure is not None:
+
+        def fn():
+            step_fn(opt, closure)
+
+    else:
+
+        def fn():
+            step_fn(opt)
+
+    return fn
+
+
 def make_test(optim_cls, closure=None, **kwargs):
     opt = optim_cls(model.parameters(), **kwargs)
 
     def test_fn(self):
         nonlocal opt
 
-        # run the patcher so that step has the expected structure
-        torch._dynamo.eval_frame.TorchPatcher.patch()
-
-        # unwrap step to avoid a deliberate graph break due to
-        # a limitation of functionalization/no_grad detection
-        # see the [Note on graph break] in optimizer.py
-        # This ignores the outer _use_grad_if_differentiable wrapper, which is fine for now
-        # as dynamo does not support differentiable optimizers anyway
-        step_fn = opt.step.__wrapped__
-        if closure is not None:
-
-            def fn():
-                step_fn(opt, closure)
-
-        else:
-
-            def fn():
-                step_fn(opt)
+        fn = get_optimizer_step(opt, closure=closure)
 
         with torch.set_grad_enabled(False):
             torch.compile(fn, backend="eager", fullgraph=True)()
@@ -91,6 +97,27 @@ optimizers = [
 
 for opt in optimizers:
     setattr(OptimizerTests, "test_" + opt.__name__.lower(), make_test(opt))
+
+
+class MyOptimizer(torch.optim.Optimizer):
+    def __init__(self, params):
+        super().__init__(params, {})
+
+    def _init_group(self, params, group):
+        any_complex = False
+        for p in group["params"]:
+            params.append(p)
+            any_complex |= p.is_complex()
+        return any_complex
+
+    def step(self):
+        for group in self.param_groups:
+            params = []
+            any_complex = self._init_group(params, group)
+            if any_complex:
+                params[0] -= 1
+            else:
+                params[0] += 1
 
 
 class End2EndTests(torch._dynamo.test_case.TestCase):
@@ -143,6 +170,23 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
             torch.randn(5, requires_grad=True),
         )
         optimizer.step(fn)
+
+    def test_init_group(self):
+        for dtype in [torch.float32, torch.cfloat]:
+            tensor = torch.randn(5, 5, dtype=dtype)
+            params = Parameter(tensor.detach().clone(), requires_grad=False)
+            opt_params = Parameter(tensor.detach().clone(), requires_grad=False)
+            print(params, opt_params)
+
+            optim = MyOptimizer([params])
+            optim.step()
+
+            opt_optim = MyOptimizer([opt_params])
+            opt_step = torch.compile(backend="eager", fullgraph=True)(opt_optim.step)
+            opt_step()
+            print(params, opt_params)
+
+            self.assertEqual(params, opt_params)
 
 
 if __name__ == "__main__":

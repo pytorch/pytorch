@@ -254,17 +254,35 @@ TEST_F(FunctionalTest, LPPool2d) {
   int stride = 2;
   std::vector<int64_t> kernel_size({2, 3});
 
-  auto x = torch::ones({1, 2, 5});
+  auto x = torch::ones({1, 1, 2, 5});
   auto y = F::lp_pool2d(
       x, F::LPPool2dFuncOptions(norm_type, kernel_size).stride(stride));
   auto expected =
-      (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) *
+      (torch::pow(torch::tensor({{{{1, 1}}}}, torch::kFloat), norm_type) *
        (kernel_size[0] * kernel_size[1]))
           .pow(1. / norm_type);
 
-  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.ndimension(), 4);
   ASSERT_TRUE(torch::allclose(y, expected));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 1, 2}));
+}
+
+TEST_F(FunctionalTest, LPPool3d) {
+  int norm_type = 2;
+  int stride = 2;
+  std::vector<int64_t> kernel_size({1, 2, 3});
+
+  auto x = torch::ones({1, 1, 1, 2, 5});
+  auto y = F::lp_pool3d(
+      x, F::LPPool3dFuncOptions(norm_type, kernel_size).stride(stride));
+  auto expected =
+      (torch::pow(torch::tensor({{{{{1, 1}}}}}, torch::kFloat), norm_type) *
+       (kernel_size[0] * kernel_size[1] * kernel_size[2]))
+          .pow(1. / norm_type);
+
+  ASSERT_EQ(y.ndimension(), 5);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 1, 1, 2}));
 }
 
 TEST_F(FunctionalTest, CosineSimilarity) {
@@ -296,6 +314,23 @@ TEST_F(FunctionalTest, SmoothL1LossBeta) {
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,bugprone-argument-comment)
       F::smooth_l1_loss(
           input, target, /*reduction=*/torch::kMean, /*beta=*/0.5);
+  auto expected = torch::tensor(1.67, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(input.sizes() == input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, SmoothL1LossBetaOptions) {
+  auto input = torch::tensor(
+      {0.1, 1.5, 10.0}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      F::smooth_l1_loss(
+          input,
+          target,
+          F::SmoothL1LossFuncOptions().reduction(torch::kMean).beta(0.5));
   auto expected = torch::tensor(1.67, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -892,6 +927,16 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 9}));
 
   x = torch::tensor(
+      {{2, 4, 5}}, torch::dtype(torch::kFloat).requires_grad(true));
+  indices = torch::tensor({{1, 3, 4}}, torch::kLong);
+  y = F::max_unpool1d(x, indices, F::MaxUnpool1dFuncOptions(3));
+
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_TRUE(torch::allclose(
+      y, torch::tensor({{0, 2, 0, 4, 5, 0, 0, 0, 0}}, torch::kFloat)));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 9}));
+
+  x = torch::tensor(
       {{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
   y = F::max_unpool1d(
@@ -945,6 +990,34 @@ TEST_F(FunctionalTest, MaxUnpool2d) {
              {0, 46, 0, 48, 49}}}},
           torch::kFloat)));
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 1, 5, 5}));
+
+  indices = torch::tensor(
+      {{{6, 8, 9}, {16, 18, 19}, {21, 23, 24}},
+       {{6, 8, 9}, {16, 18, 19}, {21, 23, 24}}},
+      torch::kLong);
+  x = torch::tensor(
+      {{{6, 8, 9}, {16, 18, 19}, {21, 23, 24}},
+       {{31, 33, 34}, {41, 43, 44}, {46, 48, 49}}},
+      torch::dtype(torch::kFloat).requires_grad(true));
+  y = F::max_unpool2d(
+      x, indices, F::MaxUnpool2dFuncOptions(3).stride(2).padding(1));
+
+  ASSERT_EQ(y.dim(), 3);
+  ASSERT_TRUE(torch::allclose(
+      y,
+      torch::tensor(
+          {{{0, 0, 0, 0, 0},
+            {0, 6, 0, 8, 9},
+            {0, 0, 0, 0, 0},
+            {0, 16, 0, 18, 19},
+            {0, 21, 0, 23, 24}},
+           {{0, 0, 0, 0, 0},
+            {0, 31, 0, 33, 34},
+            {0, 0, 0, 0, 0},
+            {0, 41, 0, 43, 44},
+            {0, 46, 0, 48, 49}}},
+          torch::kFloat)));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 5, 5}));
 }
 
 TEST_F(FunctionalTest, MaxUnpool3d) {
@@ -962,6 +1035,21 @@ TEST_F(FunctionalTest, MaxUnpool3d) {
              {{0, 0, 0}, {0, 0, 0}, {0, 0, 26}}}}},
           torch::kFloat)));
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3, 3, 3}));
+
+  indices = torch::tensor({{{{26}}}}, torch::kLong);
+  x = torch::tensor(
+      {{{{26}}}}, torch::dtype(torch::kFloat).requires_grad(true));
+  y = F::max_unpool3d(x, indices, F::MaxUnpool3dFuncOptions(3));
+
+  ASSERT_EQ(y.dim(), 4);
+  ASSERT_TRUE(torch::allclose(
+      y,
+      torch::tensor(
+          {{{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}},
+            {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}},
+            {{0, 0, 0}, {0, 0, 0}, {0, 0, 26}}}},
+          torch::kFloat)));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 3, 3, 3}));
 }
 
 TEST_F(FunctionalTest, ELU) {
@@ -2184,6 +2272,13 @@ TEST_F(FunctionalTest, Interpolate) {
     }
   }
   {
+    ASSERT_THROWS_WITH(
+        F::interpolate(
+            torch::randn({1}),
+            F::InterpolateFuncOptions().size(std::vector<int64_t>({1}))),
+        "Input Error: Only 3D, 4D and 5D input Tensors supported (got 1D) ");
+  }
+  {
     auto input = torch::randn({3, 2, 2});
     ASSERT_THROWS_WITH(
         F::interpolate(
@@ -3012,178 +3107,180 @@ TEST_F(FunctionalTest, AllClose_CUDA) {
 }
 
 TEST_F(FunctionalTest, BCEWithLogitsLoss) {
-  {// test BCE with logits raises if target and input are different size
-   {const auto target = torch::rand(5);
-  const auto input = torch::rand({5, 1});
-  ASSERT_THROWS_WITH(
-      F::binary_cross_entropy_with_logits(input, target),
-      "must be the same as input size");
-}
-{
-  const auto target = torch::rand({5, 1});
-  const auto input = torch::rand(5);
-  ASSERT_THROWS_WITH(
-      F::binary_cross_entropy_with_logits(input, target),
-      "must be the same as input size");
-}
-}
-{ // test BCE with logits gives same result as sigmoid and bce loss
-  auto sigmoid = Sigmoid();
+  { // test BCE with logits raises if target and input are different size
+    {
+      const auto target = torch::rand(5);
+      const auto input = torch::rand({5, 1});
+      ASSERT_THROWS_WITH(
+          F::binary_cross_entropy_with_logits(input, target),
+          "must be the same as input size");
+    }
+    {
+      const auto target = torch::rand({5, 1});
+      const auto input = torch::rand(5);
+      ASSERT_THROWS_WITH(
+          F::binary_cross_entropy_with_logits(input, target),
+          "must be the same as input size");
+    }
+  }
+  { // test BCE with logits gives same result as sigmoid and bce loss
+    auto sigmoid = Sigmoid();
 
-  auto target = torch::rand({64, 4});
-  auto output = torch::rand({64, 4}) - 0.5;
+    auto target = torch::rand({64, 4});
+    auto output = torch::rand({64, 4}) - 0.5;
 
-  ASSERT_TRUE(torch::allclose(
-      F::binary_cross_entropy_with_logits(output, target),
-      F::binary_cross_entropy(sigmoid(output), target)));
+    ASSERT_TRUE(torch::allclose(
+        F::binary_cross_entropy_with_logits(output, target),
+        F::binary_cross_entropy(sigmoid(output), target)));
 
-  auto weight = torch::rand(4);
-  ASSERT_TRUE(torch::allclose(
-      F::binary_cross_entropy_with_logits(
-          output,
-          target,
-          F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight)),
-      F::binary_cross_entropy(
-          sigmoid(output),
-          target,
-          F::BinaryCrossEntropyFuncOptions().weight(weight))));
+    auto weight = torch::rand(4);
+    ASSERT_TRUE(torch::allclose(
+        F::binary_cross_entropy_with_logits(
+            output,
+            target,
+            F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight)),
+        F::binary_cross_entropy(
+            sigmoid(output),
+            target,
+            F::BinaryCrossEntropyFuncOptions().weight(weight))));
 
-  target = torch::zeros({4, 1}, torch::kFloat);
-  output = torch::empty({4, 1}, torch::kFloat).fill_(-100);
+    target = torch::zeros({4, 1}, torch::kFloat);
+    output = torch::empty({4, 1}, torch::kFloat).fill_(-100);
 
-  ASSERT_TRUE(torch::allclose(
-      F::binary_cross_entropy_with_logits(output, target),
-      F::binary_cross_entropy(sigmoid(output), target)));
+    ASSERT_TRUE(torch::allclose(
+        F::binary_cross_entropy_with_logits(output, target),
+        F::binary_cross_entropy(sigmoid(output), target)));
 
-  ASSERT_TRUE(torch::allclose(
-      F::binary_cross_entropy_with_logits(
-          output,
-          target,
-          F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kNone)),
-      F::binary_cross_entropy(
-          sigmoid(output),
-          target,
-          F::BinaryCrossEntropyFuncOptions().reduction(torch::kNone))));
+    ASSERT_TRUE(torch::allclose(
+        F::binary_cross_entropy_with_logits(
+            output,
+            target,
+            F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(
+                torch::kNone)),
+        F::binary_cross_entropy(
+            sigmoid(output),
+            target,
+            F::BinaryCrossEntropyFuncOptions().reduction(torch::kNone))));
 
-  weight = torch::rand({1}, torch::kFloat);
-  ASSERT_TRUE(torch::allclose(
-      F::binary_cross_entropy_with_logits(
-          output,
-          target,
-          F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight)),
-      F::binary_cross_entropy(
-          sigmoid(output),
-          target,
-          F::BinaryCrossEntropyFuncOptions().weight(weight))));
-}
-{ // test BCE with logits has correct grad at zero
-  const auto output = torch::zeros({3, 1}, torch::requires_grad());
-  const auto target = torch::zeros({3, 1});
-  F::binary_cross_entropy_with_logits(
-      output,
-      target,
-      F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kSum))
-      .backward();
-  const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
-  ASSERT_TRUE(torch::allclose(output.grad(), expected_grad));
-}
-{ // test BCE with logits broadcasts weights
-  const auto target = torch::rand({16, 4});
-  const auto output = torch::rand({16, 4}) - 0.5;
+    weight = torch::rand({1}, torch::kFloat);
+    ASSERT_TRUE(torch::allclose(
+        F::binary_cross_entropy_with_logits(
+            output,
+            target,
+            F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight)),
+        F::binary_cross_entropy(
+            sigmoid(output),
+            target,
+            F::BinaryCrossEntropyFuncOptions().weight(weight))));
+  }
+  { // test BCE with logits has correct grad at zero
+    const auto output = torch::zeros({3, 1}, torch::requires_grad());
+    const auto target = torch::zeros({3, 1});
+    F::binary_cross_entropy_with_logits(
+        output,
+        target,
+        F::BinaryCrossEntropyWithLogitsFuncOptions().reduction(torch::kSum))
+        .backward();
+    const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
+    ASSERT_TRUE(torch::allclose(output.grad(), expected_grad));
+  }
+  { // test BCE with logits broadcasts weights
+    const auto target = torch::rand({16, 4});
+    const auto output = torch::rand({16, 4}) - 0.5;
 
-  auto weight = torch::rand(4);
-  auto out1 = F::binary_cross_entropy_with_logits(
-      output,
-      target,
-      F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight));
+    auto weight = torch::rand(4);
+    auto out1 = F::binary_cross_entropy_with_logits(
+        output,
+        target,
+        F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight));
 
-  weight = weight.expand({16, 4}).contiguous();
-  auto out2 = F::binary_cross_entropy_with_logits(
-      output,
-      target,
-      F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight));
+    weight = weight.expand({16, 4}).contiguous();
+    auto out2 = F::binary_cross_entropy_with_logits(
+        output,
+        target,
+        F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight));
 
-  ASSERT_TRUE(torch::allclose(out1, out2));
+    ASSERT_TRUE(torch::allclose(out1, out2));
 
-  weight = torch::rand({16, 1});
-  out1 = F::binary_cross_entropy_with_logits(
-      output,
-      target,
-      F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight));
+    weight = torch::rand({16, 1});
+    out1 = F::binary_cross_entropy_with_logits(
+        output,
+        target,
+        F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight));
 
-  weight = weight.expand({16, 4}).contiguous();
-  out2 = F::binary_cross_entropy_with_logits(
-      output,
-      target,
-      F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight));
+    weight = weight.expand({16, 4}).contiguous();
+    out2 = F::binary_cross_entropy_with_logits(
+        output,
+        target,
+        F::BinaryCrossEntropyWithLogitsFuncOptions().weight(weight));
 
-  ASSERT_TRUE(torch::allclose(out1, out2));
-}
-{ // test BCE with logits ones in pos weights are the same as none
-  const auto target = torch::rand({64, 4});
-  const auto output = torch::rand({64, 4}) - 0.5;
-  const auto pos_weight = torch::ones({64, 4});
+    ASSERT_TRUE(torch::allclose(out1, out2));
+  }
+  { // test BCE with logits ones in pos weights are the same as none
+    const auto target = torch::rand({64, 4});
+    const auto output = torch::rand({64, 4}) - 0.5;
+    const auto pos_weight = torch::ones({64, 4});
 
-  ASSERT_TRUE(torch::allclose(
-      F::binary_cross_entropy_with_logits(output, target),
-      F::binary_cross_entropy_with_logits(
-          output,
-          target,
-          F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(
-              pos_weight))));
-}
-{ // test BCE with logits broadcasts pos weights
-  const auto target = torch::rand({64, 4});
-  const auto output = torch::rand({64, 4}) - 0.5;
-  const auto pos_weight = torch::rand(4);
-  const auto out1 = F::binary_cross_entropy_with_logits(
-      output,
-      target,
-      F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight));
+    ASSERT_TRUE(torch::allclose(
+        F::binary_cross_entropy_with_logits(output, target),
+        F::binary_cross_entropy_with_logits(
+            output,
+            target,
+            F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(
+                pos_weight))));
+  }
+  { // test BCE with logits broadcasts pos weights
+    const auto target = torch::rand({64, 4});
+    const auto output = torch::rand({64, 4}) - 0.5;
+    const auto pos_weight = torch::rand(4);
+    const auto out1 = F::binary_cross_entropy_with_logits(
+        output,
+        target,
+        F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight));
 
-  const auto pos_weight1 = pos_weight.expand({1, 4});
-  const auto out2 = F::binary_cross_entropy_with_logits(
-      output,
-      target,
-      F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight));
+    const auto pos_weight1 = pos_weight.expand({1, 4});
+    const auto out2 = F::binary_cross_entropy_with_logits(
+        output,
+        target,
+        F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight));
 
-  const auto pos_weight2 = pos_weight.expand({64, 4});
-  const auto out3 = F::binary_cross_entropy_with_logits(
-      output,
-      target,
-      F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight));
+    const auto pos_weight2 = pos_weight.expand({64, 4});
+    const auto out3 = F::binary_cross_entropy_with_logits(
+        output,
+        target,
+        F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight));
 
-  ASSERT_TRUE(torch::allclose(out1, out2));
-  ASSERT_TRUE(torch::allclose(out1, out3));
-}
-{ // test BCE with logits with pos weight has correct grad at zero
-  const auto output = torch::zeros({3, 1}, torch::requires_grad());
-  const auto target = torch::zeros({3, 1});
-  const auto pos_weight = torch::ones({3, 1});
-  F::binary_cross_entropy_with_logits(
-      output,
-      target,
-      F::BinaryCrossEntropyWithLogitsFuncOptions()
-          .pos_weight(pos_weight)
-          .reduction(torch::kSum))
-      .backward();
-  const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  const auto grad = output.grad();
-  ASSERT_TRUE(torch::allclose(grad, expected_grad));
-}
-{ // test BCE with logits stability
-  const auto output = torch::tensor({0., -120.});
-  const auto target = torch::tensor({0., 1.});
-  const auto pos_weight = torch::tensor({1., 1.});
+    ASSERT_TRUE(torch::allclose(out1, out2));
+    ASSERT_TRUE(torch::allclose(out1, out3));
+  }
+  { // test BCE with logits with pos weight has correct grad at zero
+    const auto output = torch::zeros({3, 1}, torch::requires_grad());
+    const auto target = torch::zeros({3, 1});
+    const auto pos_weight = torch::ones({3, 1});
+    F::binary_cross_entropy_with_logits(
+        output,
+        target,
+        F::BinaryCrossEntropyWithLogitsFuncOptions()
+            .pos_weight(pos_weight)
+            .reduction(torch::kSum))
+        .backward();
+    const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+    const auto grad = output.grad();
+    ASSERT_TRUE(torch::allclose(grad, expected_grad));
+  }
+  { // test BCE with logits stability
+    const auto output = torch::tensor({0., -120.});
+    const auto target = torch::tensor({0., 1.});
+    const auto pos_weight = torch::tensor({1., 1.});
 
-  const auto out1 = F::binary_cross_entropy_with_logits(output, target);
-  ASSERT_TRUE(torch::isfinite(out1).all().item<bool>());
+    const auto out1 = F::binary_cross_entropy_with_logits(output, target);
+    ASSERT_TRUE(torch::isfinite(out1).all().item<bool>());
 
-  const auto out2 = F::binary_cross_entropy_with_logits(
-      output,
-      target,
-      F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight));
-  ASSERT_TRUE(torch::isfinite(out2).all().item<bool>());
-}
+    const auto out2 = F::binary_cross_entropy_with_logits(
+        output,
+        target,
+        F::BinaryCrossEntropyWithLogitsFuncOptions().pos_weight(pos_weight));
+    ASSERT_TRUE(torch::isfinite(out2).all().item<bool>());
+  }
 }

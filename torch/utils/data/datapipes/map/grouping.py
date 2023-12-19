@@ -10,9 +10,10 @@ T = TypeVar('T')
 @functional_datapipe('batch')
 class BatcherMapDataPipe(MapDataPipe[DataChunk]):
     r"""
-    Create mini-batches of data (functional name: ``batch``). An outer dimension will be added as
-    ``batch_size`` if ``drop_last`` is set to ``True``, or ``length % batch_size`` for the
-    last batch if ``drop_last`` is set to ``False``.
+    Create mini-batches of data (functional name: ``batch``).
+
+    An outer dimension will be added as ``batch_size`` if ``drop_last`` is set to ``True``,
+    or ``length % batch_size`` for the last batch if ``drop_last`` is set to ``False``.
 
     Args:
         datapipe: Iterable DataPipe being batched
@@ -27,6 +28,7 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
         >>> list(batch_dp)
         [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]]
     """
+
     datapipe: MapDataPipe
     batch_size: int
     drop_last: bool
@@ -64,4 +66,4 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
             else:
                 return (len(self.datapipe) + self.batch_size - 1) // self.batch_size
         else:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")

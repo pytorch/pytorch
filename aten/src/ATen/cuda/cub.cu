@@ -2,9 +2,7 @@
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAConfig.h>
 
-namespace at {
-namespace cuda {
-namespace cub {
+namespace at::cuda::cub {
 
 namespace {
 template <typename scalar_t>
@@ -49,4 +47,4 @@ void mask_exclusive_sum(const uint8_t *mask, int64_t *output_idx, int64_t n) {
   exclusive_scan(iter, output_idx, SumOp<int64_t>{}, int64_t{0}, n);
 }
 
-}}}  // namespace at::cuda::cub
+}  // namespace at::cuda::cub

@@ -9,6 +9,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Operators.h>
 #else
+#include <ATen/ops/_sparse_compressed_tensor_unsafe.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #endif
 
@@ -364,6 +365,50 @@ inline bool only_sparse_compressed_add_trivial_cases(
       [](const Tensor& v1, const Tensor& v2, const Scalar& alpha) {
         return v1.add_(v2, alpha);
       });
+}
+
+inline Tensor to_type(Tensor input, ScalarType dtype) {
+  Tensor compressed_indices, plain_indices;
+  std::tie(compressed_indices, plain_indices) =
+      at::sparse_csr::getCompressedPlainIndices(input);
+  return at::_sparse_compressed_tensor_unsafe(
+      std::move(compressed_indices),
+      std::move(plain_indices),
+      std::move(input.values()).to(dtype),
+      input.sizes(),
+      dtype,
+      input.layout(),
+      input.device(),
+      input.options().pinned_memory_opt());
+}
+
+template <typename acc_t, typename scalar_t>
+inline std::tuple<Tensor, Tensor> create_acc_buffer(
+    TensorOptions option,
+    ScalarType type,
+    int64_t nnz = -1) {
+  Tensor new_values, new_values_acc;
+  constexpr bool need_acc = !std::is_same<scalar_t, acc_t>::value;
+  bool is_integral = at::isIntegralType(type, /*includeBool=*/true);
+  if constexpr (need_acc) {
+    auto acc_dtype = CppTypeToScalarType<acc_t>::value;
+    new_values_acc = at::empty({}, option.dtype(acc_dtype));
+    new_values = is_integral ? new_values_acc : at::empty({}, option);
+  } else {
+    new_values = new_values_acc = at::empty({}, option);
+  }
+  if (nnz != -1) {
+    return std::make_tuple(
+        new_values.resize_(nnz), new_values_acc.resize_(nnz));
+  } else {
+    return std::make_tuple(new_values, new_values_acc);
+  }
+}
+
+inline void copy_from_acc_buffer(Tensor& new_values, Tensor& new_values_acc) {
+  if (!new_values_acc.is_same(new_values)) {
+    new_values.copy_(new_values_acc);
+  }
 }
 
 } // namespace sparse_csr

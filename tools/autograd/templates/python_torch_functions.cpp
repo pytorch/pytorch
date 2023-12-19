@@ -32,7 +32,7 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/utils/structseq.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
-#include "torch/csrc/autograd/python_return_types.h"
+#include "torch/csrc/autograd/generated/python_return_types.h"
 
 #include <ATen/core/Tensor.h>
 
@@ -68,7 +68,7 @@ using namespace torch::autograd::utils;
 
 // NOTE: See [Sharded File] comment in VariableType
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 // generated forward declarations start here
 
@@ -90,4 +90,4 @@ void gatherTorchFunctions${shard_id}(std::vector<PyMethodDef> &torch_functions) 
 
 ${py_methods}
 
-}} // namespace torch::autograd
+} // namespace torch::autograd

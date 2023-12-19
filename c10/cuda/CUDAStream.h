@@ -177,11 +177,18 @@ class C10_CUDA_API CUDAStream {
     // Note: this returns the range of priority **supported by PyTorch**, not
     // the range of priority **supported by CUDA**. The former is a subset of
     // the latter.
-    int least_priority, greatest_priority;
+    int least_priority = 0, greatest_priority = 0;
     C10_CUDA_CHECK(
         cudaDeviceGetStreamPriorityRange(&least_priority, &greatest_priority));
+#ifdef USE_ROCM
+    // See Note [HIP stream priorities]
+    TORCH_INTERNAL_ASSERT(
+        least_priority == 1, "Unexpected HIP stream priority range");
+    least_priority = 0;
+#else
     TORCH_INTERNAL_ASSERT(
         least_priority == 0, "Unexpected CUDA stream priority range");
+#endif
     TORCH_INTERNAL_ASSERT(
         greatest_priority <= -1, "Unexpected CUDA stream priority range");
     greatest_priority = std::max(

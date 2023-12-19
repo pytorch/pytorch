@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Utils.h>
 #include <ATen/core/symbol.h>
 #include <ATen/native/layer_norm.h>
@@ -110,7 +111,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
 
   // CALCULATE ALIASING SETS
 
-  auto aliasDb = torch::make_unique<AliasDb>(graph);
+  auto aliasDb = std::make_unique<AliasDb>(graph);
 
   // map from Value to its Aliasing Set
   std::unordered_map<Value*, ValueSetPtr> alias_mapping;
@@ -223,7 +224,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
   }
 }
 
-// This is a factory function that creates an Operation that that takes
+// This is a factory function that creates an Operation that takes
 // MKLDNN tensors and unpacks them into 1D contiguous tensors that we can
 // run aten operations on. The precondition for using this function is that the
 // aten operations in `aten_op` should be an identity for zero inputs. In other
@@ -263,7 +264,7 @@ Operation createUnaryOp(
       TORCH_INTERNAL_ASSERT(it_empty.get_desc() == a_it.get_desc());
       out = at::native::new_with_itensor_mkldnn(
           std::move(it_empty),
-          optTypeMetaToScalarType(a.options().dtype_opt()),
+          c10::optTypeMetaToScalarType(a.options().dtype_opt()),
           a.options().device_opt());
 
       out_raw_data = at::native::itensor_from_mkldnn(out).get_data_handle();
@@ -378,13 +379,13 @@ Operation BroadOp(const Node* node) {
         auto a_options = exp_a.options();
         auto a_out = at::native::new_with_itensor_mkldnn(
             std::move(a_it),
-            optTypeMetaToScalarType(a_options.dtype_opt()),
+            c10::optTypeMetaToScalarType(a_options.dtype_opt()),
             a_options.device_opt());
         push(stack, a_out);
         auto b_options = exp_b.options();
         auto b_out = at::native::new_with_itensor_mkldnn(
             std::move(b_it),
-            optTypeMetaToScalarType(b_options.dtype_opt()),
+            c10::optTypeMetaToScalarType(b_options.dtype_opt()),
             b_options.device_opt());
         push(stack, b_out);
       };
@@ -543,7 +544,7 @@ jit::RegisterOperators reg_fut_ops({
                 stack,
                 at::native::empty_mkldnn(
                     o,
-                    optTypeMetaToScalarType(input.options().dtype_opt()),
+                    c10::optTypeMetaToScalarType(input.options().dtype_opt()),
                     input.options().layout_opt(),
                     input.options().device_opt(),
                     input.options().pinned_memory_opt()));
@@ -575,7 +576,7 @@ jit::RegisterOperators reg_fut_ops({
           Tensor self = pop(stack).toTensor();
           auto out = at::native::empty_mkldnn(
               self.sizes(),
-              optTypeMetaToScalarType(self.options().dtype_opt()),
+              c10::optTypeMetaToScalarType(self.options().dtype_opt()),
               self.options().layout_opt(),
               self.options().device_opt(),
               self.options().pinned_memory_opt());

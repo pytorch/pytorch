@@ -1,0 +1,67 @@
+/*
+ * OPERATOR = $OPERATOR
+ */
+
+#define OP(X, Y, A) $OPERATOR
+#define IS_DIV $IS_DIV
+
+#include "texel_access.h"
+
+layout(std430) buffer;
+
+/* Qualifiers: layout - storage - precision - memory */
+
+layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D uOutput;
+layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
+layout(set = 0, binding = 2) uniform PRECISION sampler3D uOther;
+layout(set = 0, binding = 3) uniform PRECISION restrict Block {
+  // output tensor size (x=width,y=height,z=channel,w=batch)
+  ivec4 output_sizes;
+  // input tensor size (x=width,y=height,z=channel,w=batch)
+  ivec4 input_sizes;
+  // other tensor size (x=width,y=height,z=channel,w=batch)
+  ivec4 other_sizes;
+  float alpha;
+}
+uBlock;
+
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
+
+void main() {
+  const ivec3 pos = ivec3(gl_GlobalInvocationID);
+
+  ivec3 output_extents;
+  output_extents.xy = uBlock.output_sizes.xy;
+  output_extents.z =
+      uBlock.output_sizes.w * int(ceil(uBlock.output_sizes.z / 4.0));
+  if (any(greaterThanEqual(pos, output_extents.xyz))) {
+    return;
+  }
+
+  ivec3 input_pos =
+      map_output_pos_to_input_pos(pos, uBlock.output_sizes, uBlock.input_sizes);
+
+  ivec3 other_pos =
+      map_output_pos_to_input_pos(pos, uBlock.output_sizes, uBlock.other_sizes);
+
+  const vec4 vInput =
+      load_texel(input_pos, uBlock.output_sizes, uBlock.input_sizes, uInput);
+
+  vec4 vOther =
+      load_texel(other_pos, uBlock.output_sizes, uBlock.other_sizes, uOther);
+
+// Zero padding is added to the channels dimension when tensors are stored as
+// image textures. This will cause a divide-by-zero when performing division.
+// For division, apply an extra step of detecting which elements are zero
+// padding to avoid division by zero.
+#if IS_DIV == 1
+  const int c_index = (pos.z % ((uBlock.output_sizes.z + 3) / 4)) * 4;
+  if (uBlock.other_sizes.z != 1 && c_index + 3 >= uBlock.output_sizes.z) {
+    ivec4 c_ind = ivec4(c_index) + ivec4(0, 1, 2, 3);
+    vec4 mask = vec4(lessThan(c_ind, ivec4(uBlock.output_sizes.z)));
+    vOther = vOther * mask + vec4(1, 1, 1, 1) - mask;
+  }
+#endif
+
+  imageStore(uOutput, pos, OP(vInput, vOther, uBlock.alpha));
+}

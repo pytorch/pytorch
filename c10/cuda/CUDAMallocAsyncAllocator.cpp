@@ -599,7 +599,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
     UsageStream to_record{stream.stream(), stream.device_index()};
     if (to_record == it->second.creation_stream) {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "Called record_stream on tensor whose original creation stream "
           "matches the recorded stream. This is unnecessary and has no effect.");
     } else {
@@ -618,7 +618,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) override {
+      RecordContext when) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support recordHistory. "
@@ -629,6 +629,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support attachOutOfMemoryObserver. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
+  void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support attachAllocatorTraceTracker. "
         "If you need it, please file an issue describing your use case.");
   }
 
@@ -751,10 +758,10 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 
   // CUDAGraph interactions
-  void beginAllocateStreamToPool(
+  void beginAllocateToPool(
       int device,
-      cudaStream_t stream,
-      MempoolId_t mempool_id) override {
+      MempoolId_t mempool_id,
+      std::function<bool(cudaStream_t)>) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
     TORCH_INTERNAL_ASSERT(capture_free_streams.empty());
@@ -764,7 +771,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     capture_underway = true;
   }
 
-  void endAllocateStreamToPool(int device, cudaStream_t) override {
+  void endAllocateToPool(int device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
 
     std::lock_guard<std::mutex> lk(general_mutex);

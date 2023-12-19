@@ -14,6 +14,7 @@ __all__ = ["FileListerIterDataPipe", ]
 class FileListerIterDataPipe(IterDataPipe[str]):
     r"""
     Given path(s) to the root directory, yields file pathname(s) (path + filename) of files within the root directory.
+
     Multiple root directories can be provided (functional name: ``list_files``).
 
     Args:
@@ -61,5 +62,5 @@ class FileListerIterDataPipe(IterDataPipe[str]):
 
     def __len__(self):
         if self.length == -1:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
         return self.length

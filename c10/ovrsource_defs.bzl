@@ -74,8 +74,9 @@ def define_c10_ovrsource(name, is_mobile):
         exported_deps = [
             ":ovrsource_c10_cmake_macros.h",
             "//arvr/third-party/gflags:gflags",
-            "//third-party/glog:glog",
+            "//third-party/cpuinfo:cpuinfo",
             "//third-party/fmt:fmt",
+            "//third-party/glog:glog",
         ],
     )
 
@@ -103,6 +104,7 @@ def define_ovrsource_targets():
         ("#cmakedefine C10_BUILD_SHARED_LIBS", ""),
         ("#cmakedefine C10_USE_NUMA", ""),
         ("#cmakedefine C10_USE_MSVC_STATIC_RUNTIME", ""),
+        ("#cmakedefine C10_USE_ROCM_KERNEL_ASSERT", ""),
     ]
 
     mobile_c10_cmake_defines = [

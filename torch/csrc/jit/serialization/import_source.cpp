@@ -439,6 +439,12 @@ void SourceImporterImpl::importClass(
     switch (statement.kind()) {
       case TK_ASSIGN: {
         const auto assign = Assign(statement);
+        auto check_assign_values = [&assign](const std::string& name) {
+          TORCH_CHECK(
+              assign.rhs().present(),
+              "Malformed assignment statement: missing values to assign in ",
+              name);
+        };
         switch (assign.lhs().kind()) {
           case TK_VAR: {
             const auto name = Var(assign.lhs()).name().name();
@@ -451,6 +457,7 @@ void SourceImporterImpl::importClass(
                   is_module,
                   "Assignments in class body only "
                   "supported on modules right now");
+              check_assign_values(name);
               const auto param_list = ListLiteral(assign.rhs().get()).inputs();
               for (const auto& param : param_list) {
                 parameter_names.insert(StringLiteral(param).text());
@@ -461,6 +468,7 @@ void SourceImporterImpl::importClass(
             } else if (name == "__buffers__") {
               TORCH_INTERNAL_ASSERT(
                   is_module, "Buffers only exist on modules at the moment");
+              check_assign_values(name);
               const auto buffer_list = ListLiteral(assign.rhs().get()).inputs();
               for (const auto& buffer : buffer_list) {
                 buffer_names.insert(StringLiteral(buffer).text());
@@ -469,6 +477,7 @@ void SourceImporterImpl::importClass(
               TORCH_INTERNAL_ASSERT(
                   is_module,
                   "Forward pre hooks only exist on modules at the moment");
+              check_assign_values(name);
               const auto pre_hook_list =
                   ListLiteral(assign.rhs().get()).inputs();
               for (const auto& pre_hook : pre_hook_list) {
@@ -480,6 +489,7 @@ void SourceImporterImpl::importClass(
               TORCH_INTERNAL_ASSERT(
                   is_module,
                   "Forward hooks only exist on modules at the moment");
+              check_assign_values(name);
               const auto hook_list = ListLiteral(assign.rhs().get()).inputs();
               for (const auto& hook : hook_list) {
                 std::string hook_name = StringLiteral(hook).text();
@@ -549,7 +559,9 @@ void SourceImporterImpl::importClass(
       case TK_VAR: {
         const auto name = Var(assign.lhs()).name().name();
         TORCH_INTERNAL_ASSERT(name != "__parameters__");
-        const auto type = type_parser.parseTypeFromExpr(assign.type().get());
+        const auto type = assign.type().present()
+            ? type_parser.parseTypeFromExpr(assign.type().get())
+            : type_parser.parseTypeFromExpr(assign.rhs().get());
         const bool is_parameter = parameter_names.count(name);
         const bool is_buffer = buffer_names.count(name);
         class_type->addAttribute(name, type, is_parameter, is_buffer);
@@ -557,7 +569,9 @@ void SourceImporterImpl::importClass(
       case TK_SUBSCRIPT: {
         const auto name =
             StringLiteral(Subscript(assign.lhs()).subscript_exprs()[0]).text();
-        const auto type = type_parser.parseTypeFromExpr(assign.rhs().get());
+        const auto type = assign.type().present()
+            ? type_parser.parseTypeFromExpr(assign.type().get())
+            : type_parser.parseTypeFromExpr(assign.rhs().get());
         const bool is_parameter = parameter_names.count(name);
         const bool is_buffer = buffer_names.count(name);
         class_type->addAttribute(name, type, is_parameter, is_buffer);

@@ -61,7 +61,7 @@
 
 int register_linear_params();
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -74,13 +74,25 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
     return is_miopen_acceptable;
 }
 
-bool use_mkldnn(const Tensor& input) {
+bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
+  auto is_cpu_backend = [&](const TensorList tensors) {
+    bool backend_cpu = true;
+    for (const auto& t : tensors) {
+      if (!(t.options().backend() == at::Backend::CPU)) {
+        backend_cpu = false;
+        break;
+      }
+    }
+    return backend_cpu;
+  };
   return input.options().backend() == at::Backend::CPU &&
-      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16);
+      is_cpu_backend(params) && is_cpu_backend(hx) &&
+      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16) &&
+      input.numel() != 0;
 #endif
   return false;
 }
@@ -728,19 +740,6 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       auto hy = params.matmul_hr(std::get<0>(result));
       // Slice off the workspace argument (it's needed only for AD).
       return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
-    } else if (input.is_mps()) {
-      // MPS has issues with inplace ops, workaround to prevent using inplace ops for mps.
-      const auto gates = params.linear_hh(hx).add_(
-        pre_compute_input ? input : params.linear_ih(input));
-      auto chunked_gates = gates.unsafe_chunk(4, 1);
-      auto ingate = chunked_gates[0].sigmoid();
-      auto forgetgate = chunked_gates[1].sigmoid();
-      auto cellgate = chunked_gates[2].tanh();
-      auto outgate = chunked_gates[3].sigmoid();
-      auto cy = (forgetgate * cx).add_(ingate * cellgate);
-      auto hy = outgate * cy.tanh();
-      hy = params.matmul_hr(hy);
-      return std::make_tuple(std::move(hy), std::move(cy));
     }
 
     const auto gates = params.linear_hh(hx).add_(
@@ -1465,7 +1464,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     }
   }
 
-  if (use_mkldnn(_input)) {
+  if (use_mkldnn(_input, _params, hx)) {
     if (!has_projections) {
       if (hx[0].unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
         TORCH_WARN_ONCE(
@@ -1540,7 +1539,7 @@ std::tuple<Tensor, Tensor> lstm_cell(
   check_rnn_cell_forward_input(input, w_ih.sym_size(1));
   auto hidden_size = w_hh.sym_size(1);
   check_rnn_cell_forward_hidden(input, hx[0], hidden_size, 0);
-  check_rnn_cell_forward_hidden(input, hx[1], std::move(hidden_size), 0);
+  check_rnn_cell_forward_hidden(input, hx[1], std::move(hidden_size), 1);
   static at::Tensor undefined;
   return LSTMCell<CellParams>{}(input, std::make_tuple(hx[0], hx[1]), CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
@@ -1992,4 +1991,4 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
 }
 
 } // namespace
-}}  // namespace at::native
+}  // namespace at::native

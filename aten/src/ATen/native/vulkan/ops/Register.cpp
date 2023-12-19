@@ -1,9 +1,11 @@
 #ifdef USE_VULKAN_API
 
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/vulkan/ops/Batchnorm.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/Gru.h>
+#include <ATen/native/vulkan/ops/Layernorm.h>
 #include <ATen/native/vulkan/ops/Lstm.h>
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <ATen/native/vulkan/ops/QuantizedFunctions.h>
@@ -35,6 +37,44 @@ int register_vulkan_conv2d_packed_context() {
   return 0;
 }
 
+int register_vulkan_linear_packed_context() {
+  static auto register_vulkan_linear_context =
+      torch::selective_class_<LinearPackedContext>(
+          "vulkan", TORCH_SELECTIVE_CLASS("LinearPackedContext"))
+          .def_pickle(
+              // __getstate__
+              [](const c10::intrusive_ptr<LinearPackedContext>& context) {
+                // context is packed
+                return context->unpack();
+              },
+              // __setstate__
+              [](c10::impl::GenericList state) {
+                // state is unpacked
+                return c10::make_intrusive<LinearPackedContext>(
+                    LinearPackedContext::pack(state));
+              });
+  return 0;
+}
+
+int register_vulkan_layernorm_packed_context() {
+  static auto register_vulkan_layernorm_context =
+      torch::selective_class_<LayernormPackedContext>(
+          "vulkan", TORCH_SELECTIVE_CLASS("LayernormPackedContext"))
+          .def_pickle(
+              // __getstate__
+              [](const c10::intrusive_ptr<LayernormPackedContext>& context) {
+                // context is packed
+                return context->unpack();
+              },
+              // __setstate__
+              [](c10::impl::GenericList state) {
+                // state is unpacked
+                return c10::make_intrusive<LayernormPackedContext>(
+                    LayernormPackedContext::pack(state));
+              });
+  return 0;
+}
+
 namespace {
 
 TORCH_LIBRARY(vulkan, m) {
@@ -50,19 +90,6 @@ TORCH_LIBRARY(vulkan, m) {
             // state is unpacked
             return c10::make_intrusive<BatchNormPackedContext>(
                 BatchNormPackedContext::pack(state));
-          });
-  m.class_<LinearPackedContext>("LinearPackedContext")
-      .def_pickle(
-          // __getstate__
-          [](const c10::intrusive_ptr<LinearPackedContext>& context) {
-            // context is packed
-            return context->unpack();
-          },
-          // __setstate__
-          [](c10::impl::GenericList state) {
-            // state is unpacked
-            return c10::make_intrusive<LinearPackedContext>(
-                LinearPackedContext::pack(state));
           });
   m.class_<GruPackedContext>("GruPackedContext")
       .def_pickle(
@@ -91,6 +118,8 @@ TORCH_LIBRARY(vulkan, m) {
                 LstmPackedContext::pack(state));
           });
   register_vulkan_conv2d_packed_context();
+  register_vulkan_linear_packed_context();
+  register_vulkan_layernorm_packed_context();
   // To maintain backwards compatibility.
   m.class_<Conv2dOpContext>("Conv2dOpContext")
       .def_pickle(
@@ -152,6 +181,15 @@ TORCH_LIBRARY(vulkan_prepack, m) {
       "vulkan_prepack::run_linear_context(Tensor X, "
       "__torch__.torch.classes.vulkan.LinearPackedContext BW_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::run_qlinear_context(Tensor X, float scale, int zero_point, "
+      "__torch__.torch.classes.vulkan.LinearPackedContext vk_context) -> Tensor Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::create_layernorm_context(Tensor? W, Tensor? B, float eps) "
+      "-> __torch__.torch.classes.vulkan.LayernormPackedContext"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::run_layernorm_context(Tensor X, SymInt[] normalized_shape, "
+      "__torch__.torch.classes.vulkan.LayernormPackedContext BW_prepack) -> Tensor Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
       "vulkan_prepack::create_gru_context(Tensor[] params_cpu, "
       "bool has_biases, "
       "int num_layers, "
@@ -210,6 +248,9 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
       TORCH_SELECTIVE_NAME("vulkan_prepack::create_linear_context"),
       TORCH_FN(create_linear_context));
   m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::create_layernorm_context"),
+      TORCH_FN(create_layernorm_context));
+  m.impl(
       TORCH_SELECTIVE_NAME("vulkan_prepack::create_gru_context"),
       TORCH_FN(create_gru_context));
   m.impl(
@@ -242,6 +283,12 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("vulkan_prepack::run_linear_context"),
       TORCH_FN(run_linear_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::run_layernorm_context"),
+      TORCH_FN(run_layernorm_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::run_qlinear_context"),
+      TORCH_FN(run_qlinear_context));
   m.impl(
       TORCH_SELECTIVE_NAME("vulkan_prepack::run_gru_context"),
       TORCH_FN(run_gru_context));

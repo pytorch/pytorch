@@ -28,7 +28,7 @@
 
 #include <tuple>
 
-namespace at { namespace native {
+namespace at::native {
 
 static void check1d(
     const char* function_name,
@@ -54,6 +54,19 @@ Tensor adaptive_avg_pool1d(const Tensor & self, IntArrayRef output_size) {
 std::tuple<Tensor,Tensor> adaptive_max_pool1d(const Tensor & self, IntArrayRef output_size) {
   checkDimRange("adaptive_max_pool1d", TensorArg(self, "self", 1), 2, 4 /* exclusive */);
   check1d("adaptive_max_pool1d", "output_size", output_size);
+
+  int ndim = self.ndimension();
+  for (const auto i : c10::irange(1, ndim)) {
+    TORCH_CHECK(
+        self.sym_size(i) > 0,
+        "adaptive_max_pool1d(): ",
+        "Expected input to have non-zero size for non-batch dimensions, "
+        "but input has sizes ",
+        self.sym_sizes(),
+        " with dimension ",
+        i,
+        " being empty");
+  }
 
   Tensor output, indices;
   std::tie(output, indices) = at::adaptive_max_pool2d(
@@ -173,5 +186,4 @@ Tensor max_pool3d(
   return std::get<0>(output_and_indices);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

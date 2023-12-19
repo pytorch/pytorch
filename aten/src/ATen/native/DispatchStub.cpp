@@ -1,14 +1,16 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/DispatchStub.h>
 
+#include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
-#include <c10/macros/Macros.h>
 
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
+#endif
 #include <cstdlib>
 #include <cstring>
 
-namespace at { namespace native {
+namespace at::native {
 
 static CPUCapability compute_cpu_capability() {
   auto envar = std::getenv("ATEN_CPU_CAPABILITY");
@@ -41,9 +43,7 @@ static CPUCapability compute_cpu_capability() {
 
 #if !defined(__powerpc__) && !defined(__s390x__)
   if (cpuinfo_initialize()) {
-    // AVX512 can be slower then AVX2, so lets keep it as opt-in
-    // see https://github.com/pytorch/pytorch/issues/80252
-#if defined(HAVE_AVX512_CPU_DEFINITION) && false
+#if defined(HAVE_AVX512_CPU_DEFINITION)
     // GCC supports some AVX512 intrinsics such as _mm512_set_epi16 only in
     // versions 9 & beyond. So, we want to ensure that only releases built with
     // supported compilers on supported hardware return CPU Capability AVX512,
@@ -192,4 +192,4 @@ void* DispatchStubImpl::choose_cpu_impl(
   return DEFAULT;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

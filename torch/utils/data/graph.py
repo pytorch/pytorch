@@ -84,6 +84,7 @@ def _list_connected_datapipes(scan_obj: DataPipe, only_datapipe: bool, cache: Se
 def traverse_dps(datapipe: DataPipe) -> DataPipeGraph:
     r"""
     Traverse the DataPipes and their attributes to extract the DataPipe graph.
+
     This only looks into the attribute from each DataPipe that is either a
     DataPipe and a Python collection object such as ``list``, ``tuple``,
     ``set`` and ``dict``.
@@ -100,10 +101,12 @@ def traverse_dps(datapipe: DataPipe) -> DataPipeGraph:
 
 def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPipeGraph:
     r"""
-    [Deprecated] Traverse the DataPipes and their attributes to extract the DataPipe graph. When
-    ``only_dataPipe`` is specified as ``True``, it would only look into the attribute
-    from each DataPipe that is either a DataPipe and a Python collection object such as
-    ``list``, ``tuple``, ``set`` and ``dict``.
+    Traverse the DataPipes and their attributes to extract the DataPipe graph.
+
+    [Deprecated]
+    When ``only_dataPipe`` is specified as ``True``, it would only look into the
+    attribute from each DataPipe that is either a DataPipe and a Python collection object
+    such as ``list``, ``tuple``, ``set`` and ``dict``.
 
     Note:
         This function is deprecated. Please use `traverse_dps` instead.
@@ -130,7 +133,7 @@ def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPi
 # Add cache here to prevent infinite recursion on DataPipe
 def _traverse_helper(datapipe: DataPipe, only_datapipe: bool, cache: Set[int]) -> DataPipeGraph:
     if not isinstance(datapipe, (IterDataPipe, MapDataPipe)):
-        raise RuntimeError("Expected `IterDataPipe` or `MapDataPipe`, but {} is found".format(type(datapipe)))
+        raise RuntimeError(f"Expected `IterDataPipe` or `MapDataPipe`, but {type(datapipe)} is found")
 
     dp_id = id(datapipe)
     if dp_id in cache:

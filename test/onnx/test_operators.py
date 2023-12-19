@@ -48,7 +48,7 @@ _onnx_dep = True  # flag to import onnx package.
 
 def export_to_pbtxt(model, inputs, *args, **kwargs):
     return torch.onnx.export_to_pretty_string(
-        model, inputs, google_printer=True, *args, **kwargs
+        model, inputs, *args, google_printer=True, **kwargs
     )
 
 
@@ -105,9 +105,7 @@ class TestOperators(common_utils.TestCase):
                 # Assume:
                 #     1) the old test should be delete before the test.
                 #     2) only one assertONNX in each test, otherwise will override the data.
-                assert not os.path.exists(output_dir), "{} should not exist!".format(
-                    output_dir
-                )
+                assert not os.path.exists(output_dir), f"{output_dir} should not exist!"
                 os.makedirs(output_dir)
                 with open(os.path.join(output_dir, "model.onnx"), "wb") as file:
                     file.write(model_def.SerializeToString())
@@ -908,7 +906,7 @@ class TestOperators(common_utils.TestCase):
             def forward(self, x_in):
                 x_out = {}
                 x_out["test_key_out"] = torch.add(
-                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]
+                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]  # noqa: RUF015
                 )
                 return x_out
 
@@ -994,6 +992,16 @@ class TestOperators(common_utils.TestCase):
         y = torch.zeros(4, requires_grad=True)
         z = torch.ones(5, requires_grad=True)
         self.assertONNX(lambda x, y, z: torch.meshgrid(x, y, z), (x, y, z))
+
+    def test_meshgrid_indexing(self):
+        x = torch.ones(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.ones(5, requires_grad=True)
+        self.assertONNX(
+            lambda x, y, z: torch.meshgrid(x, y, z, indexing="xy"),
+            (x, y, z),
+            opset_version=9,
+        )
 
     def test_topk(self):
         x = torch.arange(1.0, 6.0, requires_grad=True)

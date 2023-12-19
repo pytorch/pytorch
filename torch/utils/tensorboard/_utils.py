@@ -20,7 +20,7 @@ def figure_to_image(figures, close=True):
     def render_to_rgb(figure):
         canvas = plt_backend_agg.FigureCanvasAgg(figure)
         canvas.draw()
-        data = np.frombuffer(canvas.buffer_rgba(), dtype=np.uint8)
+        data: np.ndarray = np.frombuffer(canvas.buffer_rgba(), dtype=np.uint8)
         w, h = figure.canvas.get_width_height()
         image_hwc = data.reshape([h, w, 4])[:, :, 0:3]
         image_chw = np.moveaxis(image_hwc, source=2, destination=0)
@@ -38,8 +38,11 @@ def figure_to_image(figures, close=True):
 
 def _prepare_video(V):
     """
-    Converts a 5D tensor [batchsize, time(frame), channel(color), height, width]
-    into 4D tensor with dimension [time(frame), new_width, new_height, channel].
+    Convert a 5D tensor into 4D tensor.
+
+    Convesrion is done from [batchsize, time(frame), channel(color), height, width]  (5D tensor)
+    to [time(frame), new_width, new_height, channel] (4D tensor).
+
     A batch of images are spreaded to a grid, which forms a frame.
     e.g. Video with batchsize 16 will have a 4x4 grid.
     """
@@ -95,16 +98,11 @@ def make_grid(I, ncols=8):
 def convert_to_HWC(tensor, input_format):  # tensor: numpy array
     assert len(set(input_format)) == len(
         input_format
-    ), "You can not use the same dimension shordhand twice. \
-        input_format: {}".format(
-        input_format
-    )
+    ), f"You can not use the same dimension shordhand twice.         input_format: {input_format}"
     assert len(tensor.shape) == len(
         input_format
-    ), "size of input tensor and input format are different. \
-        tensor shape: {}, input_format: {}".format(
-        tensor.shape, input_format
-    )
+    ), f"size of input tensor and input format are different. \
+        tensor shape: {tensor.shape}, input_format: {input_format}"
     input_format = input_format.upper()
 
     if len(input_format) == 4:

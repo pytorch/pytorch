@@ -2,6 +2,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -12,6 +13,35 @@
 #endif
 
 namespace at::native::mps {
+
+void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)()) {
+  __block std::optional<std::exception_ptr> block_exception;
+  dispatch_sync(queue, ^() {
+    try {
+      block();
+    } catch (...) {
+      block_exception = std::current_exception();
+    }
+  });
+  if (block_exception) {
+    std::rethrow_exception(*block_exception);
+  }
+}
+
+/**
+ * Computes distance from lowest to highest element offset in given tensor.
+ */
+size_t compute_storage_numel_distance(const at::Tensor& t) {
+  size_t rc = 1;
+  if (t.numel() == 0) {
+    return 0;
+  }
+  for (const auto i : c10::irange(t.dim())) {
+    assert(t.size(i) > 0);
+    rc += (t.size(i) - 1) * t.stride(i);
+  }
+  return rc;
+}
 
 void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
   mpsStream->executeMPSGraph(mpsGraph, feeds, results, SyncType::COMMIT_ADAPTIVE);
@@ -39,6 +69,14 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
       TORCH_CHECK_TYPE(false,
                        "Cannot convert a float64 Tensor to MPS as the MPS framework doesn't support float64. "
                        "Please use float32 instead.")
+    case ScalarType::ComplexHalf:
+      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+                       "MPS complex types are only supported on MacOS 14.0 or newer.");
+      return MPSDataTypeComplexFloat16;
+    case ScalarType::ComplexFloat:
+      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+                       "MPS complex types are only supported on MacOS 14.0 or newer.");
+      return MPSDataTypeComplexFloat32;
     default:
       TORCH_CHECK_TYPE(
           false, "Trying to convert ", scalar_type, " to the MPS backend but it does not have support for that dtype.")
@@ -105,6 +143,14 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
       return MPSDataTypeUInt8;
     case ScalarType::Bool:
       return MPSDataTypeBool;
+    case ScalarType::ComplexHalf:
+      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+                       "MPS complex types are only supported on MacOS 14.0 or newer.");
+      return MPSDataTypeComplexFloat16;
+    case ScalarType::ComplexFloat:
+      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+                       "MPS complex types are only supported on MacOS 14.0 or newer.");
+      return MPSDataTypeComplexFloat32;
     default:
       TORCH_CHECK_TYPE(
           false, "Trying to convert ", scalar_type, " to the MPS backend but it does not have support for that dtype.")
@@ -131,6 +177,10 @@ std::string getMPSTypeString(ScalarType scalar_type, bool short_name) {
       return short_name ? "u8" : "UInt8";
     case ScalarType::Bool:
       return short_name ? "b8" : "Bool";
+    case ScalarType::ComplexHalf:
+      return short_name ? "c16" : "ComplexFloat16";
+    case ScalarType::ComplexFloat:
+      return short_name ? "c32" : "ComplexFloat32";
     default:
       return "Undefined";
   }
@@ -160,7 +210,7 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
   }
 }
 
-NSArray<NSNumber*>* getTensorAxes(int64_t ndim) {
+static NSArray<NSNumber*>* getTensorAxes(int64_t ndim) {
   auto axes = [NSMutableArray<NSNumber*> arrayWithCapacity:ndim];
   for (const auto i : c10::irange(ndim)) {
     axes[i] = [NSNumber numberWithInteger:i];
@@ -172,7 +222,7 @@ NSArray<NSNumber*>* getTensorAxes(const Tensor& t) {
   return getTensorAxes(t.dim());
 }
 
-NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes) {
+static NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes) {
   return getTensorAxes(sizes.size());
 }
 

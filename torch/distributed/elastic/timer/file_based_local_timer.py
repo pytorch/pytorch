@@ -158,7 +158,7 @@ class FileTimerServer:
         file_path: str,
         max_interval: float = 10,
         daemon: bool = True,
-        log_event: Callable[[str, Optional[FileTimerRequest]], None] = None
+        log_event: Optional[Callable[[str, Optional[FileTimerRequest]], None]] = None
     ) -> None:
         self._file_path = file_path
         self._max_interval = max_interval
@@ -218,15 +218,15 @@ class FileTimerServer:
         #  1. No client case usually does not happen.
         #  2. We are running the watchdog loop in a separate daemon
         #     thread, which will not block the process to stop.
-        with open(self._file_path, "rt") as fd:
+        with open(self._file_path) as fd:
             while not self._stop_signaled:
                 try:
                     run_once = self._run_once
                     self._run_watchdog(fd)
                     if run_once:
                         break
-                except Exception as e:
-                    log.error("Error running watchdog", exc_info=e)
+                except Exception:
+                    log.exception("Error running watchdog")
 
     def _run_watchdog(self, fd: io.TextIOWrapper) -> None:
         timer_requests = self._get_requests(fd, self._max_interval)
@@ -234,7 +234,7 @@ class FileTimerServer:
         now = time.time()
         reaped_worker_pids = set()
         for worker_pid, expired_timers in self.get_expired_timers(now).items():
-            log.info("Reaping worker_pid=[%s]." " Expired timers: %s", worker_pid, self._get_scopes(expired_timers))
+            log.info("Reaping worker_pid=[%s]. Expired timers: %s", worker_pid, self._get_scopes(expired_timers))
             reaped_worker_pids.add(worker_pid)
             # In case we have multiple expired timers, we find the first timer
             # with a valid signal (>0) in the expiration time order.
@@ -328,6 +328,6 @@ class FileTimerServer:
         except ProcessLookupError:
             log.info("Process with pid=%s does not exist. Skipping", worker_pid)
             return True
-        except Exception as e:
-            log.error("Error terminating pid=%s", worker_pid, exc_info=e)
+        except Exception:
+            log.exception("Error terminating pid=%s", worker_pid)
         return False

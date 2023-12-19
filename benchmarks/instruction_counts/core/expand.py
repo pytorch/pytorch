@@ -8,8 +8,8 @@ import itertools as it
 import os
 import re
 import textwrap
-from typing import List, Optional, Tuple, TYPE_CHECKING
 import uuid
+from typing import List, Optional, Tuple, TYPE_CHECKING
 
 import torch
 
@@ -24,11 +24,13 @@ from core.types import FlatDefinition, FlatIntermediateDefinition, Label
 from core.utils import get_temp_dir
 
 
-_ALL_MODES = tuple(it.product(
-    RuntimeMode,
-    AutogradMode,
-    Language,
-))
+_ALL_MODES = tuple(
+    it.product(
+        RuntimeMode,
+        AutogradMode,
+        Language,
+    )
+)
 
 
 def _generate_torchscript_file(model_src: str, name: str) -> Optional[str]:
@@ -58,11 +60,13 @@ def _generate_torchscript_file(model_src: str, name: str) -> Optional[str]:
         # to confirm.
         raise ValueError(f"File {module_path} already exists.")
 
-    with open(module_path, "wt") as f:
+    with open(module_path, "w") as f:
         f.write(model_src)
 
     # Import magic to actually load our function.
-    module_spec = importlib.util.spec_from_file_location(f"torchscript__{name}", module_path)
+    module_spec = importlib.util.spec_from_file_location(
+        f"torchscript__{name}", module_path
+    )
     assert module_spec is not None
     module = importlib.util.module_from_spec(module_spec)
     loader = module_spec.loader
@@ -73,8 +77,7 @@ def _generate_torchscript_file(model_src: str, name: str) -> Optional[str]:
     # And again, the type checker has no way of knowing that this line is valid.
     jit_model = module.jit_model  # type: ignore[attr-defined]
     assert isinstance(
-        jit_model,
-        (torch.jit.ScriptFunction, torch.jit.ScriptModule)
+        jit_model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)
     ), f"Expected ScriptFunction or ScriptModule, got: {type(jit_model)}"
     jit_model.save(artifact_path)
 
@@ -90,7 +93,7 @@ def _get_stmt(
     language: Language,
 ) -> Optional[str]:
     """Specialize a GroupedBenchmark for a particular configuration."""
-    is_python = (language == Language.PYTHON)
+    is_python = language == Language.PYTHON
 
     # During GroupedBenchmark construction, py_fwd_stmt and cpp_fwd_stmt are
     # set to the eager invocation. So in the RuntimeMode.EAGER case we can
@@ -103,7 +106,8 @@ def _get_stmt(
         assert runtime == RuntimeMode.JIT
         assert benchmark.signature_args is not None
         stmts = GroupedBenchmark._make_model_invocation(
-            benchmark.signature_args, benchmark.signature_output, RuntimeMode.JIT)
+            benchmark.signature_args, benchmark.signature_output, RuntimeMode.JIT
+        )
 
     stmt = stmts[0 if is_python else 1]
 
@@ -111,7 +115,6 @@ def _get_stmt(
         assert benchmark.signature_output is not None
         backward = (
             f"{benchmark.signature_output}"
-
             # In C++ we have to get the Tensor out of the IValue to call `.backward()`
             f"{'.toTensor()' if runtime == RuntimeMode.JIT and language == Language.CPP else ''}"
             f".backward(){';' if language == Language.CPP else ''}"
@@ -125,7 +128,7 @@ def _get_setup(
     runtime: RuntimeMode,
     language: Language,
     stmt: str,
-    model_path: Optional[str]
+    model_path: Optional[str],
 ) -> str:
     """Specialize a GroupedBenchmark for a particular configuration.
 
@@ -162,17 +165,20 @@ def _get_setup(
     # `stmt` may contain newlines, so we can't use f-strings. Instead we need
     # to generate templates so that dedent works properly.
     if language == Language.PYTHON:
-        setup_template: str = textwrap.dedent(f"""
+        setup_template: str = textwrap.dedent(
+            f"""
             jit_model = torch.jit.load("{model_path}")
 
             # Warmup `jit_model`
             for _ in range(3):
             {{stmt}}
-        """)
+        """
+        )
 
     else:
         assert language == Language.CPP
-        setup_template = textwrap.dedent(f"""
+        setup_template = textwrap.dedent(
+            f"""
             const std::string fpath = "{model_path}";
             auto jit_model = torch::jit::load(fpath);
 
@@ -180,9 +186,10 @@ def _get_setup(
             for (int i = 0; i < 3; i++) {{{{
             {{stmt}}
             }}}}
-        """)
+        """
+        )
 
-    model_load = setup_template.format(stmt=textwrap.indent(stmt, ' ' * 4))
+    model_load = setup_template.format(stmt=textwrap.indent(stmt, " " * 4))
     return "\n".join([setup, model_load])
 
 
@@ -199,9 +206,7 @@ def materialize(benchmarks: FlatIntermediateDefinition) -> FlatDefinition:
         if isinstance(args, TimerArgs):
             # User provided an explicit TimerArgs, so no processing is necessary.
             auto_labels = AutoLabels(
-                RuntimeMode.EXPLICIT,
-                AutogradMode.EXPLICIT,
-                args.language
+                RuntimeMode.EXPLICIT, AutogradMode.EXPLICIT, args.language
             )
             results.append((label, auto_labels, args))
 
@@ -210,16 +215,20 @@ def materialize(benchmarks: FlatIntermediateDefinition) -> FlatDefinition:
 
             model_path: Optional[str] = None
             if args.py_model_setup and args.torchscript:
-                model_setup = f"{args.py_model_setup}\njit_model = torch.jit.script(model)"
+                model_setup = (
+                    f"{args.py_model_setup}\njit_model = torch.jit.script(model)"
+                )
 
                 # This is just for debugging. We just need a unique name for the
                 # model, but embedding the label makes debugging easier.
-                name: str = re.sub(r'[^a-z0-9_]', '_', '_'.join(label).lower())
+                name: str = re.sub(r"[^a-z0-9_]", "_", "_".join(label).lower())
                 name = f"{name}_{uuid.uuid4()}"
 
                 model_path = _generate_torchscript_file(model_setup, name=name)
 
-            for (runtime, autograd, language), num_threads in it.product(_ALL_MODES, args.num_threads):
+            for (runtime, autograd, language), num_threads in it.product(
+                _ALL_MODES, args.num_threads
+            ):
                 if runtime == RuntimeMode.EXPLICIT or autograd == AutogradMode.EXPLICIT:
                     continue
 
@@ -237,11 +246,13 @@ def materialize(benchmarks: FlatIntermediateDefinition) -> FlatDefinition:
 
                 global_setup: str = ""
                 if language == Language.CPP and runtime == RuntimeMode.JIT:
-                    global_setup = textwrap.dedent("""
+                    global_setup = textwrap.dedent(
+                        """
                         #include <string>
                         #include <vector>
                         #include <torch/script.h>
-                    """)
+                    """
+                    )
 
                 autolabels = AutoLabels(runtime, autograd, language)
                 timer_args = TimerArgs(

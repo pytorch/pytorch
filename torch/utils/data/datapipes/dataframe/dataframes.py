@@ -36,7 +36,7 @@ def disable_capture():
     CaptureControl.disabled = True
 
 
-class CaptureControl():
+class CaptureControl:
     disabled = False
 
 
@@ -177,14 +177,14 @@ class CaptureF(Capture):
 
 class CaptureA(CaptureF):
     def __str__(self):
-        return '{name}'.format(name=self.kwargs['name'])
+        return f"{self.kwargs['name']}"
 
     def execute(self):
         value = self.kwargs['real_attribute']
         return value
 
 
-class CaptureLikeMock():
+class CaptureLikeMock:
     def __init__(self, name):
         import unittest.mock as mock
         # TODO(VitalyFedyunin): Do not use provate function here, copy own implementation instead.
@@ -232,7 +232,7 @@ class CaptureVariableAssign(CaptureF):
     def __str__(self):
         variable = self.kwargs['variable']
         value = self.kwargs['value']
-        return "{variable} = {value}".format(variable=variable, value=value)
+        return f"{variable} = {value}"
 
     def execute(self):
         self.kwargs['variable'].calculated_value = self.kwargs['value'].execute()
@@ -247,7 +247,7 @@ class CaptureVariable(Capture):
             raise Exception('Attempting to create capture variable with capture off')
         self.ctx = ctx
         self.value = value
-        self.name = 'var_%s' % CaptureVariable.names_idx
+        self.name = f'var_{CaptureVariable.names_idx}'
         CaptureVariable.names_idx += 1
         self.ctx['variables'].append(self)
 
@@ -272,7 +272,7 @@ class CaptureGetItem(Capture):
         self.key = key
 
     def __str__(self):
-        return "%s[%s]" % (self.left, get_val(self.key))
+        return f"{self.left}[{get_val(self.key)}]"
 
     def execute(self):
         left = self.left.execute()
@@ -287,7 +287,7 @@ class CaptureSetItem(Capture):
         self.value = value
 
     def __str__(self):
-        return "%s[%s] = %s" % (self.left, get_val(self.key), self.value)
+        return f"{self.left}[{get_val(self.key)}] = {self.value}"
 
     def execute(self):
         left = self.left.execute()
@@ -302,7 +302,7 @@ class CaptureAdd(Capture):
         self.right = right
 
     def __str__(self):
-        return "%s + %s" % (self.left, self.right)
+        return f"{self.left} + {self.right}"
 
     def execute(self):
         return get_val(self.left) + get_val(self.right)
@@ -315,7 +315,7 @@ class CaptureMul(Capture):
         self.right = right
 
     def __str__(self):
-        return "%s * %s" % (self.left, self.right)
+        return f"{self.left} * {self.right}"
 
     def execute(self):
         return get_val(self.left) * get_val(self.right)
@@ -328,7 +328,7 @@ class CaptureSub(Capture):
         self.right = right
 
     def __str__(self):
-        return "%s - %s" % (self.left, self.right)
+        return f"{self.left} - {self.right}"
 
     def execute(self):
         return get_val(self.left) - get_val(self.right)
@@ -341,7 +341,7 @@ class CaptureGetAttr(Capture):
         self.name = name
 
     def __str__(self):
-        return "%s.%s" % (self.src, self.name)
+        return f"{self.src}.{self.name}"
 
     def execute(self):
         val = get_val(self.src)
@@ -352,7 +352,7 @@ def get_val(capture):
     if isinstance(capture, Capture):
         return capture.execute()
     elif isinstance(capture, str):
-        return '"%s"' % capture
+        return f'"{capture}"'
     else:
         return capture
 
@@ -361,7 +361,7 @@ class CaptureInitial(CaptureVariable):
     def __init__(self, schema_df=None):
         new_ctx: Dict[str, List[Any]] = {'operations': [], 'variables': [], 'schema_df': schema_df}
         super().__init__(None, new_ctx)
-        self.name = 'input_%s' % self.name
+        self.name = f'input_{self.name}'
 
 
 class CaptureDataFrame(CaptureInitial):
@@ -415,7 +415,7 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
 
 
 @functional_datapipe('trace_as_dataframe')
-class DataFrameTracer(CaptureDataFrameWithDataPipeOps, IterDataPipe):
+class DataFrameTracer(CaptureDataFrameWithDataPipeOps, IterDataPipe):  # type: ignore[misc]
     source_datapipe = None
 
     # TODO(VitalyFedyunin): Must implement all special functions of datapipes
