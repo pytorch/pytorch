@@ -1,16 +1,16 @@
 DOCKER_REGISTRY          ?= docker.io
 DOCKER_ORG               ?= $(shell docker info 2>/dev/null | sed '/Username:/!d;s/.* //')
 DOCKER_IMAGE             ?= pytorch
-CUDA_VERSION_SHORT       ?= 12.1
-CUDA_VERSION             ?= 12.1.1
-CUDNN_VERSION            ?= 8
-DOCKER_FULL_NAME          = $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(DOCKER_IMAGE)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)
+DOCKER_FULL_NAME          = $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(DOCKER_IMAGE)
 
 ifeq ("$(DOCKER_ORG)","")
 $(warning WARNING: No docker user found using results from whoami)
 DOCKER_ORG                = $(shell whoami)
 endif
 
+CUDA_VERSION_SHORT       ?= 12.1
+CUDA_VERSION             ?= 12.1.1
+CUDNN_VERSION            ?= 8
 BASE_RUNTIME              = ubuntu:22.04
 BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-devel-ubuntu22.04
 CMAKE_VARS               ?=
@@ -72,25 +72,25 @@ all: devel-image
 
 .PHONY: devel-image
 devel-image: BASE_IMAGE := $(BASE_DEVEL)
-devel-image: DOCKER_TAG := $(PYTORCH_VERSION)-devel
+devel-image: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-devel
 devel-image:
 	$(DOCKER_BUILD)
 
 .PHONY: devel-push
 devel-push: BASE_IMAGE := $(BASE_DEVEL)
-devel-push: DOCKER_TAG := $(PYTORCH_VERSION)-devel
+devel-push: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-devel
 devel-push:
 	$(DOCKER_PUSH)
 
 .PHONY: runtime-image
 runtime-image: BASE_IMAGE := $(BASE_RUNTIME)
-runtime-image: DOCKER_TAG := $(PYTORCH_VERSION)-runtime
+runtime-image: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-runtime
 runtime-image:
 	$(DOCKER_BUILD)
 
 .PHONY: runtime-push
 runtime-push: BASE_IMAGE := $(BASE_RUNTIME)
-runtime-push: DOCKER_TAG := $(PYTORCH_VERSION)-runtime
+runtime-push: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-runtime
 runtime-push:
 	$(DOCKER_PUSH)
 
