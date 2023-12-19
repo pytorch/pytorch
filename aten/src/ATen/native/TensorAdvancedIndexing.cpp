@@ -116,8 +116,10 @@
 #include <ATen/ops/masked_scatter_native.h>
 #include <ATen/ops/masked_select_backward_native.h>
 #include <ATen/ops/masked_select_native.h>
+#include <ATen/ops/nested_to_padded_tensor_native.h>
 #include <ATen/ops/nonzero_native.h>
 #include <ATen/ops/nonzero_numpy_native.h>
+#include <ATen/ops/nonzero_static_native.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/put_native.h>
 #include <ATen/ops/quantize_per_tensor.h>
@@ -144,15 +146,14 @@
 #include <utility>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 std::string shapes_as_str(TensorList tensors);
 AdvancedIndex make_info(Tensor self, IOptTensorListRef orig);
 
-} // namespace native
+} // namespace at::native
 
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC(gather)
 (const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
@@ -342,14 +343,18 @@ void index_func_meta_impl(
               func, "_(): Number of indices (", numel, ") should be equal to source.size(dim): (",
               source.size(dim), "), for dim: ", dim);
 
-  if (source.dim() != 0) {
-    auto self_sizes = self.sizes().vec();
-    auto source_sizes = source.sizes().vec();
+  auto self_sizes = self.sizes().vec();
+  auto source_sizes = source.sizes().vec();
+  if (source.dim() != 0 && self.dim() != 0) {
     self_sizes.erase(self_sizes.begin() + dim);
     source_sizes.erase(source_sizes.begin() + dim);
-    TORCH_CHECK(self_sizes == source_sizes,
-    "source tensor shape must match self tensor shape, excluding the specified dimension. Got self.shape = ", self.sizes(), " source.shape = ", source.sizes());
   }
+  TORCH_CHECK(
+      self_sizes == source_sizes,
+      "source tensor shape must match self tensor shape, excluding the specified dimension. Got self.shape = ",
+      self.sizes(),
+      " source.shape = ",
+      source.sizes());
 
   auto& result = meta.maybe_get_output(0);
   bool is_defined = result.defined();
@@ -462,9 +467,9 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
       .set_strides(std::move(info.indexed_strides));
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(index_stub);
 DEFINE_DISPATCH(index_fill_stub);
@@ -1880,6 +1885,27 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
   return _self->clone(at::MemoryFormat::Contiguous).masked_scatter_(*_mask, source);
 }
 
+Tensor masked_scatter_backward_symint(
+    const Tensor& grad,
+    const Tensor& mask,
+    c10::SymIntArrayRef sizes) {
+  c10::SymInt numel = 1;
+  for (const auto& size : sizes) {
+    numel *= size;
+  }
+  auto mask_selected = grad.masked_select(mask);
+  auto diff_nelem = numel - mask_selected.sym_numel();
+  if (diff_nelem > 0) {
+    // because mask_selected returns a 1-d tensor with size of masked elements
+    // that are 1, we need to fill out the rest with zeros then reshape back to
+    // tensor2's size.
+    auto zeros_fillin =
+        at::zeros_symint({std::move(diff_nelem)}, grad.options());
+    mask_selected = at::cat({mask_selected, std::move(zeros_fillin)}, 0);
+  }
+  return mask_selected.view_symint(sizes);
+}
+
 static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, const Scalar& value) {
   NoNamesGuard guard;
   TORCH_CHECK(mask.dtype() == ScalarType::Bool, "masked_fill_ only supports boolean masks, but got mask "
@@ -2476,4 +2502,4 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
   return self;
 }
 
-}} // at::native
+} // namespace at::native

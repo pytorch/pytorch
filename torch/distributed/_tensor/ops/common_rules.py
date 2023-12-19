@@ -52,9 +52,9 @@ def einop_rule(
     enforce_sharding: Optional[Dict[str, int]] = None,
 ) -> OutputSharding:
     """
-    Propagate the sharding of inputs to output for ops whose data
-    moves according to einsum notation. This is mostly borrowed
-    from @zdevito's sharding simulator. Examples:
+    Propagate the sharding of inputs to output for ops whose data moves according to einsum notation.
+
+    This is mostly borrowed from @zdevito's sharding simulator. Examples:
         mk,kn->mn - einsum
         ij,ij->ij - addition
         ij,j->ij - broadcasted addition
@@ -229,7 +229,9 @@ def einop_rule(
 
 def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputSharding:
     """
-    Propagate the sharding for pointwise operations. Examples:
+    Propagate the sharding for pointwise operations.
+
+    Examples:
         ij,ij->ij - addition/mul
         ij,j->ij - broadcasted addition
     """
@@ -285,12 +287,3 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
         linearity=linearity,
         enforce_sharding=enforce_sharding,
     )
-
-
-def linear_pointwise_rule(op_schema: OpSchema) -> OutputSharding:
-    """
-    Linear pointwise operators can propagate pending reductions.
-    For example, c = add(a, b); if a is pending sum, then c will be
-    pending sum as well without any communication overhead.
-    """
-    return pointwise_rule(op_schema, linearity=True)

@@ -4,11 +4,12 @@ import io
 from copy import deepcopy
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
-from torch.distributed._tensor import DTensor, mesh_resources, Replicate, Shard
-from torch.distributed._tensor.device_mesh import init_device_mesh
+from torch.distributed._tensor import DTensor, Replicate, Shard
+from torch.distributed.device_mesh import _mesh_resources, init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import (
     ShardedOptimStateDictConfig,
@@ -31,13 +32,13 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 # Simple and boring model to test interface and some corner cases that do not
 # require complicated wrapping strategy.
-class TestDummyModel(torch.nn.Module):
+class DenseModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
         self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
-        self.net3 = nn.Linear(32, 64)
+        self.net3 = nn.Sequential(nn.Linear(32, 64), nn.ReLU())
         self.net4 = nn.Sequential(nn.ReLU(), nn.Linear(64, 8))
 
     def forward(self, x):
@@ -55,14 +56,14 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
         # manually set a fake parent mesh to mesh_2d
         fake_parent_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        mesh_resources.child_to_parent_mapping[mesh_2d] = fake_parent_mesh
+        _mesh_resources.child_to_parent_mapping[mesh_2d] = fake_parent_mesh
 
         with self.assertRaisesRegex(
             RuntimeError,
             r"Hybrid sharding \+ TP is not supported yet.",
         ):
             model = FSDP(
-                TestDummyModel().cuda(),
+                DenseModel().cuda(),
                 device_mesh=mesh_2d,
                 sharding_strategy=ShardingStrategy.HYBRID_SHARD,
             )
@@ -70,16 +71,16 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     def _create_model(self, device_mesh=None):
         if device_mesh:
             model = FSDP(
-                TestDummyModel().cuda(),
+                DenseModel().cuda(),
                 device_mesh=device_mesh,
                 sharding_strategy=ShardingStrategy.HYBRID_SHARD,
             )
         else:
             mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
-            intra_node_pg = mesh_2d.get_dim_groups(mesh_dim=1)
-            inter_node_pg = mesh_2d.get_dim_groups(mesh_dim=0)
+            intra_node_pg = mesh_2d.get_group(mesh_dim=1)
+            inter_node_pg = mesh_2d.get_group(mesh_dim=0)
             model = FSDP(
-                TestDummyModel().cuda(),
+                DenseModel().cuda(),
                 process_group=(intra_node_pg, inter_node_pg),
                 sharding_strategy=ShardingStrategy.HYBRID_SHARD,
             )
@@ -154,11 +155,11 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         sharded_tensor_osd = FSDP.optim_state_dict(ref_model, ref_optim)
 
         # Check dtensor and sharded_tensor model state dict values are identical
-        for dtensor_sd, sharded_tensor_sd in zip(
+        for dtensor_sd_item, sharded_tensor_sd_item in zip(
             dtensor_sd.items(), sharded_tensor_sd.items()
         ):
-            k1, v1 = dtensor_sd
-            k2, v2 = sharded_tensor_sd
+            k1, v1 = dtensor_sd_item
+            k2, v2 = sharded_tensor_sd_item
             self.assertEqual(k1, k2)
 
             self.assertEqual(type(v1), DTensor)
@@ -225,15 +226,15 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         new_optim_state_dict = FSDP.optim_state_dict(model, optim)
 
         # Check whether new_optim_state_dict is the same as ref_optim_state_dict.
-        for new_optim_state_dict, ref_optim_state_dict in zip(
+        for new_optim_state_dict_item, ref_optim_state_dict_item in zip(
             new_optim_state_dict["state"].items(),
             ref_optim_state_dict["state"].items(),
         ):
             # check FQN are the same
-            self.assertEqual(new_optim_state_dict[0], ref_optim_state_dict[0])
+            self.assertEqual(new_optim_state_dict_item[0], ref_optim_state_dict_item[0])
             for new_optim_hyper_param, ref_optim_hyper_param in zip(
-                new_optim_state_dict[1].items(),
-                ref_optim_state_dict[1].items(),
+                new_optim_state_dict_item[1].items(),
+                ref_optim_state_dict_item[1].items(),
             ):
                 k1, v1 = new_optim_hyper_param
                 k2, v2 = ref_optim_hyper_param
@@ -283,6 +284,56 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             self.assertEqual(type(v2), DTensor)
             # check whether DTensor are the same
             self.assertEqual(v1, v2)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_root_module_is_not_FSDP(self):
+        class FakeMPModel(torch.nn.Module):
+            def __init__(self, device_mesh):
+                super().__init__()
+                torch.manual_seed(0)
+                self.dense = FSDP(
+                    DenseModel().cuda(),
+                    use_orig_params=True,
+                    sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+                    device_mesh=device_mesh,
+                )
+                if dist.get_rank() == 0:
+                    self.sparse0 = nn.Sequential(nn.Linear(8, 8), nn.ReLU())
+                else:
+                    self.sparse1 = nn.Sequential(nn.Linear(8, 8), nn.ReLU())
+
+            def forward(self, x):
+                if dist.get_rank() == 0:
+                    sparse = self.sparse0(x)
+                else:
+                    sparse = self.sparse1(x)
+                dist.all_reduce(sparse)
+                return self.dense(sparse)
+
+        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        model = FakeMPModel(device_mesh=mesh_2d).cuda()
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        batch = torch.rand(5, 8, device=torch.device("cuda"))
+        model(batch).sum().backward()
+        optim.step()
+        osd = optim.state_dict()
+
+        with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
+            osd = FSDP.optim_state_dict(model, optim, osd)
+
+        for param, state in osd["state"].items():
+            if "dense" in param:
+                self.assertIsInstance(state["exp_avg"], DTensor)
+                self.assertIsInstance(state["exp_avg_sq"], DTensor)
+                self.assertEqual(state["exp_avg"].placements, (Replicate(), Shard(0)))
+                self.assertEqual(
+                    state["exp_avg_sq"].placements, (Replicate(), Shard(0))
+                )
+            else:
+                self.assertIsInstance(state["exp_avg"], torch.Tensor)
+                self.assertIsInstance(state["exp_avg_sq"], torch.Tensor)
 
 
 instantiate_parametrized_tests(TestHSDPWithDeviceMeshAndDTensor)

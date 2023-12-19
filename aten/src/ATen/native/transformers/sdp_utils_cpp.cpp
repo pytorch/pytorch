@@ -1,5 +1,4 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
-
 namespace sdp {
 namespace {
 
@@ -43,11 +42,11 @@ bool use_flash_attention_cpp(sdp_params const& params, bool debug) {
       check_nested_tensor,
       check_for_dropout,
       check_tensor_shapes,
-      check_batch_size_and_num_heads,
+      check_batch_size_and_num_heads_dense,
       check_for_attn_mask,
       check_head_dim_size_cpp,
-      check_nonzero_sequence_lengths,
-      check_last_dim_stride_equals_1);
+      check_nonzero_sequence_lengths_dense,
+      check_last_dim_stride_equals_1_dense);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -61,11 +60,9 @@ bool use_flash_attention_cpp(sdp_params const& params, bool debug) {
 SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params) {
   // This function defines the priority order of the different sdp backends
   // 1. Flash Attention
-  // 2. Mem Efficient Attention
-  // 3. Math fallback
+  // 2. Math fallback
   auto& ctx = at::globalContext();
-  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP() &&
-      !ctx.userEnabledMemEfficientSDP()) {
+  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP()) {
     return SDPBackend::error;
   }
   // Get ideal kernel ordering
@@ -91,7 +88,7 @@ SDPBackend select_sdp_backend_cpp(sdp_params const& kernel_params) {
     }
   }
   // If we have gotten to this point then two things have happened:
-  // 1. use_flash_attention or use_mem_efficient did not satisfy the
+  // 1. use_flash_attention did not satisfy the
   // constraints to be ran
   // 2. The user has explicitly disabled the math kernel
   // We then re-run the kernel checks with debug enabled to print out the

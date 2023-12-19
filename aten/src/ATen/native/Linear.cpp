@@ -4,7 +4,6 @@
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/TensorOperators.h>
-#include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/irange.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/MaybeOwned.h>
@@ -28,16 +27,14 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/tensordot_native.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 #include <cctype>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace at { namespace native {
+namespace at::native {
 
 // Parse environment variable "TORCH_LINEAR_FLATTEN_3D"
 static inline bool parseLinearFlatten3d() {
@@ -76,7 +73,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+    : c10::MaybeOwned<Tensor>::owned(std::in_place);
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, *bias);
   }
@@ -121,7 +118,7 @@ Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optiona
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
               ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-              : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+              : c10::MaybeOwned<Tensor>::owned(std::in_place);
 
   if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
@@ -819,4 +816,4 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   return result;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

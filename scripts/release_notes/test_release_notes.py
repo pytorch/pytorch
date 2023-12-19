@@ -34,8 +34,8 @@ class TestCommitList(unittest.TestCase):
             expected.write_to_disk()
 
             commit_list = CommitList.from_existing(commit_list_path)
-            for commit, expected in zip(commit_list.commits, expected.commits):
-                self.assertEqual(commit, expected)
+            for commit, expected_commit in zip(commit_list.commits, expected.commits):
+                self.assertEqual(commit, expected_commit)
 
     def test_update_to(self):
         with tempfile.TemporaryDirectory() as tempdir:
