@@ -141,45 +141,49 @@ def validate_args_and_maybe_create_graph_inputs(
     assert tracer.parent is not None
 
     args = []
-    for a in sub_args:
-        assert isinstance(a, VariableTracker)
-        if not manually_set_subgraph_inputs:
-            args.append(a)
-            continue
 
-        if isinstance(a, (ConstantVariable, EnumVariable)):
-            # This arg is not used in the body of the higher order op.
-            # Currently, this new input is added to make the calls
-            # happy, which expect a fixed number of arguments. In
-            # future, we can clean this up.
-            tracer.create_graph_input("const")
-            new_arg = a
-        # Weird special case, we probably want to delete it or fold it
-        # into the next case (of `a` being placeable into a graph)
-        elif isinstance(a, AutogradFunctionContextVariable):
-            tracer.create_graph_input(a.as_proxy().node.name)
-            new_arg = a
-        # If `a` can be put into a graph
-        elif a.maybe_fx_node() is not None:
-            node = a.maybe_fx_node()
-            new_proxy = tracer.create_graph_input(node.name)
-            example_value = (
-                node.meta["example_value"] if "example_value" in node.meta else None
-            )
-            new_arg = wrap_fx_proxy_cls(
-                target_cls=type(a),
-                tx=tx,
-                proxy=new_proxy,
-                example_value=example_value,
-            )
-        # If `a` cannot be put into a graph
-        else:
-            # HOPs work much better if they use speculate_subgraph(manually_set_subgraph_inputs=False).
-            raise unimplemented(
-                f"{description} with body that accepts non-Tensors as input. "
-                f"Got: {a.python_type()}"
-            )
-        args.append(new_arg)
+    def process_args(sub_args):
+        for a in sub_args:
+            assert isinstance(a, VariableTracker)
+            if not manually_set_subgraph_inputs:
+                args.append(a)
+                continue
+
+            if isinstance(a, (ConstantVariable, EnumVariable)):
+                # This arg is not used in the body of the higher order op.
+                # Currently, this new input is added to make the calls
+                # happy, which expect a fixed number of arguments. In
+                # future, we can clean this up.
+                tracer.create_graph_input("const")
+                new_arg = a
+            # Weird special case, we probably want to delete it or fold it
+            # into the next case (of `a` being placeable into a graph)
+            elif isinstance(a, AutogradFunctionContextVariable):
+                tracer.create_graph_input(a.as_proxy().node.name)
+                new_arg = a
+            # If `a` can be put into a graph
+            elif a.maybe_fx_node() is not None:
+                node = a.maybe_fx_node()
+                new_proxy = tracer.create_graph_input(node.name)
+                example_value = (
+                    node.meta["example_value"] if "example_value" in node.meta else None
+                )
+                new_arg = wrap_fx_proxy_cls(
+                    target_cls=type(a),
+                    tx=tx,
+                    proxy=new_proxy,
+                    example_value=example_value,
+                )
+            # If `a` cannot be put into a graph
+            else:
+                # HOPs work much better if they use speculate_subgraph(manually_set_subgraph_inputs=False).
+                raise unimplemented(
+                    f"{description} with body that accepts non-Tensors as input. "
+                    f"Got: {a.python_type()}"
+                )
+            args.append(new_arg)
+
+    process_args(sub_args)
     return args
 
 
