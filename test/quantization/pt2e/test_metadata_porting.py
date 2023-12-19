@@ -16,6 +16,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import OP_TO_ANNOTA
 from torch.fx import Node
 
 from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_utils import IS_WINDOWS
 
 
 class TestHelperModules:
@@ -57,14 +58,46 @@ _QUANT_OPS = {
 }
 
 
+# TODO: rename to TestPortMetadataPass to align with the util name?
+@unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
 class TestMetaDataPorting(QuantizationTestCase):
+    def _test_quant_tag_preservation_through_decomp(
+        self, model, example_inputs, from_node_to_tags
+    ):
+        ep = export.export(model, example_inputs)
+        found_tags = True
+        not_found_nodes = ""
+        for from_node, tag in from_node_to_tags.items():
+            for n in ep.graph_module.graph.nodes:
+                from_node_meta = n.meta.get("from_node", None)
+                if from_node_meta is None:
+                    continue
+                if not isinstance(from_node_meta, list):
+                    raise ValueError(
+                        f"from_node metadata is of type {type(from_node_meta)}, but expected list"
+                    )
+                for meta in from_node_meta:
+                    node_target = meta[1]
+                    if node_target == from_node:
+                        node_tag = n.meta.get("quantization_tag", None)
+                        if node_tag is None or tag != node_tag:
+                            not_found_nodes += str(n.target) + ", "
+                            found_tags = False
+                            break
+                if not found_tags:
+                    break
+        self.assertTrue(
+            found_tags,
+            f"Decomposition did not preserve quantization tag for {not_found_nodes}",
+        )
+
     def _test_metadata_porting(
         self,
         model,
         example_inputs,
         quantizer,
         node_tags=None,
-    ):
+    ) -> torch.fx.GraphModule:
         m_eager = model.eval()
 
         # program capture
@@ -77,26 +110,37 @@ class TestMetaDataPorting(QuantizationTestCase):
         m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         pt2_quant_output = m(*example_inputs)
         recorded_node_tags = {}
         for n in m.graph.nodes:
+            if "quantization_tag" not in n.meta:
+                continue
+            if n.op == "call_function" and n.target in _QUANT_OPS:
+                key = n.target
+            elif n.op == "get_attr":
+                key = "get_attr"
+            else:
+                continue
+
+            if key not in recorded_node_tags:
+                recorded_node_tags[key] = set()
+
             if (
                 n.op == "call_function"
-                and n.target in _QUANT_OPS
-                and "quantization_tag" in n.meta
+                and n.meta["quantization_tag"] in recorded_node_tags[key]
             ):
-                if n.target not in recorded_node_tags:
-                    recorded_node_tags[n.target] = set()
-                if n.meta["quantization_tag"] in recorded_node_tags[n.target]:
-                    raise ValueError(
-                        f"{n} has tag {n.meta['quantization_tag']} that is associated with another node of the same type"
-                    )
-                recorded_node_tags[n.target].add(n.meta["quantization_tag"])
+                raise ValueError(
+                    f"{key} {n.format_node()} has tag {n.meta['quantization_tag']} that "
+                    "is associated with another node of the same type"
+                )
+            recorded_node_tags[key].add(n.meta["quantization_tag"])
+
         self.assertEqual(set(recorded_node_tags.keys()), set(node_tags.keys()))
         for k, v in recorded_node_tags.items():
             self.assertEqual(v, node_tags[k])
+        return m
 
     def test_simple_metadata_porting(self):
         """
@@ -115,9 +159,7 @@ class TestMetaDataPorting(QuantizationTestCase):
                     gm, quantization_config
                 )
                 _tag_partitions(backend_string, "linear", annotated_partitions)
-                annotated_partitions = OP_TO_ANNOTATOR["conv2d"](
-                    gm, quantization_config
-                )
+                annotated_partitions = OP_TO_ANNOTATOR["conv"](gm, quantization_config)
                 _tag_partitions(backend_string, "conv2d", annotated_partitions)
                 annotated_partitions = OP_TO_ANNOTATOR["adaptive_avg_pool2d"](
                     gm, quantization_config
@@ -130,6 +172,10 @@ class TestMetaDataPorting(QuantizationTestCase):
                 pass
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
+        get_attr_tags = {
+            "BackendA_conv2d_0",
+            "BackendA_linear_0",
+        }
         quantize_per_tensor_tags = {
             "BackendA_conv2d_0",
             "BackendA_adaptive_avg_pool2d_0",
@@ -142,15 +188,24 @@ class TestMetaDataPorting(QuantizationTestCase):
         }
         dequantize_per_channel_tags = {"BackendA_conv2d_0", "BackendA_linear_0"}
         node_tags = {
+            "get_attr": get_attr_tags,
             torch.ops.quantized_decomposed.quantize_per_tensor.default: quantize_per_tensor_tags,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: dequantize_per_tensor_tags,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantize_per_channel_tags,
         }
-        self._test_metadata_porting(
+        m = self._test_metadata_porting(
             TestHelperModules.Conv2dWithObsSharingOps(),
             example_inputs,
             BackendAQuantizer(),
             node_tags,
+        )
+
+        from_node_to_tags = {
+            torch.ops.aten.adaptive_avg_pool2d.default: "BackendA_adaptive_avg_pool2d_0",
+            torch.ops.aten.linear.default: "BackendA_linear_0",
+        }
+        self._test_quant_tag_preservation_through_decomp(
+            m, example_inputs, from_node_to_tags
         )
 
     def test_metadata_porting_with_no_quant_inbetween(self):
@@ -171,19 +226,19 @@ class TestMetaDataPorting(QuantizationTestCase):
                     gm, quantization_config
                 )
                 _tag_partitions(backend_string, "linear", annotated_partitions)
-                annotated_partitions = OP_TO_ANNOTATOR["conv2d"](
-                    gm, quantization_config
-                )
+                annotated_partitions = OP_TO_ANNOTATOR["conv"](gm, quantization_config)
                 _tag_partitions(backend_string, "conv2d", annotated_partitions)
 
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
+        get_attr_tags = {"BackendA_conv2d_0", "BackendA_linear_0"}
         quantize_per_tensor_tags = {"BackendA_conv2d_0", "BackendA_linear_0"}
         dequantize_per_tensor_tags = {"BackendA_conv2d_0", "BackendA_linear_0"}
         dequantize_per_channel_tags = {"BackendA_conv2d_0", "BackendA_linear_0"}
         node_tags = {
+            "get_attr": get_attr_tags,
             torch.ops.quantized_decomposed.quantize_per_tensor.default: quantize_per_tensor_tags,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: dequantize_per_tensor_tags,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantize_per_channel_tags,
@@ -212,9 +267,7 @@ class TestMetaDataPorting(QuantizationTestCase):
                 quantization_config = get_symmetric_quantization_config(
                     is_per_channel=True
                 )
-                annotated_partitions = OP_TO_ANNOTATOR["conv2d"](
-                    gm, quantization_config
-                )
+                annotated_partitions = OP_TO_ANNOTATOR["conv"](gm, quantization_config)
                 _tag_partitions(backend_string, "conv2d", annotated_partitions)
                 annotated_partitions = OP_TO_ANNOTATOR["adaptive_avg_pool2d"](
                     gm, quantization_config
@@ -236,6 +289,8 @@ class TestMetaDataPorting(QuantizationTestCase):
                 pass
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
+        # TODO: add get_attr_tags when the test is re-enabled
+        get_attr_tags = {}
         quantize_per_tensor_tags = {
             "BackendA_conv2d_0",
             "BackendA_adaptive_avg_pool2d_0",
@@ -252,6 +307,7 @@ class TestMetaDataPorting(QuantizationTestCase):
             "BackendA_linear_dynamic_0",
         }
         node_tags = {
+            "get_attr": get_attr_tags,
             torch.ops.quantized_decomposed.quantize_per_tensor.default: quantize_per_tensor_tags,
             torch.ops.quantized_decomposed.quantize_per_tensor.tensor: quantize_per_tensor_tensor_tags,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: dequantize_per_tensor_tags,
@@ -282,7 +338,7 @@ class TestMetaDataPorting(QuantizationTestCase):
                 quantization_config_dynamic = get_symmetric_quantization_config(
                     is_per_channel=True, is_dynamic=True
                 )
-                annotated_partitions = OP_TO_ANNOTATOR["conv2d"](
+                annotated_partitions = OP_TO_ANNOTATOR["conv"](
                     gm, quantization_config_dynamic
                 )
                 _tag_partitions(backend_string, "conv2d_dynamic", annotated_partitions)
@@ -295,6 +351,10 @@ class TestMetaDataPorting(QuantizationTestCase):
                 pass
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
+        get_attr_tags = {
+            "BackendA_conv2d_dynamic_0",
+            "BackendA_linear_dynamic_0",
+        }
         choose_qparams_tensor_tags = {
             "BackendA_conv2d_dynamic_0",
             "BackendA_linear_dynamic_0",
@@ -312,6 +372,7 @@ class TestMetaDataPorting(QuantizationTestCase):
             "BackendA_linear_dynamic_0",
         }
         node_tags = {
+            "get_attr": get_attr_tags,
             torch.ops.quantized_decomposed.quantize_per_tensor.tensor: quantize_per_tensor_tensor_tags,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: dequantize_per_tensor_tensor_tags,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantize_per_channel_tags,
@@ -349,11 +410,13 @@ class TestMetaDataPorting(QuantizationTestCase):
                 pass
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
+        get_attr_tags = {"BackendA_linear_dynamic_0"}
         choose_qparams_tensor_tags = {"BackendA_linear_dynamic_0"}
         quantize_per_tensor_tensor_tags = {"BackendA_linear_dynamic_0"}
         dequantize_per_tensor_tensor_tags = {"BackendA_linear_dynamic_0"}
         dequantize_per_channel_tags = {"BackendA_linear_dynamic_0"}
         node_tags = {
+            "get_attr": get_attr_tags,
             torch.ops.quantized_decomposed.quantize_per_tensor.tensor: quantize_per_tensor_tensor_tags,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: dequantize_per_tensor_tensor_tags,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantize_per_channel_tags,
@@ -364,4 +427,32 @@ class TestMetaDataPorting(QuantizationTestCase):
             example_inputs,
             BackendAQuantizer(),
             node_tags,
+        )
+
+    def test_no_metadata_porting(self):
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                backend_string = "BackendA"
+                quantization_config = get_symmetric_quantization_config(
+                    is_per_channel=True
+                )
+                OP_TO_ANNOTATOR["linear"](gm, quantization_config)
+                OP_TO_ANNOTATOR["conv"](gm, quantization_config)
+                OP_TO_ANNOTATOR["adaptive_avg_pool2d"](gm, quantization_config)
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        node_tags = {}
+        m = self._test_metadata_porting(
+            TestHelperModules.Conv2dWithObsSharingOps(),
+            example_inputs,
+            BackendAQuantizer(),
+            node_tags,
+        )
+
+        from_node_to_tags = {}
+        self._test_quant_tag_preservation_through_decomp(
+            m, example_inputs, from_node_to_tags
         )

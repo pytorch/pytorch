@@ -18,6 +18,8 @@
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
 
+#include <iostream>
+
 // This file contains functorch's Python bindings.
 
 namespace torch {
@@ -215,6 +217,7 @@ int64_t dlevel(const Tensor& tensor) {
   if (!wrapped->is_alive()) {
     return -1;
   }
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return wrapped->level().value();
 }
 
@@ -338,6 +341,7 @@ static int64_t maybe_get_level(const Tensor& tensor) {
   auto* wrapped = maybeGetTensorWrapper(tensor);
   if (wrapped) {
     if (wrapped->level()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       return *wrapped->level();
     }
     // TODO: this is a weird special case...

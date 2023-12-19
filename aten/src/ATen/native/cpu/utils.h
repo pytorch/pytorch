@@ -11,6 +11,16 @@
 namespace at {
 namespace native {
 
+template <typename T>
+inline void _store(T* dst, at::vec::Vectorized<T> src) {
+  src.store(dst);
+}
+
+inline void _store(at::BFloat16* dst, at::vec::Vectorized<float> src) {
+  auto res = at::vec::convert_float_bfloat16(src, src);
+  res.store(dst, at::vec::Vectorized<float>::size());
+}
+
 inline namespace CPU_CAPABILITY {
 
 template <typename T>
@@ -78,6 +88,10 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const BFloat16* p
   return convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
 }
 
+inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const Half* ptr) {
+  return convert_half_float(Vectorized<Half>::loadu(ptr));
+}
+
 inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr) {
   using Vec = Vectorized<float>;
   return std::make_tuple(Vec::loadu(ptr), Vec::loadu(ptr + Vec::size()));
@@ -85,6 +99,10 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr)
 
 inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const BFloat16* ptr, int64_t count) {
   return convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr, count));
+}
+
+inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const Half* ptr, int64_t count) {
+  return convert_half_float(Vectorized<Half>::loadu(ptr, count));
 }
 
 inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr, int64_t count) {

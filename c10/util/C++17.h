@@ -64,6 +64,15 @@ constexpr bool is_pod_v = is_pod<T>::value;
 
 namespace guts {
 
+template <typename Base, typename Child, typename... Args>
+std::enable_if_t<
+    !std::is_array_v<Base> && !std::is_array_v<Child> &&
+        std::is_base_of_v<Base, Child>,
+    std::unique_ptr<Base>>
+make_unique_base(Args&&... args) {
+  return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
+}
+
 #if defined(__cpp_lib_logical_traits) && !(defined(_MSC_VER) && _MSC_VER < 1920)
 
 template <class... B>
@@ -179,17 +188,17 @@ CUDA_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 #undef CUDA_HOST_DEVICE
 
 template <typename Functor, typename... Args>
-typename std::enable_if<
-    std::is_member_pointer<typename std::decay<Functor>::type>::value,
-    typename c10::invoke_result_t<Functor, Args...>>::type
+std::enable_if_t<
+    std::is_member_pointer_v<std::decay_t<Functor>>,
+    typename c10::invoke_result_t<Functor, Args...>>
 invoke(Functor&& f, Args&&... args) {
   return std::mem_fn(std::forward<Functor>(f))(std::forward<Args>(args)...);
 }
 
 template <typename Functor, typename... Args>
-typename std::enable_if<
-    !std::is_member_pointer<typename std::decay<Functor>::type>::value,
-    typename c10::invoke_result_t<Functor, Args...>>::type
+std::enable_if_t<
+    !std::is_member_pointer_v<std::decay_t<Functor>>,
+    typename c10::invoke_result_t<Functor, Args...>>
 invoke(Functor&& f, Args&&... args) {
   return std::forward<Functor>(f)(std::forward<Args>(args)...);
 }

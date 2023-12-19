@@ -7,15 +7,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
     maybe_handle_decomp,
 )
-from torch.utils._python_dispatch import (
-    _get_current_dispatch_mode,
-    _pop_mode_temporarily,
-)
-from torch._C import DispatchKey, _ExcludeDispatchKeyGuard, DispatchKeySet
-from torch._functorch.eager_transforms import (
-    _unwrap_all_tensors_from_functional,
-    _wrap_all_tensors_to_functional,
-)
+from torch._C import DispatchKey
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
@@ -83,12 +75,6 @@ class OutDtypeOperator(HigherOrderOperator):
 
 
 out_dtype = OutDtypeOperator()
-out_dtype.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
-out_dtype.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
-out_dtype.fallthrough(DispatchKey.ADInplaceOrView)  # type: ignore[attr-defined]
-out_dtype.fallthrough(DispatchKey.BackendSelect)  # type: ignore[attr-defined]
-out_dtype.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
-
 
 def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
     # NB: Long-term we should put the decomposition logic into
@@ -141,7 +127,7 @@ def is_int_mm(op, output_dtype, args):
 
 
 def out_dtype_fallback(op, output_dtype, *args):
-    flat_inputs = pytree.tree_flatten(args)[0] + [torch.ones(1, dtype=output_dtype)]
+    flat_inputs = pytree.arg_tree_leaves(*args) + [torch.ones(1, dtype=output_dtype)]
     promote_dtype: torch.dtype = elementwise_dtypes(
         *flat_inputs,
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -159,61 +145,32 @@ out_dtype.py_impl(DispatchKey.Autograd)(autograd_not_implemented(out_dtype, defe
 
 @out_dtype.py_impl(ProxyTorchDispatchMode)
 def out_dtype_proxy(
+    mode: ProxyTorchDispatchMode,
     op: torch._ops.OpOverload,
     output_dtype: torch.dtype,
     *args
 ):
-    # TODO Move this to proper utility function
-    from torch._ops import mode_stack_per_key, temporarily_pop_mode
-    pre_dispatch_modes = mode_stack_per_key().get(DispatchKey.PreDispatch, [])  # type: ignore[attr-defined]
-    if len(pre_dispatch_modes) > 0:
-        with temporarily_pop_mode(pre_dispatch_modes) as mode:
-            if mode.enable_tracing:
-                return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
-            else:
-                return out_dtype(op, output_dtype, *args)
-
-    mode = _get_current_dispatch_mode()
-    assert (mode is not None), "Mode should always be enabled for python fallback key"
-    with _pop_mode_temporarily() as mode:
-        if mode.enable_tracing:
-            return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
-        else:
-            return out_dtype(op, output_dtype, *args)
+    if mode.enable_tracing:
+        return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
+    else:
+        return out_dtype(op, output_dtype, *args)
 
 
 @out_dtype.py_impl(FakeTensorMode)
 def out_dtype_fake_tensor_mode(
+    mode: FakeTensorMode,
     op: torch._ops.OpOverload,
     output_dtype: torch.dtype,
     *args
 ):
-    return out_dtype_dense(op, output_dtype, *args)
+    with mode:
+        return out_dtype_dense(op, output_dtype, *args)
 
 
-@out_dtype.py_impl(DispatchKey.Functionalize)
-def out_dtype_func1(op, output_dtype, *args):
-    reapply_views = torch._C._functionalization_reapply_views_tls()
-    # At this point, we will see functionalized tensors, so need to unwrap them first
-    unwrapped_args = tuple(
-        _unwrap_all_tensors_from_functional(arg, reapply_views=reapply_views)
-        for arg in args
-    )
-    # pyre-ignore
-    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
+@out_dtype.py_functionalize_impl
+def out_dtype_func(ctx, op, output_dtype, *args):
+    unwrapped_args = tuple(ctx.unwrap_tensors(arg) for arg in args)
+
+    with ctx.redispatch_to_next():
         res = out_dtype(op, output_dtype, *unwrapped_args)
-    return _wrap_all_tensors_to_functional(res, level=0)
-
-
-@out_dtype.py_impl(torch._C._functorch.TransformType.Functionalize)
-def out_dtype_func2(interpreter, op, output_dtype, *args):
-    reapply_views = interpreter.functionalize_add_back_views()
-    # At this point, we will see functionalized tensors, so need to unwrap them first
-    unwrapped_args = tuple(
-        _unwrap_all_tensors_from_functional(arg, reapply_views=reapply_views)
-        for arg in args
-    )
-
-    with interpreter.lower():
-        res = out_dtype(op, output_dtype, *unwrapped_args)
-        return _wrap_all_tensors_to_functional(res, level=interpreter.level())
+    return ctx.wrap_tensors(res)

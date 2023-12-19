@@ -36,6 +36,27 @@ _DEQUANTIZE_OPS = [
     torch.ops.quantized_decomposed.dequantize_per_channel.default,
 ]
 
+# Example inputs for conv-bn1d patterns
+_conv1d_bn_example_inputs = (
+    torch.randn(1, 1, 3),  # x
+    torch.randn(1, 1, 1),  # conv_weight
+    torch.randn(1),        # conv_bias
+    torch.randn(1),        # bn_weight
+    torch.randn(1),        # bn_bias
+    torch.randn(1),        # bn_running_mean
+    torch.randn(1),        # bn_running_var
+)
+
+# Example inputs for conv-bn2d patterns
+_conv2d_bn_example_inputs = (
+    torch.randn(1, 1, 3, 3),  # x
+    torch.randn(1, 1, 1, 1),  # conv_weight
+    torch.randn(1),           # conv_bias
+    torch.randn(1),           # bn_weight
+    torch.randn(1),           # bn_bias
+    torch.randn(1),           # bn_running_mean
+    torch.randn(1),           # bn_running_var
+)
 
 def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
     """
@@ -56,7 +77,7 @@ def _find_q_dq_node_for_user(
     produer: torch.fx.Node, user: torch.fx.Node
 ) -> Tuple[Any, Any]:
     """
-    Find d, dq pair corresponding to [producer ... -> q -> dq -> user]
+    Find q, dq pair corresponding to [producer -> q -> dq -> user]
     Utils works by finding dq arg of user and ensuring it is connected to
     producer
     """
@@ -124,6 +145,38 @@ def _get_all_arguments(orig_args, orig_kwargs, args_schema):
             all_args.append(schema.default_value)
     return all_args
 
+def _is_supported_batch_norm_for_training(node: Node):
+    """
+    Return True if the given node refers to an aten batch norm op QAT supports.
+    """
+    supported_ops = [
+        torch.ops.aten._native_batch_norm_legit.default,
+        # Note: we won't need this op anymore after batch norm consolidation
+        # For now, we need to continue to support it because it gives better
+        # training numerics than `_native_batch_norm_legit`
+        torch.ops.aten.cudnn_batch_norm.default,
+        torch.ops.aten.miopen_batch_norm.default,
+    ]
+    return node.target in supported_ops
+
+def _is_conv(n: Node):
+    """
+    Return whether the node refers to an aten conv op.
+    """
+    return n.op == "call_function" and n.target in [
+        torch.ops.aten.conv1d.default,
+        torch.ops.aten.conv2d.default,
+    ]
+
+def _is_conv_transpose(n: Node):
+    """
+    Return whether the node refers to an aten conv_transpose op.
+    """
+    return n.op == "call_function" and n.target in [
+        torch.ops.aten.conv_transpose1d,
+        torch.ops.aten.conv_transpose2d,
+    ]
+
 def fold_bn_weights_into_conv_node(
     conv_node: Node,
     conv_weight_node: Node,
@@ -131,12 +184,10 @@ def fold_bn_weights_into_conv_node(
     bn_node: Node,
     m: GraphModule
 ) -> None:
-    # conv2d args: input, weight, bias, stride, padding, dilation, ...
-    # Note: this should also work for conv1d, conv3d and transposed conv1-3d as well with
-    # easy tweaks
+    # conv args: input, weight, bias, stride, padding, dilation, ...
     conv_w = _get_tensor_constant_from_node(conv_weight_node, m)
     conv_b = _get_tensor_constant_from_node(conv_bias_node, m)
-    transpose = not (conv_node.target == torch.ops.aten.conv2d.default)
+    transpose = _is_conv_transpose(conv_node)
 
     # eval bn args: input, weight, bias, running mean, running var, momentum, eps
     # train bn args: input, weight, bias, running mean, running var, training, momentum, eps
@@ -148,7 +199,7 @@ def fold_bn_weights_into_conv_node(
     bn_rv = _get_tensor_constant_from_node(bn_args[4], m)
     if bn_node.target == torch.ops.aten._native_batch_norm_legit_no_training.default:
         eps_arg_index = 6
-    elif bn_node.target == torch.ops.aten._native_batch_norm_legit.default:
+    elif _is_supported_batch_norm_for_training(bn_node):
         eps_arg_index = 7
     else:
         raise ValueError("BN node target is unexpected ", bn_node.target)
@@ -204,7 +255,7 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
             continue
         bn_node = n
         n = bn_node.args[0]
-        if n.op != "call_function" or n.target != torch.ops.aten.conv2d.default:
+        if not _is_conv(n):
             continue
         conv_node = n
         conv_weight_node = conv_node.args[1]
@@ -229,11 +280,14 @@ def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
 def get_aten_graph_module(
     pattern: Callable,
     example_inputs: Tuple[Any, ...],
+    is_cuda: bool = False,
     **kwargs,
 ) -> GraphModule:
     """
     Convert the pattern to an FX graph with decomposed aten ops.
     """
+    if is_cuda:
+        example_inputs = tuple([x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs])
     aten_pattern = capture_pre_autograd_graph(
         pattern,
         example_inputs,

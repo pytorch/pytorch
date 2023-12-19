@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "7"
-    name: "Constant_0"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"

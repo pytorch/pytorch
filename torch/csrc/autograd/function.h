@@ -199,7 +199,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       bool is_tensor_subclass,
       bool is_nested) noexcept {
     uint32_t input_nr = input_metadata_.size();
-    auto meta_shape = MetadataShape{c10::in_place_type<SymIntSmallVec>, shape};
+    auto meta_shape = MetadataShape{std::in_place_type<SymIntSmallVec>, shape};
     input_metadata_.emplace_back(
         options, meta_shape, is_tensor_subclass, is_nested);
     return input_nr;
@@ -326,6 +326,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   ///    in a new thread
   uint64_t sequence_nr() const noexcept {
     return sequence_nr_;
+  }
+
+  void set_sequence_nr(uint64_t sequence_nr) {
+    sequence_nr_ = sequence_nr;
   }
 
   // NOTE [ Topological Number ]
@@ -590,7 +594,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // Sequence number used to correlate backward nodes with forward ops in the
   // profiler and provide determinism in the engine.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const uint64_t sequence_nr_;
+  uint64_t sequence_nr_;
 
   // See NOTE [ Topological Number ]
   uint64_t topological_nr_ = 0;
@@ -747,9 +751,7 @@ struct TypeAndSize {
   TypeAndSize(const at::Tensor& t)
       : sym_sizes(t.sym_sizes().vec()), options(t.options()) {}
 
-  at::Tensor zeros() {
-    return at::zeros_symint(sym_sizes, options);
-  }
+  at::Tensor zeros();
 
   std::vector<c10::SymInt> sym_sizes;
   at::TensorOptions options;

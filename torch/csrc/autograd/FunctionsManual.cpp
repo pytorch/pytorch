@@ -20,6 +20,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/SmallBuffer.h>
@@ -824,7 +825,7 @@ Tensor prod_backward(
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.sym_numel() == 0) {
     return grad * (result / input).conj();
-  } else if (zero_idx.size(0) > 1) {
+  } else if (!at::GradMode::is_enabled() && zero_idx.size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
@@ -992,6 +993,26 @@ Tensor unbind_backward(const variable_list& grads, int64_t dim) {
                     : at::zeros({}, o).expand_symint(sizes));
   });
   return at::stack(grads_tensors, dim);
+}
+
+Tensor unbind_backward_nested(
+    const variable_list& grads,
+    const Tensor& nt_sizes,
+    int64_t dim,
+    const at::TensorOptions& options) {
+  std::vector<Tensor> grads_tensors;
+  for (int64_t i : c10::irange(static_cast<int64_t>(grads.size()))) {
+    if (grads[i].defined()) {
+      grads_tensors.push_back(static_cast<Tensor>(grads[i]));
+    } else {
+      const auto component_size = nt_sizes[i].contiguous();
+      const c10::IntArrayRef grad_size(
+          component_size.data_ptr<int64_t>(), component_size.size(0));
+      grads_tensors.push_back(at::zeros(grad_size, options));
+    }
+  }
+
+  return at::_nested_tensor_from_tensor_list(grads_tensors);
 }
 
 Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {
@@ -1253,12 +1274,12 @@ Tensor convolution_jvp(
     const Tensor& weight_t,
     const Tensor& bias_p,
     const Tensor& bias_t,
-    IntArrayRef stride,
+    at::SymIntArrayRef stride,
     at::SymIntArrayRef padding,
-    IntArrayRef dilation,
+    at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    int64_t groups) {
+    const c10::SymInt& groups) {
   auto bias_t_opt =
       bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
@@ -1291,12 +1312,12 @@ Tensor _convolution_jvp(
     const Tensor& weight_t,
     const Tensor& bias_p,
     const Tensor& bias_t,
-    IntArrayRef stride,
+    at::SymIntArrayRef stride,
     at::SymIntArrayRef padding,
-    IntArrayRef dilation,
+    at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    int64_t groups,
+    const c10::SymInt& groups,
     bool benchmark,
     bool deterministic,
     bool cudnn_enabled,
@@ -1507,9 +1528,11 @@ std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
   return std::make_tuple(
       self_requires_grad ? maybe_multiply(grad, beta.conj()) : Tensor{},
       mat1_requires_grad
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           ? maybe_multiply(grad_projected.mm(mat2->mH()), alpha.conj())
           : Tensor{},
       mat2_requires_grad
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           ? maybe_multiply(mat1->mH().mm(grad_projected), alpha.conj())
           : Tensor{});
 }
@@ -1572,9 +1595,8 @@ Tensor renorm_backward(
   std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
   reduce_dims.erase(reduce_dims.begin() + dim);
 
-  auto acc_type = self.is_mps()
-      ? self.scalar_type()
-      : at::toAccumulateType(self.scalar_type(), /*is_cuda=*/self.is_cuda());
+  auto acc_type =
+      at::toAccumulateType(self.scalar_type(), self.device().type());
   auto norm = at::linalg_vector_norm(
       self, p, reduce_dims, /*keepdim=*/true, /*dtype=*/acc_type);
 
@@ -1875,27 +1897,6 @@ Tensor std_mean_backward(
   return gself;
 }
 
-Tensor masked_scatter_backward(
-    const Tensor& grad,
-    const Tensor& mask,
-    c10::SymIntArrayRef sizes) {
-  c10::SymInt numel = 1;
-  for (const auto& size : sizes) {
-    numel *= size;
-  }
-  auto mask_selected = grad.masked_select(mask);
-  auto diff_nelem = numel - mask_selected.sym_numel();
-  if (diff_nelem > 0) {
-    // because mask_selected returns a 1-d tensor with size of masked elements
-    // that are 1, we need to fill out the rest with zeros then reshape back to
-    // tensor2's size.
-    auto zeros_fillin =
-        at::zeros_symint({std::move(diff_nelem)}, grad.options());
-    mask_selected = at::cat({mask_selected, std::move(zeros_fillin)}, 0);
-  }
-  return mask_selected.view_symint(sizes);
-}
-
 Tensor cholesky_jvp(const Tensor& dA, const Tensor& L, bool upper) {
   at::NoTF32Guard disable_tf32;
   // Let A = LL^H
@@ -2096,8 +2097,35 @@ Tensor _nested_split_with_sizes_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymIntArrayRef split_sizes,
     int64_t dim,
-    const Tensor& self) {
-  return not_implemented("aten::split_with_sizes");
+    const Tensor& nt_sizes,
+    const at::TensorOptions& options) {
+  // add 1 to account for batch dim
+  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(nt_sizes.size(1)) + 1);
+  // it's possible some of the grads are not defined (represents tensors of all
+  // 0s). Since at::cat can't handle those, let's define them
+  std::vector<Tensor> grads_all_defined;
+  for (int64_t i : c10::irange(static_cast<int64_t>(grads.size()))) {
+    if (grads[i].defined()) {
+      grads_all_defined.push_back(static_cast<Tensor>(grads[i]));
+    } else {
+      const auto& length = split_sizes[i].guard_int(__FILE__, __LINE__);
+      auto nt_split_size = nt_sizes.clone();
+      auto nt_split_size_ptr = nt_split_size.data_ptr<int64_t>();
+      for (int64_t j : c10::irange(static_cast<int64_t>(nt_sizes.size(0)))) {
+        // subtract 1 to account for batch dim
+        nt_split_size_ptr
+            [j * static_cast<int64_t>(nt_sizes.size(1)) + (dim - 1)] = length;
+      }
+      Tensor zeros_buffer = at::zeros(
+          {at::native::get_numel_from_nested_size_tensor(nt_split_size)},
+          options);
+      auto nt_split_grad = at::native::wrap_buffer(zeros_buffer, nt_split_size);
+      grads_all_defined.push_back(nt_split_grad);
+    }
+  }
+
+  auto ret = at::cat(grads_all_defined, dim);
+  return ret;
 }
 
 Tensor split_backward(
@@ -2237,9 +2265,12 @@ Tensor binary_cross_entropy_target_backward(
   }
 
   if (isDefined(weight)) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (!isTensorSubclassLike(weight.value())) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       grad_target.mul_(weight.value());
     } else {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       grad_target = grad_target * weight.value();
     }
   }
@@ -2261,8 +2292,12 @@ Tensor binary_cross_entropy_double_backward_target(
   auto res = -grad * grad_output;
 
   if (isDefined(weight)) {
-    res = isTensorSubclassLike(weight.value()) ? res.mul(weight.value())
-                                               : res.mul_(weight.value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    res = isTensorSubclassLike(weight.value())
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        ? res.mul(weight.value())
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        : res.mul_(weight.value());
   }
 
   auto neg_self = 1 - self;
@@ -2303,6 +2338,7 @@ Tensor binary_cross_entropy_with_logits_backward(
   Tensor grad_input;
   if (isDefined(pos_weight)) {
     // pos_weight might need to be broadcasted, thus mul(target) is not inplace.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto t = pos_weight->mul(target);
     grad_input = at::areAnyTensorSubclassLike({input, target}) ||
             at::GradMode::is_enabled()
@@ -2322,9 +2358,12 @@ Tensor binary_cross_entropy_with_logits_backward(
   }
 
   if (isDefined(weight)) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (at::isTensorSubclassLike(*weight) || at::GradMode::is_enabled()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       grad_input = grad_input.mul(*weight);
     } else {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       grad_input.mul_(*weight);
     }
   }
@@ -2349,12 +2388,15 @@ Tensor binary_cross_entropy_with_logits_target_backward(
 
   Tensor grad_target;
   if (isDefined(pos_weight)) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (areAnyTensorSubclassLike({*pos_weight, grad_output})) {
       grad_target = at::log_sigmoid(-self)
+                        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
                         .sub(at::log_sigmoid(self).mul(*pos_weight))
                         .mul(grad_output);
     } else {
       grad_target = at::log_sigmoid(-self)
+                        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
                         .sub_(at::log_sigmoid(self).mul_(*pos_weight))
                         .mul_(grad_output);
     }
@@ -2363,9 +2405,12 @@ Tensor binary_cross_entropy_with_logits_target_backward(
   }
 
   if (isDefined(weight)) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (at::isTensorSubclassLike(*weight)) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       grad_target = grad_target.mul(*weight);
     } else {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       grad_target.mul_(*weight);
     }
   }
@@ -2441,9 +2486,12 @@ Tensor binary_cross_entropy_double_backward(
   }
 
   if (isDefined(weight)) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (!isTensorSubclassLike(*weight)) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       gI *= *weight;
     } else {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       gI = gI.mul(*weight);
     }
   }
@@ -2470,9 +2518,12 @@ Tensor binary_cross_entropy_double_backward_grad_output(
   }
 
   if (isDefined(weight)) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (!isTensorSubclassLike(*weight)) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       ggO *= *weight;
     } else {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       ggO = ggO.mul(*weight);
     }
   }
@@ -3139,6 +3190,7 @@ Tensor as_strided_backward(
 
   // Step (2): use output geometry to scatter gradients into storage
   if (out_maybe_overlap) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto out_indices = flatten_full_indices->as_strided_symint(
         out_sizes_, out_strides_, out_effective_offset);
     storage.index_add_(0, out_indices.reshape(-1), grad.reshape(-1));
@@ -3153,6 +3205,7 @@ Tensor as_strided_backward(
   if (inp_maybe_overlap) {
     auto count = at::zeros_like(storage, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     auto inp_indices =
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         flatten_full_indices
             ->as_strided_symint(inp_sizes_, inp_strides_, inp_effective_offset)
             .reshape(-1);
@@ -4403,19 +4456,22 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& self,
     const Tensor& input2,
     const Tensor& result,
-    const bool upper) {
+    const bool upper,
+    std::array<bool, 2> output_mask) {
   at::NoTF32Guard disable_tf32;
   Tensor grad_self, grad_input2;
   if (grad_x.defined()) {
     grad_self = grad_x.cholesky_solve(input2, /*upper=*/upper);
 
-    Tensor common_term = at::matmul(grad_self, result.mH());
-    common_term = common_term + common_term.mH();
+    if (output_mask[1]) {
+      Tensor common_term = at::matmul(grad_self, result.mH());
+      common_term = common_term + common_term.mH();
 
-    if (upper) {
-      grad_input2 = -at::matmul(input2, common_term);
-    } else {
-      grad_input2 = -at::matmul(common_term, input2);
+      if (upper) {
+        grad_input2 = -at::matmul(input2, common_term);
+      } else {
+        grad_input2 = -at::matmul(common_term, input2);
+      }
     }
   }
   return std::tuple<Tensor, Tensor>{grad_self, grad_input2};
@@ -4571,6 +4627,7 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   Tensor gamma_expanded;
   Tensor ggG_expanded, ggB_expanded;
   if (affine) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     gamma_expanded = expand_as_dim1(*gamma, input);
     if (ggG.defined()) {
       ggG_expanded = expand_as_dim1(ggG, input);
@@ -4720,6 +4777,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   Tensor gamma_expanded;
   Tensor ggG_expanded, ggB_expanded;
   if (affine) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     gamma_expanded = gamma->reshape({1, N});
     if (ggG.defined()) {
       ggG_expanded = ggG.reshape({1, N});
@@ -4803,6 +4861,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     gG = first_bwd_fn_grad_input(
         ggI_expanded, at::ones({}, sigma2_eps_neg_1_2.options()));
     gG = (gO * gG).sum(0);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     gG = gG.reshape_as(*gamma);
   }
 
@@ -4866,6 +4925,7 @@ infinitely_differentiable_native_group_norm_backward(
   if (grad_input_mask[0]) {
     Tensor gamma_tensor;
     if (isDefined(gamma)) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       gamma_tensor = gamma->reshape_symint({1, G, D, 1});
     }
     const Tensor var =
@@ -4932,12 +4992,15 @@ std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
   if (grad_out.defined()) {
     if (grad_mask[0])
       grad_i1 =
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           at::_trilinear(grad_out, *i2, *i3, sumdim, expand2, expand3, expand1);
     if (grad_mask[1])
       grad_i2 =
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           at::_trilinear(*i1, grad_out, *i3, expand1, sumdim, expand3, expand2);
     if (grad_mask[2])
       grad_i3 =
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           at::_trilinear(*i1, *i2, grad_out, expand1, expand2, sumdim, expand3);
   }
   return std::tuple<Tensor, Tensor, Tensor>(grad_i1, grad_i2, grad_i3);
@@ -6060,11 +6123,14 @@ static Tensor _affine_jvp(
   TORCH_INTERNAL_ASSERT(input_p.has_value() == weight_p.defined());
   if (weight_p.defined()) {
     if (areAnyTensorSubclassLike(
+            // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
             {input_p.value(), input_t, weight_p, weight_t}) ||
         input_t._is_zerotensor() || weight_t._is_zerotensor()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       input_t = input_t * weight_p + input_p.value() * weight_t;
     } else {
       input_t *= weight_p;
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto temp = input_p.value();
       temp *= weight_t;
       input_t += temp;
@@ -6623,30 +6689,31 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     const at::Tensor& self,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
-    at::IntArrayRef padding,
-    at::IntArrayRef output_padding,
-    at::IntArrayRef stride,
-    at::IntArrayRef dilation,
+    at::SymIntArrayRef padding,
+    at::SymIntArrayRef output_padding,
+    at::SymIntArrayRef stride,
+    at::SymIntArrayRef dilation,
     bool transposed,
-    int64_t groups,
+    c10::SymInt groups,
     ::std::array<bool, 2> output_mask) {
   if (!grad_output.defined()) {
     return std::tuple<Tensor, Tensor>();
   }
 
   // Just call the general backward and ignore the bias gradient part.
-  std::tuple<Tensor, Tensor, Tensor> grad_inputs = at::convolution_backward(
-      grad_output,
-      self,
-      weight,
-      c10::nullopt,
-      stride,
-      padding,
-      dilation,
-      transposed,
-      output_padding,
-      groups,
-      {output_mask[0], output_mask[1], false});
+  std::tuple<Tensor, Tensor, Tensor> grad_inputs =
+      at::convolution_backward_symint(
+          grad_output,
+          self,
+          weight,
+          c10::nullopt,
+          stride,
+          padding,
+          dilation,
+          transposed,
+          output_padding,
+          std::move(groups),
+          {output_mask[0], output_mask[1], false});
   std::tuple<Tensor, Tensor> result =
       std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
   return result;
@@ -7032,6 +7099,36 @@ mkldnn_rnn_layer_differentiable_backward(
 
   auto cat_layer_dx = at::cat(layer_dx, 0);
   return std::make_tuple(cat_layer_dx, dWx, dWh, db, db, dprev_h, dprev_c);
+}
+
+Tensor values_backward(const Tensor& grad, const Tensor& self) {
+  Tensor grad_self;
+  if (grad.defined()) {
+    if (self.layout() == c10::kSparse) {
+      return at::_sparse_coo_tensor_unsafe_symint(
+          self.indices(),
+          grad,
+          self.sym_sizes(),
+          self.options(),
+          /*is_coalesced=*/true);
+    } else if (at::sparse_csr::is_sparse_compressed(self)) {
+      Tensor compressed_indices, plain_indices;
+      std::tie(compressed_indices, plain_indices) =
+          at::sparse_csr::getCompressedPlainIndices(self);
+      return at::_sparse_compressed_tensor_unsafe_symint(
+          compressed_indices,
+          plain_indices,
+          grad,
+          self.sym_sizes(),
+          self.options());
+    } else {
+      TORCH_CHECK_NOT_IMPLEMENTED(
+          false,
+          "values backward with respect to self with layout ",
+          self.layout());
+    }
+  }
+  return grad_self;
 }
 
 } // namespace details

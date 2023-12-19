@@ -100,7 +100,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
 
-    const void* host_dst = dst.storage().data();
+    const void* host_dst = static_cast<const char*>(dst.storage().data()) + dst.storage_offset() * dst.itemsize();
     void* alignedPtr = pageAlignedBlockPtr(host_dst, (NSUInteger)dst_tensor_nbytes, &alignedLength);
     NSUInteger destOffset = (uintptr_t(host_dst) - uintptr_t(alignedPtr));
     // 4 bytes alignment required on macos for blits.
@@ -140,8 +140,8 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
       stream->copy_and_sync(
           tmpBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
-      [destBuffer release];
     }
+    [destBuffer release];
   }
   if (!dst.is_same(dst_)) {
     dst_.copy_(dst, non_blocking);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/SymIntArrayRef.h>
@@ -152,6 +153,11 @@ struct C10_API PyInterpreterVTable {
       c10::DispatchKey,
       torch::jit::Stack* stack) const = 0;
 
+  virtual void throw_abstract_impl_not_imported_error(
+      std::string opname,
+      const char* pymodule,
+      const char* context) const = 0;
+
   // Invoke the Python dispatcher to handle this call
   virtual void python_dispatcher(
       const c10::OperatorHandle& op,
@@ -169,6 +175,7 @@ struct C10_API PyInterpreterVTable {
   virtual c10::IntArrayRef sizes(const TensorImpl* self) const = 0;
   virtual c10::SymIntArrayRef sym_sizes(const TensorImpl* self) const = 0;
   virtual c10::Layout layout(const TensorImpl* self) const = 0;
+  virtual int64_t numel(const TensorImpl* self) const = 0;
   virtual c10::SymInt sym_numel(const TensorImpl* self) const = 0;
   virtual c10::SymIntArrayRef sym_strides(const TensorImpl* self) const = 0;
   virtual c10::SymInt sym_storage_offset(const TensorImpl* self) const = 0;

@@ -11,8 +11,10 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/complex_native.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
+#include <ATen/ops/nextafter_native.h>
 #include <ATen/ops/polar_native.h>
 #include <ATen/ops/view_as_real.h>
 #endif
@@ -181,6 +183,72 @@ kernel void complex_mul<DTYPE>(              \
 
 REGISTER_COMPLEX_MUL_OP(float);
 REGISTER_COMPLEX_MUL_OP(half);
+
+template<typename T, typename U>
+kernel void nextafter_kernel(constant void  * input_       [[buffer(0)]],
+                             constant void  * other_       [[buffer(1)]],
+                             device   void  * out_         [[buffer(2)]],
+                             constant uint3 * offsets      [[buffer(3)]],
+                             uint tid [[thread_position_in_grid]]) {
+  device   T* out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
+  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+
+  if (*input == *other)
+  {
+    *out = *other;
+  }
+  else if (isnan(*input) || isnan(*other))
+  {
+    *out = NAN;
+  }
+  else
+  {
+    U bits = as_type<U>(*input);
+    bits = bits + ((*other > *input) ? 1 : -1);
+    *out = as_type<T>(bits);
+  }
+}
+
+#define REGISTER_NEXTAFTER_OP(DTYPE, UTYPE)  \
+template                                     \
+[[host_name("nextafter_kernel_" #DTYPE)]]    \
+kernel void nextafter_kernel<DTYPE, UTYPE>(  \
+  constant void    * input,                  \
+  constant void    * other,                  \
+  device   void    * out,                    \
+  constant uint3   * offsets,                \
+  uint tid)
+
+REGISTER_NEXTAFTER_OP(float, uint);
+REGISTER_NEXTAFTER_OP(half, ushort);
+
+template<typename T>
+kernel void complex_kernel(constant void  * real_       [[buffer(0)]],
+                           constant void  * imag_       [[buffer(1)]],
+                           device   void  * out_        [[buffer(2)]],
+                           constant uint3 * offsets     [[buffer(3)]],
+                           uint tid [[thread_position_in_grid]]) {
+  device   T* out  = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
+  constant T* real = (constant T*)((constant uint8_t*)real_ + offsets[tid].y);
+  constant T* imag = (constant T*)((constant uint8_t*)imag_ + offsets[tid].z);
+  out[0] = real[0];
+  out[1] = imag[0];
+}
+
+#define REGISTER_COMPLEX_OUT_OP(DTYPE)   \
+template                                 \
+[[host_name("complex_kernel_" #DTYPE)]]  \
+kernel void complex_kernel<DTYPE>(       \
+  constant void    * real,               \
+  constant void    * imag,               \
+  device   void    * out,                \
+  constant uint3   * offsets,            \
+  uint tid)
+
+REGISTER_COMPLEX_OUT_OP(float);
+REGISTER_COMPLEX_OUT_OP(half);
+
 )BINARY_METAL";
 
 using namespace mps;
@@ -336,9 +404,15 @@ static void copysign_mps_kernel(TensorIteratorBase& iter) {
   mps::binary_mps_impl(iter, "copysign");
 }
 
+static void nextafter_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "nextafter_mps not implemented for non-floating types");
+  mps::binary_mps_impl(iter, "nextafter_kernel");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel);
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel);
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel);
+REGISTER_DISPATCH(nextafter_stub, &nextafter_mps_kernel);
 
 Tensor& polar_out_mps(const Tensor& abs, const Tensor& angle, Tensor& output) {
   auto new_size = at::infer_size(abs.sizes(), angle.sizes());
@@ -353,6 +427,22 @@ Tensor& polar_out_mps(const Tensor& abs, const Tensor& angle, Tensor& output) {
   auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(abs).add_input(angle).build();
 
   mps::binary_mps_impl(iter, "polar");
+  return output;
+}
+
+Tensor& complex_out_mps(const Tensor& real, const Tensor& imag, Tensor& output) {
+  auto new_size = at::infer_size(real.sizes(), imag.sizes());
+  if (!output.sizes().equals(new_size)) {
+    output.resize_(new_size);
+  }
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return output;
+  }
+  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
+  auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(real).add_input(imag).build();
+
+  mps::binary_mps_impl(iter, "complex_kernel");
   return output;
 }
 } // namespace at::native

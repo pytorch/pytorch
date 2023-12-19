@@ -1126,8 +1126,7 @@ namespace {
         float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
         float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
         ValueGen<float> gen(minv, maxv, seed.add(2));
-        for (const auto i : c10::irange(trials)) {
-            (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(trials)) {
             float scale = generator_sc.get();
             float inv_scale = 1.0f / static_cast<float>(scale);
             auto zero_point_val = generator_zp.get();
@@ -1173,8 +1172,7 @@ namespace {
       float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
       float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
       ValueGen<float> gen(minv, maxv, seed.add(2));
-      for (const auto i : c10::irange(trials)) {
-        (void)i; // Suppress unused variable warning
+      for (C10_UNUSED const auto i : c10::irange(trials)) {
         float scale = generator_sc.get();
         float inv_scale = 1.0f / static_cast<float>(scale);
         auto zero_point_val = generator_zp.get();
@@ -1233,8 +1231,7 @@ namespace {
         ValueGen<int> generator(min_val, max_val, seed.add(1));
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(2));
-        for (const auto i : c10::irange(trials)) {
-            (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(trials)) {
             float scale = generator_sc.get();
             int32_t zero_point_val = generator.get();
             float scale_zp_premul = -(scale * zero_point_val);
@@ -1281,8 +1278,7 @@ namespace {
         ValueGen<int32_t> generator(min_val, max_val, seed);
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
-        for (const auto i : c10::irange(trials)) {
-            (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(trials)) {
             float multiplier = 1.f / (generator_sc.get());
             auto zero_point_val = generator.get();
             int index = 0;
@@ -1319,8 +1315,7 @@ namespace {
         typename vec::int_vec_return_type  expected_int_ret;
         auto seed = TestSeed();
         ValueGen<underlying> generator(min_val, max_val, seed);
-        for (const auto i : c10::irange(trials)) {
-            (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(trials)) {
             //generate vals
             for (int j = 0; j < vec::size(); j++) {
                 qint_vals[j] = generator.get();

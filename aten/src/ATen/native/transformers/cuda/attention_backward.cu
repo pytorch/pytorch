@@ -1,9 +1,12 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <cstdint>
 #include <type_traits>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorOperators.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/Exception.h>
 #include <c10/util/bit_cast.h>
@@ -15,6 +18,17 @@
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_flash_attention_backward.h>
+#include <ATen/ops/_flash_attention_backward_native.h>
+#include <ATen/ops/_efficient_attention_backward.h>
+#include <ATen/ops/_efficient_attention_backward_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_backward_native.h>
+#endif
 
 #ifdef USE_FLASH_ATTENTION
 // FlashAttention Specific Imports
@@ -57,14 +71,13 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   c10::optional<at::Tensor> dk{c10::nullopt};
   c10::optional<at::Tensor> dv{c10::nullopt};
 
-  //  The kernel computes irregadless we will drop for this functions return
+  //  The kernel computes irregardless we will drop for this functions return
   Tensor grad_softmax;
 
   // We check the whether the cumulative_sequence_length_q is defined
   // in order to determine whether we are using varlen or dense forward
   if (cumulative_sequence_length_q.defined()) {
     // Varlen forward
-    TORCH_CHECK(false, "Dont go down this path yet");
     auto [dQuery, dKey, dValue, dSoftmax] = pytorch_flash::mha_varlen_bwd(
         contiguous_grad_out,
         query,
@@ -83,6 +96,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         softmax_scale,
         false /*zero_tensors*/,
         is_causal,
+        -1, /*window_size_left*/
+        -1, /*window_size_right*/
         philox_seed,
         philox_offset);
     return std::make_tuple(dQuery, dKey, dValue);
@@ -101,9 +116,11 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dropout_p,
         softmax_scale,
         is_causal,
+        -1, /*window_size_left*/
+        -1, /*window_size_right*/
         philox_seed,
         philox_offset);
-    return std::make_tuple(dQuery, dKey, dValue);
+    return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
   }
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.");
@@ -117,14 +134,14 @@ _efficient_attention_backward(
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
-    const c10::optional<at::Tensor>& bias, // additive attention bias
+    const c10::optional<at::Tensor>& kernel_bias, // additive attention bias
     const at::Tensor& out,
     // (Mode 1MHK only) [b+1]: cu_seqlens_q[b] contains the
     // position of the first query token for batch $b
-    const c10::optional<at::Tensor>& cu_seqlens_q,
+    const c10::optional<at::Tensor>& cu_seqlens_q_dummy,
     // (Mode 1MHK only) [b+1]: cu_seqlens_k[b] contains the
     // position of the first key token for batch $b
-    const c10::optional<at::Tensor>& cu_seqlens_k,
+    const c10::optional<at::Tensor>& cu_seqlens_k_dummy,
     // (Mode 1MHK only) Maximum sequence length across batches
     int64_t max_seqlen_q,
     // (Mode 1MHK only) Maximum sequence length across batches
@@ -141,6 +158,14 @@ _efficient_attention_backward(
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
+  // This path is used when we directly call _efficient_attention_forward
+  // from python.
+  // This is needed because SaveVariable automatically converts
+  // c10::optional to undefined tensor
+  c10::optional<Tensor> bias, cu_seqlens_q, cu_seqlens_k;
+  bias = kernel_bias.has_value() && !kernel_bias->defined() ? c10::nullopt : kernel_bias;
+  cu_seqlens_q = cu_seqlens_q_dummy.has_value() && !cu_seqlens_q_dummy->defined() ? c10::nullopt : cu_seqlens_q_dummy;
+  cu_seqlens_k = cu_seqlens_k_dummy.has_value() && !cu_seqlens_k_dummy->defined() ? c10::nullopt : cu_seqlens_k_dummy;
 
     // ndim
   TORCH_CHECK(query.dim() == grad_out_.dim());
@@ -187,7 +212,7 @@ _efficient_attention_backward(
     TORCH_CHECK(cu_seqlens_q->size(0) == cu_seqlens_k->size(0));
     TORCH_CHECK(query.size(0) == 1, "cu_seqlen only supports batch_size=1");
     TORCH_CHECK(max_seqlen_q > 0, "max_seqlen_q required with `cu_seqlens_q`");
-    TORCH_CHECK(max_seqlen_k > 0, "max_seqlen_q required with `cu_seqlens_q`");
+    TORCH_CHECK(max_seqlen_k > 0, "max_seqlen_k required with `cu_seqlens_k`");
     TORCH_CHECK(
         max_seqlen_k <= key.size(1), "Invalid max_seqlen_k:", max_seqlen_k);
     TORCH_CHECK(
@@ -360,40 +385,32 @@ _efficient_attention_backward(
 
       p.bias_ptr = (scalar_t*)bias->data_ptr();
 
-      // assign strides for bias, viewed as:
-      // (batch_sz, n_heads, n_queries, n_keys)
-      // We make sure to expand prior to calling the kernel
-      const at::Tensor& bias_4d_view = *bias;
-      TORCH_CHECK(bias_4d_view.dim()==4);
-      TORCH_CHECK(bias_4d_view.size(0)==B);
-      TORCH_CHECK(bias_4d_view.size(1)==nH);
-      TORCH_CHECK(bias_4d_view.size(2)==M);
-      TORCH_CHECK(bias_4d_view.size(3)==N);
-      ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias_4d_view.stride(0));
-      ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias_4d_view.stride(1));
-      ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias_4d_view.stride(2));
+      TORCH_CHECK(bias->dim() == 4, "Bias expected in BMHK format");
+      TORCH_CHECK(
+          bias->size(0) == query.size(0),
+          "attn_bias: wrong shape (batch dimension)");
+      TORCH_CHECK(
+          bias->size(1) == query.size(2),
+          "attn_bias: wrong shape (head dimension)");
+      TORCH_CHECK(
+          bias->size(2) == query.size(1),
+          "attn_bias: wrong shape (seqlenQ dimension)");
+      TORCH_CHECK(
+          bias->size(3) == key.size(1),
+          "attn_bias: wrong shape (seqlenKV dimension)");
+      TORCH_CHECK(
+          bias->stride(3) == 1,
+          "attn_bias: wrong alignment (last dimension must be contiguous)");
+      ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias->stride(0));
+      ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias->stride(1));
+      ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias->stride(2));
 
       if (bias_requires_grad) {
         p.grad_bias_ptr = (scalar_t*)grad_bias.data_ptr();
 
-        // assign strides for gB, viewed as
-        // (batch_sz, n_heads, n_queries, n_keys). might have different strides
-        // than B, for example if bias tensor was created with
-        // torch.tensor((B * nH, 1, nK)).expand((B * nH, nQ, nK)),
-        // different values of Q will point to the same memory
-        // locations, meaning bias.stride(1) == 0, while we'd want
-        // grad_bias.stride(1) == nK
-        // We have expanded the input prior to calling the forward kernel
-        const at::Tensor& grad_bias_4d_view = grad_bias;
-        TORCH_CHECK(grad_bias_4d_view.dim()==4);
-        TORCH_CHECK(grad_bias_4d_view.size(0)==B);
-        TORCH_CHECK(grad_bias_4d_view.size(1)==nH);
-        TORCH_CHECK(grad_bias_4d_view.size(2)==M);
-        TORCH_CHECK(grad_bias_4d_view.size(3)==N);
-
-        ASSIGN_CHECK_OVERFLOW(p.gB_strideB, grad_bias_4d_view.stride(0));
-        ASSIGN_CHECK_OVERFLOW(p.gB_strideH, grad_bias_4d_view.stride(1));
-        ASSIGN_CHECK_OVERFLOW(p.gB_strideM, grad_bias_4d_view.stride(2));
+        ASSIGN_CHECK_OVERFLOW(p.gB_strideB, grad_bias.stride(0));
+        ASSIGN_CHECK_OVERFLOW(p.gB_strideH, grad_bias.stride(1));
+        ASSIGN_CHECK_OVERFLOW(p.gB_strideM, grad_bias.stride(2));
       }
     }
 
@@ -490,7 +507,7 @@ _efficient_attention_backward(
                  }));
   TORCH_CHECK(kernel_launched, "cutlassB: no kernel found to launch!");
   AT_CUDA_CHECK(cudaGetLastError());
-  return std::make_tuple(grad_q, grad_k, grad_v, grad_bias);
+  return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v), std::move(grad_bias));
   #endif
   TORCH_CHECK(false, "USE_MEM_EFF_ATTENTION was not enabled for build.")
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
@@ -545,7 +562,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   grad_k = grad_k.transpose(1,2);
   grad_v = grad_v.transpose(1,2);
 
-  return std::make_tuple(grad_q, grad_k, grad_v);
+  return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v));
 }
 
 

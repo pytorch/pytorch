@@ -44,10 +44,10 @@ Tensor computeSoftmax(
 
   // We do not handle None for dims (input 1) because that is supposed to
   // be deprecated.
-  TORCH_INTERNAL_ASSERT(c10::get_if<int64_t>(&inputs[1]));
+  TORCH_INTERNAL_ASSERT(std::get_if<int64_t>(&inputs[1]));
   int64_t rank = valueShape(inputs[0]).size();
   size_t softmax_dim =
-      normalizeAndCheckIndex(c10::get<int64_t>(inputs[1]), rank);
+      normalizeAndCheckIndex(std::get<int64_t>(inputs[1]), rank);
   std::vector<ExprHandle> non_softmax_dims;
   for (size_t i = 0; i < outputShape.size(); ++i) {
     if (i != softmax_dim) {
@@ -93,10 +93,10 @@ Tensor computeSoftmax(
     return new_indices;
   };
 
-  auto inp_buf = c10::get<BufHandle>(inputs[0]);
+  auto inp_buf = std::get<BufHandle>(inputs[0]);
 
   auto dtype = inp_buf.dtype();
-  if (auto d = c10::get_if<int64_t>(&inputs[2])) {
+  if (auto d = std::get_if<int64_t>(&inputs[2])) {
     dtype = ToDtype(static_cast<ScalarType>(*d));
   }
 

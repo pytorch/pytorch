@@ -16,6 +16,7 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_scaled_mm_native.h>
+#include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/baddbmm_native.h>
@@ -369,12 +370,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 }
 
 const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  IntArrayRef batch1_sizes = batch1.sizes();
-
   // handle pathological cases that blas may not like
   if (result.numel() == 0) {
     return result;
-  } else if (batch1_sizes[2] == 0) {
+  } else if (batch1.size(2) == 0) {
     if (beta.to<c10::complex<double>>() == 0.0) {
       return result.zero_();
     } else {
@@ -421,17 +420,30 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
     const scalar_t* batch1_ptr = batch1_->const_data_ptr<scalar_t>();
     const scalar_t* batch2_ptr = batch2_->const_data_ptr<scalar_t>();
     scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
-    at::cuda::blas::bgemm<scalar_t>(
-      transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
-      transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
-      m, n, k,
-      alpha_val,
-      batch1_ptr, lda, batch1_->strides()[0],
-      batch2_ptr, ldb, batch2_->strides()[0],
-      beta_val,
-      result_ptr, ldc, result_->strides()[0],
-      num_batches
-    );
+    const auto transa = transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n';
+    const auto transb = transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n';
+    // If batch is 1 call gemm rather than bgemm
+    if (num_batches == 1) {
+      at::cuda::blas::gemm<scalar_t>(
+          transa, transb,
+          m, n, k,
+          alpha_val,
+          batch1_ptr, lda,
+          batch2_ptr, ldb,
+          beta_val,
+          result_ptr, ldc);
+    } else {
+      at::cuda::blas::bgemm<scalar_t>(
+        transa, transb,
+        m, n, k,
+        alpha_val,
+        batch1_ptr, lda, batch1_->strides()[0],
+        batch2_ptr, ldb, batch2_->strides()[0],
+        beta_val,
+        result_ptr, ldc, result_->strides()[0],
+        num_batches
+      );
+   }
   });
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
@@ -721,6 +733,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           const c10::optional<at::Tensor>& scale_a,
           const c10::optional<at::Tensor>& scale_b,
           const c10::optional<at::Tensor>& scale_result,
+          bool use_fast_accum,
           Tensor& out, Tensor& amax) {
   // Check sizes
   auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -752,7 +765,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
   TORCH_CHECK(amax.scalar_type() == kFloat, "amax must be a float scalar");
   TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
-  TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat1.scalar_type());
+  TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat2.scalar_type());
   // Type restrictions imposed by CuBLASLt as of CUDA-12.1
   TORCH_CHECK(mat1.scalar_type() != ScalarType::Float8_e5m2 || mat2.scalar_type() != ScalarType::Float8_e5m2,
         "Multiplication of two Float8_e5m2 matrices is not supported");
@@ -806,7 +819,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       scale_result ? scale_result->data_ptr() : nullptr,
       args.result_ld,
       out_dtype_,
-      amax.data_ptr());
+      amax.data_ptr(),
+      use_fast_accum);
 #else
   TORCH_CHECK(false, "_scaled_mm_out_cuda is not compiled for this platform.");
 #endif
@@ -820,11 +834,12 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
           c10::optional<c10::ScalarType> out_dtype,
           const c10::optional<at::Tensor>& scale_a,
           const c10::optional<at::Tensor>& scale_b,
-          const c10::optional<at::Tensor>& scale_result) {
+          const c10::optional<at::Tensor>& scale_result,
+          bool use_fast_accum) {
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
   Tensor amax = at::empty({0}, mat_a.options().dtype(ScalarType::Float));
-  return _scaled_mm_out_cuda(mat_a, mat_b, bias, out_dtype, scale_a, scale_b, scale_result, out ,amax);
+  return _scaled_mm_out_cuda(mat_a, mat_b, bias, out_dtype, scale_a, scale_b, scale_result, use_fast_accum, out, amax);
 }
 
 } // namespace at::native

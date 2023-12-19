@@ -167,7 +167,7 @@ void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
   if (options.sparse()) {
     stream << ", sparse=" << std::boolalpha << options.sparse();
   }
-  if (!c10::get_if<enumtype::kMean>(&options.mode())) {
+  if (!std::get_if<enumtype::kMean>(&options.mode())) {
     stream << ", mode=" << torch::enumtype::get_enum_name(options.mode());
   }
   if (options.include_last_offset()) {

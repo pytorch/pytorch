@@ -27,7 +27,9 @@
 #include <unistd.h>
 #endif
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <fmt/chrono.h>
+C10_DIAGNOSTIC_POP()
 #include <fmt/format.h>
 
 #include <torch/csrc/distributed/c10d/error.h>
@@ -417,12 +419,21 @@ bool SocketImpl::waitForInput(std::chrono::milliseconds timeout) {
       return true;
     }
     std::error_code err = getSocketError();
-    if (err != std::errc::interrupted) {
+
+    if (err == std::errc::operation_in_progress) {
+      bool timedout = Clock::now() >= deadline;
+      if (timedout) {
+        return false;
+      }
+      C10D_WARNING(
+          "pollFB for socket {} returned operation_in_progress before a timeout",
+          hnd_);
+    } else if (err != std::errc::interrupted) {
       C10D_WARNING("While waitForInput, poolFD failed with {}.", err);
       return false;
     }
   } while (Clock::now() < deadline);
-  return true;
+  return false;
 }
 
 namespace {

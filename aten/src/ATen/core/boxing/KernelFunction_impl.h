@@ -59,7 +59,7 @@ inline typename remove_symint<T>::type unpackSymInt(T x) { return x; }
 
 template <>
 inline typename remove_symint<c10::SymInt>::type unpackSymInt(c10::SymInt x) {
-  return x.expect_int();
+  return x.guard_int(__FILE__, __LINE__);
 }
 
 template <>
@@ -69,7 +69,7 @@ inline typename remove_symint<c10::SymIntArrayRef>::type unpackSymInt(c10::SymIn
 
 template <>
 inline typename remove_symint<c10::optional<c10::SymInt>>::type unpackSymInt(c10::optional<c10::SymInt> x) {
-  return x.has_value() ? c10::make_optional(x->expect_int()) : c10::nullopt;
+  return x.has_value() ? c10::make_optional(x->guard_int(__FILE__, __LINE__)) : c10::nullopt;
 }
 
 template <>
@@ -177,7 +177,7 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunction(FuncPtr func_ptr) 
 #if !defined(C10_MOBILE)
     (void)func_ptr; // Suppress unused variable warning
     return makeFromUnboxedFunctor<AllowLegacyTypes, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>(
-        std::make_unique<typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>()
+        guts::make_unique_base<OperatorKernel, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>()
     );
 #else
     // On mobile, we rather want to optimize for binary size than for performance,
@@ -194,7 +194,7 @@ inline KernelFunction KernelFunction::makeFromUnboxedRuntimeFunction(FuncType* f
     TORCH_INTERNAL_ASSERT(func != nullptr, "Kernel function cannot be nullptr");
 
     return makeFromUnboxedFunctor<AllowLegacyTypes, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>(
-        std::make_unique<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>(func)
+        guts::make_unique_base<OperatorKernel, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<FuncType>>>(func)
     );
 }
 
@@ -204,7 +204,7 @@ inline std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, 
 
 #if !defined(C10_MOBILE)
     return makeFromUnboxedFunctor<AllowLegacyTypes, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(
-        std::make_unique<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
+        guts::make_unique_base<OperatorKernel, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
     );
 #else
     // On mobile, we rather want to optimize for binary size than for performance,
@@ -220,7 +220,7 @@ inline std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value,
     static_assert(guts::is_functor<std::decay_t<Lambda>>::value, "Tried to call KernelFunction::makeFromUnboxedLambda with a non-lambda type.");
 
     return makeFromUnboxedFunctor<AllowLegacyTypes, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(
-        std::make_unique<impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
+        guts::make_unique_base<OperatorKernel, impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
     );
 }
 

@@ -39,6 +39,13 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(python_op_registration_trampoline);
   }
 
+  void throw_abstract_impl_not_imported_error(
+      std::string opname,
+      const char* pymodule,
+      const char* context) const override {
+    PANIC(throw_abstract_impl_not_imported_error);
+  }
+
   void python_dispatcher(
       const c10::OperatorHandle& op,
       c10::DispatchKeySet,
@@ -73,6 +80,9 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   }
   c10::Layout layout(const TensorImpl* self) const override {
     PANIC(layout);
+  }
+  int64_t numel(const TensorImpl* self) const override {
+    PANIC(numel);
   }
   c10::SymInt sym_numel(const TensorImpl* self) const override {
     PANIC(sym_numel);

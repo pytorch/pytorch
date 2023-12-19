@@ -60,7 +60,7 @@ using at::Tensor;
 using c10::Stream;
 using namespace torch::autograd::utils;
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
 {
@@ -100,8 +100,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "size(int64_t dim)",
-    "size()",
+    "size(int64_t? dim=None)",
     "size(Dimname dim)",
   });
   auto& self_ = THPVariable_Unpack(self);
@@ -112,6 +111,9 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
   if (r.idx == 0) {
+    if (!r.toInt64Optional(0).has_value()) {
+      return THPSize_NewFromSymSizes(self_);
+    }
     if (jit::tracer::isTracing()) {
       // will error out if a tensor has symints
       return wrap(jit::tracer::getSizeOf(self_, r.toInt64(0)));
@@ -119,9 +121,6 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
       return torch::toPyObject(self_.sym_size(r.toInt64(0)));
     }
   } else if (r.idx == 1) {
-    return THPSize_NewFromSymSizes(self_);
-  }
-  else if (r.idx == 2) {
     if (jit::tracer::isTracing()) {
       TORCH_INTERNAL_ASSERT(false, "NYI: Named tensors w/ JIT");
     }
@@ -135,8 +134,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "stride(int64_t dim)",
-    "stride()",
+    "stride(int64_t? dim=None)",
     "stride(Dimname dim)",
   });
   auto& self_ = THPVariable_Unpack(self);
@@ -148,8 +146,9 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   }
 
   if (r.idx == 0) {
-    return torch::toPyObject(self_.sym_stride(r.toInt64(0)));
-  } else if (r.idx == 1) {
+    if (r.toInt64Optional(0).has_value()) {
+      return torch::toPyObject(self_.sym_stride(r.toInt64(0)));
+    }
     // yes, this is called strides in ATen.
     at::SymIntArrayRef strides = self_.sym_strides();
     // we can't do the normal wrapping here because IntArrayRef maps to both
@@ -163,8 +162,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
       PyTuple_SET_ITEM(tuple.get(), i, s);
     }
     return tuple.release();
-  }
-  else if (r.idx == 2) {
+  } else if (r.idx == 1) {
     return wrap(self_.stride(r.dimname(0)));
   }
   Py_RETURN_NONE;
@@ -315,31 +313,14 @@ static Tensor dispatch_copy_(const Tensor & self, const Tensor & other, bool non
   END_HANDLE_TH_ERRORS
 }
 
-static double dispatch_to_CDouble(const Tensor & self) {
+template<typename T>
+static T dispatch_to(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   if (self.sym_numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
-  return self.item<double>();
-}
-
-static c10::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
-  pybind11::gil_scoped_release no_gil;
-  OptionalDeviceGuard device_guard(device_of(self));
-  if (self.sym_numel() != 1) {
-    throw ValueError("only one element tensors can be converted to Python scalars");
-  }
-  return self.item<c10::complex<double>>();
-}
-
-static int64_t dispatch_to_CLong(const Tensor & self) {
-  pybind11::gil_scoped_release no_gil;
-  OptionalDeviceGuard device_guard(device_of(self));
-  if (self.sym_numel() != 1) {
-    throw ValueError("only one element tensors can be converted to Python scalars");
-  }
-  return self.item<int64_t>();
+  return self.template item<T>();
 }
 
 static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
@@ -349,7 +330,7 @@ static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
   }
   jit::tracer::warn("Converting a tensor to a Python float", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = THPVariable_Unpack(self);
-  return wrap(dispatch_to_CDouble(self_));
+  return wrap(dispatch_to<double>(self_));
   END_HANDLE_TH_ERRORS
 }
 
@@ -360,7 +341,7 @@ static PyObject * THPVariable_complex_scalar(PyObject* self, PyObject* args) {
   }
   jit::tracer::warn("Converting a tensor to a Python complex", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = THPVariable_Unpack(self);
-  return wrap(dispatch_to_CComplexDouble(self_));
+  return wrap(dispatch_to<c10::complex<double>>(self_));
   END_HANDLE_TH_ERRORS
 }
 
@@ -374,9 +355,9 @@ static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
   if (isFloatingType(self_.scalar_type())) {
     // we can't dispatch to item<int64_t> here because we want to avoid ATen overflow checks;
     // the python integral type (long in python2) can't overflow.
-    return THPUtils_packDoubleAsInt(dispatch_to_CDouble(self_));
+    return THPUtils_packDoubleAsInt(dispatch_to<double>(self_));
   } else {
-    return wrap(dispatch_to_CLong(self_));
+    return wrap(dispatch_to<int64_t>(self_));
   }
   END_HANDLE_TH_ERRORS
 }
@@ -394,7 +375,7 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
   if (!isIntegralType(self_.scalar_type(), /*includeBool=*/true) || self_.sym_numel() != 1) {
     throw TypeError("only integer tensors of a single element can be converted to an index");
   }
-  return wrap(dispatch_to_CLong(self_));
+  return wrap(dispatch_to<int64_t>(self_));
   END_HANDLE_TH_ERRORS
 }
 
@@ -1067,13 +1048,13 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   Device device = self_.device();
   if (is_dtype) {
     scalar_type = r.scalartype(0);
-  } else {
-    at::TensorOptions options = torch::utils::options_from_string(type_name);
-    scalar_type = at::typeMetaToScalarType(options.dtype());
-    auto device_type = options.device().type();
-    if (device_type != device.type()) {
-      device = at::Device(device_type);
-    }
+    return THPVariable_Wrap(dispatch_to(self_, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false, opt_memory_format));
+  }
+  at::TensorOptions options = torch::utils::options_from_string(type_name);
+  scalar_type = at::typeMetaToScalarType(options.dtype());
+  auto device_type = options.device().type();
+  if (device_type != device.type()) {
+    device = at::Device(device_type);
   }
   if (device.is_cuda()) {
     torch::utils::cuda_lazy_init();
@@ -1294,4 +1275,4 @@ PyMethodDef variable_methods[] = {
   {NULL}
 };
 
-}} // namespace torch::autograd
+} // namespace torch::autograd

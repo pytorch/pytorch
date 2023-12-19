@@ -235,10 +235,9 @@ class intrusive_ptr final {
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_base_of<
+      std::is_base_of_v<
           TTarget,
-          typename std::remove_pointer<decltype(NullType::singleton())>::type>::
-          value,
+          std::remove_pointer_t<decltype(NullType::singleton())>>,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;
@@ -369,7 +368,7 @@ class intrusive_ptr final {
   }
 
   intrusive_ptr& operator=(intrusive_ptr&& rhs) & noexcept {
-    return operator=<TTarget, NullType>(std::move(rhs));
+    return operator= <TTarget, NullType>(std::move(rhs));
   }
 
   template <class From, class FromNullType>
@@ -383,11 +382,15 @@ class intrusive_ptr final {
   }
 
   intrusive_ptr& operator=(const intrusive_ptr& rhs) & noexcept {
-    return operator=<TTarget, NullType>(rhs);
+    if (this == &rhs) {
+      return *this;
+    }
+    return operator= <TTarget, NullType>(rhs);
   }
 
   template <class From, class FromNullType>
-  intrusive_ptr& operator=(const intrusive_ptr<From, NullType>& rhs) & {
+  intrusive_ptr& operator=(
+      const intrusive_ptr<From, NullType>& rhs) & noexcept {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. intrusive_ptr copy assignment got pointer of wrong type.");
@@ -405,7 +408,6 @@ class intrusive_ptr final {
   }
 
   TTarget* operator->() const noexcept {
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
     return target_;
   }
 
@@ -419,9 +421,7 @@ class intrusive_ptr final {
   }
 
   void swap(intrusive_ptr& rhs) noexcept {
-    TTarget* tmp = target_;
-    target_ = rhs.target_;
-    rhs.target_ = tmp;
+    std::swap(target_, rhs.target_);
   }
 
   // We do a lot of null-pointer checks in our code, good to have this be cheap.
@@ -669,7 +669,7 @@ template <
 class weak_intrusive_ptr final {
  private:
   static_assert(
-      std::is_base_of<intrusive_ptr_target, TTarget>::value,
+      std::is_base_of_v<intrusive_ptr_target, TTarget>,
       "intrusive_ptr can only be used for classes that inherit from intrusive_ptr_target.");
 #ifndef _WIN32
   // This static_assert triggers on MSVC
@@ -679,10 +679,9 @@ class weak_intrusive_ptr final {
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_base_of<
+      std::is_base_of_v<
           TTarget,
-          typename std::remove_pointer<decltype(NullType::singleton())>::type>::
-          value,
+          std::remove_pointer_t<decltype(NullType::singleton())>>,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;
@@ -754,7 +753,7 @@ class weak_intrusive_ptr final {
   }
 
   weak_intrusive_ptr& operator=(weak_intrusive_ptr&& rhs) & noexcept {
-    return operator=<TTarget, NullType>(std::move(rhs));
+    return operator= <TTarget, NullType>(std::move(rhs));
   }
 
   template <class From, class FromNullType>
@@ -769,7 +768,10 @@ class weak_intrusive_ptr final {
   }
 
   weak_intrusive_ptr& operator=(const weak_intrusive_ptr& rhs) & noexcept {
-    return operator=<TTarget, NullType>(rhs);
+    if (this == &rhs) {
+      return *this;
+    }
+    return operator= <TTarget, NullType>(rhs);
   }
 
   weak_intrusive_ptr& operator=(
@@ -781,7 +783,7 @@ class weak_intrusive_ptr final {
 
   template <class From, class FromNullType>
   weak_intrusive_ptr& operator=(
-      const weak_intrusive_ptr<From, NullType>& rhs) & {
+      const weak_intrusive_ptr<From, NullType>& rhs) & noexcept {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. weak_intrusive_ptr copy assignment got pointer of wrong type.");

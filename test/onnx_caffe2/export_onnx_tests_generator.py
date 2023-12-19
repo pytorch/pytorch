@@ -101,7 +101,7 @@ def convert_tests(testcases, sets=1):
         try:
             input = gen_input(t)
             f = io.BytesIO()
-            torch.onnx.utils._export(
+            torch.onnx._export(
                 module,
                 input,
                 f,

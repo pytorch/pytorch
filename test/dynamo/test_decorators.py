@@ -233,7 +233,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
             @torch._dynamo.disable
             def helper_disabled(self, x, y):
-                return x * y
+                return x.sin() * y.cos()
 
             def helper(self, x, y):
                 return x * y
@@ -244,27 +244,12 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         e = encoder(y)
 
-        seen_frames = []
-        import contextlib
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch.compile(e, backend=cnt)(x)
 
-        @contextlib.contextmanager
-        def global_context_capture_fn(frame_summary):
-            if frame_summary is not None:
-                seen_frames.append(frame_summary)
-            yield
-
-        with mock.patch(
-            "torch._guards.TracingContext.current_frame",
-            side_effect=global_context_capture_fn,
-        ):
-            torch._dynamo.optimize("eager")(e)(x)
-
-        self.assertEqual(len(seen_frames), 1)
-        self.assertEqual(seen_frames[0].name, "forward")
-        self.assertEqual(
-            seen_frames[0].line,
-            "return self.helper(x, self.param) + self.helper_disabled(x, self.param)",
-        )
+        # first frame is before disable, second frame is after disable
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 3)
 
     def _test_mark_static_address(self, guarded):
         compiles_with_buffers = 0

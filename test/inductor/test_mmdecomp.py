@@ -5,7 +5,7 @@ import unittest
 from typing import List, Tuple, Union
 
 import torch
-from torch._inductor.utils import has_triton
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_CUDA,
 )
+from torch.utils._triton import has_triton
 
 
 default_atol = {
@@ -115,7 +116,9 @@ class TestDecomp(NNTestCase):
             run_comp_nocomp(torch_addmm, tadd, t1, t2, rtol=rtol, atol=atol)
 
     @unittest.skipIf(TEST_CUDA and not has_triton(), "CUDA tests require triton")
-    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize(
+        "dtype", [torch.float, torch.bfloat16] if SM80OrLater else [torch.float]
+    )
     @parametrize("bs", [1, 2, 4, 10])
     def test_batched_mm(self, device, dtype, bs):
         fudge = 3

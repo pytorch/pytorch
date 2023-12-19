@@ -68,7 +68,7 @@ using namespace torch::autograd::utils;
 
 // NOTE: See [Sharded File] comment in VariableType
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 // generated forward declarations start here
 
@@ -90,4 +90,4 @@ void gatherTorchFunctions${shard_id}(std::vector<PyMethodDef> &torch_functions) 
 
 ${py_methods}
 
-}} // namespace torch::autograd
+} // namespace torch::autograd

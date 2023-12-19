@@ -68,6 +68,26 @@ class TestDTypeInfo(TestCase):
         with set_default_dtype(x.dtype):
             self.assertEqual(torch.finfo(x.dtype), torch.finfo())
 
+        # Special test case for Float8_E5M2
+        xinfo = torch.finfo(torch.float8_e5m2)
+        self.assertEqual(xinfo.bits, 8)
+        self.assertEqual(xinfo.max, 57344.0)
+        self.assertEqual(xinfo.min, -57344.0)
+        self.assertEqual(xinfo.eps, .25)
+        self.assertEqual(xinfo.tiny, 6.10352e-05)
+        self.assertEqual(xinfo.resolution, 1.0)
+        self.assertEqual(xinfo.dtype, "float8_e5m2")
+
+        # Special test case for Float8_E4M3FN
+        xinfo = torch.finfo(torch.float8_e4m3fn)
+        self.assertEqual(xinfo.bits, 8)
+        self.assertEqual(xinfo.max, 448.0)
+        self.assertEqual(xinfo.min, -448.0)
+        self.assertEqual(xinfo.eps, .125)
+        self.assertEqual(xinfo.tiny, 0.015625)
+        self.assertEqual(xinfo.resolution, 1.0)
+        self.assertEqual(xinfo.dtype, "float8_e4m3fn")
+
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
     run_tests()

@@ -541,7 +541,8 @@ auto handle_torch_function(
     const char* func_name_override) -> PyObject* {
   py::object torch_api_function = PyObject_FastGetAttrString(
       torch_api,
-      (char*)(func_name_override ? func_name_override : r.get_func_name().c_str()));
+      (char*)(func_name_override ? func_name_override
+                                 : r.get_func_name().c_str()));
   TORCH_INTERNAL_ASSERT(
       torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
@@ -771,69 +772,6 @@ static bool is_float_or_complex_list(PyObject* obj) {
   return true;
 }
 
-static bool is_int_list(
-    PyObject* obj,
-    int broadcast_size,
-    int64_t* failed_idx = nullptr) {
-  if (PyTuple_Check(obj) || PyList_Check(obj)) {
-    auto len = PySequence_Size(obj);
-    if (len == 0) {
-      return true;
-    }
-
-    auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
-    bool int_first = false;
-    if (THPUtils_checkIndex(item.ptr())) {
-      // we still have to check that the rest of items are NOT symint nodes
-      int_first = true;
-    }
-
-    // Make sure none of the later arguments are SymInt
-    // NB: do NOT check that the later arguments are ints, as this is
-    // BC-breaking for FX
-    for (int i = 1; i < len; i++) {
-      if (torch::is_symint(
-              py::reinterpret_steal<py::object>(PySequence_GetItem(obj, i)))) {
-        if (failed_idx != nullptr) {
-          *failed_idx = i;
-        }
-        return false;
-      }
-    }
-
-    if (int_first) {
-      return true;
-    }
-
-    // in dynamo, FakeTensor is qualified for INT_LIST
-    if (is_dynamo_compiling && THPVariable_Check(item.ptr())) {
-      auto& var = THPVariable_Unpack(item.ptr());
-      if (var.numel() != 1 || !var.sizes().empty() ||
-          !at::isIntegralType(
-              var.dtype().toScalarType(), /*include_bool*/ true)) {
-        if (failed_idx != nullptr) {
-          *failed_idx = 0;
-        }
-        return false;
-      }
-      return true;
-    }
-
-    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
-    // in an intlist argument. Even float or complex scalar tensors.
-    bool r =
-        (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-         THPVariable_Unpack(item.ptr()).sizes().empty());
-    if (!r && failed_idx != nullptr) {
-      *failed_idx = 0;
-    }
-    return r;
-  }
-  // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
-  // int
-  return broadcast_size > 0 && THPUtils_checkLong(obj);
-}
-
 static bool is_int_or_symint(PyObject* obj) {
   // THPUtils_checkIndex may call __index__ or __int__
   // which may have side effects if obj is a symint node
@@ -922,7 +860,8 @@ auto FunctionParameter::check(
         const auto& var = THPVariable_Unpack(obj);
         return !var.requires_grad() && var.dim() == 0;
       }
-      if (torch::is_symfloat(py::handle(obj))) {
+      if (torch::is_symfloat(py::handle(obj)) ||
+          torch::is_symint(py::handle(obj))) {
         // This will induce a guard
         return true;
       }
@@ -957,8 +896,6 @@ auto FunctionParameter::check(
       return is_tensor_list_and_append_overloaded(
           obj, &overloaded_args, argnum, true /* throw_error */);
     }
-    case ParameterType::INT_LIST:
-      return is_int_list(obj, size, failed_idx);
     case ParameterType::FLOAT_LIST:
       return is_float_or_complex_list(obj);
     case ParameterType::GENERATOR:
@@ -988,6 +925,8 @@ auto FunctionParameter::check(
       return is_scalar_list(obj);
     case ParameterType::SYM_INT:
       return is_int_or_symint(obj);
+    // Allow SymInt where int is expected; we'll guard in this case
+    case ParameterType::INT_LIST:
     case ParameterType::SYM_INT_LIST:
       return is_int_or_symint_list(obj, size, failed_idx);
     case ParameterType::DISPATCH_KEY_SET:
@@ -1462,14 +1401,10 @@ bool FunctionSignature::parse(
   // if there is a single positional IntArrayRef argument, i.e. expand(..),
   // view(...), allow a var-args style IntArrayRef, so expand(5,3) behaves as
   // expand((5,3))
-  int int_list_overload = false;
   if (max_pos_args == 1 &&
       (params[0].type_ == ParameterType::INT_LIST ||
        params[0].type_ == ParameterType::SYM_INT_LIST)) {
     allow_varargs_intlist = true;
-    if (params[0].type_ == ParameterType::INT_LIST) {
-      int_list_overload = true;
-    }
   }
 
   if (static_cast<size_t>(nargs) > max_pos_args && !allow_varargs_intlist) {
@@ -1524,9 +1459,7 @@ bool FunctionSignature::parse(
       // should avoid having complex signatures that make use of it...
     } else if (
         varargs_eligible &&
-        ((int_list_overload
-              ? is_int_list(args, param.size, &failed_idx)
-              : is_int_or_symint_list(args, param.size, &failed_idx)))) {
+        (is_int_or_symint_list(args, param.size, &failed_idx))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;

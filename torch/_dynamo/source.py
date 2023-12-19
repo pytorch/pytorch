@@ -111,23 +111,6 @@ class RandomValueSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
-class GeneratorStateSource(Source):
-    device: str
-    initial_seed: int
-
-    def guard_source(self):
-        return GuardSource.RANDOM_VALUE
-
-    def reconstruct(self, codegen):
-        # generator state is a torch.ByteTensor, so we reuse TensorVariable reconstruction in codegen.py
-        raise NotImplementedError()
-
-    def name(self):
-        name = f"generator_state_{self.device}_{self.initial_seed}"
-        return f"L[{name}]"
-
-
-@dataclasses.dataclass(frozen=True)
 class GlobalSource(Source):
     global_name: str
 
@@ -383,36 +366,6 @@ class TypeSource(ChainedSource):
         return f"type({self.base.name()})"
 
 
-# NB - SuperSource is a weird one.
-# it is our only source with 2 bases, so we use the objec
-# as the base, rather than the type, since an invocation
-# like super(Foo, foo) is represented here, the source object base is more spiritually
-# aligned with the instance, rather than the type.
-# This whole construction is questionable tho, and we should probably find a way to
-# avoid this exception to our otherwise nice source parentage invariant.
-@dataclasses.dataclass(frozen=True)
-class SuperSource(ChainedSource):
-    type: Source
-
-    def __post_init__(self):
-        assert self.type is not None
-        assert self.base is not None
-
-    def reconstruct(self, codegen):
-        codegen.load_import_from("builtins", "super")
-        return (
-            self.type.reconstruct(codegen)
-            + self.base.reconstruct(codegen)
-            + create_call_function(2, True)
-        )
-
-    def guard_source(self):
-        return self.base.guard_source()
-
-    def name(self):
-        return f"super({self.type.name()}, {self.base.name()})"
-
-
 @dataclasses.dataclass(frozen=True)
 class ODictGetItemSource(ChainedSource):
     index: Any
@@ -486,14 +439,14 @@ class ConstantSource(Source):
     def name(self):
         return self.source_name
 
-    def make_guard(self, fn, is_volatile=False):
+    def make_guard(self, fn):
         raise NotImplementedError()
 
 
 @dataclasses.dataclass(frozen=True)
 class NumpyTensorSource(ChainedSource):
     def name(self) -> str:
-        return f"__as_tensor({self.base.name()})"
+        return f"___from_numpy({self.base.name()})"
 
     def guard_source(self):
         return self.base.guard_source()

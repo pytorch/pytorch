@@ -7,7 +7,6 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -25,6 +24,7 @@
 #include <c10/core/Event.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
+#include <c10/util/AbortHandler.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/ThreadLocal.h>
@@ -347,6 +347,7 @@ void Engine::thread_init(
     int device,
     const std::shared_ptr<ReadyQueue>& ready_queue,
     bool should_increment) {
+  c10::set_terminate_handler();
   if (should_increment) {
     increment_non_reentrant_thread_count();
   }
@@ -576,6 +577,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
                 local_graph_task->cpu_ready_queue_);
           }
         } catch (std::exception& e) {
+          // See Note [ Persisting PyErr state across autograd engine threads ]
           thread_on_exception(local_graph_task, task.fn_, e);
         }
       }
@@ -613,6 +615,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
 // thread, but sharing the same cpu_ready_queue with parent thread is a
 // performance improvement and cuda thread still have to do the same thing.
 void Engine::reentrant_thread_init() {
+  c10::set_terminate_handler();
   at::init_num_threads();
   auto tp_shared = thread_pool_shared_;
   while (true) {
@@ -708,6 +711,7 @@ void GraphTask::exec_post_processing() {
       // If leaf_stream.device_index() happens to be for a new device,
       // operator* on the c10::nullopt should throw an error.
       const auto caller_current_stream =
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           *caller_current_streams_[leaf_stream.device_index()];
 
       if (caller_current_stream != leaf_stream) {
@@ -1230,7 +1234,6 @@ auto Engine::execute(
 
   if (compiled_autograd != nullptr) {
     // see [Note: Compiled Autograd]
-    TORCH_CHECK(!keep_graph, "compiled_autograd does not support keep_graph");
     TORCH_CHECK(
         !create_graph, "compiled_autograd does not support create_graph");
     _thread_check.release();
@@ -1591,7 +1594,7 @@ void GraphTask::init_to_execute(
       // In terms of populating the rest of exec_info though, you can basically
       // think of this as the same as setting `needed_` is true directly.
       if (!info.captures_) {
-        info.captures_ = make_unique<std::vector<ExecInfo::Capture>>();
+        info.captures_ = std::make_unique<std::vector<ExecInfo::Capture>>();
       }
       info.captures_->emplace_back(output_edge.input_nr, output_idx++);
     }
