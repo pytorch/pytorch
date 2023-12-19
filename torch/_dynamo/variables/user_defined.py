@@ -676,9 +676,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)
             elif (
-                type(subobj) == torch.utils._pytree.api.python.TreeSpec
-                or type(subobj) == torch.utils._pytree.api.python.LeafSpec
-                or type(value) == torch.utils._pytree.api.python.TreeSpec
+                type(subobj) == torch.utils._pytree.TreeSpec
+                or type(subobj) == torch.utils._pytree.LeafSpec
+                or type(value) == torch.utils._pytree.TreeSpec
             ):
                 # TODO(Jack): these fx function we want to inline should share the same
                 # source as the origional line

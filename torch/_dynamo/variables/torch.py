@@ -666,6 +666,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         fn_,
                         *proxy_args_kwargs(args, kwargs),
                     ),
+                )
             if (
                 isinstance(tensor_variable, TensorVariable)
                 and "requires_grad" in kwargs

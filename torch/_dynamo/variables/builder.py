@@ -1927,9 +1927,9 @@ class SourcelessBuilder:
             return MethodWrapperVariable(value)
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
-        elif isinstance(value, torch.utils._pytree.api.python.TreeSpec):
+        elif isinstance(value, torch.utils._pytree.TreeSpec):
             return TreeSpecVariable(value)
-        elif isinstance(value, torch.utils._pytree.api.python.LeafSpec):
+        elif isinstance(value, torch.utils._pytree.LeafSpec):
             return LeafSpecVariable(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
