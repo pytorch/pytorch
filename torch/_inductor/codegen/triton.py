@@ -10,6 +10,7 @@ import math
 import operator
 import os
 import textwrap
+from functools import lru_cache
 from typing import (
     Any,
     Callable,
@@ -91,6 +92,25 @@ class TritonPrinter(PythonPrinter):
         q = self.doprint(expr.args[2])
         return f"tl.where({c}, {p}, {q})"
 
+    @lru_cache(None)
+    @staticmethod
+    def _propagate_nan_arg():
+        """
+        Newer triton version added propagate_nan as required argument for
+        tl.math.{min, max}. This method make inductor work with both old
+        and new version of triton.
+        """
+        import inspect
+
+        import triton.language as tl
+
+        if "propagate_nan" in inspect.signature(tl.math.min).parameters:
+            # tl.PropagateNan.NONE is the default
+            propagate_nan_arg = ", tl.PropagateNan.NONE"
+        else:
+            propagate_nan_arg = ""
+        return propagate_nan_arg
+
     def _print_Min(self, expr):
         nargs = len(expr.args)
         if len(expr.args) == 1:
@@ -99,7 +119,7 @@ class TritonPrinter(PythonPrinter):
         mid = len(expr.args) // 2
         a = self._print(sympy.Min(*expr.args[:mid]))
         b = self._print(sympy.Min(*expr.args[mid:]))
-        return f"tl.math.min({a}, {b})"
+        return f"tl.math.min({a}, {b}{TritonPrinter._propagate_nan_arg()})"
 
     def _print_Max(self, expr):
         nargs = len(expr.args)
@@ -109,7 +129,8 @@ class TritonPrinter(PythonPrinter):
         mid = len(expr.args) // 2
         a = self._print(sympy.Max(*expr.args[:mid]))
         b = self._print(sympy.Max(*expr.args[mid:]))
-        return f"tl.math.max({a}, {b})"
+
+        return f"tl.math.max({a}, {b}{TritonPrinter._propagate_nan_arg()})"
 
     def _print_Abs(self, expr):
         assert len(expr.args) == 1
@@ -2099,13 +2120,17 @@ class TritonKernel(Kernel):
                     from torch._inductor.ir import TileHint
                     from torch._inductor.triton_heuristics import AutotuneHint, {heuristics}
                     from torch._inductor.utils import instance_descriptor
-                    try:
-                        from triton.compiler.compiler import AttrsDescriptor
-                    except ImportError:
-                        pass  # ignore
                     from torch._inductor import triton_helpers
                 """
             )
+
+            # import AttrsDescriptor if the triton version is new enough to have this
+            # class defined.
+            import triton.compiler.compiler
+
+            if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
+                code.splice("from triton.compiler.compiler import AttrsDescriptor")
+
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
 
