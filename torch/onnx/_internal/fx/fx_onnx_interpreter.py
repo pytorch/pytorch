@@ -179,7 +179,6 @@ def _retrieve_or_adapt_input_to_graph_set(
         # torch.device is not supported by onnxscript (no op). We turn it into
         # a string.
         return str(onnx_tensor)
-
     # all other cases, we do nothing.
     return onnx_tensor
 
@@ -581,7 +580,7 @@ class FxOnnxInterpreter:
             # NOTE: ONNX doesn't support tensor of complex64/complex128, so we
             # convert them to float32/float64 with real representation.
             if fx_type_utils.is_torch_complex_dtype(fake_tensor.dtype):
-                fake_tensor = torch.view_as_real(fake_tensor)
+                fake_tensor = torch.view_as_real(fake_tensor.resolve_conj())
             output = onnxscript_graph.add_input(
                 input_name=node.name,
                 shape=fake_tensor.shape,

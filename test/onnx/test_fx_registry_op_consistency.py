@@ -130,7 +130,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "__rpow__",
-        reason="fixme: Assertion error: result mismatch",
+        dtypes=onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Pow", "int"),
     ),
     skip(
         "_native_batch_norm_legit",
@@ -153,8 +154,29 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     xfail(
+        "addbmm",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_dynamo_does_not_support("Addbmm", "complex64")
+    ),
+    xfail(
         "addmm", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Addmm")
+    ),
+    xfail(
+        "addmm",
+        variant_name="decomposed",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Addmm")
+    ),
+    skip(
+        "addmm", dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_dynamo_does_not_support("Addmm", "complex64 (core dump)")
+    ),
+    skip(
+        "addmm",
+        variant_name="decomposed",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_dynamo_does_not_support("Addmm", "complex64 (core dump)")
     ),
     xfail(
         "addr",
@@ -164,7 +186,12 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     xfail(
-        "allclose", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
+        "addr",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_dynamo_does_not_support("Addr", "complex64")
+    ),
+    xfail(
+        "allclose",
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
     ),
     xfail(
@@ -237,6 +264,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support(
             "Matmul", "uint8, int8, int16"
         ),
+    ),
+    xfail(
+        "baddbmm",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_dynamo_does_not_support("baddbmm", "complex64")
     ),
     xfail(
         "bernoulli",
@@ -368,6 +400,16 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "dot", dtypes=(torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_does_not_support("MatMul", "uint8, int8, int16")
     ),
+    skip(
+        "dot",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_dynamo_does_not_support("Dot", "complex64(core dump)"),
+    ),
+    xfail(
+        "empty",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason="fixme: kwargs dtpye=complex64 is not supported in ONNX."
+    ),
     xfail(
         "empty_strided",
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
@@ -395,6 +437,18 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "fft.fftn",
+        reason="fixme: Assertion error: result mismatch",
+    ),
+    xfail(
+        "fft.ifft",
+        reason="fixme: Assertion error: result mismatch",
+    ),
+    xfail(
+        "fft.ifft2",
+        reason="fixme: Assertion error: result mismatch",
+    ),
+    xfail(
+        "fft.ifftn",
         reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
@@ -432,6 +486,16 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Floor", "bool, int"),
     ),
     xfail(
+        "full",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_dynamo_does_not_support("full", "complex64")
+    ),
+    xfail(
+        "full_like",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_dynamo_does_not_support("full_like", "complex64")
+    ),
+    xfail(
         "geometric",
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
@@ -443,6 +507,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "heaviside",
         dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_script_does_not_support("Heaviside", "bool"),
+    ),
+    xfail(
+        "index_fill",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_dynamo_does_not_support("index_fill", "complex64")
     ),
     xfail(
         "index_put",
@@ -460,8 +529,17 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("IsNaN", "int, bool"),
     ),
     xfail(
+        "istft",
+        reason=onnx_test_common.reason_dynamo_does_not_support("data-dependent"),
+    ),
+    xfail(
         "item",
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
+        "lerp",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_dynamo_does_not_support("lerp", "complex64")
     ),
     xfail(
         "linalg.lstsq",
@@ -626,6 +704,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         dtypes=onnx_test_common.BOOL_TYPES + (torch.int64,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("ReduceMin", "bool"),
     ),
+    skip(
+        "mm",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_dynamo_does_not_support("MM", "complex64(core dump)"),
+    ),
     xfail(
         "multinomial",
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
@@ -642,6 +725,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "narrow",
         reason=onnx_test_common.reason_dynamo_does_not_support("data-dependent"),
+    ),
+    xfail(
+        "new_full",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason=onnx_test_common.reason_dynamo_does_not_support("new_full", "complex64")
     ),
     xfail(
         "nn.functional.adaptive_avg_pool2d",
@@ -772,8 +860,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "nn.functional.local_response_norm",
-        dtypes=(torch.float16, torch.int64),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("avgpool", "float16, int64"),
+        dtypes=(torch.int64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("avgpool", "int64"),
     ),
     xfail(
         "nn.functional.linear",
@@ -817,6 +905,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.relu",
         dtypes=(torch.int64,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Relu", "int64"),
+    ),
+    xfail(
+        "nn.functional.rrelu",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
     xfail(
         "nn.functional.rrelu",
@@ -872,6 +964,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
     xfail(
+        "ones",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason="fixme: kwargs dtpye=complex64 is not supported in ONNX."
+    ),
+    xfail(
         "pca_lowrank",
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
@@ -884,7 +981,15 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
     xfail(
+        "randint",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
         "randint_like",
+        reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
+    ),
+    xfail(
+        "randn",
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
     xfail(
@@ -1034,6 +1139,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("data-dependent"),
     ),
     xfail(
+        "to",
+        reason="This op requires torch.dtype as input, which is not supported currently.",
+    ),
+    xfail(
         "topk",
         dtypes=(torch.int64, torch.int32),
         reason="fixme: Assertion error: result mismatch",
@@ -1093,7 +1202,12 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "where",
         dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Where", "bool"),
-    )
+    ),
+    xfail(
+        "zeros",
+        dtypes=onnx_test_common.COMPLEX_TYPES,
+        reason="fixme: kwargs dtpye=complex64 is not supported in ONNX."
+    ),
 )
 # fmt: on
 
@@ -1110,11 +1224,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support(
             "Gemm", "uint8, int8, int16, int32, int64"
         ),
-    ),
-    xfail(
-        "addr",
-        matcher=lambda sample: torch.isnan(sample.args[0]).any(),
-        reason=onnx_test_common.reason_onnx_does_not_support("torch.nan"),
     ),
     xfail(
         "amax",
@@ -1179,6 +1288,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
             "https://github.com/pytorch/pytorch/issues/101150"
         ),
     ),
+    skip(
+        "linalg.multi_dot",
+        matcher=lambda sample: sum([torch.numel(input) for input in sample.input]) == 0,
+        reason="fixme: Undefined",
+    ),
     xfail(
         "linalg.vecdot",
         matcher=lambda sample: torch.numel(sample.input) == 0
@@ -1211,6 +1325,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "masked.log_softmax",
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="fixme: LogSoftMax does not support empty tensor as input",
+    ),
+    skip(
+        "matmul",
+        matcher=lambda sample: torch.numel(sample.input) == 0,
+        reason="values of matmul of [m, 0] and [0, n] matrices are undefined",
     ),
     xfail(
         "min",
@@ -1349,6 +1468,28 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     skip(
         "scatter_reduce",
+        variant_name="amax",
+        # ONNX has not include_self parameter and default is include_self=True mode
+        matcher=lambda sample: sample.kwargs.get("include_self") is False,
+        reason="ONNX does't support include_self=False option",
+    ),
+    skip(
+        "scatter_reduce",
+        variant_name="amin",
+        # ONNX has not include_self parameter and default is include_self=True mode
+        matcher=lambda sample: sample.kwargs.get("include_self") is False,
+        reason="ONNX does't support include_self=False option",
+    ),
+    skip(
+        "scatter_reduce",
+        variant_name="prod",
+        # ONNX has not include_self parameter and default is include_self=True mode
+        matcher=lambda sample: sample.kwargs.get("include_self") is False,
+        reason="ONNX does't support include_self=False option",
+    ),
+    skip(
+        "scatter_reduce",
+        variant_name="sum",
         # ONNX has not include_self parameter and default is include_self=True mode
         matcher=lambda sample: sample.kwargs.get("include_self") is False,
         reason="ONNX does't support include_self=False option",
@@ -1370,6 +1511,12 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: isinstance(sample.args[0], torch.Size),
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason=onnx_test_common.reason_dynamo_does_not_support("pytree flatten error"),
+    ),
+    xfail(
+        "t",
+        matcher=lambda sample: isinstance(sample.input, torch.Tensor)
+        and len(sample.input.shape) < 2,
+        reason="fixme: IsScalar",
     ),
     xfail(
         "unflatten",
@@ -1396,7 +1543,10 @@ class SingleOpModel(torch.nn.Module):
 
 
 def _should_skip_xfail_test_sample(
-    op_name: str, sample, model_type: pytorch_test_common.TorchModelType
+    op_name: str,
+    variant_test_name: str,
+    sample,
+    model_type: pytorch_test_common.TorchModelType,
 ) -> Tuple[Optional[str], Optional[str]]:
     """Check if the test sample should be skipped or xfailed.
 
@@ -1419,7 +1569,10 @@ def _should_skip_xfail_test_sample(
     for decorator_meta in SKIP_XFAIL_SUBTESTS:
         # Linear search on ops_test_data.SKIP_XFAIL_SUBTESTS. That's fine because the list is small.
         # NOTE: If model_type is None, the test is decorator_meta is meant to skip/xfail all model types.
-        if decorator_meta.op_name == op_name and (
+        if (
+            decorator_meta.op_name == op_name
+            and decorator_meta.variant_name == variant_test_name
+        ) and (
             model_type == decorator_meta.model_type or decorator_meta.model_type is None
         ):
             if decorator_meta.matcher is None and decorator_meta.model_type is None:
@@ -1498,7 +1651,7 @@ def _run_test_output_match(
             kwargs=repr(cpu_sample.kwargs),
         ):
             test_behavior, reason = _should_skip_xfail_test_sample(
-                op.name, cpu_sample, test_suite.model_type
+                op.name, op.variant_test_name, cpu_sample, test_suite.model_type
             )
             with onnx_test_common.normal_xfail_skip_test_behaviors(
                 test_behavior, reason
@@ -1631,10 +1784,10 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     }
 
     fp16_low_precision_dict = {
-        "addbmm": [3e-2, 1e-3],
+        "addbmm": [2e-1, 2e-2],
         "addcdiv": [3e-2, 1e-3],
         "addcmul": [3e-2, 1e-3],
-        "addmv": [3e-2, 1e-3],
+        "addmv": [5e-2, 3e-2],
         "addr": [3e-3, 4e-3],
         "baddbmm": [3e-2, 1e-3],
         "cumulative_trapezoid": [3e-2, 1e-3],
@@ -1643,6 +1796,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "linalg.multi_dot": [3e-2, 1e-3],
         "linalg.vecdot": [1e-2, 2e-2],
         "linspace": [2e-2, 2e-3],
+        "matmul": [2e-2, 6e-2],
         "nn.functional.batch_norm": [3e-2, 1e-3],
         "nn.functional.binary_cross_entropy": [3e-2, 1e-3],
         "nn.functional.binary_cross_entropy_with_logits": [3e-2, 1e-3],
@@ -1655,6 +1809,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "dot": [3e-2, 1e-3],
         "logit": [3e-2, 1e-3],
         "rsub": [3e-2, 1e-3],
+        "sinc": [2e-1, 6e-4],
         "sub": [3e-2, 1e-3],
         "trapezoid": [1e-3, 7e-3],
         "trapz": [1e-3, 7e-3],

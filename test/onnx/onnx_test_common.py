@@ -500,6 +500,8 @@ TESTED_DTYPES = (
     *INT_TYPES,
     # Floating types
     *FLOAT_TYPES,
+    # Complex types
+    *COMPLEX_TYPES,
 )
 
 
