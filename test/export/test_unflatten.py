@@ -341,6 +341,55 @@ class TestUnflatten(TestCase):
         inputs = (torch.rand(2, 3),)
         self.compare_outputs(orig_eager, unflattened, inputs)
 
+    def test_fx_trace(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                x = x[0] + x[1]
+                x = x + y["foo"]
+                return x
+
+        orig_eager = MyModule()
+        inputs = ((torch.rand(2, 3), torch.rand(2, 3)), {"foo": torch.rand(2, 3)})
+        export_module = export(orig_eager, inputs, {})
+
+        unflattened = unflatten(export_module)
+        torch.fx.symbolic_trace(
+            unflattened, concrete_args=(torch.fx.PH, torch.fx.PH, torch.fx.PH)
+        )
+
+    def test_double_nested_submodule(self):
+        class SubSubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x * x
+
+        class SubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.subsubmod = SubSubMod()
+
+            def forward(self, x):
+                return x - x
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = SubMod()
+
+            def forward(self, x):
+                return x + self.submod.subsubmod(x)
+
+        orig_eager = MyModule()
+        export_module = torch.export.export(orig_eager, (torch.rand(2, 3),), {})
+        unflattened = unflatten(export_module)
+
+        inputs = (torch.rand(2, 3),)
+        self.compare_outputs(orig_eager, unflattened, inputs)
 
 if __name__ == '__main__':
     run_tests()
