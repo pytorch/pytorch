@@ -272,9 +272,16 @@ class CausalBias(torch.Tensor):
         if kwargs is None:
             kwargs = {}
         if func != torch.nn.functional.scaled_dot_product_attention:
-            raise NotImplementedError(
-                "CausalBias only supports scaled_dot_product_attention"
-            )
+            # Needed for method access and torch.compile Support
+            if (
+                isinstance(func, py_types.MethodWrapperType)
+                or func.__objclass__ == torch._C.TensorBase
+            ):
+                return super().__torch_function__(func, types, *args, **kwargs)
+            else:
+                raise NotImplementedError(
+                    "CausalBias only supports scaled_dot_product_attention"
+                )
         return cls._dispatch(*args, **kwargs)
 
     def __repr__(self):
