@@ -79,7 +79,6 @@ if TEST_WITH_ROCM:
         "test_linear_relu_cuda",
         "test_multi_device_cuda",
         "test_mm_plus_mm2_cuda",
-        "test_scaled_dot_product_attention",  # https://github.com/pytorch/pytorch/issues/115896
         "test_sum_dtype_cuda",
         "test_transpose_cuda",
     ]
