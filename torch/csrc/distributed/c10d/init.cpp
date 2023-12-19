@@ -1036,6 +1036,29 @@ Example::
     >>> store.get("first_key")
 )")
           .def(
+              "check",
+              &::c10d::Store::check,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+The call to check whether a given list of ``keys`` have value stored in
+the store. This call immediately returns in normal cases but still suffers
+from some edge deadlock cases, e.g, calling check after TCPStore has been destroyed.
+Calling :meth:`~torch.distributed.store.check` with a list of keys that
+one wants to check whether stored in the store or not.
+
+Arguments:
+    keys (lisr[str]): The keys to query whether stored in the store.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from datetime import timedelta
+    >>> # Using TCPStore as an example, other store types can also be used
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
+    >>> store.add("first_key", 1)
+    >>> # Should return 7
+    >>> store.check(["first_key"])
+)")
+          .def(
               "delete_key",
               &::c10d::Store::deleteKey,
               py::call_guard<py::gil_scoped_release>(),
