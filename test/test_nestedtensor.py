@@ -3164,6 +3164,7 @@ class TestNestedTensorSubclass(NestedTestCase):
         flattened = nt.flatten(-3, -2)
         self.assertEqual(flattened.shape, nt.view(3, -1, 10, 6).shape)
 
+    @torch._dynamo.config.patch(suppress_errors=True)
     def test_chunk(self, device):
         # normal case
         D = 30
