@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cuda_runtime_api.h>
+#include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 
 namespace torch::inductor {
@@ -15,7 +15,13 @@ class TORCH_API AOTIModelContainerRunnerCuda : public AOTIModelContainerRunner {
 
   std::vector<at::Tensor> run(
       std::vector<at::Tensor>& inputs,
-      cudaStream_t cuda_stream_handle = nullptr);
+      cudaStream_t cuda_stream_handle = nullptr) {
+    if (cuda_stream_handle == nullptr) {
+      cuda_stream_handle = c10::cuda::getCurrentCUDAStream().stream();
+    }
+    return AOTIModelContainerRunner::run(
+        inputs, reinterpret_cast<AOTInductorStreamHandle>(cuda_stream_handle));
+  }
 };
 
 } // namespace torch::inductor
