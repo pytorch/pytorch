@@ -1946,11 +1946,9 @@ class BenchmarkRunner:
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
             if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
-                self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
+                self.optimizer = torch.optim.SGD(params, foreach=True)
             else:
-                self.optimizer = torch.optim.Adam(
-                    params, lr=0.01, capturable=True, foreach=True
-                )
+                self.optimizer = torch.optim.Adam(params, capturable=True, foreach=True)
         else:
             self.optimizer = None
 
