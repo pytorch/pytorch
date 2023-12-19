@@ -12,8 +12,9 @@ from typing import Union, List, Tuple
 __all__ = ['LocalResponseNorm', 'CrossMapLRN2d', 'LayerNorm', 'GroupNorm']
 
 class LocalResponseNorm(Module):
-    r"""Applies local response normalization over an input signal composed
-    of several input planes, where channels occupy the second dimension.
+    r"""Applies local response normalization over an input signal.
+
+    The input signal is composed of several input planes, where channels occupy the second dimension.
     Applies normalization across channels.
 
     .. math::
@@ -39,6 +40,7 @@ class LocalResponseNorm(Module):
         >>> output_4d = lrn(signal_4d)
 
     """
+
     __constants__ = ['size', 'alpha', 'beta', 'k']
     size: int
     alpha: float
@@ -85,7 +87,9 @@ _shape_t = Union[int, List[int], Size]
 
 
 class LayerNorm(Module):
-    r"""Applies Layer Normalization over a mini-batch of inputs as described in
+    r"""Applies Layer Normalization over a mini-batch of inputs.
+
+    This layer implements the operation as described in
     the paper `Layer Normalization <https://arxiv.org/abs/1607.06450>`__
 
     .. math::
@@ -123,6 +127,8 @@ class LayerNorm(Module):
         elementwise_affine: a boolean value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights)
             and zeros (for biases). Default: ``True``.
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`elementwise_affine` is ``True``). Default: ``True``.
 
     Attributes:
         weight: the learnable weights of the module of shape
@@ -157,13 +163,14 @@ class LayerNorm(Module):
         :scale: 50 %
 
     """
+
     __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
     normalized_shape: Tuple[int, ...]
     eps: float
     elementwise_affine: bool
 
     def __init__(self, normalized_shape: _shape_t, eps: float = 1e-5, elementwise_affine: bool = True,
-                 device=None, dtype=None) -> None:
+                 bias: bool = True, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
         if isinstance(normalized_shape, numbers.Integral):
@@ -174,7 +181,10 @@ class LayerNorm(Module):
         self.elementwise_affine = elementwise_affine
         if self.elementwise_affine:
             self.weight = Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
-            self.bias = Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
+            if bias:
+                self.bias = Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
+            else:
+                self.register_parameter('bias', None)
         else:
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)
@@ -184,7 +194,8 @@ class LayerNorm(Module):
     def reset_parameters(self) -> None:
         if self.elementwise_affine:
             init.ones_(self.weight)
-            init.zeros_(self.bias)
+            if self.bias is not None:
+                init.zeros_(self.bias)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.layer_norm(
@@ -196,7 +207,9 @@ class LayerNorm(Module):
 
 
 class GroupNorm(Module):
-    r"""Applies Group Normalization over a mini-batch of inputs as described in
+    r"""Applies Group Normalization over a mini-batch of inputs.
+
+    This layer implements the operation as described in
     the paper `Group Normalization <https://arxiv.org/abs/1803.08494>`__
 
     .. math::
@@ -238,6 +251,7 @@ class GroupNorm(Module):
         >>> # Activating the module
         >>> output = m(input)
     """
+
     __constants__ = ['num_groups', 'num_channels', 'eps', 'affine']
     num_groups: int
     num_channels: int

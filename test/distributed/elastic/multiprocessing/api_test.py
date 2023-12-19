@@ -244,7 +244,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
         def assert_in_file(self, expected: List[str], filename: str) -> None:
             expected = [f"{line.rstrip()}\n" for line in expected]
-            with open(filename, "r") as fp:
+            with open(filename) as fp:
                 actual = fp.readlines()
                 for line in expected:
                     self.assertIn(line, actual)
@@ -609,6 +609,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                         args={0: ("hello",), 1: ("hello",)},
                         envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
                         log_dir=self.log_dir(),
+                        log_line_prefixes={0: "[rank0]:", 1: "[rank1]:"},
                         redirects=redirs,
                     )
 
@@ -641,6 +642,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 args={0: ("hello",), 1: ("world",)},
                 envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
                 log_dir=self.log_dir(),
+                log_line_prefixes={0: "[rank0]:", 1: "[rank1]:"},
                 start_method="spawn",
                 redirects={0: Std.ERR, 1: Std.NONE},
                 tee={0: Std.OUT, 1: Std.ERR},

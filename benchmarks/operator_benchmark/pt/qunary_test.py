@@ -1,6 +1,6 @@
+import torch
 
 import operator_benchmark as op_bench
-import torch
 
 
 """Microbenchmarks for quantized unary operators (point-wise and reduction)."""
@@ -8,22 +8,23 @@ import torch
 
 # Configs for pointwise and reduction unary ops
 qunary_ops_configs_short = op_bench.config_list(
-    attr_names=['M', 'N'],
+    attr_names=["M", "N"],
     attrs=[
         [512, 512],
     ],
     cross_product_configs={
-        'dtype': [torch.quint8],
+        "dtype": [torch.quint8],
     },
-    tags=['short']
+    tags=["short"],
 )
 
 qunary_ops_configs_long = op_bench.cross_product_configs(
     M=[256, 1024],
     N=[256, 1024],
     dtype=[torch.quint8, torch.qint8, torch.qint32],
-    tags=['long']
+    tags=["long"],
 )
+
 
 class QUnaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, dtype, op_func):
@@ -31,9 +32,9 @@ class QUnaryOpBenchmark(op_bench.TorchBenchmarkBase):
         scale = 1.0
         zero_point = 0
         self.inputs = {
-            "q_input": torch.quantize_per_tensor(f_input, scale=scale,
-                                                 zero_point=zero_point,
-                                                 dtype=dtype)
+            "q_input": torch.quantize_per_tensor(
+                f_input, scale=scale, zero_point=zero_point, dtype=dtype
+            )
         }
         self.op_func = op_func
 
@@ -43,20 +44,20 @@ class QUnaryOpBenchmark(op_bench.TorchBenchmarkBase):
 
 # TODO: Uncomment the ops whenever they are implemented for quantized tensor.
 qunary_ops_list = op_bench.op_list(
-    attr_names=['op_name', 'op_func'],
+    attr_names=["op_name", "op_func"],
     attrs=[
         # ['q_abs', torch.abs],
         # ['q_abs_', torch.abs_],
         # ['q_acos', torch.acos],
         # ['q_acos_', torch.acos_],
-        ['q_argsort', torch.argsort],
+        ["q_argsort", torch.argsort],
         # ['q_asin', torch.asin],
         # ['q_asin_', torch.asin_],
         # ['q_atan', torch.atan],
         # ['q_atan_', torch.atan_],
         # ['q_ceil', torch.ceil],
         # ['q_ceil_', torch.ceil_],
-        ['q_clone', torch.clone],
+        ["q_clone", torch.clone],
         # ['q_cos', torch.cos],
         # ['q_cos_', torch.cos_],
         # ['q_cosh', torch.cosh],
@@ -84,13 +85,13 @@ qunary_ops_list = op_bench.op_list(
         # ['q_log2', torch.log2],
         # ['q_log2_', torch.log2_],
         # ['q_log_', torch.log_],
-        ['q_mean', torch.mean],
+        ["q_mean", torch.mean],
         # ['q_neg', torch.neg],
         # ['q_neg_', torch.neg_],
         # ['q_reciprocal', torch.reciprocal],
         # ['q_reciprocal_', torch.reciprocal_],
-        ['q_relu', torch.relu],
-        ['q_relu_', torch.relu_],
+        ["q_relu", torch.relu],
+        ["q_relu_", torch.relu_],
         # ['q_round', torch.round],
         # ['q_round_', torch.round_],
         # ['q_rsqrt', torch.rsqrt],
@@ -101,7 +102,7 @@ qunary_ops_list = op_bench.op_list(
         # ['q_sin', torch.sin],
         # ['q_sin_', torch.sin_],
         # ['q_sinh', torch.sinh],
-        ['q_sort', torch.sort],
+        ["q_sort", torch.sort],
         # ['q_sqrt', torch.sqrt],
         # ['q_sqrt_', torch.sqrt_],
         # ['q_tan', torch.tan],
@@ -126,23 +127,25 @@ qunary_ops_list = op_bench.op_list(
 )
 
 
-op_bench.generate_pt_tests_from_op_list(qunary_ops_list,
-                                        qunary_ops_configs_short + qunary_ops_configs_long,
-                                        QUnaryOpBenchmark)
+op_bench.generate_pt_tests_from_op_list(
+    qunary_ops_list,
+    qunary_ops_configs_short + qunary_ops_configs_long,
+    QUnaryOpBenchmark,
+)
 
 
 # === Other unary ops (i.e. the ones that need parameters as args) ===
 
 # Configs for pointwise and reduction unary ops
 qunary_ops_topk_configs_short = op_bench.config_list(
-    attr_names=['M', 'N', 'k'],
+    attr_names=["M", "N", "k"],
     attrs=[
         [512, 512, 5],
     ],
     cross_product_configs={
-        'dtype': [torch.quint8],
+        "dtype": [torch.quint8],
     },
-    tags=['short']
+    tags=["short"],
 )
 
 qunary_ops_topk_configs_long = op_bench.cross_product_configs(
@@ -150,8 +153,9 @@ qunary_ops_topk_configs_long = op_bench.cross_product_configs(
     N=[256, 1024],
     k=[1, 3, 5],
     dtype=[torch.quint8, torch.qint8, torch.qint32],
-    tags=['long']
+    tags=["long"],
 )
+
 
 class QTopkOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, dtype, k):
@@ -159,18 +163,20 @@ class QTopkOpBenchmark(op_bench.TorchBenchmarkBase):
         scale = 1.0
         zero_point = 0
         self.inputs = {
-            "q_input": torch.quantize_per_tensor(f_input, scale=scale,
-                                                 zero_point=zero_point,
-                                                 dtype=dtype),
-            "k": k
+            "q_input": torch.quantize_per_tensor(
+                f_input, scale=scale, zero_point=zero_point, dtype=dtype
+            ),
+            "k": k,
         }
-        self.set_module_name('qtopk')
+        self.set_module_name("qtopk")
 
     def forward(self, q_input, k: int):
         return torch.topk(q_input, k)
 
-op_bench.generate_pt_test(qunary_ops_topk_configs_short + qunary_ops_topk_configs_long,
-                          QTopkOpBenchmark)
+
+op_bench.generate_pt_test(
+    qunary_ops_topk_configs_short + qunary_ops_topk_configs_long, QTopkOpBenchmark
+)
 
 
 if __name__ == "__main__":

@@ -8,11 +8,6 @@
 #include <c10/util/Registry.h>
 
 #include <cstddef>
-#include <functional>
-
-namespace at {
-class Context;
-}
 
 namespace at {
 
@@ -20,7 +15,7 @@ struct TORCH_API MPSHooksInterface {
   // this fails the implementation if MPSHooks functions are called, but
   // MPS backend is not present.
   #define FAIL_MPSHOOKS_FUNC(func) \
-    TORCH_CHECK(false, "Cannot execute ", func ,"() without MPS backend.");
+    TORCH_CHECK(false, "Cannot execute ", func, "() without MPS backend.");
 
   virtual ~MPSHooksInterface() = default;
 
@@ -31,7 +26,7 @@ struct TORCH_API MPSHooksInterface {
   virtual bool hasMPS() const {
     return false;
   }
-  virtual bool isOnMacOS13orNewer(unsigned minor = 0) const {
+  virtual bool isOnMacOSorNewer(unsigned major = 13, unsigned minor = 0) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   virtual const Generator& getDefaultMPSGenerator() const {
@@ -64,16 +59,35 @@ struct TORCH_API MPSHooksInterface {
   virtual void setMemoryFraction(double /*ratio*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-
   virtual void profilerStartTrace(const std::string& mode, bool waitUntilCompleted) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-
   virtual void profilerStopTrace() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  virtual uint32_t acquireEvent(bool enable_timing) const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual void releaseEvent(uint32_t event_id) const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual void recordEvent(uint32_t event_id) const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual void waitForEvent(uint32_t event_id) const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual void synchronizeEvent(uint32_t event_id) const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual bool queryEvent(uint32_t event_id) const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
 
-    #undef FAIL_MPSHOOKS_FUNC
+  #undef FAIL_MPSHOOKS_FUNC
 };
 
 struct TORCH_API MPSHooksArgs {};

@@ -1,19 +1,17 @@
+import warnings
 from typing import Optional
 
 import torch
 import torch.distributed as dist
-from .planner import SavePlanner
+from torch.distributed.checkpoint.stateful import Stateful
+
 from .default_planner import DefaultSavePlanner
-
-
-from .storage import (
-    StorageWriter,
-)
-
 from .metadata import Metadata, STATE_DICT_TYPE
+from .planner import SavePlanner
+from .storage import StorageWriter
 from .utils import _DistWrapper
 
-__all__ = ["save_state_dict"]
+__all__ = ["save_state_dict", "save"]
 
 
 def save_state_dict(
@@ -22,13 +20,36 @@ def save_state_dict(
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: SavePlanner = None,
+    planner: Optional[SavePlanner] = None,
+) -> Metadata:
+    """This method is deprecated. Please switch to 'save'."""
+    warnings.warn(
+        "'save_state_dict' is deprecated and will be removed in future versions. Please use 'save' instead."
+    )
+
+    # TODO: test returning `save` here instead.
+    return _save_state_dict(
+        state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner
+    )
+
+
+def save(
+    state_dict: STATE_DICT_TYPE,
+    storage_writer: StorageWriter,
+    *,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False,
+    planner: Optional[SavePlanner] = None,
 ) -> Metadata:
     """
-    Saves a distributed model in SPMD style.
+    Save a distributed model in SPMD style.
 
     This function is different from ``torch.save()`` as it handles
-    ``ShardedTensor`` by having each rank only save their local shards.
+    ``ShardedTensor`` , and ``DTensor`` by having each rank only save their local shards.
+
+    For each ``Stateful`` object (having both a ``state_dict`` and a ``load_state_dict``),
+    save will call ``state_dict`` before serialization.
 
     .. warning::
         There is no guarantees of Backwards Compatibility across PyTorch versions
@@ -37,6 +58,11 @@ def save_state_dict(
     .. warning::
         If using the `process_group` argument, make sure that only its ranks
         call `save_state_dict` and that all data in state_dict belong to it.
+
+    .. note::
+        When saving checkpoint for FSDP's `ShardingStrategy.HYBRID_SHARD`, only one of
+        the shard_group should be calling `save_state_dict` and the corresponding process
+        group needs to be passed in.
 
     .. note::
         This function can be used to save a state_dict without having a process group
@@ -77,7 +103,32 @@ def save_state_dict(
         and it is the user's responsibility to ensure that this is set so that
         each rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
+    torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
+    dumpable_state_dict = {}
+    for key, elem in state_dict.items():
+        dumpable_state_dict[key] = (
+            elem.state_dict() if isinstance(elem, Stateful) else elem
+        )
+
+    return _save_state_dict(
+        dumpable_state_dict,
+        storage_writer,
+        process_group,
+        coordinator_rank,
+        no_dist,
+        planner,
+    )
+
+
+def _save_state_dict(
+    state_dict: STATE_DICT_TYPE,
+    storage_writer: StorageWriter,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False,
+    planner: Optional[SavePlanner] = None,
+) -> Metadata:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
 
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
@@ -99,9 +150,7 @@ def save_state_dict(
         nonlocal global_metatadata
 
         assert planner is not None
-        all_local_plans, global_metatadata = planner.create_global_plan(
-            all_local_plans
-        )
+        all_local_plans, global_metatadata = planner.create_global_plan(all_local_plans)
         all_local_plans = storage_writer.prepare_global_plan(all_local_plans)
         return all_local_plans
 

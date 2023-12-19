@@ -161,7 +161,7 @@ void batch_norm_elementwise(
       using acc_t = at::acc_type<scalar_t, true>;
       gpu_kernel(iter, [] GPU_LAMBDA (scalar_t input, acc_t weight, acc_t bias,
                                       acc_t mean, acc_t invstd) -> scalar_t {
-        return ((input - mean) * invstd) * weight + bias;
+        return (input - mean) * weight * invstd + bias;
       });
     });
     return;
@@ -211,7 +211,7 @@ Tensor batch_norm_elementwise_backward_train(
     auto weight_nd = weight.defined() ? as_nd(weight) :
         at::scalar_tensor(1.0, input.options().dtype(mean.scalar_type()));
 
-    Tensor grad_input = at::empty(input.sizes(), grad_out.options());
+    Tensor grad_input = at::empty(input.sizes(), grad_out.options().memory_format(input.suggest_memory_format()));
     auto iter = TensorIteratorConfig()
         .add_output(grad_input)
         .add_input(grad_out)

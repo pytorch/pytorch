@@ -7,7 +7,7 @@ import itertools
 
 import torch
 from torch.testing._internal.common_utils import run_tests, set_default_dtype, \
-    instantiate_parametrized_tests
+    instantiate_parametrized_tests, TEST_PRIVATEUSE1
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase, freeze_rng_state
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, expectedFailureXLA
@@ -50,12 +50,16 @@ class TestDropoutNN(NNTestCase):
         input = torch.randn(50, 20, 64, 64)
         self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not (TEST_CUDA or TEST_PRIVATEUSE1), "CUDA and PRIVATEUSE1 unavailable")
     def test_native_dropout_corner_case(self):
+        if TEST_CUDA:
+            device = 'cuda'
+        elif TEST_PRIVATEUSE1:
+            device = torch._C._get_privateuse1_backend_name()
         for train in [True, False]:
             for p in [0.0, 1.0]:
-                for device in ["cuda", "cpu"]:
-                    x = torch.randn(5).to(device=device).requires_grad_()
+                for current_device in [device, "cpu"]:
+                    x = torch.randn(5).to(device=current_device).requires_grad_()
                     x_ref = x.detach().requires_grad_()
                     o = torch.native_dropout(x, p, train)[0]
                     o_ref = torch.dropout(x_ref, p, train)

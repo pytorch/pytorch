@@ -36,56 +36,18 @@ enum class Rule : uint32_t {
   kOperatorSupportedInNewerOpsetVersion,
 
   /**
-   * @brief FX Tracer succeeded.
+   * @brief Transforms graph from FX IR to ONNX IR.
    */
-  kFxTracerSuccess,
+  kFxGraphToOnnx,
 
   /**
-   * @brief FX Tracer failed.
-   */
-  kFxTracerFailure,
-
-  /**
-   * @brief FX Tracer succeeded.
-   */
-  kFxFrontendAotautograd,
-
-  /**
-   * @brief FX pass converting torch.neg to torch.sigmoid.
-   */
-  kFxPassConvertNegToSigmoid,
-
-  /**
-   * @brief ToDo, experimenting diagnostics, placeholder text.
-   */
-  kFxIrAddNode,
-
-  /**
-   * @brief Op level tracking. ToDo, experimenting diagnostics, placeholder
-   * text.
-   */
-  kAtenlibSymbolicFunction,
-
-  /**
-   * @brief Graph level tracking. Each op is a step. ToDo, experimenting
-   * diagnostics, placeholder text.
-   */
-  kAtenlibFxToOnnx,
-
-  /**
-   * @brief Node level tracking. ToDo, experimenting diagnostics, placeholder
-   * text.
+   * @brief Transforms an FX node to an ONNX node.
    */
   kFxNodeToOnnx,
 
   /**
-   * @brief The make_fx + decomposition pass on fx graph produced from Dynamo,
-   * before ONNX export.
-   */
-  kFxFrontendDynamoMakeFx,
-
-  /**
-   * @brief FX graph transformation before ONNX export.
+   * @brief FX graph transformation during ONNX export before converting from FX
+   * IR to ONNX IR.
    */
   kFxPass,
 
@@ -101,9 +63,27 @@ enum class Rule : uint32_t {
   kUnsupportedFxNodeAnalysis,
 
   /**
-   * @brief The formatted str for argument to display is too verbose.
+   * @brief Report any op level validation failure in warnings.
    */
-  kArgFormatTooVerbose,
+  kOpLevelDebugging,
+
+  /**
+   * @brief Find the OnnxFunction that matches the input/attribute dtypes by
+   * comparing them with their opschemas.
+   */
+  kFindOpschemaMatchedSymbolicFunction,
+
+  /**
+   * @brief Determine if type promotion is required for the FX node. Insert cast
+   * nodes if needed.
+   */
+  kFxNodeInsertTypePromotion,
+
+  /**
+   * @brief Find the list of OnnxFunction of the PyTorch operator in onnx
+   * registry.
+   */
+  kFindOperatorOverloadsInOnnxRegistry,
 };
 
 static constexpr const char* const kPyRuleNames[] = {
@@ -111,19 +91,15 @@ static constexpr const char* const kPyRuleNames[] = {
     "missing_custom_symbolic_function",
     "missing_standard_symbolic_function",
     "operator_supported_in_newer_opset_version",
-    "fx_tracer_success",
-    "fx_tracer_failure",
-    "fx_frontend_aotautograd",
-    "fx_pass_convert_neg_to_sigmoid",
-    "fx_ir_add_node",
-    "atenlib_symbolic_function",
-    "atenlib_fx_to_onnx",
+    "fx_graph_to_onnx",
     "fx_node_to_onnx",
-    "fx_frontend_dynamo_make_fx",
     "fx_pass",
     "no_symbolic_function_for_call_function",
     "unsupported_fx_node_analysis",
-    "arg_format_too_verbose",
+    "op_level_debugging",
+    "find_opschema_matched_symbolic_function",
+    "fx_node_insert_type_promotion",
+    "find_operator_overloads_in_onnx_registry",
 };
 
 } // namespace diagnostics

@@ -20,12 +20,9 @@ api::ShaderInfo get_shader(const OpType type) {
 }
 
 struct Params final {
-  api::utils::ivec3 out_extents;
-  int32_t fill_0;
-  api::utils::ivec3 input1_extents;
-  int32_t nc_size_1;
-  api::utils::ivec3 input2_extents;
-  int32_t nc_size_2;
+  api::utils::ivec4 output_sizes;
+  api::utils::ivec4 input1_sizes;
+  api::utils::ivec4 input2_sizes;
   float alpha;
 };
 
@@ -39,16 +36,22 @@ void record_op(
   api::utils::uvec3 global_size = v_dst.extents();
   api::utils::uvec3 local_size = adaptive_work_group_size(global_size);
 
-  uint32_t nc_1 = dim_at<Dim4D::Channel>(v_in1) * dim_at<Dim4D::Batch>(v_in1);
-  uint32_t nc_2 = dim_at<Dim4D::Channel>(v_in2) * dim_at<Dim4D::Batch>(v_in2);
-
   Params block{
-      api::utils::make_ivec3(v_dst.extents()),
-      0u,
-      api::utils::make_ivec3(v_in1.extents()),
-      api::utils::safe_downcast<int32_t>(nc_1),
-      api::utils::make_ivec3(v_in2.extents()),
-      api::utils::safe_downcast<int32_t>(nc_2),
+      api::utils::make_ivec4(
+          {dim_at<Dim4D::Width>(v_dst),
+           dim_at<Dim4D::Height>(v_dst),
+           dim_at<Dim4D::Channel>(v_dst),
+           dim_at<Dim4D::Batch>(v_dst)}),
+      api::utils::make_ivec4(
+          {dim_at<Dim4D::Width>(v_in1),
+           dim_at<Dim4D::Height>(v_in1),
+           dim_at<Dim4D::Channel>(v_in1),
+           dim_at<Dim4D::Batch>(v_in1)}),
+      api::utils::make_ivec4(
+          {dim_at<Dim4D::Width>(v_in2),
+           dim_at<Dim4D::Height>(v_in2),
+           dim_at<Dim4D::Channel>(v_in2),
+           dim_at<Dim4D::Batch>(v_in2)}),
       alpha,
   };
 

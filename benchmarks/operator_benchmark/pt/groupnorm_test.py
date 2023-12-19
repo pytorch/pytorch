@@ -1,7 +1,7 @@
-
-import operator_benchmark as op_bench
 import torch
 import torch.nn.functional as F
+
+import operator_benchmark as op_bench
 
 
 """Microbenchmarks for groupnorm operator."""
@@ -24,12 +24,11 @@ class GroupNormBenchmark(op_bench.TorchBenchmarkBase):
             "num_groups": num_groups,
             "weight": torch.rand(num_channels, dtype=torch.float),
             "bias": torch.rand(num_channels, dtype=torch.float),
-            "eps": 1e-5
+            "eps": 1e-5,
         }
 
     def forward(self, input, num_groups: int, weight, bias, eps: float):
-        return F.group_norm(
-            input, num_groups, weight=weight, bias=bias, eps=eps)
+        return F.group_norm(input, num_groups, weight=weight, bias=bias, eps=eps)
 
 
 op_bench.generate_pt_test(groupnorm_configs_short, GroupNormBenchmark)

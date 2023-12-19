@@ -13,8 +13,7 @@ __all__ = [
 @functional_datapipe("open_files")
 class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     r"""
-    Given pathnames, opens files and yield pathname and file stream
-    in a tuple (functional name: ``open_files``).
+    Given pathnames, opens files and yield pathname and file stream in a tuple (functional name: ``open_files``).
 
     Args:
         datapipe: Iterable datapipe that provides pathnames
@@ -51,7 +50,7 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         self.encoding: Optional[str] = encoding
 
         if self.mode not in ('b', 't', 'rb', 'rt', 'r'):
-            raise ValueError("Invalid mode {}".format(mode))
+            raise ValueError(f"Invalid mode {mode}")
         # TODO: enforce typing for each instance based on mode, otherwise
         #       `argument_validation` with this DataPipe may be potentially broken
 
@@ -68,5 +67,5 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
 
     def __len__(self):
         if self.length == -1:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
         return self.length

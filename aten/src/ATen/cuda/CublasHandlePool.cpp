@@ -9,7 +9,7 @@
 #include <string>
 #include <tuple>
 
-namespace at { namespace cuda {
+namespace at::cuda {
 
 namespace {
 
@@ -40,7 +40,9 @@ using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle
 } // namespace
 
 void clearCublasWorkspaces() {
-  cublas_handle_stream_to_workspace().clear();
+  #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12200
+      cublas_handle_stream_to_workspace().clear();
+  #endif
 }
 
 size_t parseChosenWorkspaceSize() {
@@ -105,8 +107,10 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
-#if !defined(USE_ROCM)
-  // cublasSetWorkspace not available on CUDA 10.2
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12200
+  // cuBLAS should not need an explicitly allocated workspace after CUDA 12.2
+  // to avoid increasing memory usage during graph captures
+  // original issue: https://github.com/pytorch/pytorch/pull/83461
   cudaStream_t _stream = stream;
   auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
   auto workspace_it = cublas_handle_stream_to_workspace().find(key);
@@ -125,16 +129,16 @@ cublasHandle_t getCurrentCUDABlasHandle() {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   }
 #endif
-#if defined(USE_ROCM) && ROCM_VERSION >= 30800
-  rocblas_atomics_mode rocblas_mode;
+#if defined(USE_ROCM)
+  hipblasAtomicsMode_t hipblas_mode;
   if (at::globalContext().deterministicAlgorithms()) {
-    rocblas_mode = rocblas_atomics_not_allowed;
+    hipblas_mode = HIPBLAS_ATOMICS_NOT_ALLOWED;
   } else {
-    rocblas_mode = rocblas_atomics_allowed;
+    hipblas_mode = HIPBLAS_ATOMICS_ALLOWED;
   }
-  TORCH_CUDABLAS_CHECK(rocblas_set_atomics_mode(handle, rocblas_mode));
+  TORCH_CUDABLAS_CHECK(hipblasSetAtomicsMode(handle, hipblas_mode));
 #endif
   return handle;
 }
 
-}} // namespace at::cuda
+} // namespace at::cuda

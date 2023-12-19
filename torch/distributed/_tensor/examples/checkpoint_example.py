@@ -22,12 +22,12 @@ from torch.distributed._tensor import (
     Shard,
 )
 from torch.distributed._tensor.placement_types import Placement
-from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
+from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
 
 
 class SimpleMLP(torch.nn.Module):
     def __init__(self):
-        super(SimpleMLP, self).__init__()
+        super().__init__()
         self.net1 = torch.nn.Linear(5, 128)
         self.relu = torch.nn.ReLU()
         self.net2 = torch.nn.Linear(128, 12)
@@ -45,7 +45,7 @@ def gen_tensor_parallel_model(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
     return parallelize_module(
         model,
         mesh,
-        PairwiseParallel(),
+        {"net1": ColwiseParallel()},
     )
 
 
@@ -133,7 +133,7 @@ def gen_model_param_in_submesh(model: nn.Module, sub_mesh: DeviceMesh) -> nn.Mod
     )
 
 
-def checkpoint(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
+def checkpoint(model: nn.Module, mesh: DeviceMesh) -> nn.Module:  # type: ignore[empty-body]
     """
     checkpoint save/load models with DTensor parameters
     """

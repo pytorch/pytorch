@@ -14,6 +14,12 @@
 #include <utility>
 #include <vector>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/zeros.h>
+#endif
+
 namespace torch {
 namespace autograd {
 
@@ -23,8 +29,8 @@ namespace autograd {
 C10_DEFINE_TLS_static(std::shared_ptr<Node>, tls_current_evaluating_node);
 #define current_evaluating_node (tls_current_evaluating_node.get())
 
-NodeGuard::NodeGuard(std::shared_ptr<Node> node) {
-  last_evaluating_node_ = std::move(current_evaluating_node);
+NodeGuard::NodeGuard(std::shared_ptr<Node> node)
+    : last_evaluating_node_(std::move(current_evaluating_node)) {
   current_evaluating_node = std::move(node);
 }
 NodeGuard::~NodeGuard() {
@@ -101,6 +107,10 @@ void deleteNode(Node* function) {
     gatherFunctions(func.get(), stack);
     // Reference count is decremented on the loop backedge.
   }
+}
+
+at::Tensor TypeAndSize::zeros() {
+  return at::zeros_symint(sym_sizes, options);
 }
 
 } // namespace autograd

@@ -1,24 +1,18 @@
-import torch
-from torch.fx.graph import (
-    Node,
-)
+from abc import ABC
+from typing import Callable, Dict, List, Optional, Type
 
-from .utils import (
-    all_node_args_have_no_tensors,
-)
+import torch
+
 from torch.ao.quantization.backend_config import (
     BackendConfig,
     DTypeConfig,
     ObservationType,
 )
-from torch.ao.quantization.utils import (
-    NodePattern,
-    Pattern,
-    QuantizerCls,
-)
+from torch.ao.quantization.utils import NodePattern, Pattern, QuantizerCls
+from torch.fx.graph import Node
 
-from abc import ABC
-from typing import Callable, Dict, List, Type
+from .utils import all_node_args_have_no_tensors
+
 
 __all__ = [
     "QuantizeHandler",
@@ -45,14 +39,14 @@ def _default_root_node_getter(node_pattern):
     return node_pattern
 
 # Base Pattern Handler
-class QuantizeHandler(ABC):
+class QuantizeHandler(ABC):  # noqa: B024
     """ Base handler class for the quantizer patterns
     """
     def __init__(
             self,
             node_pattern: NodePattern,
             modules: Dict[str, torch.nn.Module],
-            root_node_getter: Callable = None,
+            root_node_getter: Optional[Callable] = None,
             is_custom_module=False,
             is_standalone_module=False):
         """ Records pattern information in __init__, which will be used
@@ -113,7 +107,7 @@ def _get_quantize_handler_cls(
                 self,
                 node_pattern: NodePattern,
                 modules: Dict[str, torch.nn.Module],
-                root_node_getter: Callable = None):
+                root_node_getter: Optional[Callable] = None):
             super().__init__(node_pattern, modules, root_node_getter)
             if num_tensor_args_to_observation_type:
                 assert self.num_tensor_args in num_tensor_args_to_observation_type, \

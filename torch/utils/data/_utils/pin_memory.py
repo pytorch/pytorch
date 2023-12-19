@@ -1,5 +1,4 @@
-r""""Contains definitions of the methods used by the _BaseDataLoaderIter to put
-fetched tensors into pinned memory.
+r"""Contains definitions of the methods used by the _BaseDataLoaderIter to put fetched tensors into pinned memory.
 
 These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
@@ -37,7 +36,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
                 data = pin_memory(data, device)
             except Exception:
                 data = ExceptionWrapper(
-                    where="in pin memory thread for device {}".format(device_id))
+                    where=f"in pin memory thread for device {device_id}")
             r = (idx, data)
         while not done_event.is_set():
             try:

@@ -514,6 +514,69 @@ class _MinimizerBase:
 
         return culprits
 
+    def _skip_traverse_impl(self, all_nodes: NodeList, start_idx: int, end_idx: int) -> NodeSet:
+        """
+        Skip certain nodes in graph based on settings
+        """
+        culprits: NodeSet = set()
+        nodes: NodeList = all_nodes[start_idx:end_idx]
+
+        report: List[str] = []
+        self.reports.append(report)
+        self.iteration += 1
+        report.append(f" Nodes block {self.iteration}.")
+        report.append(
+            f"From node index {start_idx} to {end_idx-1}. "
+            f"Size of the interested node list is {len(nodes)}"
+        )
+
+        cur_nodes: NodeSet = set(nodes)
+
+        for node in nodes:
+            if node in self.fusions:
+                cur_nodes.update(self.fusions[node])
+
+        try:
+            split_module, submod_name = self._build_submodule(cur_nodes)
+            self._run_and_compare(split_module, submod_name, [])
+        except (FxNetMinimizerResultMismatchError):
+            culprits.update(cur_nodes)
+            report.append(f"Found culprit from numeric error: {cur_nodes}")
+            self.print_report(report)
+            return culprits
+        except (FxNetMinimizerRunFuncError):
+            culprits.update(cur_nodes)
+            report.append(f"Found culprit from run error: {node}")
+            self.print_report(report)
+            return culprits
+        else:
+            report.append("No discrepancy found.")
+            self.print_report(report)
+            return set()
+
+
+    def _skip_traverse(self, all_nodes: NodeList, skip_nodes: List) -> NodeSet:
+        """
+        Skip certain nodes in graph based on settings
+        """
+        start_idx = 0
+        num_nodes = len(all_nodes)
+        idx = 0
+        culprits = set()
+        while idx < num_nodes:
+            node = all_nodes[idx]
+            if (node.name in skip_nodes):  # skip the node
+                if idx > start_idx:
+                    culprits = self._skip_traverse_impl(all_nodes, start_idx, idx)
+                start_idx = idx + 1
+            elif idx == num_nodes - 1 and start_idx <= idx:  # last node
+                culprits = self._skip_traverse_impl(all_nodes, start_idx, idx + 1)
+            idx += 1
+
+        return culprits
+
+
+
     def _collect_nodes(self, start: Optional[str], end: Optional[str]) -> NodeList:
         """
         Collect nodes in the model that between nodes with name of `start` and `end`.
@@ -583,7 +646,7 @@ class _MinimizerBase:
             self.print_report(report)
 
     def minimize(
-        self, start: Optional[str] = None, end: Optional[str] = None
+        self, start: Optional[str] = None, end: Optional[str] = None, skip_nodes: Optional[List] = None,
     ) -> NodeSet:
         """
         Minimizing the model from node with name `start` to node with name `end` base
@@ -614,5 +677,10 @@ class _MinimizerBase:
 
         if self.settings.traverse_method == "accumulate":
             return self._accumulate_traverse(nodes)
+
+        if(self.settings.traverse_method == "skip"):
+            if (skip_nodes is None):
+                raise RuntimeError("'skip_nodes' can't be None when 'traverse_method' is 'skip'.")
+            return self._skip_traverse(nodes, skip_nodes)
 
         raise RuntimeError(f"Unknown traverse method {self.settings.traverse_method}!")

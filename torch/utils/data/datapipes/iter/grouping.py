@@ -29,8 +29,9 @@ def __getattr__(name: str):
 @functional_datapipe('batch')
 class BatcherIterDataPipe(IterDataPipe[DataChunk]):
     r"""
-    Creates mini-batches of data (functional name: ``batch``). An outer dimension will be added as
-    ``batch_size`` if ``drop_last`` is set to ``True``, or ``length % batch_size`` for the
+    Creates mini-batches of data (functional name: ``batch``).
+
+    An outer dimension will be added as ``batch_size`` if ``drop_last`` is set to ``True``, or ``length % batch_size`` for the
     last batch if ``drop_last`` is set to ``False``.
 
     Args:
@@ -48,6 +49,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         >>> list(dp)
         [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
     """
+
     datapipe: IterDataPipe
     batch_size: int
     drop_last: bool
@@ -83,14 +85,15 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
             else:
                 return (len(self.datapipe) + self.batch_size - 1) // self.batch_size
         else:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
 
 
 @functional_datapipe('unbatch')
 class UnBatcherIterDataPipe(IterDataPipe):
     r"""
-    Undoes batching of data (functional name: ``unbatch``). In other words, it flattens the data up to the specified level
-    within a batched DataPipe.
+    Undos batching of data (functional name: ``unbatch``).
+
+    In other words, it flattens the data up to the specified level within a batched DataPipe.
 
     Args:
         datapipe: Iterable DataPipe being un-batched
@@ -141,8 +144,9 @@ class UnBatcherIterDataPipe(IterDataPipe):
 @functional_datapipe('groupby')
 class GrouperIterDataPipe(IterDataPipe[DataChunk]):
     r"""
-    Groups data from input IterDataPipe by keys which are generated from ``group_key_fn``,
-    and yields a ``DataChunk`` with batch size up to ``group_size`` if defined (functional name: ``groupby``).
+    Groups data from IterDataPipe by keys from ``group_key_fn``, yielding a ``DataChunk`` with batch size up to ``group_size``.
+
+    (functional name: ``groupby``).
 
     The samples are read sequentially from the source ``datapipe``, and a batch of samples belonging to the same group
     will be yielded as soon as the size of the batch reaches ``group_size``. When the buffer is full,
@@ -182,6 +186,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         >>> list(dp2)
         [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
     """
+
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
                  group_key_fn: Callable[[T_co], Any],

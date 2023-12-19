@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 import warnings
 from contextlib import closing, contextmanager
+from enum import Enum
 from ._utils import _import_dotted_name
 from torch._sources import get_source_lines_and_file
 from torch.types import Storage
@@ -48,6 +49,9 @@ __all__ = [
     'save',
     'load',
     'StorageType',
+    'LoadEndianness',
+    'get_default_load_endianness',
+    'set_default_load_endianness',
 ]
 
 
@@ -66,6 +70,41 @@ def mkdtemp():
 
 _package_registry = []
 
+class LoadEndianness(Enum):
+    NATIVE = 1
+    LITTLE = 2
+    BIG = 3
+
+_default_load_endian: Optional[LoadEndianness] = None
+
+def get_default_load_endianness() -> Optional[LoadEndianness]:
+    '''
+    Get fallback byte order for loading files
+
+    If byteorder mark is not present in saved checkpoint,
+    this byte order is used as fallback.
+    By default, it's "native" byte order.
+
+    Returns:
+        default_load_endian: Optional[LoadEndianness]
+    '''
+    return _default_load_endian
+
+def set_default_load_endianness(endianness):
+    '''
+    Set fallback byte order for loading files
+
+    If byteorder mark is not present in saved checkpoint,
+    this byte order is used as fallback.
+    By default, it's "native" byte order.
+
+    Args:
+        endianness: the new fallback byte order
+    '''
+    global _default_load_endian
+    if not isinstance(endianness, LoadEndianness) and endianness is not None:
+        raise TypeError("Invalid argument type in function set_default_load_endianness")
+    _default_load_endian = endianness
 
 def _is_zipfile(f) -> bool:
     # This is a stricter implementation than zipfile.is_zipfile().
@@ -75,19 +114,11 @@ def _is_zipfile(f) -> bool:
     # collisions and assume the zip has only 1 file.
     # See bugs.python.org/issue28494.
 
-    # Read the first 4 bytes of the file
-    read_bytes = []
     start = f.tell()
-
-    byte = f.read(1)
-    while byte != b"":
-        read_bytes.append(byte)
-        if len(read_bytes) == 4:
-            break
-        byte = f.read(1)
+    # Read the first few bytes and match against the ZIP file signature
+    local_header_magic_number = b'PK\x03\x04'
+    read_bytes = f.read(len(local_header_magic_number))
     f.seek(start)
-
-    local_header_magic_number = [b'P', b'K', b'\x03', b'\x04']
     return read_bytes == local_header_magic_number
 
 
@@ -163,10 +194,8 @@ def check_module_version_greater_or_equal(module, req_version_tuple, error_if_ma
 
     except Exception as e:
         message = (
-            "'%s' module version string is malformed '%s' and cannot be compared"
-            " with tuple %s"
-        ) % (
-            module.__name__, module.__version__, str(req_version_tuple)
+            f"'{module.__name__}' module version string is malformed '{module.__version__}' and cannot be compared"
+            f" with tuple {str(req_version_tuple)}"
         )
         if error_if_malformed:
             raise RuntimeError(message) from e
@@ -263,9 +292,9 @@ def validate_hpu_device(location):
 
 
 def _hpu_deserialize(obj, location):
-    hpu = getattr(torch, "hpu", None)
-    assert hpu is not None, "HPU device module is not loaded"
     if location.startswith('hpu'):
+        hpu = getattr(torch, "hpu", None)
+        assert hpu is not None, "HPU device module is not loaded"
         device = validate_hpu_device(location)
         if getattr(obj, "_torch_load_uninitialized", False):
             with hpu.device(device):
@@ -285,14 +314,32 @@ def _meta_deserialize(obj, location):
 
 
 def _validate_privateuse1_device(location, backend_name):
-    device = torch.device(location)
-    device_index = device.index if device.index else 0
+    '''
+    Check whether the device index of privateuse1 is valid
+
+    Register a device_module of privateuse1 by torch._register_device_module.
+    Implement the following methods in device_module like cuda:
+    device_module._utils._get_device_index(location, True),
+    device_module.device_count().
+
+    Args:
+        location: string of device
+        backend_name: the name of privateuse1, which can be renamed
+
+    Returns:
+        device_index: int
+    '''
     if not hasattr(torch, backend_name):
         raise RuntimeError(f'The {backend_name.upper()} device module is not registered. '
                            'If you are running on a CPU-only machine, '
                            'please use torch.load with map_location=torch.device(\'cpu\') '
                            'to map your storages to the CPU.')
     device_module = getattr(torch, backend_name)
+    if hasattr(device_module, '_utils') and hasattr(device_module._utils, '_get_device_index'):
+        device_index = device_module._utils._get_device_index(location, True)
+    else:
+        device = torch.device(location)
+        device_index = device.index if device.index else 0
     if hasattr(device_module, 'is_available') and not device_module.is_available():
         raise RuntimeError(f'Attempting to deserialize object on a {backend_name.upper()} '
                            f'device but torch.{backend_name}.is_available() is False. '
@@ -510,9 +557,9 @@ def _check_dill_version(pickle_module) -> None:
         required_dill_version = (0, 3, 1)
         if not check_module_version_greater_or_equal(pickle_module, required_dill_version, False):
             raise ValueError((
-                "'torch' supports dill >= %s, but you have dill %s."
+                "'torch' supports dill >= {}, but you have dill {}."
                 " Please upgrade dill or switch to 'pickle'"
-            ) % (
+            ).format(
                 '.'.join([str(num) for num in required_dill_version]),
                 pickle_module.__version__
             ))
@@ -520,9 +567,9 @@ def _check_dill_version(pickle_module) -> None:
 
 def _check_save_filelike(f):
     if not isinstance(f, (str, os.PathLike)) and not hasattr(f, 'write'):
-        raise AttributeError((
+        raise AttributeError(
             "expected 'f' to be string, path, or a file-like object with "
-            "a 'write' attribute"))
+            "a 'write' attribute")
 
 
 def save(
@@ -822,7 +869,7 @@ def load(
     pickle_module: Any = None,
     *,
     weights_only: bool = False,
-    mmap: bool = None,
+    mmap: Optional[bool] = None,
     **pickle_load_args: Any
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -830,7 +877,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, mmap=None, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
@@ -874,9 +921,9 @@ def load(
             loading only tensors, primitive types and dictionaries
         mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
-            are moved to the location that they were tagged with when saving, or specified by `map_location`. This
-            second step is a no-op if the final location is CPU. When the `mmap` flag is set, instead of copying the
-            tensor storages from disk to CPU memory in the first step, f is mmaped.
+            are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
+            second step is a no-op if the final location is CPU. When the ``mmap`` flag is set, instead of copying the
+            tensor storages from disk to CPU memory in the first step, ``f`` is mmaped.
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.
@@ -904,21 +951,23 @@ def load(
 
     Example:
         >>> # xdoctest: +SKIP("undefined filepaths")
-        >>> torch.load('tensors.pt')
+        >>> torch.load('tensors.pt', weights_only=True)
         # Load all tensors onto the CPU
-        >>> torch.load('tensors.pt', map_location=torch.device('cpu'))
+        >>> torch.load('tensors.pt', map_location=torch.device('cpu'), weights_only=True)
         # Load all tensors onto the CPU, using a function
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage)
+        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage, weights_only=True)
         # Load all tensors onto GPU 1
-        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1))
+        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1), weights_only=True)
         # Map tensors from GPU 1 to GPU 0
-        >>> torch.load('tensors.pt', map_location={'cuda:1': 'cuda:0'})
+        >>> torch.load('tensors.pt', map_location={'cuda:1': 'cuda:0'}, weights_only=True)
         # Load tensor from io.BytesIO object
+        # Loading from a buffer setting weights_only=False, warning this can be unsafe
         >>> with open('tensor.pt', 'rb') as f:
         ...     buffer = io.BytesIO(f.read())
-        >>> torch.load(buffer)
+        >>> torch.load(buffer, weights_only=False)
         # Load a module with 'ascii' encoding for unpickling
-        >>> torch.load('module.pt', encoding='ascii')
+        # Loading from a module setting weights_only=False, warning this can be unsafe
+        >>> torch.load('module.pt', encoding='ascii', weights_only=False)
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
@@ -980,7 +1029,7 @@ def load(
                              overall_storage=overall_storage,
                              **pickle_load_args)
         if mmap:
-            raise RuntimeError("mmap can only be used with files saved with ",
+            raise RuntimeError("mmap can only be used with files saved with "
                                "`torch.save(_use_new_zipfile_serialization=True), "
                                "please torch.save your checkpoint with this option in order to use mmap.")
         if weights_only:
@@ -1046,11 +1095,11 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                         if file_size == 0:
                             f.write(lines)
                         elif file_size != len(lines) or f.read() != lines:
-                            raise IOError
+                            raise OSError
                     msg = ("Saved a reverse patch to " + file_name + ". "
                            "Run `patch -p0 < " + file_name + "` to revert your "
                            "changes.")
-                except IOError:
+                except OSError:
                     msg = ("Tried to save a patch, but couldn't create a "
                            "writable file " + file_name + ". Make sure it "
                            "doesn't exist and your working directory is "
@@ -1182,7 +1231,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 res = typed_storage
             return res
         else:
-            raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
+            raise RuntimeError(f"Unknown saved id type: {saved_id[0]}")
 
     _check_seekable(f)
     f_should_read_directly = _should_read_directly(f)
@@ -1211,7 +1260,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         raise RuntimeError("Invalid magic number; corrupt file?")
     protocol_version = pickle_module.load(f, **pickle_load_args)
     if protocol_version != PROTOCOL_VERSION:
-        raise RuntimeError("Invalid protocol version: %s" % protocol_version)
+        raise RuntimeError(f"Invalid protocol version: {protocol_version}")
 
     _sys_info = pickle_module.load(f, **pickle_load_args)
     unpickler = UnpicklerWrapper(f, **pickle_load_args)
@@ -1269,9 +1318,13 @@ def _get_restore_location(map_location):
     return restore_location
 
 
-class StorageType():
+class StorageType:
     def __init__(self, name):
-        self.dtype = _get_dtype_from_pickle_storage_type(name)
+        self._dtype = _get_dtype_from_pickle_storage_type(name)
+
+    @property
+    def dtype(self):
+        return self._dtype
 
     def __str__(self):
         return f'StorageType(dtype={self.dtype})'
@@ -1289,6 +1342,27 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
         byteorderdata = zip_file.get_record(byteordername)
         if byteorderdata not in [b'little', b'big']:
             raise ValueError('Unknown endianness type: ' + byteorderdata.decode())
+    elif get_default_load_endianness() == LoadEndianness.LITTLE or \
+            get_default_load_endianness() is None:
+        byteorderdata = b'little'
+    elif get_default_load_endianness() == LoadEndianness.BIG:
+        byteorderdata = b'big'
+    elif get_default_load_endianness() == LoadEndianness.NATIVE:
+        pass
+    else:
+        raise ValueError('Invalid load endianness type')
+
+    if not zip_file.has_record(byteordername) and \
+            get_default_load_endianness() is None and \
+            sys.byteorder == 'big':
+        # Default behaviour was changed
+        # See https://github.com/pytorch/pytorch/issues/101688
+        warnings.warn("The default load endianness for checkpoints without a byteorder mark "
+                      "on big endian machines was changed from 'native' to 'little' endian, "
+                      "to avoid this behavior please use "
+                      "torch.serialization.set_default_load_endianness to set "
+                      "the desired default load endianness",
+                      UserWarning)
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'

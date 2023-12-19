@@ -2,7 +2,7 @@ import copy
 from typing import Dict, Optional, Tuple, List
 
 import torch
-from torch._export.pass_base import ExportPassBase, PassResult, Argument
+from torch._export.pass_base import _ExportPassBase, PassResult, Argument
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._ops import OpOverload
@@ -15,7 +15,7 @@ _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS: Dict[OpOverload, OpOverload]
 }
 
 
-class _FunctionalizeSideEffectfulOpsPass(ExportPassBase):
+class _FunctionalizeSideEffectfulOpsPass(_ExportPassBase):
     """
     Functionalize ops with side effect in graph module by replacing the op with
     functional version of it. A new dependency token (`dep_token`) will be
@@ -91,4 +91,4 @@ class _FunctionalizeSideEffectfulOpsPass(ExportPassBase):
     def output(self, results: List[Argument], meta: NodeMetadata) -> ProxyValue:
         assert self._dep_token is not None
 
-        return super().output(results=(*results, self._dep_token), meta=meta)
+        return super().output(results=(*results, self._dep_token), meta=meta)  # type: ignore[arg-type]

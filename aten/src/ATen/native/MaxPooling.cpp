@@ -17,8 +17,7 @@
 #include <ATen/ops/quantized_max_pool1d.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(max_pool1d_stub);
 
@@ -34,7 +33,7 @@ static void check_max_pool1d(
 
   TORCH_CHECK(
       self.dim() == 2 || self.dim() == 3,
-      "max_pool1d() Expected 2D or 3D input tensor, but got ", self.sizes());
+      "max_pool1d() Expected 2D or 3D input tensor, but got ", self.sym_sizes());
   TORCH_CHECK(
       kernel_size.size() == 1,
       "max_pool1d() kernel_size must be an int, list of ints or tuple of ints of size 1 but got size ",
@@ -74,7 +73,7 @@ static void check_max_pool1d(
   TORCH_CHECK(
       dilation[0] > 0, "max_pool1d() dilation must be greater than zero, but got ", dilation[0]);
 
-  const int64_t OW = pooling_output_shape(self.size(-1), kernel_size[0], padding[0], stride[0], dilation[0], ceil_mode);
+  const int64_t OW = pooling_output_shape(self.sym_size(-1).guard_int(__FILE__, __LINE__), kernel_size[0], padding[0], stride[0], dilation[0], ceil_mode);
   TORCH_CHECK(OW > 0, "max_pool1d() Invalid computed output size: ", OW);
 }
 
@@ -132,10 +131,10 @@ Tensor max_pool1d(
 
   auto ndim = self.ndimension();
    TORCH_CHECK(
-       (ndim == 2 && self.size(0) != 0 && self.size(1) != 0) ||
-           (ndim == 3 && self.size(1) != 0 && self.size(2) != 0),
+       (ndim == 2 && self.sym_size(0) != 0 && self.sym_size(1) != 0) ||
+           (ndim == 3 && self.sym_size(1) != 0 && self.sym_size(2) != 0),
        "max_pool1d: Expected 2D or 3D (batch mode) tensor with optional 0 dim batch size for input, but got:",
-       self.sizes());
+       self.sym_sizes());
 
   if (self.is_quantized()) {
     return at::quantized_max_pool1d(
@@ -155,5 +154,4 @@ Tensor max_pool1d(
       self, kernel_size, stride, padding, dilation, ceil_mode);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

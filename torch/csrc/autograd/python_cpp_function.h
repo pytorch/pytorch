@@ -43,8 +43,13 @@ PyObject* CppFunction_pynew(
        THPCppFunction_register_prehook,                                        \
        METH_O,                                                                 \
        nullptr},                                                               \
+      {(char*)"name", THPCppFunction_name, METH_NOARGS, nullptr},              \
+      {(char*)"_sequence_nr",                                                  \
+       THPCppFunction_sequence_nr,                                             \
+       METH_NOARGS,                                                            \
+       nullptr},                                                               \
   {                                                                            \
-    (char*)"name", THPCppFunction_name, METH_NOARGS, nullptr                   \
+    (char*)"_set_sequence_nr", THPCppFunction_set_sequence_nr, METH_O, nullptr \
   }
 
 #define THP_FUNCTION_DEFAULT_PROPERTIES                                   \
@@ -70,6 +75,7 @@ PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook);
 PyObject* THPCppFunction_register_prehook(PyObject* self, PyObject* hook);
 
 PyObject* THPCppFunction_name(PyObject* self, PyObject* noargs);
+PyObject* THPCppFunction_sequence_nr(PyObject* self, PyObject* noargs);
 
 PyTypeObject* _initFunctionPyTypeObject(
     PyTypeObject& type,

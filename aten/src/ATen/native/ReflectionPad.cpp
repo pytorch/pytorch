@@ -22,9 +22,7 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at {
-
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC(reflection_pad1d)(const Tensor& input, IntArrayRef padding) {
   int64_t dim_plane = 0;
@@ -205,9 +203,9 @@ TORCH_META_FUNC(reflection_pad3d_backward)(
 
   set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -258,7 +256,12 @@ void reflection_pad2d_out_template(
   if (ndim == 3) {
     output.resize_({nplane, output_h, output_w});
   } else {
-    output.resize_({nbatch, nplane, output_h, output_w});
+    if (input.is_quantized()) {
+      // quantized tensor can not be resized with argument `memory_format`
+      output.resize_({nbatch, nplane, output_h, output_w});
+    } else {
+      output.resize_({nbatch, nplane, output_h, output_w}, input.suggest_memory_format());
+    }
   }
   reflection_pad2d_kernel(kCPU, output, input, padding);
 }
@@ -356,7 +359,7 @@ Tensor& reflection_pad2d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding,
     Tensor& grad_input) {
-  grad_input.resize_as_(input);
+  grad_input.resize_as_(input, input.suggest_memory_format());
   grad_input.zero_();
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);
@@ -367,7 +370,7 @@ Tensor reflection_pad2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_input = at::zeros_like(input, input.suggest_memory_format());
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;
@@ -375,6 +378,9 @@ Tensor reflection_pad2d_backward_cpu(
 
 TORCH_IMPL_FUNC(reflection_pad3d_out_cpu)
 (const Tensor& input, IntArrayRef padding, const Tensor& output) {
+  // TODO: move this to TORCH_META_FUNC when CUDA has channels last support
+  output.resize_(output.sizes(), input.suggest_memory_format());
+
   reflection_pad3d_kernel(kCPU, output, input, padding);
 }
 
@@ -385,6 +391,9 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
   if (grad_output.numel() == 0) {
     return;
   }
+
+  // TODO: move this to TORCH_META_FUNC when CUDA has channels last support
+  grad_input.resize_(input.sizes(), input.suggest_memory_format());
 
   grad_input.zero_();
   reflection_pad3d_backward_kernel(kCPU, grad_input, grad_output, padding);
@@ -397,5 +406,4 @@ DEFINE_DISPATCH(reflection_pad2d_backward_kernel);
 DEFINE_DISPATCH(reflection_pad3d_kernel);
 DEFINE_DISPATCH(reflection_pad3d_backward_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

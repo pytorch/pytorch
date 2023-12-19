@@ -13,8 +13,7 @@
 
 // clang-format off
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 
 std::string shape_funcs = ""
@@ -940,7 +939,7 @@ def mv(self: List[int],
     ceil_mode: bool) -> List[int]:
   _0 = "AssertionError: max_pool2d: kernel_size must either be a single int, or a tuple of two ints"
   _1 = "AssertionError: max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
-  _2 = "AssertionError: max_pool2d: padding must be either be a single int, or a tuple of two ints"
+  _2 = "AssertionError: max_pool2d: padding must either be a single int, or a tuple of two ints"
   _3 = "AssertionError: max_pool2d: dilation must be either a single int, or a tuple of two ints"
   _4 = "AssertionError: stride should not be zeero"
   _5 = "AssertionError: stride should not be zeero"
@@ -1153,7 +1152,7 @@ def mv(self: List[int],
     ceil_mode: bool) -> Tuple[List[int], List[int]]:
   _0 = "AssertionError: max_pool2d: kernel_size must either be a single int, or a tuple of two ints"
   _1 = "AssertionError: max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
-  _2 = "AssertionError: max_pool2d: padding must be either be a single int, or a tuple of two ints"
+  _2 = "AssertionError: max_pool2d: padding must either be a single int, or a tuple of two ints"
   _3 = "AssertionError: max_pool2d: dilation must be either a single int, or a tuple of two ints"
   _4 = "AssertionError: stride should not be zeero"
   if torch.eq(torch.len(kernel_size), 1):
@@ -3332,5 +3331,4 @@ const OperatorMap<std::pair<std::string, std::string>>& GetBoundedShapeMappings(
 
 // clang-format on
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

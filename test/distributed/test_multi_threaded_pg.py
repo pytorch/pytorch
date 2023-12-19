@@ -9,6 +9,7 @@ from unittest import skip, SkipTest
 import operator
 from functools import reduce
 import threading
+import torch.autograd
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -17,12 +18,14 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     spawn_threads_and_init_comms,
     MultiThreadedTestCase,
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     IS_SANDCASTLE,
 )
+
 
 DEFAULT_WORLD_SIZE = 4
 
@@ -249,7 +252,35 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         self.assertEqual(t0, torch.ones(3, 3) * res_num)
         self.assertEqual(t1, torch.ones(3, 3) * (res_num * 2))
 
-# def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
+    @skip_if_lt_x_gpu(1)
+    def test_bwd_sees_fwd_pg(self):
+        fwd_tid = threading.current_thread().ident
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, rank):
+                result = rank * 2
+
+                ctx.save_for_backward(result, rank)
+                assert int(rank.item()) == dist.get_rank()
+                return result
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                result, rank = ctx.saved_tensors
+                bwd_tid = threading.current_thread().ident
+
+                self.assertEqual(fwd_tid, bwd_tid, f"bwd not running in the same thread a fwd for rank {rank.item()}")
+                self.assertTrue(dist.is_initialized())
+                self.assertEqual(int(rank.item()), dist.get_rank())
+                dist.all_reduce(result)
+                self.assertEqual(int(result.item()), 12)  # (0 + 1 + 2 + 3) * 2
+
+                return grad_output * result
+
+        x = torch.tensor([dist.get_rank()], dtype=torch.float, device="cuda", requires_grad=True)
+        x = MyFunc.apply(x)
+        x.sum().backward()
 
 if __name__ == "__main__":
     run_tests()

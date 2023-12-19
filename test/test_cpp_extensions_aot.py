@@ -37,6 +37,7 @@ except ImportError as e:
     ) from e
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionAOT(common.TestCase):
     """Tests ahead-of-time cpp extensions
 
@@ -90,8 +91,8 @@ class TestCppExtensionAOT(common.TestCase):
         import torch_test_cpp_extension.mps as mps_extension
 
         tensor_length = 100000
-        x = torch.zeros(tensor_length, device="cpu", dtype=torch.float32)
-        y = torch.zeros(tensor_length, device="cpu", dtype=torch.float32)
+        x = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
+        y = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
 
         cpu_output = mps_extension.get_cpu_add_output(x, y)
         mps_output = mps_extension.get_mps_add_output(x.to("mps"), y.to("mps"))
@@ -150,6 +151,7 @@ class TestCppExtensionAOT(common.TestCase):
         self.assertEqual(test, ref)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPybindTypeCasters(common.TestCase):
     """Pybind tests for ahead-of-time cpp extensions
 
@@ -243,12 +245,14 @@ class TestPybindTypeCasters(common.TestCase):
                 self.check_union(funcs)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestORTTensor(common.TestCase):
     def test_unregistered(self):
         a = torch.arange(0, 10, device='cpu')
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
             b = torch.arange(0, 10, device='ort')
 
+    @skipIfTorchDynamo("dynamo cannot model ort device")
     def test_zeros(self):
         a = torch.empty(5, 5, device='cpu')
         self.assertEqual(a.device, torch.device('cpu'))
@@ -293,6 +297,7 @@ class TestORTTensor(common.TestCase):
         self.assertEqual(grad[0].shape, input.shape)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRNGExtension(common.TestCase):
 
     def setUp(self):
@@ -329,6 +334,7 @@ class TestRNGExtension(common.TestCase):
         self.assertEqual(rng_extension.getInstanceCount(), 0)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 @unittest.skipIf(not TEST_CUDA, "CUDA not found")
 class TestTorchLibrary(common.TestCase):
 

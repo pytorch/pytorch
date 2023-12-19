@@ -58,7 +58,7 @@ def broadcast(
         raise AssertionError("Data or Function is expected to be None if not successful")
 
     payload: Optional[T] = None
-    exception : Exception = None
+    exception : Optional[Exception] = None
     # if no pg is passed then execute if rank is 0
     if (pg is None and rank == 0) or (pg is not None and pg.rank() == rank):
         # determine if it is an executable function or data payload only
@@ -119,7 +119,7 @@ def all_gather(
     >> all_ids = all_gather(data_or_fn=allocate_id, pg=ext_pg.my_pg)
     """
     payload: Optional[T] = None
-    exception : Exception = None
+    exception : Optional[Exception] = None
     success = True
     # determine if it is an executable function or data payload only
     if callable(data_or_fn):
@@ -143,7 +143,7 @@ def all_gather(
         total_list = [None] * dist.get_world_size(pg)
         all_gather_object_enforce_type(pg, total_list, sync_obj)
         # Each rank will throw RuntimeError in case of failure on any rank.
-        stage_name: Optional[str] = cast(SyncPayload[T], total_list[0]).stage_name
+        stage_name = cast(SyncPayload[T], total_list[0]).stage_name
         exception_list: List[Tuple[int, Exception]] = []
         ret_list: List[T] = []
         error_msg: str = ""
@@ -160,7 +160,7 @@ def all_gather(
             ret_list.append(sp.payload)
 
         if len(exception_list) > 0:
-            raise RuntimeError(
+            raise RuntimeError(  # type: ignore[misc]
                 error_msg, exception_list) from exception_list[0]
         return ret_list
     else:
@@ -168,7 +168,7 @@ def all_gather(
             raise RuntimeError(
                 f"all_gather failed with exception {sync_obj.exception}",
             ) from sync_obj.exception
-        return [sync_obj.payload]
+        return [sync_obj.payload]  # type: ignore[list-item]
 
 
 # Note: use Any for typing for now so users can pass in

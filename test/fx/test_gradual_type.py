@@ -33,8 +33,8 @@ class AnnotationsTest(TestCase):
     def test_annotations(self):
         """
         Test type annotations in the forward function.
-        The annoation should appear in the n.graph
-        where n is the corresoinding node in the resulting graph.
+        The annotation should appear in the n.graph
+        where n is the corresponding node in the resulting graph.
         """
         class M(torch.nn.Module):
             def forward(self,
@@ -827,7 +827,7 @@ class TypeCheckerTest(TestCase):
         for n1, n2 in zip(gm_static.graph.nodes, gm_run.graph.nodes):
             assert is_consistent(n1.type, TensorType(n2.meta['tensor_meta'].shape))
 
-        # here we give the same input as to runtume
+        # here we give the same input as to runtime
         gm_static_with_types = symbolic_trace(resnet50())
 
         # we initialize our placeholder
@@ -990,12 +990,12 @@ class TypeCheckerTest(TestCase):
 
         for n in traced.graph.nodes:
             if n.target == 'conv1':
-                assert n.type == TensorType((4, 6, sympy.floor((sympy.symbols('~0') - 4)),
-                                             sympy.floor((sympy.symbols('~1') - 4))))
+                assert n.type == TensorType((4, 6, sympy.floor(sympy.symbols('~0') - 4),
+                                             sympy.floor(sympy.symbols('~1') - 4)))
 
             elif n.target == 'conv2':
-                assert n.type == TensorType((4, 16, sympy.floor((sympy.symbols('~4') - 4)),
-                                             sympy.floor((sympy.symbols('~5') - 4))))
+                assert n.type == TensorType((4, 16, sympy.floor(sympy.symbols('~4') - 4),
+                                             sympy.floor(sympy.symbols('~5') - 4)))
 
 if __name__ == '__main__':
     unittest.main()

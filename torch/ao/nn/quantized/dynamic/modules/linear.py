@@ -68,7 +68,7 @@ class Linear(nnq.Linear):
             self.in_features, self.out_features, self._packed_params.dtype
         )
         if self._packed_params.dtype == torch.qint8:
-            extra_repr_str += ', qscheme={}'.format(self.weight().qscheme())
+            extra_repr_str += f', qscheme={self.weight().qscheme()}'
         return extra_repr_str
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
@@ -105,7 +105,7 @@ class Linear(nnq.Linear):
             weight_observer = default_dynamic_qconfig.weight()
         dtype = weight_observer.dtype
         assert dtype in [torch.qint8, torch.float16], "The only supported dtypes for " \
-            "dynamic quantized linear are qint8 and float16 got: {}".format(dtype)
+            f"dynamic quantized linear are qint8 and float16 got: {dtype}"
         weight_observer(mod.weight)
         if dtype == torch.qint8:
             qweight = _quantize_weight(mod.weight.float(), weight_observer)

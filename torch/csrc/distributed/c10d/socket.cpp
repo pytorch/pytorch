@@ -27,7 +27,9 @@
 #include <unistd.h>
 #endif
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <fmt/chrono.h>
+C10_DIAGNOSTIC_POP()
 #include <fmt/format.h>
 
 #include <torch/csrc/distributed/c10d/error.h>
@@ -109,7 +111,7 @@ void delay(std::chrono::seconds d) {
     // We don't care about error conditions other than EINTR since a failure
     // here is not critical.
     if (err == std::errc::interrupted) {
-      throw std::system_error{err};
+      C10_THROW_ERROR(DistNetworkError, std::strerror(err.value()));
     }
   }
 #endif
@@ -173,6 +175,8 @@ class SocketImpl {
   Handle handle() const noexcept {
     return hnd_;
   }
+
+  bool waitForInput(std::chrono::milliseconds timeout);
 
  private:
   bool setSocketFlag(int level, int optname, bool value) noexcept;
@@ -269,7 +273,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
   if (hnd == invalid_socket) {
     std::error_code err = getSocketError();
     if (err == std::errc::interrupted) {
-      throw std::system_error{err};
+      C10_THROW_ERROR(DistNetworkError, std::strerror(err.value()));
     }
 
     std::string msg{};
@@ -285,7 +289,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
 
     C10D_ERROR(msg);
 
-    throw SocketError{msg};
+    C10D_THROW_ERROR(SocketError, msg);
   }
 
   ::addrinfo addr{};
@@ -331,7 +335,8 @@ void SocketImpl::enableNonBlocking() {
     }
   }
 #endif
-  throw SocketError{"The socket cannot be switched to non-blocking mode."};
+  C10D_THROW_ERROR(
+      SocketError, "The socket cannot be switched to non-blocking mode.");
 }
 
 // TODO: Remove once we migrate everything to non-blocking mode.
@@ -349,7 +354,8 @@ void SocketImpl::disableNonBlocking() {
     }
   }
 #endif
-  throw SocketError{"The socket cannot be switched to blocking mode."};
+  C10D_THROW_ERROR(
+      SocketError, "The socket cannot be switched to blocking mode.");
 }
 
 bool SocketImpl::enableNoDelay() noexcept {
@@ -379,7 +385,8 @@ std::uint16_t SocketImpl::getPort() const {
 
   if (::getsockname(hnd_, reinterpret_cast<::sockaddr*>(&addr_s), &addr_len) !=
       0) {
-    throw SocketError{"The port number of the socket cannot be retrieved."};
+    C10D_THROW_ERROR(
+        SocketError, "The port number of the socket cannot be retrieved.");
   }
 
   if (addr_s.ss_family == AF_INET) {
@@ -396,6 +403,37 @@ bool SocketImpl::setSocketFlag(int level, int optname, bool value) noexcept {
   auto buf = value ? 1 : 0;
 #endif
   return setSocketOption(hnd_, level, optname, &buf, sizeof(buf)) == 0;
+}
+
+bool SocketImpl::waitForInput(std::chrono::milliseconds timeout) {
+  using Clock = std::chrono::steady_clock;
+
+  auto deadline = Clock::now() + timeout;
+  do {
+    ::pollfd pfd{};
+    pfd.fd = hnd_;
+    pfd.events = POLLIN;
+
+    int res = pollFd(&pfd, 1, static_cast<int>(timeout.count()));
+    if (res > 0) {
+      return true;
+    }
+    std::error_code err = getSocketError();
+
+    if (err == std::errc::operation_in_progress) {
+      bool timedout = Clock::now() >= deadline;
+      if (timedout) {
+        return false;
+      }
+      C10D_WARNING(
+          "pollFB for socket {} returned operation_in_progress before a timeout",
+          hnd_);
+    } else if (err != std::errc::interrupted) {
+      C10D_WARNING("While waitForInput, poolFD failed with {}.", err);
+      return false;
+    }
+  } while (Clock::now() < deadline);
+  return false;
 }
 
 namespace {
@@ -461,7 +499,8 @@ std::unique_ptr<SocketImpl> SocketListenOp::run() {
 
   C10D_ERROR(msg);
 
-  throw SocketError{fmt::format("{} {}", msg, fmt::join(errors_, " "))};
+  C10D_THROW_ERROR(
+      SocketError, fmt::format("{} {}", msg, fmt::join(errors_, " ")));
 }
 
 bool SocketListenOp::tryListen(int family) {
@@ -552,7 +591,7 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
   }
 
   // NOLINTNEXTLINE(bugprone-argument-comment)
-  if (::listen(socket_->handle(), /*backlog=*/2048) != 0) {
+  if (::listen(socket_->handle(), -1 /* backlog */) != 0) {
     recordError(
         "The server socket has failed to listen on {} {}.",
         addr,
@@ -589,26 +628,31 @@ std::unique_ptr<SocketImpl> SocketListenFromFdOp::run() const {
   ::socklen_t addr_len = sizeof(addr_storage);
   if (::getsockname(
           fd_, reinterpret_cast<::sockaddr*>(&addr_storage), &addr_len) < 0) {
-    throw SocketError{
-        fmt::format("getsockname failed for fd {}: {}", fd_, getSocketError())};
+    C10D_THROW_ERROR(
+        SocketError,
+        fmt::format("getsockname failed for fd {}: {}", fd_, getSocketError()));
   }
 
   auto socket = std::make_unique<SocketImpl>(fd_);
   const auto port = socket->getPort();
 
   if (port != expected_port_) {
-    throw SocketError{fmt::format(
-        "listen fd {} is bound to port {}, expected to be bound to port {}",
-        fd_,
-        port,
-        expected_port_)};
+    C10D_THROW_ERROR(
+        SocketError,
+        fmt::format(
+            "listen fd {} is bound to port {}, expected to be bound to port {}",
+            fd_,
+            port,
+            expected_port_));
   }
 
-  if (::listen(socket->handle(), 2048 /* backlog */) != 0) {
-    throw SocketError{fmt::format(
-        "Failed to listen on socket initialized from fd {}: {}.",
-        socket->handle(),
-        getSocketError())};
+  if (::listen(socket->handle(), -1 /* backlog */) != 0) {
+    C10D_THROW_ERROR(
+        SocketError,
+        fmt::format(
+            "Failed to listen on socket initialized from fd {}: {}.",
+            socket->handle(),
+            getSocketError()));
   }
 
   socket->closeOnExec();
@@ -708,7 +752,8 @@ std::unique_ptr<SocketImpl> SocketConnectOp::run() {
 
   C10D_ERROR(msg);
 
-  throw SocketError{fmt::format("{} {}", msg, fmt::join(errors_, " "))};
+  C10D_THROW_ERROR(
+      SocketError, fmt::format("{} {}", msg, fmt::join(errors_, " ")));
 }
 
 bool SocketConnectOp::tryConnect(int family) {
@@ -811,7 +856,7 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(
   if (cr == ConnectResult::Error) {
     std::error_code err = getSocketError();
     if (err == std::errc::interrupted) {
-      throw std::system_error{err};
+      C10_THROW_ERROR(DistNetworkError, std::strerror(err.value()));
     }
 
     // Retry if the server is not yet listening or if its backlog is exhausted.
@@ -911,7 +956,7 @@ void SocketConnectOp::throwTimeoutError() const {
 
   C10D_ERROR(msg);
 
-  throw TimeoutError{msg};
+  C10D_THROW_ERROR(TimeoutError, msg);
 }
 
 } // namespace
@@ -925,7 +970,8 @@ void Socket::initialize() {
   c10::call_once(init_flag, []() {
     WSADATA data{};
     if (::WSAStartup(MAKEWORD(2, 2), &data) != 0) {
-      throw SocketError{"The initialization of Winsock has failed."};
+      C10D_THROW_ERROR(
+          SocketError, "The initialization of Winsock has failed.");
     }
   });
 #endif
@@ -963,7 +1009,7 @@ Socket Socket::accept() const {
     return Socket{impl_->accept()};
   }
 
-  throw SocketError{"The socket is not initialized."};
+  C10D_THROW_ERROR(SocketError, "The socket is not initialized.");
 }
 
 int Socket::handle() const noexcept {
@@ -983,8 +1029,10 @@ std::uint16_t Socket::port() const {
 Socket::Socket(std::unique_ptr<SocketImpl>&& impl) noexcept
     : impl_{std::move(impl)} {}
 
-} // namespace detail
+bool Socket::waitForInput(std::chrono::milliseconds timeout) {
+  return impl_->waitForInput(timeout);
+}
 
-SocketError::~SocketError() = default;
+} // namespace detail
 
 } // namespace c10d

@@ -47,6 +47,16 @@ def layer_norm(
     # layer_norm normalizes on the last D dimensions,
     # where D is the size of normalized_shape
     axis = -len(normalized_shape)
+    scalar_type = _type_utils.JitScalarType.from_value(
+        input, _type_utils.JitScalarType.FLOAT
+    )
+    dtype = scalar_type.dtype()
+    if symbolic_helper._is_none(weight):
+        weight_value = torch.ones(normalized_shape, dtype=dtype)
+        weight = g.op("Constant", value_t=weight_value)
+    if symbolic_helper._is_none(bias):
+        bias_value = torch.zeros(normalized_shape, dtype=dtype)
+        bias = g.op("Constant", value_t=bias_value)
     return g.op(
         "LayerNormalization",
         input,
@@ -144,8 +154,8 @@ def stft(
         # Center window around zeros if needed (required by ONNX's STFT)
         if n_win < n_fft:
             left, right = _compute_edge_sizes(n_fft, n_win)
-            left_win = g.op("Constant", value_t=torch.zeros((left)))
-            right_win = g.op("Constant", value_t=torch.zeros((right)))
+            left_win = g.op("Constant", value_t=torch.zeros(left))
+            right_win = g.op("Constant", value_t=torch.zeros(right))
             window = g.op("Concat", left_win, window, right_win, axis_i=0)
 
     # Create window, if needed
@@ -161,11 +171,11 @@ def stft(
             # Center window, if needed
             left, right = _compute_edge_sizes(n_fft, win_length)
             torch_window = torch.hstack(
-                (torch.zeros((left)), torch.ones((win_length)), torch.zeros((right)))
+                (torch.zeros(left), torch.ones(win_length), torch.zeros(right))
             )
         else:
             # Rectangle window
-            torch_window = torch.ones((n_fft))
+            torch_window = torch.ones(n_fft)
         assert torch_window.shape[0] == n_fft
         window = g.op("Constant", value_t=torch_window)
     window = g.op(
