@@ -247,7 +247,7 @@ static inline Tensor applySelect(
 
     auto size = (*self_sizes)[dim];
     TORCH_CHECK_INDEX(
-        size >= -index && size > index,
+        size > -1 - index && size > index,
         "index ",
         index,
         " is out of bounds for dimension ",
