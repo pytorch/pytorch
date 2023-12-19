@@ -4,6 +4,11 @@ set -ex
 
 if [ -n "$GCC_VERSION" ]; then
 
+  if [[ "$UBUNTU_VERSION" == "22.04"* ]]; then
+    # gpg-agent is not available by default on 22.04
+    apt-get update
+    apt-get install -y gpg-agent
+  fi
   # Need the official toolchain repo to get alternate packages
   add-apt-repository ppa:ubuntu-toolchain-r/test
   apt-get update
