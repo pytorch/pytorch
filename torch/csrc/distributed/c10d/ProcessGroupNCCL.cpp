@@ -1068,10 +1068,9 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
   }
 }
 
-void abortCommsFromMap(
+void ProcessGroupNCCL::abortCommsFromMap(
     std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
         ncclCommsMap,
-    const int rank,
     c10::optional<std::string> abortReason) {
   // The process may control multiple devices, loop through the communicators on
   // each device
@@ -1092,7 +1091,7 @@ void abortCommsFromMap(
     // their responsibility to destroy the process group and recreate
     // it to recover from errors.
 
-    LOG(INFO) << "[Rank " << rank << "] Destroyed " << ncclComms.size()
+    LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
               << "communicators on CUDA device " << devName;
   }
 }
@@ -1114,8 +1113,8 @@ void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   ncclCommDevIdxMapMutex.unlock();
 
   std::lock_guard<std::mutex> lock(mutex_);
-  abortCommsFromMap(devNCCLCommMap_, rank_, abortReason);
-  abortCommsFromMap(inInitializationCommMap_, rank_, abortReason);
+  abortCommsFromMap(devNCCLCommMap_, abortReason);
+  abortCommsFromMap(inInitializationCommMap_, abortReason);
 }
 
 void ProcessGroupNCCL::shutdown() {
