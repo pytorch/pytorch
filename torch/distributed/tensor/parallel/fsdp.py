@@ -330,6 +330,7 @@ class DTensorExtensions(FSDPExtensions):
     def post_unflatten_transform(
         self, tensor: torch.Tensor, param_extension: Any
     ) -> torch.Tensor:
+        print(f">>>>>>>. post_unflatten_transform: {tensor.shape}, requires graD: {tensor.requires_grad}")
         result = _unflatten_tensor(tensor, param_extension)
         _set_fsdp_flattened(result)
         return result
