@@ -23,9 +23,7 @@
 #include <tuple>
 #include <vector>
 
-namespace at {
-
-namespace native {
+namespace at::native {
 
 template <typename T>
 void check_group_norm_inputs(
@@ -260,5 +258,4 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   at::Tensor rstd = std::get<2>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
   return std::make_tuple(out, mean, rstd);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

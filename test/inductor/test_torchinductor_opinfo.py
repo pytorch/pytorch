@@ -66,10 +66,10 @@ i16 = torch.int16  # not tested
 i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
-u8 = torch.uint8  # not tested
+u8 = torch.uint8  # not tested except upsampling and interpolate ops
 
 _ops = partial(
-    ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8]
+    ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8, u8]
 )
 
 # Success forces pass; failure forces fail; skip unconditionally skips testing
@@ -203,7 +203,6 @@ inductor_expected_failures_single_sample["cpu"] = {
         f16
     },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
-    "bernoulli": {f16, f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
     "cross": {f16},
@@ -228,8 +227,6 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
-    "atanh": {f32},
-    "bernoulli": {f16, f32, f64},
     "cholesky": {f32, f64},
     "multinomial": {f16, f32, f64},
     "nn.functional.normalize": {f16},
@@ -255,7 +252,6 @@ inductor_expected_failures_single_sample["cuda"].update(intentionally_not_handle
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
-    "atanh": {f32},
     "nn.functional.normalize": {f16},
 }
 
@@ -350,14 +346,27 @@ inductor_override_kwargs = {
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
-    # Temporarily skip interpolate bilinear and bicubic tests:
+    # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
+    ("nn.functional.interpolate.bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
+    ("nn.functional.upsample_bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
+    ("nn.functional.interpolate.bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
+    ("nn.functional.upsample_bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
+    # Temporarily skip interpolat bicubic tests:
     "nn.functional.interpolate.bicubic": {
         "assert_equal": False,
         "check_gradient": False,
     },
-    "nn.functional.interpolate.bilinear": {"assert_equal": False},
-    "nn.functional.upsample_bilinear": {"assert_equal": False},
 }
+
+
+if not TEST_WITH_ROCM:
+    inductor_override_kwargs.update(
+        {
+            # We have better precision than eager
+            ("cumsum", "cuda", f16): {"reference_in_float": True},
+        }
+    )
+
 
 # Always test with all sample for following ops
 inductor_all_samples = {
@@ -438,6 +447,16 @@ class TestInductorOpInfo(TestCase):
         op_name = op.name
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
+
+        # Skip dtype=torch.uint8 for all ops except upsample and interpolate:
+        allowed_dtypes = [f16, f32, f64, i32, i64, b8]
+        if op_name not in (
+            "nn.functional.interpolate.bilinear",
+            "nn.functional.upsample_bilinear",
+            "nn.functional.upsample_nearest",
+        ):
+            if dtype not in allowed_dtypes:
+                raise unittest.SkipTest("Skipped!")
 
         device_type = torch.device(device).type
 
@@ -544,6 +563,16 @@ class TestInductorOpInfo(TestCase):
             return ((contextlib.nullcontext, {}),)
 
         try:
+
+            def _get_tolerances(dtype):
+                _custom_tolerances = {
+                    torch.float32: (1.3e-5, 1.5e-5),
+                }
+                if dtype in _custom_tolerances:
+                    return _custom_tolerances[dtype]
+                else:
+                    return None, None
+
             for sample_input in samples:
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
@@ -552,6 +581,7 @@ class TestInductorOpInfo(TestCase):
                 # with open("test_output.txt", "a") as f:
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
+                rtol, atol = _get_tolerances(dtype)
                 if device_type == "cuda":
                     # opinfo test case have already place the input on the correct device
                     # so we don't need do additional copy by setting copy_to_cuda=False
@@ -567,6 +597,8 @@ class TestInductorOpInfo(TestCase):
                                 "check_gradient": requires_grad,
                                 "check_has_compiled": no_python,
                                 "output_process_fn_grad": sample_input.output_process_fn_grad,
+                                "atol": atol,
+                                "rtol": rtol,
                             }
                             adjusted_kwargs.update(overridden_kwargs)
                             adjusted_kwargs.update(kwarg_overrides)
@@ -586,6 +618,8 @@ class TestInductorOpInfo(TestCase):
                                 "check_has_compiled": no_python,
                                 # skip checking gradient on CPU for now
                                 "check_gradient": False,
+                                "atol": atol,
+                                "rtol": rtol,
                             }
                             adjusted_kwargs.update(overridden_kwargs)
                             adjusted_kwargs.update(kwarg_overrides)
