@@ -695,6 +695,7 @@ class ForeachTests(TestCase):
         out_compiled = torch.compile(test_foreach_add)(*inps)
 
         self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
 
 if __name__ == "__main__":
