@@ -11104,6 +11104,8 @@ class TestConsistency(TestCaseMPS):
         'cross', 'linalg.cross',
         'prod', 'masked.prod',
         'nextafter',
+        'native_layer_norm',
+        'nn.functional.layer_norm',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
