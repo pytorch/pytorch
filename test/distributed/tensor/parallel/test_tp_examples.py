@@ -27,6 +27,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPModule,
     ModelArgs,
     NUM_DEVICES,
+    skip_unless_torch_gpu,
     Transformer,
     with_comms,
 )
@@ -138,7 +139,29 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output_tp = model_tp(inp)
         self.assertEqual(output, output_tp)
 
-    def _test_transformer_training_e2e(self, is_seq_parallel=False):
+    @with_comms
+    @parametrize("is_seq_parallel", [True, False])
+    # TODO: need to revisit input_reshard API about why it failed multi-gpu tests.
+    # @parametrize("recompute_activation", [True, False])
+    @parametrize("recompute_activation", [False])
+    def test_mlp_training(self, is_seq_parallel, recompute_activation):
+        self._test_mlp_training_e2e(
+            is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation
+        )
+
+    @with_comms
+    def test_mlp_inference(self):
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+        with torch.inference_mode():
+            self._test_mlp_inference(device_mesh)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    @parametrize("is_seq_parallel", [True, False])
+    def test_transformer_training(self, is_seq_parallel=False):
         # Step 1: Initialize single-gpu models and optimizers.
 
         model_args = ModelArgs(
@@ -161,6 +184,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         # onto the device mesh.
 
         parallelize_plan = {}
+        device_mesh = DeviceMesh(self.device_type, torch.arange(0, NUM_DEVICES))
 
         # Parallelize the embedding submodules.
         parallelize_plan["tok_embeddings"] = ColwiseParallel(
@@ -173,23 +197,33 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         # Parallelize the attention and feed forward submodules.
         for i in range(model_args.n_layers):
             if is_seq_parallel:
-                parallelize_plan[f"layers.{i}.attention"] = PrepareModuleInput(
-                    input_layouts=Shard(1),
-                    desired_input_layouts=Replicate(),
+                # parallelize_plan[f"layers.{i}.attention"] = PrepareModuleInput(
+                #     input_layouts=Shard(1),
+                #     desired_input_layouts=Replicate(),
+                # )
+                parallelize_module(
+                    model_tp.layers[i].attention,
+                    device_mesh,
+                    PrepareModuleInput(input_layouts=Shard(1), desired_input_layouts=Replicate())
                 )
-            parallelize_plan[f"layers.{i}.attention.wq"] = ColwiseParallel()
-            parallelize_plan[f"layers.{i}.attention.wk"] = ColwiseParallel()
-            parallelize_plan[f"layers.{i}.attention.wv"] = ColwiseParallel()
-            parallelize_plan[f"layers.{i}.attention.wo"] = RowwiseParallel(
-                output_layouts=Shard(1)
-            ) if is_seq_parallel else RowwiseParallel()
-
-            parallelize_plan[f"layers.{i}.feed_forward.w1"] = ColwiseParallel(
-                input_layouts=Shard(1)
-            ) if is_seq_parallel else ColwiseParallel()
-            parallelize_plan[f"layers.{i}.feed_forward.w2"] = RowwiseParallel(
-                output_layouts=Shard(1)
-            ) if is_seq_parallel else RowwiseParallel()
+            parallelize_module(model_tp.layers[i].attention.wq, device_mesh, ColwiseParallel())
+            parallelize_module(model_tp.layers[i].attention.wk, device_mesh, ColwiseParallel())
+            parallelize_module(model_tp.layers[i].attention.wv, device_mesh, ColwiseParallel())
+            parallelize_module(
+                model_tp.layers[i].attention.wo,
+                device_mesh,
+                RowwiseParallel(output_layouts=Shard(1)) if is_seq_parallel else RowwiseParallel()
+            )
+            parallelize_module(
+                model_tp.layers[i].feed_forward.w1,
+                device_mesh,
+                ColwiseParallel(input_layouts=Shard(1)) if is_seq_parallel else ColwiseParallel()
+            )
+            parallelize_module(
+                model_tp.layers[i].feed_forward.w2,
+                device_mesh,
+                RowwiseParallel(output_layouts=Shard(1)) if is_seq_parallel else RowwiseParallel()
+            )
 
         # Parallelize the output submodule. If weight tying is enabled, we need to
         # make sure output.weight is sharded consistently as tok_embeddings.weight,
@@ -205,7 +239,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                 output_layouts=Replicate(),
             ) if is_seq_parallel else RowwiseParallel(input_layouts=Replicate())
 
-        device_mesh = DeviceMesh(self.device_type, torch.arange(0, NUM_DEVICES))
         model_tp = parallelize_module(model_tp, device_mesh, parallelize_plan)
 
         # Step 2.5: Do manual setup on features that DTensor does not support yet.
@@ -214,6 +247,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         for i in range(model_args.n_layers):
             model_tp.layers[i].attention.n_heads = model_args.n_heads // self.world_size
 
+        # TODO: switch to a TP API once that feature is ready.
         # Manually register all_reduce hooks for all norm layers as they only process sharded inputs.
         if is_seq_parallel:
             def all_reduce_fn(grad):
@@ -233,8 +267,8 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         # Step 3: Run test by comparing outputs from single-gpu and multi-gpu models.
 
         LR = 0.25
-        optim = torch.optim.SGD(model.parameters(), lr=LR)
-        optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)
+        optim = torch.optim.Adam(model.parameters(), lr=LR)
+        optim_tp = torch.optim.Adam(model_tp.parameters(), lr=LR)
 
         # Initialize input and make sure all ranks have the same input.
         inp_size = [4, 8]  # [batch_size, seq_len]
@@ -265,29 +299,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output_tp = model_tp(inp)
         self.assertEqual(output, output_tp)
 
-    @with_comms
-    @parametrize("is_seq_parallel", [True, False])
-    # TODO: need to revisit input_reshard API about why it failed multi-gpu tests.
-    # @parametrize("recompute_activation", [True, False])
-    @parametrize("recompute_activation", [False])
-    def test_mlp_training(self, is_seq_parallel, recompute_activation):
-        self._test_mlp_training_e2e(
-            is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation
-        )
-
-    @with_comms
-    def test_mlp_inference(self):
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
-        with torch.inference_mode():
-            self._test_mlp_inference(device_mesh)
-
-    @with_comms
-    @parametrize("is_seq_parallel", [True, False])
-    def test_transformer_training(self, is_seq_parallel):
-        self._test_transformer_training_e2e(is_seq_parallel=is_seq_parallel)
 
 instantiate_parametrized_tests(DistTensorParallelExampleTest)
 
