@@ -216,7 +216,7 @@ class TensorVariable(VariableTracker):
         return VariableBuilder(tx, attr_source)(real_value)
 
     def var_getattr(self, tx, name):
-        from . import ConstantVariable, TorchVariable
+        from . import ConstantVariable, TorchVariable, UserDefinedClassVariable
 
         if tx.strict_checks_enabled:
             if name in self._strict_mode_banned_ops():
@@ -249,7 +249,7 @@ class TensorVariable(VariableTracker):
         elif name == "data":
             result = self.call_method(tx, "detach", [], {})
         if name == "__class__":
-            return TorchVariable(self.python_type())
+            return UserDefinedClassVariable(self.python_type())
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
@@ -436,7 +436,7 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable.create(self.dtype.is_floating_point)
         elif name == "is_contiguous":
             memory_format = (
-                kwargs.pop("memory_format").as_python_constant()
+                kwargs.pop("memory_format").value
                 if "memory_format" in kwargs
                 else torch.contiguous_format
             )

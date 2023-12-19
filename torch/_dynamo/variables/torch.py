@@ -59,12 +59,9 @@ constant_fold_functions = [
     torch._assert,
     torch._utils._get_device_index,
     torch.cuda.is_available,
-    torch.device,
     torch.distributed.is_available,
-    torch.finfo,
     torch.get_autocast_gpu_dtype,
     torch.get_default_dtype,
-    torch.iinfo,
     torch.is_autocast_cache_enabled,
     torch.is_autocast_cpu_enabled,
     torch.is_autocast_enabled,
@@ -689,22 +686,20 @@ class TorchVariable(BaseTorchVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ConstantVariable
-
         from .builder import wrap_fx_proxy
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
 
-        if self.can_constant_fold_through() and (constant_args or unspec_python_args):
-            # constant fold
-            return ConstantVariable.create(
-                self.as_python_constant()(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-            )
-        elif istype(self.value, type) and issubclass(self.value, torch.nn.Module):
+        # if self.can_constant_fold_through() and (constant_args or unspec_python_args):
+        #     # constant fold
+        #     return ConstantVariable.create(
+        #         self.as_python_constant()(
+        #             *[x.as_python_constant() for x in args],
+        #             **{k: v.as_python_constant() for k, v in kwargs.items()},
+        #         ),
+        #     )
+        if istype(self.value, type) and issubclass(self.value, torch.nn.Module):
             if self.value is torch.nn.CrossEntropyLoss:
                 return self._call_cross_entropy_loss(tx, args, kwargs)
             else:

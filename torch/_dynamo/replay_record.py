@@ -18,6 +18,7 @@ class ModuleRecord:
 @dataclasses.dataclass
 class DummyModule:
     name: str
+    is_torch: bool = False
 
 
 @dataclasses.dataclass

@@ -52,6 +52,19 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def python_type(self):
         return type(self.value)
 
+    @staticmethod
+    @functools.lru_cache(None)
+    def _constant_fold_functions():
+        return {
+            torch.device,
+            torch.finfo,
+            torch.iinfo,
+            torch.Size,
+        }
+
+    def can_constant_fold_through(self):
+        return self.value in self._constant_fold_functions()
+
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from . import ConstantVariable
         from .builder import VariableBuilder
@@ -130,7 +143,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
         from .builder import SourcelessBuilder
         from .builtin import BuiltinVariable
 
-        if self.value is contextlib.nullcontext:
+        constant_args = check_constant_args(args, kwargs)
+
+        if self.can_constant_fold_through() and constant_args:
+            # constant fold
+            return variables.ConstantVariable.create(
+                self.as_python_constant()(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
+            )
+        elif self.value is contextlib.nullcontext:
             return NullContextVariable()
         elif self.value is collections.OrderedDict:
             return BuiltinVariable.call_custom_dict(

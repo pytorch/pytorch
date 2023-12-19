@@ -38,12 +38,7 @@ from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
 from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
-from ..allowed_functions import (
-    is_allowed,
-    is_builtin_callable,
-    is_numpy,
-    is_user_defined_allowed,
-)
+from ..allowed_functions import is_builtin_callable, is_numpy, is_user_defined_allowed
 
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
@@ -475,7 +470,7 @@ class VariableBuilder:
         elif ConstantVariable.is_literal(value):  # non-atomic literals
             return self.wrap_literal(value)
         elif istype(value, frozenset) and (
-            all(is_allowed(x) or ConstantVariable.is_literal(x) for x in value)
+            ConstantVariable.is_literal(x) for x in value
         ):
             # For frozenset, we can guard by object ID instead of value
             # equality, this allows us to handle non-literal values
@@ -716,15 +711,12 @@ class VariableBuilder:
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
-        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
+        elif (
+            istype(value, (types.ModuleType, replay_record.DummyModule))
+            or value is torch.backends.cudnn
+        ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonModuleVariable(
-                value,
-                source=self.source,
-            )
-        elif is_allowed(value):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return TorchVariable(
                 value,
                 source=self.source,
             )
@@ -1898,10 +1890,12 @@ class SourcelessBuilder:
             return SourcelessBuilder.wrap_constant_literal(value)
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
-        elif is_allowed(value):
+        elif trace_rules.lookup(value) is not None:
             if is_user_defined_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
-            return TorchVariable(value)
+            return trace_rules.lookup(value).create_with_source(
+                value, source=self.source
+            )
         elif isinstance(value, types.FunctionType):
             return UserFunctionVariable(value)
         elif isinstance(value, enum.Enum):
