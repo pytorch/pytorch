@@ -35,6 +35,7 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import parametrize, instantiate_parametrized_tests
 from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
 from torch.testing._internal.optests import _test_aot_autograd_forwards_backwards_helper, aot_autograd_check
+from torch._higher_order_ops.out_dtype import out_dtype
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
@@ -2778,6 +2779,36 @@ def forward(self, arg0_1, arg1_1):
     add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
     return (add_1,)""")
 
+    @unittest.expectedFailure
+    def test_aot_export_predispatch_outdtype(self):
+        class M(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = weight
+
+            def forward(self, x):
+                y = x + 2
+                y.add_(5)
+                return (out_dtype(
+                    torch.ops.aten.mm.default, torch.int32, y, self.weight
+                ),)
+
+        weight = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
+        mod = M(weight)
+        inp = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    mm = torch.ops.aten.mm.default(arg1_1, arg1_1)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    add = torch.ops.aten.add.Tensor(mm, 2);  mm = None
+    sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
+    sum_2 = torch.ops.aten.sum.default(add);  add = None
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    return (add_1,)""")
+
     def test_aot_export_predispatch_func_view(self):
         def fn(p, x):
             y = x @ x
@@ -2831,11 +2862,11 @@ def forward(self, arg0_1, arg1_1):
 
     def test_aot_export_predispatch_with_autograd_op(self):
         def foo(p, x):
-            torch._C._set_grad_enabled(True)
-            y = x + 5
-            y.add_(5)
-            y.add_(7)
-            return (x.cos() + y.sin(),)
+            with torch.enable_grad():
+                y = x + 5
+                y.add_(5)
+                y.add_(7)
+                return (x.cos() + y.sin(),)
 
         inp = torch.randn(2, 2)
         mod = TestMod(foo)
@@ -2850,6 +2881,7 @@ def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
     sin = torch.ops.aten.sin.default(add_2);  add_2 = None
     add_3 = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
     return (add_3,)""")
 
     # TODO(tmanlaibaatar) properly support functionalizing HOO in
