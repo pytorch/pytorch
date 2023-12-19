@@ -110,9 +110,9 @@ else:
         raise RuntimeError("PyTorch was compiled without CUDA support")
 
 
+has_half: bool = True
 # Global variables dynamically populated by native code
 has_magma: bool = False
-has_half: bool = False
 default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
