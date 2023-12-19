@@ -1318,6 +1318,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         triple = functools.partial(multiply, y=3)
         return triple(x)
 
+    @common_utils.parametrize("attr", ("__name__", "__call__"))
+    def test_partials_hasattr(self, attr):
+        # "__name__" ought to be False, whereas "__call__" True
+        def fn():
+            multiply = lambda x, y: x * y
+            triple = functools.partial(multiply, y=3)
+            return hasattr(triple, attr)
+
+        opt_fn = torch.compile(fullgraph=True, backend="aot_eager")(fn)
+        self.assertEqual(opt_fn(), fn())
+
     def test_pow_int(self):
         def fn(a, b):
             return torch.pow(a, b)
@@ -2731,6 +2742,7 @@ def forward(self, x_1, output_1):
 
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
+common_utils.instantiate_parametrized_tests(FunctionTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

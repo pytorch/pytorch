@@ -242,9 +242,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ]:
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])
-        elif self.value in (
-            torch._functorch.eager_transforms.grad_impl,
-        ):
+        elif self.value in (torch._functorch.eager_transforms.grad_impl,):
             return TorchHigherOrderOperatorVariable.make(
                 self.value,
                 source=self.source,
