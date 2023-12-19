@@ -3549,6 +3549,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
         os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = '1'
         self.tempdir = tempfile.TemporaryDirectory()
         os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"] = self._trace_basename()
+        os.environ["TORCH_NCCL_DEBUG_INFO_PIPE_FILE"] = self._trace_basename()
         self._spawn_processes()
 
     @classmethod
