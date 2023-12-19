@@ -83,14 +83,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     if config.pattern_matcher:
         lazy_init()
 
+        print_graph(gm.graph, "Before group batch fusion in post grad pass.")
         group_batch_fusion_passes(gm.graph, pre_grad=False)
+        print_graph(gm.graph, "After group batch fusion in post grad pass.")
         remove_noop_ops(gm.graph)
         print_graph(gm.graph, "Before split cat in post grad pass.")
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
             print_graph(
                 gm.graph,
-                f"Apply split cat pattern matcher {patterns.__class__.__name__} in post grad.",
+                "Apply split cat pattern matcher PatternMatcherPass in post grad.",
             )
         if is_inference:
             inference_patterns.apply(gm.graph)
@@ -110,7 +112,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     gm.recompile()
     gm.graph.lint()
 
-    print_graph(gm.graph, "Aftre recompile in post grad pass.")
+    print_graph(gm.graph, "After recompile in post grad pass.")
 
 
 @init_once_fakemode
@@ -679,14 +681,13 @@ def reinplace_inplaceable_ops(graph):
     """
 
     copy_args_to_copy_nodes = {}
-    foreach_node_to_copy_nodes = defaultdict(list)
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
     node_order: Dict[Any, int] = {}
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
-        if node.target == aten.copy_.default:
+        if node.target == aten.copy_.default and node.args[0].op == "placeholder":
             dst = node.args[0]
             src = node.args[1]
             # If the target is a getitem and it indexes a possible clone,
@@ -702,7 +703,6 @@ def reinplace_inplaceable_ops(graph):
 
             copy_args_to_copy_nodes[(dst, src)] = node
 
-            assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
