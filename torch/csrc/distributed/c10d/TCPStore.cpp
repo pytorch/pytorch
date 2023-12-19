@@ -396,6 +396,15 @@ void TCPStore::validate(void) {
   buffer.flush();
 }
 
+void TCPStore::_splitSet(const std::string& key, const std::vector<uint8_t>& data) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+  detail::SendBuffer buffer(*client_, detail::QueryType::SET);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.flush();
+  buffer.appendBytes(data);
+  buffer.flush();
+}
+
 void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   detail::timing_guard tguard(clientCounters_["set"]);
   const std::lock_guard<std::mutex> lock(activeOpLock_);

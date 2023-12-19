@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <future>
 #include <iostream>
+#include <string>
 #include <system_error>
 #include <thread>
 
@@ -196,6 +197,50 @@ TEST(TCPStoreTest, testCleanShutdown) {
 
   auto clientThread = std::thread([&clientTCPStore] {
     EXPECT_THROW(clientTCPStore->get("invalid_key"), c10::DistNetworkError);
+  });
+
+  // start server shutdown during a client request
+  serverTCPStore = nullptr;
+
+  clientThread.join();
+}
+
+TEST(TCPStoreTest, testLibUVPartialRead) {
+  int numWorkers = 2;
+
+  // server part
+  c10d::TCPStoreOptions server_opts{
+    0,
+    true,  // is master
+    numWorkers,
+    false,  // wait workers
+    std::chrono::seconds(defaultTimeout)
+  };
+  server_opts.useLibUV = true;
+
+  auto serverTCPStore = std::make_unique<c10d::TCPStore>(
+    "127.0.0.1",
+    server_opts);
+
+  // client part
+  c10d::TCPStoreOptions client_opts{
+    serverTCPStore->getPort(),
+    false,  // is master
+    numWorkers,
+    false,  // wait workers
+    std::chrono::seconds(defaultTimeout)
+  };
+  client_opts.useLibUV = true;
+  auto clientTCPStore = c10::make_intrusive<c10d::TCPStore>(
+    "127.0.0.1",
+    client_opts);
+  auto clientThread = std::thread([&clientTCPStore] {
+    std::string key("/default_pg/0//b7dc24de75e482ba2ceb9f9ee20732c25c0166d8//cuda//0");
+    std::string value("v");
+    std::vector<uint8_t> valueBuf(value.begin(), value.end());
+
+    // split store->set(key, valueBuf) into two requests
+    clientTCPStore->_splitSet(key, valueBuf);
   });
 
   // start server shutdown during a client request
