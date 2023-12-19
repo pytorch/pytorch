@@ -78,8 +78,9 @@ class TagActivationCheckpoint(HigherOrderOperator):
     3. Rely on the partitioners to actually duplicate the nodes.
     This sits well in the torch.compile stack, because by the time graph
     reaches partitioner, inductor has already run its functionalization of rng
-    ops. Therefore, the duplication of nodes, by design, respects the rng states
-    in the forward and recomputed forward in backward.
+    ops (by setting fixed seed for each random op, see `replace_random_passes`).
+    Therefore, the duplication of nodes, by design, respects the rng states in
+    the forward and recomputed forward in backward.
     """
 
     def __init__(self):
@@ -139,6 +140,12 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             # And we ensure that AOT Autograd traces through the non reentrant
             # version of checkpointing.
             kwargs["use_reentrant"] = False
+            # preserve_rng_state is set to False because we want to prevent AOTAutograd from tracing through
+            # `torch.random.fork_rng` op (which is not supported yet under CUDA).
+            # This doesn't mean that we don't preserve RNG state. Instead, we will always preserve RNG state
+            # regardless of this flag (by doing RNG functionalization via `replace_random_passes` in Inductor
+            # instead of in AOTAutograd).
+            kwargs["preserve_rng_state"] = False
             kwargs["context_fn"] = gmod.meta["_checkpoint_context_fn"]
             # We first tag all nodes as "recompute" in this graph, and then we undo the "recompute" tag
             # for specific nodes in _CachingTorchDispatchMode in torch/utils/checkpoint.py.
