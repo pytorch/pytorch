@@ -6,14 +6,15 @@ from typing import cast, Dict, List, Optional, Union
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
-from torch.export import ExportedProgram
 from torch.export.exported_program import (
     ConstantArgument,
+    ExportedProgram,
     ModuleCallSignature,
     SymIntArgument,
     TensorArgument,
 )
-from .utils import _check_input_constraints_pre_hook
+
+__all__ = ["InterpreterModule", "UnflattenedModule", "unflatten"]
 
 
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
@@ -107,7 +108,7 @@ class InterpreterModule(torch.nn.Module):
                 self.arg_names.append(node.target)
 
 
-class _UnflattenedModule(torch.nn.Module):
+class UnflattenedModule(torch.nn.Module):
     def __init__(self, export_module: ExportedProgram):
         super().__init__()
         if export_module.graph_signature.backward_signature is not None:
@@ -156,8 +157,14 @@ class _UnflattenedModule(torch.nn.Module):
                     continue
                 assert node.name not in inputs_to_state
 
+        # Import here to avoid an unfortunate circular dependency.
+        from torch._export.utils import _check_input_constraints_pre_hook
+
+        self.register_forward_pre_hook(_check_input_constraints_pre_hook)
+
     def forward(self, *args, **kwargs):
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
+
         assert self.module_call_graph[0].fqn == ""
         signature = self.module_call_graph[0].signature
         if in_spec != signature.in_spec:
@@ -175,12 +182,26 @@ class _UnflattenedModule(torch.nn.Module):
         return pytree.tree_unflatten(tree_out, signature.out_spec)
 
 
-def unflatten(module: ExportedProgram) -> _UnflattenedModule:
+def unflatten(module: ExportedProgram) -> UnflattenedModule:
     """Unflatten an ExportedProgram, producing a module with the same module
-    hierarchy as the original eager module.
+    hierarchy as the original eager module. This can be useful if you are trying
+    to use :mod:`torch.export` with another system that expects a module
+    hierachy instead of the flat graph that :mod:`torch.export` usually produces.
+
+    .. note:: The args/kwargs of unflattened modules will not necessarily match
+    the eager module, so doing a module swap (e.g. :code:`self.submod =
+    new_mod`) will not necessarily work. If you need to swap a module out, you
+    need to set the :code:`preserve_module_call_signature` parameter of
+    :func:`torch.export.export`.
+
+    Args:
+        module: The :class:`ExportedProgram` to unflatten.
+
+    Returns:
+        An instance of :class:`UnflattenedModule`, which has the same module
+        hierarchy as the original eager module pre-export.
     """
-    module = _UnflattenedModule(module)
-    module.register_forward_pre_hook(_check_input_constraints_pre_hook)
+    module = UnflattenedModule(module)
     return module
 
 
@@ -240,12 +261,12 @@ def _inplace_buffer_mutations(graph: torch.fx.Graph, graph_signature) -> None:
     output_node.args = ((user_outputs),)
 
 
-def is_prefix(candidate, target):
+def _is_prefix(candidate, target):
     """Check whether `candidate` is a prefix of `target`."""
     return len(candidate) < len(target) and target[: len(candidate)] == candidate
 
 
-def compute_accessor(parent_fqn: str, child_fqn: str) -> str:
+def _compute_accessor(parent_fqn: str, child_fqn: str) -> str:
     if parent_fqn == "":
         # Handle the root module correctly.
         return child_fqn
@@ -304,7 +325,7 @@ def _generate_unflatten(gm: torch.nn.Module, nodes, spec) -> torch.fx.Node:
     return gm.graph.call_function(pytree.tree_unflatten, (nodes, spec_node))
 
 
-class ModuleFrame:
+class _ModuleFrame:
     def __init__(
         self,
         flat_graph,
@@ -349,7 +370,7 @@ class ModuleFrame:
 
         self.parent_call_module: Optional[torch.fx.Node] = None
         if parent is not None:
-            accessor = compute_accessor(parent.fqn, self.fqn)
+            accessor = _compute_accessor(parent.fqn, self.fqn)
             parent.module.add_module(
                 accessor,
                 self.module
@@ -579,14 +600,14 @@ class ModuleFrame:
 
             assert node_module_stack is not None
 
-            if is_prefix(self.module_stack, node_module_stack):
+            if _is_prefix(self.module_stack, node_module_stack):
                 # This means that the current node represents the execution of a new
                 # module.
                 next_module = node_module_stack[len(self.module_stack)]
                 self.print("Creating new stack frame for", next_module)
                 # Run a nested version of module outliner from the current node
                 # counter. Once it is complete, continue from that point.
-                node_idx = ModuleFrame(
+                node_idx = _ModuleFrame(
                     self.flat_graph,
                     self.nodes,
                     self.seen_nodes,
@@ -606,10 +627,10 @@ class ModuleFrame:
             node_idx += 1
 
 
-def _outline_submodules(orig_graph: torch.fx.Graph, root_module: _UnflattenedModule):
+def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModule):
     seen_nodes: Dict[str, torch.fx.Node] = {}
     seen_modules: Dict[int, torch.nn.Module] = {}
-    ModuleFrame(
+    _ModuleFrame(
         orig_graph,
         tuple(orig_graph.nodes),
         seen_nodes,
