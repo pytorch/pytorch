@@ -25,8 +25,6 @@ from torch.overrides import TorchFunctionMode
 
 from torch.utils._python_dispatch import (
     TorchDispatchMode,
-    _pop_mode,
-    _push_mode,
 )
 
 from .sym_node import SymNode
@@ -35,6 +33,7 @@ from torch.fx import Proxy
 import torch.fx.traceback as fx_traceback
 from torch import SymInt, SymFloat, SymBool
 from torch.utils.weak import WeakTensorKeyDictionary
+from torch._ops import unset_mode_pre_dispatch, _set_mode_pre_dispatch, _get_dispatch_mode_pre_dispatch
 
 __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
 aten = torch.ops.aten
@@ -231,6 +230,24 @@ def maybe_disable_fake_tensor_mode():
     # TODO: figure out if this API generally makes sense and bake it into the
     # library
     return unset_fake_temporarily()
+
+def _unset_proxy_mode():
+    pre_dispatch_proxy = _get_dispatch_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
+    post_dispatch_proxy = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+    if pre_dispatch_proxy and post_dispatch_proxy:
+        raise AssertionError("Can't have active proxy mode on both pre and post dispatch mode stack")
+
+    if pre_dispatch_proxy:
+        mode = unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
+        return mode
+    return torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+
+def _set_proxy_mode(mode):
+    assert isinstance(mode, ProxyTorchDispatchMode)
+    if mode.pre_dispatch:
+        _set_mode_pre_dispatch(mode)
+    else:
+        torch._C._set_dispatch_mode(mode)
 
 
 @dataclass
@@ -486,33 +503,22 @@ def dispatch_trace(
 
 
 @contextlib.contextmanager
-def _pop_proxy_mode_temporarily(dk):
-    # This is a shim around the existng per-dispatch-key-mode logic.
-    # I'll delete the per-dispatch-key-mode logic in a followup PR
-    if dk is not None:
-        # During pre_dispatch, pop off of the PreDispatch mode stack
-        old = _pop_mode(dk)
-        try:
-            yield old
-        finally:
-            _push_mode(old, dk)
-    else:
-        # During normal tracing, pop off of the dedicated proxy mode stack
-        old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
-        try:
-            yield old
-        finally:
-            torch._C._set_dispatch_mode(old)
+def _pop_proxy_mode_temporarily():
+    old = _unset_proxy_mode()
+    try:
+        yield old
+    finally:
+        _set_proxy_mode(old)
+
 
 def wrap_key(f, tensors, tracer, pre_dispatch: bool):
     flat_tensors, tensors_spec = pytree.tree_flatten(tensors)
-    dk = torch._C.DispatchKey.PreDispatch if pre_dispatch else None
 
     @functools.wraps(f)
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
-        with _pop_proxy_mode_temporarily(dk) as m:
+        with _pop_proxy_mode_temporarily() as m:
             assert isinstance(m, ProxyTorchDispatchMode)
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
@@ -601,7 +607,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self._managers.append(m)
         m.__enter__()
         # Stash and store the previous proxy mode (there may or may not be one)
-        maybe_prev_proxy_mode = torch._C._unset_dispatch_mode(self._mode_key)
+        maybe_prev_proxy_mode = _unset_proxy_mode()
         self.enter_stack.append(maybe_prev_proxy_mode)
         return super().__enter__()
 
@@ -613,7 +619,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # Re-enable the previous proxy mode, if there was one.
         mb_previous_proxy_mode = self.enter_stack.pop()
         if mb_previous_proxy_mode is not None:
-            torch._C._set_dispatch_mode(mb_previous_proxy_mode)
+            _set_proxy_mode(mb_previous_proxy_mode)
 
         if not b:
             return m.__exit__(exc_type, exc_value, traceback)
