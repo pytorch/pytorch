@@ -201,7 +201,7 @@ class MetaArgEngine:
             ).gen(focus)
 
     def gen_dtypes(self, focus):
-        if not Attribute.DTYPE in Attribute.hierarchy(self.argtype):
+        if Attribute.DTYPE not in Attribute.hierarchy(self.argtype):
             return {None}
         engine = AttributeEngine(
             Attribute.DTYPE, self.constraints, self.valid, self.argtype
@@ -221,13 +221,15 @@ class MetaArgEngine:
         engine = AttributeEngine(
             Attribute.VALUE, self.constraints, self.valid, self.argtype, scalar_dtype
         )
-        return engine.gen(focus, self.deps)
+        return engine.gen(focus, self.deps, scalar_dtype)
 
-    def gen_value_spaces(self, focus):
+    def gen_value_spaces(self, focus, dtype, struct):
         if not self.argtype.is_tensor() and not self.argtype.is_tensor_list():
             return [None]
         solver = AttributeSolver(Attribute.VALUE, self.argtype)
-        variables = list(solver.solve(self.constraints, focus, self.valid, self.deps))
+        variables = list(
+            solver.solve(self.constraints, focus, self.valid, self.deps, dtype, struct)
+        )
         if focus == Attribute.VALUE:
             return [v.space for v in variables]
         else:
@@ -249,14 +251,14 @@ class MetaArgEngine:
             if focus == Attribute.DTYPE:
                 for dtype in self.gen_dtypes(focus):
                     for struct in self.gen_structures(focus):
-                        for space in self.gen_value_spaces(focus):
+                        for space in self.gen_value_spaces(focus, dtype, struct):
                             yield MetaArg(
                                 self.argtype, dtype=dtype, structure=struct, value=space
                             )
             else:
                 for struct in self.gen_structures(focus):
                     for dtype in self.gen_dtypes(focus):
-                        for space in self.gen_value_spaces(focus):
+                        for space in self.gen_value_spaces(focus, dtype, struct):
                             yield MetaArg(
                                 self.argtype, dtype=dtype, structure=struct, value=space
                             )

@@ -424,7 +424,9 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
         if len(qconv2d_node_after_weight_prepack.users) != 1:
             return False
         if output_dtype is not None:
-            binary_node_inputs = list(qconv2d_node_after_weight_prepack.users)[0].args
+            binary_node_inputs = next(
+                iter(qconv2d_node_after_weight_prepack.users)
+            ).args
             assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
             extra_input_node = None
             for arg in binary_node_inputs:
@@ -631,7 +633,7 @@ def _register_quantization_binary_fusion():
         # Priority 1 to match: QConv2d Binary or Binary-Unary pattern with int8 output
         binary_replace_patterns = {
             BinaryUnaryAttr(
-                "add", 1.0, "none", [], ""
+                "sum", 1.0, "none", [], ""
             ): generate_pattern_with_output_quant(
                 generate_pattern_with_binary(
                     aten.add.Tensor,
@@ -644,7 +646,7 @@ def _register_quantization_binary_fusion():
                 else torch.float32,
             ),
             BinaryUnaryAttr(
-                "add", 1.0, "relu", [], ""
+                "sum", 1.0, "relu", [], ""
             ): generate_pattern_with_output_quant(
                 generate_pattern_with_unary(
                     generate_pattern_with_binary(
@@ -672,7 +674,7 @@ def _register_quantization_binary_fusion():
 
         # Priority 2 to match: QConv2d Binary-Unary pattern with fp32/bfloat16 output
         binary_replace_float_out_patterns = {
-            BinaryUnaryAttr("add", 1.0, "relu", [], ""): generate_pattern_with_unary(
+            BinaryUnaryAttr("sum", 1.0, "relu", [], ""): generate_pattern_with_unary(
                 generate_pattern_with_binary(
                     aten.add.Tensor,
                     dequantize_qconv_pt2e_pattern,
@@ -710,7 +712,7 @@ def _register_quantization_binary_fusion():
 
         # Priority 3: QConv2d Binary pattern with fp32/bfloat16 output
         binary_replace_float_out_patterns = {
-            BinaryUnaryAttr("add", 1.0, "none", [], ""): generate_pattern_with_binary(
+            BinaryUnaryAttr("sum", 1.0, "none", [], ""): generate_pattern_with_binary(
                 aten.add.Tensor,
                 dequantize_qconv_pt2e_pattern,
                 KeywordArg("accum_after_dequant"),
