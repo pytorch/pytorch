@@ -1376,7 +1376,7 @@ struct DumpPipe {
         "Error creating named pipe ",
         filename);
     fd_ = open(filename.c_str(), O_RDONLY | O_NONBLOCK);
-    LOG(INFO) << logPrefix() << "Pipe file " << filename
+    LOG(INFO) << "Pipe file " << filename
               << " has been opened, write to it to trigger NCCL Debug Dump.";
     TORCH_CHECK(fd_ != -1, "Error opening named pipe ", filename);
   }
