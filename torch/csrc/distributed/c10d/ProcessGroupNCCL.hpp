@@ -13,7 +13,6 @@
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
-#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -547,8 +546,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Provide an API for users to define their own ways to store NCCL debug info.
   void registerDebugInfoWriter(std::unique_ptr<DebugInfoWriter> writer);
 
-  c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
-
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
   void abort(c10::optional<std::string> abortReason = c10::nullopt);
@@ -725,6 +722,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // for dump completion.
   std::future<bool> launchAsyncDebugDump();
 
+  // Helper to wait up to the specified timeout and then abandon the dump.
+  // Logs on timeout, and asserts the future's status is as expected.
+  void waitForDumpOrTimeout(std::future<bool>& fut, size_t timeout_sec = 30);
+
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
   // We are working on enabling more useful debug information for watchdog
@@ -836,9 +837,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   bool writeDebugInfo_ = false;
 
-  // Mutex to Guard the check of writeDebugInfo_
-  std::mutex writeDebugInfoMutex_;
-
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
 
@@ -946,8 +944,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
   size_t uid_;
-
-  c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
 };
 
 TORCH_API std::string dump_nccl_trace();

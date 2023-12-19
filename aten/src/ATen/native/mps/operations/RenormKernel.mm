@@ -131,7 +131,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
   at::mul_outf(self, factor, const_cast<Tensor&>(out));
 }
 
-} // namespace mps
+} // namespace
 
 TORCH_IMPL_FUNC(renorm_out_mps)
 (const Tensor& self, const Scalar& p, int64_t dim, const Scalar& maxnorm, const Tensor& out) {
