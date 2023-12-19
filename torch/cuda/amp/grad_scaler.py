@@ -168,41 +168,6 @@ class GradScaler:
     def _is_tensor_on_supported_device(self, tensor: torch.Tensor):
         return tensor.is_cuda or tensor.device.type == "xla"
 
-    def _maybe_convert_dtype(self, tensor: torch.Tensor, dtype: torch.dtype):
-        return tensor
-
-    def _sparse_coalesce(self, tensor: torch.Tensor):
-        return tensor.coalesce()
-
-    def _foreach_non_finite_check_and_unscale_by_device(
-        self,
-        grads,
-        per_device_found_inf,
-        per_device_inv_scale,
-        device,
-        device_type="gpu",
-    ):
-        torch._amp_foreach_non_finite_check_and_unscale_(
-            grads,
-            per_device_found_inf.get(device),
-            per_device_inv_scale.get(device),
-        )
-
-    def _maybe_init_per_device_tensors(self, per_device_found_inf):
-        return per_device_found_inf._per_device_tensors
-
-    def _update_scale_by_device(
-        self, _scale, _growth_tracker, found_inf_combined, device="gpu"
-    ):
-        torch._amp_update_scale_(
-            _scale,
-            _growth_tracker,
-            found_inf_combined,
-            self._growth_factor,
-            self._backoff_factor,
-            self._growth_interval,
-        )
-
     @overload
     def scale(self, outputs: torch.Tensor) -> torch.Tensor:
         ...
@@ -241,10 +206,7 @@ class GradScaler:
             if self._scale is None:
                 self._lazy_init_scale_growth_tracker(outputs.device)
             assert self._scale is not None
-            scaled_outputs = outputs * self._scale.to(
-                device=outputs.device, non_blocking=True
-            )
-            return self._maybe_convert_dtype(scaled_outputs, outputs.dtype)
+            return outputs * self._scale.to(device=outputs.device, non_blocking=True)
 
         # Invoke the more complex machinery only if we're treating multiple outputs.
         stash: List[
@@ -259,8 +221,7 @@ class GradScaler:
                         self._lazy_init_scale_growth_tracker(val.device)
                     assert self._scale is not None
                     stash.append(_MultiDeviceReplicator(self._scale))
-                scaled_val = val * stash[0].get(val.device)
-                return self._maybe_convert_dtype(scaled_val, val.dtype)
+                return val * stash[0].get(val.device)
             if isinstance(val, abc.Iterable):
                 iterable = map(apply_scale, val)
                 if isinstance(val, (list, tuple)):
@@ -304,7 +265,7 @@ class GradScaler:
                         # so we should check the coalesced _values().
                         if param.grad.dtype is torch.float16:
                             param.grad = self._sparse_coalesce(param.grad)
-                        to_unscale = param.grad._values()  # type: ignore[union-attr]
+                        to_unscale = param.grad._values()
                     else:
                         to_unscale = param.grad
                     # TODO: is there a way to split by device and dtype without appending in the inner loop?
@@ -316,12 +277,14 @@ class GradScaler:
                 for grads in per_dtype_grads.values():
                     self._foreach_non_finite_check_and_unscale_by_device(
                         grads,
-                        per_device_found_inf,
-                        per_device_inv_scale,
-                        device,
-                        grads[0].device.type,
+                        per_device_found_inf.get(device),
+                        per_device_inv_scale.get(device),
+                        device.type,
                     )
-        return self._maybe_init_per_device_tensors(per_device_found_inf)
+        return per_device_found_inf._per_device_tensors
+
+    def _sparse_coalesce(self, tensor: torch.Tensor):
+        return tensor.coalesce()
 
     def _init_found_inf(self, device):
         return torch.full((), 0.0, dtype=torch.float32, device=device)
@@ -557,7 +520,10 @@ class GradScaler:
                     found_inf_combined += found_infs[i]
 
             self._update_scale_by_device(
-                _scale, _growth_tracker, found_inf_combined, _scale.device.type
+                _scale,
+                _growth_tracker,
+                found_inf_combined,
+                _scale.device.type
             )
 
         # To prepare for next iteration, clear the data collected from optimizers this iteration.
@@ -716,3 +682,36 @@ class GradScaler:
 
     def _found_inf_per_device(self, optimizer: torch.optim.Optimizer) -> Dict[str, Any]:
         return self._per_optimizer_states[id(optimizer)]["found_inf_per_device"]
+
+    def _foreach_non_finite_check_and_unscale_by_device(
+        self,
+        grads,
+        found_inf,
+        inv_scale,
+        device_type="gpu",
+    ):
+        if device_type != "gpu":
+            raise NotImplementedError(
+                f"{device_type} devices are not supported by {self.__class__}."
+            )
+        torch._amp_foreach_non_finite_check_and_unscale_(
+            grads,
+            found_inf,
+            inv_scale,
+        )
+
+    def _update_scale_by_device(
+        self, _scale, _growth_tracker, found_inf_combined, device_type="gpu"
+    ):
+        if device_type != "gpu":
+            raise NotImplementedError(
+                f"{device_type} devices are not supported by {self.__class__}."
+            )
+        torch._amp_update_scale_(
+            _scale,
+            _growth_tracker,
+            found_inf_combined,
+            self._growth_factor,
+            self._backoff_factor,
+            self._growth_interval,
+        )
