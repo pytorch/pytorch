@@ -260,9 +260,9 @@ class ShardingPropagator:
                                 # create a new DTensorSpec with the same placement as the
                                 # output_spec in output_strategy
                                 DTensorSpec(
-                                    mesh=output_strategy.output_spec.mesh,
-                                    placements=output_strategy.output_spec.placements,
-                                    tensor_meta=output_strategy.output_spec.tensor_meta,
+                                    mesh=output_spec_obj.mesh,
+                                    placements=output_spec_obj.placements,
+                                    tensor_meta=output_spec_obj.tensor_meta,
                                 )
                                 for _ in range(len(op_schema.op._schema.returns))
                             ]
@@ -289,6 +289,7 @@ class ShardingPropagator:
                         # we expect the out strategies all share the same input specs
                         if not input_specs_list:
                             input_specs_list = output_strategy.input_specs
+                        assert isinstance(output_strategy.output_spec, DTensorSpec)
                         out_spec_list.append(output_strategy.output_spec)
                     else:
                         # for None output in tuple, its output spec should also be None

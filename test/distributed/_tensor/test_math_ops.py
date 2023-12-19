@@ -293,10 +293,15 @@ class DistMathOpsTest(DTensorTestBase):
             )
 
             if elementwise_affine:
-                print(layer_norm_dist.weight.grad.placements)
-                print(layer_norm_dist.bias.grad.placements)
+                self.assertEqual(
+                    layer_norm_local.weight.grad,
+                    layer_norm_dist.weight.grad.full_tensor(),
+                )
+                self.assertEqual(
+                    layer_norm_local.bias.grad,
+                    layer_norm_dist.bias.grad.full_tensor(),
+                )
 
-            print(f"x grad: {x_dist.grad.placements}")
             self.assertEqual(x_local.grad, x_dist.grad.full_tensor())
 
 
