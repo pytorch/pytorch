@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 from torch.utils.data import DataLoader
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     ops,
     onlyCPU,
@@ -907,10 +908,7 @@ class TestDeviceUtils(TestCase):
         self.assertEqual(torch.get_default_device().type, 'meta')
         torch.set_default_device(None)
 
-    @unittest.skipIf(
-        not (torch.cuda.is_available() and torch.cuda.device_count() > 1),
-        "requires multiple GPUs",
-    )
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_get_default_device_more(self):
         torch.set_default_device("cuda")
         self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
