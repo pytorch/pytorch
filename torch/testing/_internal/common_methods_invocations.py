@@ -20197,6 +20197,12 @@ python_ref_db = [
         torch_opinfo_name="mvlgamma",
         torch_opinfo_variant_name="mvlgamma_p_1",
         skips=skips_mvlgamma(),
+        decorators=(
+            DecorateInfo(torch.testing._internal.common_utils.markDynamoStrictTest, 'TestUnaryUfuncs',
+                         'test_reference_numerics_large'),
+            DecorateInfo(torch.testing._internal.common_utils.xfailIfTorchDynamo, 'TestUnaryUfuncs',
+                         'test_reference_numerics_large'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.multigammaln",
