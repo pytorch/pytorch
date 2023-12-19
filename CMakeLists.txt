@@ -200,6 +200,7 @@ option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
+option(USE_XPU "Use XPU" ON)
 cmake_dependent_option(
     USE_XPU "Use XPU. Only available on Linux." ON
     "LINUX" OFF)
