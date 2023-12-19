@@ -178,6 +178,7 @@ def generate_redistribute_costs(
 ) -> List[float]:
     redistribute_costs: List[float] = []
     for strat in src_strategy.strategies:
+        assert isinstance(strat.output_spec, DTensorSpec)
         redistribute_costs.append(redistribute_cost(strat.output_spec, dst_spec))
 
     return redistribute_costs
