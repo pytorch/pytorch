@@ -180,7 +180,7 @@ else:
 
         Example::
             >>> # xdoctest: +SKIP("no rank")
-            >>> from torch.distributed import DeviceMesh
+            >>> from torch.distributed.device_mesh import DeviceMesh
             >>>
             >>> # Initialize device mesh as (2, 4) to represent the topology
             >>> # of cross-host(dim 0), and within-host (dim 1).
@@ -352,7 +352,7 @@ else:
 
             Example::
                 >>> # xdoctest: +SKIP("no rank")
-                >>> from torch.distributed import DeviceMesh
+                >>> from torch.distributed.device_mesh import DeviceMesh
                 >>>
                 >>> # Initialize device mesh as (2, 4) to represent the topology
                 >>> # of cross-host(dim 0), and within-host (dim 1).
@@ -445,7 +445,7 @@ else:
 
             Example::
                 >>> # xdoctest: +SKIP("no rank")
-                >>> from torch.distributed import DeviceMesh
+                >>> from torch.distributed.device_mesh import DeviceMesh
                 >>>
                 >>> # Initialize device mesh as (2, 4) to represent the topology
                 >>> # of cross-host(dim 0), and within-host (dim 1).
@@ -506,7 +506,7 @@ else:
 
         Example::
             >>> # xdoctest: +SKIP("no rank")
-            >>> from torch.distributed import init_device_mesh
+            >>> from torch.distributed.device_mesh import init_device_mesh
             >>>
             >>> mesh_1d = init_device_mesh("cuda", mesh_shape=(8,))
             >>> mesh_2d = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
