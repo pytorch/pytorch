@@ -235,9 +235,9 @@ def track_tensor(tensor, proxy, *, constant, tracer):
 
         return None
 
-
     def proxy_func(p, *args, **kwargs):
         return p()
+
 
     for i, s in enumerate(tensor.shape):
         if p := get_existing_proxy(s):
@@ -245,13 +245,18 @@ def track_tensor(tensor, proxy, *, constant, tracer):
         else:
             try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
 
+    def func(*args, **kwargs):
+        proxies = [get_proxy_slot(s, tracer)() if isinstance(s, torch.SymInt) else s for s in tensor.shape]
+        return functools.reduce(operator.mul, proxies, 1)
+
+    try_set_proxy_slot(tensor.numel(), func)
+
     for i, s in enumerate(tensor.stride()):
         if p := get_existing_proxy(s):
             try_set_proxy_slot(s, functools.partial(proxy_func, p))
         else:
             try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride.int(proxy, i), x), i)
 
-    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(torch.ops.aten.sym_numel.default(proxy), x))
     try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset.default(proxy), x))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
