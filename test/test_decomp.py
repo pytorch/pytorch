@@ -10,6 +10,7 @@ from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.utils import _pytree as pytree
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import tf32_off
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     TestCase,
@@ -481,6 +482,7 @@ if not TEST_WITH_SLOW:
     })
 
 
+@unMarkDynamoStrictTest
 class TestDecomp(TestCase):
     longMessage = True
 
