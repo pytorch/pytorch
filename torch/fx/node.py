@@ -31,7 +31,7 @@ Argument = Optional[Union[
     BaseArgumentTypes
 ]]
 
-_side_effectful_autograd_functions: Set[Callable] = {
+_side_effectful_need_to_be_preserved_pre_dispatch: Set[Callable] = {
     torch._C._set_grad_enabled,
     torch.amp._enter_autocast,
     torch.amp._exit_autocast,
@@ -48,7 +48,7 @@ _side_effectful_functions: Set[Callable] = {
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
-} | _side_effectful_autograd_functions
+} | _side_effectful_need_to_be_preserved_pre_dispatch
 
 
 @compatibility(is_backward_compatible=False)

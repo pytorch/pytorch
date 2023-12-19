@@ -18,8 +18,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 // The estimated integral of a function y of x,
@@ -169,4 +168,4 @@ Tensor cumulative_trapezoid(const Tensor& y, const Scalar& dx, int64_t dim) {
     return do_cumulative_trapezoid(y, dx.toDouble(), dim);
 }
 
-}} // namespace at::native
+} // namespace at::native
