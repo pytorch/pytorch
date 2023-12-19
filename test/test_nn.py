@@ -12799,6 +12799,21 @@ class TestNNDeviceType(NNTestCase):
             out = torch._softmax_backward_data(x, x, 2, x.dtype)
             self.assertEqual(out[0, 0, 0], 1 / numel)
 
+    # reference issue: https://github.com/pytorch/pytorch/issues/68248
+    @onlyCUDA
+    def test_adaptiveavg_pool1d_shmem(self, device):
+        x = torch.randn(1, 256, 1, 5000, device=device).to(memory_format=torch.channels_last)
+        x_cpu = x.cpu()
+        x_cpu.requires_grad_()
+        x.requires_grad_()
+        y = torch.nn.functional.adaptive_avg_pool2d(x, (1, 256))
+        y_cpu = torch.nn.functional.adaptive_avg_pool2d(x_cpu, (1, 256))
+        grad = torch.randn_like(y)
+        grad_cpu = grad.cpu()
+        y.backward(grad)
+        y_cpu.backward(grad_cpu)
+        self.assertEqual(x.grad, x_cpu.grad)
+
     @skipMeta
     def test_channel_shuffle(self, device):
         #  3D tensor
