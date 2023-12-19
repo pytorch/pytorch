@@ -17,8 +17,11 @@
 #include <c10/util/quint8.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <ostream>
+#include <type_traits>
 
 namespace c10 {
 
