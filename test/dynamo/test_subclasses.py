@@ -231,6 +231,16 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res = fn(input)
         self.assertIsInstance(res, MockSubclass)
 
+    def test_return_as_subclass(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return torch.add(x, 1.0).as_subclass(MockSubclass)
+
+        input = torch.ones(2, 2)
+
+        res = fn(input)
+        self.assertIsInstance(res, MockSubclass)
+
     def test_return_local_subclass(self):
         class LocalSubclass(torch.Tensor):
             @classmethod
