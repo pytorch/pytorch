@@ -71,6 +71,7 @@ jobs:
       BUILD_PLATFORMS: ${{ matrix.platform }}
       CHANNEL: ${{ inputs.channel }}
       CUDA_VERSION: ${{ matrix.cuda_full_version }}
+      CUDA_VERSION_SHORT: ${{ matrix.cuda }}
       CUDNN_VERSION: ${{ matrix.cudnn_version }}
     steps:
       - name: Setup SSH (Click me for login details)
