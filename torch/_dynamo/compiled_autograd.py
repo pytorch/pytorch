@@ -62,9 +62,6 @@ class AutogradCompilerInstance:
         self.args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
         sizes_proxy = self.fx_tracer.create_proxy("placeholder", "sizes", (), {})
         self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
-        self.saved_tensors_proxy = self.fx_tracer.create_proxy(
-            "placeholder", "saved_tensors", (), {}
-        )
 
         # tensor inputs to fake tensors
         inputs = [
