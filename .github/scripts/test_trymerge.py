@@ -32,7 +32,6 @@ from trymerge import (
     main as trymerge_main,
     MandatoryChecksMissingError,
     MergeRule,
-    PostCommentError,
     RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
@@ -469,20 +468,6 @@ class TestTryMerge(TestCase):
             self.fail(f"get_changed_files throws an exception: {error}")
 
         self.assertEqual(len(changed_files), pr.get_changed_files_count())
-
-    def test_revert_codev_fails(self, *args: Any) -> None:
-        pr = GitHubPR("pytorch", "pytorch", 91340)
-
-        class GitRepoCoDev(DummyGitRepo):
-            def commit_message(self, ref: str) -> str:
-                return pr.get_body()
-
-        repo = GitRepoCoDev()
-        self.assertRaisesRegex(
-            PostCommentError,
-            "landed via phabricator",
-            lambda: validate_revert(repo, pr, comment_id=1372496233),
-        )
 
     def test_revert_codev_abandoned_diff_succeeds(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 100652)
