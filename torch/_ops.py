@@ -332,7 +332,11 @@ class HigherOrderOperator(OperatorBase):
 
         # This can current fail due to backend fallbacks.  You just have to
         # register them by hand for HigherOrderOperator.
-        assert final_key in self.py_kernels, f"{dispatch_key} -> {final_key}"
+        if final_key not in self.py_kernels:
+            raise NotImplementedError(
+                f"could not find kernel for HigherOrderOperator {self._name} "
+                f"at dispatch key {final_key} (resolved from {dispatch_key})"
+            )
         self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
         kernel = self.py_kernels[final_key]
         # It's illegal to register DispatchKey to py_kernels, since there's no
@@ -505,8 +509,10 @@ class OpOverload(OperatorBase):
             *self._schema.name.split("::"), self._overloadname
         )
 
-    def __call__(self, *args, **kwargs):
-        return self._op(*args, **(kwargs or {}))
+    def __call__(self_, *args, **kwargs):  # noqa: B902
+        # use `self_` to avoid naming collide with aten ops arguments that
+        # named "self". This way, all the aten ops can be called by kwargs.
+        return self_._op(*args, **(kwargs or {}))
 
     def __hash__(self):
         return hash(self._op)
@@ -743,12 +749,15 @@ class OpOverloadPacket:
     def __iter__(self):
         return iter(self._dir)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self_, *args, **kwargs):  # noqa: B902
+        # use `self_` to avoid naming collide with aten ops arguments that
+        # named "self". This way, all the aten ops can be called by kwargs.
+
         # overloading __call__ to ensure torch.ops.foo.bar()
         # is still callable from JIT
         # We save the function ptr as the `op` attribute on
         # OpOverloadPacket to access it here.
-        return self._op(*args, **(kwargs or {}))
+        return self_._op(*args, **(kwargs or {}))
 
     # TODO: use this to make a __dir__
     def overloads(self):

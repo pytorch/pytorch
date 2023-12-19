@@ -130,7 +130,7 @@ void mul_kernel(TensorIteratorBase& iter) {
           using comp_t = c10::complex<float>;
           return comp_t{a} * comp_t{b};
         });
-  } else if (iter.is_scalar(2) && at::isReducedFloatingType(dtype)) {
+  } else if (iter.is_scalar(2) && iter.data_ptr(2) != nullptr && at::isReducedFloatingType(dtype)) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "mul_cpu_reduced_float", [&]() {
       using opmath_t = at::opmath_type<scalar_t>;
       opmath_t b = iter.original_scalar_value<opmath_t>(2);
@@ -162,7 +162,7 @@ void mul_kernel(TensorIteratorBase& iter) {
 
 void div_true_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
-  if (iter.is_scalar(2) && at::isReducedFloatingType(dtype)) {
+  if (iter.is_scalar(2) && iter.data_ptr(2) != nullptr && at::isReducedFloatingType(dtype)) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "div_cpu_reduced_float", [&]() {
       using opmath_t = at::opmath_type<scalar_t>;
       opmath_t b = iter.original_scalar_value<opmath_t>(2);
@@ -208,7 +208,7 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
         return a / b;
       });
     });
-  } else if (iter.is_scalar(2) && at::isReducedFloatingType(dtype)) {
+  } else if (iter.is_scalar(2) && iter.data_ptr(2) != nullptr && at::isReducedFloatingType(dtype)) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(
         dtype, "div_trunc_cpu_reduced_float", [&]() {
           using opmath_t = at::opmath_type<scalar_t>;
@@ -283,7 +283,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
     });
   } else {
     // See NOTE: [Floor Division in Python]
-    if (iter.is_scalar(2) && at::isReducedFloatingType(dtype)) {
+    if (iter.is_scalar(2) && iter.data_ptr(2) != nullptr && at::isReducedFloatingType(dtype)) {
       AT_DISPATCH_REDUCED_FLOATING_TYPES(
           dtype, "div_floor_cpu_reduced_float", [&]() {
             using opmath_t = at::opmath_type<scalar_t>;
