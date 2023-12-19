@@ -92,8 +92,8 @@ class TritonPrinter(PythonPrinter):
         q = self.doprint(expr.args[2])
         return f"tl.where({c}, {p}, {q})"
 
-    @lru_cache(None)
     @staticmethod
+    @lru_cache(None)
     def _propagate_nan_arg():
         """
         Newer triton version added propagate_nan as required argument for
