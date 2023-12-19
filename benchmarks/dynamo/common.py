@@ -130,6 +130,114 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "dlrm",
 }
 
+# These models currently fail accuracy with eager Adam optimizer
+# so we use SGD when running the full benchmarks
+# https://github.com/pytorch/pytorch/issues/115966
+BENCHMARK_USE_SGD = {
+    # TorchBench
+    "BERT_pytorch",
+    "LearningToPaint",
+    "alexnet",
+    "dcgan",
+    "demucs",
+    "densenet121",
+    "dlrm",
+    "fastNLP_Bert",
+    "mobilenet_v2",
+    "phlippe_densenet",
+    "phlippe_resnet",
+    "pytorch_stargan",
+    "resnet18",
+    "shufflenet_v2_x1_0",
+    "speech_transformer",
+    "squeezenet1_1",
+    "stable_diffusion_text_encoder",
+    "timm_efficientdet",
+    "timm_nfnet",
+    "timm_regnet",
+    "timm_vision_transformer",
+    "timm_vovnet",
+    "vgg16",
+    "hf_T5",  # Fails dynamic https://github.com/pytorch/pytorch/issues/115968
+    # HF
+    "AlbertForMaskedLM",
+    "BartForCausalLM",
+    "BartForConditionalGeneration",
+    "BlenderbotSmallForCausalLM",
+    "BlenderbotSmallForConditionalGeneration",
+    "DebertaV2ForQuestionAnswering",  # eager OOM
+    "ElectraForCausalLM",
+    "M2M100ForConditionalGeneration",
+    "MBartForCausalLM",
+    "MBartForConditionalGeneration",
+    "OPTForCausalLM",
+    "PLBartForCausalLM",
+    "PLBartForConditionalGeneration",
+    "PegasusForCausalLM",
+    "Speech2Text2ForCausalLM",
+    "TrOCRForCausalLM",
+    "XGLMForCausalLM",
+    # TIMM
+    "adv_inception_v3",
+    "botnet26t_256",
+    "cait_m36_384",  # OOM
+    "coat_lite_mini",
+    "convit_base",
+    "dpn107",
+    "fbnetv3_b",
+    "gernet_l",
+    "lcnet_050",
+    "mixnet_l",
+    "res2net101_26w_4s",
+    "res2net50_14w_8s",
+    "res2next50",
+    "resnest101e",
+    "sebotnet33ts_256",
+    "swsl_resnext101_32x16d",
+    "tf_efficientnet_b0",
+    "ghostnet_100",
+    "gmixer_24_224",
+    "tinynet_a",
+}
+
+# These models OOM in CI
+# due to the extra memory of Adam optimizer states,
+# so we fall back to SGD in CI
+CI_USE_SGD = {
+    "torchrec_dlrm",
+    "demucs",
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "hf_T5_base",
+    "hf_clip",
+    "llama_v2_7b_16h",
+    "mobilenet_v2_quantized_qat",
+    "phi_1_5 resnet50_quantized_qat",
+    "BlenderbotForCausalLM",
+    "cait_m36_384",
+    "DALLE2_pytorch",
+    "moco",
+    "timm_efficientdet",
+    "ghostnet_100",
+    "regnety_002",
+    "poolformer_m36",
+    "inception_v3",
+    "tinynet_a",
+    "selecsls42b",
+    "mobilevit_s",
+    "pytorch_CycleGAN_and_pix2pix",
+    "vision_maskrcnn",
+}
+
+
 DO_NOT_CAST_INPUTS = {"stable_diffusion"}
 
 
@@ -703,6 +811,23 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
     return output_str
 
 
+@contextlib.contextmanager
+def override_synchronize_with_onnx_iobinding(iobinding):
+    global synchronize
+    prev_synchrnoize = synchronize
+    try:
+        if iobinding is not None:
+
+            def new_synchronize():
+                iobinding.synchronize_inputs()
+                iobinding.synchronize_outputs()
+
+            synchronize = new_synchronize
+        yield
+    finally:
+        synchronize = prev_synchrnoize
+
+
 def speedup_experiment_onnx(
     args,
     model_iter_fn,
@@ -737,7 +862,7 @@ def speedup_experiment_onnx(
             if collect_outputs:
                 return outputs
 
-        return onnxrt_model_iter_fn
+        return onnxrt_model_iter_fn, iobinding
 
     def create_onnx_fn(onnx_model: OnnxModel, pt_inputs):
         # NOTE: Making perf comparison fair by moving out the i/o adapting part.
@@ -753,18 +878,20 @@ def speedup_experiment_onnx(
     def timed_onnx(model, onnx_model: OnnxModel, inputs):
         if current_device == "cpu" or onnx_model.is_cpu():
             onnxrt_model_iter_fn = create_onnx_fn(onnx_model, inputs)
+            iobinding = None
         else:
-            onnxrt_model_iter_fn = create_onnx_input_binded_fn(
+            onnxrt_model_iter_fn, iobinding = create_onnx_input_binded_fn(
                 onnx_model, inputs, expected_output
             )
-        return timed(
-            model,
-            onnxrt_model_iter_fn,
-            inputs,
-            return_result=True,
-            times=times,
-            collect_outputs=args.collect_outputs,
-        )
+        with override_synchronize_with_onnx_iobinding(iobinding):
+            return timed(
+                model,
+                onnxrt_model_iter_fn,
+                inputs,
+                return_result=True,
+                times=times,
+                collect_outputs=args.collect_outputs,
+            )
 
     # Insert ONNX warm-up
     inputs = (
@@ -789,6 +916,11 @@ def speedup_experiment_onnx(
             if should_randomize_input
             else example_inputs
         )
+        if torch.cuda.device_count() > 1:
+            # Manually set correct torch.cuda.current_device to ensure torch.cuda.synchronize() works as intended.
+            # When there are more than 1 cuda devices, the first one is used for pytorch eager.
+            # The second one is used for onnx ort.
+            torch.cuda.set_device(0)
         timings[rep, 0], expected_output = timed(
             model,
             model_iter_fn,
@@ -797,7 +929,11 @@ def speedup_experiment_onnx(
             times=times,
             collect_outputs=args.collect_outputs,
         )
-
+        if torch.cuda.device_count() > 1:
+            # Manually set correct torch.cuda.current_device to ensure torch.cuda.synchronize() works as intended.
+            # When there are more than 1 cuda devices, the first one is used for pytorch eager.
+            # The second one is used for onnx ort.
+            torch.cuda.set_device(1)
         timings[rep, 1], actual_output = timed_onnx(model, onnx_model, inputs)
 
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
@@ -1573,6 +1709,11 @@ def optimize_onnx_ctx(
                 output_csv(
                     output_error_filename, parsed_error.headers, parsed_error.row
                 )
+            if context.onnx_model is not None:
+                e.onnx_program.save_diagnostics(
+                    f"{context.onnx_model.model_dir}/"
+                    f"{current_onnx_compiler}_{current_name}_{current_device}.sarif"
+                )
 
             # Check also the raw exception that caused export failure.
             # Skip if it is already analyzed by diagnostics.
@@ -1759,42 +1900,55 @@ class BenchmarkRunner:
         self.model_iter_fn = None
         self.grad_scaler = DummyGradScaler()
         self.autocast = contextlib.nullcontext
+        self.autocast_arg = {}
         self.optimizer = None
         self._args = None
 
-    def setup_amp(self):
+    def setup_amp(self, current_device=None):
         if self.args.only in self.fp32_only_models:
             return
 
-        if self.args.amp and self.args.devices == ["cuda"]:
-            # AMP training can lead to small loss values which can undeflow
-            # gradient values returning in zero gradients. To solve this
-            # problem, PyTorch introduces GradScaler. GradScaler is a stateful
-            # structure, that scales the loss values to prevent underflow. Loss
-            # values are big at the beginning of training (therefore not
-            # requiring scaling), while loss value tends to be small as network
-            # starts getting better (requiring scaling). GradScaler manages all
-            # of this fine tuning, checking the gradients are turning to inf,
-            # discarding such batches.
+        devices = [current_device] if current_device else self.args.devices
+        if self.args.amp:
+            if devices == ["cuda"]:
+                # AMP training can lead to small loss values which can undeflow
+                # gradient values returning in zero gradients. To solve this
+                # problem, PyTorch introduces GradScaler. GradScaler is a stateful
+                # structure, that scales the loss values to prevent underflow. Loss
+                # values are big at the beginning of training (therefore not
+                # requiring scaling), while loss value tends to be small as network
+                # starts getting better (requiring scaling). GradScaler manages all
+                # of this fine tuning, checking the gradients are turning to inf,
+                # discarding such batches.
 
-            # Since we are not running a long iteration, default value of
-            # init_scale 65536 is going to turn all gradients to inf. Therefore,
-            # we just use a init_scale of 2.0 for benchmarking purpose.
+                # Since we are not running a long iteration, default value of
+                # init_scale 65536 is going to turn all gradients to inf. Therefore,
+                # we just use a init_scale of 2.0 for benchmarking purpose.
 
-            # Disabling Gradscaler because
-            #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
-            #  2) Current setup shares grad_scaler for eager and dynamo model,
-            #  which is bad as Gradscaler has state and can adjust the scaling
-            #  factor between eager and dynamo run, making accuracy check
-            #  harder.
-            # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
-            self.autocast = torch.cuda.amp.autocast
-        elif (self.args.bfloat16 or self.args.amp) and self.args.devices == ["cpu"]:
-            self.autocast = torch.cpu.amp.autocast
+                # Disabling Gradscaler because
+                #  1) Benchmark setup runs 2 iterations of fwd-bwd. So, not useful.
+                #  2) Current setup shares grad_scaler for eager and dynamo model,
+                #  which is bad as Gradscaler has state and can adjust the scaling
+                #  factor between eager and dynamo run, making accuracy check
+                #  harder.
+                # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+                self.autocast = torch.cuda.amp.autocast
+            if devices == ["cpu"]:
+                self.autocast = torch.cpu.amp.autocast
+            if self.args.amp_dtype:
+                amp_dtype = (
+                    torch.float16
+                    if self.args.amp_dtype == "float16"
+                    else torch.bfloat16
+                )
+                self.autocast_arg["dtype"] = amp_dtype
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
+            if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
+                self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
+            else:
+                self.optimizer = torch.optim.Adam(params, lr=0.01, foreach=True)
         else:
             self.optimizer = None
 
@@ -1978,12 +2132,14 @@ class BenchmarkRunner:
             self.model_iter_fn(mod, inputs, collect_outputs=False)
         return self.model_iter_fn(mod, inputs, collect_outputs=True)
 
+    @torch._disable_dynamo(recursive=True)
     def optimizer_zero_grad(self, mod):
         if self.optimizer is not None:
             self.optimizer.zero_grad(True)
         else:
             mod.zero_grad(True)
 
+    @torch._disable_dynamo(recursive=True)
     def optimizer_step(self):
         if self.optimizer is not None:
             self.optimizer.step()
@@ -2232,7 +2388,7 @@ class BenchmarkRunner:
                     # apply export on module directly
                     # no need for n iterations
                     # the logic should be the same to self.model_iter_fn (forward_pass)
-                    with self.autocast():
+                    with self.autocast(**self.autocast_arg):
                         optimized_model_iter_fn = optimize_ctx(
                             model_copy, example_inputs
                         )
@@ -2968,7 +3124,11 @@ def parse_args(args=None):
     group_prec.add_argument(
         "--amp", action="store_true", help="use automatic mixed precision"
     )
-
+    parser.add_argument(
+        "--amp-dtype",
+        choices=("bfloat16", "float16"),
+        help="the data type used with automatic mixed precision",
+    )
     group_printout = parser.add_mutually_exclusive_group()
     group_printout.add_argument(
         "--verbose", "-v", action="store_true", help="enable verbose debug printouts"
@@ -3654,6 +3814,7 @@ def run(runner, args, original_dir=None):
 
             else:
                 model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+            runner.setup_amp(current_device)
             runner.run_one_model(
                 name,
                 model,

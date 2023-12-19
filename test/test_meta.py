@@ -13,6 +13,7 @@ import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import OpOverload, OpOverloadPacket
 from torch.testing import make_tensor
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
@@ -1107,6 +1108,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 # inconsistencies between CUDA and CPU, and running on CUDA makes it easier
 # to ignore the CPU case when inconsistencies arise.  Ideally we deal
 # with the inconsistencies but this takes time.
+@unMarkDynamoStrictTest
 class TestMeta(TestCase):
     # Copies inputs to inplace operations to avoid inplace modifications
     #   to leaves requiring gradient
