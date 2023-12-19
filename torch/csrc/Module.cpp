@@ -60,6 +60,7 @@
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/functorch/init.h>
+#include <torch/csrc/inductor/aoti_runner/pybind.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
@@ -1456,6 +1457,7 @@ PyObject* initModule() {
   torch::profiler::initPythonBindings(module);
   torch::python::init_bindings(module);
   torch::lazy::initLazyBindings(module);
+  torch::inductor::initAOTIRunnerBindings(module);
 #ifdef USE_ITT
   torch::profiler::initIttBindings(module);
 #endif
