@@ -110,6 +110,32 @@ class ShardedGradScaler(GradScaler):
     def _is_tensor_on_supported_device(self, tensor: torch.Tensor):
         return tensor.is_cuda or tensor.device.type in ("xla", "cpu")
 
+    def _sparse_coalesce(self, tensor: torch.Tensor):
+        return tensor.type(torch.float32).coalesce().type(torch.float16)
+
+    def _init_found_inf(self, device):
+        return torch.full((1,), 0.0, dtype=torch.float32, device=device)
+
+    def _foreach_non_finite_check_and_unscale_(
+        self,
+        grads,
+        found_inf,
+        inv_scale,
+        device_type="gpu",
+    ):
+        if device_type == "cpu":
+            self._foreach_non_finite_check_and_unscale_cpu_(
+                grads,
+                found_inf,
+                inv_scale,
+            )
+        else:
+            super()._foreach_non_finite_check_and_unscale_(
+                grads,
+                found_inf,
+                inv_scale,
+            )
+
     def _foreach_non_finite_check_and_unscale_cpu_(
         self,
         grads: Sequence[torch.Tensor],
@@ -140,45 +166,16 @@ class ShardedGradScaler(GradScaler):
             else:
                 grad.data *= inv_scale.item()
 
-    def _sparse_coalesce(self, tensor: torch.Tensor):
-        return tensor.type(torch.float32).coalesce().type(torch.float16)
-
-    def _foreach_non_finite_check_and_unscale_by_device(
-        self,
-        grads,
-        found_inf,
-        inv_scale,
-        device_type="gpu",
+    def _update_scale_(
+        self, _scale, _growth_tracker, found_inf_combined
     ):
-        if device_type == "cpu":
-            self._foreach_non_finite_check_and_unscale_cpu_(
-                grads,
-                found_inf,
-                inv_scale,
-            )
-        else:
-            torch._amp_foreach_non_finite_check_and_unscale_(
-                grads,
-                found_inf,
-                inv_scale,
-            )
-
-    def _init_found_inf(self, device):
-        return torch.full((1,), 0.0, dtype=torch.float32, device=device)
-
-    def _update_scale_by_device(
-        self, _scale, _growth_tracker, found_inf_combined, device_type="gpu"
-    ):
-        if device == "cpu":
+        if _scale.device.type == "cpu":
             self._amp_update_scale_cpu_(found_inf_combined)
         else:
-            torch._amp_update_scale_(
-                _scale,  # type: ignore[arg-type]
-                _growth_tracker,  # type: ignore[arg-type]
+            super()._update_scale_(
+                _scale,
+                _growth_tracker,
                 found_inf_combined,
-                self._growth_factor,  # type: ignore[arg-type]
-                self._backoff_factor,  # type: ignore[arg-type]
-                self._growth_interval,  # type: ignore[arg-type]
             )
 
     def _unscale_grads_(
@@ -189,7 +186,7 @@ class ShardedGradScaler(GradScaler):
         allow_fp16: bool = True,
     ) -> Dict[torch.device, torch.Tensor]:
         per_device_found_inf_dict = super()._unscale_grads_(optimizer, inv_scale, found_inf, allow_fp16)
-        # when `use_orig_params=True`, some
+        # There exist contexts (e.g. w/ `use_orig_params=True`) wherein some
         # ranks may have no (non-zero sized) parameter shards, necessitating the
         # initialization of `per_device_found_inf._per_device_tensors` here
         if not per_device_found_inf_dict:
@@ -197,7 +194,6 @@ class ShardedGradScaler(GradScaler):
             per_device_found_inf = _MultiDeviceReplicator(found_inf)
             per_device_found_inf.get(self._scale.device)
         return per_device_found_inf._per_device_tensors
-
 
     def unscale_(self, optimizer: torch.optim.Optimizer) -> None:
         super().unscale_(optimizer)
