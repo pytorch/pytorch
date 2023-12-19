@@ -9718,10 +9718,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # Refcount values get modified by Dynamo resume frames
             0 if TEST_WITH_TORCHDYNAMO else sys.getrefcount(t),
         )
+        slotnames = copyreg._slotnames(t.__class__)
         moved = (
-            copyreg._slotnames(t.__class__),
+            slotnames,
             id(t.__dict__),
             tuple(t.__dict__.keys()),
+            [getattr(t, name) for name in slotnames]
         )
         return preserved, moved
 

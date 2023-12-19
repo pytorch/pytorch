@@ -7,6 +7,7 @@ from .backend_registration import rename_privateuse1_backend, generate_methods_f
 from . import deterministic
 from . import collect_env
 import weakref
+import copyreg
 
 def set_module(obj, mod):
     """
@@ -47,6 +48,18 @@ def swap_tensors(t1, t2):
 
     # Swap the dynamic attributes
     swap_attr("__dict__")
+
+    # Swap the slots
+    slots = copyreg._slotnames(t1.__class__)  # type: ignore[attr-defined]
+    for slot in slots:
+        if hasattr(t1, slot) and hasattr(t2, slot):
+            swap_attr(slot)
+        elif hasattr(t1, slot):
+            setattr(t2, slot, (getattr(t1, slot)))
+            delattr(t1, slot)
+        elif hasattr(t2, slot):
+            setattr(t1, slot, (getattr(t2, slot)))
+            delattr(t2, slot)
 
     # Swap the at::Tensor they point to
     torch._C._swap_tensor_impl(t1, t2)
