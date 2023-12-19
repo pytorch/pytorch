@@ -1788,10 +1788,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         t1 = torch.rand(5, device="cuda")
         t2 = torch.rand(5, device="cuda")
-
-        gm = make_fx(PythonFunctionalizeAPI(FunctionalTensorMode()).functionalize(f))(
-            t1, t2
-        )
+        with FunctionalTensorMode():
+            gm = make_fx(PythonFunctionalizeAPI().functionalize(f))(t1, t2)
         # Make sure t2 was not modified
         self.assertNotEqual(gm(t1, t2), t2)
 
