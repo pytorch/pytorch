@@ -213,8 +213,7 @@
 #include <utility>
 #include <vector>
 
-namespace at {
-namespace meta {
+namespace at::meta {
 inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
   size_t i = 0;
   for (const Tensor& t : tensors) {
@@ -345,9 +344,9 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
       .set_all_same_sizes_and_stride(all_same_sizes_and_stride)
       .set_memory_format(memory_format);
 }
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(cat_serial_stub);
 DEFINE_DISPATCH(stack_serial_stub);
@@ -432,7 +431,7 @@ Tensor& set__symint(Tensor& result, const Tensor& storage, c10::SymInt storage_o
 
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
   if (result.unsafeGetTensorImpl() != source.unsafeGetTensorImpl()) {
-    return result.set_(source.storage(), source.storage_offset(), source.sizes(), source.strides());
+    return result.set__symint(source.storage(), source.sym_storage_offset(), source.sym_sizes(), source.sym_strides());
   }
   return result;
 }
@@ -3064,14 +3063,12 @@ static inline Tensor sparse_compressed_transpose(
           return self.values().transpose(-2 - dense_dim, -1 - dense_dim);
         });
   }
-  return at::native::_sparse_compressed_tensor_unsafe(
+  return at::_sparse_compressed_tensor_unsafe(
       compressed_inds,
       plain_inds,
       result_vals,
       result_sizes,
-      self.scalar_type(),
-      result_layout,
-      self.device());
+      self.options().layout(result_layout));
 }
 } // namespace
 
@@ -4035,5 +4032,4 @@ int64_t dense_dim_strided(const at::Tensor& self) {
   return self.dim();
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

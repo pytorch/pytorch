@@ -1,14 +1,14 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass
-from typing import cast, List, NamedTuple, Optional, Tuple
+from typing import Any, cast, List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 
 from torch.distributed._tensor._collective_utils import mesh_broadcast, mesh_scatter
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed.device_mesh import DeviceMesh
 
 
 class Placement:
@@ -16,10 +16,11 @@ class Placement:
 
     # convenient utils to check for placement types
     def is_shard(self, dim: Optional[int] = None) -> bool:
-        if dim is not None and isinstance(self, Shard):
-            return self.dim == dim
+        is_shard_instance = isinstance(self, Shard)
+        if dim is not None and is_shard_instance:
+            return cast(Shard, self).dim == dim
         else:
-            return isinstance(self, Shard)
+            return is_shard_instance
 
     def is_replicate(self) -> bool:
         return isinstance(self, Replicate)
@@ -28,10 +29,10 @@ class Placement:
         return isinstance(self, _Partial)
 
 
+@dataclass(frozen=True)
 class Shard(Placement):
     # shard placement, shard on a dim
-    def __init__(self, dim):
-        self.dim = dim
+    dim: int
 
     def _split_tensor(
         self,
@@ -53,9 +54,6 @@ class Shard(Placement):
         assert (
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
-        assert (
-            tensor.size(self.dim) > 0
-        ), f"Tensor size along dim{self.dim} is 0. There is nothing to be sharded."
 
         # chunk tensor over dimension `dim` into n slices with padding if necessary
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
@@ -122,10 +120,6 @@ class Shard(Placement):
         """
         returns the local shard size and offset on a given tensor dim
         """
-        assert (
-            size_on_dim >= num_chunks
-        ), f"Size to be sharded on dim {self.dim} must be at least as large as the number of devices in that dimension {num_chunks}"
-
         # Compute the chunk size inline with ``torch.chunk``
         full_chunk_size = (size_on_dim + num_chunks - 1) // num_chunks
 
@@ -155,7 +149,7 @@ class Shard(Placement):
         0 on the mesh dimension as source of truth)
         """
         my_coordinate = mesh.get_coordinate()
-        num_chunks = mesh.size(dim=mesh_dim)
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
 
         if my_coordinate is None:
             # if rank is not part of mesh, we simply return an empty tensor
@@ -185,7 +179,7 @@ class Shard(Placement):
         reduce and scatter a tensor on a mesh dimension
         """
         my_coordinate = mesh.get_coordinate()
-        num_chunks = mesh.size(dim=mesh_dim)
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
 
         if my_coordinate is None:
             # if rank is not part of mesh, we simply return local_tensor,
@@ -198,6 +192,8 @@ class Shard(Placement):
                 tensor, num_chunks, with_padding=True, contiguous=True
             )
             tensor = torch.cat(scattered_list, dim=self.dim)
+        elif not tensor.is_contiguous():
+            tensor = tensor.contiguous()
 
         output = funcol.reduce_scatter_tensor(
             tensor, reduce_op.name, scatter_dim=self.dim, group=(mesh, mesh_dim)
@@ -219,7 +215,7 @@ class Shard(Placement):
         is replicated on the previously sharded mesh dimension
         """
         my_coordinate = mesh.get_coordinate()
-        num_chunks = mesh.size(dim=mesh_dim)
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
 
         if my_coordinate is None:
             # if rank is not part of mesh, we simply return local_tensor,
@@ -275,6 +271,7 @@ class Shard(Placement):
         return f"S({self.dim})"
 
 
+@dataclass(frozen=True)
 class Replicate(Placement):
     # replicate placement
     def __eq__(self, other: object) -> bool:
@@ -315,6 +312,7 @@ class Replicate(Placement):
         return tensor
 
 
+@dataclass(frozen=True)
 class _Partial(Placement):
     # This is a default partial placement with element-wise reduce op
     # when doing reduction it follows the contract of `_to_replicate`
@@ -323,9 +321,7 @@ class _Partial(Placement):
     #
     # We can implement custom reductions as needed by subclassing this
     # class and override those contracts.
-
-    def __init__(self, reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM):
-        self.reduce_op: c10d.ReduceOp.RedOpType = reduce_op
+    reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM
 
     def _to_replicate(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
@@ -384,7 +380,19 @@ class DTensorSpec:
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMeta] = None
 
-    def __hash__(self) -> int:
+    def __post_init__(self):
+        if not isinstance(self.placements, tuple):
+            self.placements = tuple(self.placements)
+        self._hash: Optional[int] = None
+
+    def __setattr__(self, attr: str, value: Any):
+        super().__setattr__(attr, value)
+        # Make sure to recompute the hash in case any of the hashed attributes
+        # change (though we do not expect `mesh` or `placements` to change)
+        if hasattr(self, "_hash") and attr in ("mesh", "placements", "tensor_meta"):
+            self._hash = None
+
+    def _hash_impl(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
         # propagation results. We only need to consider the mesh, placements, shape
         # dtype and stride.
@@ -400,8 +408,16 @@ class DTensorSpec:
                     self.tensor_meta.dtype,
                 )
             )
-        else:
-            return hash((self.mesh, self.placements))
+        return hash((self.mesh, self.placements))
+
+    def __hash__(self) -> int:
+        # We lazily cache the spec to avoid recomputing the hash upon each
+        # use, where we make sure to update the hash when the `tensor_meta`
+        # changes by overriding `__setattr__`. This must be lazy so that Dynamo
+        # does not try to hash non-singleton `SymInt`s for the stride.
+        if self._hash is None:
+            self._hash = self._hash_impl()
+        return self._hash
 
     def __eq__(self, __o: object) -> bool:
         if not (
@@ -454,6 +470,12 @@ class DTensorSpec:
             if placement.is_shard():
                 num_shards *= self.mesh.size(i)
         return num_shards
+
+    @property
+    def device_mesh(self) -> DeviceMesh:
+        # simple aliasing for the mesh field, make some
+        # checks that mixes DTensor/DTensorSpec easier
+        return self.mesh
 
     @property
     def dim_map(self) -> List[int]:

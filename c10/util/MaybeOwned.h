@@ -2,10 +2,10 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/in_place.h>
 
 #include <memory>
 #include <type_traits>
+#include <utility>
 
 namespace c10 {
 
@@ -83,7 +83,7 @@ class MaybeOwned final {
 
   /// Don't use this; use owned() instead.
   template <class... Args>
-  explicit MaybeOwned(in_place_t, Args&&... args)
+  explicit MaybeOwned(std::in_place_t, Args&&... args)
       : isBorrowed_(false), own_(std::forward<Args>(args)...) {}
 
  public:
@@ -127,8 +127,8 @@ class MaybeOwned final {
   }
 
   MaybeOwned(MaybeOwned&& rhs) noexcept(
-      std::is_nothrow_move_constructible_v<T>&&
-          std::is_nothrow_move_assignable_v<borrow_type>)
+      std::is_nothrow_move_constructible_v<T> &&
+      std::is_nothrow_move_assignable_v<borrow_type>)
       : isBorrowed_(rhs.isBorrowed_) {
     if (C10_LIKELY(rhs.isBorrowed_)) {
       MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
@@ -138,10 +138,11 @@ class MaybeOwned final {
   }
 
   MaybeOwned& operator=(MaybeOwned&& rhs) noexcept(
-      std::is_nothrow_move_assignable_v<T>&& std::is_nothrow_move_assignable_v<
-          borrow_type>&& std::is_nothrow_move_constructible_v<T>&&
-          std::is_nothrow_destructible_v<T>&&
-              std::is_nothrow_destructible_v<borrow_type>) {
+      std::is_nothrow_move_assignable_v<T> &&
+      std::is_nothrow_move_assignable_v<borrow_type> &&
+      std::is_nothrow_move_constructible_v<T> &&
+      std::is_nothrow_destructible_v<T> &&
+      std::is_nothrow_destructible_v<borrow_type>) {
     if (this == &rhs) {
       return *this;
     }
@@ -175,12 +176,13 @@ class MaybeOwned final {
   }
 
   template <class... Args>
-  static MaybeOwned owned(in_place_t, Args&&... args) {
-    return MaybeOwned(in_place, std::forward<Args>(args)...);
+  static MaybeOwned owned(std::in_place_t, Args&&... args) {
+    return MaybeOwned(std::in_place, std::forward<Args>(args)...);
   }
 
-  ~MaybeOwned() noexcept(std::is_nothrow_destructible_v<T>&&
-                             std::is_nothrow_destructible_v<borrow_type>) {
+  ~MaybeOwned() noexcept(
+      std::is_nothrow_destructible_v<T> &&
+      std::is_nothrow_destructible_v<borrow_type>) {
     if (C10_UNLIKELY(!isBorrowed_)) {
       own_.~T();
     } else {

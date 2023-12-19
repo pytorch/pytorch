@@ -5,6 +5,7 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/Registry.h>
 
 #include <array>
@@ -135,6 +136,11 @@ struct AllocatorState {
   virtual ~AllocatorState() = default;
 };
 
+union trace_time_ {
+  time_t t_;
+  approx_time_t approx_t_;
+};
+
 struct TraceEntry {
   enum Action {
     ALLOC, // API made to the caching allocator for new memory
@@ -158,19 +164,23 @@ struct TraceEntry {
       int64_t addr,
       size_t size,
       cudaStream_t stream,
+      approx_time_t time,
       std::shared_ptr<GatheredContext> context = nullptr)
       : action_(action),
         device_(device),
         addr_(addr),
         context_(std::move(context)),
         stream_(stream),
-        size_(size) {}
+        size_(size) {
+    time_.approx_t_ = time;
+  }
   Action action_;
   int device_;
   int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<GatheredContext> context_;
   cudaStream_t stream_;
   int64_t size_;
+  trace_time_ time_;
 };
 
 struct SnapshotInfo {
@@ -220,11 +230,11 @@ class CUDAAllocator : public Allocator {
   virtual void resetAccumulatedStats(int device) = 0;
   virtual void resetPeakStats(int device) = 0;
   virtual SnapshotInfo snapshot() = 0;
-  virtual void beginAllocateStreamToPool(
+  virtual void beginAllocateToPool(
       int device,
-      cudaStream_t stream,
-      MempoolId_t mempool_id) = 0;
-  virtual void endAllocateStreamToPool(int device, cudaStream_t stream) = 0;
+      MempoolId_t mempool_id,
+      std::function<bool(cudaStream_t)> filter) = 0;
+  virtual void endAllocateToPool(int device, MempoolId_t mempool_id) = 0;
   virtual void releasePool(int device, MempoolId_t mempool_id) = 0;
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
@@ -367,15 +377,15 @@ inline CheckpointDelta setCheckpointPoolState(
 }
 
 // CUDAGraph interactions
-inline void beginAllocateStreamToPool(
+inline void beginAllocateToPool(
     int device,
-    cudaStream_t stream,
-    MempoolId_t mempool_id) {
-  return get()->beginAllocateStreamToPool(device, stream, mempool_id);
+    MempoolId_t mempool_id,
+    std::function<bool(cudaStream_t)> filter) {
+  get()->beginAllocateToPool(device, mempool_id, std::move(filter));
 }
 
-inline void endAllocateStreamToPool(int device, cudaStream_t stream) {
-  return get()->endAllocateStreamToPool(device, stream);
+inline void endAllocateToPool(int device, MempoolId_t mempool_id) {
+  get()->endAllocateToPool(device, mempool_id);
 }
 
 inline void recordHistory(

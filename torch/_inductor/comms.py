@@ -117,7 +117,8 @@ def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> float:
     if config.estimate_op_runtime == "default":
         runtime = snode.get_estimated_runtime()
     else:
-        runtime = config.estimate_op_runtime(snode)  # type: ignore[operator]
+        assert callable(config.estimate_op_runtime)
+        runtime = config.estimate_op_runtime(snode)
     return runtime
 
 
@@ -290,7 +291,7 @@ def reorder_compute_for_overlap(
 def node_summary(snode):
     detail = ""
     if isinstance(snode.node, ir.ExternKernelOut):
-        detail = f" ({snode.node.kernel})"
+        detail = f" ({snode.node.python_kernel_name})"
     out_tensor_info = ""
     if (
         hasattr(snode.node, "layout")
