@@ -54,7 +54,7 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
-from .source import DefaultsSource, LocalSource, TypeSource
+from .source import LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
@@ -905,20 +905,6 @@ class PyExprCSEPass:
         replacer = self.Replacer(self._config, self._new_var)
         new_node = replacer.visit(ast.parse(expr))
         return replacer.preface, _ast_unparse(new_node)
-
-
-def must_add_nn_module_guards(guard):
-    # For config.guard_nn_modules=False, we can skip all the guards that
-    # originate from inside of nn module except for a few categories.
-    return (
-        # Guard for defaults
-        isinstance(guard.originating_source, DefaultsSource)
-        # Guard using dict tags if the config flag is set
-        or (
-            config.guard_nn_modules_using_dict_tags
-            and guard.create_fn is GuardBuilder.NN_MODULE
-        )
-    )
 
 
 # NB: Naively, you'd expect this to only be a function that produces
