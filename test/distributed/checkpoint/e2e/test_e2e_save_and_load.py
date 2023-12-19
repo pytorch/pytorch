@@ -91,7 +91,7 @@ def _train(model, optim, train_steps=1):
     return loss
 
 
-class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
+class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @property
     def backend(self):
         return "cpu:gloo,cuda:nccl"
@@ -267,6 +267,6 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
         DCP.load(sd, DCP.FileSystemReader(self.temp_dir))
 
 
-instantiate_parametrized_tests(TestE2ELoadAndSave)
+instantiate_parametrized_tests(TestE2ESaveAndLoad)
 if __name__ == "__main__":
     run_tests()

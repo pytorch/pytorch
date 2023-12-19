@@ -22,6 +22,7 @@ The entrypoints to load and save a checkpoint are the following:
 
 .. autofunction::  load
 .. autofunction::  save
+.. autofunction::  save_async
 .. autofunction::  load_state_dict
 .. autofunction::  save_state_dict
 
@@ -37,6 +38,8 @@ A useful high-level abstraction is also provided:
 .. autoclass:: torch.distributed.checkpoint.checkpointer.Checkpoint
 
 For an example using `Checkpointer`, see `stateful example <https://github.com/pytorch/pytorch/blob/main/torch/distributed/checkpoint/examples/stateful_example.py>`_
+
+Finally, for a good example of using Asynchronous saving features, checkout out the `async save example <https://github.com/pytorch/pytorch/blob/main/torch/distributed/checkpoint/examples/async_checkpointing_example.py>`_
 
 The following types define the IO interface used during checkpoint:
 

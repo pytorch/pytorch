@@ -1,17 +1,16 @@
 import warnings
-from typing import Optional, Any
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import Optional
 
 import torch
 import torch.distributed as dist
-from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
+from torch.distributed.checkpoint.default_planner import DefaultSavePlanner, SavePlanner
+from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
+from torch.distributed.checkpoint.stateful import Stateful
+from torch.distributed.checkpoint.storage import StorageWriter
+from torch.distributed.checkpoint.utils import _DistWrapper
 
-from .planner import SavePlanner
-from .default_planner import DefaultSavePlanner
-from .metadata import Metadata, STATE_DICT_TYPE
-from .storage import StorageWriter
-from .utils import _DistWrapper
 
 __all__ = ["save_state_dict", "save"]
 
@@ -29,7 +28,6 @@ def save_state_dict(
         "'save_state_dict' is deprecated and will be removed in future versions. Please use 'save' instead."
     )
 
-    # TODO: test returning `save` here instead.
     return _save_state_dict(
         state_dict, storage_writer, process_group, coordinator_rank, no_dist, planner
     )
@@ -116,12 +114,32 @@ def save(
         planner,
     )
 
-def async_save(state_dict: STATE_DICT_TYPE, *args: Any, **kwargs: Any) -> Future:
+
+def async_save(
+    state_dict: STATE_DICT_TYPE,
+    storage_writer: StorageWriter,
+    *,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False,
+    planner: Optional[SavePlanner] = None,
+) -> Future:
     """Asynchronous version of ``save_state_dict``. This code first de-stages the state_dict on CPU, and then calls
     `save` in a separate thread.
 
     .. warning::
         This feature is experimental and subject to removal/change.
+
+    Args:
+        state_dict (Dict[str, Any]): The state_dict to save.
+        storage_writer (StorageWriter):
+            Instance of StorageWrite use to perform writes.
+        process_group (ProcessGroup):
+            ProcessGroup to be used for cross-rank synchronization.
+        coordinator_rank (int): Rank to use to coordinate the checkpoint.
+            rank0 is used by default.
+        no_dist (bool): If ``True``, distributed checkpoint will not save
+            in SPMD style. (Default: ``False``)
 
     Returns:
         Future: A future holding the resultant Metadata object from `save`.
@@ -136,18 +154,25 @@ def async_save(state_dict: STATE_DICT_TYPE, *args: Any, **kwargs: Any) -> Future
     f = executor.submit(
         _save_state_dict,
         cpu_state_dict,
-        *args,
-        **kwargs
+        storage_writer,
+        process_group,
+        coordinator_rank,
+        no_dist,
+        planner,
     )
     f.add_done_callback(lambda f: executor.shutdown(wait=False))
 
     return f
 
+
 def _stateful(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
     stateful_state_dict = {}
     for key, elem in state_dict.items():
-        stateful_state_dict[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
+        stateful_state_dict[key] = (
+            elem.state_dict() if isinstance(elem, Stateful) else elem
+        )
     return stateful_state_dict
+
 
 def _save_state_dict(
     state_dict: STATE_DICT_TYPE,
