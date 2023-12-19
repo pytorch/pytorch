@@ -161,7 +161,7 @@ def is_boolean_type(x):
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
     def construct_input(inp):
-        if isinstance(inp, (Number, sympy.Symbol)):
+        if isinstance(inp, (Number, sympy.Expr)):
             return inp
         else:
             assert hasattr(inp, "get_dtype")
@@ -198,7 +198,9 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
         else:
             # FIXME that's a crude approximation for promoting args
             promoting_args = [
-                a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
+                a
+                for a in args
+                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "get_dtype")
             ]
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
@@ -341,12 +343,19 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
-def promote_constants(inputs, override_return_dtype=None):
+def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=None):
+    assert (
+        override_return_dtype is None or type_promotion_kind is None
+    ), "only one of override_return_dtype or type_promotion_kind may be given"
+
+    if override_return_dtype is None and type_promotion_kind is None:
+        type_promotion_kind = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+
     if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
         return inputs
     if all(isinstance(x, (int, float, sympy.Symbol)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
-            *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            *inputs, type_promotion_kind=type_promotion_kind
         )
 
         def const_func(x):
@@ -524,7 +533,8 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
 
 
 def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
-    if x.get_dtype() == dtype:
+    x_dtype = x.get_dtype()
+    if x_dtype == dtype:
         return clone(x) if copy else x
 
     def _get_primitive_bitwidth(dtype):
@@ -533,15 +543,20 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
         else:
             return torch.iinfo(dtype).bits
 
-    src_bits = _get_primitive_bitwidth(x.get_dtype())
+    src_bits = _get_primitive_bitwidth(x_dtype)
     dst_bits = _get_primitive_bitwidth(dtype)
     if src_bits != dst_bits:
         raise NotImplementedError(
-            f"bitcast {x.get_dtype()} to different bitwidth type {dtype} is not supported yet."
+            f"bitcast {x_dtype} to different bitwidth type {dtype} is not supported yet."
         )
 
     def _to_dtype_bitcast(x):
-        return ops.to_dtype_bitcast(x, dtype)
+        # Because we may promote tensor type from float16 or bfloat16
+        # to float, we will need to pass the original src dtype (i.e. x_dtype),
+        # which is used for correctly constructing type conversion before bitcast,
+        # which requires the bitwidth of the input tensor type is the same as the
+        # target type.
+        return ops.to_dtype_bitcast(x, dtype, x_dtype)
 
     return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
 
@@ -2137,7 +2152,6 @@ make_fallback(aten.addbmm)
 make_fallback(aten.addmv, warn=False)
 make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten.avg_pool3d)
-make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
@@ -2228,7 +2242,6 @@ make_fallback(aten.fractional_max_pool3d_backward)
 make_fallback(aten._linalg_check_errors)
 make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten._pdist_backward)
-make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
 make_fallback(aten.replication_pad2d_backward)
 make_fallback(aten.soft_margin_loss_backward, warn=False)
@@ -3490,22 +3503,24 @@ def upsample_bicubic2d_default(
     )
 
 
+@register_lowering(aten.reflection_pad1d_backward)
 @register_lowering(aten.reflection_pad2d_backward)
-def reflection_pad2d_backward(grad_output, x, padding):
-    assert len(padding) == 4
-    left, right, top, bot = padding
+@register_lowering(aten.reflection_pad3d_backward)
+def _reflection_padnd_backward(grad_output, x, padding):
+    dim = len(padding) // 2
 
-    *_, h, w = x.get_size()
-    h = V.graph.sizevars.evaluate_static_shape(h) - 1
-    w = V.graph.sizevars.evaluate_static_shape(w) - 1
+    dhw = [h - 1 for h in x.get_size()[-dim:]]
     grad_loader = grad_output.make_loader()
-    *_, h_grad, w_grad = grad_output.get_size()
+
+    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
+    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
 
     def fn(idx):
-        *b, x, y = idx
+        b = idx[:-dim]
+        xyz = idx[-dim:]
 
-        def load_from_output(x, y):
-            return grad_loader([*b, x, y])
+        def load_from_output(x):
+            return grad_loader([*b, *x])
 
         def index_range_condition(index_range):
             i, lb, ub = index_range
@@ -3524,46 +3539,58 @@ def reflection_pad2d_backward(grad_output, x, padding):
         #
         # The center area is the original matrix. Other areas are reflections.
 
-        center_x, center_y = x + top, y + left
-        top_reflect_x, left_reflect_y = top - x, left - y
-        bot_reflect_x, right_reflect_y = 2 * h + top - x, 2 * w + left - y
+        center = [xyz[i] + padding_left[i] for i in range(dim)]
+        left_reflect = [padding_left[i] - xyz[i] for i in range(dim)]
+        right_reflect = [2 * dhw[i] + padding_left[i] - xyz[i] for i in range(dim)]
 
         # Accumulate gradients from different areas
         # If some of the padding is negative, center load is not always valid
-        range_cx = (center_x, 0, h + top + bot)
-        range_cy = (center_y, 0, w + left + right)
-        cond = ops.and_(
-            index_range_condition(range_cx), index_range_condition(range_cy)
+        range_c = [
+            (center[i], 0, dhw[i] + padding_left[i] + padding_right[i])
+            for i in range(dim)
+        ]
+        cond = functools.reduce(
+            ops.and_, [index_range_condition(range_c[i]) for i in range(dim)]
         )
-        grad = ops.masked(cond, lambda: load_from_output(center_x, center_y), 0.0)
+        grad = ops.masked(cond, lambda: load_from_output(center), 0.0)
 
-        def accumulate(out_x, out_y, index_range1, index_range2=None):
-            nonlocal grad
-
+        def accumulate(grad, out, index_ranges):
             # If the upper bound is less than the lower bound, we can get rid of one accumulation.
             # This happens when the padding size is zero.
-            upper_less_than_lower1 = index_range1[2] < index_range1[1]
-            if isinstance(upper_less_than_lower1, bool) and upper_less_than_lower1:
-                return
-            cond = index_range_condition(index_range1)
-            if index_range2 is not None:
-                upper_less_than_lower2 = index_range2[2] < index_range2[1]
-                if isinstance(upper_less_than_lower2, bool) and upper_less_than_lower2:
-                    return
-                cond = ops.and_(cond, index_range_condition(index_range2))
-            g = ops.masked(cond, lambda: load_from_output(out_x, out_y), 0.0)
-            grad = ops.add(grad, g)
+            for i in range(dim):
+                upper_less_than_lower = index_ranges[i][2] < index_ranges[i][1]
+                if isinstance(upper_less_than_lower, bool) and upper_less_than_lower:
+                    return grad
+            cond = functools.reduce(
+                ops.and_,
+                [index_range_condition(index_range) for index_range in index_ranges],
+            )
+            g = ops.masked(cond, lambda: load_from_output(out), 0.0)
+            return ops.add(grad, g)
 
-        accumulate(center_x, left_reflect_y, range_cx, (y, 1, left))
-        accumulate(center_x, right_reflect_y, range_cx, (y, w - right, w - 1))
-        accumulate(top_reflect_x, center_y, (x, 1, top), range_cy)
-        accumulate(bot_reflect_x, center_y, (x, h - bot, h - 1), range_cy)
-        accumulate(top_reflect_x, left_reflect_y, (x, 1, top), (y, 1, left))
-        accumulate(top_reflect_x, right_reflect_y, (x, 1, top), (y, w - right, w - 1))
-        accumulate(bot_reflect_x, left_reflect_y, (x, h - bot, h - 1), (y, 1, left))
-        accumulate(
-            bot_reflect_x, right_reflect_y, (x, h - bot, h - 1), (y, w - right, w - 1)
-        )
+        for area in itertools.product(*[[-1, 0, 1] for _ in range(dim)]):
+            if area == tuple([0] * dim):
+                # center, this is already done.
+                continue
+
+            outs = []
+            index_ranges = []
+
+            for i in range(dim):
+                if area[i] == 0:
+                    out = center[i]
+                    index_range = range_c[i]
+                elif area[i] == -1:
+                    out = left_reflect[i]
+                    index_range = (xyz[i], 1, padding_left[i])
+                elif area[i] == 1:
+                    out = right_reflect[i]
+                    index_range = (xyz[i], dhw[i] - padding_right[i], dhw[i] - 1)
+
+                outs.append(out)
+                index_ranges.append(index_range)
+
+            grad = accumulate(grad, outs, index_ranges)
 
         return grad
 
@@ -4827,11 +4854,16 @@ def div_prim(a, b):
     return make_pointwise(fn)(a, b)
 
 
-div = register_lowering(
+@register_lowering(
     [aten.true_divide, aten.div.Tensor],
     broadcast=True,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)(div_prim)
+)
+def div(a, b):
+    a, b = promote_constants(
+        (a, b), type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    )
+    return div_prim(a, b)
 
 
 @register_lowering([aten.fmod, prims.fmod], broadcast=True)
@@ -4886,7 +4918,7 @@ def cumsum(x, axis=None, dtype=None):
         dtype = torch.int64
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, scan_op="sum")
+    result = ir.Scan.create(**kwargs, combine_fn=ops.add, init=0)
     if result is None:
         return fallback_cumsum(x, dim=axis, dtype=dtype)
     return result
@@ -4900,7 +4932,7 @@ def cumprod(x, axis=None, dtype=None):
         dtype = torch.int64
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, scan_op="prod")
+    result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)
     if result is None:
         return fallback_cumprod(x, dim=axis, dtype=dtype)
     return result
@@ -4917,7 +4949,7 @@ def prod(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
-@register_lowering(aten.any)
+@register_lowering(aten.any, type_promotion_kind=None)
 def reduce_any(x, dim=None, keepdim=False):
     x = to_dtype(x, torch.bool)
     return make_reduction("any")(x, axis=dim, keepdims=keepdim)

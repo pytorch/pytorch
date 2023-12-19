@@ -29,7 +29,7 @@
 
 #include <bitset>
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor& rename_(Tensor& self, optional<DimnameList> names) {
   at::internal_set_names_inplace(self, names);
@@ -407,4 +407,4 @@ Tensor squeeze(const Tensor& self, Dimname dim) {
 }
 
 
-}}  // namespace at::native
+}  // namespace at::native
