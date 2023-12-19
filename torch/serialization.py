@@ -1013,7 +1013,7 @@ def load(
                     if not _is_path(f):
                         raise ValueError("f must be a file path in order to use the mmap argument")
                     size = os.path.getsize(f)
-                    overall_storage = torch.UntypedStorage.from_file(f, False, size)
+                    overall_storage = torch.UntypedStorage.from_file(str(f), False, size)
                 if weights_only:
                     try:
                         return _load(opened_zipfile,
