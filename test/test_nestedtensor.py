@@ -3135,6 +3135,24 @@ class TestNestedTensorSubclass(NestedTestCase):
         view = nt.expand(-1, -1, 5)
         self.assertEqual(nt.shape[:2], view.shape[:2])
 
+    @torch._dynamo.config.patch(suppress_errors=True)
+    def test_reshape_decomp(self, device):
+        # contiguous NT should result in view
+        nt = random_nt_from_dims(
+            [3, None, 10], device=device, dtype=torch.float32, layout=torch.jagged)
+        view = nt.reshape(-1, -1, 5, 2)
+        self.assertEqual(view.shape[:2], nt.shape[:2])
+        self.assertTrue(view._is_view() and view._base is nt)
+
+        # non-contiguous NT should result in contiguous copy
+        nt = random_nt_from_dims(
+            [3, None, 5, 2], device=device, dtype=torch.float32, layout=torch.jagged)
+        nt_noncontig = nt.transpose(-1, -2)
+        self.assertFalse(nt_noncontig.is_contiguous())
+        copy = nt_noncontig.reshape(-1, -1, 10)
+        self.assertTrue(copy.is_contiguous())
+        self.assertEqual(copy.shape[:2], nt.shape[:2])
+
     def test_binary_pointwise_broadcasting(self, device):
         # (B, j0, 3, 4)
         ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), device, requires_grad=True)
