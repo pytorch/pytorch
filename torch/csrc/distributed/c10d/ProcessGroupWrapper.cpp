@@ -371,6 +371,15 @@ std::ostream& operator<<(
   return output << collectiveInfo;
 }
 
+bool check_same_size(const std::vector<at::Tensor>& input_tensors) {
+  for (const auto& input_tensor : input_tensors) {
+    if (!input_tensors[0].is_same_size(input_tensor)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 ProcessGroupWrapper::ProcessGroupWrapper(
@@ -423,7 +432,11 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
-  runCollectiveChecks(OpType::ALLGATHER, inputTensors);
+  if (check_same_size(outputTensors.back())) {
+    runCollectiveChecks(OpType::ALLGATHER, inputTensors);
+  } else {
+    runCollectiveChecks(OpType::ALLGATHER, {});
+  }
   return backend_->allgather(outputTensors, inputTensors, opts);
 }
 
@@ -468,7 +481,11 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
-  runCollectiveChecks(OpType::REDUCE_SCATTER, outputTensors);
+  if (check_same_size(inputTensors.back())) {
+    runCollectiveChecks(OpType::REDUCE_SCATTER, outputTensors);
+  } else {
+    runCollectiveChecks(OpType::REDUCE_SCATTER, {});
+  }
   return backend_->reduce_scatter(outputTensors, inputTensors, opts);
 }
 
