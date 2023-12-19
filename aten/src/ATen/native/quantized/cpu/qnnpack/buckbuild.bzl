@@ -300,7 +300,6 @@ def define_qnnpack(third_party, labels = []):
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
-        force_static = True,
         labels = [
             "supermodule:android/default/pytorch",
             "supermodule:ios/default/public.pytorch",
@@ -320,6 +319,13 @@ def define_qnnpack(third_party, labels = []):
                 ],
             ),
         ],
+        # FIXME(T172572183): This should be removed when fbcode no longer uses
+        # produce_interface_from_stub_shared_library; it's needed to work around a bug
+        # in that mode.
+        supports_shlib_interfaces = select({
+            "ovr_config//os:linux": False,
+            "DEFAULT": True,
+        }),
         visibility = ["PUBLIC"],
         deps = [
             ":qnnp_interface",
@@ -333,6 +339,7 @@ def define_qnnpack(third_party, labels = []):
             third_party("cpuinfo"),
             third_party("FP16"),
             third_party("FXdiv"),
+            third_party("pthreadpool"),
         ],
         exported_deps = [
             third_party("cpuinfo"),
@@ -643,6 +650,13 @@ def define_qnnpack(third_party, labels = []):
         },
         deps = [
             ":pytorch_qnnpack",
+            ":ukernels_asm",
+            ":ukernels_neon",
+            ":ukernels_psimd",
+            ":ukernels_scalar",
+            ":ukernels_sse2",
+            ":ukernels_sse41",
+            ":ukernels_ssse3",
             third_party("cpuinfo"),
             third_party("FP16"),
             third_party("pthreadpool"),

@@ -374,9 +374,7 @@ extern SYCL_EXTERNAL void __assert_fail(
     unsigned int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
-#if (                                                                       \
-    defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)) && \
-    !defined(TORCH_DISABLE_GPU_ASSERTS))
+#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
 // CUDA supports __assert_fail function which are common for both device
 // and host side code.
 __host__ __device__
@@ -393,18 +391,14 @@ __host__ __device__
         unsigned int line,
         const char* function) noexcept __attribute__((__noreturn__));
 
-#if (defined(__HIP_ARCH__) || defined(__HIP__)) && \
-    !defined(TORCH_DISABLE_GPU_ASSERTS)
-// ROCm supports __assert_fail only as a device side function.
-__device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
-    const char* assertion,
-    const char* file,
-    unsigned int line,
-    const char* function);
-#endif // defined(__HIP_ARCH__) || defined(__HIP__)
 #endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
+// ROCm disable kernel assert by default
+#if !defined(C10_USE_ROCM_KERNEL_ASSERT) and defined(USE_ROCM)
+#define CUDA_KERNEL_ASSERT(cond)
+#define SYCL_KERNEL_ASSERT(cond)
+#else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
@@ -415,6 +409,7 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
+#endif //  C10_USE_ROCM_KERNEL_ASSERT and USE_ROCM
 #endif // __APPLE__
 
 #ifdef __APPLE__
