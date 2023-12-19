@@ -1528,7 +1528,7 @@ if(USE_CUDA)
 elseif(USE_ROCM)
   install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 elseif(USE_XPU)
-  install(TARGETS torch_xpu torch_xpu_library EXPORT Caffe2Targets DESTINATION "${T}")
+  install(TARGETS torch_xpu torch_xpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 install(TARGETS torch torch_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
@@ -1540,13 +1540,6 @@ elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)
 endif()
 
-# message("xxxxxxxxxxxxxxxxxx XPUMKLDNN_FOUND: ${XPUMKLDNN_FOUND} xxxxxxxxxxxxxxxx")
-# if(XPUMKLDNN_FOUND)
-#   add_library(torch_xpu INTERFACE)
-#   target_link_libraries(torch_xpu xpumkldnn)
-#   caffe2_interface_library(torch_xpu torch_xpu_library)
-#   target_link_libraries(torch PUBLIC torch_xpu_library)
-# endif()
 
 if(PRINT_CMAKE_DEBUG_INFO)
   print_target_properties(torch)
@@ -1593,7 +1586,6 @@ if(USE_XPU)
   target_link_libraries(torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
   target_include_directories(
     torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)
-
 
   target_link_libraries(torch_xpu PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 endif()
