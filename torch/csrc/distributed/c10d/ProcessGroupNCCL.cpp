@@ -788,7 +788,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
   std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
-            << "NCCL version: " << getNcclVersion()
+            << "NCCL version: " << getNcclVersion() << ", size: " << size
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -1045,6 +1045,36 @@ std::future<bool> ProcessGroupNCCL::launchAsyncDebugDump() {
   return resultFuture;
 }
 
+void ProcessGroupNCCL::waitForDumpOrTimeout(
+    std::future<bool>& fut,
+    size_t timeout_sec) {
+  TORCH_CHECK(fut.valid(), "Expected a valid future");
+
+  auto futStatus = fut.wait_for(std::chrono::seconds(timeout_sec));
+  if (futStatus != std::future_status::ready) {
+    TORCH_CHECK(
+        futStatus != std::future_status::deferred,
+        "Expected the dump future to have been launched eagerly.");
+    LOG(INFO)
+        << logPrefix() << "Debug dump timed out and is being abandoned."
+        << " This may be due to slow ADDR2LINE performance processing stacktraces."
+        << " Try TORCH_DISABLE_ADDR2LINE=1 and TORCH_NCCL_TRACE_CPP_STACK=0 to work around.";
+  }
+
+  // Calling .get() will raise any exception stored in the promise associated
+  // with the future. (but we can ignore the return value, which will be false
+  // if dumping is not enabled)
+  try {
+    fut.get();
+  } catch (const std::exception& e) {
+    LOG(ERROR) << logPrefix() << "Caught exception during async debug dump: \""
+               << e.what() << "\"\n";
+  } catch (...) {
+    LOG(ERROR) << logPrefix()
+               << "Caught unknown exception during async debug dump.";
+  }
+}
+
 void abortCommsFromMap(
     std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
         ncclCommsMap,
@@ -1151,7 +1181,8 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
   // Serialize all calls to this function to avoid corrupting data, but allow
   // multiple calls in one runtime. User is responsible for preserving the
   // output file from an earlier call before a later call overwrites it.
-  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
+  static std::mutex writeDebugInfoMutex;
+  std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
   LOG(ERROR) << "ProcessGroupNCCL preparing to dump debug info.";
   if (ncclTraceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
@@ -1208,12 +1239,21 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
+  // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
+  // url here.
   const auto exitMsg = c10::str(
       logPrefix(),
-      "NCCL monitor thread timeout. Basically, this could ",
-      "be due to CUDA or NCCL calls being unexpectedly blocking, ",
-      "especially when your program enters a deadlock state in watchdog "
-      "or destructors. If you see this error, please file a bug to PyTorch.");
+      "ProcessGroupNCCL's watchdog got stuck for ",
+      heartbeatTimeoutInSec_,
+      "seconds without making progress in monitoring enqueued collectives. ",
+      "This typically indicates a NCCL/CUDA API hang blocking the watchdog, ",
+      "and could be triggered by another thread holding the GIL inside a ",
+      "CUDA api, or other deadlock-prone behaviors.",
+      "If you suspect the watchdog is not actually stuck and a longer timeout would help, ",
+      "you can either increase the timeout (TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
+      "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
+      "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
+      "or false positive abort; otherwise, please attempt to debug the hang.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
@@ -1239,7 +1279,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // We already log completion inside the thread, so it may not be necessary to
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
-  asyncDebugDump.wait_for(std::chrono::seconds(heartbeatTimeoutInSec_));
+  waitForDumpOrTimeout(asyncDebugDump);
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     const auto logMsg = c10::str(
@@ -1425,8 +1465,7 @@ void ProcessGroupNCCL::watchdogHandler() {
         lastTimePollStore = currentTime;
         if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
           optAsyncDebugDump = launchAsyncDebugDump();
-          optAsyncDebugDump->wait_for(
-              std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
+          waitForDumpOrTimeout(*optAsyncDebugDump);
           const auto exitMsg = c10::str(
               logPrefix(),
               "Another rank reported a timeout and signaled a global abort.");
@@ -1475,8 +1514,7 @@ void ProcessGroupNCCL::watchdogHandler() {
 
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
-              optAsyncDebugDump->wait_for(
-                  std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
+              waitForDumpOrTimeout(*optAsyncDebugDump);
             }
 
           } catch (const std::exception& e) {
