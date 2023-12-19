@@ -9723,7 +9723,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             slotnames,
             id(t.__dict__),
             tuple(t.__dict__.keys()),
-            [getattr(t, name) for name in slotnames]
+            [getattr(t, name, None) for name in slotnames]
         )
         return preserved, moved
 
@@ -9774,7 +9774,11 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             __slots__ = ("b", "a")
 
         class MyTwoTensor3(TwoTensor):
-            __slots__ = ("a", "b", "c")
+            __slots__ = ("a", "b", "c", "d")
+
+        class MyTwoTensor4(TwoTensor):
+            __slots__ = ("a", "c")
+
 
         t1 = torch.rand(4)
         t2 = TwoTensor(torch.rand(4), torch.rand(4))
@@ -9782,12 +9786,16 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         t4 = MyTwoTensor(torch.rand(4), torch.rand(4))
         t5 = MyTwoTensor2(torch.rand(4), torch.rand(4))
         t6 = MyTwoTensor3(torch.rand(4), torch.rand(4))
+        t7 = MyTwoTensor3(torch.rand(4), torch.rand(4))
+        t8 = MyTwoTensor4(torch.rand(4), torch.rand(4))
 
         self._checked_swap(t1, t2)
         with self.assertRaisesRegex(TypeError, "object layout differs"):
             torch.utils.swap_tensors(t1, t3)
         with self.assertRaisesRegex(TypeError, "object layout differs"):
             torch.utils.swap_tensors(t2, t3)
+        with self.assertRaisesRegex(TypeError, "object layout differs"):
+            torch.utils.swap_tensors(t2, t8)
         self._checked_swap(t3, t4)
         self._checked_swap(t3, t5)
         with self.assertRaisesRegex(TypeError, "object layout differs"):
@@ -9797,6 +9805,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self._checked_swap(t3, t4)
         self.assertEqual(t4.c, "foo")
         self.assertEqual(t3.d, "bar")
+        t6.c = "cat"
+        t7.d = "dog"
+        self._checked_swap(t6, t7)
+
 
 
 # The following block extends TestTorch with negative dim wrapping tests

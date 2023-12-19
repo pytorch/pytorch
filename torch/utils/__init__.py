@@ -29,7 +29,7 @@ def swap_tensors(t1, t2):
     At a high level, this will make t1 have the content of t2 while preserving
     its identity.
 
-    This will not work if t1 and t2 have different number of slots.
+    This will not work if t1 and t2 have different slots.
     """
     # Ensure there are no weakrefs
     if weakref.getweakrefs(t1):
@@ -50,6 +50,7 @@ def swap_tensors(t1, t2):
     swap_attr("__dict__")
 
     # Swap the slots
+    # slotnames must match exactly for __class__ to have been swapped
     slots = copyreg._slotnames(t1.__class__)  # type: ignore[attr-defined]
     for slot in slots:
         if hasattr(t1, slot) and hasattr(t2, slot):
