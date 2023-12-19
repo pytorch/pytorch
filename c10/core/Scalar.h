@@ -338,6 +338,7 @@ class C10_API Scalar {
     int64_t i;
     c10::complex<double> z;
     c10::intrusive_ptr_target* p;
+    // NOLINTNEXTLINE(modernize-use-equals-default)
     v_t() {} // default constructor
   } v;
 
