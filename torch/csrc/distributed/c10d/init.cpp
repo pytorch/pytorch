@@ -1040,7 +1040,8 @@ Example::
               py::call_guard<py::gil_scoped_release>(),
               R"(
 The call to check whether a given list of ``keys`` have value stored in
-the store. This call is nonblocking.
+the store. This call immediately returns in normal cases but still suffers
+from some edge deadlock cases, e.g, calling check after TCPStore has been destroyed.
 Calling :meth:`~torch.distributed.store.check` with a list of keys that
 one wants to check whether stored in the store or not.
 
