@@ -72,6 +72,19 @@ IN_PLACE_DESUGARING_MAP = {
 }
 
 
+def _polyfill_call_impl(name):
+    """Create a BuiltinVariable.call_{name} method that inlines through polyfill.{name}"""
+
+    def call_fn(self, tx, *args, **kwargs):
+        return tx.inline_user_function_return(
+            variables.UserFunctionVariable(fn), args, kwargs
+        )
+
+    fn = getattr(polyfill, name)
+    call_fn.__name__ = f"call_{name}"
+    return call_fn
+
+
 class BuiltinVariable(VariableTracker):
     @staticmethod
     @functools.lru_cache(None)
@@ -348,18 +361,15 @@ class BuiltinVariable(VariableTracker):
         ]
         op_handlers[operator.add].extend(list_like_addition_handlers)
 
-        def list_iadd_handler(tx, a, b, options):
+        def list_iadd_handler(tx, a, b, _):
             if not a.mutable_local or not b.has_unpack_var_sequence(tx):
                 # Handler doesn't apply
                 return None
 
-            return tx.replace_all(
-                a,
-                ListVariable(
-                    list(a.items) + list(b.unpack_var_sequence(tx)),
-                    **options,
-                ),
-            )
+            seq = b.unpack_var_sequence(tx)
+            tx.output.side_effects.mutation(a)
+            a.items.extend(seq)
+            return a
 
         list_like_iadd_handlers = [
             (
@@ -1119,7 +1129,7 @@ class BuiltinVariable(VariableTracker):
         if not name_var.is_python_constant():
             unimplemented("non-const getattr() name")
 
-        if tx.output.side_effects.is_attribute_mutation(obj):
+        if tx.output.side_effects.is_attribute_mutation(obj) and name != "grad":
             try:
                 # re-read a pending side effect?
                 return tx.output.side_effects.load_attr(obj, name)
@@ -1200,9 +1210,13 @@ class BuiltinVariable(VariableTracker):
                             else:
                                 grapharg.example.grad = None
                         return VariableBuilder(tx, source)(grapharg.example.grad)
-                unimplemented("tensor grad")
+
+                return obj.dynamic_getattr(tx, name)
             else:
-                unimplemented("tensor grad")
+                example_value = obj.as_proxy().node.meta["example_value"]
+                if example_value.grad is not None:
+                    unimplemented("getattr on non-None grad - NYI")
+                return ConstantVariable(None)
         elif isinstance(
             obj,
             (
@@ -1214,7 +1228,7 @@ class BuiltinVariable(VariableTracker):
             ),
         ):
             try:
-                return obj.var_getattr(tx, name).clone(source=source)
+                return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchInGraphFunctionVariable):
@@ -1243,7 +1257,7 @@ class BuiltinVariable(VariableTracker):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
             try:
-                return obj.var_getattr(tx, name).clone(source=source)
+                return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
 
@@ -1449,6 +1463,10 @@ class BuiltinVariable(VariableTracker):
         # None no-ops this handler and lets the driving function proceed
         return None
 
+    def call_format(self, tx, _format_string, *args, **kwargs):
+        format_string = _format_string.as_python_constant()
+        return variables.StringFormatVariable.create(format_string, args, kwargs)
+
     def call_id(self, tx, *args):
         if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
             nn_mod_variable = args[0]
@@ -1456,6 +1474,9 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstantVariable.create(id(mod))
         else:
             unimplemented(f"call_id with args {args}")
+
+    def call_deepcopy(self, tx, x):
+        unimplemented(f"copy.deepcopy {repr(x)}")
 
     def _comparison(self, tx, left, right):
         """
@@ -1649,12 +1670,8 @@ class BuiltinVariable(VariableTracker):
     call_is_ = _comparison
     call_is_not = _comparison
 
-    def call_all(self, tx, *args, **kwargs):
-        from .builder import SourcelessBuilder
-
-        return tx.inline_user_function_return(
-            SourcelessBuilder()(tx, polyfill.all), args, kwargs
-        )
+    call_all = _polyfill_call_impl("all")
+    call_any = _polyfill_call_impl("any")
 
 
 @contextlib.contextmanager
