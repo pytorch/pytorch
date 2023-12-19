@@ -81,6 +81,7 @@ class NNModuleVariable(VariableTracker):
         self.module_type = module_type
         self.module_key = module_key
         assert self.source
+        assert self.source.is_nn_module()
 
     def python_type(self):
         return self.module_type
@@ -646,6 +647,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 kwargs["value_type"] = type(value)
 
         super().__init__(value=value, **kwargs)
+        if self.source:
+            assert self.source.is_nn_module()
 
     @staticmethod
     @functools.lru_cache(None)
