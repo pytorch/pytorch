@@ -61,7 +61,7 @@ class ColwiseParallel(ParallelStyle):
         >>> )
         >>> ...
 
-    ... note:: By default ``ColwiseParallel`` output is sharded on the last dimension if the ``output_layouts`` not
+    .. note:: By default ``ColwiseParallel`` output is sharded on the last dimension if the ``output_layouts`` not
         specified, if there're operators that require specific tensor shape (i.e. before the paired ``RowwiseParallel``),
         keep in mind that if the output is sharded the operator might need to be adjusted to the sharded size.
     """
