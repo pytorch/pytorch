@@ -13,8 +13,7 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, int64_t pad) {
   TORCH_CHECK(self.dim() == 3, "Input must have 3 dims: time, batch, "
@@ -118,5 +117,4 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
   return std::make_tuple(dInput, dWeight, dBias);
 }
 
-}
-}
+} // namespace at::native
