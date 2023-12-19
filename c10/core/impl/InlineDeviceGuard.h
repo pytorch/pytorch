@@ -9,8 +9,8 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Optional.h>
 
-namespace c10 {
-namespace impl {
+
+namespace c10::impl {
 
 /**
  * A DeviceGuard is an RAII class that sets a device to some value
@@ -423,5 +423,5 @@ class InlineOptionalDeviceGuard {
   optional<InlineDeviceGuard<T>> guard_;
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl
+
