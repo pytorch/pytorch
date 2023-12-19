@@ -20,7 +20,7 @@
 #include <ATen/ops/range_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor& linspace_out(const Tensor& start, const Tensor& end, int64_t steps, Tensor& result) {
   TORCH_CHECK(start.dim() == 0 && end.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
@@ -257,4 +257,4 @@ Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, T
 DEFINE_DISPATCH(arange_stub);
 DEFINE_DISPATCH(linspace_stub);
 
-}} // namespace at::native
+} // namespace at::native
