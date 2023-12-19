@@ -279,7 +279,6 @@ class GradScaler:
                         grads,
                         per_device_found_inf.get(device),
                         per_device_inv_scale.get(device),
-                        device.type,
                     )
         return per_device_found_inf._per_device_tensors
 
@@ -288,15 +287,10 @@ class GradScaler:
 
     def _foreach_non_finite_check_and_unscale_(
         self,
-        grads,
-        found_inf,
-        inv_scale,
-        device_type="gpu",
+        grads: List[torch.Tensor],
+        found_inf: torch.Tensor,
+        inv_scale: torch.Tensor,
     ):
-        if device_type != "gpu":
-            raise NotImplementedError(
-                f"{device_type} devices are not supported by {self.__class__}."
-            )
         torch._amp_foreach_non_finite_check_and_unscale_(
             grads,
             found_inf,
@@ -700,7 +694,10 @@ class GradScaler:
         return self._per_optimizer_states[id(optimizer)]["found_inf_per_device"]
 
     def _update_scale_(
-        self, _scale, _growth_tracker, found_inf_combined
+        self,
+        _scale: torch.Tensor,
+        _growth_tracker: torch.Tensor,
+        found_inf_combined: torch.Tensor,
     ):
         torch._amp_update_scale_(
             _scale,

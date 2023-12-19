@@ -107,35 +107,6 @@ class ShardedGradScaler(GradScaler):
             return type(scaled_outputs)(iterable)
         return iterable
 
-    def _is_tensor_on_supported_device(self, tensor: torch.Tensor):
-        return tensor.is_cuda or tensor.device.type in ("xla", "cpu")
-
-    def _sparse_coalesce(self, tensor: torch.Tensor):
-        return tensor.type(torch.float32).coalesce().type(torch.float16)
-
-    def _init_found_inf(self, device):
-        return torch.full((1,), 0.0, dtype=torch.float32, device=device)
-
-    def _foreach_non_finite_check_and_unscale_(
-        self,
-        grads,
-        found_inf,
-        inv_scale,
-        device_type="gpu",
-    ):
-        if device_type == "cpu":
-            self._foreach_non_finite_check_and_unscale_cpu_(
-                grads,
-                found_inf,
-                inv_scale,
-            )
-        else:
-            super()._foreach_non_finite_check_and_unscale_(
-                grads,
-                found_inf,
-                inv_scale,
-            )
-
     def _foreach_non_finite_check_and_unscale_cpu_(
         self,
         grads: Sequence[torch.Tensor],
@@ -167,10 +138,15 @@ class ShardedGradScaler(GradScaler):
                 grad.data *= inv_scale.item()
 
     def _update_scale_(
-        self, _scale, _growth_tracker, found_inf_combined
+        self,
+        _scale: torch.Tensor,
+        _growth_tracker: torch.Tensor,
+        found_inf_combined: torch.Tensor,
     ):
         if _scale.device.type == "cpu":
-            self._amp_update_scale_cpu_(found_inf_combined)
+            self._amp_update_scale_cpu_(
+                found_inf_combined
+            )
         else:
             super()._update_scale_(
                 _scale,
@@ -242,3 +218,31 @@ class ShardedGradScaler(GradScaler):
 
     def update(self, new_scale: Optional[Union[float, torch.Tensor]] = None) -> None:
         super().update(new_scale)
+
+    def _is_tensor_on_supported_device(self, tensor: torch.Tensor):
+        return tensor.is_cuda or tensor.device.type in ("xla", "cpu")
+
+    def _sparse_coalesce(self, tensor: torch.Tensor):
+        return tensor.type(torch.float32).coalesce().type(torch.float16)
+
+    def _init_found_inf(self, device):
+        return torch.full((1,), 0.0, dtype=torch.float32, device=device)
+
+    def _foreach_non_finite_check_and_unscale_(
+        self,
+        grads: List[torch.Tensor],
+        found_inf: torch.Tensor,
+        inv_scale: torch.Tensor,
+    ):
+        if found_inf.device.type == "cpu":
+            self._foreach_non_finite_check_and_unscale_cpu_(
+                grads,
+                found_inf,
+                inv_scale,
+            )
+        else:
+            super()._foreach_non_finite_check_and_unscale_(
+                grads,
+                found_inf,
+                inv_scale,
+            )
