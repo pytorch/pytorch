@@ -109,7 +109,7 @@ jobs:
           # To get QEMU binaries in our PATH
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
           # Generate PyTorch version to use without suffix
-          echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py --no-build-suffix)" >> "${GITHUB_ENV}"
+          echo "PYTORCH_VERSION=2.1.2" >> "${GITHUB_ENV}"
 
       - name: Setup release specific variables
         run: |
