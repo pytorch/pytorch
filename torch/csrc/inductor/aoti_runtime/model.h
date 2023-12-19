@@ -438,8 +438,8 @@ class AOTInductorModelBase {
           "constants_map_ was not ready when constants_ is trying to be constructed from it!"};
     }
     if (!constants_) {
-      constants_ = std::make_shared<std::vector<ConstantHandle>>(
-          constants_info_.size());
+      constants_ =
+          std::make_shared<std::vector<ConstantHandle>>(constants_info_.size());
     } else {
       constants_->resize(constants_info_.size());
     }
@@ -566,6 +566,12 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
           output_handles, // array for writing output AtenTensorHandle; handles
                           // will be stolen by the caller; the array itself is
                           // borrowed
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor);
+
+  template <typename Inputs, typename Outputs>
+  Outputs run_impl_minimal_arrayref_interface(
+      const Inputs& inputs,
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor);
 
