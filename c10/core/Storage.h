@@ -1,7 +1,18 @@
 #pragma once
 
+#include <c10/core/Allocator.h>
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
 #include <c10/core/StorageImpl.h>
+#include <c10/core/SymInt.h>
+#include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
 #include <c10/util/ExclusivelyOwned.h>
+#include <c10/util/MaybeOwned.h>
+#include <c10/util/UniqueVoidPtr.h>
+#include <c10/util/intrusive_ptr.h>
+#include <cstddef>
+#include <utility>
 
 namespace c10 {
 
