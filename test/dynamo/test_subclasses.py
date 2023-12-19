@@ -31,6 +31,14 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
 
 
+class BaseTorchFunction(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        return super().__torch_function__(func, types, args, kwargs)
+
+
 class MockSubclass(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -139,6 +147,7 @@ GLOBAL_TEST_SUBCLASSES = {
     MockSubclass,
     DummyNDim,
     SigmoidToExpSubclass,
+    BaseTorchFunction,
 }
 
 
@@ -170,6 +179,16 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls._exit_stack.close()
+
+    def test_base_torch_function_tracing(self):
+        def fn(x):
+            return torch.add(x, 1)
+
+        input = torch.ones(2, 2).as_subclass(BaseTorchFunction)
+        out = fn(input)
+        out_opt = compile_full_eager(fn)(input)
+        self.assertIsInstance(out, BaseTorchFunction)
+        self.assertEqual(out, out_opt)
 
     def test_torch_function_state_graph_break(self):
         @torch.compile(backend="eager")

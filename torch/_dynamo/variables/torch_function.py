@@ -11,8 +11,8 @@ from ..utils import has_torch_function, is_tensor_base_attr_getter
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import TupleVariable
-from .tensor import TensorVariable
-from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+from .tensor import TensorSubclassVariable, TensorVariable
+from .user_defined import UserDefinedObjectVariable
 
 
 # [Note: __torch_function__] This feature is a prototype and has some rough edges (contact mlazos with issues):
@@ -160,7 +160,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         return self.class_type
 
     def class_type_var(self):
-        return UserDefinedClassVariable(
+        return TensorSubclassVariable(
             self.class_type, source=GlobalSource(self.global_mangled_class_name())
         )
 
