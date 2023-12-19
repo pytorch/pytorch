@@ -3,6 +3,7 @@
 #include <fstream>
 #include <mutex>
 #include <sstream>
+#include <cxxabi.h>
 
 #if defined(__linux__)
 #include <fcntl.h>
@@ -698,6 +699,16 @@ bool ProcessGroupNCCL::CoalescedWorkNCCL::wait(
 
 static std::atomic<size_t> process_group_id = 0;
 
+template <typename T>
+std::string getTypeName(const T& obj) {
+    int status = 0;
+    std::unique_ptr<char, void(*)(void*)> res {
+        abi::__cxa_demangle(typeid(obj).name(), NULL, NULL, &status),
+        std::free
+    };
+    return (status == 0) ? res.get() : "error occurred";
+}
+
 ProcessGroupNCCL::ProcessGroupNCCL(
     const c10::intrusive_ptr<Store>& store,
     int rank,
@@ -714,6 +725,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       collectiveDebugInfoMode_(false),
       uid_(process_group_id++),
       intraNodeComm_(initIntraNodeComm()) {
+  LOG(ERROR) << "The type of store in the constructor is: " << getTypeName(*store) << "\n\n\n\n";
   TORCH_CHECK_WITH(
       ValueError,
       at::cuda::getNumGPUs() != 0,
@@ -1463,7 +1475,9 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (timeSinceLastWorkListUpdate >= kWatchdogThreadSleepMillis &&
           timeSinceLastPollStore >= heartbeatTimeoutInSec_ * 1000) {
         lastTimePollStore = currentTime;
-        if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
+        LOG(ERROR) << "The type of store_ inside check is: " << getTypeName(*store_);
+        auto flag = store_->check({std::string(TIMEOUT_DUMP)});
+        if (flag && !optAsyncDebugDump) {
           optAsyncDebugDump = launchAsyncDebugDump();
           waitForDumpOrTimeout(*optAsyncDebugDump);
           const auto exitMsg = c10::str(
@@ -1500,6 +1514,7 @@ void ProcessGroupNCCL::watchdogHandler() {
               collectiveDebugInfoMode_.store(true);
               std::vector<uint8_t> vec(1);
               store_->set(std::string(TIMEOUT_DUMP), vec);
+              LOG(ERROR) << "DUMP HERE---------============\n\n\n\n\n\n";
             }
 
             if (dumpOnTimeout_ && !optAsyncDebugDump) {

@@ -3866,7 +3866,10 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
     timeout_sec = 1
 
     def _create_process_group_nccl(self):
-        store = dist.FileStore(self.file_name, self.world_size)
+        DEFAULT_HOSTNAME = "localhost"
+        import torch.testing._internal.common_utils as common
+        port = 34245
+        store = dist.TCPStore(host_name=DEFAULT_HOSTNAME, port=port, world_size=self.world_size, is_master=self.rank == 0, use_libuv=True)
         c10d.init_process_group(
             "nccl",
             world_size=self.world_size,
@@ -3874,6 +3877,10 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
             store=store,
             timeout=timedelta(seconds=NCCLTraceTestDumpOnTimeoutBase.timeout_sec))
         pg = c10d.distributed_c10d._get_default_group()
+
+        store_key = f"store_based_barrier_key:{self.rank}"
+        store.add(store_key, 1)
+        store.get(store_key)
         return pg
 
     def _check_return_codes(self, elapsed_time):
@@ -3948,10 +3955,10 @@ class NCCLTraceTestTimeoutDumpOnIdleRanks(NCCLTraceTestDumpOnTimeoutBase):
             self.assertEqual(self._wait_process(1, timeout=90), -6)
             self.assertTrue(os.path.exists(self._trace_name(rank=1)))
             self.assertTrue(os.path.exists(self._trace_name(rank=0)))
-            with open(self._trace_name(rank=0), 'rb') as f:
+            with open(self._trace_name(rank=1), 'rb') as f:
                 t = pickle.load(f)
                 self.assertEqual(len(t), 2)
-            with open(self._trace_name(rank=1), 'rb') as f:
+            with open(self._trace_name(rank=0), 'rb') as f:
                 t = pickle.load(f)
                 self.assertEqual(len(t), 1)
                 self.assertEqual(t[0]['seq_id'], 1)
@@ -3962,6 +3969,7 @@ class NCCLTraceTestTimeoutDumpOnIdleRanks(NCCLTraceTestDumpOnTimeoutBase):
         os.environ[
             "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"
         ] = f"{NCCLTraceTestDumpOnTimeoutBase.timeout_sec * 2}"
+        os.environ["TORCH_NCCL_ENABLE_MONITORING"] = "0"
         pg = self._create_process_group_nccl()
 
         device = self.local_device
@@ -3969,15 +3977,16 @@ class NCCLTraceTestTimeoutDumpOnIdleRanks(NCCLTraceTestDumpOnTimeoutBase):
             a = torch.full((3, 4), float(self.rank), device=device)
 
             pg.allreduce(a).wait()
-            if self.rank == 0:
+            if self.rank == 1:
                 pg.allreduce(a).wait()
 
             # rank 0 will crash before it passes the sync, but rank1 will exit quickly and cleanly
             torch.cuda.synchronize()
 
             # Force rank 1 to idle so that it also gets debug info dump triggered.
-            if self.rank == 1:
-                time.sleep(6)
+            if self.rank == 0:
+                print("Rank0 is here.")
+                time.sleep(10)
 
 if __name__ == "__main__":
     assert (

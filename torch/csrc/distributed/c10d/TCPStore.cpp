@@ -349,7 +349,9 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   }
 }
 
-TCPStore::~TCPStore() = default;
+TCPStore::~TCPStore() {
+  LOG(ERROR) << "TCPStore destructor called\n\n\n\n\n\n";
+}
 
 void TCPStore::waitForWorkers() {
   detail::timing_guard tguard(clientCounters_["waitForWorkers"]);

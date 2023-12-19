@@ -1225,13 +1225,19 @@ def init_process_group(
             rendezvous_iterator = rendezvous(
                 not_none(init_method), rank, world_size, timeout=timeout
             )
+            logging.error("rendezvous is called here")
+            print("rendezvous is called here")
             store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
             # Use a PrefixStore to avoid accidental overrides of keys used by
             # different systems (e.g. RPC) in case the store is multi-tenant.
             store = PrefixStore("default_pg", store)
+            logging.error("PrefixStore wrapper is called here")
+            print("PrefixStore wrapper is called here")
 
+        print(type(store).__name__)
+        print("store None case is called.")
         default_pg, _ = _new_process_group_helper(
             world_size,
             rank,
@@ -1327,6 +1333,8 @@ def _new_process_group_helper(
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
     _check_valid_timeout(timeout)
 
+    print("Before wrapping", type(store).__name__)
+
     if pg_tag not in [None, ""]:
         # creating with the same tag and rank set results in the same underlying PG
         existing_group = _find_pg_by_ranks_and_tag(pg_tag, global_ranks_in_group)
@@ -1377,6 +1385,7 @@ def _new_process_group_helper(
     for device, backend_str in backend_config.get_device_backend_map().items():
         # Use the group name as prefix in the default store, such that
         # a single store can be reused by multiple groups.
+        print("Before wrapping for backend", type(prefix_store).__name__)
         backend_prefix_store = PrefixStore(f"{device}/", prefix_store)
 
         if backend_str == Backend.MPI:
@@ -1421,9 +1430,11 @@ def _new_process_group_helper(
                 pg_options.split_from = split_from
                 pg_options.split_color = _process_group_color(global_ranks_in_group)
             pg_options.global_ranks_in_group = global_ranks_in_group
+            print("Before init", type(backend_prefix_store).__name__)
             backend_class = ProcessGroupNCCL(
                 backend_prefix_store, group_rank, group_size, pg_options)
             backend_type = ProcessGroup.BackendType.NCCL
+            print("After init", type(backend_prefix_store).__name__)
         elif backend_str == Backend.UCC and is_ucc_available():
             # TODO: once UCC plugin is fully deprecated, remove
             # is_ucc_available() from above elif-condition and raise

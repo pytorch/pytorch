@@ -258,6 +258,7 @@ SocketImpl::~SocketImpl() {
 #ifdef _WIN32
   ::closesocket(hnd_);
 #else
+  LOG(ERROR) << "The socket has been closed.";
   ::close(hnd_);
 #endif
 }
