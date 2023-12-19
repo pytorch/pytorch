@@ -13,10 +13,10 @@ from torch.ao.quantization.fake_quantize import (
 )
 from torch.ao.quantization.observer import (
     HistogramObserver,
+    MovingAverageMinMaxObserver,
     MovingAveragePerChannelMinMaxObserver,
     PerChannelMinMaxObserver,
     PlaceholderObserver,
-    MovingAverageMinMaxObserver,
 )
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
