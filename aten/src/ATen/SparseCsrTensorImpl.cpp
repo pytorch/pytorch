@@ -194,7 +194,7 @@ void SparseCsrTensorImpl::set_member_tensors(
     const Tensor& crow_indices,
     const Tensor& col_indices,
     const Tensor& values,
-    IntArrayRef size) {
+    c10::SymIntArrayRef size) {
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
       "set_member_tensors called on tensor with symbolic shape");
@@ -211,7 +211,7 @@ void SparseCsrTensorImpl::set_member_tensors(
   col_indices_ = col_indices;
   values_ = values;
 
-  sizes_and_strides_.set_sizes(size);
+  sizes_and_strides_.set_sizes(C10_AS_INTARRAYREF_SLOW(size));
   refresh_numel();
   // TODO: If this check ever shows up as a bottleneck, which is unlikely given that
   // comparing devices only involves comparing the type and index (two integers), we
@@ -223,6 +223,14 @@ void SparseCsrTensorImpl::set_member_tensors(
               at::sparse_csr::plainIndicesName(layout_), " need to be on the same device.");
   TORCH_CHECK(values_.device() == device(),
               "Values and compressed tensor instance need to be on the same device.");
+}
+
+void SparseCsrTensorImpl::set_member_tensors(
+    const Tensor& crow_indices,
+    const Tensor& col_indices,
+    const Tensor& values,
+    IntArrayRef size) {
+  set_member_tensors(crow_indices, col_indices, values, c10::fromIntArrayRefSlow(size));
 }
 
 IntArrayRef SparseCsrTensorImpl::strides_custom() const {
