@@ -539,7 +539,9 @@ class StreamVariable(VariableTracker):
         self.proxy = proxy
         self.value = value
         self.device = device
-        torch._dynamo.device_interface.register_interface_for_device(self.device, torch._dynamo.device_interface.CudaInterface)
+        torch._dynamo.device_interface.register_interface_for_device(
+            self.device, torch._dynamo.device_interface.CudaInterface
+        )
 
     def call_method(
         self,
@@ -592,7 +594,6 @@ class StreamVariable(VariableTracker):
         codegen.extend_output([codegen.create_load_const(str(self.device))])
         codegen.extend_output(create_call_function(1, False))
         return []
-
 
 
 class EventVariable(VariableTracker):

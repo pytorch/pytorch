@@ -411,6 +411,7 @@ class TupleVariable(BaseListVariable):
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         return variables.ConstantVariable.create(hasattr((), name))
 
+
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
 

@@ -61,7 +61,6 @@ from ..source import (
     RandomValueSource,
     Source,
     TupleIteratorGetItemSource,
-    GlobalSource,
 )
 from ..utils import (
     build_checkpoint_variable,
@@ -1558,9 +1557,7 @@ def wrap_fx_proxy_cls(
         for _, device_interface in get_registered_device_interfaces()
     ]:
         proxy.node.meta["example_value"] = example_value
-        return StreamVariable(
-            proxy, example_value, example_value.device, **options
-        )
+        return StreamVariable(proxy, example_value, example_value.device, **options)
     elif (
         inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, _EventBase)
     ) or proxy.node.target in [

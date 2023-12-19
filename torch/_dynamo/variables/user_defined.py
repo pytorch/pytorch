@@ -16,7 +16,6 @@ import torch.nn
 from torch._guards import TracingContext
 
 from .. import variables
-from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..allowed_functions import is_allowed
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -543,9 +542,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and (
                 isinstance(
                     self.value,
-                    (
-                        torch.nn.Module,
-                        torch.distributed.fsdp._flat_param.FlatParamHandle,
+                    (torch.nn.Module,)
+                    + (
+                        (torch.distributed.fsdp._flat_param.FlatParamHandle,)
+                        if torch.distributed.is_available()
+                        else ()
                     ),
                 )
             )

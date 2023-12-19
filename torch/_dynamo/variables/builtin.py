@@ -1284,6 +1284,7 @@ class BuiltinVariable(VariableTracker):
             name = name_var.as_python_constant()
             if isinstance(obj, variables.TensorVariable):
                 from .builder import wrap_fx_proxy
+
                 if name == "requires_grad" and not config.trace_distributed:
                     # TODO(voz): Make it work properly for all cases
                     unimplemented(
@@ -1717,6 +1718,7 @@ class BuiltinVariable(VariableTracker):
 
     call_all = _polyfill_call_impl("all")
     call_any = _polyfill_call_impl("any")
+
 
 @contextlib.contextmanager
 def dynamo_disable_grad(tx):

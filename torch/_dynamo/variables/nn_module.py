@@ -350,6 +350,7 @@ class NNModuleVariable(VariableTracker):
         constant=False,
     ) -> "VariableTracker":
         from . import ConstantVariable, ListIteratorVariable, TupleVariable
+
         key = self.module_key
         module = tx.output.get_submodule(key)
 
@@ -481,7 +482,17 @@ class NNModuleVariable(VariableTracker):
         elif name == "_named_members":
             # The get_members_fn fails a const check, but this is a private internal lambda
             # passed in nn_module, and so can be safely non-const, as it will not execute arbitrary user code
-            return wrap_values(module._named_members(**get_kwargs("get_members_fn", "prefix", "recurse", "remove_duplicates", assert_const=False)))
+            return wrap_values(
+                module._named_members(
+                    **get_kwargs(
+                        "get_members_fn",
+                        "prefix",
+                        "recurse",
+                        "remove_duplicates",
+                        assert_const=False,
+                    )
+                )
+            )
         elif name == "keys":
             assert not (args or kwargs)
             result = []
@@ -830,9 +841,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
                 **get_kwargs("prefix", "recurse", "remove_duplicate")
             ):
                 result.append(named_embed(name, buffer))
-            return variables.ListIteratorVariable(
-                result, mutable_local=MutableLocal()
-            )
+            return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "children":
             assert not (args or kwargs)
             return wrap_values(self.value.named_children())
@@ -896,9 +905,7 @@ def _wrap_values(items, *, tx, key, source_cls, source):
                 source=source_cls(_gen_source(source, name)),
             )
         )
-    return variables.ListIteratorVariable(
-        result, mutable_local=MutableLocal()
-    )
+    return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
 
 
 # Breaks tx first convention because meant for functools partial usage, post * args should be

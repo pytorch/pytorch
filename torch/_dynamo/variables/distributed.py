@@ -5,11 +5,10 @@ import torch
 from torch._dynamo.variables.base import VariableTracker
 from .. import variables
 from ..exc import unimplemented
-from ..utils import istype, proxy_args_kwargs
+from ..utils import istype
 from .base import VariableTracker
 from .constant import ConstantVariable
 
-from .functions import UserFunctionVariable
 
 class DistributedVariable(VariableTracker):
     def __init__(self, **kwargs):

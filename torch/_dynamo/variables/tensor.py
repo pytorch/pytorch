@@ -21,7 +21,7 @@ import torch.random
 
 from torch._dynamo.variables.base import VariableTracker
 
-from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
+from torch.fx.experimental.symbolic_shapes import guard_scalar, SymTypes
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
     GuardOnDataDependentSymNode,
