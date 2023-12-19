@@ -1765,6 +1765,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI,
+            FunctionalTensorMode,
             FunctorchFunctionalizeAPI,
             PythonFunctionalizeAPI,
         )
@@ -1788,7 +1789,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         t1 = torch.rand(5, device="cuda")
         t2 = torch.rand(5, device="cuda")
 
-        gm = make_fx(PythonFunctionalizeAPI().functionalize(f))(t1, t2)
+        gm = make_fx(PythonFunctionalizeAPI(FunctionalTensorMode()).functionalize(f))(
+            t1, t2
+        )
         # Make sure t2 was not modified
         self.assertNotEqual(gm(t1, t2), t2)
 
