@@ -2119,14 +2119,14 @@ class CommonTemplate:
                 .sub(8),
             )
 
-            self.common(
-                fn,
-                (
-                    torch.randn(8, 8),
-                    torch.randint(0, 255, (4, 8), dtype=torch.uint8),
-                ),
-                check_lowp=True,
-            )
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8),
+            ),
+            check_lowp=True,
+        )
 
     def test_mm_mixed_dtype(self):
         def fn(a, b):
