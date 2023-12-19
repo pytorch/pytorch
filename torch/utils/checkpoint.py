@@ -20,6 +20,7 @@ from weakref import ReferenceType
 
 import torch
 import torch.fx.traceback as fx_traceback
+from torch._functorch._aot_autograd.functional_utils import is_fun
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -424,7 +425,8 @@ def checkpoint(
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
         preserve_rng_state(bool, optional):  Omit stashing and restoring
-            the RNG state during each checkpoint.
+            the RNG state during each checkpoint. Note that under torch.compile,
+            this flag doesn't take effect and we always preserve RNG state.
             Default: ``True``
         use_reentrant(bool, optional): Use checkpointing
             implementation that requires re-entrant autograd.
@@ -1142,12 +1144,10 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
     # There should probably be a better way to do this...
+    # TODO: unify _is_compiling across all compile stacks
     for arg in args:
-        if isinstance(arg, torch.Tensor):
-            if isinstance(arg, torch._subclasses.functional_tensor.FunctionalTensor):
-                arg = torch._from_functional_tensor(arg.elem)
-            if isinstance(arg, torch._subclasses.FakeTensor):
-                return True
+        if isinstance(arg, torch.Tensor) and is_fun(arg):
+            return True
     return False
 
 

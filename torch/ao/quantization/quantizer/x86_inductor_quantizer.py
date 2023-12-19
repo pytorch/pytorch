@@ -7,12 +7,16 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import torch
 import torch.nn.functional as F
-from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
+from torch.ao.quantization.fake_quantize import (
+    FakeQuantize,
+    FusedMovingAvgObsFakeQuantize,
+)
 from torch.ao.quantization.observer import (
     HistogramObserver,
     MovingAveragePerChannelMinMaxObserver,
     PerChannelMinMaxObserver,
     PlaceholderObserver,
+    MovingAverageMinMaxObserver,
 )
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
@@ -41,7 +45,6 @@ from torch.fx.passes.utils.source_matcher_utils import (
 __all__ = [
     "X86InductorQuantizer",
     "get_default_x86_inductor_quantization_config",
-    "get_default_x86_inductor_dynamic_quantization_config",
 ]
 
 
@@ -155,7 +158,6 @@ def _get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
     supported_config_and_operators: List[OperatorConfig] = []
     for quantization_config in [
         get_default_x86_inductor_quantization_config(),
-        get_default_x86_inductor_dynamic_quantization_config(),
     ]:
         ops = _supported_quantized_operators()
         for pattern_list in ops.values():
@@ -166,10 +168,25 @@ def _get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
 
 
 @functools.lru_cache
-def get_default_x86_inductor_quantization_config(is_qat: bool = False):
-    act_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
-        FusedMovingAvgObsFakeQuantize if is_qat else HistogramObserver
-    )
+def get_default_x86_inductor_quantization_config(
+    is_qat: bool = False,
+    is_dynamic: bool = False,
+):
+    extra_args: Dict[str, Any] = {"eps": 2**-12}
+    if is_qat:
+        if is_dynamic:
+            act_observer_or_fake_quant_ctr = FakeQuantize
+            dynamic_quant_observer = MovingAverageMinMaxObserver.with_args(
+                averaging_constant=1
+            )
+            extra_args["observer"] = dynamic_quant_observer
+        else:
+            act_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize  # type: ignore[assignment]
+    else:
+        if is_dynamic:
+            act_observer_or_fake_quant_ctr = PlaceholderObserver  # type: ignore[assignment]
+        else:
+            act_observer_or_fake_quant_ctr = HistogramObserver  # type: ignore[assignment]
 
     # Copy from x86 default qconfig from torch/ao/quantization/qconfig.py
     act_quantization_spec = QuantizationSpec(
@@ -177,9 +194,9 @@ def get_default_x86_inductor_quantization_config(is_qat: bool = False):
         quant_min=0,
         quant_max=255,  # reduce_range=False
         qscheme=torch.per_tensor_affine,
-        is_dynamic=False,
+        is_dynamic=is_dynamic,
         observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(
-            eps=2**-12
+            **extra_args
         ),
     )
 
@@ -187,7 +204,6 @@ def get_default_x86_inductor_quantization_config(is_qat: bool = False):
         FusedMovingAvgObsFakeQuantize if is_qat else PerChannelMinMaxObserver
     )
 
-    extra_args: Dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         # Only support per channel quant for now
         extra_args["observer"] = MovingAveragePerChannelMinMaxObserver  # type: ignore[dict-item]
@@ -202,54 +218,13 @@ def get_default_x86_inductor_quantization_config(is_qat: bool = False):
             **extra_args
         ),
     )
-    bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
-        PlaceholderObserver
-    )
-    bias_quantization_spec = QuantizationSpec(
-        dtype=torch.float, observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
-    )
+    bias_quantization_spec = None  # will use placeholder observer by default
     quantization_config = QuantizationConfig(
         act_quantization_spec,
         act_quantization_spec,
         weight_quantization_spec,
         bias_quantization_spec,
         is_qat,
-    )
-    return quantization_config
-
-
-@functools.lru_cache
-def get_default_x86_inductor_dynamic_quantization_config():
-    act_quantization_spec = QuantizationSpec(
-        dtype=torch.uint8,
-        quant_min=0,
-        quant_max=255,
-        is_dynamic=True,
-        observer_or_fake_quant_ctr=PlaceholderObserver.with_args(is_dynamic=True),
-    )
-
-    extra_args: Dict[str, Any] = {"eps": 2**-12}
-    weight_quantization_spec = QuantizationSpec(
-        dtype=torch.int8,
-        quant_min=-128,
-        quant_max=127,
-        qscheme=torch.per_channel_symmetric,
-        ch_axis=0,  # 0 corresponding to output channel
-        is_dynamic=False,  # Weight is not quantized at runtime but ahead of time
-        observer_or_fake_quant_ctr=PerChannelMinMaxObserver.with_args(**extra_args),
-    )
-    bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
-        PlaceholderObserver
-    )
-    bias_quantization_spec = QuantizationSpec(
-        dtype=torch.float, observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
-    )
-    quantization_config = QuantizationConfig(
-        act_quantization_spec,
-        act_quantization_spec,
-        weight_quantization_spec,
-        bias_quantization_spec,
-        is_qat=False,
     )
     return quantization_config
 
