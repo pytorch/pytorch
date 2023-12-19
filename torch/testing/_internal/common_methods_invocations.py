@@ -14282,11 +14282,13 @@ op_db: List[OpInfo] = [
             # skip for sm < 80
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
                          device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace', # innocent comment to cause problems
                          device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_difoo barspatch_meta_outplace',
                          device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
+                        #  more problems
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatlajfdkjch_symbolic_meta_outplace',
+            # more comments foo bar
                          device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),),
     ),
     OpInfo(
