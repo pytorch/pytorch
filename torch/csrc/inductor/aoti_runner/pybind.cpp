@@ -21,6 +21,6 @@ void initAOTIRunnerBindings(PyObject* module) {
       .def(py::init<const std::string&, int>())
       .def("run", &AOTIModelContainerRunnerCuda::run)
       .def("get_call_spec", &AOTIModelContainerRunnerCuda::get_call_spec);
-}
 #endif
+}
 } // namespace torch::inductor
