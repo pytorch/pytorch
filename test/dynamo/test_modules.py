@@ -1535,6 +1535,31 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_mod(x)
         self.assertEqual(cnt.frame_count, 3)
 
+    def test_parameterize(self):
+        torch.manual_seed(0)
+
+        class Symmetric(torch.nn.Module):
+            def forward(self, X):
+                return X.triu() + X.triu(1).transpose(-1, -2)
+
+        x = torch.randn(3)
+
+        def f(x):
+            layer = torch.nn.Linear(3, 3, bias=False)
+            torch.nn.utils.parametrize.register_parametrization(
+                layer, "weight", Symmetric()
+            )
+            y = layer(x)
+            return y, layer.weight
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        f_compiled = torch._dynamo.optimize(cnt)(f)
+
+        out_compiled, weight = f_compiled(x)
+        out = torch.nn.functional.linear(x, weight)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(out_compiled, out)
+
     def test_attr(self):
         class MockModule(torch.nn.Module):
             def __init__(self):

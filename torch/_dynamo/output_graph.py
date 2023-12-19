@@ -727,7 +727,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-
             install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):

@@ -54,7 +54,7 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
-from .source import DefaultsSource, LocalSource, TypeSource
+from .source import LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
@@ -907,20 +907,6 @@ class PyExprCSEPass:
         return replacer.preface, _ast_unparse(new_node)
 
 
-def must_add_nn_module_guards(guard):
-    # For config.guard_nn_modules=False, we can skip all the guards that
-    # originate from inside of nn module except for a few categories.
-    return (
-        # Guard for defaults
-        isinstance(guard.originating_source, DefaultsSource)
-        # Guard using dict tags if the config flag is set
-        or (
-            config.guard_nn_modules_using_dict_tags
-            and guard.create_fn is GuardBuilder.NN_MODULE
-        )
-    )
-
-
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -1070,15 +1056,17 @@ class CheckFunctionManager:
                         converted.append(dim.node.maybe_as_int())
                 return converted
 
-            dynamic_dims_sizes = [
-                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["size"])
-                for t in tensor_check_examples
-            ]
+            dynamic_dims_sizes = []
+            dynamic_dims_strides = []
 
-            dynamic_dims_strides = [
-                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"])
-                for t in tensor_check_examples
-            ]
+            for i, t in enumerate(tensor_check_examples):
+                assert (
+                    t in self.output_graph.tensor_weakref_to_sizes_strides
+                ), f"Invariant violated, tensor named {tensor_check_names[i]} not found"
+
+                tensor_info = self.output_graph.tensor_weakref_to_sizes_strides[t]
+                dynamic_dims_sizes.append(convert(tensor_info["size"]))
+                dynamic_dims_strides.append(convert(tensor_info["stride"]))
 
             tensor_guards = TensorGuards(
                 *tensor_check_examples,

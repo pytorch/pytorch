@@ -19,7 +19,13 @@ from .. import variables
 from ..allowed_functions import is_allowed
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
+from ..source import (
+    AttrSource,
+    GetItemSource,
+    NNModuleSource,
+    ODictGetItemSource,
+    RandomValueSource,
+)
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -616,6 +622,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         ):
             if source:
+                if isinstance(self, variables.UnspecializedNNModuleVariable):
+                    source = NNModuleSource(source)
                 return VariableBuilder(tx, source)(subobj)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)
