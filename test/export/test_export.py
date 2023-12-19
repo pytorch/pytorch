@@ -2015,7 +2015,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         self.assertExpectedInline(
             str(cond_top_level_nn_module_stack),
-            """{'L__self__': ('', <class 'torch.fx.experimental.proxy_tensor.CondExport'>), 'L__self__bar': ('bar', <class 'torch.fx.experimental.proxy_tensor.Bar'>)}"""
+            """{'L__self__': ('', <class 'test_export.TestExport.test_cond_with_module_stack_export_with.<locals>.CondExport'>), 'L__self__bar': ('bar', <class 'test_export.TestExport.test_cond_with_module_stack_export_with.<locals>.Bar'>)}"""
         )
 
 

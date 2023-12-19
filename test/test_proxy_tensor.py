@@ -1446,7 +1446,7 @@ def forward(self, a_1):
                 elif len(node.meta["nn_module_stack"]) == 2:
                     self.assertExpectedInline(
                         str(node.meta["nn_module_stack"]),
-                        """OrderedDict([('', ('', <class 'test_proxy_tensor.TestSymbolicTracing.test_make_fx_with_custom_tracer_preserving_nn_module_stack.<locals>.Foo'>)), ('bar', ('bar', <class 'torch.fx.experimental.proxy_tensor.Bar'>))])"""  # noqa: B950
+                        """OrderedDict([('', ('', <class 'test_proxy_tensor.TestSymbolicTracing.test_make_fx_with_custom_tracer_preserving_nn_module_stack.<locals>.Foo'>)), ('bar', ('bar', <class 'test_proxy_tensor.TestSymbolicTracing.test_make_fx_with_custom_tracer_preserving_nn_module_stack.<locals>.Bar'>))])"""  # noqa: B950
                     )
                     found = True
                 else:

@@ -799,6 +799,8 @@ class _ModuleStackTracer(PythonKeyTracer):
                     {},
                 )
                 self.__dict__ = base.__dict__
+                self.__class__.__module__ = base.__class__.__module__
+                self.__class__.__qualname__ = base.__class__.__qualname__
                 self_.proxy_paths[self] = path
                 self_.proxy_modules[self] = base
 
