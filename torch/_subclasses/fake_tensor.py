@@ -694,14 +694,7 @@ def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     out_fake = []
 
     for i, meta_t in enumerate(out_meta):
-        device = tensor_lists[0][i].device
-        for j in range(1, len(tensor_lists)):
-            other_device = tensor_lists[j][i].device
-            torch._check(
-                other_device == device,
-                lambda: f"found two different devices {device}, {other_device}",
-            )
-
+        device, _ = FakeTensor._find_common_device(func, [tl[i] for tl in tensor_lists])
         out_fake.append(
             fake_mode.fake_tensor_converter.from_meta_and_device(
                 fake_mode, meta_t, device
