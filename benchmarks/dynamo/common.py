@@ -1948,7 +1948,9 @@ class BenchmarkRunner:
             if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
                 self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
             else:
-                self.optimizer = torch.optim.Adam(params, lr=0.01, foreach=True)
+                self.optimizer = torch.optim.Adam(
+                    params, lr=0.01, capturable=True, foreach=True
+                )
         else:
             self.optimizer = None
 
