@@ -51,7 +51,9 @@ if HAS_CUDA:
     @triton.autotune(
         configs=[
             triton.Config({"BLOCK_SIZE": 128}, num_stages=3, num_warps=8),
+            triton.Config({"BLOCK_SIZE": 128}, num_stages=4, num_warps=4),
             triton.Config({"BLOCK_SIZE": 64}, num_stages=3, num_warps=8),
+            triton.Config({"BLOCK_SIZE": 64}, num_stages=4, num_warps=4),
         ],
         key=[],
     )
@@ -78,7 +80,13 @@ if HAS_CUDA:
                 {"BLOCK_SIZE_X": 128, "BLOCK_SIZE_Y": 128}, num_stages=3, num_warps=8
             ),
             triton.Config(
+                {"BLOCK_SIZE_X": 128, "BLOCK_SIZE_Y": 128}, num_stages=4, num_warps=4
+            ),
+            triton.Config(
                 {"BLOCK_SIZE_X": 64, "BLOCK_SIZE_Y": 64}, num_stages=3, num_warps=8
+            ),
+            triton.Config(
+                {"BLOCK_SIZE_X": 64, "BLOCK_SIZE_Y": 64}, num_stages=4, num_warps=4
             ),
         ],
         key=[],
