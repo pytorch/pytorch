@@ -4,6 +4,7 @@ from typing import Optional, Tuple
 
 import torch
 import torch.nn
+import torch.nn.functional as F
 from torch.backends.cuda import (
     can_use_efficient_attention,
     can_use_flash_attention,
@@ -55,10 +56,10 @@ def _validate_sdpa_input(
             f"Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: "
             f"{query.dim()}, key.dim: {key.dim()} and value.dim: {value.dim()} instead."
         )
-    if query._ragged_idx != 2 or key._ragged_idx != 2 or value._ragged_idx != 2:
+    if query._ragged_idx != key._ragged_idx or query._ragged_idx != value._ragged_idx:
         raise ValueError(
-            f"Expected query, key, and value to all be be jagged at dimension 2, but got query._ragged_idx: "
-            f"{query._ragged_idx}, key._ragged_idx: {key._ragged_idx} and value._ragged_idx: {value._ragged_idx} instead."
+            f"Expected query, key, and value to all be ragged on the same dimension, but got ragged "
+            f"dims {query._ragged_idx}, {key._ragged_idx}, and {value._ragged_idx}, respectively."
         )
     if attn_mask is not None:
         # TODO: Figure out whether masks are actually supported for this layout or not
@@ -638,6 +639,33 @@ def jagged_scaled_dot_product_attention(
     scale=None,
 ):
     _validate_sdpa_input(query, key, value, attn_mask, dropout_p, is_causal, scale)
+    # for mypy, ugh
+    assert (
+        isinstance(query, NestedTensor)
+        and isinstance(key, NestedTensor)
+        and isinstance(value, NestedTensor)
+    )
+
+    # Special path for non-ragged sequence length (e.g. for SAM where we have a ragged
+    # second batch dim instead). For this case, we can just send the dense buffers through
+    # vanilla SDPA.
+    if query.dim() > 3 and key.dim() > 3 and value.dim() > 3 and query._ragged_idx == 1:
+        from torch.nested._internal.ops import extract_kwargs
+
+        output = F.scaled_dot_product_attention(
+            query._values,
+            key._values,
+            value._values,
+            attn_mask=(
+                attn_mask._values if isinstance(attn_mask, NestedTensor) else attn_mask
+            ),
+            dropout_p=dropout_p,
+            is_causal=is_causal,
+            scale=scale,
+        )
+
+        return NestedTensor(output, **extract_kwargs(query))
+
     compute_logsumexp = query.requires_grad or key.requires_grad or value.requires_grad
 
     backend_choice = _select_sdp_backend(
