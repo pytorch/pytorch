@@ -1066,28 +1066,20 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self, unary_op=torch.nn.ReLU(), int8_mixed_bf16=False
     ):
         class M(torch.nn.Module):
-            def __init__(self, use_bias, post_op_algo):
+            def __init__(self, use_bias):
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4, use_bias)
-                if unary_op == torch.nn.GELU():
-                    self.unary_fn = copy.deepcopy(unary_op(approximate=post_op_algo))
-                else:
-                    self.unary_fn = copy.deepcopy(unary_op)
+                self.unary_fn = copy.deepcopy(unary_op)
                 self.linear2 = torch.nn.Linear(4, 4, use_bias)
-                if unary_op == torch.nn.GELU():
-                    self.unary_fn2 = copy.deepcopy(unary_op(approximate=post_op_algo))
-                else:
-                    self.unary_fn2 = copy.deepcopy(unary_op)
+                self.unary_fn2 = copy.deepcopy(unary_op)
 
             def forward(self, x):
                 tmp = self.unary_fn(self.linear(x))
                 return self.unary_fn2(self.linear2(tmp))
 
         bias_list = [True, False]
-        post_op_algorithms = ["none", "tanh"]
-        cases = itertools.product(bias_list, post_op_algorithms)
-        for bias, post_op_algo in cases:
-            mod = M(bias, post_op_algo).eval()
+        for bias in bias_list:
+            mod = M(bias).eval()
             v = torch.randn((2, 4))
 
             def matcher_check_fn():
@@ -1132,7 +1124,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a Linear->GELU pattern.
         """
-        self._qlinear_unary_cpu_test_helper(unary_op=torch.nn.GELU())
+        for gelu in [torch.nn.GELU("none"), torch.nn.GELU("tanh")]:
+            self._qlinear_unary_cpu_test_helper(unary_op=gelu)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
