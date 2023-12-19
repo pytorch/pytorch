@@ -1118,7 +1118,6 @@ class BuiltinVariable(VariableTracker):
             GetAttrVariable,
             PythonModuleVariable,
             TorchInGraphFunctionVariable,
-            TorchVariable,
             UserFunctionVariable,
         )
         from .builder import SourcelessBuilder, VariableBuilder
@@ -1226,16 +1225,26 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
             ),
         ):
+            if (
+                isinstance(obj, variables.UserDefinedClassVariable)
+                and obj.as_python_constant() is torch.Tensor
+            ):
+                member = getattr(obj.value, name)
+                if trace_rules.is_aten_op_or_tensor_method(member):
+                    return TorchInGraphFunctionVariable(member, **options)
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
-        elif isinstance(obj, TorchInGraphFunctionVariable):
-            member = getattr(obj.value, name)
-            if trace_rules.lookup(member) is not None:
-                return trace_rules.lookup(member)(member, **options)
-        elif isinstance(obj, TorchVariable):
-            member = getattr(obj.value, name)
+        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
+            if obj.is_torch:
+                member = getattr(obj.value, name)
+            else:
+                member = obj.value.__dict__[name]
+
+            if config.replay_record_enabled:
+                tx.exec_recorder.record_module_access(obj.value, name, member)
+
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
@@ -1245,13 +1254,6 @@ class BuiltinVariable(VariableTracker):
                 return VariableBuilder(tx, source)(member)
             else:
                 return SourcelessBuilder()(tx, member)
-        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
-            member = obj.value.__dict__[name]
-
-            if config.replay_record_enabled:
-                tx.exec_recorder.record_module_access(obj.value, name, member)
-
-            return VariableBuilder(tx, source)(member)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
