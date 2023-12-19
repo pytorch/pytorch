@@ -132,7 +132,7 @@ class ShardedGradScaler(GradScaler):
                 torch.isinf(grad).any().item() is True
                 or torch.isnan(grad).any().item() is True
             ):
-                found_inf.data = torch.tensor([1.0])
+                found_inf.fill_(1.0)
                 break
             else:
                 grad.data *= inv_scale.item()
@@ -224,9 +224,6 @@ class ShardedGradScaler(GradScaler):
 
     def _sparse_coalesce(self, tensor: torch.Tensor):
         return tensor.type(torch.float32).coalesce().type(torch.float16)
-
-    def _init_found_inf(self, device):
-        return torch.full((1,), 0.0, dtype=torch.float32, device=device)
 
     def _foreach_non_finite_check_and_unscale_(
         self,

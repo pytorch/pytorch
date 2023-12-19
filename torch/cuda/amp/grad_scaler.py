@@ -346,15 +346,12 @@ class GradScaler:
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
         assert self._scale is not None
         inv_scale = self._scale.double().reciprocal().float()
-        found_inf = self._init_found_inf(self._scale.device)
+        found_inf = torch.full((), 0.0, dtype=torch.float32, device=self._scale.device)
 
         optimizer_state["found_inf_per_device"] = self._unscale_grads_(
             optimizer, inv_scale, found_inf, False
         )
         optimizer_state["stage"] = OptState.UNSCALED
-
-    def _init_found_inf(self, device):
-        return torch.full((), 0.0, dtype=torch.float32, device=device)
 
     def _maybe_opt_step(
         self,
