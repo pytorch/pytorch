@@ -37,4 +37,10 @@ class FakeContext:
 
 
 def call_backward(backward_fn, saved_tensors, *args):
-    return backward_fn(FakeContext(saved_tensors), *args)
+    grads = backward_fn(FakeContext(saved_tensors), *args)
+
+    # in eager, we wrap in a tuple when there's only one grad output
+    if type(grads) is not tuple:
+        grads = (grads,)
+
+    return grads

@@ -100,7 +100,7 @@ class AutogradCompilerInstance:
         saved_tensors_end_idx: int,
     ):
         assert self.hooks_proxy is not None
-        assert self.saved_tensors_proxy is not None
+        assert self.args_proxy is not None
         backward_fn = self.hooks_proxy[backward_idx]
         saved_variables = self.args_proxy[saved_tensors_start_idx:saved_tensors_end_idx]
         proxies = self.fx_tracer.create_proxy(
