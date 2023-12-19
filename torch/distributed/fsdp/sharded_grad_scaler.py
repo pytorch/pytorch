@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -76,6 +76,27 @@ class ShardedGradScaler(GradScaler):
         )
         if self._enabled:
             self.process_group = process_group
+
+    @overload
+    def scale(self, outputs: torch.Tensor) -> torch.Tensor:
+        ...
+
+    @overload
+    def scale(self, outputs: List[torch.Tensor]) -> List[torch.Tensor]:
+        ...
+
+    @overload
+    def scale(self, outputs: Tuple[torch.Tensor, ...]) -> Tuple[torch.Tensor, ...]:
+        ...
+
+    @overload
+    def scale(self, outputs: Iterable[torch.Tensor]) -> Iterable[torch.Tensor]:
+        ...
+
+    def scale(
+        self, outputs: Union[torch.Tensor, Iterable[torch.Tensor]]
+    ) -> Union[torch.Tensor, Iterable[torch.Tensor]]:
+        return super().scale(outputs)
 
     def _is_tensor_on_supported_device(self, tensor: torch.Tensor):
         return tensor.is_cuda or tensor.device.type in ("xla", "cpu")
@@ -216,3 +237,6 @@ class ShardedGradScaler(GradScaler):
                 self._growth_tracker.fill_(0)
             else:
                 self._growth_tracker = successful
+
+    def update(self, new_scale: Optional[Union[float, torch.Tensor]] = None) -> None:
+        super().update(new_scale)
