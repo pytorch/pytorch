@@ -1,5 +1,6 @@
 import functools
 import math
+import operator
 
 import torch
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
@@ -20,7 +21,7 @@ def _outer_to_inner_dim(ndim, dim):
     return 0 if dim < 2 else dim - 1
 
 
-def _wrap_jagged_dim(ndim, dim, op_name):
+def _wrap_jagged_dim(ndim, dim, op_name, convert_to_inner_dim=True):
     from torch._prims_common import canonicalize_dims
 
     wrapped = canonicalize_dims(ndim, dim)
@@ -28,7 +29,7 @@ def _wrap_jagged_dim(ndim, dim, op_name):
         raise RuntimeError(
             f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1"
         )
-    return _outer_to_inner_dim(ndim, wrapped)
+    return _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
 
 
 def _wrap_jagged_dims(ndim, dims, op_name):
@@ -304,14 +305,22 @@ def jagged_torch_function(func, *args, **kwargs):
         )
 
         inp = new_kwargs.pop("input")
-        new_kwargs["start_dim"] = _wrap_jagged_dim(
-            inp.dim(), new_kwargs["start_dim"], "flatten"
+
+        # NB: stay in outer dim space because we're going to redispatch on a NT input
+        start_dim = _wrap_jagged_dim(
+            inp.dim(), new_kwargs["start_dim"], "flatten", convert_to_inner_dim=False
         )
-        new_kwargs["end_dim"] = _wrap_jagged_dim(
-            inp.dim(), new_kwargs["end_dim"], "flatten"
+        end_dim = _wrap_jagged_dim(
+            inp.dim(), new_kwargs["end_dim"], "flatten", convert_to_inner_dim=False
         )
 
-        return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+        if start_dim == end_dim:
+            return inp
+
+        product = functools.reduce(operator.mul, inp.shape[start_dim : end_dim + 1])
+        new_shape = (*inp.shape[:start_dim], product, *inp.shape[end_dim + 1 :])
+
+        return inp.reshape(*new_shape)
 
     raise NotImplementedError(func)
 

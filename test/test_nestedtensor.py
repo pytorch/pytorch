@@ -3153,6 +3153,17 @@ class TestNestedTensorSubclass(NestedTestCase):
         self.assertTrue(copy.is_contiguous())
         self.assertEqual(copy.shape[:2], nt.shape[:2])
 
+    def test_flatten_decomp(self, device):
+        nt = random_nt_from_dims(
+            [3, None, 5, 2], device=device, dtype=torch.float32, layout=torch.jagged)
+        flattened = nt.flatten(-2, -1)
+        self.assertEqual(flattened.shape, nt.view(3, -1, 10).shape)
+
+        nt = random_nt_from_dims(
+            [3, None, 5, 2, 6], device=device, dtype=torch.float32, layout=torch.jagged)
+        flattened = nt.flatten(-3, -2)
+        self.assertEqual(flattened.shape, nt.view(3, -1, 10, 6).shape)
+
     def test_binary_pointwise_broadcasting(self, device):
         # (B, j0, 3, 4)
         ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), device, requires_grad=True)
