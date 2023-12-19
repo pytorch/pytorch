@@ -1641,7 +1641,9 @@ class AotCodeCache:
                         return bytes(raw_array.contents)
 
                     aot_constants = b"".join(
-                        _to_bytes(tensor) for tensor in graph.constants.values()
+                        _to_bytes(tensor)
+                        for name, tensor in graph.constants.items()
+                        if "_FOLDED_CONST_" not in name
                     )
 
                     consts_key, consts_path = write(
