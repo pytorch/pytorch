@@ -5,12 +5,12 @@ namespace torch::inductor {
 
 std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run(
     std::vector<at::Tensor>& inputs,
-    AOTInductorStreamHandle cuda_stream_handle) {
+    cudaStream_t cuda_stream_handle) {
   if (cuda_stream_handle == nullptr) {
-    cudaStream_t stream_id = c10::cuda::getCurrentCUDAStream().stream();
-    cuda_stream_handle = reinterpret_cast<AOTInductorStreamHandle>(stream_id);
+    cuda_stream_handle = c10::cuda::getCurrentCUDAStream().stream();
   }
-  return AOTIModelContainerRunner::run(inputs, cuda_stream_handle);
+  return AOTIModelContainerRunner::run(
+      inputs, reinterpret_cast<AOTInductorStreamHandle>(cuda_stream_handle));
 }
 
 } // namespace torch::inductor

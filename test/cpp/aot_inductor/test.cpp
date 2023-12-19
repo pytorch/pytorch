@@ -26,7 +26,7 @@ void test_aoti(const std::string& device) {
   std::string inputs_attr = "inputs_" + device;
   std::string outputs_attr = "outputs_" + device;
   const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
-  const auto& input_tensors =
+  auto input_tensors =
       data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
   const auto& ref_output_tensors =
       data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
@@ -86,7 +86,7 @@ void test_aoti_constants_update(const std::string& device) {
   std::string weights_attr = "fc_weight_" + device;
   std::string bias_attr = "fc_bias_" + device;
   const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
-  const auto& input_tensors =
+  auto input_tensors =
       data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
   const auto& ref_output_tensors =
       data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
@@ -154,7 +154,7 @@ void test_aoti_double_buffering(const std::string& device) {
   std::string weights_attr = "fc_weight_" + device;
   std::string bias_attr = "fc_bias_" + device;
   const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
-  const auto& input_tensors =
+  auto input_tensors =
       data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
   const auto& ref_output_tensors =
       data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
