@@ -2061,8 +2061,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.rand([1])
         self.assertEqual(fn(x), torch._dynamo.optimize("eager")(fn)(x))
 
-    @unittest.skipIf(not has_detectron2(), "requires detectron2")
     def test_multi_import(self):
+        if not has_detectron2():
+            raise unittest.SkipTest("requires detectron2")
+
         @torch._dynamo.optimize("eager", nopython=True)
         def to_bitmasks(boxes):
             from detectron2.layers.mask_ops import (
@@ -3423,7 +3425,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             compiled_opt_step()
 
         compiled_model_step(x)
-        param_grad_ref = weakref.ref(list(model.parameters())[0].grad)
+        param_grad_ref = weakref.ref(next(iter(model.parameters())).grad)
         optimizer.zero_grad(True)
         self.assertIsNone(param_grad_ref())
 
@@ -3867,7 +3869,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             z = x
             x.data = y
             y.data = torch.zeros([0])
-            return x is z
+            return torch.tensor(x is z)
 
         for backend in ["eager", "aot_eager", "inductor"]:
             for func in [func1, func2, func3]:
@@ -3893,7 +3895,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                     out_compiled = compiled_fn(compiled_a, compiled_b)
                     self.assertEqual(eager_a, compiled_a)
                     self.assertEqual(eager_b, compiled_b)
-                    self.assertEqual(out_eager, out_compiled)
+                    self.assertTrue(torch.equal(out_eager, out_compiled))
 
                     # func1 hits a leaf Variable that requires grad is being used in an in-place operation
                     if requires_grad:
