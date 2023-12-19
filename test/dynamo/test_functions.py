@@ -4,6 +4,7 @@ import collections
 import functools
 import inspect
 import itertools
+import math
 import operator
 import sys
 import unittest
@@ -1174,6 +1175,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #             return x * param
     #         case {"b": param}:
     #             return x / param
+
+    def test_math_radians(self):
+        def func(x, a):
+            return x + math.radians(a)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        cfunc = torch._dynamo.optimize_assert(cnt)(func)
+
+        assert cnt.frame_count == 0
+        x = torch.rand(10)
+        expected = func(x, 12)
+        output = cfunc(x, 12)
+        self.assertTrue(same(output, expected))
+        assert cnt.frame_count == 1
 
     @make_test
     def test_numpy_meshgrid(x, y):
@@ -2376,6 +2391,20 @@ def forward(self, x_1, output_1):
         o6 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, o6, 2, 200), torch_add)
 
+    @requires_cuda()
+    def test_triton_kernel_mutation_not_mark_dirty(self):
+        @torch.compile
+        def f(x):
+            n_elements = x.numel()
+            add_kernel[(n_elements,)](x, x, x, n_elements, 16)
+            return x
+
+        x = torch.randn(5, device="cuda", requires_grad=True)
+        x_cloned = x.clone()
+        out = x_cloned.sin()
+        f(x_cloned)
+        out.sum().backward()
+
     def test_dataclass_factory(self):
         @dataclass
         class Output:
@@ -2565,6 +2594,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor(self):
         def fn(z):
             x = z.clone()
@@ -2578,6 +2608,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_vmapped_mutated_tensor_tensor(self):
         def fn(x):
             y = torch.vmap(torch.Tensor.acos_)(x)
@@ -2589,6 +2620,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor_multi_arg(self):
         def fn(y, z):
             a = y.clone()
