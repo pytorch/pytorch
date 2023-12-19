@@ -22,7 +22,6 @@ from torch.testing._internal.common_quantization import skip_if_no_torchvision
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     TEST_WITH_ROCM,
     TestCase,
@@ -1528,7 +1527,7 @@ CPU_TEST_FAILURES = {
     "test_simple_dynamic": fail_with_and_without_stack_allocation(),
 }
 
-if not IS_SANDCASTLE:
+if not IS_FBCODE:
     # The following tests look like they pass in both pytest and unittest (xml
     # and terminal output say pass), but the process will segfault.  This only
     # happens in OSS CI and is fine internally.
