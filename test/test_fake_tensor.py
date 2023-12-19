@@ -43,8 +43,8 @@ import torch.utils._pytree as pytree
 
 aten = torch.ops.aten
 
-torch._functorch.config.fake_tensor_cache_enabled = True
-torch._functorch.config.fake_tensor_cache_crosscheck_enabled = True
+torch._dynamo.config.fake_tensor_cache_enabled = True
+torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorTest(TestCase):

@@ -26,7 +26,6 @@ import torch
 import torch._custom_op
 import torch._logging
 
-from torch._functorch import config
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
@@ -1483,9 +1482,14 @@ class FakeTensorMode(TorchDispatchMode):
         else:
             self.static_shapes = shape_env is None
 
-        self.allow_meta = config.fake_tensor_allow_meta
-        self.cache_enabled = config.fake_tensor_cache_enabled
-        self.cache_crosscheck_enabled = config.fake_tensor_cache_crosscheck_enabled
+        import torch._dynamo.config
+        import torch._functorch.config
+
+        self.allow_meta = torch._functorch.config.fake_tensor_allow_meta
+        self.cache_enabled = torch._dynamo.config.fake_tensor_cache_enabled
+        self.cache_crosscheck_enabled = (
+            torch._dynamo.config.fake_tensor_cache_crosscheck_enabled
+        )
 
         # A flag that controls, whether we want to invoke ops on mix of
         # real weights/global variables and fake inputs

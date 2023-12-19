@@ -2058,13 +2058,13 @@ class TestFakeTensor(TestCase):
     def setUp(self):
         # Turn on FakeTensor caching and cross-checking for these tests:
         cache_enabled = unittest.mock.patch(
-            "torch._functorch.config.fake_tensor_cache_enabled", True
+            "torch._dynamo.config.fake_tensor_cache_enabled", True
         )
         cache_enabled.start()
         self.addCleanup(cache_enabled.stop)
 
         cache_crosscheck = unittest.mock.patch(
-            "torch._functorch.config.fake_tensor_cache_crosscheck_enabled", True
+            "torch._dynamo.config.fake_tensor_cache_crosscheck_enabled", True
         )
         cache_crosscheck.start()
         self.addCleanup(cache_crosscheck.stop)

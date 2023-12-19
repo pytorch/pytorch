@@ -9,7 +9,6 @@ Global flags for aot autograd
 """
 import os
 import sys
-import torch
 from typing import TYPE_CHECKING
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
@@ -18,19 +17,6 @@ functionalize_rng_ops = False
 
 # can be useful for debugging if we are incorrectly creating meta fake tensors
 fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
-
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
-
-# Enables caching of dispatches to fake tensors.
-fake_tensor_cache_enabled = (
-    os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE", "0" if is_fbcode() else "1") == "1"
-)
-
-# Enables cross checking between the fake tensor cache and dispatch.
-fake_tensor_cache_crosscheck_enabled = (
-    os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE_CROSSCHECK", "0") == "1"
-)
 
 # Enables optional asserts in hotpath code to check for errors.  If
 # you are seeing weird accuracy problems, try turning this on.

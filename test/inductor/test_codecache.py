@@ -30,8 +30,8 @@ HAS_TRITON = has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
-torch._functorch.config.fake_tensor_cache_enabled = True
-torch._functorch.config.fake_tensor_cache_crosscheck_enabled = True
+torch._dynamo.config.fake_tensor_cache_enabled = True
+torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 
 class MyModel(torch.nn.Module):
