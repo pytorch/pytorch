@@ -43,7 +43,10 @@ from torch.utils._pytree import (
     treespec_dumps,
     treespec_loads,
 )
-import testing
+try:
+    from . import testing
+except ImportError:
+    import testing
 # The following import pattern matters as `test_export.export` is patched
 # in other files (like test_export_nonstrict.py). `torch.export.export`
 # will invalidate the patch.
