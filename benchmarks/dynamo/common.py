@@ -130,6 +130,114 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "dlrm",
 }
 
+# These models currently fail accuracy with eager Adam optimizer
+# so we use SGD when running the full benchmarks
+# https://github.com/pytorch/pytorch/issues/115966
+BENCHMARK_USE_SGD = {
+    # TorchBench
+    "BERT_pytorch",
+    "LearningToPaint",
+    "alexnet",
+    "dcgan",
+    "demucs",
+    "densenet121",
+    "dlrm",
+    "fastNLP_Bert",
+    "mobilenet_v2",
+    "phlippe_densenet",
+    "phlippe_resnet",
+    "pytorch_stargan",
+    "resnet18",
+    "shufflenet_v2_x1_0",
+    "speech_transformer",
+    "squeezenet1_1",
+    "stable_diffusion_text_encoder",
+    "timm_efficientdet",
+    "timm_nfnet",
+    "timm_regnet",
+    "timm_vision_transformer",
+    "timm_vovnet",
+    "vgg16",
+    "hf_T5",  # Fails dynamic https://github.com/pytorch/pytorch/issues/115968
+    # HF
+    "AlbertForMaskedLM",
+    "BartForCausalLM",
+    "BartForConditionalGeneration",
+    "BlenderbotSmallForCausalLM",
+    "BlenderbotSmallForConditionalGeneration",
+    "DebertaV2ForQuestionAnswering",  # eager OOM
+    "ElectraForCausalLM",
+    "M2M100ForConditionalGeneration",
+    "MBartForCausalLM",
+    "MBartForConditionalGeneration",
+    "OPTForCausalLM",
+    "PLBartForCausalLM",
+    "PLBartForConditionalGeneration",
+    "PegasusForCausalLM",
+    "Speech2Text2ForCausalLM",
+    "TrOCRForCausalLM",
+    "XGLMForCausalLM",
+    # TIMM
+    "adv_inception_v3",
+    "botnet26t_256",
+    "cait_m36_384",  # OOM
+    "coat_lite_mini",
+    "convit_base",
+    "dpn107",
+    "fbnetv3_b",
+    "gernet_l",
+    "lcnet_050",
+    "mixnet_l",
+    "res2net101_26w_4s",
+    "res2net50_14w_8s",
+    "res2next50",
+    "resnest101e",
+    "sebotnet33ts_256",
+    "swsl_resnext101_32x16d",
+    "tf_efficientnet_b0",
+    "ghostnet_100",
+    "gmixer_24_224",
+    "tinynet_a",
+}
+
+# These models OOM in CI
+# due to the extra memory of Adam optimizer states,
+# so we fall back to SGD in CI
+CI_USE_SGD = {
+    "torchrec_dlrm",
+    "demucs",
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "hf_T5_base",
+    "hf_clip",
+    "llama_v2_7b_16h",
+    "mobilenet_v2_quantized_qat",
+    "phi_1_5 resnet50_quantized_qat",
+    "BlenderbotForCausalLM",
+    "cait_m36_384",
+    "DALLE2_pytorch",
+    "moco",
+    "timm_efficientdet",
+    "ghostnet_100",
+    "regnety_002",
+    "poolformer_m36",
+    "inception_v3",
+    "tinynet_a",
+    "selecsls42b",
+    "mobilevit_s",
+    "pytorch_CycleGAN_and_pix2pix",
+    "vision_maskrcnn",
+}
+
+
 DO_NOT_CAST_INPUTS = {"stable_diffusion"}
 
 
@@ -1837,7 +1945,10 @@ class BenchmarkRunner:
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
+            if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
+                self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
+            else:
+                self.optimizer = torch.optim.Adam(params, lr=0.01, foreach=True)
         else:
             self.optimizer = None
 
@@ -2021,12 +2132,14 @@ class BenchmarkRunner:
             self.model_iter_fn(mod, inputs, collect_outputs=False)
         return self.model_iter_fn(mod, inputs, collect_outputs=True)
 
+    @torch._disable_dynamo(recursive=True)
     def optimizer_zero_grad(self, mod):
         if self.optimizer is not None:
             self.optimizer.zero_grad(True)
         else:
             mod.zero_grad(True)
 
+    @torch._disable_dynamo(recursive=True)
     def optimizer_step(self):
         if self.optimizer is not None:
             self.optimizer.step()

@@ -52,6 +52,7 @@ modernize-*,
 -modernize-use-nodiscard,
 performance-*,
 readability-container-size-empty,
+readability-string-compare,
 '
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 AnalyzeTemporaryDtors: false

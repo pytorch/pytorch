@@ -172,12 +172,12 @@ template <class Type, class Head, class... Tail>
 struct contains<
     typelist<Head, Tail...>,
     Type,
-    std::enable_if_t<std::is_same<Head, Type>::value>> : std::true_type {};
+    std::enable_if_t<std::is_same_v<Head, Type>>> : std::true_type {};
 template <class Type, class Head, class... Tail>
 struct contains<
     typelist<Head, Tail...>,
     Type,
-    std::enable_if_t<!std::is_same<Head, Type>::value>>
+    std::enable_if_t<!std::is_same_v<Head, Type>>>
     : contains<typelist<Tail...>, Type> {};
 } // namespace detail
 template <class TypeList, class Type>
@@ -339,7 +339,7 @@ struct last<typelist<Head>> final {
 };
 template <class TypeList>
 using last_t = typename last<TypeList>::type;
-static_assert(std::is_same<int, last_t<typelist<double, float, int>>>::value);
+static_assert(std::is_same_v<int, last_t<typelist<double, float, int>>>);
 
 /**
  * Take/drop a number of arguments from a typelist.
