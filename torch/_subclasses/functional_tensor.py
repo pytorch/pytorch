@@ -480,15 +480,10 @@ class BaseFunctionalizeAPI(ABC):
 
 
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
-    def __init__(self, mode):
-        super().__init__()
-        self.mode = mode
-
     def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
-        with self.mode:
-            return torch.utils._pytree.tree_map_only(
-                torch.Tensor, FunctionalTensor.to_functional, args
-            )
+        return torch.utils._pytree.tree_map_only(
+            torch.Tensor, FunctionalTensor.to_functional, args
+        )
 
     def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         return torch.utils._pytree.tree_map_only(
@@ -496,8 +491,7 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
         )
 
     def functionalize(self, inner_f: Callable) -> Callable:
-        with self.mode:
-            return dispatch_functionalize(inner_f)
+        return dispatch_functionalize(inner_f)
 
     def redispatch_to_next(self) -> ContextManager:
         return unset_functional_temporarily()
