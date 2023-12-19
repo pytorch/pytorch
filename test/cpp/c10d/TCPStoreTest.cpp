@@ -210,32 +210,29 @@ TEST(TCPStoreTest, testLibUVPartialRead) {
 
   // server part
   c10d::TCPStoreOptions server_opts{
-    0,
-    true,  // is master
-    numWorkers,
-    false,  // wait workers
-    std::chrono::seconds(defaultTimeout)
-  };
+      0,
+      true, // is master
+      numWorkers,
+      false, // wait workers
+      std::chrono::seconds(defaultTimeout)};
   server_opts.useLibUV = true;
 
-  auto serverTCPStore = std::make_unique<c10d::TCPStore>(
-    "127.0.0.1",
-    server_opts);
+  auto serverTCPStore =
+      std::make_unique<c10d::TCPStore>("127.0.0.1", server_opts);
 
   // client part
   c10d::TCPStoreOptions client_opts{
-    serverTCPStore->getPort(),
-    false,  // is master
-    numWorkers,
-    false,  // wait workers
-    std::chrono::seconds(defaultTimeout)
-  };
+      serverTCPStore->getPort(),
+      false, // is master
+      numWorkers,
+      false, // wait workers
+      std::chrono::seconds(defaultTimeout)};
   client_opts.useLibUV = true;
-  auto clientTCPStore = c10::make_intrusive<c10d::TCPStore>(
-    "127.0.0.1",
-    client_opts);
+  auto clientTCPStore =
+      c10::make_intrusive<c10d::TCPStore>("127.0.0.1", client_opts);
   auto clientThread = std::thread([&clientTCPStore] {
-    std::string key("/default_pg/0//b7dc24de75e482ba2ceb9f9ee20732c25c0166d8//cuda//0");
+    std::string key(
+        "/default_pg/0//b7dc24de75e482ba2ceb9f9ee20732c25c0166d8//cuda//0");
     std::string value("v");
     std::vector<uint8_t> valueBuf(value.begin(), value.end());
 
