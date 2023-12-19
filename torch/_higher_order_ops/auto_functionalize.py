@@ -168,12 +168,9 @@ def do_auto_functionalize(
     The normalized_kwargs are just the (args, kwargs), but all in kwarg form.
     This makes handling easier for the auto_functionalized HOP.
     """
-    from torch._subclasses.functional_tensor import (
-        FunctionalTensorMode,
-        PythonFunctionalizeAPI,
-    )
+    from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
-    ctx = PythonFunctionalizeAPI(FunctionalTensorMode())
+    ctx = PythonFunctionalizeAPI()
 
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names = []

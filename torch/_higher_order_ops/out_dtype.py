@@ -164,6 +164,7 @@ def out_dtype_fake_tensor_mode(
     *args
 ):
     with mode:
+        print("ARGS", args)
         return out_dtype_dense(op, output_dtype, *args)
 
 

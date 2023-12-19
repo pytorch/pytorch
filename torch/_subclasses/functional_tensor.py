@@ -151,6 +151,7 @@ class FunctionalTensor(torch.Tensor):
         # - If we use the default tensor.__new__(), we have another problem: it returns inner_tensor.alias(),
         #   which causes every subclass created above autograd to have autograd view metadata
         #   (in addition to also being a FunctionalTensorWrapper).
+        breakpoint()
         raise RuntimeError(
             "Attempting to use FunctionalTensor on its own. Instead, please use it with a corresponding FunctionalTensorMode()"
         )
@@ -440,12 +441,20 @@ def dispatch_functionalize(func):
         functional_mode = (
             current_functional_mode
             if current_functional_mode
-            else FunctionalTensorMode()
+            else FunctionalTensorMode(True)
         )
+
         with disable_above, functional_mode:
             func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
             func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
-            func_outputs = func(*func_args, **func_kwargs)
+            include_to_set = (
+                torch._C._dispatch_tls_local_include_set()
+                | torch._C.DispatchKeySet(torch._C.DispatchKey.PreDispatch)
+            )
+            with torch._C._ForceDispatchKeyGuard(
+                include_to_set, torch._C._dispatch_tls_local_exclude_set()
+            ):
+                func_outputs = func(*func_args, **func_kwargs)
             outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
 
             return outputs
@@ -488,15 +497,10 @@ class BaseFunctionalizeAPI(ABC):
 
 
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
-    def __init__(self, mode):
-        super().__init__()
-        self.mode = mode
-
     def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
-        with self.mode:
-            return torch.utils._pytree.tree_map_only(
-                torch.Tensor, FunctionalTensor.to_functional, args
-            )
+        return torch.utils._pytree.tree_map_only(
+            torch.Tensor, FunctionalTensor.to_functional, args
+        )
 
     def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         return torch.utils._pytree.tree_map_only(
@@ -504,11 +508,10 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
         )
 
     def functionalize(self, inner_f: Callable) -> Callable:
-        with self.mode:
-            return dispatch_functionalize(inner_f)
+        return dispatch_functionalize(inner_f)
 
     def redispatch_to_next(self) -> ContextManager:
-        return unset_functional_temporarily(self.mode.pre_dispatch)
+        return unset_functional_temporarily()
 
     def replace(self, input_tensor, output_tensor) -> None:
         assert isinstance(input_tensor, FunctionalTensor)

@@ -2779,7 +2779,6 @@ def forward(self, arg0_1, arg1_1):
     add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
     return (add_1,)""")
 
-    @unittest.expectedFailure
     def test_aot_export_predispatch_outdtype(self):
         class M(torch.nn.Module):
             def __init__(self, weight):
