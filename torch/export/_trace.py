@@ -19,10 +19,11 @@ from torch._export.passes.lift_constant_tensor_pass import lift_constant_tensor_
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
+    ShapeEnv,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError
@@ -57,16 +58,8 @@ DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
 
 
 def _convert_input_to_fake(gm, args, kwargs):
-    if (
-        len(args) == 0
-        and len(kwargs) == 0
-        and len(dict(gm.named_parameters())) == 0
-        and len(dict(gm.named_buffers())) == 0
-    ):
-        return [], {}, {}, None
-
+    params_buffers = _get_params_buffers(gm)
     fake_inps: List[torch.Tensor] = []
-    fake_mode = None
     for node in gm.graph.nodes:
         if node.op == "placeholder" and "val" in node.meta:
             fake_val = node.meta["val"]
@@ -75,10 +68,11 @@ def _convert_input_to_fake(gm, args, kwargs):
 
     if detected_fake_mode := detect_fake_mode(fake_inps):
         fake_mode = detected_fake_mode
+    else:
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
 
-    assert (
-        fake_mode is not None
-    ), "Cannot find fake_mode attatched to the graph's placeholders."
+    if len(args) == 0 and len(kwargs) == 0:
+        return (), {}, params_buffers, fake_mode
 
     count = 0
 
@@ -94,10 +88,7 @@ def _convert_input_to_fake(gm, args, kwargs):
     fake_params_buffers = pytree.tree_map_only(
         torch.Tensor,
         functools.partial(fake_mode.from_tensor, static_shapes=True),
-        {
-            **dict(gm.named_parameters(remove_duplicate=False)),
-            **dict(gm.named_buffers(remove_duplicate=False)),
-        },
+        params_buffers,
     )
     return fake_args, fake_kwargs, fake_params_buffers, fake_mode
 
@@ -163,6 +154,77 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                 }
 
 
+def _get_param_buffer_mapping(
+    original_module: torch.nn.Module,
+    traced_module: torch.nn.Module,
+) -> Dict[str, str]:
+    """
+    Returns a mapping of parameter/buffer names from the new module to the
+    original model. This is to help with restoring the FQN for parameter/buffers
+    of a traced module to what the original module contains.
+    """
+
+    param_lookup: Dict[int, List[str]] = {}
+    buffer_lookup: Dict[int, List[str]] = {}
+    for name, param in original_module.named_parameters(remove_duplicate=False):
+        param_lookup.setdefault(id(param), []).append(name)
+    for name, buffer in original_module.named_buffers(remove_duplicate=False):
+        buffer_lookup.setdefault(id(buffer), []).append(name)
+
+    param_buffer_table: Dict[str, str] = {}
+    for dynamo_name, dynamo_param in traced_module.named_parameters(
+        remove_duplicate=False
+    ):
+        assert dynamo_name not in param_buffer_table
+        if id(dynamo_param) in param_lookup:
+            param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)].pop()
+
+    for dynamo_name, dynamo_buffer in traced_module.named_buffers(
+        remove_duplicate=False
+    ):
+        assert dynamo_name not in param_buffer_table
+        if id(dynamo_buffer) in buffer_lookup:
+            param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)].pop()
+
+    return param_buffer_table
+
+
+def _restore_state_dict(
+    original_module: torch.nn.Module, traced_module: torch.fx.GraphModule
+) -> None:
+    """
+    Restores the state dict of the traced module to that of the original module.
+    """
+    param_buffer_table = _get_param_buffer_mapping(original_module, traced_module)
+    # Since the graph module is flattened (no module heirarchy), we
+    # need to noramlize the module by replacing "." with "_". If we
+    # don't, it will try to save the weight to a submodule which no
+    # longer exists.
+    for name, fqn in param_buffer_table.items():
+        param_buffer_table[name] = fqn.replace(".", "_")
+
+    # Replace state dict attr names with the fqn
+    for name, fqn in param_buffer_table.items():
+        if not hasattr(traced_module, name):
+            continue
+
+        attr = getattr(traced_module, name)
+        if isinstance(attr, torch.Tensor) and not isinstance(attr, torch.nn.Parameter):
+            traced_module.register_buffer(fqn, attr)
+        else:
+            setattr(traced_module, fqn, attr)
+        delattr(traced_module, name)
+
+    # Replace graph getattr nodes with the correct name
+    for node in traced_module.graph.nodes:
+        if node.op == "get_attr":
+            attr_name = node.target
+            if attr_name in param_buffer_table:
+                node.target = param_buffer_table[attr_name]
+
+    traced_module.recompile()
+
+
 def _export_to_torch_ir(
     f: Callable,
     args: Tuple[Any, ...],
@@ -171,6 +233,7 @@ def _export_to_torch_ir(
     *,
     preserve_module_call_signature: Tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
+    restore_fqn: bool = True,
 ) -> torch.fx.GraphModule:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -215,6 +278,10 @@ def _export_to_torch_ir(
             )
 
     gm_torch_level.meta["module_call_specs"] = module_call_specs
+
+    if isinstance(f, torch.nn.Module) and restore_fqn:
+        _restore_state_dict(f, gm_torch_level)
+
     return gm_torch_level
 
 
@@ -509,6 +576,7 @@ def _export(
         kwargs,
         constraints,
         preserve_module_call_signature=preserve_module_call_signature,
+        restore_fqn=False,  # don't need to restore because we will do it later
     )
 
     params_buffers = _get_params_buffers(gm_torch_level)
@@ -592,27 +660,12 @@ def _export(
     )
     gm_torch_level.recompile()
 
-    param_buffer_table: Dict[str, str] = {}
-    if isinstance(f, torch.nn.Module):
-        param_lookup: Dict[int, List[str]] = {}
-        buffer_lookup: Dict[int, List[str]] = {}
-        for name, param in f.named_parameters(remove_duplicate=False):
-            param_lookup.setdefault(id(param), []).append(name)
-        for name, buffer in f.named_buffers(remove_duplicate=False):
-            buffer_lookup.setdefault(id(buffer), []).append(name)
-        for dynamo_name, dynamo_param in gm_torch_level.named_parameters(
-            remove_duplicate=False
-        ):
-            assert dynamo_name not in param_buffer_table
-            if id(dynamo_param) in param_lookup:
-                param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)].pop()
-
-        for dynamo_name, dynamo_buffer in gm_torch_level.named_buffers(
-            remove_duplicate=False
-        ):
-            assert dynamo_name not in param_buffer_table
-            if id(dynamo_buffer) in buffer_lookup:
-                param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)].pop()
+    # Restore FQN of param/buffers
+    param_buffer_table: Dict[str, str] = (
+        _get_param_buffer_mapping(f, gm_torch_level)
+        if isinstance(f, torch.nn.Module)
+        else {}
+    )
 
     if isinstance(f, torch.nn.Module):
         _normalize_nn_module_stack(gm_torch_level, type(f))
@@ -667,13 +720,11 @@ def _export(
     # The unbacked symint symbols are updated in aot_export
     # so we serialize them here instead of inside dynamo
 
-    # dynamo_fake_mode can be None if there's no placeholder in gm_torch_level
-    if dynamo_fake_mode:
-        gm.meta["inline_constraints"] = {
-            k: v
-            for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
-            if re.match(r"^[if]\d+$", str(k))
-        }
+    gm.meta["inline_constraints"] = {
+        k: v
+        for k, v in dynamo_fake_mode.shape_env.runtime_var_to_range.items()
+        if re.match(r"^[if]\d+$", str(k))
+    }
 
     num_lifted = next(
         (
@@ -681,7 +732,7 @@ def _export(
             for i, s in enumerate(export_graph_signature.input_specs)
             if s.kind == InputKind.USER_INPUT
         ),
-        0,
+        len(export_graph_signature.input_specs),
     )
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
     range_constraints, equality_constraints = _process_constraints(

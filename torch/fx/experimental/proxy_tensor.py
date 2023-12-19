@@ -760,7 +760,7 @@ def disable_autocast_cache():
 
 
 class _ModuleStackTracer(PythonKeyTracer):
-    """Customized version of PythonKeyTracer that retains module stack
+    r"""Customized version of PythonKeyTracer that retains module stack
     information in node.meta["nn_module_stack"].
 
     FX symbolic trace actually does this already, but it relies on `self.root`
@@ -775,7 +775,7 @@ class _ModuleStackTracer(PythonKeyTracer):
            \ /
             D
     we want to record the path as A.B.D by recording only one path.
-    See Note [Preserving the nn module stack metadata during export non-strict mode]
+    See Note [Preserving the nn module stack metadata during export non-strict mode]  # noqa: W605
     """
 
     def __init__(self, scope_root):
