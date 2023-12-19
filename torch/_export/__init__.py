@@ -178,7 +178,9 @@ def capture_pre_autograd_graph(
         torch.ops.aten.native_batch_norm.default: torch.ops.aten.native_batch_norm.default.decompose,
     }
 
-    if not _functional_pre_dispatch_IR:
+    if _functional_pre_dispatch_IR:
+        module = _export(f, args, kwargs, constraints=constraints, pre_dispatch=True, decomp_table=decomp_table).module()
+    else:
         if kwargs is None:
             kwargs = {}
 
@@ -206,40 +208,27 @@ def capture_pre_autograd_graph(
 
             flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
             range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
+            if isinstance(f, torch.nn.Module):
+                from torch.export._trace import _restore_state_dict
+                _restore_state_dict(f, m)
+
+            flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
+            range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
             module = _create_stateful_graph_module(
                 m,
                 range_constraints=range_constraints,
                 equality_constraints=equality_constraints,
             )
-    else:
-        module = _export(f, args, kwargs, constraints=constraints, pre_dispatch=True, decomp_table=decomp_table).module()
 
     def _train(self, mode: bool = True):
         raise NotImplementedError("Calling train() is not supported yet.")
 
-<<<<<<< HEAD
-        if isinstance(f, torch.nn.Module):
-            from torch.export._trace import _restore_state_dict
-            _restore_state_dict(f, m)
-
-        flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-        range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
-        unlifted_m = _create_stateful_graph_module(
-            m,
-            range_constraints=range_constraints,
-            equality_constraints=equality_constraints,
-        )
-        unlifted_m.train = types.MethodType(_train, m)  # type: ignore[method-assign]
-        unlifted_m.eval = types.MethodType(_eval, m)  # type: ignore[method-assign]
-        return unlifted_m
-=======
     def _eval(self, mode: bool = True):
         raise NotImplementedError("Calling eval() is not supported yet.")
 
     module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
     module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
     return module
->>>>>>> e478ffb9035 (Expose functional IR to capture_pre_autograd)
 
 
 def export(
