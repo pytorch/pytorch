@@ -5,6 +5,7 @@ from typing import Any, Callable, ContextManager, Tuple
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
+from torch._ops import _get_dispatch_mode_pre_dispatch
 from torch.utils._python_dispatch import return_and_correct_aliasing, TorchDispatchMode
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
@@ -205,8 +206,6 @@ class FunctionalTensorMode(TorchDispatchMode):
     def __enter__(self):
         def _get_prev_mode():
             if self._dispatch_key == torch._C.DispatchKey.PreDispatch:
-                from torch._ops import _get_dispatch_mode_pre_dispatch
-
                 return _get_dispatch_mode_pre_dispatch(
                     torch._C._TorchDispatchModeKey.FUNCTIONAL
                 )
