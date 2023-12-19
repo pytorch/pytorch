@@ -5,7 +5,6 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/Exception.h>
 
-
 namespace c10::impl {
 
 template <typename T>
@@ -112,4 +111,3 @@ struct InlineEvent final {
 };
 
 } // namespace c10::impl
-

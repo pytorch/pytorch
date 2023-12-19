@@ -4,7 +4,6 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
 
-
 namespace c10::impl {
 
 /**
@@ -254,4 +253,3 @@ class InlineMultiStreamGuard {
 };
 
 } // namespace c10::impl
-

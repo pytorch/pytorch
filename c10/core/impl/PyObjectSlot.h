@@ -7,7 +7,6 @@
 
 #include <atomic>
 
-
 namespace c10::impl {
 
 struct C10_API PyObjectSlot {
@@ -189,4 +188,3 @@ struct C10_API PyObjectSlot {
 };
 
 } // namespace c10::impl
-

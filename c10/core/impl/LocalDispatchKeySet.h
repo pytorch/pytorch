@@ -20,7 +20,6 @@
 // set, but TLS is defined to be zero-initialized, so this doesn't actually work
 // (if it's inverted, you want the set to be -1 initialized).
 
-
 namespace c10::impl {
 
 // POD version of LocalDispatchKeySet.  Declared here just so that
@@ -161,4 +160,3 @@ C10_API bool tls_is_dispatch_keyset_excluded(DispatchKeySet ks);
 C10_API bool tls_is_dispatch_keyset_included(DispatchKeySet ks);
 
 } // namespace c10::impl
-

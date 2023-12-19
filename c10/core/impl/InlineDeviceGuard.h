@@ -9,7 +9,6 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Optional.h>
 
-
 namespace c10::impl {
 
 /**
@@ -424,4 +423,3 @@ class InlineOptionalDeviceGuard {
 };
 
 } // namespace c10::impl
-

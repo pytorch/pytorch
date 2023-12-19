@@ -20,14 +20,11 @@ class OperatorHandle;
 struct TensorImpl;
 } // namespace c10
 
-
 namespace torch::jit {
 using Stack = std::vector<c10::IValue>;
 }
 
-
 // Actual implementation
-
 
 namespace c10::impl {
 
@@ -240,4 +237,3 @@ enum class PyInterpreterStatus {
 };
 
 } // namespace c10::impl
-

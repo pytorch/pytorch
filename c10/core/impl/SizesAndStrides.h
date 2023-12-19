@@ -9,7 +9,6 @@
 
 #define C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE 5
 
-
 namespace c10::impl {
 
 // Packed container for TensorImpl sizes and strides.
@@ -312,4 +311,3 @@ class C10_API SizesAndStrides {
 };
 
 } // namespace c10::impl
-

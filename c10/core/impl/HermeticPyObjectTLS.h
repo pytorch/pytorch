@@ -3,7 +3,6 @@
 #include <c10/macros/Export.h>
 #include <atomic>
 
-
 namespace c10::impl {
 
 // This TLS controls whether or not we permanently associate PyObject
@@ -58,4 +57,3 @@ struct C10_API HermeticPyObjectTLS {
 };
 
 } // namespace c10::impl
-

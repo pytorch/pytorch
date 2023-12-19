@@ -2,7 +2,6 @@
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
-
 namespace c10::impl {
 
 /**
@@ -90,4 +89,3 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
 };
 
 } // namespace c10::impl
-

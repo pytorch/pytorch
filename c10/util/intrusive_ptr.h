@@ -341,7 +341,7 @@ class intrusive_ptr final {
   }
 
   template <class From, class FromNullType>
-    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   /* implicit */ intrusive_ptr(intrusive_ptr<From, FromNullType>&& rhs) noexcept
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
@@ -370,7 +370,7 @@ class intrusive_ptr final {
   }
 
   intrusive_ptr& operator=(intrusive_ptr&& rhs) & noexcept {
-    // NOLINTNEXTLINE(misc-unconventional-assign-operator, cppcoreguidelines-c-copy-assignment-signature)
+    // NOLINTNEXTLINE(*assign*)
     return operator= <TTarget, NullType>(std::move(rhs));
   }
 
@@ -388,7 +388,8 @@ class intrusive_ptr final {
     if (this == &rhs) {
       return *this;
     }
-    // NOLINTNEXTLINE(misc-unconventional-assign-operator, cppcoreguidelines-c-copy-assignment-signature)
+    // NOLINTNEXTLINE(misc-unconventional-assign-operator,
+    // cppcoreguidelines-c-copy-assignment-signature)
     return operator= <TTarget, NullType>(rhs);
   }
 
@@ -758,7 +759,7 @@ class weak_intrusive_ptr final {
   }
 
   weak_intrusive_ptr& operator=(weak_intrusive_ptr&& rhs) & noexcept {
-    // NOLINTNEXTLINE(misc-unconventional-assign-operator, cppcoreguidelines-c-copy-assignment-signature)
+    // NOLINTNEXTLINE(*assign*)
     return operator= <TTarget, NullType>(std::move(rhs));
   }
 
@@ -777,7 +778,7 @@ class weak_intrusive_ptr final {
     if (this == &rhs) {
       return *this;
     }
-    // NOLINTNEXTLINE(misc-unconventional-assign-operator, cppcoreguidelines-c-copy-assignment-signature)
+    // NOLINTNEXTLINE(*assign*)
     return operator= <TTarget, NullType>(rhs);
   }
 
