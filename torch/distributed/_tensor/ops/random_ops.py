@@ -23,6 +23,7 @@ def random_op_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     random_strategy = OpStrategy([])
     for arg_strategy in self_strategy.strategies:
         arg_spec = arg_strategy.output_spec
+        assert isinstance(arg_spec, TensorSpec)
         if is_tensor_partial(arg_spec):
             # TODO: figure out how inplace random op should behave when it's partial
             raise RuntimeError(f"{op_schema.op} with _Partial is not supported yet!")

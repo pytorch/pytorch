@@ -192,6 +192,8 @@ class Shard(Placement):
                 tensor, num_chunks, with_padding=True, contiguous=True
             )
             tensor = torch.cat(scattered_list, dim=self.dim)
+        elif not tensor.is_contiguous():
+            tensor = tensor.contiguous()
 
         output = funcol.reduce_scatter_tensor(
             tensor, reduce_op.name, scatter_dim=self.dim, group=(mesh, mesh_dim)

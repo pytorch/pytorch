@@ -35,6 +35,7 @@ from typing import (
     ClassVar,
     Counter,
     DefaultDict,
+    Deque,
     Dict,
     Iterator,
     List,
@@ -89,6 +90,7 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map_only
@@ -586,14 +588,50 @@ class CompilationMetrics:
     cache_size: int
     accumulated_cache_size: int
     guard_count: Optional[int]
+    shape_env_guard_count: Optional[int]
     graph_op_count: Optional[int]
     graph_node_count: Optional[int]
     graph_input_count: Optional[int]
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
+    fail_type: Optional[str]
     fail_reason: Optional[str]
+    fail_user_frame_filename: Optional[str]
+    fail_user_frame_lineno: Optional[int]
     non_compliant_ops: Set[str]
     compliant_custom_ops: Set[str]
+
+
+DEFAULT_COMPILATION_METRICS_LIMIT = 64
+
+
+_compilation_metrics: Deque[CompilationMetrics] = collections.deque(
+    maxlen=DEFAULT_COMPILATION_METRICS_LIMIT
+)
+
+
+def record_compilation_metrics(compilation_metrics: CompilationMetrics):
+    global _compilation_metrics
+    _compilation_metrics.append(compilation_metrics)
+    if config.log_compilation_metrics:
+        log_compilation_event(compilation_metrics)
+
+
+def set_compilation_metrics_limit(new_size: int) -> None:
+    global _compilation_metrics
+    while len(_compilation_metrics) > new_size:
+        _compilation_metrics.popleft()
+    new_deque = collections.deque(_compilation_metrics, maxlen=new_size)
+    _compilation_metrics = new_deque
+
+
+def clear_compilation_metrics() -> None:
+    global _compilation_metrics
+    _compilation_metrics.clear()
+
+
+def get_compilation_metrics() -> List[CompilationMetrics]:
+    return list(_compilation_metrics)
 
 
 @dataclasses.dataclass
@@ -2305,6 +2343,10 @@ def is_tensor_base_attr_getter(value):
         and value.__name__ == "__get__"
         and value.__self__.__objclass__ is torch._C._TensorBase  # type: ignore[attr-defined]
     )
+
+
+def is_torch_function_object(value):
+    return hasattr(value, "__torch_function__")
 
 
 def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
