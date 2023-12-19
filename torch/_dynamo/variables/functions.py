@@ -614,7 +614,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
-    def __init__(self, func, args, keywords, original=None, **kwargs):
+    def __init__(self, func: VariableTracker, args, keywords, original=None, **kwargs):
         super().__init__(**kwargs)
         self.func = func
         assert isinstance(args, list)
@@ -630,6 +630,9 @@ class FunctoolsPartialVariable(VariableTracker):
         merged_kwargs = {**self.keywords, **kwargs}
         return self.func.call_function(tx, merged_args, merged_kwargs)
 
+    def call_hasattr(self, tx, name: str) -> VariableTracker:
+        return self.func.call_hasattr(tx, name)
+
     def as_python_constant(self):
         if self.original:
             return self.original
@@ -642,7 +645,7 @@ class FunctoolsPartialVariable(VariableTracker):
                     return v.as_python_constant()
 
             return functools.partial(
-                self.func.fn,
+                self.func.get_function(),
                 *[get_val(arg) for arg in self.args],
                 **{k: get_val(v) for k, v in self.keywords.items()},
             )
