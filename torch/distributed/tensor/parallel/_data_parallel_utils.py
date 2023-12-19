@@ -2,7 +2,7 @@ from functools import partial
 from typing import Optional, Tuple
 
 import torch
-from torch.distributed._tensor import DTensor as DistributedTensor
+from torch.distributed._tensor import DTensor
 from torch.distributed._tensor.placement_types import DTensorSpec
 
 
@@ -14,7 +14,7 @@ def grad_layout_hook(param_placements, grad):
     # the case for DTensor, i.e. we might have a replicated param
     # and a partial gradient and DTensor was relying on optimizer
     # who really consumes the gradient to convert the layout.
-    if isinstance(grad, DistributedTensor):
+    if isinstance(grad, DTensor) and grad.placements != param_placements:
         grad = grad.redistribute(grad.device_mesh, param_placements)
     return grad
 
@@ -22,7 +22,7 @@ def grad_layout_hook(param_placements, grad):
 def _flatten_tensor(
     tensor: torch.Tensor,
 ) -> Tuple[torch.Tensor, Optional[DTensorSpec]]:
-    if isinstance(tensor, DistributedTensor):
+    if isinstance(tensor, DTensor):
         tensor._local_tensor.requires_grad_()
         return tensor._local_tensor, tensor._spec
     return tensor, None
@@ -31,7 +31,7 @@ def _flatten_tensor(
 @torch._dynamo.disable
 def _unflatten_tensor(tensor: torch.Tensor, spec: DTensorSpec) -> torch.Tensor:
     # unflatten would mainly be called everytime FSDP allgather parameters.
-    result = DistributedTensor.from_local(
+    result = DTensor.from_local(
         tensor,
         spec.mesh,
         spec.placements,
