@@ -1397,9 +1397,9 @@ class TestIndexing(TestCase):
 
     def test_minint_of_empty(self, device):
         #  Regression test for https://github.com/pytorch/pytorch/issues/115415
-        t = torch.tensor([], device_device)
+        t = torch.tensor([], device=device)
         idx = torch.iinfo(torch.int64).min
-        self.assertRaises(RuntimeError, lambda: t[idx])
+        self.assertRaises(IndexError, lambda: t[idx])
 
 
 
