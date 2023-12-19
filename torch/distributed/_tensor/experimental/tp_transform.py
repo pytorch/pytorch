@@ -199,10 +199,14 @@ def _mark_sharding(
                     len(input_nodes) == 1
                 ), f"non-compute op only support one input now, found node: {node} with length of inputs: {len(node.args)}"
                 arg_strategy = placement_strategies[input_nodes[0]]
+                # TODO: this is for passing the lint check, not sure if this is
+                # the right logic when we need to handle backward layer norm.
+                _output_spec = arg_strategy.output_spec
+                assert isinstance(_output_spec, DTensorSpec)
                 placement_strategies[node] = _create_placement_strategy(
                     node,
                     mesh,
-                    placements=arg_strategy.output_spec.placements,
+                    placements=_output_spec.placements,
                     input_specs=_get_input_node_specs(node, placement_strategies),
                 )
                 node.meta["sharding"] = placement_strategies[node]
@@ -480,7 +484,9 @@ def _get_input_node_specs(
     input_specs_list: List[DTensorSpec] = []
     for input_arg in node.all_input_nodes:
         if input_arg in placement_strategies:
-            input_specs_list.append(placement_strategies[input_arg].output_spec)
+            output_spec = placement_strategies[input_arg].output_spec
+            assert isinstance(output_spec, DTensorSpec)
+            input_specs_list.append(output_spec)
         else:
             raise ValueError(f"{input_arg} does not have output_spec populated.")
     return tuple(input_specs_list)
@@ -524,6 +530,7 @@ def _shard_state_dict(
         assert fqn in state_dict, f"{fqn} not found in state dict: {state_dict.keys()}"
 
         original_param = state_dict[fqn]
+        assert isinstance(placement_strategy.output_spec, DTensorSpec)
         dtensor_param = distribute_tensor(
             original_param,
             mesh,
