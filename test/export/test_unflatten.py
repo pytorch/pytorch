@@ -14,6 +14,7 @@ from torch.export import (
     Dim,
     dynamic_dim,
     export,
+    unflatten,
 )
 from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
 from torch._export import capture_pre_autograd_graph
@@ -85,7 +86,7 @@ class TestUnflatten(TestCase):
 
         orig_eager = MyModule()
         export_module = export(orig_eager, (torch.rand(2, 3),), {})
-        unflattened = export_module.module(flat=False)
+        unflattened = unflatten(export_module)
 
         inputs = (torch.rand(2, 3),)
 
@@ -125,7 +126,7 @@ class TestUnflatten(TestCase):
 
         eager_module = MyModule()
         export_module = export(eager_module, (torch.rand(2, 3),), {})
-        unflattened_module = export_module.module(flat=False)
+        unflattened_module = unflatten(export_module)
 
         # Buffer should look the same before and after one run
         eager_buffer = eager_module.foo.child2buffer
@@ -161,7 +162,7 @@ class TestUnflatten(TestCase):
 
         eager_module = MyModule()
         export_module = export(eager_module, (torch.rand(2, 3),), {})
-        unflattened_module = export_module.module(flat=False)
+        unflattened_module = unflatten(export_module)
 
         inputs = (torch.rand(2, 3),)
         self.compare_outputs(eager_module, unflattened_module, inputs)
@@ -184,7 +185,7 @@ class TestUnflatten(TestCase):
         eager_module = Shared()
         inps = (torch.rand(10),)
         export_module = export(eager_module, inps, {})
-        unflattened_module = export_module.module(flat=False)
+        unflattened_module = unflatten(export_module)
         self.compare_outputs(eager_module, unflattened_module, inps)
         self.assertTrue(hasattr(unflattened_module, "sub_net"))
         for i in range(len(eager_module.sub_net)):
@@ -235,7 +236,7 @@ class TestUnflatten(TestCase):
             {},
             preserve_module_call_signature=("foo.nested",),
         )
-        unflattened = export_module.module(flat=False)
+        unflattened = unflatten(export_module)
         self.compare_outputs(export_module, unflattened, inps)
         unflattened.foo.nested = NestedChild()
         self.compare_outputs(export_module, unflattened, inps)
@@ -259,7 +260,7 @@ class TestUnflatten(TestCase):
                 return x
 
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
-        unflattened = export_module.module(flat=False)
+        unflattened = unflatten(export_module)
 
         self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
 
@@ -286,7 +287,7 @@ class TestUnflatten(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be equal to 2, but got 6"):
             export_module(torch.randn(6, 6))
 
-        unflattened = export_module.module(flat=False)
+        unflattened = unflatten(export_module)
         with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be equal to 2, but got 6"):
             unflattened(torch.randn(6, 6))
 
@@ -332,7 +333,7 @@ class TestUnflatten(TestCase):
 
         orig_eager = MyModule()
         export_module = torch.export.export(orig_eager, (torch.rand(2, 3),), {})
-        unflattened = export_module.module(flat=False)
+        unflattened = unflatten(export_module)
 
         # in-place compilation should work. Pass fullgraph to ensure no graph breaks.
         unflattened.foo.compile(fullgraph=True)
