@@ -276,6 +276,7 @@ class StepcurrentPlugin:
         self.cache: pytest.Cache = config.cache
         self.directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
         self.lastrun: Optional[str] = self.cache.get(self.directory, None)
+        self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
 
     def pytest_collection_modifyitems(self, config: Config, items: List[Any]) -> None:
@@ -310,3 +311,7 @@ class StepcurrentPlugin:
     def pytest_runtest_protocol(self, item, nextitem) -> None:
         self.lastrun = item.nodeid
         self.cache.set(self.directory, self.lastrun)
+
+    def pytest_sessionfinish(self, session, exitstatus):
+        if exitstatus == 0:
+            self.cache.set(self.directory, self.initial_val)
