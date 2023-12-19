@@ -3677,7 +3677,7 @@ def constant_boundary_condition(
 ):
     dhw = x.get_size()[-dim:]
     x_loader = x.make_loader()
-    padding = padding or [0] * dim
+    padding_dhw = padding or [0] * dim
 
     def load(index):
         prefix = index[:-dim]
@@ -3685,7 +3685,10 @@ def constant_boundary_condition(
 
         mask = functools.reduce(
             ops.and_,
-            [range_mask(inp[i], dhw[i] + padding[i], -padding[i]) for i in range(dim)],
+            [
+                range_mask(inp[i], dhw[i] + padding_dhw[i], -padding_dhw[i])
+                for i in range(dim)
+            ],
         )
         return (
             ops.masked(
