@@ -1,7 +1,8 @@
+import abc
 import copy
 import operator
 from copy import deepcopy
-from typing import cast, Dict, List, Optional, Union
+from typing import Any, cast, Dict, List, Optional, Union
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -15,7 +16,7 @@ from torch.export.exported_program import (
 )
 from torch.fx._symbolic_trace import is_fx_tracing
 
-__all__ = ["InterpreterModule", "UnflattenedModule", "unflatten"]
+__all__ = ["InterpreterModule", "UnflattenedModule", "unflatten", "FlatArgsAdapter"]
 
 
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
@@ -109,8 +110,28 @@ class InterpreterModule(torch.nn.Module):
                 self.arg_names.append(node.target)
 
 
+class FlatArgsAdapter(abc.ABC):
+    """
+    Adapts input arguments with `input_spec` to align `target_spec`.
+    """
+
+    @abc.abstractmethod
+    def adapt(
+        self,
+        target_spec: pytree.TreeSpec,
+        input_spec: pytree.TreeSpec,
+        input_args: List[Any],
+    ) -> List[Any]:
+        """NOTE: This adapter may mutate given `flat_args`."""
+        ...
+
+
 class UnflattenedModule(torch.nn.Module):
-    def __init__(self, export_module: ExportedProgram):
+    def __init__(
+        self,
+        export_module: ExportedProgram,
+        flat_args_adapter: Optional[FlatArgsAdapter] = None,
+    ):
         super().__init__()
         if export_module.graph_signature.backward_signature is not None:
             raise ValueError("Unflattening on JointExportModule NYI")
@@ -119,6 +140,10 @@ class UnflattenedModule(torch.nn.Module):
         self.graph_signature = deepcopy(export_module.graph_signature)
         self.graph = torch.fx.Graph()
         self.module_call_graph = deepcopy(export_module.module_call_graph)
+        self.flat_args_adapter = flat_args_adapter
+        # Flag to indicate whether args have been adapted.
+        self.adapted = False
+
         _inplace_buffer_mutations(export_graph, self.graph_signature)
         _outline_submodules(export_graph, self)
 
@@ -158,10 +183,12 @@ class UnflattenedModule(torch.nn.Module):
                     continue
                 assert node.name not in inputs_to_state
 
-        # Import here to avoid an unfortunate circular dependency.
-        from torch._export.utils import _check_input_constraints_pre_hook
-
-        self.register_forward_pre_hook(_check_input_constraints_pre_hook)
+        # Cache so we don't have to compute this every time.
+        # NOTE: this needs to be kept in sync with the placeholders in
+        # self.graph, but currently we have no way to guarantee that.
+        self.input_placeholders = [
+            node for node in self.graph.nodes if node.op == "placeholder"
+        ]
 
     def forward(self, *args, **kwargs):
         if is_fx_tracing():
@@ -173,21 +200,49 @@ class UnflattenedModule(torch.nn.Module):
         assert self.module_call_graph[0].fqn == ""
         signature = self.module_call_graph[0].signature
         if in_spec != signature.in_spec:
-            raise TypeError(
-                f"Input treespec does not match with exported module's. "
-                "Are you sure you are calling this with the right arguments? "
-                f"Input treespec: {in_spec}. ",
-                f"Exported module treespec: {signature.in_spec}",
-            )
+            if not self.adapted:
+                print(
+                    "Input treespec does not match with exported module's: \n"
+                    f"Input treespec: {in_spec}. ",
+                    f"Exported module treespec: {signature.in_spec}",
+                )
+            if self.flat_args_adapter is None:
+                raise TypeError(
+                    "There is no flat args adapter sepcified. "
+                    "Are you sure you are calling this with the right arguments? "
+                )
+            else:
+                if not self.adapted:
+                    print("Adapting flat arg to match exported module's treespec")
+                flat_args = self.flat_args_adapter.adapt(
+                    target_spec=signature.in_spec,
+                    input_spec=in_spec,
+                    input_args=flat_args,
+                )
+                self.adapted = True
+                if len(flat_args) != signature.in_spec.num_leaves:
+                    raise TypeError(
+                        f"Flat args adaption failed, number of args mismatch "
+                        f"Adatped: {len(flat_args)} \n"
+                        f"Exported module: {signature.in_spec.num_leaves}"
+                    )
 
-        # TODO(zhxchen17) Use lineno map to dump the original stacktrace during error handling.
+        # Import here to avoid an unfortunate circular dependency.
+        # TODO(suo): untangle this.
+        from torch._export.utils import _check_input_constraints_for_graph
+
+        _check_input_constraints_for_graph(
+            self.input_placeholders, flat_args, self.range_constraints
+        )
         tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
             *flat_args, enable_io_processing=False
         )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
 
 
-def unflatten(module: ExportedProgram) -> UnflattenedModule:
+def unflatten(
+    module: ExportedProgram, flat_args_adapter: Optional[FlatArgsAdapter] = None
+) -> UnflattenedModule:
     """Unflatten an ExportedProgram, producing a module with the same module
     hierarchy as the original eager module. This can be useful if you are trying
     to use :mod:`torch.export` with another system that expects a module
@@ -200,14 +255,14 @@ def unflatten(module: ExportedProgram) -> UnflattenedModule:
     :func:`torch.export.export`.
 
     Args:
-        module: The :class:`ExportedProgram` to unflatten.
+        module (ExportedProgram): The ExportedProgram to unflatten.
+        flat_args_adapter (Optional[FlatArgsAdapter]): Adapt flat args if input TreeSpec does not match with exported module's.
 
     Returns:
         An instance of :class:`UnflattenedModule`, which has the same module
         hierarchy as the original eager module pre-export.
     """
-    module = UnflattenedModule(module)
-    return module
+    return UnflattenedModule(module, flat_args_adapter)
 
 
 def _inplace_buffer_mutations(graph: torch.fx.Graph, graph_signature) -> None:
