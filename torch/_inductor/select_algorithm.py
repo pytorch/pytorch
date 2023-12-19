@@ -686,7 +686,7 @@ class ExternKernelCaller(ChoiceCaller):
             cls(
                 layout=self.layout,
                 inputs=self.input_nodes,
-                kernel=self.choice.call_name(),
+                python_kernel_name=self.choice.call_name(),
                 cpp_kernel_name=self.choice.cpp_kernel_name,
                 ordered_kwargs_for_cpp_kernel=self.choice.ordered_kwargs_for_cpp_kernel,
                 kwargs=self.kwargs,
@@ -724,7 +724,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
-        log.info("Max autotune selects from %s choices.", str(len(choices)))
+        log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         if len(choices) == 1:
             if not isinstance(choices[0], CUDATemplateCaller):
