@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes, skipXLA)
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIndexing(TestCase):
     def test_index(self, device):
 
@@ -1431,7 +1430,6 @@ class TestIndexing(TestCase):
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class NumpyTests(TestCase):
     def test_index_no_floats(self, device):
         a = torch.tensor([[[5.]]], device=device)
