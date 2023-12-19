@@ -279,7 +279,6 @@ def check_model(
     ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
     ref_kwargs = kwargs
     has_lowp_args = False
-    original_lowp_dtype = torch.half
 
     if reference_in_float and exact_dtype:
         # Store expected dtypes so we can check actual result gives the correct types
@@ -297,6 +296,7 @@ def check_model(
         ]
         del eager_result
 
+    ref_model = model
     if reference_in_float:
         # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
         def upcast_fn(x):
@@ -309,25 +309,14 @@ def check_model(
             else:
                 return x
 
-        def get_original_lowp_dtype(example_inputs):
-            dtypes = [x.dtype for x in example_inputs if isinstance(x, torch.Tensor)]
-            dtype_set = set(dtypes)
-            return dtype_set.pop() if len(dtype_set) == 1 else torch.half
-
         ref_inputs = list(map(upcast_fn, example_inputs))
         ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
-        if has_lowp_args:
-            original_lowp_dtype = get_original_lowp_dtype(example_inputs)
-            if hasattr(model, "to"):
-                model = model.to(torch.float)
+        if has_lowp_args and hasattr(model, "to"):
+            ref_model = copy.deepcopy(model).to(torch.float)
 
     torch.manual_seed(0)
 
-    correct = model(*ref_inputs, **ref_kwargs)
-    # downcast the model back if needed
-    if reference_in_float and has_lowp_args:
-        if hasattr(model, "to"):
-            model = model.to(original_lowp_dtype)
+    correct = ref_model(*ref_inputs, **ref_kwargs)
 
     torch._inductor.metrics.reset()
 

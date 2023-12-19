@@ -183,6 +183,13 @@ class UnflattenedModule(torch.nn.Module):
                     continue
                 assert node.name not in inputs_to_state
 
+        # Cache so we don't have to compute this every time.
+        # NOTE: this needs to be kept in sync with the placeholders in
+        # self.graph, but currently we have no way to guarantee that.
+        self.input_placeholders = [
+            node for node in self.graph.nodes if node.op == "placeholder"
+        ]
+
     def forward(self, *args, **kwargs):
         if is_fx_tracing():
             return torch.fx.Interpreter(self, graph=self.graph).run(
@@ -225,10 +232,8 @@ class UnflattenedModule(torch.nn.Module):
         from torch._export.utils import _check_input_constraints_for_graph
 
         _check_input_constraints_for_graph(
-            self.graph, self.range_constraints, self.equality_constraints
-        )(*flat_args)
-
-        # TODO(zhxchen17) Use lineno map to dump the original stacktrace during error handling.
+            self.input_placeholders, flat_args, self.range_constraints
+        )
         tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
             *flat_args, enable_io_processing=False
         )
