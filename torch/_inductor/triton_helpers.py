@@ -195,7 +195,9 @@ def store_broadcasting(
     # workaround https://github.com/openai/triton/issues/2814
     value = value.to(dtype)
     if value.numel != tl.zeros(size, dtype=tl.int8).numel:
+        # this broadcasting was implicit without block_ptr
         value = tl.broadcast_to(value, size)
     else:
-        value = tl.view(value, size)
+        # remove size=1 dimensions since we can't expand the block_ptr
+        value = tl.reshape(value, size)
     return value

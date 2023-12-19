@@ -173,10 +173,14 @@ class BlockPtrOptions:
 class TritonPrinter(PythonPrinter):
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        return f"tl.math.floor({self.paren(self._print(expr.args[0]))})"
+        return f"tl.math.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+
+    def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
 
     def _helper_sqrt(self, expr):
-        return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
+        return f"tl.math.sqrt({self._print(expr)}.to(tl.float32))"
 
     def _print_Where(self, expr):
         c = self.doprint(expr.args[0])
@@ -215,7 +219,22 @@ class TritonPrinter(PythonPrinter):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
-        return f"tl.math.floor({x} / {div})"
+        return f"tl.math.floor({x} / {div}).to({V.kernel.index_dtype})"
+
+    def _print_Round(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.llrint({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+
+    def _print_RoundDecimal(self, expr):
+        assert len(expr.args) == 2
+        number, ndigits = expr.args
+        if number.is_integer:
+            # ndigits < 0 should have been filtered by the sympy function
+            assert ndigits < 0
+            raise ValueError(
+                f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
+            )
+        return f"tl.math.nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits}"
 
 
 texpr = TritonPrinter().doprint
@@ -1403,7 +1422,7 @@ class TritonKernel(Kernel):
             and len(mask_vars - dense_mask_vars) == 0
             and not self.is_indirect_indexing(index)
             and have_loop_vars
-            # HACK to workaround correctness issue in test_multilayer_sum_low_prec_cuda
+            # HACK workaround correctness issue in test_multilayer_sum_low_prec_cuda/test_multilayer_var_cuda
             and not self.no_x_dim
         ):
             index_relative_to_xyr_index = sympy_subs(
@@ -1414,11 +1433,7 @@ class TritonKernel(Kernel):
             strides = [sympy.Wild(f"stride_{s}", exclude=symbols) for s in symbols]
             offset = sympy.Wild("_offset", exclude=symbols)
             m = index_relative_to_xyr_index.match(sympy_dot(symbols, strides) + offset)
-            if m and V.graph.sizevars.evaluate_expr(
-                # workaround https://github.com/openai/triton/issues/2821
-                # TODO(jansel): should we guard here?  If we don't dynamic shapes will never use block_ptrs.
-                sympy.Le(sympy_product(t.numel for t in range_trees), 2**31)
-            ):
+            if m and self.index_dtype == "tl.int32":
                 strides = [m[s] for s in strides]
                 return BlockPtrOptions(
                     offset=m[offset],
@@ -1430,7 +1445,7 @@ class TritonKernel(Kernel):
                     mask_vars=dense_mask_vars,
                 )
             # TODO(jansel): it is sometimes possible to do higher dimensional block_ptrs with
-            #               a tl.view into the correct block.  We will miss these cases today.
+            #               a tl.reshape the correct block.  We will miss these cases today.
 
         expand_str = None
         index_str = self.index_to_str(index)
@@ -1862,14 +1877,18 @@ class TritonKernel(Kernel):
         def where_cond(tval, fval):
             if not cond:
                 return tval
-            return f"tl.where({cond}, {tval}, {fval})"
+            return TritonKernelOverrides.where(cond, tval, fval)
 
         if self.persistent_reduction:
             default = ir.Reduction.default_value(reduction_type, src_dtype)
-            default = self._map_tuple_or_scalar(triton_constant, default)
 
             def _mask_value(value, default):
-                return self.cse.generate(self.compute, where_cond(value, default))
+                # TODO: int1 seems to be broken on triton-rocm
+                mask_dtype = torch.int8 if src_dtype == torch.bool else src_dtype
+                other = self.cse.generate(
+                    self.compute, TritonKernelOverrides.constant(default, mask_dtype)
+                )
+                return self.cse.generate(self.compute, where_cond(value, other))
 
             if isinstance(value, tuple):
                 masked_value = [_mask_value(v, d) for v, d in zip(value, default)]
