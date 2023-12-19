@@ -1,6 +1,6 @@
-import sys
 import math
 import struct
+import sys
 
 
 def nextup(x):

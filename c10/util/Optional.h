@@ -12,8 +12,6 @@
 
 namespace c10 {
 using std::bad_optional_access;
-using std::in_place;
-using std::in_place_t;
 using std::make_optional;
 using std::nullopt;
 using std::nullopt_t;

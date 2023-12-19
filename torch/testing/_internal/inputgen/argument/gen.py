@@ -43,6 +43,8 @@ class TensorGenerator:
         if dtype == torch.bool:
             if not self.space.contains(0):
                 return torch.full(size, True, dtype=dtype)
+            elif not self.space.contains(1):
+                return torch.full(size, False, dtype=dtype)
             else:
                 return torch.randint(low=0, high=2, size=size, dtype=dtype)
 

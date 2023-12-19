@@ -6,7 +6,9 @@
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
+#include <ATen/core/SingletonSymNodeImpl.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <torch/library.h>
 
@@ -15,7 +17,6 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-#include <c10/core/SingletonSymNodeImpl.h>
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>

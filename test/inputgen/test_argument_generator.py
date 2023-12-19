@@ -24,6 +24,17 @@ class TestTensorGenerator(TestCase):
         self.assertGreaterEqual(tensor.min(), 13)
         self.assertLessEqual(tensor.max(), 51)
 
+    def test_zero_tensor(self):
+        v = SolvableVariable(float)
+        v.Eq(0)
+        tg = TensorGenerator(dtype=torch.float64, structure=(2, 3), space=v.space)
+        tensor = tg.gen()
+
+        self.assertEqual(tensor.shape, (2, 3))
+        self.assertEqual(tensor.dtype, torch.float64)
+        self.assertGreaterEqual(tensor.min(), 0)
+        self.assertLessEqual(tensor.max(), 0)
+
 
 class TestArgumentGenerator(TestCase):
     def test_gen_optional(self):
