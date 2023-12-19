@@ -1264,17 +1264,6 @@ class TestOptim(TestCase):
             self._test_complex_2d(functools.partial(AdamW, foreach=foreach, weight_decay=0.2))
             self._test_complex_2d(functools.partial(AdamW, foreach=foreach, weight_decay=0.2, amsgrad=True))
 
-    def test_adamw_serialization(self):
-        model = torch.nn.Linear(5, 5)
-        optim = torch.optim.AdamW(model.parameters())
-
-        loaded_dict = optim.state_dict()
-
-        new_optim = torch.optim.Adam(model.parameters())
-        new_optim.load_state_dict(loaded_dict)
-
-        self.assertTrue(new_optim.param_groups[0]['decoupled_weight_decay'])
-
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
             lambda params: SparseAdam(params, lr=4e-2), [], True
@@ -2472,10 +2461,10 @@ class TestDifferentiableOptimizer(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_defaults_changed_to_foreach(self):
-        from torch.optim import (adam, nadam, sgd, radam, rmsprop, rprop,
+        from torch.optim import (adam, adamw, nadam, sgd, radam, rmsprop, rprop,
                                  asgd, adamax, adadelta, adagrad)
         multi_optims = ((Adam, adam, "_multi_tensor_adam"),
-                        (AdamW, adam, "_multi_tensor_adam"),  # adamw dispatches to superclass's adam
+                        (AdamW, adamw, "_multi_tensor_adamw"),
                         (NAdam, nadam, "_multi_tensor_nadam"),
                         (SGD, sgd, "_multi_tensor_sgd"),
                         (RAdam, radam, "_multi_tensor_radam"),
