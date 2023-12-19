@@ -788,24 +788,6 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         )
 
 
-class TreeSpecVariable(UserDefinedObjectVariable):
-    def __init__(
-        self,
-        value,
-        **kwargs,
-    ):
-        super().__init__(value, **kwargs)
-
-
-class LeafSpecVariable(UserDefinedObjectVariable):
-    def __init__(
-        self,
-        value,
-        **kwargs,
-    ):
-        super().__init__(value, **kwargs)
-
-
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     @staticmethod
     def is_matching_object(obj):
