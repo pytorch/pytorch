@@ -35,7 +35,11 @@ def swap_tensors(t1, t2):
     if weakref.getweakrefs(t1):
         raise RuntimeError("Cannot swap t1 because it has weakref associated with it")
     if weakref.getweakrefs(t2):
-        raise RuntimeError("Cannot swap t1 because it has weakref associated with it")
+        raise RuntimeError("Cannot swap t2 because it has weakref associated with it")
+    t1_slots = set(copyreg._slotnames(t1.__class__))  # type: ignore[attr-defined]
+    t2_slots = set(copyreg._slotnames(t2.__class__))  # type: ignore[attr-defined]
+    if t1_slots != t2_slots:
+        raise RuntimeError("Cannot swap t1 and t2 if they have different slots")
 
     def swap_attr(name):
         tmp = getattr(t1, name)
@@ -50,9 +54,7 @@ def swap_tensors(t1, t2):
     swap_attr("__dict__")
 
     # Swap the slots
-    # slotnames must match exactly for __class__ to have been swapped
-    slots = copyreg._slotnames(t1.__class__)  # type: ignore[attr-defined]
-    for slot in slots:
+    for slot in t1_slots:
         if hasattr(t1, slot) and hasattr(t2, slot):
             swap_attr(slot)
         elif hasattr(t1, slot):

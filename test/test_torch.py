@@ -9790,15 +9790,15 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         t8 = MyTwoTensor4(torch.rand(4), torch.rand(4))
 
         self._checked_swap(t1, t2)
-        with self.assertRaisesRegex(TypeError, "object layout differs"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot swap t1 and t2 if they have different slots"):
             torch.utils.swap_tensors(t1, t3)
-        with self.assertRaisesRegex(TypeError, "object layout differs"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot swap t1 and t2 if they have different slots"):
             torch.utils.swap_tensors(t2, t3)
-        with self.assertRaisesRegex(TypeError, "object layout differs"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot swap t1 and t2 if they have different slots"):
             torch.utils.swap_tensors(t2, t8)
         self._checked_swap(t3, t4)
         self._checked_swap(t3, t5)
-        with self.assertRaisesRegex(TypeError, "object layout differs"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot swap t1 and t2 if they have different slots"):
             torch.utils.swap_tensors(t3, t6)
         t3.c = "foo"
         t4.d = "bar"
