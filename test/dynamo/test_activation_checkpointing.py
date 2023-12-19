@@ -198,7 +198,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, y):
             # This goes through VariableBuilder
-            return checkpoint(gn, torch.sin(x), y)
+            return checkpoint(gn, torch.sin(x), y, use_reentrant=True)
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
         y = torch.randn(4, 4, device="cuda", requires_grad=True)

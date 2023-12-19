@@ -371,9 +371,8 @@ def checkpoint(
 
     .. warning::
 
-        If you are using the ``use_reentrant=True`` variant (this is currently
-        the default), please refer to the note below for important
-        considerations and potential limitations.
+        If you are using the ``use_reentrant=True`` variant, please refer to the
+        note below for important considerations and potential limitations.
 
     .. note::
 
@@ -427,7 +426,7 @@ def checkpoint(
             the RNG state during each checkpoint. Note that under torch.compile,
             this flag doesn't take effect and we always preserve RNG state.
             Default: ``True``
-        use_reentrant(bool, optional): Use checkpointing
+        use_reentrant(bool): Use checkpointing
             implementation that requires re-entrant autograd.
             If ``use_reentrant=False`` is specified, ``checkpoint`` will use an
             implementation that does not require re-entrant autograd. This
@@ -435,7 +434,6 @@ def checkpoint(
             working as expected with ``torch.autograd.grad`` and support for
             keyword arguments input into the checkpointed function. Note that future
             versions of PyTorch will default to ``use_reentrant=False``.
-            Default: ``True``
         context_fn(Callable, optional): A callable returning a tuple of two
             context managers. The function and its recomputation will be run
             under the first and second context managers respectively.
@@ -521,14 +519,13 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
             Default: ``True``
-        use_reentrant(bool, optional): Use checkpointing
+        use_reentrant(bool): Use checkpointing
             implementation that requires re-entrant autograd.
             If ``use_reentrant=False`` is specified, ``checkpoint`` will use an
             implementation that does not require re-entrant autograd. This
             allows ``checkpoint`` to support additional functionality, such as
             working as expected with ``torch.autograd.grad`` and support for
             keyword arguments input into the checkpointed function.
-            Default: ``True``
 
     Returns:
         Output of running :attr:`functions` sequentially on :attr:`*inputs`
