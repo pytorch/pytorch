@@ -1906,7 +1906,7 @@
 - name: values(Tensor(a) self) -> Tensor(a)
   dispatch:
     Default:
-      self: at::_sparse_coo_tensor_unsafe_symint(self.indices(), grad, self.sym_sizes())._coalesced_(true)
+      self: values_backward(grad, self)
     AutogradNestedTensor:
       self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_storage_offsets())
 
