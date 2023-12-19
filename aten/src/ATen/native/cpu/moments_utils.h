@@ -55,9 +55,9 @@ C10_ALWAYS_INLINE void AddMomentsVec(
   m0 = n;
 }
 
-template <typename T,
-          typename std::enable_if_t<!is_reduced_floating_point_v<T>, int> = 0>
-inline void UpdateMomentsVec(
+template <typename T>
+inline typename std::enable_if<std::is_same<T, opmath_t<T>>::value, void>::type
+UpdateMomentsVec(
     int64_t m0,
     const T* X_ptr,
     const std::array<vec::Vectorized<opmath_t<T>>, kChunkSize>& c_vecs,
@@ -78,17 +78,17 @@ inline void UpdateMomentsVec(
 
 // each bfloat16/half vector will be converted to two float vectors,
 // and accumulated successively on m1_stk0/m2_stk0.
-template <typename T,
-          typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
-inline void UpdateMomentsVec(
+template <typename T>
+inline typename std::enable_if<!std::is_same<T, at::opmath_type<T>>::value, void>::type
+UpdateMomentsVec(
     int64_t m0,
     const T* X_ptr,
-    const std::array<vec::Vectorized<float>, kChunkSize>& c_vecs,
+    const std::array<vec::Vectorized<at::opmath_type<T>>, kChunkSize>& c_vecs,
     int64_t& m0_stk0,
-    vec::Vectorized<float>& m1_stk0,
-    vec::Vectorized<float>& m2_stk0) {
-  using bVec = vec::Vectorized<T>;
-  using fVec = vec::Vectorized<float>;
+    vec::Vectorized<at::opmath_type<T>>& m1_stk0,
+    vec::Vectorized<at::opmath_type<T>>& m2_stk0) {
+  using Vec = vec::Vectorized<T>;
+  using fVec = vec::Vectorized<at::opmath_type<T>>;
   fVec m1_fvec0(0), m1_fvec1(0);
   fVec m2_fvec0(0), m2_fvec1(0);
   for (const auto j : c10::irange(m0)) {

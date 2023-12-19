@@ -24,7 +24,7 @@ inline bool is_mixed_type(const Tensor& input, const Args&... parameters) {
 // when input is 'BFloat16' or 'Half' and parameters are 'Float'
 inline void check_mixed_data_type(const Tensor& input) {
   TORCH_CHECK(at::isReducedFloatingType(input.scalar_type()),
-      "mixed dtype (CPU): expect input to have scalar type of BFloat16/Half");
+      "mixed dtype (CPU): all inputs must share same datatype.");
 }
 
 template <typename... Args>
