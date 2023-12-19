@@ -488,7 +488,7 @@ class basic_string_view final {
       const noexcept {
     if (pos + 1 <= size()) {
       for (size_type cur = pos; cur < size(); ++cur) {
-        if (condition(at_(cur))) {
+        if (std::forward<Condition>(condition)(at_(cur))) {
           return cur;
         }
       }
@@ -503,7 +503,7 @@ class basic_string_view final {
     if (size() > 0) {
       pos = std::min(size() - 1, pos);
       do {
-        if (condition(at_(pos))) {
+        if (std::forward<Condition>(condition)(at_(pos))) {
           return pos;
         }
       } while (pos-- > 0);
