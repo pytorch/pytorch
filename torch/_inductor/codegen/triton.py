@@ -1633,11 +1633,15 @@ class TritonKernel(Kernel):
 
         if self.persistent_reduction:
             default = ir.Reduction.default_value(reduction_type, src_dtype)
-            default = self._map_tuple_or_scalar(triton_constant, default)
 
             def _mask_value(value, default):
+                # TODO: int1 seems to be broken on triton-rocm
+                mask_dtype = torch.int8 if src_dtype == torch.bool else src_dtype
+                other = self.cse.generate(
+                    self.compute, TritonKernelOverrides.constant(default, mask_dtype)
+                )
                 return self.cse.generate(
-                    self.compute, f"tl.where({cond}, {value}, {default})"
+                    self.compute, TritonKernelOverrides.where(cond, value, other)
                 )
 
             if isinstance(value, tuple):
