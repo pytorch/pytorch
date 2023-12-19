@@ -406,6 +406,17 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps(const Tensor& self,
   return std::make_tuple(output, save_mean, save_var);
 }
 
+std::tuple<Tensor, Tensor, Tensor, Tensor> _new_batch_norm_mps(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+    bool update, double momentum, double eps, bool cudnn_enabled) {
+  Tensor output, save_mean, save_var;
+  std::tie(output, save_mean, save_var) =
+    batch_norm_mps(input, weight_opt, bias_opt, running_mean_opt, running_var_opt, update, momentum, eps);
+  Tensor reserve = at::empty({0}, input.options().dtype(kByte));
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
+}
+
 std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_mps(const Tensor& self,
                                                          const c10::optional<Tensor>& weight_opt,
                                                          const c10::optional<Tensor>& bias_opt,
@@ -471,6 +482,14 @@ static string get_mem_string(c10::MemoryFormat memory_format) {
 }
 
 // Batch norm backward
+std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mps(
+    const Tensor& grad_output, const Tensor& input, const Tensor& weight,
+    const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+    const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
+    bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve) {
+  return batch_norm_backward_mps(grad_output, input, weight, running_mean_opt, running_var_opt, save_mean_opt, save_var_opt, update, eps, grad_input_mask);
+}
+
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_out,
                                                            const Tensor& input,
                                                            const c10::optional<Tensor>& weight_opt,

@@ -192,6 +192,18 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
 }
 
 
+std::tuple<Tensor, Tensor, Tensor, Tensor> _new_batch_norm_mkldnn(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+    bool update, double momentum, double eps, bool cudnn_enabled) {
+  Tensor output, save_mean, save_var;
+  std::tie(output, save_mean, save_var) =
+    mkldnn_batch_norm(input, weight_opt, bias_opt, running_mean_opt, running_var_opt, update, momentum, eps);
+  Tensor reserve = empty_mkldnn({0}, input.scalar_type());
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
+}
+
+
 std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var,
     bool train,
@@ -207,6 +219,15 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit_no_stats(
     double momentum,
     double eps) {
   return mkldnn_batch_norm(input, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
+}
+
+
+std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
+    const Tensor& grad_output, const Tensor& input, const Tensor& weight,
+    const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+    const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
+    bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve) {
+  return mkldnn_batch_norm_backward(grad_output, input, weight, running_mean_opt, running_var_opt, save_mean_opt, save_var_opt, update, eps, grad_input_mask);
 }
 
 
