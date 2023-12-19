@@ -81,6 +81,7 @@ def _addmm_like_strategy(
         mat1_spec = strtg.input_specs[0]
         mat2_spec = strtg.input_specs[1]
         out_spec = strtg.output_spec
+        assert isinstance(out_spec, DTensorSpec)
 
         # self arg's spec should follow the output of mm, but need
         # to consider broadcast for the self arg

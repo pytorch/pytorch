@@ -123,7 +123,11 @@ def check_ragged_dim_same(
 # match those of the specified size
 def raggedness_matches(nt, size):
     end = nt._ragged_idx + 1
-    return list(nt._size[:end]) == list(size[:end])
+    nt_ragged = nt._size[:end]
+    size_ragged = size[:end]
+    return len(nt_ragged) == len(size_ragged) and (
+        all(ns == s or s == -1 for ns, s in zip(nt_ragged, size_ragged))
+    )
 
 
 def squeeze_leading_ones(t):
@@ -274,6 +278,20 @@ def jagged_torch_function(func, *args, **kwargs):
     # Dispatch to the correct implementation here
     if func is torch._C._nn.scaled_dot_product_attention:
         return jagged_scaled_dot_product_attention(*args, **kwargs)
+
+    # Handle reshape() / reshape_as() here because they're CompositeImplicit.
+    # TODO: Do the full view determination logic based on computeStride()
+    if func.__name__ == "reshape":
+        inp = args[0]
+        shape = args[1:]
+
+        return inp.view(shape) if inp.is_contiguous() else inp.contiguous().view(shape)
+
+    if func.__name__ == "reshape_as":
+        inp = args[0]
+        other = args[1]
+
+        return inp.reshape(*other.shape)
 
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
