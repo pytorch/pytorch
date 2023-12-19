@@ -1195,7 +1195,7 @@ class Placeholder(enum.Enum):
 def aot_inductor_launcher(so_path: str, device: str):
     if device == "cuda":
         return f"""
-            #include <torch/csrc/inductor/aoti_model_container_runner_cuda.h>
+            #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 
             torch::inductor::AOTIModelContainerRunnerCuda runner("{so_path}");
 
@@ -1209,7 +1209,7 @@ def aot_inductor_launcher(so_path: str, device: str):
         """
     elif device == "cpu":
         return f"""
-            #include <torch/csrc/inductor/aoti_model_container_runner.h>
+            #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 
             torch::inductor::AOTIModelContainerRunnerCpu runner("{so_path}");
 
