@@ -224,6 +224,34 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_permute_tensor(self):
+        def func(tensor, src_dst_pairs, *, tag, ranks, group_size):
+            return _functional_collectives.permute_tensor(tensor, src_dst_pairs, ranks, tag)
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            inputs = (
+                # rank0: [0., 1.], rank1: [2., 3.]
+                torch.arange(2, dtype=torch.float32, device="cuda") + 2 * self.rank,
+                [1, 0],
+            )
+            compiled = torch.compile(func)
+            out = compiled(*inputs, **self.get_world_trs())
+            correct = func(*inputs, **self.get_world_trs())
+            self.assertTrue(same(out, correct))
+
+            # rank0: [2., 3.], rank1: [0., 1.]
+            expected = torch.arange(
+                2,
+                dtype=torch.float32,
+                device="cuda"
+            ) + 2 * ((self.rank - 1 + self.world_size) % self.world_size)
+            self.assertEqual(out, expected)
+            self.assertEqual(correct, expected)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
