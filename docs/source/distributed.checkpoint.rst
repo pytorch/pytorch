@@ -22,7 +22,7 @@ The entrypoints to load and save a checkpoint are the following:
 
 .. autofunction::  load
 .. autofunction::  save
-.. autofunction::  save_async
+.. autofunction::  async_save
 .. autofunction::  load_state_dict
 .. autofunction::  save_state_dict
 

@@ -12,7 +12,7 @@ from torch.distributed.checkpoint.storage import StorageWriter
 from torch.distributed.checkpoint.utils import _DistWrapper
 
 
-__all__ = ["save_state_dict", "save"]
+__all__ = ["save_state_dict", "save", "async_save"]
 
 
 def save_state_dict(
