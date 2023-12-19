@@ -1433,20 +1433,20 @@ def forward(self, a_1):
 
         functional_call._orig_mod = foo
 
-        gm_with_stack = make_fx(functional_call)(torch.randn(4, 4))
+        gm_with_stack = make_fx(functional_call, record_module_stack=True)(torch.randn(4, 4))
         found = False
         for node in gm_with_stack.graph.nodes:
             if "nn_module_stack" in node.meta:
                 if len(node.meta["nn_module_stack"]) == 1:
                     self.assertExpectedInline(
                         str(node.meta["nn_module_stack"]),
-                        """OrderedDict([('', ('', <class '__main__.TestSymbolicTracing.test_make_fx_with_custom_tracer_preserving_nn_module_stack.<locals>.Foo'>))])"""  # noqa: B950
+                        """OrderedDict([('', ('', <class 'test_proxy_tensor.TestSymbolicTracing.test_make_fx_with_custom_tracer_preserving_nn_module_stack.<locals>.Foo'>))])"""  # noqa: B950
                     )
                     found = True
                 elif len(node.meta["nn_module_stack"]) == 2:
                     self.assertExpectedInline(
                         str(node.meta["nn_module_stack"]),
-                        """OrderedDict([('', ('', <class '__main__.TestSymbolicTracing.test_make_fx_with_custom_tracer_preserving_nn_module_stack.<locals>.Foo'>)), ('bar', ('bar', <class 'torch.fx.experimental.proxy_tensor.Bar'>))])"""  # noqa: B950
+                        """OrderedDict([('', ('', <class 'test_proxy_tensor.TestSymbolicTracing.test_make_fx_with_custom_tracer_preserving_nn_module_stack.<locals>.Foo'>)), ('bar', ('bar', <class 'torch.fx.experimental.proxy_tensor.Bar'>))])"""  # noqa: B950
                     )
                     found = True
                 else:
@@ -1454,6 +1454,10 @@ def forward(self, a_1):
                     self.assertTrue(False)
 
         self.assertTrue(found)
+
+        gm_without_stack = make_fx(functional_call)(torch.randn(4, 4))
+        for node in gm_without_stack.graph.nodes:
+            self.assertTrue("nn_module_stack" not in node.meta)
 
     def test_symint_to_tensor(self):
         def f(a):

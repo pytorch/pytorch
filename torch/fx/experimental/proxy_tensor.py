@@ -768,8 +768,13 @@ class _ModuleStackTracer(PythonKeyTracer):
     creation, things don't work properly.
 
     So for this version we hold onto a reference to the original module
-    (scope_root) and monkeypatch it in when capturing the stack trace.
-
+    (scope_root) and use that to match the path. Also when we see,
+            A
+           / \
+          B   C
+           \ /
+            D
+    we want to record the path as A.B.D by recording only one path.
     See Note [Preserving the nn module stack metadata during export non-strict mode]
     """
 
@@ -852,6 +857,8 @@ class _ModuleStackTracer(PythonKeyTracer):
         # use cases don't need to work with HOO.
         if isinstance(m, (OptimizedModule, GraphModule)):
             return forward(*args, **kwargs)
+        # if "<class 'torch.fx.experimental.proxy_tensor.Bar'>" in str(type(m)):
+        #     breakpoint()
         return Tracer.call_module(self, m, forward, args, kwargs)
 
 
@@ -865,6 +872,7 @@ def make_fx(f,
             _allow_non_fake_inputs=False,
             *,
             pre_dispatch=False,
+            record_module_stack=False,
             _allow_fake_constant=False,
             _error_on_data_dependent_ops=True):
     assert tracing_mode in ["real", "fake", "symbolic"]
@@ -879,7 +887,7 @@ def make_fx(f,
 
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
 
-        if hasattr(f, "_orig_mod"):
+        if hasattr(f, "_orig_mod") and record_module_stack:
             scope_root = f._orig_mod
             fx_tracer = _ModuleStackTracer(scope_root)
         else:
