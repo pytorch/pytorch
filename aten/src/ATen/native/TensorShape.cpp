@@ -372,6 +372,7 @@ Tensor& set_(Tensor& result, Storage source) {
   return result.set_(std::move(source), 0, new_size, {});
 }
 
+
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
 Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
   checkSetStorage(result, std::move(storage), storage_offset, size, stride);
