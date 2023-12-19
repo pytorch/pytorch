@@ -622,7 +622,7 @@ class HFOperations(unittest.TestCase):
         self.assertNotEqual(s.model()[arange_result].arg(0).arg(0).as_long(), 0)
         self.assertEqual(s.model()[arange_result].arg(0).arg(1).as_long(), B.size()[0])
 
-        # change the annotation to Dyn. This will migrate to an arbitirary type
+        # change the annotation to Dyn. This will migrate to an arbitrary type
         for n in symbolic_traced.graph.nodes:
             if n.op == 'placeholder':
                 n.type = Dyn
@@ -737,7 +737,7 @@ class HFOperations(unittest.TestCase):
         assert s.model()[embedding_result].arg(1).arg(0) == 0
         assert s.model()[embedding_result].arg(2).arg(1) == B[2]
 
-        # change the type to Dyn. Here, we will get an arbitirary migration
+        # change the type to Dyn. Here, we will get an arbitrary migration
         for n in traced.graph.nodes:
             if n.op == 'placeholder':
                 n.type = Dyn
@@ -1086,7 +1086,7 @@ class ComposeOperationsGradualTypes(unittest.TestCase):
         self.assertEqual(s.model()[masked_fill_res].arg(0).arg(1).as_long(), B.size()[0])
         self.assertEqual(s.model()[masked_fill_res].arg(1).arg(1).as_long(), B.size()[1])
 
-        # change the annotation to Dyn. This will migrate to an arbitirary type
+        # change the annotation to Dyn. This will migrate to an arbitrary type
         for n in symbolic_traced.graph.nodes:
             if n.op == 'placeholder':
                 n.type = Dyn

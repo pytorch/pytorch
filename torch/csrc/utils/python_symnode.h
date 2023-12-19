@@ -145,6 +145,19 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("str")().cast<std::string>();
   }
 
+  c10::SymNode dispatch_sym_ite_(
+      const char* fname,
+      const c10::SymNode& other,
+      const c10::SymNode& third) {
+    auto pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
+    auto pthird = dynamic_cast<PythonSymNodeImpl*>(third.get());
+    TORCH_CHECK(pother);
+    TORCH_CHECK(pthird);
+    py::gil_scoped_acquire acquire;
+    auto r = getPyObj().attr(fname)(pother->getPyObj(), pthird->getPyObj());
+    return c10::make_intrusive<PythonSymNodeImpl>(r);
+  }
+
   c10::SymNode dispatch_common_(const char* fname, const c10::SymNode& other) {
     auto pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
     TORCH_CHECK(pother);
@@ -224,6 +237,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
 
   c10::SymNode sym_or(const c10::SymNode& other) override {
     return dispatch_common_(__func__, other);
+  }
+
+  c10::SymNode sym_ite(const c10::SymNode& other, const c10::SymNode& third)
+      override {
+    return dispatch_sym_ite_(__func__, other, third);
   }
 
   c10::SymNode sym_not() override {

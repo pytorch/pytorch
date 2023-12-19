@@ -36,6 +36,27 @@ _DEQUANTIZE_OPS = [
     torch.ops.quantized_decomposed.dequantize_per_channel.default,
 ]
 
+# Example inputs for conv-bn1d patterns
+_conv1d_bn_example_inputs = (
+    torch.randn(1, 1, 3),  # x
+    torch.randn(1, 1, 1),  # conv_weight
+    torch.randn(1),        # conv_bias
+    torch.randn(1),        # bn_weight
+    torch.randn(1),        # bn_bias
+    torch.randn(1),        # bn_running_mean
+    torch.randn(1),        # bn_running_var
+)
+
+# Example inputs for conv-bn2d patterns
+_conv2d_bn_example_inputs = (
+    torch.randn(1, 1, 3, 3),  # x
+    torch.randn(1, 1, 1, 1),  # conv_weight
+    torch.randn(1),           # conv_bias
+    torch.randn(1),           # bn_weight
+    torch.randn(1),           # bn_bias
+    torch.randn(1),           # bn_running_mean
+    torch.randn(1),           # bn_running_var
+)
 
 def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
     """
@@ -138,6 +159,24 @@ def _is_supported_batch_norm_for_training(node: Node):
     ]
     return node.target in supported_ops
 
+def _is_conv(n: Node):
+    """
+    Return whether the node refers to an aten conv op.
+    """
+    return n.op == "call_function" and n.target in [
+        torch.ops.aten.conv1d.default,
+        torch.ops.aten.conv2d.default,
+    ]
+
+def _is_conv_transpose(n: Node):
+    """
+    Return whether the node refers to an aten conv_transpose op.
+    """
+    return n.op == "call_function" and n.target in [
+        torch.ops.aten.conv_transpose1d,
+        torch.ops.aten.conv_transpose2d,
+    ]
+
 def fold_bn_weights_into_conv_node(
     conv_node: Node,
     conv_weight_node: Node,
@@ -145,12 +184,10 @@ def fold_bn_weights_into_conv_node(
     bn_node: Node,
     m: GraphModule
 ) -> None:
-    # conv2d args: input, weight, bias, stride, padding, dilation, ...
-    # Note: this should also work for conv1d, conv3d and transposed conv1-3d as well with
-    # easy tweaks
+    # conv args: input, weight, bias, stride, padding, dilation, ...
     conv_w = _get_tensor_constant_from_node(conv_weight_node, m)
     conv_b = _get_tensor_constant_from_node(conv_bias_node, m)
-    transpose = not (conv_node.target == torch.ops.aten.conv2d.default)
+    transpose = _is_conv_transpose(conv_node)
 
     # eval bn args: input, weight, bias, running mean, running var, momentum, eps
     # train bn args: input, weight, bias, running mean, running var, training, momentum, eps
@@ -218,7 +255,7 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
             continue
         bn_node = n
         n = bn_node.args[0]
-        if n.op != "call_function" or n.target != torch.ops.aten.conv2d.default:
+        if not _is_conv(n):
             continue
         conv_node = n
         conv_weight_node = conv_node.args[1]

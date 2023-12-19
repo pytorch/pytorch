@@ -20,8 +20,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -42,7 +41,7 @@ Tensor make_feature_noise(const Tensor& input) {
 }
 
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {
-  return (input.is_cuda() || input.is_xpu() || input.is_lazy() || input.device().is_privateuseone()) && p > 0 && p < 1 && input.sym_numel() > 0;
+  return (input.is_cuda() || input.is_xpu() || input.is_lazy() || input.is_privateuseone()) && p > 0 && p < 1 && input.sym_numel() > 0;
 }
 
 // NB: sure, we could have used different overloads here, but I would feel insecure
@@ -173,5 +172,4 @@ Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
   return _feature_alpha_dropout<true>(input, p, train);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -377,6 +377,7 @@ def emit_view_functionalization_body(
 """
 
         else:
+            is_multi_output_view = isinstance(f.func.returns[0].type, ListType)
             return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       {unwrap_tensor_args_str}
@@ -415,7 +416,8 @@ def emit_view_functionalization_body(
         }},
         {reverse_lambda.decl()} {{
           return {reverse_lambda.inner_call()}
-        }}
+        }},
+        /*is_multi_output=*/{str(is_multi_output_view).lower()}
       );
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
@@ -714,7 +716,11 @@ def gen_functionalization_registration(
         return view_str
 
     elif isinstance(g, NativeFunctionsGroup):
-        fns = list(g.functions())
+        # Gets a hand-written functionalization kernel
+        if g.inplace is not None and str(g.inplace.func.name) == "set_.source_Tensor":
+            fns = []
+        else:
+            fns = list(g.functions())
     else:
         if str(g.func.name) in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION:
             return []

@@ -48,7 +48,7 @@ _onnx_dep = True  # flag to import onnx package.
 
 def export_to_pbtxt(model, inputs, *args, **kwargs):
     return torch.onnx.export_to_pretty_string(
-        model, inputs, google_printer=True, *args, **kwargs
+        model, inputs, *args, google_printer=True, **kwargs
     )
 
 
@@ -906,7 +906,7 @@ class TestOperators(common_utils.TestCase):
             def forward(self, x_in):
                 x_out = {}
                 x_out["test_key_out"] = torch.add(
-                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]
+                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]  # noqa: RUF015
                 )
                 return x_out
 

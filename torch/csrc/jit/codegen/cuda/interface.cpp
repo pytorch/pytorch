@@ -14,43 +14,10 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class LoadingNvfuserLibrary {
- public:
-#ifdef USE_CUDA
-  LoadingNvfuserLibrary() {
-    std::string library_name;
-    if (const char* path = std::getenv("TORCH_NVFUSER_LIBRARY_PATH")) {
-      library_name = path;
-    }
-#if defined(_WIN32)
-    library_name += "nvfuser_codegen.dll";
-#elif defined(__APPLE__)
-    library_name += "libnvfuser_codegen.dylib";
-#else
-    library_name += "libnvfuser_codegen.so";
-#endif
-    try {
-      // NOTE: we need to refactor this to a lazy load instead. We could end up
-      // with double de-allocation with our python API loading the library.
-      // Leaking the handle should solve the problem for now
-      nvfuserLib_ = std::make_shared<at::DynamicLibrary>(
-          library_name.c_str(), nullptr, true);
-    } catch (const c10::DynamicLibraryError& e) {
-#if defined(BUILD_NVFUSER) || !defined(NDEBUG)
-      TORCH_WARN_ONCE("Loading nvfuser library failed with: ", e.msg());
-#endif
-    }
-  }
-
-#endif // USE_CUDA
-  std::shared_ptr<at::DynamicLibrary> nvfuserLib_;
-};
-
-static LoadingNvfuserLibrary loading_nvfuser_library_;
-
 static std::atomic<bool> cuda_fusion_guard_mode{true};
 
 bool isEnabled() {
+  TORCH_WARN_ONCE("torch::jit::fuser::cuda::isEnabled() is deprecated");
   return false;
 }
 
