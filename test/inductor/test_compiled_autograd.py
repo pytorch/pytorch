@@ -652,6 +652,49 @@ known_failing_tests = {
     "test_unrelated_inputs",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_will_engine_execute_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
     "test_backward_to_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
+    "test_custom_fn_saved_attr",  # torch._dynamo.exc.InternalTorchDynamoError: 'type' object is not subscriptable
+    "test_custom_fn_saved_multiple_tensors",  # AssertionError: assert len(val) == inst.argval
+    "test_anomaly_detect_nan",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function aten.add.Tensor(*(FakeTensor(..., size=(s1,)), None), **{}):
+    "test_autograd_multiple_views_python",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable() ConstantVariable(int) SkipFilesVariable()
+    "test_autograd_node_isinstance",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsInstance
+    "test_autograd_simple_views_python",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function inductor.accumulate_grad_.default(*(FakeTensor(..., size=(s0,), dtype=torch.float64, requires_grad=True), None), **{}):
+    "test_callback_adds_callback",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable(queue_callback) __call__ [UserFunctionVariable()] {}
+    "test_callback_propagates_errors_from_device_thread",  # AssertionError: "blah" does not match "call_method UserDefinedObjectVariable(queue_callback) __call__ [UserFunctionVariable()] {}
+    "test_custom_autograd_no_early_free",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got: Cannot access storage of BatchedTensorImpl
+    "test_custom_function_cycle",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_custom_function_error",  # AssertionError: "must implement either the backward" does not match "call_function BuiltinVariable(NotImplementedError) [ConstantVariable(str)] {}
+    "test_custom_function_non_tensor_inputs_outputs",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_custom_function_save_for_forward",  # torch._dynamo.exc.Unsupported: call_function BuiltinVariable(NotImplementedError) [ConstantVariable(str)] {}
+    "test_custom_function_setup_context_multi_input",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable() SkipFilesVariable()
+    "test_custom_function_setup_context_multi_output",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable() SkipFilesVariable()
+    "test_deep_reentrant",  # torch._dynamo.exc.InternalTorchDynamoError: '<' not supported between instances of 'type' and 'int'
+    "test_dont_materialize_grads",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone
+    "test_function_returns_undefined_tensor",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function inductor.accumulate_grad_.default(*(FakeTensor(..., size=(1,), requires_grad=True), None), **{}):
+    "test_grad_fn_prehooks",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_grad_fn_prehooks_multiple_outputs",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone
+    "test_grad_fn_prehooks_remove_hooks",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: RemovableHandle.remove
+    "test_grad_mode_restored_reentrant",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertTrue
+    "test_hook_none",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNotNone
+    "test_invalid_gradients",  # AssertionError: "expected shape" does not match "The size of tensor a (5) must match the size of tensor b (10) at non-singleton dimension 1"
+    "test_mark_non_differentiable_mixed",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertTrue
+    "test_materialize_grads",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_naughty_autograd_function_stashing_ctx",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function inductor.accumulate_grad_.default(*(FakeTensor(..., size=(1,), requires_grad=True), [FakeTensor(..., size=(1,), require...
+    "test_no_grad_copy",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable() SkipFilesVariable()
+    "test_no_grad_copy_sparse",  # torch._dynamo.exc.Unsupported: Tensor.data_ptr
+    "test_reentrant_priority",  # torch._dynamo.exc.InternalTorchDynamoError: '<' not supported between instances of 'type' and 'int'
+    "test_reentrant_with_callbacks_both_depths",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable(queue_callback) __call__ [UserFunctionVariable()] {}
+    "test_reentrant_with_callbacks_depth_0",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable(queue_callback) __call__ [UserFunctionVariable()] {}
+    "test_reentrant_with_callbacks_depth_1",  # torch._dynamo.exc.Unsupported: Tensor.requires_grad_
+    "test_return_duplicate",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got: Cannot access storage of BatchedTensorImpl
+    "test_return_duplicate_inplace",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got: Cannot access storage of BatchedTensorImpl
+    "test_return_leaf",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_save_none_for_backward",  # AssertionError:
+    "test_save_output_nr",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_saved_variables_deprecated",  # torch._dynamo.exc.Unsupported: UNPACK_SEQUENCE SkipFilesVariable()
+    "test_set_materialize_non_diff_grads",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone
+    "test_setup_context_when_forward_has_default_args",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable() SkipFilesVariable()
+    "test_simple_reentrant",  # torch._dynamo.exc.Unsupported: call_method SkipFilesVariable() sum [] {}
+    "test_tensor_hooks_inplace_multiple_outputs",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
 }
 
 if not HAS_CUDA:
