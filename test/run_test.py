@@ -1780,10 +1780,7 @@ def main():
 
         all_failures = [failure for batch in test_batches for failure in batch.failures]
 
-        emit_dynamo_test_metric()
         if IS_CI:
-            print_to_stderr("Emiting dynamo_strict_stats")
-
             num_tests = len(selected_tests)
             for test, _ in all_failures:
                 test_stats = aggregated_heuristics.get_test_stats(test)

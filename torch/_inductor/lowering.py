@@ -23,7 +23,6 @@ from torch._prims_common import (
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
-    get_computation_dtype,
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
@@ -162,7 +161,7 @@ def is_boolean_type(x):
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
     def construct_input(inp):
-        if isinstance(inp, (Number, sympy.Symbol)):
+        if isinstance(inp, (Number, sympy.Expr)):
             return inp
         else:
             assert hasattr(inp, "get_dtype")
@@ -199,7 +198,9 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
         else:
             # FIXME that's a crude approximation for promoting args
             promoting_args = [
-                a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
+                a
+                for a in args
+                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "get_dtype")
             ]
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
@@ -342,12 +343,19 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
-def promote_constants(inputs, override_return_dtype=None):
+def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=None):
+    assert (
+        override_return_dtype is None or type_promotion_kind is None
+    ), "only one of override_return_dtype or type_promotion_kind may be given"
+
+    if override_return_dtype is None and type_promotion_kind is None:
+        type_promotion_kind = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+
     if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
         return inputs
     if all(isinstance(x, (int, float, sympy.Symbol)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
-            *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            *inputs, type_promotion_kind=type_promotion_kind
         )
 
         def const_func(x):
@@ -4573,7 +4581,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     denom = ExpandView.create(denom, list(sum_result.get_size()))
     x_var = div(sum_result, denom)
     if not return_mean:
-        return (x_var,)
+        return x_var
 
     x_mean = x_mean if keepdim else squeeze(x_mean, axis)
     return x_var, x_mean
@@ -4635,39 +4643,29 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     if return_mean:
         mean.realize()
         return var, mean
-    return (var,)
-
-
-def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
-    out_dtype = x.get_dtype()
-    compute_dtype = get_computation_dtype(out_dtype)
-    x = to_dtype(x, compute_dtype, copy=False)
-    kwargs = dict(
-        x=x,
-        axis=axis,
-        correction=correction,
-        keepdim=keepdim,
-        return_mean=return_mean,
-    )
-    output = (
-        var_mean_sum_(**kwargs)
-        if use_two_step_variance(x, axis=axis, keepdim=keepdim)
-        else var_mean_welford_(**kwargs)
-    )
-    output = tuple(to_dtype(x, out_dtype, copy=False) for x in output)
-    return output[0] if not return_mean else output
+    return var
 
 
 @register_lowering([aten.var, prims.var])
 def var_(x, axis=None, *, correction=None, keepdim=False):
-    return var_mean_helper_(
+    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
+        return var_mean_sum_(
+            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
+        )
+
+    return var_mean_welford_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
     )
 
 
 @register_lowering(aten.var_mean)
 def var_mean(x, axis=None, *, correction=None, keepdim=False):
-    return var_mean_helper_(
+    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
+        return var_mean_sum_(
+            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
+        )
+
+    return var_mean_welford_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
     )
 
@@ -4843,11 +4841,16 @@ def div_prim(a, b):
     return make_pointwise(fn)(a, b)
 
 
-div = register_lowering(
+@register_lowering(
     [aten.true_divide, aten.div.Tensor],
     broadcast=True,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)(div_prim)
+)
+def div(a, b):
+    a, b = promote_constants(
+        (a, b), type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    )
+    return div_prim(a, b)
 
 
 @register_lowering([aten.fmod, prims.fmod], broadcast=True)
