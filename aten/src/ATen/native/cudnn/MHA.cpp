@@ -50,7 +50,7 @@ namespace at { namespace native {
 
 namespace fe = cudnn_frontend;
 using graph_and_tensors = std::tuple<
-                                    std::shared_ptr<fe::graph::Graph>,                    
+                                    std::shared_ptr<fe::graph::Graph>,
                                     std::shared_ptr<fe::graph::Tensor_attributes>, // Q,
                                     std::shared_ptr<fe::graph::Tensor_attributes>, // K,
                                     std::shared_ptr<fe::graph::Tensor_attributes>, // V,
@@ -277,7 +277,7 @@ run_cudnn_LLM_fprop(int64_t b,
       // TODO(eqy): fix strides
       softmaxstats = at::empty({b, h, s_q}, q.options().dtype(kFloat));
     }
-    
+
     auto key = MHACacheKeyWrapper(b, h, s_q, s_kv, d, q, k, v, dropout_probability, is_causal, return_softmaxstats);
     auto graph_and_tensors_ptr = mhagraphcache.find(key);
     graph_and_tensors graph_and_tensors_values;

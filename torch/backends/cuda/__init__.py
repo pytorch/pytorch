@@ -307,6 +307,7 @@ def can_use_efficient_attention(params: SDPAParams, debug: bool = False) -> bool
     """
     return torch._C._can_use_mem_efficient_attention(params, debug)
 
+
 def cudnn_sdp_enabled():
     r"""
     .. warning:: This flag is beta and subject to change.
