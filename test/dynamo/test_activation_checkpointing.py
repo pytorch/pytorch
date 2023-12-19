@@ -177,9 +177,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             return torch.sigmoid(torch.matmul(x, y))
 
         def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(
-                gn, torch.sin(x), y, use_reentrant=True
-            )
+            return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
         y = torch.randn(4, 4, device="cuda", requires_grad=True)
@@ -237,9 +235,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, y):
             x = torch.sin(x)
-            z = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+            z = torch.utils.checkpoint.checkpoint(gn, x, y)
             x = torch.sin(z)
-            z = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+            z = torch.utils.checkpoint.checkpoint(gn, x, y)
             return z
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
@@ -265,9 +263,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         mod = MockModule().cuda()
 
         def fn(x):
-            return torch.utils.checkpoint.checkpoint(
-                mod, torch.sin(x), use_reentrant=True
-            )
+            return torch.utils.checkpoint.checkpoint(mod, torch.sin(x))
 
         x = torch.randn(10, 10, device="cuda", requires_grad=True)
 
@@ -294,9 +290,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         mod = MockModule().cuda()
 
         def fn(x):
-            return torch.utils.checkpoint.checkpoint(
-                mod, torch.sin(x), use_reentrant=True
-            )
+            return torch.utils.checkpoint.checkpoint(mod, torch.sin(x))
 
         x = torch.randn(10, 10, device="cuda", requires_grad=True)
 
@@ -323,9 +317,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, y):
             x = torch.sin(x)
-            x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+            x = torch.utils.checkpoint.checkpoint(gn, x, y)
             x = torch.sin(x)
-            z = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+            z = torch.utils.checkpoint.checkpoint(gn, x, y)
             return z
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
@@ -349,9 +343,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, y):
             x = torch.sin(x)
-            x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+            x = torch.utils.checkpoint.checkpoint(gn, x, y)
             x = torch.sin(x)
-            # x = torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+            # x = torch.utils.checkpoint.checkpoint(gn, x, y)
             return x
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
@@ -382,7 +376,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         mod = MockModule().cuda()
 
         def fn(x):
-            return torch.utils.checkpoint.checkpoint(mod, x, use_reentrant=True)
+            return torch.utils.checkpoint.checkpoint(mod, x)
 
         x = torch.randn(10, 10, device="cuda", requires_grad=True)
         backend = "inductor"
@@ -457,7 +451,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             return torch.matmul(x, torch.nn.functional.dropout(y, 0.5))
 
         def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(gn, x, y, use_reentrant=True)
+            return torch.utils.checkpoint.checkpoint(gn, x, y)
 
         backend = "aot_eager"
         cnt = CompileCounterWithBackend(backend)
@@ -811,7 +805,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             )[0]
 
         def gn(*args):
-            return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
+            return torch.utils.checkpoint.checkpoint(fn, *args)
 
         with torch.cuda.amp.autocast():
             x = torch.randn(4, 2, 16, 32, device="cuda", requires_grad=True)
@@ -842,7 +836,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         mod = MockModule().cuda()
 
         def fn(x):
-            return torch.utils.checkpoint.checkpoint(mod, x, use_reentrant=True)
+            return torch.utils.checkpoint.checkpoint(mod, x)
 
         x = torch.randn(4, 4).cuda()
         opt_fn = torch.compile(fn, fullgraph=True)
@@ -867,7 +861,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         mod = MockModule().cuda()
 
         def fn(x, ys):
-            return torch.utils.checkpoint.checkpoint(mod, x, ys, use_reentrant=True)
+            return torch.utils.checkpoint.checkpoint(mod, x, ys)
 
         x = torch.randn(4, 4).cuda()
         y = torch.randn(4, 4).cuda()
