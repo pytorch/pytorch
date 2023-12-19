@@ -139,18 +139,11 @@ def user_defined_kernel_grid_fn_code(name, configs, grids):
         if len(grids) == 1:
             output.writeline(f"return {grids[0]}")
         else:
-            assert len(grids) > 1
             assert len(grids) == len(configs)
-            seen = set()
             for grid, c in zip(grids, configs):
                 guards = [f"meta['{name}'] == {val}" for name, val in c.kwargs.items()]
                 guards = " and ".join(guards)
-                statement = f"if {guards}: return {grid}"
-                if statement in seen:
-                    continue
-                seen.add(statement)
-                output.writeline(statement)
-
+                output.writeline(f"if {guards}: return {grid}")
     return fn_name, output.getvalue()
 
 
