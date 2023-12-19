@@ -19,7 +19,7 @@ class TestOptimRenewed(TestCase):
     @optims(optim_db)
     def test_optim_infos_do_not_specify_global_cliquey_kwargs(self, device, dtype, optim_info):
         global_cliquey_flags = ["foreach", "fused", "differentiable"]
-        for optim_input in optim_info.optim_inputs_func():
+        for optim_input in optim_info.optim_inputs_func(device=device):
             self.assertFalse(any(f for f in global_cliquey_flags if f in optim_input.kwargs))
 
 
@@ -56,7 +56,7 @@ class TestOptimRenewed(TestCase):
         # after rho_t becomes greater than 5 in step 6.
         kIterations = 7
 
-        optim_inputs = optim_info.optim_inputs_func()
+        optim_inputs = optim_info.optim_inputs_func(device=device)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
             updated_params, state = [], []
@@ -145,7 +145,7 @@ class TestOptimRenewed(TestCase):
                 p.grad = torch.rand_like(p, device=p.device, dtype=p.dtype)
 
         kIterations = 7 if flag == "foreach" else 1
-        optim_inputs = optim_info.optim_inputs_func()
+        optim_inputs = optim_info.optim_inputs_func(device=device)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
             updated_params, state = [], []
@@ -226,7 +226,7 @@ class TestOptimRenewed(TestCase):
     @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float16])
     def test_foreach_large_tensor(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        optim_inputs = optim_info.optim_inputs_func()
+        optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
             params = [torch.ones(2 ** 32, device=device, dtype=dtype)]
             params[0].grad = torch.zeros_like(params[0])
@@ -238,7 +238,7 @@ class TestOptimRenewed(TestCase):
     @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float32])
     def test_peak_memory_foreach(self, device, dtype, optim_info):
         nparams = 10
-        optim_inputs = optim_info.optim_inputs_func()
+        optim_inputs = optim_info.optim_inputs_func(device=device)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
             kwargs = deepcopy(optim_input.kwargs)
@@ -306,7 +306,7 @@ class TestOptimRenewed(TestCase):
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float16])
     def test_fused_large_tensor(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        optim_inputs = optim_info.optim_inputs_func()
+        optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
             params = [torch.ones(2 ** 32, device=device, dtype=dtype)]
             params[0].grad = torch.zeros_like(params[0])
@@ -317,7 +317,7 @@ class TestOptimRenewed(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_is_noop_when_params_have_no_grad(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        optim_inputs = optim_info.optim_inputs_func()
+        optim_inputs = optim_info.optim_inputs_func(device=device)
         params = [
             torch.randn(2, 3, requires_grad=False, device=device, dtype=dtype)
             for _ in range(2)]
@@ -349,7 +349,7 @@ class TestOptimRenewed(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_is_noop_for_empty_grads(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        optim_inputs = optim_info.optim_inputs_func()
+        optim_inputs = optim_info.optim_inputs_func(device=device)
         param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
         old_param = param.clone().detach()
 
