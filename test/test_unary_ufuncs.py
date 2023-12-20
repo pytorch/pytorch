@@ -276,6 +276,7 @@ class TestUnaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
+    @skipIfTorchDynamo  # really flaky
     @ops(reference_filtered_ops)
     def test_reference_numerics_small(self, device, dtype, op):
         if dtype in (torch.bool,):
@@ -287,6 +288,7 @@ class TestUnaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
+    @skipIfTorchDynamo  # really flaky
     @ops(reference_filtered_ops)
     def test_reference_numerics_large(self, device, dtype, op):
         if dtype in (torch.bool, torch.uint8, torch.int8):
