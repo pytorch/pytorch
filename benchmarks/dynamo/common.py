@@ -238,6 +238,9 @@ CI_USE_SGD = {
     "resmlp_12_224",
     "dlrm",
     "resnet50",
+    "dm_nfnet_f0",
+    "pit_b_224",
+    "tf_mixnet_l",
 }
 
 
