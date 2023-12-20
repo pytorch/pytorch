@@ -518,7 +518,7 @@ def fx_codegen_and_compile(
             # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
             # For the forward pass, we have the real inputs to be used as example_inputs. For the backward pass,
             # we currently use fake tensors and defake them later.
-            example_inputs=V.real_inputs if is_inference else example_inputs,
+            example_inputs=example_inputs,
             shape_env=shape_env,
             num_static_inputs=num_fixed,
             graph_id=graph_id,
