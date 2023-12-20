@@ -3,7 +3,7 @@ from typing import Dict, Iterable, List, Optional, overload, Sequence, Tuple, Un
 
 import torch
 import torch.distributed as dist
-from torch.cuda.amp.grad_scaler import GradScaler, _MultiDeviceReplicator
+from torch.cuda.amp.grad_scaler import _MultiDeviceReplicator, GradScaler
 from torch.distributed.distributed_c10d import ProcessGroup
 
 log = logging.getLogger(__name__)
@@ -76,6 +76,7 @@ class ShardedGradScaler(GradScaler):
         )
         if self._enabled:
             self.process_group = process_group
+            self._allow_fp16_grad = True
 
     @overload
     def scale(self, outputs: torch.Tensor) -> torch.Tensor:
@@ -101,7 +102,7 @@ class ShardedGradScaler(GradScaler):
         # For the FSDP + Mixed Precision use case, the loss output is in the Mixed Precision
         # format (fp16, bf16) and so the scaled loss should be of the same dtype.
         if isinstance(scaled_outputs, torch.Tensor):
-            return scaled_outputs.type(outputs.dtype)
+            return scaled_outputs.type(outputs.dtype)  # type: ignore[union-attr]
         iterable = map(lambda x, y: x.type(y.dtype), scaled_outputs, outputs)
         if isinstance(scaled_outputs, (list, tuple)):
             return type(scaled_outputs)(iterable)
@@ -144,9 +145,7 @@ class ShardedGradScaler(GradScaler):
         found_inf_combined: torch.Tensor,
     ):
         if _scale.device.type == "cpu":
-            self._amp_update_scale_cpu_(
-                found_inf_combined
-            )
+            self._amp_update_scale_cpu_(found_inf_combined)
         else:
             super()._update_scale_(
                 _scale,
@@ -159,9 +158,11 @@ class ShardedGradScaler(GradScaler):
         optimizer: torch.optim.Optimizer,
         inv_scale: torch.Tensor,
         found_inf: torch.Tensor,
-        allow_fp16: bool = True,
+        allow_fp16: bool,
     ) -> Dict[torch.device, torch.Tensor]:
-        per_device_found_inf_dict = super()._unscale_grads_(optimizer, inv_scale, found_inf, allow_fp16)
+        per_device_found_inf_dict = super()._unscale_grads_(
+            optimizer, inv_scale, found_inf, allow_fp16
+        )
         # There exist contexts (e.g. w/ `use_orig_params=True`) wherein some
         # ranks may have no (non-zero sized) parameter shards, necessitating the
         # initialization of `per_device_found_inf._per_device_tensors` here
@@ -169,7 +170,9 @@ class ShardedGradScaler(GradScaler):
             assert self._scale is not None
             per_device_found_inf = _MultiDeviceReplicator(found_inf)
             per_device_found_inf.get(self._scale.device)
-        return per_device_found_inf._per_device_tensors
+            return per_device_found_inf._per_device_tensors
+        else:
+            return per_device_found_inf_dict
 
     def unscale_(self, optimizer: torch.optim.Optimizer) -> None:
         super().unscale_(optimizer)
@@ -181,11 +184,7 @@ class ShardedGradScaler(GradScaler):
         for v in optimizer_state["found_inf_per_device"].values():
             if v.device.type == "cpu":
                 v_on_cuda = v.cuda()
-                future_handles.append(
-                    dist.all_reduce(
-                        v_on_cuda, async_op=True, group=self.process_group
-                    ).get_future()
-                )
+                dist.all_reduce(v_on_cuda, async_op=False, group=self.process_group)
                 v.copy_(v_on_cuda.cpu())
             else:
                 future_handles.append(
@@ -222,7 +221,7 @@ class ShardedGradScaler(GradScaler):
     def _is_tensor_on_supported_device(self, tensor: torch.Tensor):
         return tensor.is_cuda or tensor.device.type in ("xla", "cpu")
 
-    def _sparse_coalesce(self, tensor: torch.Tensor):
+    def _sparse_coalesce(self, tensor: torch.Tensor) -> torch.Tensor:
         return tensor.type(torch.float32).coalesce().type(torch.float16)
 
     def _foreach_non_finite_check_and_unscale_(

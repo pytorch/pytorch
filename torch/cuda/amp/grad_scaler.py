@@ -145,6 +145,7 @@ class GradScaler:
             self._per_optimizer_states: Dict[int, Dict[str, Any]] = defaultdict(
                 _refresh_per_optimizer_state
             )
+            self._allow_fp16_grad = False
 
     def _check_scale_growth_tracker(
         self, funcname: str
@@ -282,7 +283,7 @@ class GradScaler:
                     )
         return per_device_found_inf._per_device_tensors
 
-    def _sparse_coalesce(self, tensor: torch.Tensor):
+    def _sparse_coalesce(self, tensor: torch.Tensor) -> torch.Tensor:
         return tensor.coalesce()
 
     def _foreach_non_finite_check_and_unscale_(
@@ -349,7 +350,7 @@ class GradScaler:
         found_inf = torch.full((), 0.0, dtype=torch.float32, device=self._scale.device)
 
         optimizer_state["found_inf_per_device"] = self._unscale_grads_(
-            optimizer, inv_scale, found_inf, False
+            optimizer, inv_scale, found_inf, self._allow_fp16_grad
         )
         optimizer_state["stage"] = OptState.UNSCALED
 
@@ -704,3 +705,15 @@ class GradScaler:
             self._backoff_factor,
             self._growth_interval,
         )
+
+    def get_allow_fp16_grad(self) -> bool:
+        r"""Return a Python bool whether allow fp16 gradients"""
+        return self._allow_fp16_grad
+
+    def set_allow_fp16_grad(self, allow_fp16: bool) -> None:
+        r"""allow fp16 gradients or not
+
+        Args:
+            allow_fp16 (bool):  allow fp16 or not
+        """
+        self._allow_fp16_grad = allow_fp16
