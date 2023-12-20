@@ -824,13 +824,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_mixed_device_dtype",
-            ),
         ),
     ),
     OptimizerInfo(
@@ -861,13 +854,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_mixed_device_dtype",
-            ),
         ),
     ),
     OptimizerInfo(
@@ -897,13 +883,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
             ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_mixed_device_dtype",
-            ),
         ),
     ),
     OptimizerInfo(
@@ -932,13 +911,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_mixed_device_dtype",
             ),
             DecorateInfo(
                 unittest.skip("Uses too much memory, even for H100, surprisingly."),
@@ -974,13 +946,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
             ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_mixed_device_dtype",
-            ),
         ),
     ),
     OptimizerInfo(
@@ -1009,13 +974,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_mixed_device_dtype",
             ),
         ),
     ),
@@ -1048,13 +1006,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
             ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_mixed_device_dtype",
-            ),
         ),
     ),
     OptimizerInfo(
@@ -1076,13 +1027,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_mixed_device_dtype",
             ),
         ),
     ),
@@ -1114,11 +1058,14 @@ optim_db: List[OptimizerInfo] = [
                 "test_set_default_dtype_works_with_foreach",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
+                toleranceOverride(
+                    {  # previously atol=5-05, rtol=0.001
+                        torch.float32: tol(atol=5e-04, rtol=0.01),
+                    }
                 ),
                 "TestOptimRenewed",
-                "test_foreach_mixed_device_dtype",
+                "test_mixed_device_dtype",
+                active_if=TEST_WITH_TORCHDYNAMO,
             ),
         ),
     ),
@@ -1149,13 +1096,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Mixed device in params errors, see https://github.com/pytorch/pytorch/issues/102023"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_mixed_device_dtype",
-            ),
         ),
     ),
     OptimizerInfo(
@@ -1181,12 +1121,12 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 toleranceOverride(
-                    {
+                    {  # previously atol=5-05, rtol=0.001
                         torch.float32: tol(atol=5e-04, rtol=0.007),
                     }
                 ),
                 "TestOptimRenewed",
-                "test_foreach_mixed_device_dtype",
+                "test_mixed_device_dtype",
                 active_if=TEST_WITH_TORCHDYNAMO,
             ),
         ),
