@@ -1373,6 +1373,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
         self.register_finalizer_fns.clear()
+        # None is invalid for these, and clearing them messes up the user scope.
+        self.local_scope = {}
+        self.global_scope = {}
 
     def set_torch_function_state(self, enabled: bool) -> None:
         self.torch_function_enabled = enabled
