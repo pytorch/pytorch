@@ -669,9 +669,8 @@ def _compile(
                 e.__traceback__
             ) from None
         finally:
-            # nonlocal tracer
             if tracer:
-                tracer.output.local_scope.clear()
+                tracer.output.local_scope = {}
 
             from .utils import curr_frame
 
