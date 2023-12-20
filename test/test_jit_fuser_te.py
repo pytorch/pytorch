@@ -2043,7 +2043,7 @@ class TestTEFuser(JitTestCase):
         sets = []
         for i in range(0, len(indices) + 1):
             for subset in combinations(indices, i):
-                sets.append(subset)
+                sets.append(subset)  # noqa: PERF402
 
         for set in sets:
             size = [2, 3, 4, 5]
