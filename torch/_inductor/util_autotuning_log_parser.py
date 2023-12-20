@@ -2,10 +2,16 @@ import hashlib
 import io
 import json
 import logging
+import operator
 import re
-from typing import Any, Dict, Optional, Union
+from functools import reduce
+from typing import Any, Dict, List, Optional, Union
 
 log = logging.getLogger(__name__)
+
+
+def prod(iterable):
+    return reduce(operator.mul, iterable, 1)
 
 
 class AutotuningLogParser:
@@ -41,6 +47,7 @@ class AutotuningLogParser:
         return df.groupby(
             [
                 "problem_hash",
+                "BATCHSIZE",
                 "M",
                 "N",
                 "K",
@@ -54,6 +61,44 @@ class AutotuningLogParser:
             dropna=False,
             as_index=False,
         ).benchmark_result.min()
+
+    def get_detail_analysis(self):
+        df = self.get_dataframe()
+        return df.loc[
+            df.groupby(
+                [
+                    "problem_hash",
+                    "BATCHSIZE",
+                    "M",
+                    "N",
+                    "K",
+                    "A_shape",
+                    "B_shape",
+                    "Bias_shape",
+                    "tile_shape",
+                    "backend",
+                    "kernel_schedule",
+                ],
+                dropna=False,
+            ).benchmark_result.idxmin()
+        ]
+
+    def get_best_analysis(self):
+        df = self.get_dataframe()
+        return df.loc[
+            df.groupby(
+                [
+                    "BATCHSIZE",
+                    "M",
+                    "N",
+                    "K",
+                    "A_shape",
+                    "B_shape",
+                    "Bias_shape",
+                ],
+                dropna=False,
+            ).benchmark_result.idxmin()
+        ]
 
     @staticmethod
     def strhash(s):
@@ -88,7 +133,7 @@ class AutotuningLogParser:
         result["device"] = rec.get("device", "unknown")
         result["cuda_device_name"] = rec["cuda_device_name"]
         # result['keys'] = ",".join(rec.keys())
-        for name, tinfo in cls.parse_inputs(rec["input_nodes"]).items():
+        for name, tinfo in cls.parse_inputs(rec["input_nodes"], rec["backend"]).items():
             if isinstance(tinfo, dict):
                 for key, value in tinfo.items():
                     result[f"{name}_{key}"] = value
@@ -109,9 +154,16 @@ class AutotuningLogParser:
                 yield json.loads(line)
 
     @classmethod
-    def load_records(cls, path_or_fd: Union[str, io.TextIOWrapper]):
-        for record in cls.load_raw_records(path_or_fd):
-            yield cls.parse_record(record)
+    def load_records(
+        cls,
+        path_or_fd: Union[str, io.TextIOWrapper, List[Union[str, io.TextIOWrapper]]],
+    ):
+        if isinstance(path_or_fd, list):
+            for pf in path_or_fd:
+                yield from cls.load_records(pf)
+        else:
+            for record in cls.load_raw_records(path_or_fd):
+                yield cls.parse_record(record)
 
     @staticmethod
     def load_raw_grepped_records(path, pattern):
@@ -153,15 +205,20 @@ class AutotuningLogParser:
         return res
 
     @classmethod
-    def parse_inputs(cls, input_nodes):
+    def parse_inputs(cls, input_nodes, backend):
         if len(input_nodes) == 2:
             a_layout = cls.parse_layout(input_nodes[0]["layout"])
             b_layout = cls.parse_layout(input_nodes[1]["layout"])
             c_layout = None
         else:
-            a_layout = cls.parse_layout(input_nodes[1]["layout"])
-            b_layout = cls.parse_layout(input_nodes[2]["layout"])
-            c_layout = cls.parse_layout(input_nodes[0]["layout"])
+            if backend == "CUDA" and input_nodes[0]["name"] != "addmm":
+                a_layout = cls.parse_layout(input_nodes[0]["layout"])
+                b_layout = cls.parse_layout(input_nodes[1]["layout"])
+                c_layout = cls.parse_layout(input_nodes[2]["layout"])
+            else:
+                a_layout = cls.parse_layout(input_nodes[1]["layout"])
+                b_layout = cls.parse_layout(input_nodes[2]["layout"])
+                c_layout = cls.parse_layout(input_nodes[0]["layout"])
         assert (
             a_layout["size"][-1] == b_layout["size"][-2]
         ), f"Incompatible input layouts. {a_layout=}, {b_layout=}, {input_nodes[0]=}, {input_nodes[1]=}"
@@ -170,12 +227,17 @@ class AutotuningLogParser:
             b_layout["size"][-1],
             a_layout["size"][-1],
         )
+        if len(a_layout["size"]) > 2:
+            batch_size = prod(list(a_layout["size"][0:-2]))
+        else:
+            batch_size = 1
         M, N, K = problem_shape
         return {
             "problem_shape_MNK": problem_shape,
             "A": a_layout,
             "B": b_layout,
             "Bias": c_layout,
+            "BATCHSIZE": batch_size,
             "M": M,
             "N": N,
             "K": K,
