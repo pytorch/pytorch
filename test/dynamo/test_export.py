@@ -78,7 +78,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         out_graph = exported[0]
 
         dynamo_result = out_graph()
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_mismatched_out(self):
         def func(x):
@@ -95,7 +95,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(torch.tensor([[[1.3737, 0.1]]]))
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_shape_control_flow_1(self):
         def func(x):
@@ -115,7 +115,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         from torch._guards import GuardSource
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
         hit = False
         for guard in out_guards:
             if guard.source == GuardSource.SHAPE_ENV:
@@ -144,7 +144,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         resA = module(*input)
         graph, _ = torch._dynamo.export(module)(*input)
         resB = graph(*input)
-        self.assertTrue(torch._dynamo.utils.same(resA, resB))
+        self.assertEqual(resA, resB)
 
     def test_export_graph_bypass(self):
         inp = [
@@ -168,7 +168,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_list_unpack(self):
         inp = [
@@ -192,7 +192,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_with_shallow_list_copy_wo_side_effects(self):
         def f(x):
@@ -203,7 +203,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         gm = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
             inp
         ).graph_module
-        self.assertTrue(torch._dynamo.utils.same(gm(inp), f(inp)))
+        self.assertEqual(gm(inp), f(inp))
 
     def test_export_with_shallow_list_copy_with_side_effects(self):
         def f(x):
@@ -218,7 +218,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         ).graph_module
         res = gm(inp)
         ref = f(inp)
-        self.assertTrue(torch._dynamo.utils.same(res, ref))
+        self.assertEqual(res, ref)
         self.assertEqual(res[0], res[1])
 
     def test_export_mismatched_out_2(self):
@@ -236,7 +236,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(torch.tensor([[[1.3737, 0.1]]]))
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_graph_with_list(self):
         inp = [
@@ -261,7 +261,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_graph_with_complex_reorder(self):
         inp = [
@@ -287,7 +287,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_dupes(self):
         inp = torch.tensor([0.1, 0.1])
@@ -306,7 +306,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_dupes_2(self):
         inp = torch.tensor([0.1, 0.1])
@@ -325,7 +325,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_dupes_and_bypass(self):
         inp = torch.tensor([0.1, 0.1])
@@ -346,7 +346,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_dupes_and_bypass_with_non_tensor_arg(self):
         inp = torch.tensor([0.1, 0.1])
@@ -368,7 +368,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_dupes_and_bypass_reorder_with_non_tensor_arg(self):
         inp = torch.tensor([0.1, 0.1])
@@ -390,7 +390,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     @config.patch(capture_scalar_outputs=True)
     def test_dupes_and_bypass_with_non_tensor_output(self):
@@ -413,7 +413,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_zeroes_in_and_out_different_shape_on_test(self):
         inp = torch.zeros(10)
@@ -436,7 +436,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps_rand)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     @config.patch(capture_scalar_outputs=True)
     def test_zeroes_in_new_shape_scalar_out(self):
@@ -460,7 +460,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps_rand)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     @config.patch(capture_scalar_outputs=True)
     def test_zeroes_in_new_shape_scalar_out_permute(self):
@@ -484,7 +484,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps_rand)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     @config.patch(capture_scalar_outputs=True)
     def test_zeroes_in_new_shape_scalar_out_permute_dupe_and_bypass(self):
@@ -508,7 +508,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps_rand)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_func_return(self):
         inp = torch.zeros(10)
@@ -536,7 +536,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps_rand)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_dict_return(self):
         inp = torch.zeros(10)
@@ -560,7 +560,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps_rand)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_with_aten_graph(self):
         def pre_attention_state_ops(input, mems, state):
@@ -601,7 +601,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         out_graph = exported[0]
 
         dynamo_result = out_graph()
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_mismatched_out_with_aten_graph(self):
         def func(x):
@@ -620,7 +620,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(torch.tensor([[[1.3737, 0.1]]]))
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_graph_bypass_with_aten_graph(self):
         inp = [
@@ -644,7 +644,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_list_unpack_with_aten_graph(self):
         inp = [
@@ -668,7 +668,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_mismatched_out_2_with_aten_graph(self):
         def func(x):
@@ -687,7 +687,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(torch.tensor([[[1.3737, 0.1]]]))
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_graph_with_list_with_aten_graph(self):
         inp = [
@@ -712,7 +712,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_graph_with_complex_reorder_with_aten_graph(self):
         inp = [
@@ -738,7 +738,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_dupes_with_aten_graph(self):
         inp = torch.tensor([0.1, 0.1])
@@ -757,7 +757,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_dupes_2_with_aten_graph(self):
         inp = torch.tensor([0.1, 0.1])
@@ -776,7 +776,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(inp)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_dupes_and_bypass_with_aten_graph(self):
         inp = torch.tensor([0.1, 0.1])
@@ -797,7 +797,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_dupes_and_bypass_with_non_tensor_arg_with_aten_graph(self):
         inp = torch.tensor([0.1, 0.1])
@@ -819,7 +819,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_dupes_and_bypass_reorder_with_non_tensor_arg_with_aten_graph(self):
         inp = torch.tensor([0.1, 0.1])
@@ -841,7 +841,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     @config.patch(capture_scalar_outputs=True)
     def test_dupes_and_bypass_with_non_tensor_output_with_aten_graph(self):
@@ -864,7 +864,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_zeroes_in_and_out_different_shape_on_test_with_aten_graph(self):
         inp = torch.zeros(10)
@@ -887,7 +887,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps_rand)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_func_return_with_aten_graph(self):
         inp = torch.zeros(10)
@@ -915,7 +915,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps_rand)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_dict_return_with_aten_graph(self):
         inp = torch.zeros(10)
@@ -939,7 +939,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         dynamo_result = out_graph(*inps_rand)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_with_stack_trace(self):
         inp = torch.randn(4, 4)
@@ -1054,12 +1054,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         fx_g = make_fx(func)(inp)
         make_fx_result_through_direct = fx_g(inp)
 
-        self.assertTrue(
-            torch._dynamo.utils.same(make_fx_result_through_backend, export_result)
-        )
-        self.assertTrue(
-            torch._dynamo.utils.same(make_fx_result_through_direct, export_result)
-        )
+        self.assertEqual(make_fx_result_through_backend, export_result)
+        self.assertEqual(make_fx_result_through_direct, export_result)
 
     def test_export_with_constant_method_on_module(self):
         class MyModule(torch.nn.Module):
@@ -1083,9 +1079,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         module = MyModule()
         graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         result = graph(torch.tensor([[1.0, 0.0], [0, 0]]))
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_method_on_module_invoke_twice(self):
         class MyModule(torch.nn.Module):
@@ -1109,9 +1105,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         module = MyModule()
         graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         result = graph(torch.tensor([[1.0, 0.0], [0, 0]]))
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_free_function(self):
         @torch._dynamo.assume_constant_result
@@ -1139,9 +1135,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         module = MyModule()
         graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         result = graph(torch.tensor([[1.0, 0.0], [0, 0]]))
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_free_function_and_class_method(self):
         @torch._dynamo.assume_constant_result
@@ -1165,9 +1161,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         module = MyModule()
         graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         result = graph(torch.tensor([[1.0, 0.0], [0, 0]]))
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_free_function_and_class_method_multiarg(self):
         @torch._dynamo.assume_constant_result
@@ -1197,11 +1193,11 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         result = graph(
             torch.tensor([[1.0, 0.0], [0, 0]]), torch.tensor([[1.0, 0.0], [0, 0]])
         )
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
         result = graph(
             torch.tensor([[1, 0], [0.25, 0.25]]), torch.tensor([[1, 0], [0.25, 0.25]])
         )
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_free_function_and_class_method_multiarg_diff(self):
         @torch._dynamo.assume_constant_result
@@ -1224,12 +1220,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         result = graph(
             torch.tensor([[1.0, 0.0], [0, 0]]), torch.tensor([[0.0, 1.0], [0, 0]])
         )
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
         result = graph(
             torch.tensor([[1, 0], [0.25, 0.25]]),
             torch.tensor([[0.33, 0.33], [0.25, 0.25]]),
         )
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_tuple_nonzero(self):
         class MyModule(torch.nn.Module):
@@ -1253,7 +1249,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # Tensor input can be almost anything here, and the result will capture what we
         # made constant at compile time.
         result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_list_nonzero(self):
         class MyModule(torch.nn.Module):
@@ -1277,7 +1273,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # Tensor input can be almost anything here, and the result will capture what we
         # made constant at compile time.
         result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_list_nonzero_free_function(self):
         @torch._dynamo.assume_constant_result
@@ -1301,7 +1297,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # Tensor input can be almost anything here, and the result will capture what we
         # made constant at compile time.
         result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_dict_values(self):
         class MyModule(torch.nn.Module):
@@ -1323,7 +1319,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # Tensor input can be almost anything here, and the result will capture what we
         # made constant at compile time.
         result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_none_control_flow(self):
         class MyModule(torch.nn.Module):
@@ -1350,7 +1346,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         graph, guards = torch._dynamo.export(module)(torch.tensor([-1]))
         result = graph(torch.tensor([2]))
         # X is positive, but we compiled helper_fn to return None, so it will still return y
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_not_none_control_flow(self):
         class MyModule(torch.nn.Module):
@@ -1377,7 +1373,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         graph, guards = torch._dynamo.export(module)(torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
         # X is negative, but we compiled helper_fn to return x, so it will still return y * x
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_none_control_flow_free_func(self):
         @torch._dynamo.assume_constant_result
@@ -1404,7 +1400,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         graph, guards = torch._dynamo.export(module)(torch.tensor([-1]))
         result = graph(torch.tensor([2]))
         # X is positive, but we compiled helper_fn to return None, so it will still return y
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_not_none_control_flow_pos(self):
         class MyModule(torch.nn.Module):
@@ -1431,7 +1427,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         graph, guards = torch._dynamo.export(module)(torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
         # X is negative, but we compiled helper_fn to return x, so it will still return y * x
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_not_none_control_flow_free_func(self):
         @torch._dynamo.assume_constant_result
@@ -1458,7 +1454,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         graph, guards = torch._dynamo.export(module)(torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
         # X is negative, but we compiled helper_fn to return x, so it will still return y * x
-        self.assertTrue(torch._dynamo.utils.same(result, real_result))
+        self.assertEqual(result, real_result)
 
     def test_export_with_constant_not_return_const(self):
         class MyModule(torch.nn.Module):
@@ -1479,7 +1475,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         graph, guards = torch._dynamo.export(module)(torch.tensor([2]))
         module.val = "B"
         resB = graph(torch.tensor([2]))
-        self.assertTrue(torch._dynamo.utils.same(resA, resB))
+        self.assertEqual(resA, resB)
 
     def test_export_decomp(self):
         def f(x):
@@ -1550,14 +1546,14 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         out_graph = exported[0]
 
         dynamo_result = out_graph(pred, x)
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
         # New X, just to show we did not specialize
         x = x * -1
         pred = torch.tensor(x[0][0].item() < 0)
         real_result_2 = mod.forward(pred, x)
         dynamo_result_2 = out_graph(pred, x)
-        self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
+        self.assertEqual(real_result_2, dynamo_result_2)
 
     @config.patch(capture_scalar_outputs=True)
     def test_export_with_cond_branches_calling_methods(self):
@@ -1590,7 +1586,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         real_result = mod.forward(pred, x)
         out_graph, _ = torch._dynamo.export(mod.forward)(pred, x)
         dynamo_result = out_graph(pred, x)
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     @config.patch(capture_scalar_outputs=True)
     def test_export_with_cond_closure(self):
@@ -1645,7 +1641,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             real_result = mod.forward(pred, x)
             out_graph, _ = torch._dynamo.export(mod.forward)(pred, x)
             dynamo_result = out_graph(pred, x)
-            self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+            self.assertEqual(real_result, dynamo_result)
 
     def test_export_with_cond_with_closed_function(self):
         def hello(x):
@@ -1668,7 +1664,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         real_result = foo(pred, x)
         out_graph, _ = torch._dynamo.export(foo)(pred, x)
         dynamo_result = out_graph(pred, x)
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_with_cond_dynamic_shape_pred(self):
         from functorch.experimental.control_flow import cond
@@ -2212,7 +2208,7 @@ def forward(self, x):
         out_graph = exported[0]
         dynamo_result = out_graph(*args, **kwargs)
         real_result = fn(*args, **kwargs)
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
         # Check that the exported graph preserves same argument names.
         self.assertEqual(
@@ -2736,7 +2732,7 @@ def forward(self, x):
 
         dynamo_result = out_graph(*inps)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_list_not_contains(self):
         def func(x):
@@ -2755,7 +2751,7 @@ def forward(self, x):
 
         dynamo_result = out_graph(*inps)
 
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        self.assertEqual(real_result, dynamo_result)
 
     def test_export_identity(self):
         inp = torch.tensor([0.1, 0.1])
@@ -2766,7 +2762,7 @@ def forward(self, x):
         torch._dynamo.reset()
         exported, _ = torch._dynamo.export(func)(inp)
         dynamo_result = exported(inp)
-        self.assertTrue(torch._dynamo.utils.same(inp, dynamo_result))
+        self.assertEqual(inp, dynamo_result)
 
     def test_export_specialized_int(self):
         class Foo(torch.nn.Module):
@@ -2810,11 +2806,7 @@ def forward(self, x):
             gm, _ = torch._dynamo.export(m, aten_graph=True)(input_tensor)
             res = gm(input_tensor)
             self.assertEqual(res.size(0), static_size)
-            self.assertTrue(
-                torch._dynamo.utils.same(
-                    res, torch.nonzero_static(input_tensor, size=static_size)
-                )
-            )
+            self.assertEqual(res, torch.nonzero_static(input_tensor, size=static_size))
 
     def test_export_pass_arg_by_name(self):
         class BasicModule(torch.nn.Module):
@@ -2829,7 +2821,7 @@ def forward(self, x):
         gm, guard = torch._dynamo.export(mod, aten_graph=True)(input_tensor)
         ref = mod(x=input_tensor)
         res = gm(x=input_tensor)
-        self.assertTrue(torch._dynamo.utils.same(ref, res))
+        self.assertEqual(ref, res)
 
     def test_export_pass_arg_by_name_star_args(self):
         class BasicModule(torch.nn.Module):
@@ -2850,7 +2842,7 @@ def forward(self, x):
         )
         ref = mod(input_tensor, input_tensor2)
         res = gm(input_tensor, input_tensor2)
-        self.assertTrue(torch._dynamo.utils.same(ref, res))
+        self.assertEqual(ref, res)
 
     def test_export_mark_dynamic_conflict_dynamic_dim(self):
         y = torch.randn([3, 3, 3])

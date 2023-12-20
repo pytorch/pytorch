@@ -27,8 +27,8 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt)(fn)
         r1 = opt_fn(v1, v2)
         r2 = opt_fn(v2, v1)
-        self.assertTrue(torch._dynamo.testing.same(r1, correct1))
-        self.assertTrue(torch._dynamo.testing.same(r2, correct2))
+        self.assertEqual(r1, correct1)
+        self.assertEqual(r2, correct2)
         self.assertEqual(
             cnt.frame_count,
             frame_count,
@@ -287,8 +287,8 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt)(fn)
         r1 = opt_fn(v1, v2, t)
         r2 = opt_fn(v1, v2, f)
-        self.assertTrue(torch._dynamo.testing.same(r1, correct1))
-        self.assertTrue(torch._dynamo.testing.same(r2, correct2))
+        self.assertEqual(r1, correct1)
+        self.assertEqual(r2, correct2)
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 4)
 

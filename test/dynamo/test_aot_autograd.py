@@ -57,7 +57,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         eager_result = mod(*args)
         aot_result = aot_mod(*args)
-        self.assertTrue(torch._dynamo.testing.same(eager_result, aot_result))
+        self.assertEqual(eager_result, aot_result)
 
     def test_mutation(self):
         # https://github.com/pytorch/torchdynamo/issues/1301
@@ -163,7 +163,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         graph, _ = torch._dynamo.export(mod)(rx)
 
         # Run exported graph with AOT
-        self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
+        self.assertEqual(real, graph(rx))
 
         aot_fn = torch._dynamo.optimize("aot_eager")(graph)
         aot_fn(rx)
@@ -194,7 +194,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         graph, _ = torch._dynamo.export(mod)(x, y)
 
         # Assert equal
-        self.assertTrue(torch._dynamo.testing.same(real, graph(x, y)))
+        self.assertEqual(real, graph(x, y))
 
         # Run exported graph with AOT
         aot_fn = torch._dynamo.optimize("aot_eager")(graph)
@@ -235,7 +235,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         optimized_mod = torch._dynamo.optimize(capturing_fn)(mod)
 
         # Assert equal
-        self.assertTrue(torch._dynamo.testing.same(real, optimized_mod(x, y)))
+        self.assertEqual(real, optimized_mod(x, y))
 
         # Uncomment to reproduce commented out graphs below.
         # for gm in gms:
@@ -750,7 +750,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         x = torch.rand((4, 4))
 
         opt_fn = torch._dynamo.optimize("aot_eager")(fn)
-        self.assertTrue(torch._dynamo.testing.same(fn(x), opt_fn(x)))
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_aot_sequence_nr(self):
         class Model(torch.nn.Module):

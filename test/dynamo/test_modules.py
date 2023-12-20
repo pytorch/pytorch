@@ -1110,7 +1110,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_m = torch._dynamo.optimize(cnt)(m)
         r = opt_m(i)
-        self.assertTrue(torch._dynamo.testing.same(r, m(i)))
+        self.assertEqual(r, m(i))
         self.assertEqual(cnt.op_count, 5)
 
     def test_unsupportedmodule(self):
@@ -1119,7 +1119,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_m = torch._dynamo.optimize(cnt)(m)
         r = opt_m(i)
-        self.assertTrue(torch._dynamo.testing.same(r, m(i)))
+        self.assertEqual(r, m(i))
         self.assertEqual(cnt.op_count, 6)
 
     def test_self_mutating1(self):
@@ -1134,8 +1134,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         opt_m4 = torch._dynamo.optimize_assert(cnt)(m4)
         out3 = [opt_m3(i), opt_m3(i), opt_m3(i)]
         out4 = [opt_m4(i), opt_m4(i), opt_m4(i)]
-        self.assertTrue(torch._dynamo.testing.same(out2, out3))
-        self.assertTrue(torch._dynamo.testing.same(out2, out4))
+        self.assertEqual(out2, out3)
+        self.assertEqual(out2, out4)
         self.assertEqual(cnt.frame_count, 3)
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
@@ -1186,7 +1186,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             out2 = opt_foo(x)
 
             self.assertEqual(cnt.op_count, 4)
-            self.assertTrue(torch._dynamo.testing.same(out1, out2))
+            self.assertEqual(out1, out2)
 
         finally:
             torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
@@ -1224,7 +1224,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 out2 = opt_foo(x)
 
                 self.assertEqual(cnt.op_count, 4)
-                self.assertTrue(torch._dynamo.testing.same(out1, out2))
+                self.assertEqual(out1, out2)
             finally:
                 torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
 
@@ -1251,7 +1251,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
         out2 = opt_m(data)
         self.assertEqual(cnt.op_count, 2)
-        self.assertTrue(torch._dynamo.testing.same(out1, out2))
+        self.assertEqual(out1, out2)
 
         module_dict = torch.nn.ModuleDict({"bar": torch.nn.Conv2d(1, 1, 1)})
         m = M(module_dict)
@@ -1263,7 +1263,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         out2 = opt_m(data)
 
         self.assertEqual(cnt.op_count, 1)
-        self.assertTrue(torch._dynamo.testing.same(out1, out2))
+        self.assertEqual(out1, out2)
 
         module_dict = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
         pre = m(data)
@@ -1278,8 +1278,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         out_post = m(data)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
-        self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
-        self.assertTrue(torch._dynamo.testing.same(out1, out_post))
+        self.assertEqual(pre, opt_pre)
+        self.assertEqual(out1, out_post)
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
@@ -1343,7 +1343,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         opt_test_torch_static()
         out = opt_test_torch_static()
 
-        self.assertTrue(same(out, module(torch.ones(*input_shape))))
+        self.assertEqual(out, module(torch.ones(*input_shape)))
 
         self.assertTrue(
             isinstance(module, torch.nn.modules.batchnorm.BatchNorm3d),
@@ -1451,7 +1451,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         rx = torch.randn([3, 10, 10])
         real = mod(rx)
         graph, _ = torch._dynamo.export(mod)(rx)
-        self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
+        self.assertEqual(real, graph(rx))
 
     def test_conv_call_forward_directly(self):
         m = ConvCallForwardDirectly()
@@ -1505,7 +1505,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(opt_mod, torch._dynamo.OptimizedModule)
 
         x = torch.randn(10, 10)
-        self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
+        self.assertEqual(mod(x), opt_mod(x))
         self.assertEqual(cnt.frame_count, 1)
 
     def test_to(self):
@@ -1513,7 +1513,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_mod = torch._dynamo.optimize(cnt)(mod)
         x = torch.randn(10, 10)
-        self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
+        self.assertEqual(mod(x), opt_mod(x))
         self.assertEqual(cnt.frame_count, 1)
 
         # Ensure that there is no recompilation
@@ -1704,7 +1704,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         self.assertIsInstance(opt_outer_mod, torch._dynamo.OptimizedModule)
-        self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
+        self.assertEqual(outer_mod(x), opt_outer_mod(x))
         self.assertEqual(cnt.frame_count, 1)
 
     def test_composition_with_opt_mod(self):
@@ -1733,7 +1733,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         self.assertIsInstance(opt_outer_mod, torch._dynamo.OptimizedModule)
-        self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
+        self.assertEqual(outer_mod(x), opt_outer_mod(x))
         # There will be a graph break for the inner mod being OptimizedModule
         self.assertEqual(cnt.frame_count, 2)
 

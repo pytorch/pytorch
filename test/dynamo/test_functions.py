@@ -721,10 +721,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert("eager")(fn)
         res = opt_fn(x)
 
-        self.assertTrue(same(ref[0], res[0]))
-        self.assertTrue(same(ref[1]["a"], res[1]["a"]))
-        self.assertTrue(same(ref[1]["c"], res[1]["c"]))
-        self.assertTrue(same(ref[1][param], res[1][param]))
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1]["a"], res[1]["a"])
+        self.assertEqual(ref[1]["c"], res[1]["c"])
+        self.assertEqual(ref[1][param], res[1][param])
 
     def test_default_dict(self):
         self._test_default_dict_helper(dict)
@@ -756,13 +756,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert("eager")(fn)
         res = opt_fn(x)
 
-        self.assertTrue(same(ref[0], res[0]))
-        self.assertTrue(same(ref[1]["a"], res[1]["a"]))
-        self.assertTrue(same(ref[1]["b"], res[1]["b"]))
-        self.assertTrue(same(ref[1]["c"], res[1]["c"]))
-        self.assertTrue(same(ref[1]["d"], res[1]["d"]))
-        self.assertTrue(same(ref[1]["e"], res[1]["e"]))
-        self.assertTrue(same(ref[1][param], res[1][param]))
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1]["a"], res[1]["a"])
+        self.assertEqual(ref[1]["b"], res[1]["b"])
+        self.assertEqual(ref[1]["c"], res[1]["c"])
+        self.assertEqual(ref[1]["d"], res[1]["d"])
+        self.assertEqual(ref[1]["e"], res[1]["e"])
+        self.assertEqual(ref[1][param], res[1][param])
+        
 
     @make_test
     def test_call_dict1(x):
@@ -1110,7 +1111,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for i, x in enumerate(data):
             expected = func(x)
             output = cfunc(x)
-            self.assertTrue(same(output, expected))
+            self.assertEqual(output, expected)
             assert cnt.frame_count == expected_frame_counts[i]
 
     @make_test
@@ -1187,7 +1188,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(10)
         expected = func(x, 12)
         output = cfunc(x, 12)
-        self.assertTrue(same(output, expected))
+        self.assertEqual(output, expected)
         assert cnt.frame_count == 1
 
     @make_test
@@ -1517,7 +1518,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         input1 = torch.rand([2])
         input2 = torch.rand([2])
         res = forward(input1)(input2)
-        self.assertTrue(same(res, input1 + input2))
+        self.assertEqual(res, input1 + input2)
 
     def test_non_inlined_closure(self):
         @torch.compile()
@@ -1537,7 +1538,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         input1 = torch.randn(1)
         input2 = torch.randn(1)
 
-        self.assertTrue(same(program(input1, input2), input1 + input1))
+        self.assertEqual(program(input1, input2), input1 + input1)
 
 
 def udf_mul(x, y):
@@ -1605,8 +1606,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             else:
                 x, kw_x = compiled_func()
             # the inner func mutates += 1 each call
-            self.assertTrue(same(x, torch.ones_like(x) + i))
-            self.assertTrue(same(kw_x, torch.ones_like(kw_x) + i))
+            self.assertEqaul(x, torch.ones_like(x) + i)
+            self.assertEqual(kw_x, torch.ones_like(kw_x) + i)
         # Calling compiled_func twice does not recompile
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -1645,8 +1646,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             else:
                 x, kw_x = compiled_mod()
             # the inner func mutates += 1 each call
-            self.assertTrue(same(x, torch.ones_like(x) + i))
-            self.assertTrue(same(kw_x, torch.ones_like(kw_x) + i))
+            self.assertEqual(x, torch.ones_like(x) + i)
+            self.assertEqual(kw_x, torch.ones_like(kw_x) + i)
         # Calling compiled_func twice does not recompile
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -2469,7 +2470,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(
             eager_dataclass.named_tensors["x"], compiled_dataclass.named_tensors["x"]
         )
-        self.assertTrue(same(out, compiled_out))
+        self.assertEqual(out, compiled_out)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
 

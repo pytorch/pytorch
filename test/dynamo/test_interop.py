@@ -17,7 +17,7 @@ class InteropTests(torch._dynamo.test_case.TestCase):
         ref = fn(*inputs)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(*inputs)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
 
     def test_fx_fn(self):
         fx_fn = torch.fx.symbolic_trace(fn)

@@ -136,7 +136,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
                 )
             )
 
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
             self.assertTrue(
                 len(events) == 1,
                 "Expected one lookup profiler event for one opt_fn run",

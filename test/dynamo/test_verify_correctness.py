@@ -92,7 +92,7 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
         r1 = s(i)
         opt_s = torch._dynamo.optimize("ts")(s)
         r2 = opt_s(i)
-        self.assertTrue(same(r1, r2))
+        self.assertEqual(r1, r2)
 
     def test_incorrect_verify_true(self):
         """
@@ -133,7 +133,7 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
         r1 = toy_example(i1, i2)
         opt_toy_example = torch._dynamo.optimize(incorrect_compile_fn)(toy_example)
         r2 = opt_toy_example(i1, i2)
-        self.assertTrue(not same(r1, r2))
+        self.assertNotEqual(r1, r2)
 
 
 if __name__ == "__main__":

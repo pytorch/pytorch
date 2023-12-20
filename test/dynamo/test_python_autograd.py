@@ -210,9 +210,9 @@ class TestPythonAutograd(TestCase):
         reset_tape()
         res2 = fn_dynamo(*args2)
         reset_tape()
-        self.assertTrue(same(res1, fn(*args1)))
+        self.assertEqual(res1, fn(*args1))
         reset_tape()
-        self.assertTrue(same(res2, fn(*args2)))
+        self.assertEqual(res2, fn(*args2))
         reset_tape()
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, expected_ops)
@@ -277,8 +277,8 @@ class TestPythonAutograd(TestCase):
         # force two frames
         grad2 = opt_grad(loss2, [v1, v2])
 
-        self.assertTrue(same(loss1, loss2))
-        self.assertTrue(same(grad1, grad2))
+        self.assertEqual(loss1, loss2)
+        self.assertEqual(grad1, grad2)
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 8)
 

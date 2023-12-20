@@ -93,15 +93,15 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         r3 = opt_fn(a, (b, c), d)
 
         self.assertIsNotNone(r1)
-        self.assertTrue(same(r1, r2))
-        self.assertTrue(same(r1, r3))
+        self.assertEqual(r1, r2)
+        self.assertEqual(r1, r3)
 
     def _check_backend_works(self, backend):
         model = Seq().eval()
         input = torch.randn(2, 10)
         r1 = model(input)
         r2 = torch.compile(model, backend=backend)(input)
-        self.assertTrue(same(r1, r2.float(), tol=0.01))
+        self.assertAlmostEqual(r1, r2.float(), delta=0.01)
 
     def test_eager(self):
         self._check_backend_works("eager")
@@ -152,7 +152,7 @@ class NormalizeIRTests(torch._dynamo.test_case.TestCase):
 
         optimized_fn = torch._dynamo.optimize("aot_eager")(fn)
         res = optimized_fn(a, b)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
 
 
 class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
