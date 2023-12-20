@@ -2042,7 +2042,8 @@ make_fallback(aten.randperm)
 
 
 def sdpa_constraint(fx_node, *args, **kwargs):
-    # sdpa requires dense last dimension
+    # sdpa requires dense last dimension]
+
     def apply_constraint(arg, fx_arg):
         if not isinstance(arg, ir.IRNode):
             return arg
@@ -2060,25 +2061,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
         ALIGNMENT = 8
 
-        is_backward = fx_node.target in (
-            aten._scaled_dot_product_efficient_attention_backward.default,
-            aten._scaled_dot_product_flash_attention_backward.default,
-        )
-
-        def is_aligned(x):
-            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
-
         assert isinstance(arg, TensorBox)
+        if len(arg.get_size()) not in (3, 4):
+            return arg
 
-        # This correctly handles the forward case:
-        if isinstance(arg.data, (ir.SliceView, ir.ExpandView)):
-            if not is_aligned(arg):
-                # input is padded, requiring_stride_order will unwrap the view and unpad.
-                # Would be nice to be able to require certain padding from inductor ir, nyi
-                if is_aligned(arg.unwrap_view()):
-                    return arg
-
-        def is_aligned_backward(x):
+        def is_aligned_realized_tensor(x):
             aligned_strides = all(
                 (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
                 for i in range(len(x.get_stride()) - 1)
@@ -2087,13 +2074,20 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                 V.graph.sizevars.size_hint(x.get_stride()[-1])
             ) == 1 and aligned_strides
 
-        if (
-            isinstance(arg.data, ir.StorageBox)
-            and arg.data.is_input_buffer()
-            and is_backward
-        ):
-            if len(arg.data.get_size()) == 4 and is_aligned_backward(arg):
+        try:
+            arg.get_stride()
+            if is_aligned_realized_tensor(arg):
                 return arg
+        except AttributeError:
+            pass
+
+        def is_aligned(x):
+            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
+
+        if isinstance(arg.data, ir.BaseView):
+            if not is_aligned(arg):
+                if is_aligned(arg.unwrap_view()):
+                    return arg
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
