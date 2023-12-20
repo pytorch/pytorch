@@ -348,7 +348,6 @@ class TensorVariable(VariableTracker):
                 unimplemented(f"Illegal method invocation {name} in strict mode")
         from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
-        from .user_defined import UserDefinedClassVariable
 
         kwargs = dict(kwargs)
 
@@ -484,7 +483,7 @@ class TensorVariable(VariableTracker):
         elif (
             name == "as_subclass"
             and len(args) == 1
-            and isinstance(args[0], UserDefinedClassVariable)
+            and isinstance(args[0], TensorSubclassVariable)
         ):
             from .builder import VariableBuilder
             from .torch_function import TensorWithTFOverrideVariable
