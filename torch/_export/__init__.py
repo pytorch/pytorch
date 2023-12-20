@@ -206,8 +206,6 @@ def capture_pre_autograd_graph(
                 if re.match(r"^[if]\d+$", str(k))
             }
 
-            flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-            range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
             if isinstance(f, torch.nn.Module):
                 from torch.export._trace import _restore_state_dict
                 _restore_state_dict(f, m)
