@@ -10,6 +10,11 @@ import threading
 import types
 from typing import Dict, List
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 import torch._dynamo.config
 
 import torch.nn
@@ -31,6 +36,8 @@ from ..utils import (
     istype,
     namedtuple_fields,
     object_has_getattribute,
+    proxy_args_kwargs,
+    tensortype_to_dtype,
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
@@ -140,7 +147,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
-        from .builder import SourcelessBuilder
+        from .builder import SourcelessBuilder, wrap_fx_proxy
         from .builtin import BuiltinVariable
 
         constant_args = check_constant_args(args, kwargs)
@@ -268,6 +275,37 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 user_cls_source=self.source,
                 mutable_local=MutableLocal(),
             )
+        # torch.LongTensor cannot accept a list of FakeTensors.
+        # So we stack the list of FakeTensors instead.
+        elif (
+            np
+            and self.value in tensortype_to_dtype
+            and len(args) == 1
+            and isinstance(args[0], variables.ListVariable)
+            and len(args[0].items) > 1
+            and all(isinstance(x, variables.TensorVariable) for x in args[0].items)
+        ):
+            # Stack FakeTensor
+            stacked = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.stack,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+            )
+            args = [stacked]
+
+            tensor_variable = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+            )
+
+            return tensor_variable
 
         return super().call_function(tx, args, kwargs)
 
