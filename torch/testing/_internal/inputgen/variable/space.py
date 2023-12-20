@@ -50,8 +50,10 @@ class Discrete:
     def __str__(self) -> str:
         if len(self.values) == 0:
             return "{}"
-        if list(self.values)[0].__class__ in [bool, int, float, ScalarDtype]:
+        if next(iter(self.values)).__class__ in [bool, int, float, str]:
             return "{" + str(sorted(self.values))[1:-1] + "}"
+        if next(iter(self.values)).__class__ == ScalarDtype:
+            return "{" + ", ".join(str(v) for v in sorted(self.values)) + "}"
         return str(self.values)
 
     def empty(self) -> bool:
@@ -327,7 +329,7 @@ class VariableSpace:
 
     >>> s = VariableSpace(ScalarDtype)
     >>> str(s)
-    '{ScalarDtype.bool, ScalarDtype.int, ScalarDtype.float}'
+    '{bool, int, float}'
     """
 
     def __init__(self, vtype: type):
@@ -351,10 +353,7 @@ class VariableSpace:
 
     def __str__(self) -> str:
         if self.discrete.initialized:
-            if self.vtype in [bool, int, float, str, ScalarDtype]:
-                return str(sorted(self.discrete.values))
-            else:
-                return str(self.discrete)
+            return str(self.discrete)
         else:
             return str(self.intervals)
 
