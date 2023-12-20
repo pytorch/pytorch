@@ -34,7 +34,7 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
-from .dicts import ConstDictVariable
+from .dicts import ConstDictVariable, DefaultDictVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -61,6 +61,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             obj = inspect.getattr_static(self.value, name)
         except AttributeError:
             obj = None
+
         if isinstance(obj, staticmethod):
             return variables.UserFunctionVariable(
                 obj.__get__(self.value), source=source
@@ -69,6 +70,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source and inspect.ismemberdescriptor(obj):
             return VariableBuilder(tx, source)(obj.__get__(self.value))
+
+        # Special handling of collections.OrderedDict.fromkeys()
+        # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
+        # collections.defaultdict, and both will be handled at UserDefinedClassVariable.call_method().
+        # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
+        # and we need duplicate code to handle both cases.
+        if self.value is collections.OrderedDict and name == "fromkeys":
+            return super().var_getattr(tx, name)
 
         if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
             obj
@@ -102,6 +111,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
 
             return variables.ListVariable(subs_as_vars, **options)
+        elif (
+            self.value in {collections.OrderedDict, collections.defaultdict}
+            and name == "fromkeys"
+        ):
+            from .builtin import BuiltinVariable
+
+            return BuiltinVariable.call_custom_dict_fromkeys(
+                tx, self.value, *args, **kwargs
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -110,9 +128,44 @@ class UserDefinedClassVariable(UserDefinedVariable):
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
         from .builder import SourcelessBuilder
+        from .builtin import BuiltinVariable
 
         if self.value is contextlib.nullcontext:
             return NullContextVariable()
+        elif self.value is collections.OrderedDict:
+            return BuiltinVariable.call_custom_dict(
+                tx, collections.OrderedDict, *args, **kwargs
+            )
+        elif (
+            self.value is collections.defaultdict
+            and len(args) <= 1
+            and DefaultDictVariable.is_supported_arg(args[0])
+        ):
+            return DefaultDictVariable(
+                {},
+                collections.defaultdict,
+                args[0],
+                mutable_local=MutableLocal(),
+            )
+        elif self.value is collections.deque and not kwargs:
+            if len(args) == 0:
+                items = []
+            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+                items = args[0].unpack_var_sequence(tx)
+            else:
+                unimplemented("deque() with more than 1 arg not supported")
+            return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
+        elif self.value is functools.partial:
+            if not args:
+                unimplemented("functools.partial malformed")
+            # The first arg, a callable (the ctor below will assert on types)
+            fn = args[0]
+            rest_args = args[1:]
+            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
+            # args and keywords
+            return variables.functions.FunctoolsPartialVariable(
+                fn, args=rest_args, keywords=kwargs
+            )
         elif (
             issubclass(type(self.value), type)
             and hasattr(self.value, "__enter__")
