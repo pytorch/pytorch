@@ -861,6 +861,14 @@ def _return_true(match):
     return True
 
 
+def log_trace_fialure(search_fn, e):
+    log.info(
+        "Replacement pattern %s failed to apply due to shape mismatch: %s",
+        search_fn.__name__,
+        e,
+    )
+
+
 def register_replacement(
     search_fn,
     replace_fn,
@@ -925,43 +933,49 @@ def register_replacement(
                         if isinstance(v, torch.SymInt) and v not in sym_args:
                             sym_args.append(v)
 
-            try:
-                if sym_args:
-                    orig_len = len(args)
+            if sym_args:
+                # AOT Autograd and make fx will dedupe symbolic shape size
+                # accesses of sym ints that appear as inputs
+                # We don't want the sym_size uses to interfere with pattern matching
+                # so we provide them as inputs.
+                # Later, when we actually do the replacement, the symbolic shape
+                # sizes will get re-traced and added to the graph.
 
-                    def search_fn_new(*args):
-                        return search_fn(*args[len(args) - (orig_len) :])
+                def search_fn_new(*args_new):
+                    return search_fn(*args_new[len(args_new) - len(args) :])
 
+                try:
                     specific_graph = trace_fn(search_fn_new, sym_args + args)
-                    sym_arg_names = []
-                    for i, placeholder in zip(
-                        range(len(sym_args) + len(args)),
-                        list(specific_graph.graph.nodes),
-                    ):
-                        if i < len(sym_args):
-                            sym_arg_names.append(placeholder.target)
-                            continue
+                except RuntimeError as e:
+                    log_trace_fialure(search_fn, e)
+                    return False
 
-                        with specific_graph.graph.inserting_after(placeholder):
-                            new_node = specific_graph.graph.placeholder(
-                                argnames[i - len(sym_args)]
-                            )
-                            new_node.target = new_node.name
-                            placeholder.replace_all_uses_with(new_node)
-                            specific_graph.graph.erase_node(placeholder)
+                # correct argnames in the graph
+                sym_arg_names = []
+                for i, placeholder in zip(
+                    range(len(sym_args) + len(args)),
+                    specific_graph.graph.nodes,
+                ):
+                    if i < len(sym_args):
+                        sym_arg_names.append(placeholder.target)
+                        continue
 
-                    argnames = sym_arg_names + argnames
+                    with specific_graph.graph.inserting_after(placeholder):
+                        new_node = specific_graph.graph.placeholder(
+                            argnames[i - len(sym_args)]
+                        )
+                        new_node.target = new_node.name
+                        placeholder.replace_all_uses_with(new_node)
+                        specific_graph.graph.erase_node(placeholder)
 
-                else:
+                argnames = sym_arg_names + argnames
+            else:
+                try:
                     specific_graph = trace_fn(search_fn, args)
+                except RuntimeError as e:
+                    log_trace_fialure(search_fn, e)
+                    return False
 
-            except RuntimeError as e:
-                log.info(
-                    "Replacement pattern %s failed to apply due to shape mismatch: %s",
-                    search_fn.__name__,
-                    e,
-                )
-                return False
             specific_pattern = fx_to_pattern(
                 specific_graph,
                 argnames=argnames,
