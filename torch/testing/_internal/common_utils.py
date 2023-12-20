@@ -2695,7 +2695,8 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 if match is not None:
                     filename = match.group(1)
                     strict_default = filename not in FIXME_default_non_strict
-            except OSError:
+            # inspect.getfile can fail with these
+            except (OSError, TypeError):
                 pass
             if "STRICT_DEFAULT" in os.environ:
                 if os.environ["STRICT_DEFAULT"] == "1":
