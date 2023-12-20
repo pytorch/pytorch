@@ -4943,7 +4943,7 @@ def prod(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
-@register_lowering(aten.any, type_promotion_kind=None)
+@register_lowering(aten.any)
 def reduce_any(x, dim=None, keepdim=False):
     x = to_dtype(x, torch.bool)
     return make_reduction("any")(x, axis=dim, keepdims=keepdim)
