@@ -155,7 +155,7 @@ C10_API void report_overflow(const char* name);
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
   // Converting to bool can't overflow so we exclude this case from checking.
-  if (!std::is_same<To, bool>::value && overflows<To, From>(f)) {
+  if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
     report_overflow(name);
   }
   return convert<To, From>(f);

@@ -372,6 +372,7 @@ Tensor& set_(Tensor& result, Storage source) {
   return result.set_(std::move(source), 0, new_size, {});
 }
 
+
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
 Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
   checkSetStorage(result, std::move(storage), storage_offset, size, stride);
@@ -3063,14 +3064,12 @@ static inline Tensor sparse_compressed_transpose(
           return self.values().transpose(-2 - dense_dim, -1 - dense_dim);
         });
   }
-  return at::native::_sparse_compressed_tensor_unsafe(
+  return at::_sparse_compressed_tensor_unsafe(
       compressed_inds,
       plain_inds,
       result_vals,
       result_sizes,
-      self.scalar_type(),
-      result_layout,
-      self.device());
+      self.options().layout(result_layout));
 }
 } // namespace
 
