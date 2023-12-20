@@ -147,9 +147,12 @@ class BlockPtrOptions:
             ]
 
         return BlockPtrOptions(
-            constant_offset=constant_offset,
-            shape=filter([t.numel for t in range_trees]),
-            strides=filter(strides),
+            constant_offset=V.graph.sizevars.lookup_precomputed_size(constant_offset),
+            shape=[
+                V.graph.sizevars.lookup_precomputed_size(t.numel)
+                for t in filter(range_trees)
+            ],
+            strides=[*map(V.graph.sizevars.lookup_precomputed_size, filter(strides))],
             block_shape=filter(block_shape),
             order=V.graph.sizevars.guarded_order(filter(strides)),
             offsets=filter([f"{t.prefix}offset" for t in range_trees]),
