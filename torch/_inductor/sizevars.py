@@ -500,6 +500,8 @@ class SizeVarAllocator:
         return order
 
     def lookup_precomputed_size(self, expr: Expr) -> sympy.Symbol:
+        if expr.is_number or expr.is_symbol:
+            return expr
         expr = self.remove_precomputed_replacements(expr)
         if expr not in self.precomputed_replacements:
             sym = sympy_symbol(f"ps{len(self.precomputed_replacements)}")
