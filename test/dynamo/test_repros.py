@@ -3814,6 +3814,36 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn_opt(torch.zeros(1)), fn(torch.zeros(1)))
 
+    @torch._dynamo.config.patch(log_compilation_metrics=True)
+    def test_many_views_with_mutation(self):
+        # When symbolic storage offsets were added in #113734, tensors_definitely_do_not_overlap
+        # began adding shape guards - a quadratic amount relative to the number of inputs.
+        # Test this configuration, and test that a reasonable number of guards are added.
+        # Note, when dynamic shapes are turned on, this test fails and we still get quadratic guards.
+        def fn(x):
+            x[0].relu_()
+            return torch.cat(x).sum()
+
+        AMT = 32
+        src = torch.rand(16 * (AMT + 1))
+
+        x = [src.as_strided((4, 4), (4, 1), 3 + 16 * i) for i in range(AMT)]
+
+        torch._dynamo.reset()
+        torch._dynamo.utils.clear_compilation_metrics()
+
+        res = torch.compile(fn, backend="aot_eager")(x)
+
+        all_metrics = torch._dynamo.utils.get_compilation_metrics()
+
+        total_guards = sum(metric.guard_count for metric in all_metrics)
+        self.assertLess(total_guards, AMT * 8)
+
+        total_shape_env_guards = sum(
+            metric.shape_env_guard_count for metric in all_metrics
+        )
+        self.assertLess(total_shape_env_guards, AMT * 8)
+
     def test_numpy_tobytes_no_error(self):
         def fn(x):
             x += 1
