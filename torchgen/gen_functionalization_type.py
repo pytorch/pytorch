@@ -377,6 +377,7 @@ def emit_view_functionalization_body(
 """
 
         else:
+            is_multi_output_view = isinstance(f.func.returns[0].type, ListType)
             return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       {unwrap_tensor_args_str}
@@ -415,7 +416,8 @@ def emit_view_functionalization_body(
         }},
         {reverse_lambda.decl()} {{
           return {reverse_lambda.inner_call()}
-        }}
+        }},
+        /*is_multi_output=*/{str(is_multi_output_view).lower()}
       );
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
@@ -714,7 +716,11 @@ def gen_functionalization_registration(
         return view_str
 
     elif isinstance(g, NativeFunctionsGroup):
-        fns = list(g.functions())
+        # Gets a hand-written functionalization kernel
+        if g.inplace is not None and str(g.inplace.func.name) == "set_.source_Tensor":
+            fns = []
+        else:
+            fns = list(g.functions())
     else:
         if str(g.func.name) in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION:
             return []
@@ -730,7 +736,8 @@ def gen_functionalization_registration(
         if str(f.func.name) == "resize_":
             # See Note [resize_ in Functionalization]
             return []
-        assert not f.is_view_op
+        if str(f.func.name.name) != "set_":
+            assert not f.is_view_op
         # functionalization needs to generate and register kernels for inplace ops.
         # We *also* need to directly register CompositeImplicitAUtograd kernels
         # so that they decompose properly before functioanlization.
@@ -770,7 +777,10 @@ def gen_functionalization_definition(
         # I think we should either:
         # (1) fix their schemas (BC-breaking)
         # (2) hand-write their functionalization kernels
-        if str(g.func.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION:
+        if (
+            str(g.func.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION
+            and str(g.func.name.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION
+        ):
             assert g.has_composite_implicit_autograd_kernel or not modifies_arguments(g)
         return []
     else:

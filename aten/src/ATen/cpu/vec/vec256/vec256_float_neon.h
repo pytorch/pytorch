@@ -16,8 +16,7 @@
 // However for now opting for STL, since we are not building
 // with Sleef for mobile yet.
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -421,6 +420,9 @@ public:
       Vectorized<float>(Sleef_expm1f4_u10(values.val[0]), Sleef_expm1f4_u10(values.val[1])),
       map(std::expm1)
     );
+  }
+  Vectorized<float> exp_u20() const {
+    return exp();
   }
   Vectorized<float> fmod(const Vectorized<float>& q) const {
     USE_SLEEF(
@@ -877,4 +879,4 @@ inline Vectorized<float> Vectorized<float>::erf() const{
 }
 #endif /* defined(aarch64) */
 
-}}}
+}} // namespace at::vec::CPU_CAPABILITY

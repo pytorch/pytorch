@@ -23,7 +23,7 @@ def autograd_not_implemented_inner(
     """
     with torch._C._AutoDispatchBelowAutograd():
         result = operator(*args, **kwargs)
-        flat_operands, _ = pytree.tree_flatten(args)
+        flat_operands = pytree.arg_tree_leaves(*args)
         if torch.is_grad_enabled() and any(
             f.requires_grad for f in flat_operands if isinstance(f, torch.Tensor)
         ):

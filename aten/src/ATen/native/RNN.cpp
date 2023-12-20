@@ -61,7 +61,7 @@
 
 int register_linear_params();
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -740,19 +740,6 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       auto hy = params.matmul_hr(std::get<0>(result));
       // Slice off the workspace argument (it's needed only for AD).
       return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
-    } else if (input.is_mps()) {
-      // MPS has issues with inplace ops, workaround to prevent using inplace ops for mps.
-      const auto gates = params.linear_hh(hx).add_(
-        pre_compute_input ? input : params.linear_ih(input));
-      auto chunked_gates = gates.unsafe_chunk(4, 1);
-      auto ingate = chunked_gates[0].sigmoid();
-      auto forgetgate = chunked_gates[1].sigmoid();
-      auto cellgate = chunked_gates[2].tanh();
-      auto outgate = chunked_gates[3].sigmoid();
-      auto cy = (forgetgate * cx).add_(ingate * cellgate);
-      auto hy = outgate * cy.tanh();
-      hy = params.matmul_hr(hy);
-      return std::make_tuple(std::move(hy), std::move(cy));
     }
 
     const auto gates = params.linear_hh(hx).add_(
@@ -2004,4 +1991,4 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
 }
 
 } // namespace
-}}  // namespace at::native
+}  // namespace at::native

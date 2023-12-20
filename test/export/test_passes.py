@@ -4,6 +4,7 @@ with test_functionalization_with_native_python_assertion)
 """
 
 # Owner(s): ["module: dynamo"]
+import math
 import unittest
 from typing import List, Set
 import operator
@@ -12,13 +13,12 @@ import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import export
-from torch._export.passes import (
-    ReplaceViewOpsWithViewCopyOpsPass,
-)
+from torch.export import export
+from torch._export.pass_base import _ExportPassBase
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     is_view_op,
     get_view_copy_of_view_op,
+    ReplaceViewOpsWithViewCopyOpsPass,
 )
 from torch._export.passes.functionalize_side_effectful_ops_pass import (
     _FunctionalizeSideEffectfulOpsPass,
@@ -26,7 +26,7 @@ from torch._export.passes.functionalize_side_effectful_ops_pass import (
 from functorch.experimental.control_flow import cond
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.infra.partitioner import Partition
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:
@@ -55,7 +55,7 @@ def _to_partition_names(partitions: List[Partition]) -> List[Set[str]]:
 
 def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
     output_node = next(n for n in gm.graph.nodes if n.op == "output")
-    args = tree_flatten(output_node.args)[0]
+    args = pytree.tree_leaves(output_node.args)
     # if isinstance(args, tuple) and len(args) == 1:
     #     args = args[0]
     return [str(arg) for arg in args]
@@ -76,7 +76,7 @@ class TestPasses(TestCase):
         dim1_x = torch.export.Dim("dim1_x", min=2, max=6)
         ep = torch.export.export(M(), (x,), dynamic_shapes={"x": {1: dim1_x}})
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected input l_x_.shape\[1\] to be <= 6, but got 7"):
             ep(torch.zeros(2, 7, 3))
 
         self.assertEqual(ep(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
@@ -99,10 +99,10 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": {0: dim0_y}}
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected input l_x_.shape\[1\] to be <= 6, but got 7"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg1_1"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected input l_y_.shape\[0\] to be >= 3, but got 2"):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
@@ -123,12 +123,12 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": {0: dim0_x, 1: dim1_x}, "y": None}
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected input l_x_.shape\[1\] to be <= 6, but got 7"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"
+            RuntimeError, r"Expected input l_y_.shape\[0\] to be equal to 5, but got 2"
         ):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
@@ -152,12 +152,12 @@ class TestPasses(TestCase):
         dim1_y = torch.export.Dim("dim1_y", min=3, max=6)
         ep = torch.export.export(M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}})
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+        with self.assertRaisesRegex(RuntimeError, r"shape\[1\] to be equal to 2"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"
+            RuntimeError, r"Expected input l_y_.shape\[0\] to be equal to 5, but got 2"
         ):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
@@ -302,34 +302,6 @@ class TestPasses(TestCase):
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint \\[2, 5\\]."):
             ep(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
 
-    def test_runtime_assert_equality_constraint(self):
-        class Adder(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-                return x + y
-
-        m = Adder()
-        x = torch.rand(3, 4)
-        y = torch.rand(3, 4)
-        dim1 = torch.export.Dim("dim1")
-        exported = torch.export.export(
-            m, (x, y), dynamic_shapes={"x": {1: dim1}, "y": {1: dim1}}
-        )
-
-        x = torch.rand(3, 5)
-        y = torch.rand(3, 6)
-        with self.assertRaisesRegex(
-            RuntimeError, r"Input arg0_1.shape\[1\] is not equal to input arg1_1.shape\[1\]"
-        ):
-            exported(x, y)
-
-        y = torch.rand(3, 5)
-        dynamo_result = exported(x, y)
-        real_result = m(x, y)
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
-
     def test_functionalize_inline_contraints(self) -> None:
         def f(x):
             a = x.item()
@@ -366,6 +338,17 @@ class TestPasses(TestCase):
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
         ).run(gm.code)
+
+    def test_math_ops(self):
+        def func(x):
+            return (
+                torch.tensor([math.ceil(x.item())]),
+                torch.tensor([math.floor(x.item())]),
+            )
+
+        x = torch.randn(1, dtype=torch.float32)
+        ep = torch.export.export(func, args=(x,))
+        _ExportPassBase()(ep.graph_module)
 
 
 if __name__ == '__main__':

@@ -28,12 +28,15 @@ for device in ["cpu", "cuda"]:
             dynamic_dim(x, 0) <= 1024,
             dynamic_dim(x, 0) == dynamic_dim(y, 0),
         ]
-        model_so_path, _ = aot_compile(model, (x, y), constraints=constraints)
+        model_so_path = aot_compile(model, (x, y), constraints=constraints)
 
+    params = dict(model.named_parameters())
     data.update({
         f"model_so_path_{device}": model_so_path,
         f"inputs_{device}": [x, y],
         f"outputs_{device}": [ref_output],
+        f"fc_weight_{device}": params["fc.weight"],
+        f"fc_bias_{device}": params["fc.bias"],
     })
 
 # Use this to communicate tensors to the cpp code

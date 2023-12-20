@@ -3,36 +3,19 @@
 import copy
 
 import torch.distributed as dist
+from torch.distributed._shard.sharded_tensor import Shard, ShardedTensor, ShardMetadata
+from torch.distributed._shard.sharded_tensor.metadata import ShardedTensorMetadata
+from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.distributed.remote_device import _remote_device
 
-from torch.distributed.checkpoint.metadata import (
-    STATE_DICT_TYPE,
-)
-from torch.distributed._shard.sharded_tensor import (
-    Shard,
-    ShardMetadata,
-    ShardedTensor,
-)
-
-from torch.distributed._shard.sharded_tensor.metadata import (
-    ShardedTensorMetadata,
-)
-
-
-from ._traverse import (
-    OBJ_PATH,
-    traverse_state_dict,
-    set_element,
-    STATE_DICT_ITEM,
-)
-
+from ._traverse import OBJ_PATH, set_element, STATE_DICT_ITEM, traverse_state_dict
 from .utils import _element_wise_add, _normalize_device_info
 
 
 # TODO: We need to refactor this code.
 def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
     r"""
-    Transforms ``state_dict`` by flattening all nested ShardedTensor instances found.
+    Transform ``state_dict`` by flattening all nested ShardedTensor instances found.
 
     The resulting ShardedTensor instances are only correct regarding the local shard and
     MUST not be used for any other purpose but checkpointing, as no operator will work with them.
@@ -62,9 +45,7 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
             return
 
         if len(inner_st.local_shards()) != 1:
-            raise ValueError(
-                "Cannot handle inner tensor with more than 1 shard"
-            )
+            raise ValueError("Cannot handle inner tensor with more than 1 shard")
         inner_shard = inner_st.local_shards()[0]
 
         local_shards = [
