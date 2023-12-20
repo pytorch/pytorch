@@ -159,8 +159,6 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
 
 namespace {
 
-constexpr int64_t GRAIN_SIZE = at::internal::GRAIN_SIZE;
-
 template <typename F>
 Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
   TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
