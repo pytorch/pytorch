@@ -75,8 +75,8 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
         cudaMemcpy(dst, src, data_size, cudaMemcpyDeviceToHost);
         for (size_t i = 0; i < data_size; ++i) {
           // Update the hash for each byte in the tensor
-          hash ^=
-              hasher(((char*)dst)[i]) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+          hash = c10::hash_combine(
+              hash, c10::get_hash(((char*)dst)[i], data_size));
         }
         free(dst);
       }

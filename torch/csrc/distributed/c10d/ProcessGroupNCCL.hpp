@@ -100,8 +100,7 @@ enum ErrorHandlingMode {
 #define PRINT_COLLECTIVE_HASH_SIGNATURE(                                    \
     prefix, phase, opType, numel, hashValue)                                \
   LOG(WARNING) << prefix << "at phase " << phase << ": Collective hash of " \
-               << opType << " before calling into NCCL, "                   \
-               << "numel: " << numel << ", hash: " << hashValue;
+               << opType << ", numel: " << numel << ", hash: " << hashValue;
 
 // If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
 // caching allocator safety for tensors used on both user-facing and
@@ -169,7 +168,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt,
         bool desyncDebug = false,
-        bool enableTiming = false);
+        bool enableTiming = false,
+        DebugLevel distDebugLevel = DebugLevel::Off);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -321,6 +321,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // unique id used to tell the trace buffer that this
     // work has completed
     c10::optional<uint64_t> trace_id_;
+    DebugLevel distDebugLevel_;
     friend class ProcessGroupNCCL;
   };
 
