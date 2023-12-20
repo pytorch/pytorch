@@ -5,9 +5,11 @@ import torch
 from torch import Tensor
 from torch._inductor import utils
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._triton import has_triton
+from ...utils._triton import has_triton
+from ..ir import FixedLayout
 
 from ..pattern_matcher import fwd_only, joint_fwd_bwd, Match, register_replacement
+from ..utils import use_cutlass_template
 
 aten = torch.ops.aten
 
@@ -205,9 +207,6 @@ def should_pad_bench_key(
 def should_pad_bench(
     mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
-    if not has_triton():
-        return False
-
     do_bench = functools.partial(
         utils.do_bench,
         warmup=5,
@@ -234,6 +233,16 @@ def should_pad_bench(
             return False
 
         if m_padded_length == k_padded_length == n_padded_length == 0:
+            return False
+
+        fake_layout = FixedLayout(
+            device=mat1.device, dtype=mat1.dtype, size=[n, m, n], stride=[n * m, n, 1]
+        )
+        if use_cutlass_template(fake_layout, m, n, k):
+            # We cannot use I/O efficient Cutlass templates if the alignment doesn't meet TMA requirements
+            return True
+
+        if not has_triton():
             return False
 
         if not is_mm_compute_bound(m, k, n, mat1.dtype):
