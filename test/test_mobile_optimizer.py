@@ -21,7 +21,6 @@ except ImportError:
 
 FileCheck = torch._C.FileCheck
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestOptimizer(TestCase):
 
     @skipIfNoXNNPACK

@@ -71,7 +71,6 @@ if TEST_NUMPY:
 # update test/run_test.py to list it, otherwise it will NOT be run in
 # CI.
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -2116,7 +2115,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
                          ' with instruction set support avx2 or newer.')
-    @skipIfTorchDynamo("how do i install fbgemm?")
     def test_fb_fc_packed(self):
         X = np.random.rand(16, 16).astype(np.float32) - 0.5
         W = np.random.rand(16, 16).astype(np.float32) - 0.5
@@ -7345,7 +7343,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaises(RuntimeError):
             res = arg_class(*arg_4)
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),), dtype=np.double),
@@ -7386,7 +7383,6 @@ class TestFusionEval(TestCase):
         self.assertEqual(Y_ref, Y_hat, msg="Conv+BN(non-affine) fusion results are off")
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestConstantPadNd(TestCase):
     def test_constant_pad_nd(self):
         a = torch.tensor([[1, 2], [3, 4]])
@@ -7408,7 +7404,6 @@ class TestConstantPadNd(TestCase):
         self.assertTrue(nhwc_padded.is_contiguous(memory_format=torch.channels_last))
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAddRelu(TestCase):
     def test_add_relu(self):
         a = torch.rand((7, 11))
@@ -7862,7 +7857,6 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 # end TestNN.test_affine_* helpers
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestNNDeviceType(NNTestCase):
     def _test_InstanceNorm_general(self, cls, input, device, dtype=torch.float):
         # default case track_running_stats=False
@@ -7954,7 +7948,7 @@ class TestNNDeviceType(NNTestCase):
             mean = out_reshaped.mean(-1)
             var = out_reshaped.var(-1, unbiased=False)
 
-            delta = 1e-1 if dtype == torch.bfloat16 else 1e-5
+            delta = 1e-1 if (dtype == torch.bfloat16 or dtype == torch.half) else 1e-5
             self.assertEqual(torch.abs(mean.data).mean(), 0, atol=delta, rtol=0)
             self.assertEqual(torch.abs(var.data).mean(), 1, atol=delta, rtol=0)
 
@@ -7988,12 +7982,12 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
-    def _test_LayerNorm_cpu_mixed_dtype(self, device):
+    def _test_LayerNorm_cpu_mixed_dtype(self, device, dtype):
         for elementwise_affine in [True, False]:
             # layer norm input shape is normalized to m x n, cpu vectorized on n,
             # so make sure n exceeds vector length
-            input = torch.empty(2, 3, 11, 3, device=device, dtype=torch.bfloat16).random_(1, 10)
-            m = nn.LayerNorm([11, 3], elementwise_affine=elementwise_affine).to(device, torch.bfloat16)
+            input = torch.empty(2, 3, 11, 3, device=device, dtype=dtype).random_(1, 10)
+            m = nn.LayerNorm([11, 3], elementwise_affine=elementwise_affine).to(device, dtype)
 
             # fp32
             m_fp32 = deepcopy(m).to(device, torch.float)
@@ -8001,21 +7995,21 @@ class TestNNDeviceType(NNTestCase):
             out_fp32 = m_fp32(x_fp32)
             out_fp32.sum().backward()
 
-            # bf16
+            # bf16/half
             m_bf16 = deepcopy(m)
             x_bf16 = input.clone().detach().requires_grad_()
             out_bf16 = m_bf16(x_bf16)
             out_bf16.sum().backward()
 
-            # bf16 mixed type
+            # bf16/half mixed type
             m_mix = deepcopy(m).to(device, torch.float)
             x_mix = input.clone().detach().requires_grad_()
             out_mix = m_mix(x_mix)
             out_mix.sum().backward()
-            self.assertEqual(out_fp32.bfloat16(), out_bf16)
-            self.assertEqual(out_fp32.bfloat16(), out_mix)
-            self.assertEqual(x_fp32.grad.bfloat16(), x_bf16.grad, atol=1e-1, rtol=1e-1)
-            self.assertEqual(x_fp32.grad.bfloat16(), x_mix.grad, atol=1e-1, rtol=1e-1)
+            self.assertEqual(out_fp32.to(dtype=dtype), out_bf16)
+            self.assertEqual(out_fp32.to(dtype=dtype), out_mix)
+            self.assertEqual(x_fp32.grad.to(dtype=dtype), x_bf16.grad, atol=1e-1, rtol=1e-1)
+            self.assertEqual(x_fp32.grad.to(dtype=dtype), x_mix.grad, atol=1e-1, rtol=1e-1)
 
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
@@ -8524,13 +8518,15 @@ class TestNNDeviceType(NNTestCase):
         self._test_LayerNorm_general(device)
 
         if self.device_type == 'cuda' or self.device_type == 'cpu':
-            self._test_LayerNorm_general(device, dtype=torch.bfloat16)
+            for dtype in [torch.half, torch.bfloat16]:
+                self._test_LayerNorm_general(device, dtype=dtype)
 
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
 
         if self.device_type == 'cpu':
-            self._test_LayerNorm_cpu_mixed_dtype(device)
+            for dtype in [torch.half, torch.bfloat16]:
+                self._test_LayerNorm_cpu_mixed_dtype(device, dtype=dtype)
 
     @onlyNativeDeviceTypes
     def test_LayerNorm_numeric(self, device):
@@ -12805,6 +12801,21 @@ class TestNNDeviceType(NNTestCase):
             out = torch._softmax_backward_data(x, x, 2, x.dtype)
             self.assertEqual(out[0, 0, 0], 1 / numel)
 
+    # reference issue: https://github.com/pytorch/pytorch/issues/68248
+    @onlyCUDA
+    def test_adaptiveavg_pool1d_shmem(self, device):
+        x = torch.randn(1, 256, 1, 5000, device=device).to(memory_format=torch.channels_last)
+        x_cpu = x.cpu()
+        x_cpu.requires_grad_()
+        x.requires_grad_()
+        y = torch.nn.functional.adaptive_avg_pool2d(x, (1, 256))
+        y_cpu = torch.nn.functional.adaptive_avg_pool2d(x_cpu, (1, 256))
+        grad = torch.randn_like(y)
+        grad_cpu = grad.cpu()
+        y.backward(grad)
+        y_cpu.backward(grad_cpu)
+        self.assertEqual(x.grad, x_cpu.grad)
+
     @skipMeta
     def test_channel_shuffle(self, device):
         #  3D tensor
@@ -12900,7 +12911,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(y, y_ref)
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFunctionalPickle(TestCase):
 
     # issue gh-38137
@@ -12909,7 +12919,6 @@ class TestFunctionalPickle(TestCase):
         s = pickle.dumps(F.softsign)
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestFusionUtils(TestCase):
     def test_fuse_conv_bn_requires_grad(self):
         conv = torch.nn.Conv2d(3, 3, 3)
