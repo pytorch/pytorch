@@ -97,10 +97,10 @@ enum ErrorHandlingMode {
 
 #define SHOULD_TEAR_DOWN(a) (a != NoHandling && a != CleanUpOnly)
 
-#define PRINT_COLLECTIVE_HASH_SIGNATURE(phase, rank, opType, numel, hashValue) \
-  LOG(WARNING) << "[RANK" << rank << "] at phase " << phase                    \
-               << ": Collective hash of " << opType                            \
-               << " before calling into NCCL, "                                \
+#define PRINT_COLLECTIVE_HASH_SIGNATURE(                                    \
+    prefix, phase, opType, numel, hashValue)                                \
+  LOG(WARNING) << prefix << "at phase " << phase << ": Collective hash of " \
+               << opType << " before calling into NCCL, "                   \
                << "numel: " << numel << ", hash: " << hashValue;
 
 // If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
@@ -213,6 +213,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     float getDuration() const override;
 
     uint64_t getSequencenumber() const override;
+
+    const std::string& logPrefix() const;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
@@ -367,6 +369,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // via `ncclCommSplit`
     std::shared_ptr<ProcessGroupNCCL> split_from;
     int64_t split_color{0};
+    std::vector<uint64_t> global_ranks_in_group;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -598,6 +601,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       OpType opType);
 
  private:
+  int globalRankStart;
+  int globalRankStride;
+
   // Helper that encapsulates work shared across all collective communication
   // primitives.  The callbacks have the following signatures:
   //
@@ -703,6 +709,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Desync debug helper
   void logWorkEnd(WorkNCCL& work);
 
+  // Generates a prefix that is unique to this process group and rank, for
+  // disambiguating logs
+  const std::string& logPrefix() const;
+
  protected:
   // Function that runs as part of a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
@@ -720,6 +730,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Each call returns a future, which can be checked or waited on
   // for dump completion.
   std::future<bool> launchAsyncDebugDump();
+
+  // Helper to wait up to the specified timeout and then abandon the dump.
+  // Logs on timeout, and asserts the future's status is as expected.
+  void waitForDumpOrTimeout(std::future<bool>& fut, size_t timeout_sec = 30);
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
@@ -831,9 +845,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::mutex monitorMutex_;
 
   bool writeDebugInfo_ = false;
-
-  // Mutex to Guard the check of writeDebugInfo_
-  std::mutex writeDebugInfoMutex_;
 
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;

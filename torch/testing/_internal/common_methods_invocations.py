@@ -8465,6 +8465,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             cu_seqlens_q=None,
             cu_seqlens_k=None,
             max_seqlen_q=None,
+            max_seqlen_k=None,
             dropout_p=dropout_p,
             custom_mask_type=mask_type,
             compute_log_sumexp=requires_grad,
@@ -8482,6 +8483,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
         cu_seqlens_q=None,
         cu_seqlens_k=None,
         max_seqlen_q=None,
+        max_seqlen_k=None,
         dropout_p=dropout_p,
         custom_mask_type=0,  # No Mask
         compute_log_sumexp=requires_grad,
@@ -8500,6 +8502,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             cu_seqlens_q=None,
             cu_seqlens_k=None,
             max_seqlen_q=None,
+            max_seqlen_k=None,
             dropout_p=dropout_p,
             custom_mask_type=0,  # No Mask
             compute_log_sumexp=requires_grad,
@@ -14221,7 +14224,15 @@ op_db: List[OpInfo] = [
         supports_forward_ad=False,
         supports_autograd=False,
         decorators=[skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 9.0')],
-        skips=()
+        skips=(
+            # Sample inputs isn't really parametrized on dtype
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
+                         device_type='cuda'),
+            # "mul_cuda" not implemented for float8_e4m3fn
+            # https://github.com/pytorch/pytorch/issues/107256
+            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                         dtypes=(torch.float8_e4m3fn,)),
+        )
     ),
     OpInfo(
         'nn.functional.scaled_dot_product_attention',
@@ -20186,6 +20197,12 @@ python_ref_db = [
         torch_opinfo_name="mvlgamma",
         torch_opinfo_variant_name="mvlgamma_p_1",
         skips=skips_mvlgamma(),
+        decorators=(
+            DecorateInfo(torch.testing._internal.common_utils.markDynamoStrictTest, 'TestUnaryUfuncs',
+                         'test_reference_numerics_large'),
+            DecorateInfo(torch.testing._internal.common_utils.xfailIfTorchDynamo, 'TestUnaryUfuncs',
+                         'test_reference_numerics_large'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.multigammaln",

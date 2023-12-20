@@ -63,6 +63,7 @@ from torch._functorch.make_functional import functional_init_with_buffers
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch._functorch.vmap import restore_vmap
 from torch.utils import _pytree as pytree
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 
 FALLBACK_REGEX = 'There is a performance drop'
 
@@ -3397,6 +3398,7 @@ def discover_variants(opinfo):
 
 # TODO: enable this when we get a bit closer to getting torch.vmap x torch.compile working.
 # @markDynamoStrictTest
+@unMarkDynamoStrictTest
 class TestVmapOperatorsOpInfo(TestCase):
 
     def vmap_outplace_test(self, func, args, kwargs, in_dims, check_shape_only=False,
