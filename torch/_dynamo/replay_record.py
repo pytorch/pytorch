@@ -40,7 +40,7 @@ class ExecutionRecord:
 
 @dataclasses.dataclass
 class ExecutionRecorder:
-    MOD_EXCLUDES = ["torch", "torch.fx", "torch.fx.passes"]
+    MOD_EXCLUDES = ["torch"]
     LOCAL_MOD_PREFIX = "___local_mod_"
 
     code: CodeType
@@ -100,7 +100,8 @@ class ExecutionRecorder:
 
     @classmethod
     def _is_excl(cls, mod):
-        return any(mod.__name__ == excl for excl in cls.MOD_EXCLUDES)
+        # Excluded modules and their submodule
+        return any(mod.__name__.startswith(excl) for excl in cls.MOD_EXCLUDES)
 
     # Convert ModuleRecords -> DummyModule tree
     @classmethod
