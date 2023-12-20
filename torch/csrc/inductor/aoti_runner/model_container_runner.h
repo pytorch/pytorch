@@ -59,8 +59,8 @@ class TORCH_API AOTIModelContainerRunner {
 
   AOTInductorModelContainerHandle container_handle_ = nullptr;
 
-  // TODO: need an OSS proxy executor implementation. For now, proxy_executor_handle_
-  // will always be nullptr.
+  // TODO: need an OSS proxy executor implementation. For now,
+  // proxy_executor_handle_ will always be nullptr.
   AOTIProxyExecutorHandle proxy_executor_handle_ = nullptr;
 };
 
