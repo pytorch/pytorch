@@ -1,3 +1,4 @@
+# mypy: disable-error-code="type-arg"
 from typing import (
     Any,
     Callable,
@@ -66,7 +67,7 @@ type_trace_db: JitTypeTraceStore
 
 # Defined in torch/csrc/jit/python/script_init.cpp
 ResolutionCallback: TypeAlias = Callable[[str], Callable[..., Any]]
-ClassVar = TypeVar("ClassVar", bound=type)
+_ClassVar = TypeVar("_ClassVar", bound=type)
 
 def _reduce(cls) -> None: ...
 
@@ -230,12 +231,12 @@ def script(  # type: ignore[misc]
 ) -> RecursiveScriptModule: ...
 @overload
 def script(  # type: ignore[misc]
-    obj: ClassVar,
+    obj: _ClassVar,
     optimize: Optional[bool] = None,
     _frames_up: int = 0,
     _rcb: Optional[ResolutionCallback] = None,
     example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
-) -> ClassVar: ...
+) -> _ClassVar: ...
 @overload
 def script(  # type: ignore[misc]
     obj: Callable,

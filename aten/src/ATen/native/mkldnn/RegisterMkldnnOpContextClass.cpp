@@ -1,12 +1,14 @@
-#include <ATen/Tensor.h>
-#include <ATen/native/mkldnn/ConvPrepack.h>
-#include <ATen/native/mkldnn/OpContext.h>
-#include <torch/custom_class.h>
-#include <torch/library.h>
+#include <ATen/Config.h>
 
 #if AT_MKLDNN_ENABLED()
 
+#include <ATen/Tensor.h>
+#include <ATen/native/mkldnn/ConvPrepack.h>
+#include <ATen/native/mkldnn/OpContext.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <torch/custom_class.h>
+#include <torch/library.h>
+
 namespace at {
 namespace native {
 namespace mkldnn {
@@ -23,6 +25,10 @@ static bool is_mkldnn_bf16_supported() {
 
 static bool is_mkldnn_fp16_supported() {
   return mkldnn_fp16_device_check();
+}
+
+constexpr bool is_mkldnn_acl_supported() {
+  return AT_MKLDNN_ACL_ENABLED();
 }
 
 TORCH_LIBRARY(mkldnn, m) {
@@ -67,6 +73,7 @@ TORCH_LIBRARY(mkldnn, m) {
       "mkldnn::_reorder_mkldnn_rnn_layer_weight(Tensor weight0, Tensor weight1, int hidden_size, bool reverse, bool has_biases, bool batch_first, int[]? input_size=None) -> Tensor[] Y"));
   m.def("_is_mkldnn_bf16_supported", &is_mkldnn_bf16_supported);
   m.def("_is_mkldnn_fp16_supported", &is_mkldnn_fp16_supported);
+  m.def("_is_mkldnn_acl_supported", &is_mkldnn_acl_supported);
 }
 
 TORCH_LIBRARY(mkldnn_prepacked, m) {

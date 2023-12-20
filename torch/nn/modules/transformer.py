@@ -17,12 +17,17 @@ __all__ = ['Transformer', 'TransformerEncoder', 'TransformerDecoder', 'Transform
 
 def _generate_square_subsequent_mask(
         sz: int,
-        device: torch.device = torch.device(torch._C._get_default_device()),  # torch.device('cpu'),
-        dtype: torch.dtype = torch.get_default_dtype(),
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
-    r"""Generate a square causal mask for the sequence. The masked positions are filled with float('-inf').
-        Unmasked positions are filled with float(0.0).
+    r"""Generate a square causal mask for the sequence.
+
+    The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0).
     """
+    if device is None:
+        device = torch.device('cpu')
+    if dtype is None:
+        dtype = torch.float32
     return torch.triu(
         torch.full((sz, sz), float('-inf'), dtype=dtype, device=device),
         diagonal=1,
@@ -48,7 +53,9 @@ def _get_seq_len(
 
 
 class Transformer(Module):
-    r"""A transformer model. User is able to modify the attributes as needed. The architecture
+    r"""A transformer model.
+
+    User is able to modify the attributes as needed. The architecture
     is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
     Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and
     Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information
@@ -191,7 +198,6 @@ class Transformer(Module):
             >>> # xdoctest: +SKIP
             >>> output = transformer_model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
         """
-
         is_batched = src.dim() == 3
         if not self.batch_first and src.size(1) != tgt.size(1) and is_batched:
             raise RuntimeError("the batch number of src and tgt must be equal")
@@ -212,25 +218,26 @@ class Transformer(Module):
     @staticmethod
     def generate_square_subsequent_mask(
             sz: int,
-            device: torch.device = torch.device(torch._C._get_default_device()),  # torch.device('cpu'),
-            dtype: torch.dtype = torch.get_default_dtype(),
+            device: Optional[torch.device] = None,
+            dtype: Optional[torch.dtype] = None,
     ) -> Tensor:
-        r"""Generate a square causal mask for the sequence. The masked positions are filled with float('-inf').
-            Unmasked positions are filled with float(0.0).
+        r"""Generate a square causal mask for the sequence.
+
+        The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0).
         """
         return _generate_square_subsequent_mask(sz, dtype=dtype, device=device)
 
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
-
         for p in self.parameters():
             if p.dim() > 1:
                 xavier_uniform_(p)
 
 
 class TransformerEncoder(Module):
-    r"""TransformerEncoder is a stack of N encoder layers. Users can build the
-    BERT(https://arxiv.org/abs/1810.04805) model with corresponding parameters.
+    r"""TransformerEncoder is a stack of N encoder layers.
+
+    Users can build the BERT(https://arxiv.org/abs/1810.04805) model with corresponding parameters.
 
     Args:
         encoder_layer: an instance of the TransformerEncoderLayer() class (required).
@@ -246,6 +253,7 @@ class TransformerEncoder(Module):
         >>> src = torch.rand(10, 32, 512)
         >>> out = transformer_encoder(src)
     """
+
     __constants__ = ['norm']
 
     def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True, mask_check=True):
@@ -396,7 +404,7 @@ class TransformerEncoder(Module):
 
 
 class TransformerDecoder(Module):
-    r"""TransformerDecoder is a stack of N decoder layers
+    r"""TransformerDecoder is a stack of N decoder layers.
 
     Args:
         decoder_layer: an instance of the TransformerDecoderLayer() class (required).
@@ -410,6 +418,7 @@ class TransformerDecoder(Module):
         >>> tgt = torch.rand(20, 32, 512)
         >>> out = transformer_decoder(tgt, memory)
     """
+
     __constants__ = ['norm']
 
     def __init__(self, decoder_layer, num_layers, norm=None):
@@ -471,6 +480,7 @@ class TransformerDecoder(Module):
 
 class TransformerEncoderLayer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
+
     This standard encoder layer is based on the paper "Attention Is All You Need".
     Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
     Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
@@ -542,6 +552,7 @@ class TransformerEncoderLayer(Module):
          https://arxiv.org/abs/2205.14135
 
     """
+
     __constants__ = ['norm_first']
 
     def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.1,
@@ -726,6 +737,7 @@ class TransformerEncoderLayer(Module):
 
 class TransformerDecoderLayer(Module):
     r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
+
     This standard decoder layer is based on the paper "Attention Is All You Need".
     Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
     Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
@@ -760,6 +772,7 @@ class TransformerDecoderLayer(Module):
         >>> tgt = torch.rand(32, 20, 512)
         >>> out = decoder_layer(tgt, memory)
     """
+
     __constants__ = ['norm_first']
 
     def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.1,

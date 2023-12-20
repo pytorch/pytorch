@@ -1,9 +1,12 @@
 #pragma once
 
+#include <array>
 #include <atomic>
-#include <cstdlib>
+#include <cstdint>
 #include <memory>
 #include <mutex>
+#include <ostream>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -12,6 +15,7 @@
 #include <c10/util/IdWrapper.h>
 #include <c10/util/TypeIndex.h>
 #include <c10/util/TypeTraits.h>
+#include <c10/util/string_view.h>
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
@@ -36,12 +40,11 @@
 // later.  So the namespace is not fixed at the moment.
 
 // Make at::Half a fundamental type.
-namespace c10 {
-namespace guts {
+
+namespace c10::guts {
 template <>
 struct is_fundamental<at::Half> : std::true_type {};
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts
 
 namespace caffe2 {
 
@@ -175,19 +178,19 @@ inline void _PlacementNewNotDefault(void* /*ptr*/, size_t /*n*/) {
 
 template <
     typename T,
-    std::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
+    std::enable_if_t<std::is_default_constructible_v<T>>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
-  return (c10::guts::is_fundamental<T>::value || std::is_pointer<T>::value)
+  return (c10::guts::is_fundamental<T>::value || std::is_pointer_v<T>)
       ? nullptr
       : &_PlacementNew<T>;
 }
 
 template <
     typename T,
-    std::enable_if_t<!std::is_default_constructible<T>::value>* = nullptr>
+    std::enable_if_t<!std::is_default_constructible_v<T>>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
   static_assert(
-      !c10::guts::is_fundamental<T>::value && !std::is_pointer<T>::value,
+      !c10::guts::is_fundamental<T>::value && !std::is_pointer_v<T>,
       "this should have picked the other SFINAE case");
   return &_PlacementNewNotDefault<T>;
 }
@@ -206,14 +209,14 @@ inline void* _NewNotDefault() {
 
 template <
     typename T,
-    std::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
+    std::enable_if_t<std::is_default_constructible_v<T>>* = nullptr>
 inline constexpr TypeMetaData::New* _PickNew() {
   return &_New<T>;
 }
 
 template <
     typename T,
-    std::enable_if_t<!std::is_default_constructible<T>::value>* = nullptr>
+    std::enable_if_t<!std::is_default_constructible_v<T>>* = nullptr>
 inline constexpr TypeMetaData::New* _PickNew() {
   return &_NewNotDefault<T>;
 }
@@ -240,21 +243,19 @@ inline void _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
       " does not allow assignment.");
 }
 
-template <
-    typename T,
-    std::enable_if_t<std::is_copy_assignable<T>::value>* = nullptr>
+template <typename T, std::enable_if_t<std::is_copy_assignable_v<T>>* = nullptr>
 inline constexpr TypeMetaData::Copy* _PickCopy() {
-  return (c10::guts::is_fundamental<T>::value || std::is_pointer<T>::value)
+  return (c10::guts::is_fundamental<T>::value || std::is_pointer_v<T>)
       ? nullptr
       : &_Copy<T>;
 }
 
 template <
     typename T,
-    std::enable_if_t<!std::is_copy_assignable<T>::value>* = nullptr>
+    std::enable_if_t<!std::is_copy_assignable_v<T>>* = nullptr>
 inline constexpr TypeMetaData::Copy* _PickCopy() {
   static_assert(
-      !c10::guts::is_fundamental<T>::value && !std::is_pointer<T>::value,
+      !c10::guts::is_fundamental<T>::value && !std::is_pointer_v<T>,
       "this should have picked the other SFINAE case");
   return &_CopyNotAllowed<T>;
 }
@@ -272,7 +273,7 @@ inline void _PlacementDelete(void* ptr, size_t n) {
 
 template <typename T>
 inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
-  return (c10::guts::is_fundamental<T>::value || std::is_pointer<T>::value)
+  return (c10::guts::is_fundamental<T>::value || std::is_pointer_v<T>)
       ? nullptr
       : &_PlacementDelete<T>;
 }
@@ -299,7 +300,7 @@ class _Uninitialized final {};
 //
 
 // item sizes for TypeMeta::itemsize() fast path
-static constexpr uint8_t scalarTypeItemSizes[NumScalarTypes] = {
+static constexpr std::array<uint8_t, NumScalarTypes> scalarTypeItemSizes = {
 #define SCALAR_TYPE_SIZE(T, name) sizeof(T),
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_SIZE)
 #undef SCALAR_TYPE_SIZE
@@ -693,7 +694,7 @@ template <class T>
 class _guard_long_unique_dummy final {};
 template <class T>
 using _guard_long_unique = std::conditional_t<
-    std::is_same<long, int32_t>::value || std::is_same<long, int64_t>::value,
+    std::is_same_v<long, int32_t> || std::is_same_v<long, int64_t>,
     _guard_long_unique_dummy<T>,
     T>;
 } // namespace detail

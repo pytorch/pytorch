@@ -2,8 +2,7 @@
 
 #include <c10/util/C++17.h>
 
-namespace c10 {
-namespace guts {
+namespace c10::guts {
 
 /**
  * is_equality_comparable<T> is true_type iff the equality operator is defined
@@ -101,7 +100,7 @@ namespace detail {
 template <class LambdaType, class FuncType>
 struct is_stateless_lambda__ final {
   static_assert(
-      !std::is_same<LambdaType, LambdaType>::value,
+      !std::is_same_v<LambdaType, LambdaType>,
       "Base case shouldn't be hit");
 };
 // implementation idea: According to the C++ standard, stateless lambdas are
@@ -137,7 +136,7 @@ template <template <class> class C>
 struct is_type_condition<
     C,
     std::enable_if_t<
-        std::is_same<bool, std::remove_cv_t<decltype(C<int>::value)>>::value>>
+        std::is_same_v<bool, std::remove_cv_t<decltype(C<int>::value)>>>>
     : std::true_type {};
 
 /**
@@ -148,5 +147,4 @@ struct is_type_condition<
  */
 template <class T>
 struct is_fundamental : std::is_fundamental<T> {};
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts

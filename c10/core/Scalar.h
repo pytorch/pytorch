@@ -1,24 +1,24 @@
 #pragma once
 
-#include <stdint.h>
+#include <cstdint>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
 
 #include <c10/core/OptionalRef.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/SymBool.h>
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymInt.h>
+#include <c10/core/SymNodeImpl.h>
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
+#include <c10/util/complex.h>
 #include <c10/util/intrusive_ptr.h>
-
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
-#endif
 
 namespace c10 {
 
@@ -48,11 +48,13 @@ class C10_API Scalar {
 #define DEFINE_IMPLICIT_CTOR(type, name) \
   Scalar(type vv) : Scalar(vv, true) {}
 
-  AT_FORALL_SCALAR_TYPES_AND5(
+  AT_FORALL_SCALAR_TYPES_AND7(
       Half,
       BFloat16,
       Float8_e5m2,
       Float8_e4m3fn,
+      Float8_e5m2fnuz,
+      Float8_e4m3fnuz,
       ComplexHalf,
       DEFINE_IMPLICIT_CTOR)
   AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
@@ -64,16 +66,15 @@ class C10_API Scalar {
   // problem.
   template <
       typename T,
-      typename std::enable_if<std::is_same<T, bool>::value, bool>::type* =
-          nullptr>
+      typename std::enable_if_t<std::is_same_v<T, bool>, bool>* = nullptr>
   Scalar(T vv) : tag(Tag::HAS_b) {
     v.i = convert<int64_t, bool>(vv);
   }
 
   template <
       typename T,
-      typename std::enable_if<std::is_same<T, c10::SymBool>::value, bool>::
-          type* = nullptr>
+      typename std::enable_if_t<std::is_same_v<T, c10::SymBool>, bool>* =
+          nullptr>
   Scalar(T vv) : tag(Tag::HAS_sb) {
     v.i = convert<int64_t, c10::SymBool>(vv);
   }
@@ -90,11 +91,14 @@ class C10_API Scalar {
     } else if (Tag::HAS_i == tag) {                                   \
       return checked_convert<type, int64_t>(v.i, #type);              \
     } else if (Tag::HAS_si == tag) {                                  \
-      TORCH_CHECK(false, "tried to get " #name " out of SymInt")      \
+      return checked_convert<type, int64_t>(                          \
+          toSymInt().guard_int(__FILE__, __LINE__), #type);           \
     } else if (Tag::HAS_sd == tag) {                                  \
-      TORCH_CHECK(false, "tried to get " #name " out of SymFloat")    \
+      return checked_convert<type, int64_t>(                          \
+          toSymFloat().guard_float(__FILE__, __LINE__), #type);       \
     } else if (Tag::HAS_sb == tag) {                                  \
-      TORCH_CHECK(false, "tried to get " #name " out of SymBool")     \
+      return checked_convert<type, int64_t>(                          \
+          toSymBool().guard_bool(__FILE__, __LINE__), #type);         \
     }                                                                 \
     TORCH_CHECK(false)                                                \
   }
@@ -203,7 +207,7 @@ class C10_API Scalar {
 
   template <
       typename T,
-      typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
+      typename std::enable_if_t<!c10::is_complex<T>::value, int> = 0>
   bool equal(T num) const {
     if (isComplex()) {
       TORCH_INTERNAL_ASSERT(!isSymbolic());
@@ -226,7 +230,7 @@ class C10_API Scalar {
 
   template <
       typename T,
-      typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
+      typename std::enable_if_t<c10::is_complex<T>::value, int> = 0>
   bool equal(T num) const {
     if (isComplex()) {
       TORCH_INTERNAL_ASSERT(!isSymbolic());
@@ -315,6 +319,7 @@ class C10_API Scalar {
   enum class Tag { HAS_d, HAS_i, HAS_z, HAS_b, HAS_sd, HAS_si, HAS_sb };
 
   // NB: assumes that self has already been cleared
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   C10_ALWAYS_INLINE void moveFrom(Scalar&& rhs) noexcept {
     v = rhs.v;
     tag = rhs.tag;
@@ -333,30 +338,31 @@ class C10_API Scalar {
     int64_t i;
     c10::complex<double> z;
     c10::intrusive_ptr_target* p;
+    // NOLINTNEXTLINE(modernize-use-equals-default)
     v_t() {} // default constructor
   } v;
 
   template <
       typename T,
-      typename std::enable_if<
-          std::is_integral<T>::value && !std::is_same<T, bool>::value,
-          bool>::type* = nullptr>
+      typename std::enable_if_t<
+          std::is_integral_v<T> && !std::is_same_v<T, bool>,
+          bool>* = nullptr>
   Scalar(T vv, bool) : tag(Tag::HAS_i) {
     v.i = convert<decltype(v.i), T>(vv);
   }
 
   template <
       typename T,
-      typename std::enable_if<
-          !std::is_integral<T>::value && !c10::is_complex<T>::value,
-          bool>::type* = nullptr>
+      typename std::enable_if_t<
+          !std::is_integral_v<T> && !c10::is_complex<T>::value,
+          bool>* = nullptr>
   Scalar(T vv, bool) : tag(Tag::HAS_d) {
     v.d = convert<decltype(v.d), T>(vv);
   }
 
   template <
       typename T,
-      typename std::enable_if<c10::is_complex<T>::value, bool>::type* = nullptr>
+      typename std::enable_if_t<c10::is_complex<T>::value, bool>* = nullptr>
   Scalar(T vv, bool) : tag(Tag::HAS_z) {
     v.z = convert<decltype(v.z), T>(vv);
   }
@@ -374,5 +380,3 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_TO)
 #undef DEFINE_TO
 
 } // namespace c10
-
-C10_CLANG_DIAGNOSTIC_POP()

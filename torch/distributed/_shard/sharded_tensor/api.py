@@ -44,7 +44,7 @@ from .utils import (
     build_global_metadata
 )
 from torch.distributed.remote_device import _remote_device
-from torch.utils._pytree import tree_map
+from torch.utils import _pytree as pytree
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -210,7 +210,7 @@ class ShardedTensor(ShardedTensorBase):
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-                Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+                Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
@@ -1137,8 +1137,8 @@ class ShardedTensor(ShardedTensorBase):
             if st_instance is None and isinstance(e, ShardedTensor):
                 st_instance = e
 
-        tree_map(find_sharded_tensor, args)
-        tree_map(find_sharded_tensor, kwargs)
+        pytree.tree_map_(find_sharded_tensor, args)
+        pytree.tree_map_(find_sharded_tensor, kwargs)
 
         if st_instance is not None:
             return dispatch(st_instance, func)

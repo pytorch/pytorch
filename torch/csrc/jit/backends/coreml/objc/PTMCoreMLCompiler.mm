@@ -11,7 +11,7 @@ static NSString *gCompiledModelExtension = @"mlmodelc";
 static NSString *gVersionExtension = @"version";
 
 + (void)setCacheDirectory:(const std::string&)dir {
-  gCacheDirectory = [NSString stringWithCString:dir.c_str()];
+  gCacheDirectory = [NSString stringWithCString:dir.c_str() encoding:NSUTF8StringEncoding];
 }
 
 + (nonnull NSString *)cacheDirectory {
@@ -115,7 +115,7 @@ static NSString *gVersionExtension = @"version";
 #if TARGET_OS_IPHONE
   NSURL *versionURL = [PTMCoreMLCompiler _cacheURLForModel:modelName extension:gVersionExtension];
   NSString *currentOSVer = [UIDevice currentDevice].systemVersion;
-  [currentOSVer writeToFile:versionURL.path atomically:YES];
+  [currentOSVer writeToFile:versionURL.path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
 #endif
 
   return YES;

@@ -1,14 +1,16 @@
 from typing import cast, List, Sequence, Tuple
 
 import torch
+import torch.distributed._tensor.api as dtensor
 from torch._prims_common import ShapeType
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import (
     _Partial,
+    DTensorSpec,
     Placement,
     Replicate,
     Shard,
 )
+from torch.distributed.device_mesh import DeviceMesh
 
 
 # TODO: audit existing code base to see if we can safely remove this API.
@@ -23,7 +25,7 @@ def compute_local_shape(
 
     if my_coordinate is None:
         # if rank not in the mesh, return empty shape
-        return ()
+        return (0,)
     else:
         local_shape = list(global_shape)  # start with global shape
         ndim = len(global_shape)
@@ -70,6 +72,18 @@ def compute_local_shape_and_global_offset(
     rank4 -- local_shape:[1, 4], global_offset:[4, 0]
     rank6 -- local_shape:[1, 4], global_offset:[6, 0]
     rank7 -- local_shape:[1, 4], global_offset:[7, 0]
+
+    Let's say we distribute a global_tensor of shape (2) over the above DeviceMesh with
+    a placements of [Shard(0)]. We will not have non-empty local tensor for all the ranks.
+    The local shape and global offset will be as follows:
+    rank0 -- local_shape:[1,], global_offset:[0,]
+    rank1 -- local_shape:[1,], global_offset:[1,]
+    rank2 -- local_shape:[0,], global_offset:[2,]
+    rank5 -- local_shape:[0,], global_offset:[2,]
+    rank3 -- local_shape:[0,], global_offset:[2,]
+    rank4 -- local_shape:[0,], global_offset:[2,]
+    rank6 -- local_shape:[0,], global_offset:[2,]
+    rank7 -- local_shape:[0,], global_offset:[2,]
     """
     my_coordinate = mesh.get_coordinate()
 
@@ -143,7 +157,18 @@ def compute_global_tensor_info(
     for idx, placement in enumerate(placements):
         mesh_dim_size = mesh.size(idx)
         if placement.is_shard():
-            shard_dim = cast(Shard, placement).dim
+            shard_placement = cast(Shard, placement)
+            if shard_placement.dim < 0:
+                raise AssertionError(
+                    "Shard placements should have negative dims normalized in "
+                    f"the user-facing APIs: {shard_placement}"
+                )
+            shard_dim = shard_placement.dim
+
+            assert (
+                shard_dim < tensor.ndim
+            ), f"Sharding dim {shard_dim} greater than tensor ndim {tensor.ndim} for placement number {idx}."
+
             local_dim_size = tensor_shape[shard_dim]
             tensor_shape[shard_dim] = local_dim_size * mesh_dim_size
 
@@ -156,3 +181,24 @@ def compute_global_tensor_info(
         elif not isinstance(placement, (Replicate, _Partial)):
             raise RuntimeError(f"placement type {type(placement)} not supported!")
     return tensor_shape, tensor_stride
+
+
+def try_find_mesh_from_args(
+    op_call: torch._ops.OpOverload, args: Sequence[object]
+) -> DeviceMesh:
+    """
+    Find the device mesh object from args.
+    It returns None if no mesh is found.
+    NOTE: we can optimize this search if needed
+    """
+    for arg in args:
+        if isinstance(arg, (dtensor.DTensor, DTensorSpec)):
+            return arg.device_mesh
+        elif (
+            isinstance(arg, (list, tuple))
+            and len(arg) > 0
+            and isinstance(arg[0], (dtensor.DTensor, DTensorSpec))
+        ):
+            return arg[0].device_mesh
+
+    raise ValueError(f"Cannot find device mesh from args for op : {op_call}.")
