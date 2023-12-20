@@ -64,15 +64,14 @@ class FrontendWorker(mp.Process):
         self.poll_gpu = False
 
         response_times = np.array(response_times)
-        metrics_lock.acquire()
-        self.metrics_dict["warmup_latency"] = warmup_response_time
-        self.metrics_dict["average_latency"] = response_times.mean()
-        self.metrics_dict["max_latency"] = response_times.max()
-        self.metrics_dict["min_latency"] = response_times.min()
-        self.metrics_dict["throughput"] = (self.num_iters * self.batch_size) / (
-            self.end_recv_time - self.start_send_time
-        )
-        metrics_lock.release()
+        with metrics_lock:
+            self.metrics_dict["warmup_latency"] = warmup_response_time
+            self.metrics_dict["average_latency"] = response_times.mean()
+            self.metrics_dict["max_latency"] = response_times.max()
+            self.metrics_dict["min_latency"] = response_times.min()
+            self.metrics_dict["throughput"] = (self.num_iters * self.batch_size) / (
+                self.end_recv_time - self.start_send_time
+            )
 
     def _run_gpu_utilization(self, metrics_lock):
         """
@@ -102,9 +101,8 @@ class FrontendWorker(mp.Process):
             if gpu_utilization != "N/A":
                 gpu_utilizations.append(float(gpu_utilization))
 
-        metrics_lock.acquire()
-        self.metrics_dict["gpu_util"] = np.array(gpu_utilizations).mean()
-        metrics_lock.release()
+        with metrics_lock:
+            self.metrics_dict["gpu_util"] = torch.tensor(gpu_utilizations).mean().item()
 
     def _send_requests(self):
         """
