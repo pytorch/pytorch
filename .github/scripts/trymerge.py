@@ -1357,7 +1357,7 @@ def find_matching_merge_rule(
                 ]
 
                 reject_reason = (
-                    "Approvers from one of the following rules are needed:\n"
+                    "Approvers from one of the following sets are needed:\n"
                 )
                 reject_reason += "\n".join(all_rule_approvers_msg)
 
