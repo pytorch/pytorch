@@ -35,7 +35,7 @@ _TORCH_SYM_OPS: Set[Callable] = {
     torch.sym_max,
     torch.sym_min,
     torch.sym_not,
-    torch._sym_sqrt,
+    torch.sym_sqrt,
 }
 
 

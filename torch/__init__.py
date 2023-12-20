@@ -511,6 +511,10 @@ for name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos"
     fn.__qualname__ = fn.__name__ = sym_name
     setattr(current_module, sym_name, fn)
 
+# Adding temporary shortcut
+sym_sqrt = current_module._sym_sqrt
+__all__.append("sym_sqrt")
+
 del fn, name, sym_name, current_module
 
 
