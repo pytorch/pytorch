@@ -4,7 +4,6 @@ import sys
 import traceback
 import warnings
 from collections import defaultdict
-from contextlib import nullcontext
 from typing import Any, DefaultDict, List, Optional
 
 import torch
@@ -493,22 +492,6 @@ def _import_dotted_name(name):
     return obj
 
 
-# Taken from python 3.5 docs
-def _accumulate(iterable, fn=lambda x, y: x + y):
-    "Return running totals"
-    # _accumulate([1,2,3,4,5]) --> 1 3 6 10 15
-    # _accumulate([1,2,3,4,5], operator.mul) --> 1 2 6 24 120
-    it = iter(iterable)
-    try:
-        total = next(it)
-    except StopIteration:
-        return
-    yield total
-    for element in it:
-        total = fn(total, element)
-        yield total
-
-
 def _flatten_dense_tensors(tensors):
     """Flatten dense tensors into a contiguous 1D buffer. Assume tensors are of
     same dense type.
@@ -873,16 +856,8 @@ def is_compiling():
 def _functionalize_sync(t):
     # This code lives in python instead of C++ since conditioning on a certain python subclass
     # is much more of a pain in C++.
-    from torch._subclasses.functional_tensor import (
-        FunctionalTensor,
-        maybe_disable_functional_mode,
-    )
+    from torch._subclasses.functional_tensor import FunctionalTensor
 
-    ctx = (
-        maybe_disable_functional_mode
-        if isinstance(t, FunctionalTensor)
-        else nullcontext
-    )
     if isinstance(t, FunctionalTensor):
         # If a FunctionalTensorMode is active while syncing, we don't want it to intercept any ops that get called
         # when we sync our inner tensor.

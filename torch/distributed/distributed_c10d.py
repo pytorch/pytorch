@@ -1420,6 +1420,7 @@ def _new_process_group_helper(
             if split_from:
                 pg_options.split_from = split_from
                 pg_options.split_color = _process_group_color(global_ranks_in_group)
+            pg_options.global_ranks_in_group = global_ranks_in_group
             backend_class = ProcessGroupNCCL(
                 backend_prefix_store, group_rank, group_size, pg_options)
             backend_type = ProcessGroup.BackendType.NCCL
@@ -2110,8 +2111,8 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     Complex tensors are supported.
 
     Args:
-        tensors (List[Tensor]): Input and output of the collective. The function
-            operates in-place.
+        tensors (Union[List[Tensor], Tensor]): Input and output of the collective.
+            The function operates in-place.
         op (Optional[ReduceOp]): One of the values from
             ``torch.distributed.ReduceOp`` enum. Specifies an operation used for
             element-wise reductions.
@@ -2129,6 +2130,8 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         "use it, please revisit our documentation later at "
         "https://pytorch.org/docs/master/distributed.html#collective-functions"
     )
+    if isinstance(tensors, torch.Tensor):
+        tensors = [tensors]
     _check_tensor_list(tensors, "tensor")
     _ensure_all_tensors_same_dtype(tensors)
     if _rank_not_in_group(group):
@@ -4087,7 +4090,7 @@ def _get_process_group_name(pg: ProcessGroup) -> str:
 def _get_process_group_store(pg: ProcessGroup) -> Store:
     return _world.pg_map[pg][1]
 
-# This ops are not friently to TorchDynamo. So, we decide to disallow these ops
+# This ops are not friendly to TorchDynamo. So, we decide to disallow these ops
 # in FX graph, allowing them to run them on eager, with torch.compile.
 dynamo_unsupported_distributed_c10d_ops = [
     recv,

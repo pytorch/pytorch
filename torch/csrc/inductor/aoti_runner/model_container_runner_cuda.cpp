@@ -1,5 +1,5 @@
 #include <c10/cuda/CUDAStream.h>
-#include <torch/csrc/inductor/aoti_model_container_runner_cuda.h>
+#include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 
 namespace torch::inductor {
 
