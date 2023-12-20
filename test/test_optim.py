@@ -6,11 +6,22 @@ from optim.test_optim import TestOptim, TestDifferentiableOptimizer  # noqa: F40
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 from torch.testing._internal.common_optimizers import optim_db, optims, OptimizerErrorEnum
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, skipMPS
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, onlyCUDA, skipMPS
 from torch.testing._internal.common_utils import markDynamoStrictTest, run_tests, TestCase
+
+
+FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
 
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
+
+    @onlyCPU
+    @optims(optim_db)
+    def test_optim_infos_do_not_specify_global_cliquey_kwargs(self, device, dtype, optim_info):
+        global_cliquey_flags = ["foreach", "fused", "differentiable"]
+        for optim_input in optim_info.optim_inputs_func():
+            self.assertFalse(any(f for f in global_cliquey_flags if f in optim_input.kwargs))
+
 
     @onlyCPU
     @optims([optim for optim in optim_db if optim.optim_error_inputs_func is not None])
@@ -32,7 +43,12 @@ class TestOptimRenewed(TestCase):
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
 
-    def _test_derived_optimizers(self, device, dtype, optim_info, flag):
+    def _test_derived_optimizers(self, device, dtype, optim_info, flag, reduced_precision=False):
+        """
+        Given a flag 'fused' or 'foreach', test for parity of optimizer state
+        and updated parameters between when the flag is set to True and False
+        for provided optimizer configurations.
+        """
         assert flag in ("foreach", "fused")
 
         # why 7? iteration 7 is where we start to see differences for RAdam
@@ -87,16 +103,18 @@ class TestOptimRenewed(TestCase):
                 state.append(optimizer.state)
                 updated_params.append(model.parameters())
 
+            assert_eq_kwargs = {} if not reduced_precision else FP16_REDUCED_PRECISION
+
             og_state, new_state = state
             for og_p, new_p in zip(updated_params[0], updated_params[1]):
-                self.assertEqual(og_p, new_p)
+                self.assertEqual(og_p, new_p, **assert_eq_kwargs)
 
                 # check that optimizer states are the same
                 og_p_state = og_state[og_p]
                 new_p_state = new_state[new_p]
 
                 for k in og_p_state:
-                    self.assertEqual(og_p_state[k], new_p_state[k])
+                    self.assertEqual(og_p_state[k], new_p_state[k], **assert_eq_kwargs)
 
 
     @skipMPS  # MPS doesn't support torch.float64, see https://github.com/pytorch/pytorch/issues/115350
@@ -105,12 +123,28 @@ class TestOptimRenewed(TestCase):
         self._test_derived_optimizers(device, dtype, optim_info, "foreach")
 
 
-    @onlyCPU
-    @optims(optim_db)
-    def test_optim_infos_do_not_specify_global_cliquey_kwargs(self, device, dtype, optim_info):
-        global_cliquey_flags = ["foreach", "fused", "differentiable"]
-        for optim_input in optim_info.optim_inputs_func():
-            self.assertFalse(any(f for f in global_cliquey_flags if f in optim_input.kwargs))
+    @onlyCUDA
+    @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float64])
+    def test_set_default_dtype_works_with_foreach(self, device, dtype, optim_info):
+        # https://github.com/pytorch/pytorch/issues/110940
+        # We coerce step to always be float32 regardless of the default dtype
+        old_default_dtype = torch.get_default_dtype()
+        for default_dtype in [torch.float64, torch.float16]:
+            torch.set_default_dtype(default_dtype)
+            self._test_derived_optimizers(
+                device,
+                dtype,
+                optim_info,
+                "foreach",
+                reduced_precision=default_dtype == torch.float16
+            )
+            torch.set_default_dtype(old_default_dtype)
+
+
+    @onlyCUDA
+    @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float64])
+    def test_fused_matches_forloop(self, device, dtype, optim_info):
+        self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
