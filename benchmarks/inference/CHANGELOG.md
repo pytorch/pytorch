@@ -14,3 +14,21 @@
 
 ##### Results
 * Baseline metrics were reset due to the bugs listed above.
+
+
+### [#116189](https://github.com/pytorch/pytorch/pull/116189)
+* Added two `ThreadPoolExecutor`s with 1 worker each for D2H and H2D copies. Each uses its own `cuda.Stream`. The purpose is to try to overlap D2H and H2D with compute and allow the worker handling prediction to launch compute kernels without being blocked by D2H/H2D.
+    * One thread pins memory of the CPU request and copies it into a CUDA tensor
+    * One thread moves the response to CPU and places it into the response queue
+Semaphores are used in conjunction with `cuda.Event`s to ensure proper synchronization among the threads.
+
+##### Results:
+* Warmup latency decreases as compared to the baseline for all batch sizes.
+* For batch sizes 1, 32, 64 we observed that metrics were worse
+    * Average latency increased
+    * Throughput decreased
+    * GPU utilization decreased
+* For batch sizes 128 and 256 we observed metrics improved
+    * Average latency decreased
+    * Throughput increased
+    * GPU utilization increased
