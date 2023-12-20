@@ -623,12 +623,12 @@ class TensorVariable(VariableTracker):
             result = backward_variable.call_function(
                 tx,
                 [
-                    self,
-                    grad_tensors,
-                    none_variable,
-                    false_variable,
-                    none_variable,
-                    none_variable,
+                    self,  # tensors
+                    grad_tensors,  # grad_tensors
+                    none_variable,  # retain_graph
+                    false_variable,  # create_graph
+                    none_variable,  # grad_variables
+                    none_variable,  # inputs
                 ],
                 {},
             )
