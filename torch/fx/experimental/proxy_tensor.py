@@ -13,7 +13,6 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake
 from torch._dispatch.python import enable_python_dispatcher, enable_pre_dispatch
 import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
-
 from contextlib import contextmanager, nullcontext
 import inspect
 from dataclasses import dataclass
@@ -71,12 +70,15 @@ def decompose(decomposition_table):
 proxy_slot = object()
 no_default = object()
 
-
 py_sym_types = (SymInt, SymFloat, SymBool)
 
 
 @dataclass
 class _SymExprHash:
+    """
+    Hash for a py_sym_types that will use the underlying sympy expression
+    """
+
     sym_obj: py_sym_types
 
     def __hash__(self) -> int:
@@ -87,19 +89,21 @@ class _SymExprHash:
         return self.sym_obj.node.expr == value.sym_obj.node.expr
 
 
-def _wrap_to_sym_expr_hash(key):
-    return _SymExprHash(key) if isinstance(key, py_sym_types) else key
-
-
-
 class _SymHashingDict:
     """
-    Wrapper around a dictionary that will convert sym types to hash with _SymExprHash.
+    Wrapper around a dictionary that will convert sym types to hash with _SymExprHash and reuse
+    existing sym proxies.
+
+    SymPy hash is not always reliable so optimistically hash sympy expression, and if those fail,
+    fallback to symnodes.
+
+    We only dedupe sym_size that are resolvable to an sym type that is an input to the graph to avoid
+    adding dependencies of graph intermediaries.
     """
     def __init__(self):
         # optimistically hash sympy expressions, if those fail, fallback to symnodes
         self.sym_node_dict = {}
-        self.wrapped_dict = {}
+        self.sym_hash_dict = {}
         self.graph_input_symbols = set()
 
     def add_input_symint_symbol(self, symbol: py_sym_types):
@@ -109,21 +113,26 @@ class _SymHashingDict:
         existing_node = key.node in self.sym_node_dict
         if not existing_node and key.node.expr.free_symbols.issubset(self.graph_input_symbols):
             self.graph_input_symbols.update(key.node.expr.free_symbols)
-            self.wrapped_dict.__setitem__(_wrap_to_sym_expr_hash(key), value)
+            self.sym_hash_dict.__setitem__(self._wrap_to_sym_expr_hash(key), value)
         self.sym_node_dict[key.node] = value
 
     def __getitem__(self, key):
-        if val := self.wrapped_dict.get(_wrap_to_sym_expr_hash(key), None):
-            return val
-        return self.sym_node_dict[key.node]
+        if node_val := self.sym_node_dict.get(key.node, None):
+            return node_val
+
+        return self.sym_hash_dict[self._wrap_to_sym_expr_hash(key)]
 
     def __contains__(self, key):
-        return (self.wrapped_dict.__contains__(_wrap_to_sym_expr_hash(key))) or key.node in self.sym_node_dict
+        return key.node in self.sym_node_dict or self._wrap_to_sym_expr_hash(key) in self.sym_hash_dict
 
     def get(self, key, default=None):
-        if val := self.wrapped_dict.get(_wrap_to_sym_expr_hash(key), default) is not default:
+        if val := self.sym_node_dict.get(key.node, None):
             return val
-        return self.sym_node_dict.get(key.node, default)
+
+        return self.sym_hash_dict.get(self._wrap_to_sym_expr_hash(key), default)
+
+    def _wrap_to_sym_expr_hash(self, key):
+        return _SymExprHash(key) if isinstance(key, py_sym_types) else key
 
 
 def is_sym_node(node):
