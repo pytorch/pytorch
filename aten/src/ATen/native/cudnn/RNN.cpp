@@ -256,7 +256,7 @@ namespace {
     // NB: Looks like even if batch_first is true here we always want SEQ_MAJOR_UNPACKED, because the input
     // appears to be transposed if it is barch-major
     const auto layout = CUDNN_RNN_DATA_LAYOUT_SEQ_MAJOR_UNPACKED;
-    std::vector<int> seqLengthArray(batch_size, seq_len);
+    std::vector<in32_t> seqLengthArray(batch_size, seq_len);
     r.set(tensor, layout, seq_len, batch_size, vector_size, seqLengthArray.data());
     return r;
   }
