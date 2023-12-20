@@ -120,7 +120,7 @@ class FakeTensorUpdater:
                 updating_node = processing.pop()
                 if updating_node in processed:
                     continue
-                if is_aten_node(updating_node):
+                if not is_aten_node(updating_node):
                     continue
 
                 is_valid, args, kwargs = get_fake_args_kwargs(updating_node)
@@ -136,7 +136,7 @@ class FakeTensorUpdater:
 
                 # todo(chilli): This code path is not exercised by our existing
                 # tests - add a test
-                existing_storages[get_node_storage(new_fake_tensor)] += 1
+                existing_storages[updating_node] += 1
                 processed.add(updating_node)
                 for user in updating_node.users:
                     processing.append(user)
