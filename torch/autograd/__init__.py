@@ -264,7 +264,7 @@ def backward(
     # The reason we repeat the same comment below is that
     # some Python versions print out the first line of a multi-line function
     # calls in the traceback and some print out the last line
-    torch.autograd.graph._engine_run_backward(
+    _engine_run_backward(
         tensors,
         grad_tensors_,
         retain_graph,
@@ -395,7 +395,7 @@ def grad(
     if is_grads_batched:
 
         def vjp(gO):
-            return torch.autograd.graph._engine_run_backward(
+            return _engine_run_backward(
                 t_outputs,
                 gO,
                 retain_graph,
@@ -409,7 +409,7 @@ def grad(
             grad_outputs_
         )
     else:
-        result = torch.autograd.graph._engine_run_backward(
+        result = _engine_run_backward(
             t_outputs,
             grad_outputs_,
             retain_graph,

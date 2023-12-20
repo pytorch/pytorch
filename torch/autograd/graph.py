@@ -143,7 +143,7 @@ class Node(abc.ABC):
 
 def _get_grad_fn_or_grad_acc(t):
     if t.requires_grad and t.grad_fn is None:
-        return t.expand_as(t).grad_fn.next_functions[0][0]
+        return t.view_as(t).grad_fn.next_functions[0][0]
     else:
         return t.grad_fn
 
@@ -634,7 +634,7 @@ def allow_mutation_on_saved_tensors():
             _allow_mutation_on_saved_tensors_enabled = False
 
 
-def _apply_hooks_on_graph_outputs(t_outputs: List[torch.Tensor]):
+def _register_logging_hooks_on_whole_graph(t_outputs: List[torch.Tensor]):
     grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
 
     def iter_graph(roots):
@@ -676,7 +676,7 @@ def _apply_hooks_on_graph_outputs(t_outputs: List[torch.Tensor]):
 def _engine_run_backward(t_outputs, *args, **kwargs):
     attach_logging_hooks = log.getEffectiveLevel() <= logging.INFO
     if attach_logging_hooks:
-        unregister_hooks = _apply_hooks_on_graph_outputs(t_outputs)
+        unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)
     try:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, *args, **kwargs
