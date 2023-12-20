@@ -430,20 +430,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 return self.odict_getitem(tx, args[0])
 
-            if method is collections.OrderedDict.__contains__ and len(args) == 1:
-                from .misc import GetAttrVariable
-
-                if (
-                    isinstance(args[0], GetAttrVariable)
-                    and args[0].name == "type"
-                    and isinstance(args[0].obj, GetAttrVariable)
-                    and args[0].obj.name == "_in_spec"
-                ):
-                    # seems wrong for me to do constant folding here?
-                    return variables.ConstantVariable.create(
-                        self.value.__contains__(args[0].obj.obj.value._in_spec.type)
-                    )
-
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
                 source = (
