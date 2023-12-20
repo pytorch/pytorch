@@ -208,6 +208,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         self,
         cpu_offload: CPUOffload = CPUOffload(offload_params=False),
         use_orig_params: bool = False,
+        mixed_precision: Optional[MixedPrecision] = None,
     ):
         model = TransformerWithSharedParams.init(
             self.process_group,
@@ -225,6 +226,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         fsdp_kwargs = {
             "use_orig_params": use_orig_params,
             "cpu_offload": cpu_offload,
+            "mixed_precision": mixed_precision,
             "auto_wrap_policy": ModuleWrapPolicy(
                 {
                     TransformerEncoderLayer,
@@ -242,23 +244,31 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
     def test_sharded_grad_scaler_found_inf(self):
         self.run_subtests(
             {
-                "use_orig_params": [False, True],
                 "cpu_offload": [
                     CPUOffload(offload_params=True),
                     CPUOffload(offload_params=False),
                 ],
+                "use_orig_params": [False, True],
+                "mixed_precision": [
+                    None,
+                    MixedPrecision(param_dtype=torch.float16, reduce_dtype=torch.float32),
+                    MixedPrecision(param_dtype=torch.float32, reduce_dtype=torch.float16),
+                    MixedPrecision(param_dtype=torch.float16, reduce_dtype=torch.float16),
+                ]
             },
             self._test_sharded_grad_scaler_found_inf,
         )
 
     def _test_sharded_grad_scaler_found_inf(
         self,
-        use_orig_params: bool,
         cpu_offload: CPUOffload,
+        use_orig_params: bool,
+        mixed_precision: Optional[MixedPrecision],
     ):
         model, optim, ref_model, ref_optim = self._build_model_and_optim(
             cpu_offload=cpu_offload,
             use_orig_params=use_orig_params,
+            mixed_precision=mixed_precision,
         )
         grad_scaler = ShardedGradScaler(init_scale=2.0, growth_interval=2)
         ref_grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0, growth_interval=2)
