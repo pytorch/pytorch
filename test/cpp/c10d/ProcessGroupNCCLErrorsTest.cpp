@@ -439,7 +439,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   work->wait();
   EXPECT_TRUE(work->isSuccess());
   EXPECT_TRUE(traces.size() > 0);
-  auto filename = c10::str(tempFilename, 0);
+  auto filename = c10::str(tempFilename, 0, "_", 0);
   auto traceFromStorage = readTraceFromFile(filename, traces.size());
   // Check the traces read from storage match with the original nccl trace.
   EXPECT_TRUE(traceFromStorage == std::string(traces.begin(), traces.end()));
