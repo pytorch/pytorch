@@ -246,7 +246,8 @@ static PyObject* THPStorage_fromBuffer(
   scalar_type = dtype->scalar_type;
 
   const bool is_endian_independent = (scalar_type == at::kByte) ||
-      (scalar_type == at::kChar) || (scalar_type == at::kFloat8_e5m2) ||
+      (scalar_type == at::kChar) ||
+      (scalar_type == at::kFloat8_e5m2) ||
       (scalar_type == at::kFloat8_e5m2fnuz) ||
       (scalar_type == at::kFloat8_e4m3fn) ||
       (scalar_type == at::kFloat8_e4m3fnuz);

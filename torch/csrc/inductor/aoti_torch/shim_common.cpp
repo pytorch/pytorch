@@ -78,7 +78,7 @@ int32_t aoti_torch_dtype_float8_e5m2fnuz() {
   return (int32_t)c10::ScalarType::Float8_e5m2fnuz;
 }
 
-int32_t aoti_torch_dtype_float8_e4m3fnfnuz() {
+int32_t aoti_torch_dtype_float8_e4m3fnuz() {
   return (int32_t)c10::ScalarType::Float8_e4m3fnuz;
 }
 
