@@ -69,9 +69,10 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
     if (tensor.numel() > 0 && tensor.storage()) {
       size_t data_size = tensor.storage().nbytes();
       if (data_size > 0 && tensor.storage().data_ptr()) {
-        std::hash<char> hasher;
         auto src = static_cast<const char*>(tensor.storage().data_ptr().get());
         char* dst = (char*)std::calloc(data_size, sizeof(char));
+        // This is needed so that we trigger a device synchronization so we can
+        // get the collective finished if launched on GPU and hash its output.
         cudaMemcpy(dst, src, data_size, cudaMemcpyDeviceToHost);
         for (size_t i = 0; i < data_size; ++i) {
           // Update the hash for each byte in the tensor

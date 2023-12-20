@@ -655,7 +655,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
     auto numel = getTensorsNumel(*outputs_);
     auto hashValue = hashTensors(*outputs_);
     PRINT_COLLECTIVE_HASH_SIGNATURE(
-        logPrefix(), "output", opTypeToString(opType_), numel, hashValue);
+        "output", opTypeToString(opType_), numel, hashValue);
   }
   return true;
 }
@@ -2426,7 +2426,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     auto numel = getTensorsNumel(inputs);
     auto hashValue = hashTensors(inputs);
     PRINT_COLLECTIVE_HASH_SIGNATURE(
-        logPrefix(), "input", opTypeToString(opType), numel, hashValue);
+        "input", opTypeToString(opType), numel, hashValue);
   }
 
   {

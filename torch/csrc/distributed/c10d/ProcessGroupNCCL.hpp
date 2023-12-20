@@ -97,10 +97,9 @@ enum ErrorHandlingMode {
 
 #define SHOULD_TEAR_DOWN(a) (a != NoHandling && a != CleanUpOnly)
 
-#define PRINT_COLLECTIVE_HASH_SIGNATURE(                                    \
-    prefix, phase, opType, numel, hashValue)                                \
-  LOG(WARNING) << prefix << "at phase " << phase << ": Collective hash of " \
-               << opType << ", numel: " << numel << ", hash: " << hashValue;
+#define PRINT_COLLECTIVE_HASH_SIGNATURE(phase, opType, numel, hashValue)      \
+  LOG(WARNING) << logPrefix() << "Hash of " << phase << " to NCCL " << opType \
+               << " with size " << numel << " is " << hashValue;
 
 // If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
 // caching allocator safety for tensors used on both user-facing and
