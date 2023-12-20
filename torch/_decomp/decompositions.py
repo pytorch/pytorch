@@ -324,8 +324,8 @@ def rrelu_with_noise(
 def rrelu_with_noise_(
     self: Tensor,
     noise: Tensor,
-    lower: float,
-    upper: float,
+    lower: float = 1.0 / 8,
+    upper: float = 1.0 / 3,
     training: bool = False,
     generator: Optional[torch.Generator] = None,
 ) -> Tensor:
@@ -339,10 +339,10 @@ def rrelu_with_noise_backward(
     grad_output: Tensor,
     self: Tensor,
     noise: Tensor,
-    lower: float,
-    upper: float,
-    training: bool,
-    self_is_result: bool,
+    lower: float = 1.0 / 8,
+    upper: float = 1.0 / 3,
+    training: bool = False,
+    self_is_result: bool = False,
 ) -> Tensor:
     if training and upper - lower > 1e-6:
         return grad_output.mul(noise)

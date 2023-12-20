@@ -130,6 +130,16 @@ qconfig_dict = {"object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]}
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):
+    def test_rrelu_compile(self):
+        # This used to fail due to missing default params
+        def f(x):
+            x = torch.rrelu(x)
+            return torch.nn.functional.rrelu(x)
+
+        inp = torch.ones(1, 2, 3)
+        # Should be an identity function for this input
+        self.assertEqual(torch.compile(f)(inp), inp)
+
     def test_get_cache_entry(self):
         def f(x):
             return x + 1
