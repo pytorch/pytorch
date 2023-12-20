@@ -9,7 +9,8 @@
 #include <ATen/ops/empty_strided_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Tensor empty_meta_symint(
   SymIntArrayRef size,
@@ -52,4 +53,5 @@ Tensor empty_strided_meta_symint(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

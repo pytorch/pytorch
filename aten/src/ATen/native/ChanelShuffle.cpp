@@ -17,7 +17,8 @@
 #include <ATen/ops/native_channel_shuffle_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Tensor channel_shuffle_cpu(const Tensor& self, int64_t groups) {
   auto memory_format = self.suggest_memory_format();
@@ -85,4 +86,4 @@ Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
 
 DEFINE_DISPATCH(channel_shuffle_kernel);
 
-} // namespace at::native
+}} // namespace at::native

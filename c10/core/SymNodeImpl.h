@@ -5,9 +5,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
-#include <cstdint>
-#include <ostream>
-#include <string>
 
 namespace c10 {
 

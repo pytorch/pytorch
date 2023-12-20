@@ -13,8 +13,9 @@
 #include <ATen/ops/max_pool2d_with_indices_native.h>
 #endif
 
-namespace at::meta {
-using namespace at::native;
+namespace at {
+namespace meta {
+using namespace native;
 TORCH_META_FUNC(max_pool2d_with_indices)
 (const Tensor& input,
 IntArrayRef kernel_size,
@@ -155,9 +156,9 @@ const Tensor& indices) {
   set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(memory_format),
              input.has_names() ? input.names() : DimnameList{});
 }
-} // namespace at::meta
+} // namespace meta
 
-namespace at::native {
+namespace native {
 
 TORCH_IMPL_FUNC(max_pool2d_with_indices_out_cpu)
 (const Tensor& input,
@@ -212,4 +213,5 @@ const Tensor& gradInput) {
 DEFINE_DISPATCH(max_pool2d_kernel);
 DEFINE_DISPATCH(max_pool2d_backward_kernel);
 
+} // at::native
 } // at

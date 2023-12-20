@@ -23,7 +23,8 @@
 
 #include <c10/util/irange.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 /// If addends is nullopt, return values.
 /// Else, return a new tensor containing the elementwise sums.
@@ -111,9 +112,9 @@ Tensor _test_check_tensor(const Tensor& self) {
   return self.clone();
 }
 
-} // namespace at::native
+} // namespace native
 
-namespace at::functionalization {
+namespace functionalization {
 
 // view_copy ops must have a functional inverse registered
 Tensor FunctionalInverses::_test_autograd_multiple_dispatch_view_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, bool reapply_views) {
@@ -123,4 +124,5 @@ Tensor FunctionalInverses::_test_autograd_multiple_dispatch_view_copy_inverse(co
     return Tensor();
 }
 
-} // namespace at::functionalization
+} // namespace functionalization
+} // namespace at

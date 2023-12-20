@@ -236,7 +236,7 @@ T findFirstSet(T Val, ZeroBehavior ZB = ZB_Max) {
 /// bits set to 0.  Only unsigned types are allowed.
 template <typename T>
 T maskTrailingOnes(unsigned N) {
-  static_assert(std::is_unsigned_v<T>, "Invalid type!");
+  static_assert(std::is_unsigned<T>::value, "Invalid type!");
   const unsigned Bits = CHAR_BIT * sizeof(T);
   assert(N <= Bits && "Invalid bit index");
   return N == 0 ? 0 : (T(-1) >> (Bits - N));
@@ -366,12 +366,14 @@ constexpr inline bool isShiftedInt(int64_t x) {
 /// to keep MSVC from (incorrectly) warning on isUInt<64> that we're shifting
 /// left too many places.
 template <unsigned N>
-constexpr inline std::enable_if_t<(N < 64), bool> isUInt(uint64_t X) {
+constexpr inline typename std::enable_if<(N < 64), bool>::type isUInt(
+    uint64_t X) {
   static_assert(N > 0, "isUInt<0> doesn't make sense");
   return X < (UINT64_C(1) << (N));
 }
 template <unsigned N>
-constexpr inline std::enable_if_t<N >= 64, bool> isUInt(uint64_t /*X*/) {
+constexpr inline typename std::enable_if<N >= 64, bool>::type isUInt(
+    uint64_t /*X*/) {
   return true;
 }
 
@@ -805,7 +807,9 @@ inline int64_t SignExtend64(uint64_t X, unsigned B) {
 /// Subtract two unsigned integers, X and Y, of type T and return the absolute
 /// value of the result.
 template <typename T>
-std::enable_if_t<std::is_unsigned_v<T>, T> AbsoluteDifference(T X, T Y) {
+typename std::enable_if<std::is_unsigned<T>::value, T>::type AbsoluteDifference(
+    T X,
+    T Y) {
   return std::max(X, Y) - std::min(X, Y);
 }
 
@@ -813,7 +817,7 @@ std::enable_if_t<std::is_unsigned_v<T>, T> AbsoluteDifference(T X, T Y) {
 /// maximum representable value of T on overflow.  ResultOverflowed indicates if
 /// the result is larger than the maximum representable value of type T.
 template <typename T>
-std::enable_if_t<std::is_unsigned_v<T>, T> SaturatingAdd(
+typename std::enable_if<std::is_unsigned<T>::value, T>::type SaturatingAdd(
     T X,
     T Y,
     bool* ResultOverflowed = nullptr) {
@@ -833,7 +837,7 @@ std::enable_if_t<std::is_unsigned_v<T>, T> SaturatingAdd(
 /// maximum representable value of T on overflow.  ResultOverflowed indicates if
 /// the result is larger than the maximum representable value of type T.
 template <typename T>
-std::enable_if_t<std::is_unsigned_v<T>, T> SaturatingMultiply(
+typename std::enable_if<std::is_unsigned<T>::value, T>::type SaturatingMultiply(
     T X,
     T Y,
     bool* ResultOverflowed = nullptr) {
@@ -882,11 +886,8 @@ std::enable_if_t<std::is_unsigned_v<T>, T> SaturatingMultiply(
 /// overflow. ResultOverflowed indicates if the result is larger than the
 /// maximum representable value of type T.
 template <typename T>
-std::enable_if_t<std::is_unsigned_v<T>, T> SaturatingMultiplyAdd(
-    T X,
-    T Y,
-    T A,
-    bool* ResultOverflowed = nullptr) {
+typename std::enable_if<std::is_unsigned<T>::value, T>::type
+SaturatingMultiplyAdd(T X, T Y, T A, bool* ResultOverflowed = nullptr) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool Dummy;
   bool& Overflowed = ResultOverflowed ? *ResultOverflowed : Dummy;

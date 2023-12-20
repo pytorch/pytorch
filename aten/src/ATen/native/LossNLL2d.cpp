@@ -20,7 +20,8 @@
 #include <utility>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -502,4 +503,5 @@ static Tensor nll_loss2d(const Tensor & self, const Tensor & target, const c10::
   return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight, reduction, ignore_index));
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

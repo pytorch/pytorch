@@ -19,7 +19,8 @@
 #include <ATen/ops/zero_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor& fill_out(Tensor& self, const Scalar& value) {
@@ -166,4 +167,5 @@ Tensor& zero_meta_(Tensor& self) {
   return self;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

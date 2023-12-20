@@ -41,7 +41,8 @@ Tensor _triu_mask(int64_t n, int64_t dims, bool diagonal, TensorOptions opt) {
 
 }  // namespace
 
-namespace at::native {
+namespace at {
+namespace native{
 
 Tensor cartesian_prod(TensorList tensors) {
   for(const Tensor &t : tensors) {
@@ -72,4 +73,5 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
   return at::stack(grids, 1);
 }
 
-}  // namespace at::native
+}  // namespace native
+}  // namespace at

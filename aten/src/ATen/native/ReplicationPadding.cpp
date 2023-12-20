@@ -20,7 +20,9 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at::meta {
+namespace at {
+
+namespace meta {
 
 TORCH_META_FUNC(replication_pad1d) (
   const Tensor& input, IntArrayRef paddingSize  // no out argument!
@@ -168,9 +170,9 @@ TORCH_META_FUNC(replication_pad3d) (
   }
 }
 
-} // namespace at::meta
+} // namespace meta
 
-namespace at::native {
+namespace native {
 
 namespace {
 
@@ -353,4 +355,5 @@ DEFINE_DISPATCH(replication_pad2d_backward_kernel);
 DEFINE_DISPATCH(replication_pad3d_kernel);
 DEFINE_DISPATCH(replication_pad3d_backward_kernel);
 
-} // namespace at::native
+} // at::native
+} // at

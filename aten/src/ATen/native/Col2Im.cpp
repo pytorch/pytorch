@@ -68,7 +68,8 @@
 //
 // ALSO do vol2col
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 static void col2im_out_cpu_template(
@@ -214,4 +215,5 @@ Tensor col2im_cpu(
   return output;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

@@ -17,7 +17,8 @@
 #include <ATen/ops/quantized_max_pool1d.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 DEFINE_DISPATCH(max_pool1d_stub);
 
@@ -154,4 +155,5 @@ Tensor max_pool1d(
       self, kernel_size, stride, padding, dilation, ceil_mode);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

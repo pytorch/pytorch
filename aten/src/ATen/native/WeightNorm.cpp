@@ -20,7 +20,8 @@
 
 #include <vector>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 DEFINE_DISPATCH(weight_norm_stub);
 DEFINE_DISPATCH(weight_norm_backward_stub);
@@ -159,4 +160,5 @@ std::tuple<Tensor, Tensor> _weight_norm_differentiable_backward
   }
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

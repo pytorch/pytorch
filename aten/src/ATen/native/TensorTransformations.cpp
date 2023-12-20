@@ -31,7 +31,8 @@
 #include <utility>
 #include <vector>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Tensor flip(const Tensor& self, IntArrayRef dims) {
   const int64_t total_dims = self.dim();
@@ -236,4 +237,4 @@ Tensor chalf(const Tensor& self, c10::optional<MemoryFormat> memory_format) {
 
 DEFINE_DISPATCH(flip_stub);
 
-} // namespace at::native
+}} // namespace at::native

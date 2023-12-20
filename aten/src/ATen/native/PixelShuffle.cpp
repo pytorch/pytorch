@@ -18,7 +18,8 @@
 #include <numeric>
 #include <vector>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Tensor pixel_shuffle_cpu(const Tensor& self, int64_t upscale_factor) {
   check_pixel_shuffle_shapes(self, upscale_factor);
@@ -157,4 +158,4 @@ Tensor math_pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
 DEFINE_DISPATCH(pixel_shuffle_kernel);
 DEFINE_DISPATCH(pixel_unshuffle_kernel);
 
-} // namespace at::native
+}} // namespace at::native

@@ -23,11 +23,6 @@ from torch.nested._internal.nested_tensor import (
     jagged_from_tensor_and_lengths,
     ViewBufferFromNested,
 )
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    subtest,
-)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -255,31 +250,16 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res = fn(input)
             self.assertIsInstance(res, LocalSubclass)
 
-    @parametrize(
-        "comparison",
-        [
-            subtest(isinstance, "isinstance"),
-            subtest(lambda instance, type_: type(instance) == type_, "equality"),
-            subtest(lambda instance, type_: type(instance) is type_, "identity"),
-        ],
-    )
-    @parametrize(
-        "input_type",
-        [
-            subtest(torch.Tensor, "tensor"),
-            subtest(DummyNDim, "subclass"),
-        ],
-    )
-    def test_type_check(self, comparison, input_type):
+    def test_isinstance_check_subclass(self):
         with torch._dynamo.config.patch("traceable_tensor_subclasses", {DummyNDim}):
 
             def fn(x):
-                if comparison(x, DummyNDim):
+                if isinstance(x, DummyNDim):
                     return torch.ones(1, 1)
                 else:
                     return torch.zeros(2, 2)
 
-            input = torch.ones(2, 2).as_subclass(input_type)
+            input = torch.ones(2, 2)
             exp_res = fn(input)
             act_res = torch.compile(backend="eager", fullgraph=True)(fn)(input)
             self.assertEqual(exp_res, act_res)
@@ -965,9 +945,6 @@ class GraphModule(torch.nn.Module):
             return typ.__bases__
 
         self.assertEqual(f(torch.randn(1)), (Multistreamable,))
-
-
-instantiate_parametrized_tests(SubclassTests)
 
 
 class TestNestedTensor(torch._dynamo.test_case.TestCase):

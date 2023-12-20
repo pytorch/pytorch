@@ -19,7 +19,8 @@
 #include <ATen/ops/upsample_nearest2d_native.h>
 #endif
 
-namespace at::meta {
+namespace at {
+namespace meta {
 
 TORCH_META_FUNC(upsample_nearest2d) (
     const Tensor& input, IntArrayRef output_size, c10::optional<double> scales_h, c10::optional<double> scales_w
@@ -97,9 +98,9 @@ TORCH_META_FUNC(_upsample_nearest_exact2d_backward) (
   set_output_raw_strided(0, input_size, {}, grad_output.options().memory_format(grad_output.suggest_memory_format()));
 }
 
-} // namespace at::meta
+} // namespace meta
 
-namespace at::native {
+namespace native {
 
 TORCH_IMPL_FUNC(upsample_nearest2d_out_cpu) (
     const Tensor& input,
@@ -171,4 +172,5 @@ DEFINE_DISPATCH(_upsample_nearest_exact2d_kernel);
 DEFINE_DISPATCH(upsample_nearest2d_backward_kernel);
 DEFINE_DISPATCH(_upsample_nearest_exact2d_backward_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

@@ -19,7 +19,8 @@
 #include <ATen/ops/true_divide.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Tensor cov(
     const Tensor& self,
@@ -150,4 +151,5 @@ Tensor corrcoef(const Tensor& self) {
       : c.clip(-1, 1);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

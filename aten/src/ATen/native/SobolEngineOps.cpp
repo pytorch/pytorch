@@ -17,7 +17,8 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 using namespace sobol_utils;
 
@@ -188,4 +189,5 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
   return sobolstate;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

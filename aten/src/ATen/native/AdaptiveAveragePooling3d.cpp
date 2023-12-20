@@ -19,7 +19,8 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -338,4 +339,5 @@ Tensor adaptive_avg_pool3d_backward_cpu(const Tensor& gradOutput_,
   return gradInput;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

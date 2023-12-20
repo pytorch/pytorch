@@ -30,7 +30,7 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at::native {
+namespace at { namespace native {
 
 using at::native::detail::GridSamplerInterpolation;
 using at::native::detail::GridSamplerPadding;
@@ -1068,4 +1068,4 @@ Tensor grid_sampler(
   }
 }
 
-}  // namespace at::native
+}}  // namespace at::native

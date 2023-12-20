@@ -356,21 +356,13 @@ __host__ __device__
 #endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
-#define CUDA_KERNEL_ASSERT(cond)                 \
-  if (C10_UNLIKELY(!(cond))) {                   \
-    (void)(_wassert(                             \
-               _CRT_WIDE(#cond),                 \
-               _CRT_WIDE(__FILE__),              \
-               static_cast<unsigned>(__LINE__)), \
-           0);                                   \
+#define CUDA_KERNEL_ASSERT(cond)                                                                 \
+  if (C10_UNLIKELY(!(cond))) {                                                                   \
+    (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
   }
-#define SYCL_KERNEL_ASSERT(cond)                 \
-  if (C10_UNLIKELY(!(cond))) {                   \
-    (void)(_wassert(                             \
-               _CRT_WIDE(#cond),                 \
-               _CRT_WIDE(__FILE__),              \
-               static_cast<unsigned>(__LINE__)), \
-           0);                                   \
+#define SYCL_KERNEL_ASSERT(cond)                                                                 \
+  if (C10_UNLIKELY(!(cond))) {                                                                   \
+    (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
   }
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)

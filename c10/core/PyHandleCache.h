@@ -2,7 +2,6 @@
 
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Exception.h>
 #include <c10/util/python_stub.h>
 
 #include <atomic>

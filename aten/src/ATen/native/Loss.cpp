@@ -70,7 +70,8 @@ namespace {
   }
 }
 
-namespace at::meta {
+namespace at {
+namespace meta {
 
 TORCH_META_FUNC(smooth_l1_loss)
 (const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
@@ -97,9 +98,9 @@ TORCH_META_FUNC(mse_loss)
   maybe_get_output().resize_({});
 }
 
-} // namespace at::meta
+} // namespace meta
 
-namespace at::native {
+namespace native {
 
 DEFINE_DISPATCH(smooth_l1_stub);
 DEFINE_DISPATCH(smooth_l1_backward_stub);
@@ -509,4 +510,4 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
   return apply_loss_reduction((input - target).abs(), reduction);
 }
-}  // namespace at::native
+}}  // namespace at::native

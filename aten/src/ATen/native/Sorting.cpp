@@ -47,9 +47,10 @@
 
 #include <utility>
 
-namespace at::meta {
+namespace at {
+namespace meta {
 
-using namespace ::at::native;
+using namespace native;
 
 TORCH_META_FUNC(topk)
 (const Tensor& self, int64_t k, int64_t dim_, bool largest, bool sorted) {
@@ -88,9 +89,9 @@ TORCH_META_FUNC2(sort, stable)
   set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(kLong), {});
 }
 
-} // namespace at::meta
+} // namespace meta
 
-namespace at::native {
+namespace native {
 
 DEFINE_DISPATCH(sort_stub);
 DEFINE_DISPATCH(topk_stub);
@@ -992,4 +993,5 @@ Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descen
 }
 
 
-} // namespace at::native
+} // namespace native
+} // namespace at

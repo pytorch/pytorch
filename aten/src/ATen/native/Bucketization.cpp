@@ -33,7 +33,8 @@
  * - Restrictions are defined in searchsorted_pre_check()
  */
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -243,4 +244,4 @@ Tensor bucketize_cpu(const Scalar& self, const Tensor& boundaries, bool out_int3
   return bucketize_cpu(searchsorted_scalar_tensor(self, boundaries.device()), boundaries, out_int32, right);
 }
 
-} // namespace at::native
+}} // namespace at::native

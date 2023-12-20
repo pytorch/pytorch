@@ -1,9 +1,5 @@
 #pragma once
 
-#include <c10/core/Device.h>
-#include <c10/core/DeviceType.h>
-#include <c10/core/Stream.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/InlineEvent.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
 

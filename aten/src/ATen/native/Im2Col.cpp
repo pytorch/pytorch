@@ -16,7 +16,8 @@
 #include <ATen/ops/im2col_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 static void im2col_out_cpu_template(
@@ -153,4 +154,5 @@ Tensor im2col_cpu(
   return output;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

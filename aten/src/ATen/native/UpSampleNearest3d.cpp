@@ -18,7 +18,8 @@
 #include <ATen/ops/upsample_nearest3d_native.h>
 #endif
 
-namespace at::meta {
+namespace at {
+namespace meta {
 
 TORCH_META_FUNC(upsample_nearest3d) (
     const Tensor& input,
@@ -106,9 +107,9 @@ TORCH_META_FUNC(_upsample_nearest_exact3d_backward) (
   set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
-} // namespace at::meta
+} // namespace meta
 
-namespace at::native {
+namespace native {
 
 TORCH_IMPL_FUNC(upsample_nearest3d_out_cpu) (
     const Tensor& input,
@@ -188,4 +189,5 @@ DEFINE_DISPATCH(_upsample_nearest_exact3d_kernel);
 DEFINE_DISPATCH(upsample_nearest3d_backward_kernel);
 DEFINE_DISPATCH(_upsample_nearest_exact3d_backward_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

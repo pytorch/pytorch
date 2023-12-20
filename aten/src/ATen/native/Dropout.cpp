@@ -20,7 +20,8 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -172,4 +173,5 @@ Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
   return _feature_alpha_dropout<true>(input, p, train);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

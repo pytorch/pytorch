@@ -13,7 +13,8 @@
 #include <ATen/ops/max_pool3d_with_indices_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -296,4 +297,5 @@ Tensor max_pool3d_with_indices_backward_cpu(
 
 DEFINE_DISPATCH(max_pool3d_kernel);
 DEFINE_DISPATCH(max_pool3d_backward_kernel);
-} // namespace at::native
+} // at::native
+} // at

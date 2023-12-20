@@ -28,7 +28,7 @@
 
 #include <tuple>
 
-namespace at::native {
+namespace at { namespace native {
 
 static void check1d(
     const char* function_name,
@@ -186,4 +186,5 @@ Tensor max_pool3d(
   return std::get<0>(output_and_indices);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

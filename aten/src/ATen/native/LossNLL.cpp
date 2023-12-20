@@ -33,7 +33,8 @@
 
 #include <utility>
 
-namespace at::meta {
+namespace at {
+namespace meta {
 TORCH_META_FUNC(nll_loss_forward)
 (const Tensor& self,
  const Tensor& target,
@@ -130,9 +131,9 @@ TORCH_META_FUNC(nll_loss_backward)
 
   set_output_raw_strided(0, self.sizes(), {}, self.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 }
-} // namespace at::meta
+} // namespace meta
 
-namespace at::native {
+namespace native {
 
 namespace {
 
@@ -741,4 +742,5 @@ Tensor nll_loss_nd_symint(
   return ret;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

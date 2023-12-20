@@ -830,10 +830,8 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool2d_with_indices(
   if (output_size_ == c10::nullopt) {
     TORCH_INTERNAL_ASSERT(output_ratio != c10::nullopt);
     output_size_ = {
-        (int64_t)(static_cast<double>(input.size(-2)) *
-                  (*output_ratio.value())[0]),
-        (int64_t)(static_cast<double>(input.size(-1)) *
-                  (*output_ratio.value())[1])};
+        (int64_t)(static_cast<double>(input.size(-2)) * (*output_ratio.value())[0]),
+        (int64_t)(static_cast<double>(input.size(-1)) * (*output_ratio.value())[1])};
   }
 
   Tensor _random_samples_ = _random_samples;
@@ -924,12 +922,9 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(
   if (output_size_ == c10::nullopt) {
     TORCH_INTERNAL_ASSERT(output_ratio != c10::nullopt);
     output_size_ = {
-        (int64_t)(static_cast<double>(input.size(-3)) *
-                  (*output_ratio.value())[0]),
-        (int64_t)(static_cast<double>(input.size(-2)) *
-                  (*output_ratio.value())[1]),
-        (int64_t)(static_cast<double>(input.size(-1)) *
-                  (*output_ratio.value())[2])};
+        (int64_t)(static_cast<double>(input.size(-3)) * (*output_ratio.value())[0]),
+        (int64_t)(static_cast<double>(input.size(-2)) * (*output_ratio.value())[1]),
+        (int64_t)(static_cast<double>(input.size(-1)) * (*output_ratio.value())[2])};
   }
 
   Tensor _random_samples_ = _random_samples;

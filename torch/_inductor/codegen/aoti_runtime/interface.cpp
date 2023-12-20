@@ -104,28 +104,16 @@ AOTIRuntimeError AOTInductorModelContainerRun(
   })
 }
 
-AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
+AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
-    AOTInductorConstantMapHandle constant_map_handle,
-    bool use_inactive,
-    bool validate_full_update) {
+    AOTInductorConstantMapHandle constant_map_handle) {
   auto* container =
       reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
           container_handle);
   auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
-    container->update_constant_buffer(
-        *input_map, use_inactive, validate_full_update);
+    container->update_inactive_constant_buffer(*input_map);
   })
-}
-
-AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
-    AOTInductorModelContainerHandle container_handle,
-    AOTInductorConstantMapHandle constant_map_handle) {
-  return AOTInductorModelContainerUpdateConstantBuffer(container_handle,
-          constant_map_handle,
-          /*use_inactive*/ true,
-          /*validate_full_update*/ true);
 }
 
 AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(

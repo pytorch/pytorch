@@ -216,7 +216,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_eager = mod(inp)
                 out, code = run_and_get_code(foo, mod, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
-                    "mm(", count=1, exactly=True
+                    "mkl_linear(", count=1, exactly=True
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 
@@ -235,7 +235,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_eager = mod2(inp)
                 out, code = run_and_get_code(foo, mod2, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
-                    "mm(", count=count, exactly=True
+                    "mkl_linear(", count=count, exactly=True
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 

@@ -17,7 +17,8 @@
 #include <ATen/ops/min_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 DEFINE_DISPATCH(min_all_stub);
 DEFINE_DISPATCH(max_all_stub);
@@ -73,4 +74,4 @@ std::tuple<Tensor, Tensor> _aminmax_all(const Tensor &self) {
   return at::aminmax(self);
 }
 
-} // namespace at::native
+}} // namespace at::native

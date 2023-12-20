@@ -81,7 +81,8 @@
 #include <utility>
 #endif
 
-namespace at::meta {
+namespace at {
+namespace meta {
 // computes `result = self <= threshold ? value : other`
 // other is `self` in threshold() and `grad` in threshold_backward()
 TORCH_META_FUNC(threshold)(const Tensor& self, const Scalar& threshold, const Scalar& value) {
@@ -237,9 +238,9 @@ TORCH_META_FUNC(gelu_backward) (
   build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
 
-} // namespace at::meta
+} // namespace meta
 
-namespace at::native {
+namespace native {
 
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
@@ -828,4 +829,4 @@ Tensor& log_sigmoid_backward_cpu_out(const Tensor& grad_output,
 DEFINE_DISPATCH(GeluKernel);
 DEFINE_DISPATCH(GeluBackwardKernel);
 
-}  // namespace at::native
+}}  // namespace at::native
