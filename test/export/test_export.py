@@ -33,7 +33,8 @@ from torch._subclasses import FakeTensorMode
 from torch.export import Constraint, Dim
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests
+from torch._dynamo.test_case import TestCase
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
