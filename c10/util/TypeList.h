@@ -3,6 +3,10 @@
 #include <c10/util/C++17.h>
 #include <c10/util/TypeTraits.h>
 #include <algorithm>
+#include <cstddef>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 
 namespace c10::guts {
 

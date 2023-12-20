@@ -1,11 +1,13 @@
 #pragma once
 
-#include <c10/util/C++17.h>
 #include <c10/util/ConstexprCrc.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/string_view.h>
-#include <cinttypes>
-#include <functional>
+#include <cstdint>
+#include <ostream>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
 
 namespace c10::util {
 

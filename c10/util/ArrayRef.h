@@ -15,12 +15,18 @@
 
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
 #include <iterator>
+#include <ostream>
+#include <type_traits>
 #include <vector>
 
 namespace c10 {
