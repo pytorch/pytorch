@@ -353,6 +353,7 @@
 
 - name: x86 CPU quantization
   patterns:
+  - aten/src/ATen/native/quantized/cpu/**
   - torch/ao/quantization/quantizer/x86_inductor_quantizer.py
   - torch/_inductor/fx_passes/quantization.py
   - test/quantization/core/test_quantized_op.py
