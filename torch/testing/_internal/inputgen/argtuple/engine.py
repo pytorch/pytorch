@@ -1,5 +1,3 @@
-import logging
-
 from torch.testing._internal.inputgen.argument.engine import MetaArgEngine
 from torch.testing._internal.inputgen.argument.gen import ArgumentGenerator
 from torch.testing._internal.inputgen.attribute.model import Attribute
@@ -63,11 +61,9 @@ class MetaArgTupleEngine:
         return tuple(value_tuple[self.order_inverse_perm[ix]] for ix in arg_deps)
 
     def gen_meta_tuples(self, valid: bool, focus_ix: int):
-        logging.debug(f"Generating tuples focusing on argument {focus_ix}")
         tuples = [()]
         for ix in self.order:
             arg = self.args[ix]
-            logging.debug(f"Generating argument {ix} ({arg.type})")
             new_tuples = []
             focuses = [None]
             if ix == focus_ix:
@@ -88,12 +84,12 @@ class MetaArgTupleEngine:
         return valid_tuples
 
     def gen_invalid_from_valid(self, valid_tuple):
-        logging.debug("Valid", [str(x) for x in valid_tuple])
+        # Valid [str(x) for x in valid_tuple]
         valid_value_tuple = tuple(ArgumentGenerator(m).gen() for m in valid_tuple)
         invalid_tuples = []
         for ix in range(len(self.args)):
             arg = self.args[ix]
-            logging.debug(f"Generating invalid argument {ix} ({arg.type})")
+            # Generating invalid argument {ix} {arg.type}
             deps = tuple(valid_value_tuple[i] for i in arg.deps)
             for focus in Attribute.hierarchy(arg.type):
                 engine = MetaArgEngine(arg.type, arg.constraints, deps, False)
@@ -101,9 +97,7 @@ class MetaArgTupleEngine:
                     invalid_tuple = (
                         valid_tuple[:ix] + (meta_arg,) + valid_tuple[ix + 1 :]
                     )
-                    logging.debug(
-                        f"  Invalid {ix} {focus}:", [str(x) for x in invalid_tuple]
-                    )
+                    # Invalid {ix} {focus} [str(x) for x in invalid_tuple]
                     invalid_tuples.append(invalid_tuple)
         invalid_tuples = list(set(invalid_tuples))
         return invalid_tuples
