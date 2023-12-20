@@ -1,6 +1,7 @@
 import functools
 import itertools
 import math
+import unittest
 from enum import Enum
 from typing import Any, Dict, List, Tuple, Union
 
@@ -23,11 +24,13 @@ from torch.optim import (
     SGD,
     SparseAdam,
 )
+from torch.testing._internal.common_device_type import tol, toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
     set_single_threaded_if_parallel_tbb,
     skipIfTorchDynamo,
+    TEST_WITH_TORCHDYNAMO,
 )
 
 
@@ -909,6 +912,11 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
             ),
+            DecorateInfo(
+                unittest.skip("Uses too much memory, even for H100, surprisingly."),
+                "TestOptimRenewed",
+                "test_foreach_large_tensor",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1049,6 +1057,16 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
+            DecorateInfo(
+                toleranceOverride(
+                    {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
+                        torch.float32: tol(atol=5e-04, rtol=0.01),
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_mixed_device_dtype",
+                active_if=TEST_WITH_TORCHDYNAMO,
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1100,6 +1118,16 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                toleranceOverride(
+                    {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
+                        torch.float32: tol(atol=5e-04, rtol=0.007),
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_mixed_device_dtype",
+                active_if=TEST_WITH_TORCHDYNAMO,
             ),
         ),
     ),
