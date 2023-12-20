@@ -136,7 +136,7 @@ class FakeTensorUpdater:
 
                 # todo(chilli): This code path is not exercised by our existing
                 # tests - add a test
-                existing_storages[updating_node] += 1
+                existing_storages[get_node_storage(updating_node)] += 1
                 processed.add(updating_node)
                 for user in updating_node.users:
                     processing.append(user)
