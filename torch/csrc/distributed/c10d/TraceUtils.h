@@ -290,7 +290,7 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
   }
 
   file.write(ncclTrace.data(), ncclTrace.size());
-  LOG(INFO) << "Finished writing NCCLPG debug info.";
+  LOG(INFO) << "Finished writing NCCLPG debug info to " << filename_;
 }
 
 inline std::string pickle_str(const c10::IValue& v) {
@@ -386,7 +386,7 @@ struct NCCLTraceBuffer {
         id_,
         pg_id,
         seq_id,
-        profiling_name,
+        profiling_name == nullptr ? "" : profiling_name,
         std::move(traceback),
         std::move(start),
         std::move(end),

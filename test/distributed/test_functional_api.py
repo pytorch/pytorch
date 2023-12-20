@@ -121,13 +121,13 @@ class TestExpand(MultiThreadedTestCase):
     def test_expand_device_mesh(self):
         mesh = dt.DeviceMesh("cpu", torch.arange(4))
         tag, rankset, group_size = ft_c._expand_group(mesh)
-        self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
+        self.assertEqual(c10d._get_group_tag(mesh.get_group(mesh_dim=0)), tag)
         self.assertEqual([0, 1, 2, 3], rankset)
         self.assertEqual(4, group_size)
 
         mesh = dt.DeviceMesh("cpu", torch.arange(4))
         tag, rankset, group_size = ft_c._expand_group(mesh)
-        self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
+        self.assertEqual(c10d._get_group_tag(mesh.get_group(mesh_dim=0)), tag)
         self.assertEqual([0, 1, 2, 3], rankset)
         self.assertEqual(4, group_size)
 
@@ -137,14 +137,14 @@ class TestExpand(MultiThreadedTestCase):
             tag, rankset, group_size = ft_c._expand_group(mesh)
 
         tag, rankset, group_size = ft_c._expand_group((mesh, 0))
-        self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
+        self.assertEqual(c10d._get_group_tag(mesh.get_group(mesh_dim=0)), tag)
         expected_rankset = [0, 2] if dist.get_rank() in [0, 2] else [1, 3]
         self.assertEqual(expected_rankset, rankset)
         self.assertEqual(2, group_size)
 
         tag, rankset, group_size = ft_c._expand_group((mesh, 1))
         expected_rankset = [0, 1] if dist.get_rank() in [0, 1] else [2, 3]
-        self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[1]), tag)
+        self.assertEqual(c10d._get_group_tag(mesh.get_group(mesh_dim=1)), tag)
         self.assertEqual(expected_rankset, rankset)
         self.assertEqual(2, group_size)
 
@@ -605,6 +605,50 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
             store=FakeStore(),
         )
         allreduce(torch.randn(8, device=self.device), pg=dist.group.WORLD)
+
+
+class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
+
+    @property
+    def world_size(self):
+        return 4
+
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    @with_comms()
+    def test_permute_tensor_with_sub_group(self):
+        device = "cuda"
+        mesh_dim_names = ["dp", "tp"]
+
+        mesh_2d = dt.init_device_mesh(
+            device, (2, self.world_size // 2), mesh_dim_names=mesh_dim_names
+        )
+
+        for mesh_name in mesh_dim_names:
+            mesh = mesh_2d[mesh_name]
+            rank = mesh.get_local_rank()
+
+            # rank0: [0., 1.], rank1: [2., 3.]
+            send_tensor = torch.arange(2, dtype=torch.float32, device=device) + 2 * rank
+            recvd_tensor = ft_c.permute_tensor(
+                send_tensor,
+                [1, 0],
+                group=mesh
+            )
+
+            # rank0: [2., 3.], rank1: [0., 1.]
+            expected = torch.arange(
+                2,
+                dtype=torch.float32,
+                device=device
+            ) + 2 * ((rank - 1 + 2) % 2)
+            self.assertEqual(
+                recvd_tensor,
+                expected,
+                msg=f"Expected {expected} on {self.rank=} (local_rank={rank}), "
+                    f"but received {recvd_tensor} instead."
+            )
+
 
 
 class TestOpWaitiness(MultiThreadedTestCase):
