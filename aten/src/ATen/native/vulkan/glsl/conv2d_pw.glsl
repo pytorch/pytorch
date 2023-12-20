@@ -1,28 +1,22 @@
 /*
- * TILE_SIZE = ($TILE_SIZE_X, $TILE_SIZE_Y, 1)
+ * TILE_SIZE = (${OUTPUT_TILE_SIZE[0]}, ${OUTPUT_TILE_SIZE[1]}, 1)
  * WEIGHT_STORAGE = TEXTURE_2D
  * WEIGHT_STORAGE_LAYOUT = OC4,IC4,4ic,4oc
  * BIAS_STORAGE = TEXTURE_2D
- * REGISTER_FOR = $REGISTER_FOR
+ * REGISTER_FOR = ${REGISTER_FOR}
  */
+#version 450 core
+#define PRECISION ${PRECISION}
+#define FORMAT ${FORMAT}
 
 layout(std430) buffer;
 
-/*
- * Output Image
- */
+// clang-format off
 layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D uOutput;
-
-/*
- * Input Textures
- */
+// clang-format on
 layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
 layout(set = 0, binding = 2) uniform PRECISION sampler2D uKernel;
 layout(set = 0, binding = 3) uniform PRECISION sampler2D uBias;
-
-/*
- * Params Buffer
- */
 layout(set = 0, binding = 4) uniform PRECISION restrict Block {
   // extents of the output texture
   ivec4 out_extents;
@@ -40,9 +34,6 @@ layout(set = 0, binding = 4) uniform PRECISION restrict Block {
 }
 uBlock;
 
-/*
- * Local Work Group
- */
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 /*
@@ -53,16 +44,17 @@ layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 void main() {
   const ivec3 gpos = ivec3(gl_GlobalInvocationID);
 
-  // Output position for TILE_SIZE_X, TILE_SIZE_Y = 2, 2
+  // Output position for OUTPUT_TILE_SIZE[0], OUTPUT_TILE_SIZE[1] = 2, 2
   // +--------+--------+
   // | pos[0] | pos[1] |
   // +--------+--------+
   // | pos[2] | pos[3] |
   // +--------+--------+
-  ivec3 pos[$TILE_SIZE_X * $TILE_SIZE_Y];
-  for (int y = 0, i = 0; y < $TILE_SIZE_Y; ++y) {
-    for (int x = 0; x < $TILE_SIZE_X; ++x) {
-      pos[i] = ivec3(gpos.x * $TILE_SIZE_X + x, gpos.y * $TILE_SIZE_Y + y, gpos.z);
+  ivec3 pos[${OUTPUT_TILE_SIZE[0]} * ${OUTPUT_TILE_SIZE[1]}];
+  for (int y = 0, i = 0; y < ${OUTPUT_TILE_SIZE[1]}; ++y) {
+    for (int x = 0; x < ${OUTPUT_TILE_SIZE[0]}; ++x) {
+      pos[i] = ivec3(
+          gpos.x * ${OUTPUT_TILE_SIZE[0]} + x, gpos.y * ${OUTPUT_TILE_SIZE[1]} + y, gpos.z);
       i++;
     }
   }
@@ -76,14 +68,14 @@ void main() {
   // Compute the index of the input texture that needs to be loaded for each
   // output position. Note that negative indices can be produced indicating that
   // the top-left element is in a region added by padding.
-  ivec2 ipos[$TILE_SIZE_X * $TILE_SIZE_Y];
-  for (int i = 0; i < $TILE_SIZE_X * $TILE_SIZE_Y; ++i) {
+  ivec2 ipos[${OUTPUT_TILE_SIZE[0]} * ${OUTPUT_TILE_SIZE[1]}];
+  for (int i = 0; i < ${OUTPUT_TILE_SIZE[0]} * ${OUTPUT_TILE_SIZE[1]}; ++i) {
     ipos[i] = pos[i].xy * uBlock.stride - uBlock.padding;
   }
 
-  vec4 sum[$TILE_SIZE_X * $TILE_SIZE_Y];
+  vec4 sum[${OUTPUT_TILE_SIZE[0]} * ${OUTPUT_TILE_SIZE[1]}];
   sum[0] = texelFetch(uBias, ivec2(gpos.z, 0), 0);
-  for (int i = 1; i < $TILE_SIZE_X * $TILE_SIZE_Y; ++i) {
+  for (int i = 1; i < ${OUTPUT_TILE_SIZE[0]} * ${OUTPUT_TILE_SIZE[1]}; ++i) {
     sum[i] = sum[0];
   }
 
@@ -93,17 +85,17 @@ void main() {
     // During prepacking, the weight tensor has been permuted so that the
     // channel (IC) dim is along the x axis, and the batch (OC) dim is along
     // the z axis.
-    vec4 in_tex[$TILE_SIZE_X * $TILE_SIZE_Y];
+    vec4 in_tex[${OUTPUT_TILE_SIZE[0]} * ${OUTPUT_TILE_SIZE[1]}];
     const vec4 ktex_0 = texelFetch(uKernel, ivec2(z + 0, gpos.z), 0);
     const vec4 ktex_1 = texelFetch(uKernel, ivec2(z + 1, gpos.z), 0);
     const vec4 ktex_2 = texelFetch(uKernel, ivec2(z + 2, gpos.z), 0);
     const vec4 ktex_3 = texelFetch(uKernel, ivec2(z + 3, gpos.z), 0);
 
-    for (int i = 0; i < $TILE_SIZE_Y * $TILE_SIZE_X; ++i) {
+    for (int i = 0; i < ${OUTPUT_TILE_SIZE[1]} * ${OUTPUT_TILE_SIZE[0]}; ++i) {
       in_tex[i] = texelFetch(uInput, ivec3(ipos[i], z4), 0);
     }
 
-    for (int i = 0; i < $TILE_SIZE_Y * $TILE_SIZE_X; ++i) {
+    for (int i = 0; i < ${OUTPUT_TILE_SIZE[1]} * ${OUTPUT_TILE_SIZE[0]}; ++i) {
       // For 2x2 tile size algorithm works as follows.
       // To explain the calculations below, the contents one in_tex and the
       // group of 4 texels loaded from uKernel are shown:
@@ -144,7 +136,7 @@ void main() {
     }
   }
 
-  for (int i = 0; i < $TILE_SIZE_Y * $TILE_SIZE_X; ++i) {
+  for (int i = 0; i < ${OUTPUT_TILE_SIZE[1]} * ${OUTPUT_TILE_SIZE[0]}; ++i) {
     if (all(lessThan(pos[i], uBlock.out_extents.xyz))) {
       imageStore(
           uOutput,
