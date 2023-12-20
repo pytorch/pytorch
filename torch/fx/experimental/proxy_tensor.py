@@ -238,18 +238,11 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     def proxy_func(p, *args, **kwargs):
         return p()
 
-
     for i, s in enumerate(tensor.shape):
         if p := get_existing_proxy(s):
             try_set_proxy_slot(s, functools.partial(proxy_func, p))
         else:
             try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size.int(proxy, i), x), i)
-
-    def func(*args, **kwargs):
-        proxies = [get_proxy_slot(s, tracer)() if isinstance(s, torch.SymInt) else s for s in tensor.shape]
-        return functools.reduce(operator.mul, proxies, 1)
-
-    try_set_proxy_slot(tensor.numel(), func)
 
     for i, s in enumerate(tensor.stride()):
         if p := get_existing_proxy(s):
@@ -860,6 +853,12 @@ def make_fx(f,
 
     if decomposition_table is None:
         decomposition_table = {}
+
+    if torch.ops.aten.sym_numel.default not in decomposition_table:
+        decomposition_table = {
+            **decomposition_table,
+            torch.ops.aten.sym_numel.default: torch._decomp.decompositions.sym_numel
+        }
 
     @functools.wraps(f)
     def wrapped(*args):
