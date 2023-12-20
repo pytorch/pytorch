@@ -153,12 +153,11 @@ _SYM_INT_OPS = {
     operator.sub,
     operator.floordiv,
     operator.mod,
-    torch.sym_sqrt,
     torch.sym_int,
     torch.sym_ite,
     torch.sym_max,
     torch.sym_min,
-    torch.sym_sqrt,
+    torch._sym_sqrt,
 }
 
 

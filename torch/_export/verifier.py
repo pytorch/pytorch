@@ -165,7 +165,7 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.sym_max,
                 torch.sym_min,
                 torch.sym_not,
-                torch.sym_sqrt,
+                torch._sym_sqrt,
             )
 
             if not isinstance(op, _allowed_op_types()):
