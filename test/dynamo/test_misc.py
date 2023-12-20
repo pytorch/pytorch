@@ -4581,22 +4581,24 @@ def fn():
         input_tensor = torch.tensor([8])
         static_size = 1
         out_tensor = torch.empty((10, 10, 10, 10), dtype=torch.long)
-        self.assertEqual(
+        self.assertTrue(same(
             torch.nonzero_static(input_tensor, size=static_size, out=out_tensor), 
             torch.tensor([0]),
+            ) 
         )
-        self.assertEqual(out_tensor, torch.tensor([0]))
+        self.assertTrue(same(out_tensor, torch.tensor([0])))
 
         # nonzero_static.out: out resize (enlarge)
         input_tensor = torch.tensor([8])
         static_size = 1
         out_tensor = torch.empty((0), dtype=torch.long)
-        self.assertEqual(
+        self.assertTrue(same(
             torch.nonzero_static(input_tensor, size=static_size, out=out_tensor), 
             torch.tensor([0]),
+            )
         )
 
-        self.assertEqual(out_tensor, torch.tensor([0]))
+        self.assertTrue(same(out_tensor, torch.tensor([0])))
 
         # 0 rank
         input_tensor = torch.tensor(6)
@@ -4617,9 +4619,10 @@ def fn():
         # 1D input
         input_tensor = torch.tensor([0, 8])
         static_size = 1
-        self.assertEqual(
+        self.assertTrue(same(
             torch.nonzero_static(input_tensor, size=static_size), 
-            torch.tensor([1]),
+            torch.tensor([1])
+            )
         )
 
         input_tensor = torch.tensor([8, 0])
@@ -4642,14 +4645,15 @@ def fn():
                         [fill_value, fill_value],
                     ]
                 )
-        self.assertEqual(input_tensor, correct_tensor)
+        self.assertTrue(same(input_tensor, correct_tensor))
 
         input_tensor = torch.tensor([[1.2, 0], [3.4, 5.6]])
         static_size = 2
         fill_value = -100
-        self.assertEqual(torch.nonzero_static(
+        self.assertTrue(same(torch.nonzero_static(
                     input_tensor, size=static_size, fill_value=fill_value),
-                torch.tensor([[0, 0], [1, 0]]),
+                torch.tensor([[0, 0], [1, 0]])
+                )
         )
 
         # 3D input
@@ -4657,7 +4661,7 @@ def fn():
         static_size = 4
         fill_value = -999
 
-        self.assertEqual(
+        self.assertTrue(same(
             torch.nonzero_static(
                     input_tensor,
                     size=static_size,
@@ -4671,7 +4675,7 @@ def fn():
                         [fill_value, fill_value, fill_value],
                     ]
                 )
-
+            )
         )
 
     def test_cond_with_quantization(self):

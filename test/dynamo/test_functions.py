@@ -1605,7 +1605,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             else:
                 x, kw_x = compiled_func()
             # the inner func mutates += 1 each call
-            self.assertEqaul(x, torch.ones_like(x) + i)
+            self.assertEqual(x, torch.ones_like(x) + i)
             self.assertEqual(kw_x, torch.ones_like(kw_x) + i)
         # Calling compiled_func twice does not recompile
         self.assertEqual(cnts.frame_count, 1)
