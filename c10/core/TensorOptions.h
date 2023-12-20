@@ -3,15 +3,22 @@
 #include <c10/core/Backend.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#include <cstdint>
 #include <iosfwd>
+#include <string>
+#include <type_traits>
 #include <utility>
 
 namespace c10 {
@@ -149,7 +156,7 @@ struct C10_API TensorOptions {
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
   template <
       typename T,
-      typename = std::enable_if_t<std::is_same<std::decay_t<T>, Device>::value>>
+      typename = std::enable_if_t<std::is_same_v<std::decay_t<T>, Device>>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -164,8 +171,7 @@ struct C10_API TensorOptions {
   ///     constructors too.
   template <
       typename... Args,
-      typename =
-          std::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
+      typename = std::enable_if_t<std::is_constructible_v<Device, Args&&...>>>
   /* implicit */ TensorOptions(Args&&... args)
       : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
@@ -199,7 +205,7 @@ struct C10_API TensorOptions {
   template <typename... Args>
   C10_NODISCARD TensorOptions device(Args&&... args) const noexcept {
     return device(
-        c10::optional<Device>(c10::in_place, std::forward<Args>(args)...));
+        c10::optional<Device>(std::in_place, std::forward<Args>(args)...));
   }
 
   /// Return a copy of `TensorOptions`, but with device set to CUDA, and the

@@ -2,7 +2,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-import torch.distributed as dist
 import torch.nn.functional as F
 from numpy.testing import assert_array_equal
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -743,6 +742,22 @@ class DTensorMeshTest(DTensorTestBase):
             mesh.mesh, torch.ones(4, 3), torch.tensor([]), sharded_again.to_local()
         )
 
+    @with_comms
+    def test_implicit_replication(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        local_tensor1 = torch.ones(4, 3)
+        sharded_dtensor = DTensor.from_local(local_tensor1, mesh, [Shard(0)])
+
+        from torch.distributed._tensor.experimental import implicit_replication
+
+        with implicit_replication():
+            out_dt = sharded_dtensor + torch.ones(3, device=self.device_type)
+            self.assertEqual(out_dt.placements, [Shard(0)])
+            self.assertEqual(out_dt.shape, (4 * self.world_size, 3))
+            local_shard = out_dt.to_local()
+            self.assertEqual(local_shard.shape, (4, 3))
+            self.assertEqual(local_shard, torch.ones(4, 3) + torch.ones(3))
+
 
 class TestDTensorPlacementTypes(DTensorTestBase):
     @property
@@ -759,33 +774,33 @@ class TestDTensorPlacementTypes(DTensorTestBase):
             return tensor
 
     @with_comms
-    def test_split_tensor(self) -> None:
+    def test_split_tensor_1D(self) -> None:
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         shard_placement = Shard(0)
 
         for size in range(8):
             tensor = self._create_tensor(size)
+            splitted_tensor_list, pad_sizes = shard_placement._split_tensor(
+                tensor,
+                mesh.size(),
+                with_padding=True,
+                contiguous=True,
+            )
             if size == 0:
-                with self.assertRaisesRegex(
-                    Exception,
-                    "Tensor size along dim0 is 0. There is nothing to be sharded.",
-                ):
-                    _, _ = shard_placement._split_tensor(
-                        tensor,
-                        mesh.size(),
-                        with_padding=True,
-                        contiguous=True,
-                    )
+                # when tensor size is 0, there is no padding needed for all the ranks.
+                expected_pad_sizes = [0] * self.world_size
+                assert_array_equal(expected_pad_sizes, pad_sizes)
+
+                is_tensor_empty = [
+                    False if splitted_tensor.numel() > 0 else True
+                    for splitted_tensor in splitted_tensor_list
+                ]
+                expected_is_tensor_empty = [True] * self.world_size
+                assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
             else:
-                splitted_tensor_list, pad_sizes = shard_placement._split_tensor(
-                    tensor,
-                    mesh.size(),
-                    with_padding=True,
-                    contiguous=True,
-                )
                 expected_pad_sizes = [
                     0 if idx < size else 1
-                    for idx, _ in enumerate(range(dist.get_world_size()))
+                    for idx, _ in enumerate(range(self.world_size))
                 ]
                 assert_array_equal(expected_pad_sizes, pad_sizes)
 
@@ -797,7 +812,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 ]
                 expected_is_tensor_empty = [
                     False if idx < size else True
-                    for idx, _ in enumerate(range(dist.get_world_size()))
+                    for idx, _ in enumerate(range(self.world_size))
                 ]
                 is_tensor_empty = [
                     False if unpadded_tensor.numel() > 0 else True
