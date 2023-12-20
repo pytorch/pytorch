@@ -2,8 +2,7 @@
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 /**
  * An implementation of DeviceGuardImplInterface which delegates
@@ -89,5 +88,4 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   const DeviceGuardImplInterface* impl_ = nullptr;
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

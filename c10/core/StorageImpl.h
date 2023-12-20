@@ -104,7 +104,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   // TODO: remove later
   void set_nbytes(size_t size_bytes) {
-    size_bytes_ = size_bytes;
+    size_bytes_ = static_cast<int64_t>(size_bytes);
     size_bytes_is_heap_allocated_ = false;
   }
 
@@ -193,7 +193,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       at::DataPtr&& data_ptr,
       size_t size_bytes) {
     data_ptr_ = std::move(data_ptr);
-    size_bytes_ = size_bytes;
+    size_bytes_ = static_cast<int64_t>(size_bytes);
     size_bytes_is_heap_allocated_ = false;
     allocator_ = nullptr;
     resizable_ = false;

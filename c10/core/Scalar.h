@@ -319,6 +319,7 @@ class C10_API Scalar {
   enum class Tag { HAS_d, HAS_i, HAS_z, HAS_b, HAS_sd, HAS_si, HAS_sb };
 
   // NB: assumes that self has already been cleared
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   C10_ALWAYS_INLINE void moveFrom(Scalar&& rhs) noexcept {
     v = rhs.v;
     tag = rhs.tag;
@@ -337,6 +338,7 @@ class C10_API Scalar {
     int64_t i;
     c10::complex<double> z;
     c10::intrusive_ptr_target* p;
+    // NOLINTNEXTLINE(modernize-use-equals-default)
     v_t() {} // default constructor
   } v;
 

@@ -40,12 +40,11 @@
 // later.  So the namespace is not fixed at the moment.
 
 // Make at::Half a fundamental type.
-namespace c10 {
-namespace guts {
+
+namespace c10::guts {
 template <>
 struct is_fundamental<at::Half> : std::true_type {};
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts
 
 namespace caffe2 {
 

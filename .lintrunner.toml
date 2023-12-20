@@ -242,6 +242,7 @@ code = 'CLANGTIDY'
 include_patterns = [
     'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
+    'c10/core/**/*.h',
     'torch/csrc/**/*.cpp',
 ]
 exclude_patterns = [
