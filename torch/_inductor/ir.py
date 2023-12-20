@@ -3681,7 +3681,7 @@ class ExternKernel(InputsKernel):
         if isinstance(x, TensorBox):
             return cls.realize_input(x.data)
         if isinstance(x, ReinterpretView):
-            return x
+            return cls.realize_input(x.data)
         if isinstance(x, BaseView):
             x.realize()
             if is_storage_and_layout(x.unwrap_view()):
