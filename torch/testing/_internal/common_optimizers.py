@@ -1059,7 +1059,7 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 toleranceOverride(
-                    {  # previously atol=5-05, rtol=0.001
+                    {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
                         torch.float32: tol(atol=5e-04, rtol=0.01),
                     }
                 ),
@@ -1121,7 +1121,7 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 toleranceOverride(
-                    {  # previously atol=5-05, rtol=0.001
+                    {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
                         torch.float32: tol(atol=5e-04, rtol=0.007),
                     }
                 ),
