@@ -76,7 +76,7 @@ UpdateMomentsVec(
   AddMomentsVec(m0, m1_vec, m2_vec, m0_stk0, m1_stk0, m2_stk0);
 }
 
-// each bfloat16 vector will be converted to two float vectors,
+// each bfloat16/half vector will be converted to two float vectors,
 // and accumulated successively on m1_stk0/m2_stk0.
 template <typename T>
 inline typename std::enable_if<!std::is_same<T, at::opmath_type<T>>::value, void>::type
