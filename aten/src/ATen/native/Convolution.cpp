@@ -539,6 +539,10 @@ struct ConvParams {
   }
   bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const  {
 #if AT_NNPACK_ENABLED()
+    if (!at::globalContext().userEnabledNNPACK()) {
+      return false;
+    }
+
     return at::_nnpack_available() &&
            input.device().is_cpu() &&
            input.scalar_type() == kFloat && // only on CPU Float Tensors
