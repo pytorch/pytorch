@@ -977,7 +977,7 @@ class CheckFunctionManager:
         def cleanup_builder(weak_b):
             b = weak_b()
             if b:
-                b.scope = {}
+                b.scope = None
 
         # Break retain cycle. See test_release_input_memory
         w_builder = weakref.ref(builder, cleanup_builder)
