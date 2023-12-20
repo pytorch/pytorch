@@ -361,6 +361,21 @@ kernel_name_max_ops = 10
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 
+# Whether to shape-pad only along K dimension
+# which does not affect output shape of GEMM
+shape_pad_only_k_dim: bool = False
+
+# When, during shape padding, dimension N would have to be padded, but
+# dimension M would not, then we can avoid a padding if we perform an
+# explicit transpose ( e.g. matmul(A,B) = matmul(B.T, A.T) ) in order to
+# put the M dimension in the N position, therefore ensuring an aligned
+# GEMM result without padding. This can have dramatic
+# performance benefits if it is possible.
+shape_pad_use_transpose: bool = True
+
+# Whether to always use shape padding if it is enabled and possible
+shape_pad_always: bool = False
+
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 
