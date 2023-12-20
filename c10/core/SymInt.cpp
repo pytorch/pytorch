@@ -136,7 +136,7 @@ SymInt operator-(const SymInt& s) {
   if (auto ma = s.maybe_as_int()) {
     const auto val = *ma;
     // Note: Result of `-std::numeric_limits<decltype(val)>::min()` is undefined
-    // But on many platforms it equals to self + setting Carry/Overflow flags 
+    // But on many platforms it equals to self + setting Carry/Overflow flags
     // Which in opimized code affects results of `check_range` condition
     // Workaround by using ternary that avoids alterning the flags
     constexpr auto val_min = std::numeric_limits<decltype(val)>::min();

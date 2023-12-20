@@ -29,7 +29,6 @@ TEST(SymIntTest, Overflows) {
   const auto y = SymInt(INT64_MIN);
   EXPECT_NE(-y, 0);
   EXPECT_NE(0 - y, 0);
-
 }
 
 #endif
