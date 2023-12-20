@@ -2688,12 +2688,15 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         # Is the class strict and compiling?
         strict_default = False
         if compiled:
-            filename = re.match(r".*/test/(.*).py", inspect.getfile(type(test_cls))).group(1)
-            if filename in FIXME_default_non_strict:
-                strict_default = False
-            else:
-                strict_default = True
-
+            try:
+                path = inspect.getfile(type(test_cls))
+                full_path = os.path.abspath(path)
+                match = re.match(r".*/test/(.*).py", full_path)
+                if match is not None:
+                    filename = match.group(1)
+                    strict_default = filename not in FIXME_default_non_strict
+            except OSError:
+                pass
             if "STRICT_DEFAULT" in os.environ:
                 if os.environ["STRICT_DEFAULT"] == "1":
                     strict_default = True
