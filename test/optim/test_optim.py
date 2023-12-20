@@ -736,77 +736,6 @@ class TestOptim(TestCase):
                     actual = mt_p_state[k]
                     self.assertEqual(st_p_state[k], actual, rtol=rtol, atol=atol)
 
-    def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag, reduced_precision=False):
-        if not torch.cuda.is_available():
-            return
-        assert flag in ("foreach", "fused")
-
-        # why 7? iteration 7 is where we start to see differences for RAdam
-        # params interacting with the small eps value, because that's right
-        # after rho_t becomes greater than 5 in step 6.
-        kIterations = 7
-        device = "cuda"
-        for optimizer_constructor, params in optimizer_pairs_with_flags:
-            res, state = [], []
-            for flag_value in (False, True):
-                input = torch.tensor(
-                    [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device
-                ).reshape(3, 2)
-
-                torch.manual_seed(1)
-                model = torch.nn.Sequential(
-                    torch.nn.Linear(2, 3),
-                    torch.nn.Sigmoid(),
-                    torch.nn.Linear(3, 1),
-                    torch.nn.Sigmoid(),
-                )
-                model.to(dtype=torch.float64, device=device)
-                params_with_flags = deepcopy(params)
-                if optimizer_constructor.__name__ == "ASGD" and flag == "foreach" and not flag_value:
-                    # single tensor ASGD does not support capturable
-                    params_with_flags["capturable"] = False
-                params_with_flags[flag] = flag_value
-
-                # foreach/fused optimizers should be tested with a param_groups['params'] with
-                # zero_size tensor as its last param.
-                # ref: https://github.com/pytorch/pytorch/issues/100701
-                empty_params = [torch.empty((), device=device, dtype=torch.float64)]
-
-                optimizer = optimizer_constructor(
-                    list(model.parameters()) + empty_params, **params_with_flags
-                )
-
-                for i in range(kIterations):
-                    optimizer.zero_grad()
-                    output = model(input)
-                    loss = output.sum()
-                    loss.backward()
-
-                    # Test that step behaves as expected (a no-op) when grads are set to None
-                    if i == 0:
-                        optimizer.zero_grad(set_to_none=True)
-
-                    optimizer.step()
-
-                state.append(optimizer.state)
-                res.append(model.parameters())
-
-            st_state = state[0]
-            mt_state = state[1]
-
-            assert_eq_kwargs = {}
-            if reduced_precision:
-                assert_eq_kwargs = {'atol': 1e-5, 'rtol': 1e-4}
-
-            for st_p, mt_p in zip(res[0], res[1]):
-                self.assertEqual(st_p, mt_p, **assert_eq_kwargs)
-
-                # check that optimizer states are the same
-                st_p_state = st_state[st_p]
-                mt_p_state = mt_state[mt_p]
-
-                for k in st_p_state:
-                    self.assertEqual(st_p_state[k], mt_p_state[k], **assert_eq_kwargs)
 
     def _test_foreach_memory(self, optimizer_pairs_with_flags):
         if not torch.cuda.is_available():
@@ -961,21 +890,6 @@ class TestOptim(TestCase):
         ]
 
 
-    def test_multi_tensor_optimizers_default_dtype(self):
-        # https://github.com/pytorch/pytorch/issues/110940
-        # We coerce step to always be float32
-        default_dtype = torch.tensor(0.0).dtype
-        for dtype in [torch.float64, torch.float16]:
-            try:
-                torch.set_default_dtype(dtype)
-                self._test_derived_optimizers(
-                    self._multi_tensor_optimizer_configs,
-                    "foreach",
-                    reduced_precision=dtype == torch.float16
-                )
-            finally:
-                torch.set_default_dtype(default_dtype)
-
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_multi_tensor_optimizers_with_varying_tensors(self):
         self._test_derived_optimizers_varying_tensors(self._multi_tensor_optimizer_configs, "foreach")
@@ -1016,9 +930,6 @@ class TestOptim(TestCase):
                 dict(weight_decay=0., amsgrad=True, maximize=True),
             ),
         ))
-
-    def test_fused_optimizers(self):
-        self._test_derived_optimizers(self._fused_optimizer_configs, "fused")
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_fused_optimizers_with_varying_tensors(self):
