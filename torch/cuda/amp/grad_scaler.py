@@ -14,9 +14,13 @@ __all__ = ["OptState", "GradScaler"]
 
 
 class _MultiDeviceReplicator:
-    """Lazily serves copies of a tensor to requested devices.
+    """grads may live in different devices
+    `scale` and `found_inf` needs to move to same devices as grads
+    before calling torch._amp cuda kernels
 
-    Copies are cached per-device.
+    specifically, `self.master` stores `1/scale` or `found_inf`
+    `get(device)` will copy tensor to device for the first time
+    and cache it in `self._per_device_tensors` for future calls
     """
 
     def __init__(self, master_tensor: torch.Tensor) -> None:
@@ -242,9 +246,9 @@ class GradScaler:
         per_device_inv_scale = _MultiDeviceReplicator(inv_scale)
         per_device_found_inf = _MultiDeviceReplicator(found_inf)
 
-        # To set up _amp_foreach_non_finite_check_and_unscale_, split grads by device and dtype.
-        # There could be hundreds of grads, so we'd like to iterate through them just once.
-        # However, we don't know their devices or dtypes in advance.
+        # group grads by device and dtype, so cuda kernel
+        # `_amp_foreach_non_finite_check_and_unscale_` could process potentially
+        # hundreds of grads together in one python-c++ call performantly
 
         # https://stackoverflow.com/questions/5029934/defaultdict-of-defaultdict
         # Google says mypy struggles with defaultdicts type annotations.
