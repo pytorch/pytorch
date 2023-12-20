@@ -1212,7 +1212,6 @@ class BuiltinVariable(VariableTracker):
                         return VariableBuilder(tx, source)(grapharg.example.grad)
 
                 return obj.dynamic_getattr(tx, name)
-
             else:
                 example_value = obj.as_proxy().node.meta["example_value"]
                 if example_value.grad is not None:

@@ -511,7 +511,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 {},
             )
             return ConstantVariable.create(None)
-        elif self.value is torch.autograd.backward:
+        elif config.use_single_step_graph and self.value is torch.autograd.backward:
             from .builder import SourcelessBuilder
 
             # inline the backward call directly
@@ -604,7 +604,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             in_compiled_backward = compiled_autograd.compiled_autograd_enabled
 
             if (
-                allowed_torch_fn
+                config.use_single_step_graph
+                and allowed_torch_fn
                 and not definanilly_no_composite_kernel
                 and not in_compiled_backward
             ):
@@ -981,5 +982,7 @@ class TorchVariable(BaseTorchVariable):
             )
             return res_variable
 
-        # return variables.LambdaVariable(fake_cross_entropy_loss)
-        return variables.LambdaVariable(fake_cross_entropy_loss_decompose)
+        if config.use_single_step_graph:
+            return variables.LambdaVariable(fake_cross_entropy_loss_decompose)
+        else:
+            return variables.LambdaVariable(fake_cross_entropy_loss)

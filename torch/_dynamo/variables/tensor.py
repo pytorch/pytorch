@@ -598,7 +598,7 @@ class TensorVariable(VariableTracker):
             tensor = self.as_proxy().node.meta["example_value"]
             out = tolist(tensor, self.as_proxy())
             return SourcelessBuilder()(tx, out)
-        elif name == "backward":
+        elif config.use_single_step_graph and name == "backward":
             from . import TorchInGraphFunctionVariable
             from .builder import VariableBuilder
 

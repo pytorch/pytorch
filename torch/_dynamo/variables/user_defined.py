@@ -550,8 +550,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 tx, partial_args, partial_kwargs
             )
         elif callable(self.value):
-            # TODO: UserDefinedObjectVariable(CompiledAutograd) is constructed with SourcelessBuilder
-            # so it does not have source
             if self.source:
                 install_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
