@@ -329,7 +329,7 @@ class TestTryMerge(TestCase):
             )
 
         pr = GitHubPR("pytorch", "pytorch", 115495)
-        # Test that PR with the correct approvers doesn't raise any regex
+        # Test that PR with the correct approvers doesn't raise any exception
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
