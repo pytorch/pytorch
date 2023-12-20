@@ -237,9 +237,6 @@ COMMON_HIP_FLAGS = [
     '-DUSE_ROCM=1',
 ]
 
-if ROCM_VERSION is not None and ROCM_VERSION >= (6, 0):
-    COMMON_HIP_FLAGS.append('-DHIPBLAS_V2')
-
 COMMON_HIPCC_FLAGS = [
     '-DCUDA_HAS_FP16=1',
     '-D__HIP_NO_HALF_OPERATORS__=1',
