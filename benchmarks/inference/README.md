@@ -14,7 +14,7 @@ The frontend worker is a process with three threads
 2. A thread that reads responses from the response queue and collects metrics on
    the latency of the first response, which corresponds to the cold start time,
    average, minimum and maximum response latency as well as throughput.
-3. A thread that polls nvidia-smi for GPU utilization metrics every 100ms.
+3. A thread that polls nvidia-smi for GPU utilization metrics.
 
 For now we omit data preprocessing as well as result post-processing.
 
