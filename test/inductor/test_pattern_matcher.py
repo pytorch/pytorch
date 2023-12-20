@@ -827,11 +827,11 @@ class TestPatternMatcher(TestCase):
 
             self.assertEqual(foo(x, y), x + y)
 
-            # we trace out the y.sym_size in replacement
             self.assertTrue(invoked)
-            FileCheck().check("num_users=2").check_same(
+            # we trace out the y.sym_size in replacement
+            FileCheck().check("sym_size_int").check_same("num_users=2").check_same(
                 "target=torch.ops.aten.sym_size"
-            ).run(repr(saved_graph))
+            ).run(str(saved_graph))
 
     def test_match_with_mutation(self):
         counter = 0
