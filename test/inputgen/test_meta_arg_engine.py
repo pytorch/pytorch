@@ -14,7 +14,7 @@ class TestMetaArgEngine(TestCase):
             cp.Rank.Le(lambda deps: deps[0] + 2),
             cp.Size.NotIn(lambda deps, length, ix: [1, 3]),
             cp.Size.Le(lambda deps, length, ix: 5),
-            cp.Value.Ne(lambda deps: 0),
+            cp.Value.Ne(lambda deps, dtype, struct: 0),
         ]
         deps = [2]
 
