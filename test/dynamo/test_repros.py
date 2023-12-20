@@ -1714,7 +1714,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return x
 
         y = torch.randn(10)
-        self.assertEqual(fn(y, contextlib.nullcontext()), y.sin().cos().sin())
+        self.assertEqual(fn(y, contextlib.nullcontext), y.sin().cos().sin())
 
     def test_no_grad_inline(self):
         @torch.no_grad()

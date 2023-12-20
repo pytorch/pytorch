@@ -278,7 +278,7 @@ class TestPythonAutograd(TestCase):
         grad2 = opt_grad(loss2, [v1, v2])
 
         self.assertTrue(same(loss1, loss2))
-        self.assertEqual(grad1, grad2)
+        self.assertTrue(same(grad1, grad2))
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 8)
 
