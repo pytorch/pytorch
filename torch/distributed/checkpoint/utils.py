@@ -384,7 +384,7 @@ ENABLE_PROFILE = False
 def _profile():
     # Only log the profiling when it is enable and is on rank0  or dist is not
     # avaiable.
-    if ENABLE_PROFILE and (not dist.is_available() and dist.get_rank() == 0):
+    if ENABLE_PROFILE and (not dist.is_available() or dist.get_rank() == 0):
         profiler = cProfile.Profile()
         profiler.enable()
         try:

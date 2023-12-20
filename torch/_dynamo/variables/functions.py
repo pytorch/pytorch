@@ -541,13 +541,8 @@ def _traceable_collective_remaps():
 
 def _traceable_collectives_source(tx, fn):
     assert torch.distributed.is_available(), "Illegal invocation."
-    from torch.distributed._functional_collectives import (
-        all_gather_tensor_inplace,
-        reduce_scatter_tensor_inplace,
-    )
+    assert fn in _traceable_collective_remaps().values()
 
-    valid_values = {all_gather_tensor_inplace, reduce_scatter_tensor_inplace}
-    assert fn in valid_values
     inner_name = fn.__name__
     path_source = tx.import_source("torch.distributed._functional_collectives")
     return AttrSource(path_source, inner_name)
