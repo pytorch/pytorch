@@ -359,6 +359,11 @@ class SizeVarAllocator:
     def evaluate_static_shapes(self, left: List[Expr]) -> List[int]:
         return [self.evaluate_static_shape(x) for x in left]
 
+    def remove_precomputed_replacements(self, expr: Expr) -> Expr:
+        if any(s.name.startswith("ps") for s in expr.free_symbols):
+            return sympy_subs(expr, self.inv_precomputed_replacements)
+        return expr
+
     def symbolic_hint(self, expr: Expr) -> Expr:
         # Substitute all hints into expr, but leave unbacked symints alone
         if not isinstance(expr, Expr):
@@ -367,9 +372,7 @@ class SizeVarAllocator:
         free_symbols = expr.free_symbols
         if not free_symbols:
             return int(expr)
-        while any(s.name.startswith("ps") for s in free_symbols):
-            expr = sympy_subs(expr, self.inv_precomputed_replacements)
-            free_symbols = expr.free_symbols
+        expr = self.remove_precomputed_replacements(expr)
         return sympy_subs(expr, self.var_to_val)
 
     def size_hint(self, expr: Expr, *, fallback: Optional[int] = None) -> int:
@@ -497,6 +500,7 @@ class SizeVarAllocator:
         return order
 
     def lookup_precomputed_size(self, expr: Expr) -> sympy.Symbol:
+        expr = self.simplify(self.remove_precomputed_replacements(expr))
         if expr not in self.precomputed_replacements:
             sym = sympy_symbol(f"ps{len(self.precomputed_replacements)}")
             self.precomputed_replacements[expr] = sym
