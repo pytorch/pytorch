@@ -322,20 +322,31 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
       PyTuple_CheckExact(pykey.get()),
       "_compiled_autograd_key shoud return tuple of ints");
   auto size = PyTuple_GET_SIZE(pykey.get());
-  TORCH_INTERNAL_ASSERT(size > 0);
+
+  int key_size = 2;
+  // key should at least contain a graph id and a function id
+  TORCH_INTERNAL_ASSERT(size >= key_size);
   // first value is unique ID of the AotAutograd graph
-  auto key = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
-  if (C10_UNLIKELY(key < 0)) {
+  auto graph_id = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
+  if (C10_UNLIKELY(graph_id < 0)) {
     TORCH_CHECK(PyErr_Occurred(), "key must be positive");
     throw_python_error();
   }
-  args.collect_size(static_cast<size_t>(key));
+  // second value is unique ID of the autograd function
+  auto function_id = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 1));
+  if (C10_UNLIKELY(function_id < 0)) {
+    TORCH_CHECK(PyErr_Occurred(), "key must be positive");
+    throw_python_error();
+  }
+
+  args.collect_size(static_cast<size_t>(graph_id));
+  args.collect_size(static_cast<size_t>(function_id));
   args.collect_size(size);
 
   auto f = (THPFunction*)obj;
   f->compiled_autograd_symints.clear();
-  f->compiled_autograd_symints.reserve(size - 1);
-  for (const auto i : c10::irange(1, size)) {
+  f->compiled_autograd_symints.reserve(size - key_size);
+  for (const auto i : c10::irange(key_size, size)) {
     auto val = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), i));
     if (C10_UNLIKELY(val == -1 && PyErr_Occurred()))
       throw_python_error();
