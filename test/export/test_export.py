@@ -2136,7 +2136,6 @@ def forward(self, l_x_):
         self.assertTrue(torch.allclose(torch_gm(test_inp), orig_eager(test_inp)))
 
         pre_autograd_gm = capture_pre_autograd_graph(orig_eager, (torch.rand(2, 3),), {})
-        print(pre_autograd_gm.graph)
         for k, v in orig_eager.state_dict().items():
             normalized_k = k.replace(".", "_")
             self.assertIn(normalized_k, pre_autograd_gm.state_dict())
