@@ -599,6 +599,7 @@ class TensorVariable(VariableTracker):
             out = tolist(tensor, self.as_proxy())
             return SourcelessBuilder()(tx, out)
         elif name == "backward":
+            from . import TorchInGraphFunctionVariable
             from .builder import VariableBuilder
 
             # assert not args
@@ -618,7 +619,7 @@ class TensorVariable(VariableTracker):
             none_variable = ConstantVariable.create(None)
             grad_tensors = none_variable if len(args) == 0 else args[0]
             false_variable = ConstantVariable.create(False)
-            backward_variable = TorchVariable(torch.autograd.backward)
+            backward_variable = TorchInGraphFunctionVariable(torch.autograd.backward)
             result = backward_variable.call_function(
                 tx,
                 [

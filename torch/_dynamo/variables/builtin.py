@@ -1211,16 +1211,6 @@ class BuiltinVariable(VariableTracker):
                                 grapharg.example.grad = None
                         return VariableBuilder(tx, source)(grapharg.example.grad)
 
-                # If we reach here it means we are trying to access the grad that is not a graph
-                # input. This is possible for the single step graph since we are trying to inline
-                # the backward graph into the fwd. The input to fwd graph will not include all the
-                # weights.
-                # TODO(JackCao): Fix it
-                return VariableBuilder(tx, source)(
-                    obj.as_proxy().node.meta["example_value"].grad
-                )
-
-                # TODO(JackCaoG): maybe this works?
                 return obj.dynamic_getattr(tx, name)
 
             else:
