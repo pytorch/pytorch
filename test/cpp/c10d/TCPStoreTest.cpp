@@ -12,6 +12,8 @@
 
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
+#include <torch/csrc/distributed/c10d/socket.h>
 
 constexpr int64_t kShortStoreTimeoutMillis = 100;
 constexpr int defaultTimeout = 20;
@@ -230,7 +232,23 @@ TEST(TCPStoreTest, testLibUVPartialRead) {
   client_opts.useLibUV = true;
   auto clientTCPStore =
       c10::make_intrusive<c10d::TCPStore>("127.0.0.1", client_opts);
-  auto clientThread = std::thread([&clientTCPStore] {
+  auto clientThread = std::thread([&client_opts] {
+    // connect to server
+    c10d::detail::Socket::initialize();
+
+    c10d::detail::SocketAddress addr = {
+      "127.0.0.1", // hostname
+      client_opts.port, // port
+    };
+    auto client = c10d::detail::TCPClient::connect(addr, client_opts);
+
+    // client validate
+    c10d::detail::SendBuffer buffer(*client, c10d::detail::QueryType::VALIDATE);
+    buffer.appendValue<std::uint32_t>(c10d::detail::validationMagicNumber);
+    buffer.flush();
+
+    // note: we skip waitForWorkers logic in TCPStore client constructor
+    // since we do not wait
     std::string keyPrefix(
         "/default_pg/0//b7dc24de75e482ba2ceb9f9ee20732c25c0166d8//cuda//");
     std::string value("v");
@@ -239,10 +257,20 @@ TEST(TCPStoreTest, testLibUVPartialRead) {
     // split store->set(key, valueBuf) into two requests
     for (int i = 0; i < 10; ++i) {
       std::string key = keyPrefix + std::to_string(i);
-      clientTCPStore->_splitSet(key, valueBuf);
+      c10d::detail::SendBuffer buffer(*client, c10d::detail::QueryType::SET);
+      buffer.appendString(key);
+      buffer.flush();
+      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+      buffer.appendBytes(valueBuf);
+      buffer.flush();
 
       // check the result on server
-      c10d::test::check(*clientTCPStore, key, "v");
+      buffer.appendValue<c10d::detail::QueryType>(c10d::detail::QueryType::GET);
+      buffer.appendString(key);
+      buffer.flush();
+      auto res = client->receiveBits();
+      auto resStr = std::string((char*)res.data(), res.size());
+      EXPECT_EQ(resStr, value);
     }
   });
 

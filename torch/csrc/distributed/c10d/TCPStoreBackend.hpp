@@ -21,22 +21,6 @@ namespace detail {
 // Magic number for client validation.
 static const uint32_t validationMagicNumber = 0x3C85F7CE;
 
-enum class QueryType : uint8_t {
-  VALIDATE,
-  SET,
-  COMPARE_SET,
-  GET,
-  ADD,
-  CHECK,
-  WAIT,
-  GETNUMKEYS,
-  DELETE_KEY,
-  APPEND,
-  MULTI_GET,
-  MULTI_SET,
-  CANCEL_WAIT,
-};
-
 enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
 enum class WaitResponseType : uint8_t { STOP_WAITING, WAIT_CANCELED };

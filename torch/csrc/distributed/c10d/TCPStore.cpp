@@ -152,39 +152,6 @@ std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
   return server;
 }
 
-class TCPClient {
- public:
-  static std::unique_ptr<TCPClient> connect(
-      const SocketAddress& addr,
-      const TCPStoreOptions& opts);
-
-  void sendRaw(uint8_t* data, size_t lenght) {
-    tcputil::sendBytes(socket_.handle(), data, lenght);
-  }
-
-  std::vector<std::uint8_t> receiveBits() {
-    return tcputil::recvVector<std::uint8_t>(socket_.handle());
-  }
-
-  template <typename T>
-  T receiveValue() {
-    return tcputil::recvValue<T>(socket_.handle());
-  }
-  template <typename T>
-  bool receiveValueWithTimeout(T& t, std::chrono::milliseconds timeout) {
-    if (!socket_.waitForInput(timeout))
-      return false;
-    t = tcputil::recvValue<T>(socket_.handle());
-    return true;
-  }
-  void setTimeout(std::chrono::milliseconds value);
-
-  explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
-
- private:
-  Socket socket_;
-};
-
 std::unique_ptr<TCPClient> TCPClient::connect(
     const SocketAddress& addr,
     const TCPStoreOptions& opts) {
@@ -218,51 +185,43 @@ void TCPClient::setTimeout(std::chrono::milliseconds value) {
       sizeof(timeoutTV)));
 }
 
-class SendBuffer {
-  // ethernet mtu 1500 - 40 (ip v6 header) - 20 (tcp header)
-  const size_t FLUSH_WATERMARK = 1440;
-  std::vector<uint8_t> buffer;
-  detail::TCPClient& client;
-
-  void maybeFlush() {
-    if (buffer.size() >= FLUSH_WATERMARK) {
-      flush();
-    }
+void SendBuffer::maybeFlush() {
+  if (buffer.size() >= FLUSH_WATERMARK) {
+    flush();
   }
+}
 
- public:
-  SendBuffer(detail::TCPClient& client, detail::QueryType cmd)
-      : client(client) {
-    buffer.reserve(32); // enough for most commands
-    buffer.push_back((uint8_t)cmd);
-  }
+SendBuffer::SendBuffer(detail::TCPClient& client, detail::QueryType cmd)
+    : client(client) {
+  buffer.reserve(32); // enough for most commands
+  buffer.push_back((uint8_t)cmd);
+}
 
-  void appendString(const std::string& str) {
-    appendValue<uint64_t>(str.size());
-    buffer.insert(buffer.end(), str.begin(), str.end());
-    maybeFlush();
-  }
+void SendBuffer::appendString(const std::string& str) {
+  appendValue<uint64_t>(str.size());
+  buffer.insert(buffer.end(), str.begin(), str.end());
+  maybeFlush();
+}
 
-  void appendBytes(const std::vector<uint8_t>& vec) {
-    appendValue<uint64_t>(vec.size());
-    buffer.insert(buffer.end(), vec.begin(), vec.end());
-    maybeFlush();
-  }
+void SendBuffer::appendBytes(const std::vector<uint8_t>& vec) {
+  appendValue<uint64_t>(vec.size());
+  buffer.insert(buffer.end(), vec.begin(), vec.end());
+  maybeFlush();
+}
 
-  template <typename T>
-  void appendValue(T value) {
-    uint8_t* begin = (uint8_t*)&value;
-    buffer.insert(buffer.end(), begin, begin + sizeof(T));
-    maybeFlush();
-  }
+template <typename T>
+void SendBuffer::appendValue(T value) {
+  uint8_t* begin = (uint8_t*)&value;
+  buffer.insert(buffer.end(), begin, begin + sizeof(T));
+  maybeFlush();
+}
 
-  void flush() {
-    if (buffer.size() > 0) {
-      client.sendRaw(buffer.data(), buffer.size());
-      buffer.clear();
-    }
+void SendBuffer::flush() {
+  if (buffer.size() > 0) {
+    client.sendRaw(buffer.data(), buffer.size());
+    buffer.clear();
   }
-};
+}
 
 } // namespace detail
 
@@ -394,18 +353,6 @@ void TCPStore::validate(void) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   detail::SendBuffer buffer(*client_, detail::QueryType::VALIDATE);
   buffer.appendValue<std::uint32_t>(c10d::detail::validationMagicNumber);
-  buffer.flush();
-}
-
-void TCPStore::_splitSet(
-    const std::string& key,
-    const std::vector<uint8_t>& data) {
-  const std::lock_guard<std::mutex> lock(activeOpLock_);
-  detail::SendBuffer buffer(*client_, detail::QueryType::SET);
-  buffer.appendString(keyPrefix_ + key);
-  buffer.flush();
-  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-  buffer.appendBytes(data);
   buffer.flush();
 }
 

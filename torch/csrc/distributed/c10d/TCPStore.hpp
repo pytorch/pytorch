@@ -9,9 +9,77 @@
 namespace c10d {
 namespace detail {
 
+enum class QueryType : uint8_t {
+  VALIDATE,
+  SET,
+  COMPARE_SET,
+  GET,
+  ADD,
+  CHECK,
+  WAIT,
+  GETNUMKEYS,
+  DELETE_KEY,
+  APPEND,
+  MULTI_GET,
+  MULTI_SET,
+  CANCEL_WAIT,
+};
+
 class TCPServer;
 
-class TCPClient;
+class TCPClient {
+ public:
+  static std::unique_ptr<TCPClient> connect(
+      const SocketAddress& addr,
+      const TCPStoreOptions& opts);
+
+  void sendRaw(uint8_t* data, size_t lenght) {
+    tcputil::sendBytes(socket_.handle(), data, lenght);
+  }
+
+  std::vector<std::uint8_t> receiveBits() {
+    return tcputil::recvVector<std::uint8_t>(socket_.handle());
+  }
+
+  template <typename T>
+  T receiveValue() {
+    return tcputil::recvValue<T>(socket_.handle());
+  }
+  template <typename T>
+  bool receiveValueWithTimeout(T& t, std::chrono::milliseconds timeout) {
+    if (!socket_.waitForInput(timeout))
+      return false;
+    t = tcputil::recvValue<T>(socket_.handle());
+    return true;
+  }
+  void setTimeout(std::chrono::milliseconds value);
+
+  explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
+
+ private:
+  Socket socket_;
+};
+
+class SendBuffer {
+  // ethernet mtu 1500 - 40 (ip v6 header) - 20 (tcp header)
+  const size_t FLUSH_WATERMARK = 1440;
+  std::vector<uint8_t> buffer;
+  detail::TCPClient& client;
+
+  void maybeFlush();
+
+ public:
+  explicit SendBuffer(TCPClient& client, QueryType cmd);
+
+  void appendString(const std::string& str);
+
+  void appendBytes(const std::vector<uint8_t>& vec);
+
+  template <typename T>
+  void appendValue(T value);
+
+  void flush();
+};
 
 struct SocketAddress {
   std::string host{};
@@ -134,9 +202,6 @@ class TORCH_API TCPStore : public Store {
   bool isLibUvBackend() const noexcept {
     return usingLibUv_;
   }
-
-  // note(xilunwu): this function is only for internal testing
-  void _splitSet(const std::string& key, const std::vector<uint8_t>& data);
 
  private:
   int64_t incrementValueBy(const std::string& key, int64_t delta);
