@@ -121,31 +121,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   THPFunction* py_fn = (THPFunction*)obj;
 
   // Massage a C++ variable_list into a Python arguments tuple
-  auto num_inputs = inputs.size();
-  THPObjectPtr pyInputs(PyTuple_New(static_cast<Py_ssize_t>(num_inputs)));
-  if (!pyInputs)
-    throw_python_error();
-  auto& output_info = py_fn->output_info;
-  for (const auto i : c10::irange(num_inputs)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyObject* input;
-    if (inputs[i].defined() || !py_fn->materialize_grads ||
-        (input_metadata(i).was_default_constructed() &&
-         !py_fn->materialize_non_diff_grads)) {
-      input = THPVariable_Wrap(inputs[i]);
-    } else {
-      auto zeros_without_gil = [](const VariableInfo& variable,
-                                  at::OptionalDeviceGuard& device_guard) {
-        pybind11::gil_scoped_release gil;
-        return variable.zeros(device_guard);
-      };
-      input =
-          THPVariable_Wrap(zeros_without_gil(output_info[i], _device_guard));
-    }
-    if (!input)
-      throw_python_error();
-    PyTuple_SET_ITEM(pyInputs.get(), i, input);
-  }
+  THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
 
   THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
   if (!apply_fn)
@@ -183,35 +159,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   }
 
   // Massage the Python results tuple back into a C++ variable_list
-  variable_list results;
-  results.reserve(num_outputs);
-  for (int i = 0; i != num_outputs; ++i) {
-    PyObject* output = PyTuple_GET_ITEM(r.get(), i);
-    bool was_variable = is_variable_input[i];
-    if (!was_variable) {
-      if (output != Py_None) {
-        std::string msg("function ");
-        msg += name() + " returned a gradient different than None at position ";
-        msg += std::to_string(i + 1) +
-            ", but the corresponding forward input was not a Variable";
-        throw std::runtime_error(msg);
-      }
-      continue;
-    }
-    if (output == Py_None) {
-      results.emplace_back();
-    } else {
-      if (!THPVariable_Check(output)) {
-        std::string msg("expected Variable or None (got ");
-        msg += THPUtils_typename(output);
-        msg += ")";
-        throw std::runtime_error(msg);
-      }
-      results.emplace_back(THPVariable_Unpack(output));
-    }
-  }
-
-  return results;
+  return to_variable_list(r.get(), is_variable_input);
 }
 
 auto PyNode::compiled_apply(
@@ -275,9 +223,7 @@ auto PyNode::compiled_apply(
   ensure_tuple(r);
 
   // Massage the Python results tuple back into a C++ variable_list
-  variable_list results(to_variable_list(r.get(), is_variable_input));
-
-  return results;
+  return to_variable_list(r.get(), is_variable_input);
 }
 
 auto PyNode::is_traceable() -> bool {
