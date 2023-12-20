@@ -47,7 +47,7 @@
 #ifndef HIPBLAS_V2
 #define HIP_R_16F  HIPBLAS_R_16F
 #define HIP_R_32F  HIPBLAS_R_32F
-#endif
+#endif // HIPBLAS_V2
 #else // USE_ROCM
 #define CUBLAS_HALF_TYPE __half
 #endif // USE_ROCM
@@ -625,6 +625,11 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
     // It has more general hipblasGemmEx API which is more close to cublasGemmEx.
     // hipblasGemmEx does D = alpha*op( A )*op( B ) + beta*C,
     // whereas cublasSgemmEx does C = alpha*op( A )*op( B ) + beta*C
+#if ROCM_VERSION >= 60000 && defined(HIPBLAS_V2)
+    auto compute_type = HIPBLAS_COMPUTE_32F;
+#else
+    auto compute_type = HIPBLAS_R_32F;
+#endif
     HIPBLAS_ENFORCE(hipblasGemmEx(
         context->hipblas_handle(),
         cu_trans_B,
@@ -866,6 +871,11 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     thrust::device_vector<void*> C_device(C, C + batch_size);
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && defined(HIPBLAS_V2)
+    auto compute_type = HIPBLAS_COMPUTE_32F;
+#else
+    auto compute_type = CUDA_R_32F;
+#endif
     CUBLAS_ENFORCE(cublasGemmBatchedEx(
         context->cublas_handle(),
         cu_trans_B,
@@ -962,6 +972,11 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
   if (math_type == TensorProto_DataType_FLOAT) {
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && defined(HIPBLAS_V2)
+    auto compute_type = HIPBLAS_COMPUTE_32F;
+#else
+    auto compute_type = CUDA_R_32F;
+#endif
     CUBLAS_ENFORCE(cublasGemmStridedBatchedEx(
         context->cublas_handle(),
         cu_trans_B,
@@ -1081,6 +1096,11 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
     // It has more general hipblasGemmEx API which is more close to cublasGemmEx.
     // hipblasGemmEx does D = alpha*op( A )*op( B ) + beta*C,
     // whereas cublasSgemmEx does C = alpha*op( A )*op( B ) + beta*C
+#if ROCM_VERSION >= 60000 && defined(HIPBLAS_V2)
+        auto compute_type = HIPBLAS_COMPUTE_32F;
+#else
+        auto compute_type = HIPBLAS_R_32F;
+#endif
     HIPBLAS_ENFORCE(hipblasGemmEx(
         context->hipblas_handle(),
         cu_trans_A,
