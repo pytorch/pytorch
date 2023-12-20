@@ -206,6 +206,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def __repr__(self):
         return f"TorchInGraphFunctionVariable({self.value})"
 
+    def should_decompose_torch_op(self, fn):
+        from torch._dynamo import compiled_autograd
+
+        # TODO(JackCaoG): we need a better way to tell if a torch function should we decompose
+        allowed_torch_fn = fn.__name__ != "_make_grads"
+        definanilly_not_composite_kernel = type(
+            fn
+        ) == torch._ops.OpOverload and not torch._C._dispatch_has_kernel_for_dispatch_key(
+            fn.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+        )
+
+        # only do decompoization for backward
+        in_compiled_backward = compiled_autograd.compiled_autograd_enabled
+        return (
+            config.use_single_step_graph
+            and allowed_torch_fn
+            and not definanilly_not_composite_kernel
+            and not in_compiled_backward
+        )
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -585,30 +605,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             from functorch import make_fx
 
             from torch._dispatch.python import enable_python_dispatcher
-            from torch._dynamo import compiled_autograd
             from ..utils import get_fake_value
             from .base import MutableLocal
             from .builder import SourcelessBuilder
             from .lists import BaseListVariable
 
-            # TODO(JackCaoG): we need a better way to tell if a torch function should we decompose
-            allowed_torch_fn = fn_.__name__ != "_make_grads"
-
-            definanilly_no_composite_kernel = type(
-                fn_
-            ) == torch._ops.OpOverload and not torch._C._dispatch_has_kernel_for_dispatch_key(
-                fn_.name(), torch._C.DispatchKey.CompositeImplicitAutograd
-            )
-
-            # only do decompoization for backward
-            in_compiled_backward = compiled_autograd.compiled_autograd_enabled
-
-            if (
-                config.use_single_step_graph
-                and allowed_torch_fn
-                and not definanilly_no_composite_kernel
-                and not in_compiled_backward
-            ):
+            if self.should_decompose_torch_op(fn_):
                 # convert he arguments from VariableTracker to fake tensors + constants again
                 fake_value_args = []
                 # TODO(JackCaoG): include kwargs handling here
