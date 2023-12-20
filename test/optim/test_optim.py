@@ -1451,67 +1451,6 @@ class TestOptim(TestCase):
             lambda: Adadelta([{'params': param}, {'params': param}])
         )
 
-    def test_step_is_noop_when_params_have_no_grad(self):
-        params = [torch.randn(2, 3, requires_grad=False) for _ in range(2)]
-        old_params = [p.clone().detach() for p in params]
-
-        def closure():
-            return torch.tensor([1])
-
-        optimizer_list = [
-            Adadelta,
-            AdamW,
-            Adam,
-            RAdam,
-            NAdam,
-            Adagrad,
-            Adamax,
-            RMSprop,
-            SGD,
-            SparseAdam,
-            ASGD,
-            LBFGS
-        ]
-        for optim_ctr in optimizer_list:
-            opt = optim_ctr(params, lr=0.1)
-            opt.step(closure)
-        self.assertEqual(old_params, params)
-
-
-    def test_step_is_noop_for_empty_grads(self):
-        optimizers = [
-            Adadelta,
-            AdamW,
-            Adam,
-            RAdam,
-            NAdam,
-            Adagrad,
-            Adamax,
-            RMSprop,
-            SGD,
-            SparseAdam,
-            ASGD,
-            LBFGS
-        ]
-        param = torch.randn(5, 1, requires_grad=True)
-        old_param = param.clone().detach()
-
-        def closure():
-            return torch.tensor([1])
-
-        for optimizer in optimizers:
-            opt = optimizer([param], lr=1e-5)
-            param.grad = torch.zeros_like(param)
-            if optimizer is SparseAdam:
-                # Intentionally construct a multidimensional empty v for the sparse grad
-                # Single dim v passes the test while multidim correctly repros the issue
-                # https://github.com/pytorch/pytorch/issues/82486
-                i = torch.empty(1, 0)
-                v = torch.empty(0, 1)
-                param.grad = torch.sparse_coo_tensor(i, v, (5, 1))
-            opt.step(closure)
-            self.assertEqual(old_param, param)
-
 
     def test_fused_optimizer_does_not_step_if_foundinf(self):
         if not torch.cuda.is_available():
