@@ -50,7 +50,7 @@ dla102,pass,6
 
 
 
-dm_nfnet_f0,pass,6
+dm_nfnet_f0,pass,7
 
 
 
@@ -146,7 +146,7 @@ nfnet_l0,pass,6
 
 
 
-pit_b_224,pass,6
+pit_b_224,pass,7
 
 
 
@@ -214,7 +214,7 @@ tf_efficientnet_b0,pass,7
 
 
 
-tf_mixnet_l,pass,6
+tf_mixnet_l,pass,7
 
 
 
