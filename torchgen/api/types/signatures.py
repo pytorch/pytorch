@@ -317,7 +317,7 @@ class FunctionalizationLambda:
         # and plumb it into the lambda.
         outer_ctx = dispatcher.arguments(self.g.view.func) + [
             functionalization.reapply_views_binding,
-            functionalization.called_by_functionalization_binding,
+            functionalization.inverse_return_mode_binding,
         ]
         capture_bindings = functionalization.capture_arguments(
             self.g.view.func, is_reverse=self.is_reverse

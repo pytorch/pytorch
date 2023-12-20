@@ -14,7 +14,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
-#include <c10/util/CallOnce.h>
 
 #include <c10/core/SymInt.h>
 #include <c10/util/string_view.h>
@@ -177,42 +176,11 @@ bool check_sm_version(cudaDeviceProp * dprops) {
   return is_gte_lower_bound && is_lte_upper_bound;
 }
 
-#if USE_ROCM
-c10::once_flag gcn_arch_override_flag;
-const char* over_arch = nullptr;
-
-void init_gcn_arch_override() {
-  over_arch = std::getenv("PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE");
-  if (over_arch) {
-      TORCH_WARN("SDPA functions only loads value from PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE once. "
-                 "Later changes to this environment variable with os.environ "
-                 "(or other methods) will not affect SDPA function's behavior.");
-  }
-}
-#endif
-
 bool check_flash_attention_hardware_support(sdp_params const& params, bool debug) {
   // Check that the gpu is capable of running flash attention
   using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
   auto dprops = at::cuda::getCurrentDeviceProperties();
-#if USE_ROCM
-  constexpr std::string_view mi200 = "gfx90a:sramecc+:xnack-";
-  const char* real_arch = dprops->gcnArchName;
-  c10::call_once(gcn_arch_override_flag, init_gcn_arch_override);
-  const char* arch = over_arch ? over_arch : real_arch;
-  if (mi200 != arch) {
-    if (debug) {
-      TORCH_WARN(
-          "Flash attention only supports gpu architecture gfx90a, for now. Attempting to run on a ",
-          arch,
-          ".",
-          over_arch ? " This is overrided by PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE. Real architecture is " : "",
-          over_arch ? real_arch : "");
-    }
-    return false;
-  }
-#else
   if (!check_sm_version<sm80, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
@@ -224,7 +192,6 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
     }
     return false;
   }
-#endif
   return true;
 }
 
@@ -372,9 +339,9 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   return false;
 #endif
   // Constraints specific to mem efficient attention
-  constexpr auto default_mem_efficient_dtypes =
+  constexpr auto greater_than_or_equal_sm80_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
-  constexpr auto sm50_mem_efficient_dtypes =
+  constexpr auto less_than_sm80_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat);
 
   //  Define gate functions that determine if a mem efficient kernel can be ran
@@ -414,10 +381,10 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
 
   auto dprop = at::cuda::getCurrentDeviceProperties();
-  if (dprop->major == 5) {
-    return check_tensor_dtype(params, sm50_mem_efficient_dtypes, debug);
+  if (dprop->major >= 8) {
+    return check_tensor_dtype(params, greater_than_or_equal_sm80_mem_efficient_dtypes, debug);
   }
-  return check_tensor_dtype(params, default_mem_efficient_dtypes, debug);
+  return check_tensor_dtype(params, less_than_sm80_mem_efficient_dtypes, debug);
 }
 
 SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
