@@ -88,48 +88,6 @@ from .wrappers import _wrap_submodules
 from torch._inductor import config
 
 
-def export__RC__(
-    f: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-    *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
-    strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
-) -> ExportedProgram:
-    """
-    API for exporting with dynamic shape specifications instead of constraints.
-    It should be considered "release candidate" (RC), meant to replace `export`.
-
-    Here, `dynamic_shapes` is expected to be a dict from
-    argument names of `f` to dynamic shape specifications OR a tuple where each element
-    corresponds to the original order of the arguments defined in the function signature
-    ,as follows:
-    - The dynamic shape of a tensor argument can be specified as:
-      - Either a dict from dynamic dimension indices to Dim types. It is not
-        required to include static dimension indices in this dict, but when
-        they are, they should be mapped to None.
-      - Or a tuple of Dim types or None. The Dim types correspond to dynamic
-        dimensions, whereas static dimensions are denoted by None.
-    - Arguments that are dicts or tuples of tensors are recursively specified
-      by using mappings or sequences of contained specifications.
-
-    See `export` for documentation of `f`, `args`, `kwargs` and return.
-    """
-    from torch.export._trace import _export
-    warnings.warn("This function is deprecated. Please use torch.export.export instead.")
-
-    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
-    return _export(
-        f,
-        args,
-        kwargs,
-        constraints=constraints,
-        strict=strict,
-        preserve_module_call_signature=preserve_module_call_signature
-    )
-
-
 @dataclasses.dataclass
 class ExportDynamoConfig:
     """
