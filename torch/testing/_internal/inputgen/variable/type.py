@@ -10,6 +10,12 @@ class ScalarDtype(Enum):
     int = int
     float = float
 
+    def __lt__(self, other):
+        if self.__class__ is other.__class__:
+            order = [bool, int, float]
+            return order.index(self.value) < order.index(other.value)
+        return NotImplemented
+
 
 SUPPORTED_TENSOR_DTYPES = [
     torch.bool,
