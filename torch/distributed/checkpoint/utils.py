@@ -1,6 +1,9 @@
+import cProfile
 import io
 import itertools
 import os
+from contextlib import contextmanager
+from pstats import Stats
 from typing import Any, Callable, cast, Dict, List, Optional, Sequence, TypeVar, Union
 
 import torch
@@ -371,3 +374,24 @@ def _normalize_device_info(device_type: str, device_id: int) -> str:
     if device_type == "cpu":
         return "cpu"
     return f"{device_type}:{device_id}"
+
+
+# TODO: integrate with distributed logging flag
+ENABLE_PROFILE = False
+
+
+@contextmanager
+def _profile():
+    # Only log the profiling when it is enable and is on rank0  or dist is not
+    # avaiable.
+    if ENABLE_PROFILE and (not dist.is_available() or dist.get_rank() == 0):
+        profiler = cProfile.Profile()
+        profiler.enable()
+        try:
+            yield
+        finally:
+            profiler.disable()
+            stats = Stats(profiler)
+            stats.sort_stats("time").print_stats(10)
+    else:
+        yield
