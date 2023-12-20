@@ -115,6 +115,7 @@ class OutputGraphState(NamedTuple):
     side_effects: SideEffects
     timestamp: int
     non_compliant_ops: Set[torch._ops.OpOverload]
+    compliant_custom_ops: Set[torch._ops.OpOverload]
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
         for k in self._fields:
@@ -351,12 +352,20 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # This information is useful for logging.
         self.non_compliant_ops: Set[torch._ops.OpOverload] = set({})
 
+        # Tracks a list of called custom ops that were tagged with "pt2_compliant_tag".
+        # This information is useful for logging.
+        self.compliant_custom_ops: Set[torch._ops.OpOverload] = set({})
+
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
         # https://github.com/pytorch/pytorch/pull/100570#issuecomment-1543427086
         # where inlining of a function changes the global state (because of the
         # presence of torch.no_grad) and there is a graph break.
         self.save_global_state()
+
+        # Tracks the original FQNs of the constant tensors from the original graph,
+        # i.e. buffers and parameters.
+        self.dynamo_flat_name_to_original_fqn: Dict[str, str] = {}
 
     # This gets its own helper function so guards DEBUG logs are more
     # informative
@@ -378,11 +387,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         )
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
-
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.CONFIG_HASH_MATCH))
-
-    def guard_has_graph_break(self):
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.HAS_GRAPH_BREAK))
 
     def add_cleanup_hook(self, fn: Callable[[], Any]):
         self.cleanup_hooks.append(fn)
@@ -538,6 +542,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.side_effects.clone(),
             self.timestamp,
             set(self.non_compliant_ops),
+            set(self.compliant_custom_ops),
         )
         self.timestamp += 1
         return state
@@ -555,6 +560,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.side_effects,
             self.timestamp,
             self.non_compliant_ops,
+            self.compliant_custom_ops,
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
         self.tracing_context.module_context.restore_graphstate(module_state)
@@ -775,6 +781,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         new_source = ParamBufferSource(source, leaf_name)
                         new_name = f"{name}.{leaf_name}"
                         self.param_name_to_source[new_name] = new_source
+                        if isinstance(source, LocalSource):
+                            self.dynamo_flat_name_to_original_fqn[
+                                OutputGraph.module_key_name(new_source.name())
+                            ] = leaf_name
 
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
@@ -791,11 +801,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         raise AssertionError("unreachable")
 
     def compile_subgraph(
-        self,
-        tx,
-        partial_convert=False,
-        reason: Optional[GraphCompileReason] = None,
-        compile_return_value=False,
+        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
     ):
         """
         Generate a subgraph to continue execution on user code.
@@ -808,10 +814,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
         self.should_exit = True
-
-        if not compile_return_value:
-            # invalid graph to be cache hit for nopython
-            self.guard_has_graph_break()
 
         log.debug("COMPILING GRAPH due to %s", reason)
 
@@ -917,7 +919,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             pass1 = PyCodegen(tx, root, graph_output_var)
             self.side_effects.codegen_hooks(pass1)
             self.side_effects.codegen_save_tempvars(pass1)
-            pass1.foreach(stack_values)
+            pass1.restore_stack(stack_values, value_from_source=not tx.export)
             self.side_effects.codegen_update_mutated(pass1)
 
             # one more time now that we have established tempvars
@@ -929,7 +931,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             )
             self.side_effects.codegen_hooks(pass2)
             self.side_effects.codegen_save_tempvars(pass2)
-            pass2.foreach(stack_values)
+            pass2.restore_stack(stack_values, value_from_source=not tx.export)
             self.side_effects.codegen_update_mutated(pass2)
 
             output = []
@@ -1058,6 +1060,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             register_finalizer(gm)
 
         gm.compile_subgraph_reason = self.compile_subgraph_reason
+        gm.meta[
+            "dynamo_flat_name_to_original_fqn"
+        ] = self.dynamo_flat_name_to_original_fqn.copy()
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
@@ -1379,6 +1384,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
         self.register_finalizer_fns.clear()
+        self.dynamo_flat_name_to_original_fqn.clear()
 
     def set_torch_function_state(self, enabled: bool) -> None:
         self.torch_function_enabled = enabled
@@ -1402,6 +1408,11 @@ def check_pt2_compliant_op(output_graph, kind, target, args, kwargs):
     if kind != "call_function":
         return
 
+    def encountered_compliant_op(target):
+        if target.namespace in {"prim", "prims", "aten"}:
+            return
+        output_graph.compliant_custom_ops.add(target)
+
     def encountered_non_compliant_op(target, msg):
         output_graph.non_compliant_ops.add(target)
         if config.only_allow_pt2_compliant_ops:
@@ -1409,6 +1420,7 @@ def check_pt2_compliant_op(output_graph, kind, target, args, kwargs):
 
     if isinstance(target, torch._ops.OpOverload):
         if torch.Tag.pt2_compliant_tag in target.tags:
+            encountered_compliant_op(target)
             return
         encountered_non_compliant_op(
             target,
@@ -1424,6 +1436,7 @@ def check_pt2_compliant_op(output_graph, kind, target, args, kwargs):
         if len(overloads) == 1:
             op = getattr(target, overloads[0])
             if torch.Tag.pt2_compliant_tag in op.tags:
+                encountered_compliant_op(op)
                 return
             encountered_non_compliant_op(
                 op,
@@ -1444,7 +1457,9 @@ def check_pt2_compliant_op(output_graph, kind, target, args, kwargs):
             unimplemented(str(e))
 
         op = getattr(target, overload)
-        if torch.Tag.pt2_compliant_tag not in op.tags:
+        if torch.Tag.pt2_compliant_tag in op.tags:
+            encountered_compliant_op(op)
+        else:
             encountered_non_compliant_op(
                 op,
                 f"Encountered the torch.ops.OpOverloadPacket {target} "
@@ -1578,7 +1593,11 @@ class SubgraphTracer(fx.Tracer):
             "call_module",
         ):
             cur_inst = tx.current_instruction
-            if cur_inst is not self.prev_inst and cur_inst.positions.lineno is not None:
+            if (
+                cur_inst is not self.prev_inst
+                and cur_inst.positions is not None
+                and cur_inst.positions.lineno is not None
+            ):
                 tx_code = tx.f_code
                 header = tx.get_line_of_code_header(lineno=cur_inst.positions.lineno)
 

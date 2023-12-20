@@ -20,6 +20,7 @@ from weakref import ReferenceType
 
 import torch
 import torch.fx.traceback as fx_traceback
+from torch._functorch._aot_autograd.functional_utils import is_fun
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -36,7 +37,6 @@ __all__ = [
     "noop_context_fn",
     "set_checkpoint_early_stop",
     "DefaultDeviceType",
-    "context_fn_gen",
     "set_checkpoint_debug_enabled",
 ]
 
@@ -425,7 +425,8 @@ def checkpoint(
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
         preserve_rng_state(bool, optional):  Omit stashing and restoring
-            the RNG state during each checkpoint.
+            the RNG state during each checkpoint. Note that under torch.compile,
+            this flag doesn't take effect and we always preserve RNG state.
             Default: ``True``
         use_reentrant(bool, optional): Use checkpointing
             implementation that requires re-entrant autograd.
@@ -1143,12 +1144,10 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
     # There should probably be a better way to do this...
+    # TODO: unify _is_compiling across all compile stacks
     for arg in args:
-        if isinstance(arg, torch.Tensor):
-            if isinstance(arg, torch._subclasses.functional_tensor.FunctionalTensor):
-                arg = torch._from_functional_tensor(arg.elem)
-            if isinstance(arg, torch._subclasses.FakeTensor):
-                return True
+        if isinstance(arg, torch.Tensor) and is_fun(arg):
+            return True
     return False
 
 
@@ -1243,12 +1242,13 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
             return out
 
 
-def context_fn_gen(policy_fn):
+def _pt2_selective_checkpoint_context_fn_gen(policy_fn):
     """
-    A helper function to generate a pair of contexts to be later passed into
-    `torch.utils.checkpoint` API. Useful for implementing selective checkpointing + torch.compile
-    because the context functions need special logic to work with torch.compile.
-    The generated context functions also work in eager mode.
+    A helper function that generates a pair of contexts to be later passed into
+    `torch.utils.checkpoint` API to implment selective checkpointing.
+
+    .. warning::
+        This is context_fn is intended for use with torch.compile only.
 
     Args:
         policy_fn (Callable[[Callable, List[Any], Dict[str, Any]], bool]): Policy function
@@ -1276,7 +1276,7 @@ def context_fn_gen(policy_fn):
         >>>     return custom_policy
         >>>
         >>> def selective_checkpointing_context_fn():
-        >>>     return context_fn_gen(get_custom_policy())
+        >>>     return _pt2_selective_checkpoint_context_fn_gen(get_custom_policy())
         >>>
         >>> def gn(x, y):
         >>>     return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y

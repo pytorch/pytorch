@@ -54,6 +54,7 @@ def make_dynamic_cls(cls):
     test_classes[test_class.__name__] = test_class
     # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
     globals()[test_class.__name__] = test_class
+    test_class.__module__ = __name__
     return test_class
 
 
@@ -80,6 +81,11 @@ if TEST_Z3:
         # Ref: https://github.com/sympy/sympy/issues/25146
         DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes
     )
+
+unittest.expectedFailure(
+    # Test is only valid without dynamic shapes
+    DynamicShapesReproTests.test_many_views_with_mutation_dynamic_shapes
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
