@@ -1,7 +1,10 @@
 import argparse
+
+import asyncio
 import os.path
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from queue import Empty
 
 import numpy as np
@@ -10,8 +13,6 @@ import pandas as pd
 import torch
 import torch.multiprocessing as mp
 
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 
 class FrontendWorker(mp.Process):
     """
@@ -195,7 +196,9 @@ class BackendWorker:
                 model = self._setup()
                 self._setup_complete = True
 
-            asyncio.get_running_loop().run_in_executor(pool, self.model_predict, model, data, request_time)
+            asyncio.get_running_loop().run_in_executor(
+                pool, self.model_predict, model, data, request_time
+            )
 
 
 if __name__ == "__main__":
