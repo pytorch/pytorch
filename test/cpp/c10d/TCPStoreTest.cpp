@@ -231,17 +231,20 @@ TEST(TCPStoreTest, testLibUVPartialRead) {
   auto clientTCPStore =
       c10::make_intrusive<c10d::TCPStore>("127.0.0.1", client_opts);
   auto clientThread = std::thread([&clientTCPStore] {
-    std::string key(
-        "/default_pg/0//b7dc24de75e482ba2ceb9f9ee20732c25c0166d8//cuda//0");
+    std::string keyPrefix(
+        "/default_pg/0//b7dc24de75e482ba2ceb9f9ee20732c25c0166d8//cuda//");
     std::string value("v");
     std::vector<uint8_t> valueBuf(value.begin(), value.end());
 
     // split store->set(key, valueBuf) into two requests
-    clientTCPStore->_splitSet(key, valueBuf);
-  });
+    for (int i = 0; i < 10; ++i) {
+      std::string key = keyPrefix + std::to_string(i);
+      clientTCPStore->_splitSet(key, valueBuf);
 
-  // start server shutdown during a client request
-  serverTCPStore = nullptr;
+      // check the result on server
+      c10d::test::check(*clientTCPStore, key, "v");
+    }
+  });
 
   clientThread.join();
 }

@@ -403,6 +403,7 @@ void TCPStore::_splitSet(
   detail::SendBuffer buffer(*client_, detail::QueryType::SET);
   buffer.appendString(keyPrefix_ + key);
   buffer.flush();
+  sleep(1);
   buffer.appendBytes(data);
   buffer.flush();
 }
