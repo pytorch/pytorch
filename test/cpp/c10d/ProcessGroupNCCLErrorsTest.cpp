@@ -371,7 +371,7 @@ std::string readTraceFromFile(const std::string& filename, size_t size) {
 // Extend the nested class outside the parent class
 class TestDebugInfoWriter : public c10d::DebugInfoWriter {
  public:
-  TestDebugInfoWriter() : DebugInfoWriter(0) {}
+  TestDebugInfoWriter() : DebugInfoWriter(0, 0) {}
 
   void write(const std::string& ncclTrace) override {
     traces_.assign(ncclTrace.begin(), ncclTrace.end());

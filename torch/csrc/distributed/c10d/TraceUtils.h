@@ -269,10 +269,10 @@ inline std::string retrieveDesyncReport(
 
 #ifdef USE_C10D_NCCL
 
-DebugInfoWriter::DebugInfoWriter(int rank) {
+DebugInfoWriter::DebugInfoWriter(int pgId, int rank) {
   std::string fileName = getCvarString(
       {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
-  filename_ = c10::str(fileName, rank);
+  filename_ = c10::str(fileName, pgId, "_", rank);
 }
 
 DebugInfoWriter::~DebugInfoWriter() = default;
