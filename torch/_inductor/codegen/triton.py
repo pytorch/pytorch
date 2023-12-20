@@ -1662,12 +1662,16 @@ class TritonKernel(Kernel):
         return block_ptr, advance_block_ptr, other
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
-        dtype = triton_store_type(V.graph.get_dtype(name))
-        return (
-            f"tl.store({block_ptr}, "
-            f"triton_helpers.store_broadcasting({value}, {dtype}, {self.index_to_str(indexing.block_shape)})"
-            f"{other})"
+        # broadcasting is not implicit for block_ptrs
+        value = (
+            f"tl.broadcast_to({value}, {self.index_to_str(indexing.reshape_suffix)})"
         )
+        if indexing.block_shape != indexing.reshape_suffix:
+            # drop any extra size=1 dimensions
+            value = f"tl.reshape({value}, {self.index_to_str(indexing.block_shape)})"
+        # workaround https://github.com/openai/triton/issues/2814
+        value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
+        return f"tl.store({block_ptr}, {value}{other})"
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)

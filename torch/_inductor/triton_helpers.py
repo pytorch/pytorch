@@ -180,24 +180,3 @@ def bucketize_binary_search(
         full_range = (full_range + 1) // 2
 
     return low
-
-
-@triton.jit
-def store_broadcasting(
-    value,
-    dtype: tl.constexpr,
-    size: tl.constexpr,
-):
-    """
-    Triton tl.store(tl.make_block_ptr(...), value) is more picky than the non-block_ptr API.
-    This helper implements some implicit casting to try to coerce value into dtype+size.
-    """
-    # workaround https://github.com/openai/triton/issues/2814
-    value = value.to(dtype)
-    if value.numel != tl.zeros(size, dtype=tl.int8).numel:
-        # this broadcasting was implicit without block_ptr
-        value = tl.broadcast_to(value, size)
-    else:
-        # remove size=1 dimensions since we can't expand the block_ptr
-        value = tl.reshape(value, size)
-    return value
