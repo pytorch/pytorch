@@ -50,7 +50,7 @@
   {"USE_MPI", "${USE_MPI}"}, \
   {"USE_GFLAGS", "${USE_GFLAGS}"}, \
   {"USE_GLOG", "${USE_GLOG}"}, \
-  {"USE_GLOO", "${USE_GLOI}"}, \
+  {"USE_GLOO", "${USE_GLOO}"}, \
   {"USE_NNPACK", "${USE_NNPACK}"}, \
   {"USE_OPENMP", "${USE_OPENMP}"}, \
   {"FORCE_FALLBACK_CUDA_MPI", "${CAFFE2_FORCE_FALLBACK_CUDA_MPI}"}, \
