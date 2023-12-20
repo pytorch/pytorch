@@ -31,7 +31,7 @@ class ParallelStyle(ABC):
 
 class ColwiseParallel(ParallelStyle):
     """
-    Partition a compatible nn.Module in a row-wise fashion. Currently supports nn.Linear and nn.Embedding.
+    Partition a compatible nn.Module in a column-wise fashion. Currently supports nn.Linear and nn.Embedding.
     Users can compose it together with RowwiseParallel to achieve the sharding of more complicated modules.
     (i.e. MLP, Attention)
 
@@ -280,6 +280,8 @@ class PrepareModuleInput(ParallelStyle):
         prepared_inputs = []
         if not isinstance(inputs, tuple):
             inputs = (inputs,)
+        assert len(inputs) == len(self.input_layouts), \
+            "module inputs and input_layouts should have same length!"
         for inp, input_layout, desired_layout in zip(inputs, self.input_layouts, self.desired_input_layouts):
             if input_layout is not None:
                 if isinstance(inp, DTensor):
@@ -345,11 +347,15 @@ class PrepareModuleOutput(ParallelStyle):
         self.desired_output_layouts = \
             (desired_output_layouts,) if isinstance(desired_output_layouts, Placement) else desired_output_layouts
         self.use_local_output = use_local_output
+        assert len(self.output_layouts) == len(self.desired_output_layouts), \
+            "output_layouts and desired_output_layouts should have same length!"
 
     def _prepare_out_fn(self, outputs, device_mesh):
         prepared_outputs = []
         if not isinstance(outputs, tuple):
             outputs = (outputs,)
+        assert len(outputs) == len(self.output_layouts), \
+            "module outputs and output_layouts should have same length!"
         for out, out_layout, desired_out_layout in zip(outputs, self.output_layouts, self.desired_output_layouts):
             if out_layout is not None:
                 if isinstance(out, DTensor):
