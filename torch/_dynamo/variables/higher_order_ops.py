@@ -1402,7 +1402,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
         else:
             bwd_input = [ctx, fwd_out]
 
-        # breakpoint()
         with tx.output.subtracer(fwd_fn, fwd_tracer):
             (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
                 tx,
