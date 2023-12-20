@@ -10,7 +10,6 @@ from . import utils
 
 from .bytecode_transformation import (
     create_call_function,
-    create_call_method,
     create_dup_top,
     create_instruction,
     create_load_global,
@@ -123,14 +122,14 @@ class PyCodegen:
             graph_outputs_key = self.add_graph_output(value)
             self.tx.output.update_co_names("as_subclass")
 
+            self.load_import_from(utils.__name__, "to_subclass")
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
-            output.append(create_instruction("LOAD_METHOD", argval="as_subclass"))
             output.append(
                 self.create_load_global(
                     value.global_mangled_class_name(), True, add=True
                 )
             )
-            output.extend(create_call_method(1))
+            output.extend(create_call_function(2, True))
         elif isinstance(
             value,
             (
