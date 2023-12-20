@@ -15,7 +15,7 @@ torch.sparse
 Why and when to use sparsity
 ++++++++++++++++++++++++++++
 
-By default PyTorch stores :class:`torch.Tensor` stores elements contiguously
+By default, PyTorch stores :class:`torch.Tensor` elements contiguously in
 physical memory. This leads to efficient implementations of various array
 processing algorithms that require fast access to elements.
 

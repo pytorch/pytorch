@@ -225,14 +225,16 @@ static void validateInputData(const TensorIteratorBase& iter,
   AT_ASSERT(num_indices == index_stride.size());
   AT_ASSERT(static_cast<int>(num_indices) == iter.ntensors() - 2);
   const Tensor& inputTensor = iter.tensor(1);
+  const auto scalar_type = inputTensor.scalar_type();
 
   if (accumulate) {
     // No atomic support for the rest of dtypes
-    TORCH_CHECK(inputTensor.scalar_type() == ScalarType::Float || inputTensor.scalar_type() == ScalarType::Int ||
-                inputTensor.scalar_type() == ScalarType::Bool);
+    TORCH_CHECK(scalar_type == ScalarType::Float || inputTensor.scalar_type() == ScalarType::Int ||
+                scalar_type == ScalarType::Bool);
   } else {
-    TORCH_CHECK(c10::isIntegralType(inputTensor.scalar_type(), /*includesBool=*/true) ||
-                    inputTensor.scalar_type() == ScalarType::Float || inputTensor.scalar_type() == ScalarType::Half,
+    TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true) || scalar_type == ScalarType::Float ||
+                    scalar_type == ScalarType::Half || scalar_type == ScalarType::ComplexFloat ||
+                    scalar_type == ScalarType::ComplexHalf,
                 getMPSTypeString(inputTensor) + std::string(" not supported for index.Tensor_out"));
   }
 }
