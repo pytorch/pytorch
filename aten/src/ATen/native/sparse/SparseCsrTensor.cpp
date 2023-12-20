@@ -259,16 +259,13 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
       compressed_indices_type);
 
   // Indices invariants
-  if (plain_indices.numel() > 0) {
-    at::_validate_compressed_sparse_indices(
-        /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
-        compressed_indices,
-        plain_indices,
-        compressed_dim_size,
-        plain_dim_size,
-        values_nnz
-    );
-  }
+  at::_validate_compressed_sparse_indices(
+      /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
+      compressed_indices,
+      plain_indices,
+      compressed_dim_size,
+      plain_dim_size,
+      values_nnz);
 
   // Device Invariants
   // 4.1
@@ -563,6 +560,10 @@ SPARSE_COMPRESSED_TENSOR(csc, kSparseCsc)
 SPARSE_COMPRESSED_TENSOR(bsr, kSparseBsr)
 SPARSE_COMPRESSED_TENSOR(bsc, kSparseBsc)
 
+// Warning: ideally, torch.empty(..., layout=<sparse compressed
+// format>) ought to be unsupported because it does not return a valid
+// sparse compressed tensor without initialization of compressed
+// indices. The implementation below is kept for BC.
 Tensor empty_sparse_compressed(
     IntArrayRef size,
     c10::optional<ScalarType> dtype,
@@ -590,16 +591,25 @@ Tensor empty_sparse_compressed(
   auto compressed_indices = at::empty(compressed_indices_size, options);
   auto plain_indices = at::empty(plain_indices_and_values_size, options);
   auto values = at::empty(plain_indices_and_values_size, options.dtype(dtype));
-
-  return at::_sparse_compressed_tensor_unsafe(
-       compressed_indices,
-       plain_indices,
-       values,
-       size,
-       dtype,
-       layout,
-       device,
-       pin_memory);
+  // torch.empty on produces garbage so that the resulting empty
+  // sparse compressed tensor may fail to satisfy the following
+  // compressed sparse tensor invariants:
+  //
+  //   compressed_indices[..., 0] == 0
+  //   compressed_indices[..., -1] == nnz.
+  //   compressed_indices must be non-decreasing sequence
+  //
+  // Therefore, avoid using empty to create sparse compressed
+  // tensors. Instead, use compressed sparse constructors directly or
+  // other factory functions such as torch.zeros, etc.
+  return at::_sparse_compressed_tensor_unsafe(compressed_indices,
+                                              plain_indices,
+                                              values,
+                                              size,
+                                              dtype,
+                                              layout,
+                                              device,
+                                              pin_memory);
 }
 
 const Tensor& resize_sparse_csr_(
