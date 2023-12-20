@@ -243,7 +243,7 @@ struct CollectiveFingerPrint {
     // Check op type
     auto other_op = opTypeToString(other.op_type_);
     auto this_op = opTypeToString(op_type_);
-    if (other_op.compare(this_op) != 0) {
+    if (other_op != this_op) {
       found_diff = true;
       ss << c10::str("  Op type: ", this_op, "vs ", other_op);
     }
@@ -258,7 +258,7 @@ struct CollectiveFingerPrint {
         return;
       }
       for (size_t i = 0; i < other.size(); ++i) {
-        if (other[i].compare(curr[i]) != 0) {
+        if (other[i] != curr[i]) {
           found_diff = true;
           ss << c10::str("  Tensor ", arg, ": ", curr, "vs ", other);
           return;

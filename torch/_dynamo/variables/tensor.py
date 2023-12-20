@@ -127,6 +127,9 @@ class TensorVariable(VariableTracker):
         self.class_type = class_type
         self.specialized_value = specialized_value
 
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.proxy})"
+
     def as_proxy(self):
         return self.proxy
 
