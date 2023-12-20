@@ -416,8 +416,7 @@ class FlopCounterMode(TorchDispatchMode):
                 continue
 
             cur_values = process_mod(mod, mod_depth - 1)
-            for value in cur_values:
-                values.append(value)
+            values.extend(cur_values)
 
         # We do a bit of messing around here to only output the "Global" value
         # if there are any FLOPs in there that aren't already fully contained by

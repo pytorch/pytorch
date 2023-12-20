@@ -967,7 +967,7 @@ def _test_get_worker_info():
     it = iter(dataloader)
     data = []
     for d in it:
-        data.append(d)
+        data.append(d)  # noqa: PERF402
     worker_pids = [w.pid for w in it._workers]
     data = torch.cat(data, 0)
     for d in data:

@@ -138,8 +138,7 @@ class FakeTensorUpdater:
                 # tests - add a test
                 existing_storages[get_node_storage(new_fake_tensor)] += 1
                 processed.add(updating_node)
-                for user in updating_node.users:
-                    processing.append(user)
+                processing.extend(updating_node.users)
 
                 self.processed_hashes.add(self.hash_node(updating_node))
 

@@ -945,9 +945,7 @@ class _NnapiSerializer:
     def add_tuple_construct(self, node):
         assert node.outputsSize() == 1
         output = node.outputsAt(0)
-        values = []
-        for inp in node.inputs():
-            values.append(inp)
+        values = list(node.inputs())
         self.add_tensor_sequence(output, values)
 
     def add_unsqueeze(self, node):
