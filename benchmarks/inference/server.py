@@ -43,7 +43,7 @@ class FrontendWorker(mp.Process):
         self.start_send_time = None
         self.end_recv_time = None
 
-    def _run_metrics(self, metrics_sem):
+    def _run_metrics(self, metrics_lock):
         """
         This function will poll the response queue until it has received all
         responses. It records the startup latency, the average, max, min latency
@@ -64,7 +64,7 @@ class FrontendWorker(mp.Process):
         self.poll_gpu = False
 
         response_times = np.array(response_times)
-        metrics_sem.acquire()
+        metrics_lock.acquire()
         self.metrics_dict["warmup_latency"] = warmup_response_time
         self.metrics_dict["average_latency"] = response_times.mean()
         self.metrics_dict["max_latency"] = response_times.max()
@@ -72,9 +72,9 @@ class FrontendWorker(mp.Process):
         self.metrics_dict["throughput"] = (self.num_iters * self.batch_size) / (
             self.end_recv_time - self.start_send_time
         )
-        metrics_sem.release()
+        metrics_lock.release()
 
-    def _run_gpu_utilization(self, metrics_sem):
+    def _run_gpu_utilization(self, metrics_lock):
         """
         This function will poll nvidia-smi for GPU utilization every 100ms to
         record the average GPU utilization.
@@ -102,9 +102,9 @@ class FrontendWorker(mp.Process):
             if gpu_utilization != "N/A":
                 gpu_utilizations.append(float(gpu_utilization))
 
-        metrics_sem.acquire()
+        metrics_lock.acquire()
         self.metrics_dict["gpu_util"] = np.array(gpu_utilizations).mean()
-        metrics_sem.release()
+        metrics_lock.release()
 
     def _send_requests(self):
         """
@@ -132,12 +132,14 @@ class FrontendWorker(mp.Process):
             self.request_queue.put((other_data[i], time.time()))
 
     def run(self):
-        # Semaphore for writing to metrics_dict
-        metrics_sem = threading.Semaphore(1)
+        # Lock for writing to metrics_dict
+        metrics_lock = threading.Lock()
         requests_thread = threading.Thread(target=self._send_requests)
-        metrics_thread = threading.Thread(target=self._run_metrics, args=(metrics_sem,))
+        metrics_thread = threading.Thread(
+            target=self._run_metrics, args=(metrics_lock,)
+        )
         gpu_utilization_thread = threading.Thread(
-            target=self._run_gpu_utilization, args=(metrics_sem,)
+            target=self._run_gpu_utilization, args=(metrics_lock,)
         )
 
         requests_thread.start()
