@@ -1934,6 +1934,21 @@ def forward(self, l_x_):
         self.assertEqual(inputs[0][0] * 2.0, inputs_model[0][0])
         self.assertEqual(inputs[0][0] * 2.0, inputs_export[0][0])
 
+    @testing.expectedFailureSerDer  # symfloat nyi
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureNonStrict
+    def test_sym_sqrt(self):
+        import math
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x / torch.sym_sqrt(x.shape[0])
+
+        ep = export(M(), (torch.ones(16, 4),), dynamic_shapes={'x': {0: Dim("dim")}})
+        _ExportPassBase()(ep.graph_module)
+        FileCheck().check_count(
+            "torch.sym_sqrt", 1, exactly=True
+        ).run(ep.graph_module.code)
+
     def test_check_specialized_int(self):
         class SingleOp(torch.nn.Module):
             def __init__(self):
