@@ -221,7 +221,6 @@ template <typename scalar_t>
 typename std::enable_if_t<std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, void>
 batch_norm_cpu_collect_stats_channels_last_impl(
     Tensor& mean, Tensor& var_sum, const Tensor& input) {
-
   using Vec = Vectorized<scalar_t>;
   // keep acc_type as opmath_type will use float type when scalar_t==float
   // while acc_type uses double for float.
@@ -234,7 +233,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
   scalar_t* var_sum_data = var_sum.data_ptr<scalar_t>();
 
   // Typical vertical reduce from shape of {NHW, C} to {C}.
-  // Apply two path parallel reduction:
+  // Apply two path parallel reduction when NHW > max_threads:
   // First path: allocate an immediate buffer of size {max_threads, C}, parallel along dim0,
   //    {NHW, C} => {max_threads, C}
   //
@@ -305,78 +304,97 @@ batch_norm_cpu_collect_stats_channels_last_impl(
       }
     });
   } else {
-    /*
-    // Method 1: direct single reduction when N <= num_threads
-    at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
-      for (const auto c : c10::irange(begin, end)) {
-        accscalar_t sum = 0;
-        for (const auto t : c10::irange(N)) {
-          sum += input_data[t * n_channel + c];
-        }
-        scalar_t mean = sum / N;
-        mean_data[c] = mean;
-      }
-    });
-
-    at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
-      for (const auto c : c10::irange(begin, end)) {
-        accscalar_t _var_sum = 0;
-        for (const auto t : c10::irange(N)) {
-          _var_sum += (input_data[t * n_channel + c] - mean_data[c]) * (input_data[t * n_channel + c] - mean_data[c]);
-        }
-        var_sum_data[c] = _var_sum;
-      }
-    });
-    */
-
-    // Method 2: direct single reduction and vertical tile on n_channel when N <= num_threads
+    // Vertical reduce from shape of {NHW, C} to {C} when NHW <= max_threads.
+    // We'll use two methods, Method 1 and Method 2.
+    //
+    // Method 1: when TILE_SIZE < C <= THRESHOLD, parallel on C
+    //    {NHW, C} => {C}
+    //
+    // Method 2: when C <= TILE_SIZE or C > THRESHOLD, tile and vectorize on C, C is tiled as:
+    //    C: {TILE_SIZE, TILE_SIZE, ..., Remainder}
+    // parallel on tiles, vectorized vertical reduce on each tile
+    //    {NHW, TILE_SIZE} => {TILE_SIZE}
+    //
+    // The optimal THRESHOLD to tile was found empirically.
+    // When C > THRESHOLD, C is large enough that the benefit from tiling and vectorization outweigh the synchronization overhead.
+    // Wehn C <= TILE_SIZE, the problem size is small enough (C <= TILE_SIZE && NHW <= max_threads) that it's better to launch single thread with vectorization than C threads without vectorization.
     int64_t TILE_SIZE = 16;
-    // compute mean per input
-    Tensor sum = at::zeros({n_channel}, input.options());
-    scalar_t* sum_data = sum.data_ptr<scalar_t>();
-    at::parallel_for(0, (n_channel + TILE_SIZE - 1) / TILE_SIZE, 1, [&](int64_t tile_idx_begin, int64_t tile_idx_end) {
-      for (int64_t tile_idx = tile_idx_begin; tile_idx < tile_idx_end; tile_idx++) {
-        int64_t jj_begin = tile_idx * TILE_SIZE;
-        int64_t jj_end = std::min(jj_begin + TILE_SIZE, n_channel);
-        scalar_t* sum_ptr = sum_data + jj_begin;
-        scalar_t* mean_ptr = mean_data + jj_begin;
-        for (const auto i : c10::irange(N)) {
-          const scalar_t* x_ptr = input_data + (i * n_channel + jj_begin);
-          vec::map2<scalar_t>(
-            [](Vec x, Vec y) { return x + y; },
-            sum_ptr,
-            x_ptr,
-            sum_ptr,
-            jj_end - jj_begin);
-        }
-        vec::map<scalar_t>(
-          [N](Vec x) { return x / Vec(N); },
-          mean_ptr,
-          sum_ptr,
-          jj_end - jj_begin);
-      }
-    });
+    int64_t THRESHOLD = 2048;
 
-    // compute variance per input
-    var_sum.zero_();
-    at::parallel_for(0, (n_channel + TILE_SIZE - 1) / TILE_SIZE, 1, [&](int64_t tile_idx_begin, int64_t tile_idx_end) {
-      for (int64_t tile_idx = tile_idx_begin; tile_idx < tile_idx_end; tile_idx++) {
-        int64_t jj_begin = tile_idx * TILE_SIZE;
-        int64_t jj_end = std::min(jj_begin + TILE_SIZE, n_channel);
-        scalar_t* var_sum_ptr = var_sum_data + jj_begin;
-        scalar_t* mean_ptr = mean_data + jj_begin;
-        for (const auto i : c10::irange(N)) {
-          const scalar_t* x_ptr = input_data + (i * n_channel + jj_begin);
-          vec::map3<scalar_t>(
-            [](Vec x, Vec y, Vec mean) { return y + (x - mean) * (x - mean); },
-            var_sum_ptr,
-            x_ptr,
-            var_sum_ptr,
+    // Method 1: parallel on C, vertical reduce
+    if (TILE_SIZE < n_channel && n_channel <= THRESHOLD) {
+      // compute mean per input
+      at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+        for (const auto c : c10::irange(begin, end)) {
+          accscalar_t sum = 0;
+          for (const auto t : c10::irange(N)) {
+            sum += input_data[t * n_channel + c];
+          }
+          scalar_t mean = sum / N;
+          mean_data[c] = mean;
+        }
+      });
+
+      // compute variance per input
+      at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+        for (const auto c : c10::irange(begin, end)) {
+          accscalar_t _var_sum = 0;
+          for (const auto t : c10::irange(N)) {
+            _var_sum += (input_data[t * n_channel + c] - mean_data[c]) * (input_data[t * n_channel + c] - mean_data[c]);
+          }
+          var_sum_data[c] = _var_sum;
+        }
+      });
+    }
+    // Method 2: parallel on tiles of C, vectorized vertical reduce on each tile
+    else {
+      // compute mean per input
+      Tensor sum = at::zeros({n_channel}, input.options());
+      scalar_t* sum_data = sum.data_ptr<scalar_t>();
+      at::parallel_for(0, (n_channel + TILE_SIZE - 1) / TILE_SIZE, 1, [&](int64_t tile_idx_begin, int64_t tile_idx_end) {
+        for (int64_t tile_idx = tile_idx_begin; tile_idx < tile_idx_end; tile_idx++) {
+          int64_t jj_begin = tile_idx * TILE_SIZE;
+          int64_t jj_end = std::min(jj_begin + TILE_SIZE, n_channel);
+          scalar_t* sum_ptr = sum_data + jj_begin;
+          scalar_t* mean_ptr = mean_data + jj_begin;
+          for (const auto i : c10::irange(N)) {
+            const scalar_t* x_ptr = input_data + (i * n_channel + jj_begin);
+            vec::map2<scalar_t>(
+              [](Vec x, Vec y) { return x + y; },
+              sum_ptr,
+              x_ptr,
+              sum_ptr,
+              jj_end - jj_begin);
+          }
+          vec::map<scalar_t>(
+            [N](Vec x) { return x / Vec(N); },
             mean_ptr,
+            sum_ptr,
             jj_end - jj_begin);
         }
-      }
-    });
+      });
+
+      // compute variance per input
+      var_sum.zero_();
+      at::parallel_for(0, (n_channel + TILE_SIZE - 1) / TILE_SIZE, 1, [&](int64_t tile_idx_begin, int64_t tile_idx_end) {
+        for (int64_t tile_idx = tile_idx_begin; tile_idx < tile_idx_end; tile_idx++) {
+          int64_t jj_begin = tile_idx * TILE_SIZE;
+          int64_t jj_end = std::min(jj_begin + TILE_SIZE, n_channel);
+          scalar_t* var_sum_ptr = var_sum_data + jj_begin;
+          scalar_t* mean_ptr = mean_data + jj_begin;
+          for (const auto i : c10::irange(N)) {
+            const scalar_t* x_ptr = input_data + (i * n_channel + jj_begin);
+            vec::map3<scalar_t>(
+              [](Vec x, Vec y, Vec mean) { return y + (x - mean) * (x - mean); },
+              var_sum_ptr,
+              x_ptr,
+              var_sum_ptr,
+              mean_ptr,
+              jj_end - jj_begin);
+          }
+        }
+      });
+    }
   }
 }
 
