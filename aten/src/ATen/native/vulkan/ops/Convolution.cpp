@@ -13,6 +13,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
+#include <ATen/ops/dequantize.h>
 #include <ATen/ops/pad.h>
 #include <ATen/ops/permute.h>
 #include <ATen/ops/quantize_per_tensor.h>
@@ -506,13 +507,15 @@ namespace {
 using namespace api::utils;
 
 vTensor pack_weights(
-    const Tensor& weight_arg,
+    const Tensor& weight_inp,
     const bool transposed,
     const bool quantized,
     const Conv2dMethod conv_method) {
-  if (weight_arg.is_vulkan()) {
-    return convert(weight_arg);
+  if (weight_inp.is_vulkan()) {
+    return convert(weight_inp);
   }
+
+  const Tensor weight_arg = quantized ? at::dequantize(weight_inp) : weight_inp;
 
   const Tensor weight = transposed
       ? at::permute(weight_arg, {1, 0, 2, 3}).contiguous()
@@ -532,12 +535,6 @@ vTensor pack_weights(
       api::StorageType::TEXTURE_2D,
   };
 
-  if (quantized) {
-    v_weight.set_is_quantized();
-    v_weight.set_scale(weight_arg.q_scale());
-    v_weight.set_zero_point(weight_arg.q_zero_point());
-  }
-
   pack_cpu_to_vulkan(weight_rearranged, v_weight);
 
   return v_weight;
@@ -549,8 +546,11 @@ vTensor pack_biases(
     const bool transposed,
     const bool quantized) {
   at::Tensor bias_arg = conv2d::rearrange_bias(bias, weight, transposed);
-  at::Tensor bias_rearranged = (quantized && bias_arg.scalar_type() == kFloat)
-      ? at::quantize_per_tensor(bias_arg, weight.q_scale(), 0, c10::kQInt32)
+  at::Tensor bias_rearranged =
+      (quantized &&
+       (bias_arg.scalar_type() == kQUInt8 || bias_arg.scalar_type() == kQInt8 ||
+        bias_arg.scalar_type() == kQInt32))
+      ? at::dequantize(bias_arg)
       : bias_arg;
 
   vTensor v_bias{
@@ -559,12 +559,6 @@ vTensor pack_biases(
       bias_rearranged.scalar_type(),
       api::StorageType::TEXTURE_2D,
   };
-
-  if (quantized) {
-    v_bias.set_is_quantized();
-    v_bias.set_scale(bias_rearranged.q_scale());
-    v_bias.set_zero_point(bias_rearranged.q_zero_point());
-  }
 
   pack_cpu_to_vulkan(bias_rearranged, v_bias);
 
