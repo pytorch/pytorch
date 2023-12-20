@@ -99,13 +99,15 @@ class IndexingOptions:
 
 @dataclasses.dataclass
 class BlockPtrOptions:
-    offset: sympy.Expr
+    constant_offset: sympy.Expr
     shape: List[sympy.Expr]
     strides: List[sympy.Expr]
     block_shape: List[str]
     order: List[int]
     offsets: List[str]
     mask_vars: Set[sympy.Symbol]
+    expand_suffix: List[str]
+    reshape_suffix: List[str]
 
     def format(self, name: str, roffset=True) -> str:
         """
@@ -123,7 +125,9 @@ class BlockPtrOptions:
         if not roffset:
             offsets[offsets.index("roffset")] = "0"
         args = [
-            f"{name} + ({f(self.offset)})" if self.offset != 0 else name,
+            f"{name} + ({f(self.constant_offset)})"
+            if self.constant_offset != 0
+            else name,
             f"shape={f(self.shape)}",
             f"strides={f(self.strides)}",
             f"block_shape={f(self.block_shape)}",
@@ -144,6 +148,7 @@ class BlockPtrOptions:
                     self.shape[i],
                     config.triton.max_block[self.block_shape[i][0]],
                 )
+                and not (V.kernel.no_x_dim and self.block_shape[i] == "XBLOCK")
             ):
                 check.append(i)
         return check
@@ -1434,18 +1439,15 @@ class TritonKernel(Kernel):
             offset = sympy.Wild("_offset", exclude=symbols)
             m = index_relative_to_xyr_index.match(sympy_dot(symbols, strides) + offset)
             if m:
-                strides = [m[s] for s in strides]
-                return BlockPtrOptions(
-                    offset=m[offset],
-                    shape=[t.numel for t in range_trees],
-                    strides=strides,
-                    block_shape=[f"{t.prefix.upper()}BLOCK" for t in range_trees],
-                    order=V.graph.sizevars.guarded_order(strides),
-                    offsets=[f"{t.prefix}offset" for t in range_trees],
-                    mask_vars=dense_mask_vars,
+                self.filter_masks(mask_vars)
+                return self.indexing_block_ptr(
+                    [m[s] for s in strides],
+                    m[offset],
+                    range_trees,
+                    mask_vars,
                 )
-            # TODO(jansel): it is sometimes possible to do higher dimensional block_ptrs with
-            #               a tl.reshape the correct block.  We will miss these cases today.
+                # TODO(jansel): it is sometimes possible to do higher dimensional block_ptrs with
+                #               a tl.reshape the correct block.  We will miss these cases today.
 
         expand_str = None
         index_str = self.index_to_str(index)
@@ -1472,6 +1474,57 @@ class TritonKernel(Kernel):
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
         return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex)
+
+    def indexing_block_ptr(
+        self, strides, constant_offset, range_trees, mask_vars
+    ) -> BlockPtrOptions:
+        """Helper to create a  BlockPtrOptions instance"""
+        block_shape = [f"{t.prefix.upper()}BLOCK" for t in range_trees]
+        expand_suffix = [":"] * len(strides)
+        reshape_suffix = [*block_shape]
+
+        broadcasting_dim = [s == 0 for s in strides]
+        for i, is_broadcasting in enumerate(broadcasting_dim):
+            if is_broadcasting:
+                # drop any stride==0 dimensions for performance
+                expand_suffix[i] = "None"
+                reshape_suffix[i] = "1"
+
+        if self.no_x_dim:
+            assert range_trees[0].prefix == "x"
+            if broadcasting_dim[0]:
+                expand_suffix.pop(0)
+            reshape_suffix.pop(0)
+
+        if (
+            not self.inside_reduction
+            and len(strides) == len(self.numels) - 1
+            and self.numels[-1] != 1
+        ):
+            # Need to expand rank by 1 to match rank when self.inside_reduction=True
+            expand_suffix.append("None")  # RBLOCK
+            reshape_suffix.append("1")
+
+        def filter(it):
+            """Removes any broadcasting dims from a given sequence"""
+            assert len(it) == len(broadcasting_dim)
+            return [
+                item
+                for item, is_broadcasting in zip(it, broadcasting_dim)
+                if not is_broadcasting
+            ]
+
+        return BlockPtrOptions(
+            constant_offset=constant_offset,
+            shape=filter([t.numel for t in range_trees]),
+            strides=filter(strides),
+            block_shape=filter(block_shape),
+            order=V.graph.sizevars.guarded_order(filter(strides)),
+            offsets=filter([f"{t.prefix}offset" for t in range_trees]),
+            mask_vars=mask_vars,
+            expand_suffix=expand_suffix,
+            reshape_suffix=reshape_suffix,
+        )
 
     def active_range_trees(self, reorder=False):
         trees = [
@@ -1682,17 +1735,10 @@ class TritonKernel(Kernel):
                     name, var, indexing, other
                 )
                 line = f"tl.load({block_ptr}{other}{ep})"
-                if (
-                    not self.inside_reduction
-                    and len(indexing.shape) == len(self.numels) - 1
-                    and self.numels[-1] != 1
-                ):
-                    # Need to expand rank by 1 to match rank when self.inside_reduction=True
-                    expand_str = [":"] * len(indexing.shape) + ["None"]
-                    line = f"{line}[{', '.join(expand_str)}]"
-                elif self.no_x_dim:
-                    assert indexing.block_shape[0] == "XBLOCK"
-                    line = f"tl.reshape({line}, {self.index_to_str(indexing.block_shape[1:])})"
+                if any(s != ":" for s in indexing.expand_suffix):
+                    line = f"{line}[{', '.join(indexing.expand_suffix)}]"
+                if indexing.reshape_suffix != indexing.block_shape:
+                    line = f"tl.reshape({line}, {self.index_to_str(indexing.reshape_suffix)})"
             elif isinstance(original_index, sympy.Integer):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
