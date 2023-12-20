@@ -230,11 +230,11 @@ class CUDAAllocator : public Allocator {
   virtual void resetAccumulatedStats(int device) = 0;
   virtual void resetPeakStats(int device) = 0;
   virtual SnapshotInfo snapshot() = 0;
-  virtual void beginAllocateToPool(
+  virtual void beginAllocateStreamToPool(
       int device,
-      MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)> filter) = 0;
-  virtual void endAllocateToPool(int device, MempoolId_t mempool_id) = 0;
+      cudaStream_t stream,
+      MempoolId_t mempool_id) = 0;
+  virtual void endAllocateStreamToPool(int device, cudaStream_t stream) = 0;
   virtual void releasePool(int device, MempoolId_t mempool_id) = 0;
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
@@ -377,15 +377,15 @@ inline CheckpointDelta setCheckpointPoolState(
 }
 
 // CUDAGraph interactions
-inline void beginAllocateToPool(
+inline void beginAllocateStreamToPool(
     int device,
-    MempoolId_t mempool_id,
-    std::function<bool(cudaStream_t)> filter) {
-  get()->beginAllocateToPool(device, mempool_id, std::move(filter));
+    cudaStream_t stream,
+    MempoolId_t mempool_id) {
+  return get()->beginAllocateStreamToPool(device, stream, mempool_id);
 }
 
-inline void endAllocateToPool(int device, MempoolId_t mempool_id) {
-  get()->endAllocateToPool(device, mempool_id);
+inline void endAllocateStreamToPool(int device, cudaStream_t stream) {
+  return get()->endAllocateStreamToPool(device, stream);
 }
 
 inline void recordHistory(

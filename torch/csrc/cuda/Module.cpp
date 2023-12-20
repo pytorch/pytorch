@@ -1055,23 +1055,22 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             self.set_record_stream_fn(func);
           })
       .def(
-          "set_begin_allocate_to_pool",
+          "set_begin_allocate_stream_to_pool",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
-            using FuncType = void(
-                int, c10::cuda::MempoolId_t, std::function<bool(cudaStream_t)>);
+            using FuncType = void(int, cudaStream_t, c10::cuda::MempoolId_t);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
-            self.set_begin_allocate_to_pool(func);
+            self.set_begin_allocate_stream_to_pool(func);
           })
       .def(
-          "set_end_allocate_to_pool_fn",
+          "set_end_allocate_stream_to_pool_fn",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
-            using FuncType = void(int, c10::cuda::MempoolId_t);
+            using FuncType = void(int, cudaStream_t);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
-            self.set_end_allocate_to_pool_fn(func);
+            self.set_end_allocate_stream_to_pool_fn(func);
           })
       .def(
           "set_release_pool",
@@ -1167,17 +1166,15 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       [](int device, at::cuda::MempoolId_t mempool_id) {
         auto stream = at::cuda::getCurrentCUDAStream(device);
         TORCH_CHECK(stream, "Expected stream capture to be under way");
-        c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-            device, mempool_id, [stream](cudaStream_t target) {
-              return target == stream;
-            });
+        c10::cuda::CUDACachingAllocator::beginAllocateStreamToPool(
+            device, stream, mempool_id);
       });
 
-  m.def(
-      "_cuda_endAllocateCurrentStreamToPool",
-      [](int device, at::cuda::MempoolId_t mempool_id) {
-        c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
-      });
+  m.def("_cuda_endAllocateCurrentStreamToPool", [](int device) {
+    auto stream = at::cuda::getCurrentCUDAStream(device);
+    TORCH_CHECK(stream, "Expected stream capture to be under way");
+    c10::cuda::CUDACachingAllocator::endAllocateStreamToPool(device, stream);
+  });
 
   m.def("_cuda_releasePool", [](int device, at::cuda::MempoolId_t mempool_id) {
     c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
