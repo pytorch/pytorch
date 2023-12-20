@@ -51,6 +51,7 @@ class DummyModule:
         return 0
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionOpenRgistration(common.TestCase):
     """Tests Open Device Registration with C++ extensions.
     """
