@@ -7,7 +7,6 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
 
-from torch._dynamo.testing import same
 from torch._dynamo.utils import dynamo_timed
 
 from torch.testing._internal.common_utils import TemporaryFileName

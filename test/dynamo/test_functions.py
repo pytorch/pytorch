@@ -763,7 +763,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref[1]["d"], res[1]["d"])
         self.assertEqual(ref[1]["e"], res[1]["e"])
         self.assertEqual(ref[1][param], res[1][param])
-        
 
     @make_test
     def test_call_dict1(x):

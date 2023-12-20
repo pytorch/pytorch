@@ -4581,35 +4581,46 @@ def fn():
         input_tensor = torch.tensor([8])
         static_size = 1
         out_tensor = torch.empty((10, 10, 10, 10), dtype=torch.long)
-        self.assertEqual(torch.nonzero_static(input_tensor, size=static_size, out=out_tensor), torch.tensor([0]))
-        
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size, out=out_tensor), 
+            torch.tensor([0]),
+        )
         self.assertEqual(out_tensor, torch.tensor([0]))
 
         # nonzero_static.out: out resize (enlarge)
         input_tensor = torch.tensor([8])
         static_size = 1
         out_tensor = torch.empty((0), dtype=torch.long)
-        self.assertEqual(torch.nonzero_static(input_tensor, size=static_size, out=out_tensor), torch.tensor([0]))
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size, out=out_tensor), 
+            torch.tensor([0]),
+        )
 
         self.assertEqual(out_tensor, torch.tensor([0]))
 
         # 0 rank
         input_tensor = torch.tensor(6)
         static_size = 2
-        self.assertEqual(torch.nonzero_static(input_tensor, size=static_size), 
-            torch.empty((static_size, input_tensor.dim()), dtype=torch.long))
-        
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size),
+            torch.empty((static_size, input_tensor.dim()), dtype=torch.long),
+        )
 
         # 0 size
         input_tensor = torch.tensor([[[1]]])
         static_size = 0
-        self.assertEqual(torch.nonzero_static(input_tensor, size=static_size), 
-            torch.empty((static_size, input_tensor.dim()), dtype=torch.long))
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size),
+            torch.empty((static_size, input_tensor.dim()), dtype=torch.long),
+        )
 
         # 1D input
         input_tensor = torch.tensor([0, 8])
         static_size = 1
-        self.assertEqual(torch.nonzero_static(input_tensor, size=static_size), torch.tensor([1]))
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size), 
+            torch.tensor([1]),
+        )
 
         input_tensor = torch.tensor([8, 0])
         static_size = 2
@@ -4636,12 +4647,10 @@ def fn():
         input_tensor = torch.tensor([[1.2, 0], [3.4, 5.6]])
         static_size = 2
         fill_value = -100
-        
         self.assertEqual(torch.nonzero_static(
-                    input_tensor, size=static_size, fill_value=fill_value
-                ),
-                torch.tensor([[0, 0], [1, 0]])
-                )
+                    input_tensor, size=static_size, fill_value=fill_value),
+                torch.tensor([[0, 0], [1, 0]]),
+        )
 
         # 3D input
         input_tensor = torch.tensor([[[0, 0], [0, -3]], [[0, 0], [5, 0]]])

@@ -6,7 +6,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.config as config
 import torch._dynamo.test_case
-from torch._dynamo.testing import same
 
 
 class Seq(torch.nn.Module):

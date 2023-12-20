@@ -4,7 +4,6 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
-from torch._dynamo.testing import same
 
 
 def fn(a, b):

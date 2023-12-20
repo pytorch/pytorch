@@ -3750,7 +3750,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_fn = torch.compile(torch.addr, dynamic=True)
         compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
         self.assertEqual(out, compile_out)
-        
 
     def test_setattr_requires_grad_graph_breaks(self):
         def fn(x):
