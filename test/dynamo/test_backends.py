@@ -9,6 +9,7 @@ import torch._dynamo.test_case
 from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
+from torch._dynamo.testing import same
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -100,7 +101,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         input = torch.randn(2, 10)
         r1 = model(input)
         r2 = torch.compile(model, backend=backend)(input)
-        self.assertAlmostEqual(r1, r2.float(), delta=0.01)
+        self.assertTrue(same(r1, r2.float(), tol=0.01))
 
     def test_eager(self):
         self._check_backend_works("eager")

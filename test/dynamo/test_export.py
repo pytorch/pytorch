@@ -1220,12 +1220,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         result = graph(
             torch.tensor([[1.0, 0.0], [0, 0]]), torch.tensor([[0.0, 1.0], [0, 0]])
         )
-        self.assertEqual(result, real_result)
+        self.assertTrue(torch._dynamo.utils.same(result, real_result))
         result = graph(
             torch.tensor([[1, 0], [0.25, 0.25]]),
             torch.tensor([[0.33, 0.33], [0.25, 0.25]]),
         )
-        self.assertEqual(result, real_result)
+        self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
     def test_export_with_constant_tuple_nonzero(self):
         class MyModule(torch.nn.Module):

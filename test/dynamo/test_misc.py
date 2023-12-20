@@ -5208,7 +5208,7 @@ def fn():
         real = f(input)
 
         optimized = torch._dynamo.optimize("eager")(f)
-        self.assertEqyal(optimized(input), real)
+        self.assertEqual(optimized(input), real)
 
         # should not error
         gm = torch.fx.symbolic_trace(optimized)

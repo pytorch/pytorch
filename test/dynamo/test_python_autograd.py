@@ -5,7 +5,7 @@ import torch
 
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import CompileCounter
+from torch._dynamo.testing import CompileCounter, same
 
 """
 This is an example of a pure-python version of autograd implemented by
@@ -210,9 +210,9 @@ class TestPythonAutograd(TestCase):
         reset_tape()
         res2 = fn_dynamo(*args2)
         reset_tape()
-        self.assertEqual(res1, fn(*args1))
+        self.assertTrue(same(res1, fn(*args1)))
         reset_tape()
-        self.assertEqual(res2, fn(*args2))
+        self.assertTrue(same(res2, fn(*args2)))
         reset_tape()
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, expected_ops)
