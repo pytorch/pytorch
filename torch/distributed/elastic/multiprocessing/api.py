@@ -426,8 +426,14 @@ class MultiprocessContext(PContext):
             start_method=self.start_method,
         )
 
-    def _is_done(self) -> bool:
-        return len(self._return_values) == self.nprocs
+    def _is_done_or_error(self) -> bool:
+        # While torch multiprocessing takes care of a child process returing non-zero values.
+        # For case where the return code is 0 eg: someone calls exit(0) multiprocessing won't
+        # kill the other processes but that makes us block since we expect all the child processes
+        # to write to the queue, the len check takes care of that.
+        return (len(self._return_values) == self.nprocs) or (
+            len(self._pc.alive_pids()) < len(self._pc.pids())
+        )
 
     def _poll(self) -> Optional[RunProcsResult]:
         assert self._pc is not None  # assertion for mypy type checker
@@ -438,7 +444,7 @@ class MultiprocessContext(PContext):
             # timeout < 0 checks worker status and return immediately
             # Join will never return success since we use synchronize.Event to wait
             # for all processes to finish.
-            self._pc.join(-1)
+            all_joined = self._pc.join(-1)
 
             # IMPORTANT: we use multiprocessing.Queue to carry worker return values
             # back to the parent, the worker process will wait before terminating
@@ -452,9 +458,14 @@ class MultiprocessContext(PContext):
                     # save the return values temporarily into a member var
                     self._return_values[local_rank] = return_queue.get()
 
-            if self._is_done():
-                # we should ALWAYS have ALL the return values when all the processes are done
-                self._worker_finished_event.set()
+            if self._is_done_or_error() or all_joined:
+                # it is possible that all child processes are already joined
+                # in that case there is no point calling set() which may deadlock
+                # if the child process got killed on event.wait()
+                if not all_joined:
+                    # we should ALWAYS have ALL the return values when all the processes are done
+                    self._worker_finished_event.set()
+
                 # Wait untill all processes are finished. At this point workers finished executing
                 # user function
                 self._pc.join()
@@ -509,7 +520,9 @@ class MultiprocessContext(PContext):
             return
         for proc in self._pc.processes:
             if proc.is_alive():
-                log.warning("Closing process %s via signal %s", proc.pid, death_sig.name)
+                log.warning(
+                    "Closing process %s via signal %s", proc.pid, death_sig.name
+                )
                 try:
                     os.kill(proc.pid, death_sig)
                 except ProcessLookupError:
