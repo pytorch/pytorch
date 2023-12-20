@@ -17,9 +17,11 @@
 #include <c10/util/quint8.h>
 
 #include <array>
-#include <complex>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <ostream>
+#include <type_traits>
 
 namespace c10 {
 
@@ -441,15 +443,15 @@ static inline ScalarType toQIntType(ScalarType t) {
 static inline ScalarType toUnderlying(ScalarType t) {
   switch (t) {
     case ScalarType::QUInt8:
+      [[fallthrough]];
+    case ScalarType::QUInt4x2:
+      [[fallthrough]];
+    case ScalarType::QUInt2x4:
       return ScalarType::Byte;
     case ScalarType::QInt8:
       return ScalarType::Char;
     case ScalarType::QInt32:
       return ScalarType::Int;
-    case ScalarType::QUInt4x2:
-      return ScalarType::Byte;
-    case ScalarType::QUInt2x4:
-      return ScalarType::Byte;
     default:
       return t;
   }
