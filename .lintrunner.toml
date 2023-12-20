@@ -2544,7 +2544,6 @@ exclude_patterns = [
     'torch/utils/data/datapipes/utils/common.py',
     'torch/utils/data/datapipes/utils/decoder.py',
     'torch/utils/data/datapipes/utils/snapshot.py',
-    'torch/utils/data/dataset.py',
     'torch/utils/data/distributed.py',
     'torch/utils/data/graph.py',
     'torch/utils/data/graph_settings.py',
