@@ -34,7 +34,6 @@ if TEST_SCIPY:
 NVPRIM_ATEN_FALLBACK_WARNING = "fallback to aten executor"
 GET_ISOLATED_GRAPHMODULE_ERROR = "get_isolated_graphmodule failed on decomposition"
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPrims(TestCase):
     @onlyCUDA
     @dtypes(torch.float32)
@@ -322,7 +321,6 @@ class TestPrims(TestCase):
         self.assertEqual(ref1, res3)
         self.assertEqual(ref2, res4)
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
@@ -347,7 +345,6 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
 instantiate_device_type_tests(TestPrims, globals())
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRefs(TestCase):
     @dtypes(torch.float32)
     def test_constant_pad_nd_memory_format(self, device, dtype):
@@ -412,7 +409,6 @@ class TestRefs(TestCase):
 instantiate_device_type_tests(TestRefs, globals())
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestDecomp(TestCase):
     @ops([op for op in op_db if op.supports_varargs], dtypes=OpDTypes.any_one)
     def test_decomposition_method_vararg(self, device, dtype, op):

@@ -8,7 +8,6 @@ import sys
 import time
 import unittest
 
-import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN)
 import torch.multiprocessing as mp
 
@@ -193,7 +192,6 @@ class _TestMultiProcessing:
 @unittest.skipIf(
     NO_MULTIPROCESSING_SPAWN,
     "Disabled for environments that don't support the spawn start method")
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class SpawnTest(TestCase, _TestMultiProcessing):
     start_method = 'spawn'
 
@@ -218,12 +216,10 @@ class SpawnTest(TestCase, _TestMultiProcessing):
     IS_WINDOWS,
     "Fork is only available on Unix",
 )
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class ForkTest(TestCase, _TestMultiProcessing):
     start_method = 'fork'
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class ErrorTest(TestCase):
     def test_errors_pickleable(self):
         for error in (

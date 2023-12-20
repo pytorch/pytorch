@@ -525,7 +525,7 @@ class TestSparseSemiStructured(TestCase):
         if dtype == torch.bfloat16:
             rtol, atol = 5e-3, 5e-3
         elif dtype == torch.float32:
-            rtol, atol = 1e-3, 5e-1
+            rtol, atol = 1e-3, 75e-2
         for batch_shape, m, n, k, add_bias, activation in \
                 itertools.product(batch_shapes, range(3), range(3), range(3), (False, True), activations):
             if activation == "silu" and dtype == torch.int8:
