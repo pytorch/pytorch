@@ -29,22 +29,38 @@ env:
   WITH_PUSH: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
 
 jobs:
+  generate-matrix:
+    if: github.repository_owner == 'pytorch'
+    runs-on: [self-hosted, linux.large]
+    outputs:
+      matrix: ${{ steps.generate-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          fetch-depth: 1
+          submodules: true
+      - name: Get docker release matrix
+        id: generate-matrix
+        run: |
+          MATRIX_BLOB="$(python3 .github/scripts/generate_docker_release_matrix.py)"
+          echo "${MATRIX_BLOB}"
+          echo "matrix=${MATRIX_BLOB}" >> "${GITHUB_OUTPUT}"
+
   build:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: [self-hosted, linux.2xlarge]
     environment: ${{ (github.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     timeout-minutes: 240
+    needs: generate-matrix
     strategy:
-      matrix:
-        include:
-          # nvidia specific images don't exist for arm64 so only build the runtime image
-          - image_type: runtime
-            platform: linux/arm64,linux/amd64
-          - image_type: devel
-            platform: linux/amd64
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+      fail-fast: false
     env:
       BUILD_IMAGE_TYPE: ${{ matrix.image_type }}
       BUILD_PLATFORMS: ${{ matrix.platform }}
+      CUDA_VERSION: ${{ matrix.cuda_full_version }}
+      CUDNN_VERSION: ${{ matrix.cudnn_version }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
