@@ -18,7 +18,7 @@ import torch
 
 import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import dynamo_timed, get_first_attr
 from torch.utils._triton import has_triton_package
 
 from . import config
@@ -356,18 +356,9 @@ class CachingAutotuner(KernelInterface):
             "current_device": torch.cuda.current_device,
         }
 
-        def _getattr(obj, attr1, attr2):
-            if hasattr(obj, attr1):
-                return getattr(obj, attr1)
-            else:
-                assert hasattr(
-                    obj, attr2
-                ), f"{obj} should have either {attr1} or {attr2}"
-                return getattr(obj, attr2)
-
-        scope["runner"] = _getattr(binary, "run", "c_wrapper")
-        scope["function"] = _getattr(binary, "function", "cu_function")
-        cluster_dims = _getattr(binary, "cluster_dims", "clusterDims")
+        scope["runner"] = get_first_attr(binary, "run", "c_wrapper")
+        scope["function"] = get_first_attr(binary, "function", "cu_function")
+        cluster_dims = get_first_attr(binary, "cluster_dims", "clusterDims")
         scope["cta_args"] = (
             (binary.num_ctas, *cluster_dims) if hasattr(binary, "num_ctas") else ()
         )
