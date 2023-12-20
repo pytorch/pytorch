@@ -32,3 +32,18 @@ Semaphores are used in conjunction with `cuda.Event`s to ensure proper synchroni
     * Average latency decreased
     * Throughput increased
     * GPU utilization increased
+
+
+### [#116190](https://github.com/pytorch/pytorch/pull/116190)
+* Added a `--num_workers` option to `server.py` that allows more than 1 worker in the `ThreadPoolWorker` used for model predictions. Each worker uses its own `cuda.Stream()` that is created when the worker thread is initialized.
+
+##### Results:
+Benchmarks were only run for `compile=False` since `torch.compile()` is not thread-safe. Benchmarks were run with `num_workers={2, 3, 4}`.
+
+For the 2 worker case:
+* All metrics improved compared to the single worker case across all batch sizes.
+* For batch sizes 1, 32 and 64 we observed that the metrics were still slightly worse than the baseline.
+* For batch sizes 128 and 256 we observed that all metrics beat the baseline (e.g. ~300 samples/sec increase in throughput, ~5s decrease in average latency and ~2s decrease in warmup latency for bs=256)
+
+![Throughput against batch size](./src/throughput_plot.png)
+![Avg latency against batch size](./src/avg_latency_plot.png)

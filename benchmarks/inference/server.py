@@ -164,6 +164,7 @@ class BackendWorker:
         response_queue,
         read_requests_event,
         batch_size,
+        num_workers,
         model_dir=".",
         compile_model=True,
     ):
@@ -174,11 +175,14 @@ class BackendWorker:
         self.response_queue = response_queue
         self.read_requests_event = read_requests_event
         self.batch_size = batch_size
+        self.num_workers = num_workers
         self.model_dir = model_dir
         self.compile_model = compile_model
         self._setup_complete = False
         self.h2d_stream = torch.cuda.Stream()
         self.d2h_stream = torch.cuda.Stream()
+        # maps thread_id to the cuda.Stream associated with that worker thread
+        self.stream_map = dict()
 
     def _setup(self):
         import time
@@ -221,11 +225,12 @@ class BackendWorker:
     ):
         # copy_sem makes sure copy_event has been recorded in the data copying thread
         copy_sem.acquire()
-        torch.cuda.current_stream().wait_event(copy_event)
-        with torch.no_grad():
-            response_list.append(model(input_buffer))
-            compute_event.record()
-            compute_sem.release()
+        self.stream_map[threading.get_native_id()].wait_event(copy_event)
+        with torch.cuda.stream(self.stream_map[threading.get_native_id()]):
+            with torch.no_grad():
+                response_list.append(model(input_buffer))
+                compute_event.record()
+                compute_sem.release()
         del input_buffer
 
     def copy_data(self, input_buffer, data, copy_event, copy_sem):
@@ -243,7 +248,12 @@ class BackendWorker:
             self.response_queue.put((response_list[0].cpu(), request_time))
 
     async def run(self):
-        worker_pool = ThreadPoolExecutor(max_workers=1)
+        def worker_initializer():
+            self.stream_map[threading.get_native_id()] = torch.cuda.Stream()
+
+        worker_pool = ThreadPoolExecutor(
+            max_workers=self.num_workers, initializer=worker_initializer
+        )
         h2d_pool = ThreadPoolExecutor(max_workers=1)
         d2h_pool = ThreadPoolExecutor(max_workers=1)
 
@@ -314,6 +324,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--profile", default=False, action=argparse.BooleanOptionalAction
     )
+    parser.add_argument("--num_workers", type=int, default=4)
     args = parser.parse_args()
 
     downloaded_checkpoint = False
@@ -354,6 +365,7 @@ if __name__ == "__main__":
             response_queue,
             read_requests_event,
             args.batch_size,
+            args.num_workers,
             args.model_dir,
             args.compile,
         )
