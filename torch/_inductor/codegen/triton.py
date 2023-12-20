@@ -32,6 +32,7 @@ import torch._logging
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._triton import has_triton_package
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
@@ -100,6 +101,11 @@ class TritonPrinter(PythonPrinter):
         tl.math.{min, max}. This method make inductor work with both old
         and new version of triton.
         """
+
+        if not has_triton_package():
+            # some tests run under environment without triton installed want to
+            # check that the generated code is as expected.
+            return ""
         import inspect
 
         import triton.language as tl
@@ -2078,6 +2084,20 @@ class TritonKernel(Kernel):
         """
         )
 
+    @staticmethod
+    @lru_cache(None)
+    def gen_attr_descriptor_import():
+        """
+        import AttrsDescriptor if the triton version is new enough to have this
+        class defined.
+        """
+        import triton.compiler.compiler
+
+        if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
+            return "from triton.compiler.compiler import AttrsDescriptor"
+        else:
+            return ""
+
     def codegen_kernel(self, name=None):
         from triton import next_power_of_2
 
@@ -2123,13 +2143,8 @@ class TritonKernel(Kernel):
                     from torch._inductor import triton_helpers
                 """
             )
-
-            # import AttrsDescriptor if the triton version is new enough to have this
-            # class defined.
-            import triton.compiler.compiler
-
-            if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
-                code.splice("from triton.compiler.compiler import AttrsDescriptor")
+            if self.gen_attr_descriptor_import():
+                code.splice(self.gen_attr_descriptor_import())
 
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
