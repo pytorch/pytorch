@@ -243,7 +243,7 @@ namespace {
       if (it == batch_sizes.begin()) {
         continue;
       }
-      for (int idx = 0; idx < *it; idx++) {
+      for (const auto idx : c10::irange(*it)) {
         seqLengthArray[idx]++;
       }
     }
