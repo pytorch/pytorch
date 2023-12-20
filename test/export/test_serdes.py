@@ -2,8 +2,11 @@
 
 import io
 
-import test_export
-import testing
+try:
+    from . import test_export, testing
+except ImportError:
+    import test_export
+    import testing
 
 from torch.export import export, load, save
 
