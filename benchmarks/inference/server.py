@@ -3,7 +3,6 @@ import argparse
 import asyncio
 import os.path
 import subprocess
-
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -164,6 +163,7 @@ class BackendWorker:
         request_queue,
         response_queue,
         read_requests_event,
+        batch_size,
         model_dir=".",
         compile_model=True,
     ):
@@ -173,9 +173,12 @@ class BackendWorker:
         self.request_queue = request_queue
         self.response_queue = response_queue
         self.read_requests_event = read_requests_event
+        self.batch_size = batch_size
         self.model_dir = model_dir
         self.compile_model = compile_model
         self._setup_complete = False
+        self.h2d_stream = torch.cuda.Stream()
+        self.d2h_stream = torch.cuda.Stream()
 
     def _setup(self):
         import time
@@ -205,14 +208,45 @@ class BackendWorker:
             self.metrics_dict["m_compile_time"] = end_compile_time - start_compile_time
         return m
 
-    def model_predict(self, model, data, request_time):
+    def model_predict(
+        self,
+        model,
+        input_buffer,
+        copy_event,
+        compute_event,
+        copy_sem,
+        compute_sem,
+        response_list,
+        request_time,
+    ):
+        # copy_sem makes sure copy_event has been recorded in the data copying thread
+        copy_sem.acquire()
+        torch.cuda.current_stream().wait_event(copy_event)
         with torch.no_grad():
-            data = data.to(self.device, non_blocking=True)
-            out = model(data)
-        self.response_queue.put((out.cpu(), request_time))
+            response_list.append(model(input_buffer))
+            compute_event.record()
+            compute_sem.release()
+        del input_buffer
+
+    def copy_data(self, input_buffer, data, copy_event, copy_sem):
+        data = data.pin_memory()
+        with torch.cuda.stream(self.h2d_stream):
+            input_buffer.copy_(data, non_blocking=True)
+            copy_event.record()
+            copy_sem.release()
+
+    def respond(self, compute_event, compute_sem, response_list, request_time):
+        # compute_sem makes sure compute_event has been recorded in the model_predict thread
+        compute_sem.acquire()
+        self.d2h_stream.wait_event(compute_event)
+        with torch.cuda.stream(self.d2h_stream):
+            self.response_queue.put((response_list[0].cpu(), request_time))
 
     async def run(self):
-        pool = ThreadPoolExecutor(max_workers=1)
+        worker_pool = ThreadPoolExecutor(max_workers=1)
+        h2d_pool = ThreadPoolExecutor(max_workers=1)
+        d2h_pool = ThreadPoolExecutor(max_workers=1)
+
         self.read_requests_event.wait()
         # Clear as we will wait for this event again before continuing to
         # poll the request_queue for the non-warmup requests
@@ -226,8 +260,41 @@ class BackendWorker:
             if not self._setup_complete:
                 model = self._setup()
 
+            copy_sem = threading.Semaphore(0)
+            compute_sem = threading.Semaphore(0)
+            copy_event = torch.cuda.Event()
+            compute_event = torch.cuda.Event()
+            response_list = []
+            input_buffer = torch.empty(
+                [self.batch_size, 3, 250, 250], dtype=torch.float32, device="cuda"
+            )
             asyncio.get_running_loop().run_in_executor(
-                pool, self.model_predict, model, data, request_time
+                h2d_pool,
+                self.copy_data,
+                input_buffer,
+                data,
+                copy_event,
+                copy_sem,
+            )
+            asyncio.get_running_loop().run_in_executor(
+                worker_pool,
+                self.model_predict,
+                model,
+                input_buffer,
+                copy_event,
+                compute_event,
+                copy_sem,
+                compute_sem,
+                response_list,
+                request_time,
+            )
+            asyncio.get_running_loop().run_in_executor(
+                d2h_pool,
+                self.respond,
+                compute_event,
+                compute_sem,
+                response_list,
+                request_time,
             )
 
             if not self._setup_complete:
@@ -286,6 +353,7 @@ if __name__ == "__main__":
             request_queue,
             response_queue,
             read_requests_event,
+            args.batch_size,
             args.model_dir,
             args.compile,
         )
