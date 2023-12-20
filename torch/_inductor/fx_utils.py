@@ -87,7 +87,8 @@ class FakeTensorUpdater:
                 return all(
                     is_fake_tensor_same(new_i, old_i) for new_i, old_i in zip(new, old)
                 )
-            assert isinstance(new, torch.Tensor)
+            if not isinstance(new, torch.Tensor):
+                return new == old
             if new.shape != old.shape or new.layout != old.layout:
                 return False
             if new.layout == torch.strided and new.stride() != old.stride():
