@@ -1,7 +1,8 @@
 import bisect
-import warnings
+import itertools
 import math
 from typing import (
+    Dict,
     Generic,
     Iterable,
     List,
@@ -10,12 +11,12 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
-    Dict
+    cast,
 )
+import warnings
 
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator, randperm
-from torch._utils import _accumulate
 
 from ... import Generator, Tensor
 
@@ -454,4 +455,5 @@ def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
     indices = randperm(sum(lengths), generator=generator).tolist()  # type: ignore[arg-type, call-overload]
-    return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths), lengths)]
+    lengths = cast(Sequence[int], lengths)
+    return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(itertools.accumulate(lengths), lengths)]
