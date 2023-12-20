@@ -1692,6 +1692,8 @@ class CommonTemplate:
         def fn(a, b):
             return (
                 aten.div(a, b, rounding_mode=None),
+                aten.div(a * 0.5, b, rounding_mode=None),
+                aten.div(a, b * 1.0, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
                 a / b,
