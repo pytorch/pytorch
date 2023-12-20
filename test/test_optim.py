@@ -9,6 +9,9 @@ from torch.testing._internal.common_optimizers import optim_db, optims, Optimize
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, onlyCUDA, skipMPS
 from torch.testing._internal.common_utils import markDynamoStrictTest, run_tests, TestCase
 
+
+FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
+
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
 
@@ -100,9 +103,7 @@ class TestOptimRenewed(TestCase):
                 state.append(optimizer.state)
                 updated_params.append(model.parameters())
 
-            assert_eq_kwargs = {}
-            if reduced_precision:
-                assert_eq_kwargs = {'atol': 1e-5, 'rtol': 1e-4}
+            assert_eq_kwargs = {} if not reduced_precision else FP16_REDUCED_PRECISION
 
             og_state, new_state = state
             for og_p, new_p in zip(updated_params[0], updated_params[1]):
