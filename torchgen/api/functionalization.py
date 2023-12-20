@@ -7,6 +7,7 @@ from torchgen.api.types import (
     boolT,
     ConstRefCType,
     CType,
+    InverseReturnModeT,
     longT,
     NamedCType,
     tensorT,
@@ -68,11 +69,12 @@ reapply_views_binding = Binding(
     ),
     default=None,
 )
-called_by_functionalization_binding = Binding(
-    name="called_by_functionalization",
-    nctype=NamedCType(name="called_by_functionalization", type=BaseCType(boolT)),
+inverse_return_mode_binding = Binding(
+    name="inverse_return_mode",
+    nctype=NamedCType(name="inverse_return_mode", type=BaseCType(InverseReturnModeT)),
     argument=Argument(
-        name="called_by_functionalization",
+        name="inverse_return_mode",
+        # NB: not actually a bool but it doesn't matter because this isn't used
         type=BaseType(BaseTy.bool),
         default=None,
         annotation=None,
@@ -127,9 +129,9 @@ def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding
         dispatcher.argument(a, remove_non_owning_ref_types=True) for a in non_self_args
     ]
 
-    all_bindings = [reapply_views_binding]
-    if is_reverse:
-        all_bindings.append(called_by_functionalization_binding)
+    all_bindings = [
+        inverse_return_mode_binding if is_reverse else reapply_views_binding
+    ]
     all_bindings.extend(non_self_value_bindings)
     return all_bindings
 
@@ -180,14 +182,12 @@ def inner_arguments(func: FunctionSchema, is_reverse: bool) -> List[Binding]:
             return [
                 base_binding,
                 mutated_view_binding,
-                reapply_views_binding,
-                called_by_functionalization_binding,
+                inverse_return_mode_binding,
                 index_binding,
             ] + non_self_bindings
         else:
             return [
                 base_binding,
                 mutated_view_binding,
-                reapply_views_binding,
-                called_by_functionalization_binding,
+                inverse_return_mode_binding,
             ] + non_self_bindings
