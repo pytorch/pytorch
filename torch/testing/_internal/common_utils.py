@@ -77,7 +77,7 @@ from torch.nn import (
     ParameterList,
     Sequential,
 )
-from .dynamo_test_failures import dynamo_expected_failures
+from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips, FIXME_default_non_strict
 from torch.onnx import (
     register_custom_op_symbolic,
     unregister_custom_op_symbolic,
@@ -2686,7 +2686,19 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         # Are we compiling?
         compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR
         # Is the class strict and compiling?
-        strict_mode = getattr(test_cls, "dynamo_strict", False) and compiled
+        strict_default = False
+        if compiled:
+            filename = re.match(r".*/test/(.*).py", inspect.getfile(type(test_cls))).group(1)
+            if filename in FIXME_default_non_strict:
+                strict_default = False
+            else:
+                strict_default = True
+
+            if "STRICT_DEFAULT" in os.environ:
+                if os.environ["STRICT_DEFAULT"] == "1":
+                    strict_default = True
+
+        strict_mode = getattr(test_cls, "dynamo_strict", strict_default) and compiled
         nopython = getattr(test_cls, "dynamo_strict_nopython", False) and compiled
 
         if strict_mode:
@@ -2711,6 +2723,9 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 if key in dynamo_expected_failures:
                     method = getattr(self, self._testMethodName)
                     unittest.expectedFailure(self)
+                if key in dynamo_skips:
+                    method = getattr(self, self._testMethodName)
+                    setattr(self, self._testMethodName, unittest.skip("marked skip in dynamo_test_failures.py")(method))
 
             super_run(result=result)
 
