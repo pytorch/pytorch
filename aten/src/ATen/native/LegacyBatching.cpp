@@ -8,7 +8,7 @@
 #include <ATen/ops/_remove_batch_dim_native.h>
 #endif
 
-namespace at::native {
+namespace at { namespace native {
 
 // Adds a batch dimension to the tensor `self` out-of-place
 Tensor _add_batch_dim(const Tensor& self, int64_t batch_dim, int64_t level) {
@@ -122,4 +122,5 @@ Tensor _remove_batch_dim(const Tensor& self, int64_t level, int64_t batch_size, 
   return maybe_movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

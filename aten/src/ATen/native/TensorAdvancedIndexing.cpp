@@ -146,14 +146,15 @@
 #include <utility>
 #include <vector>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 std::string shapes_as_str(TensorList tensors);
 AdvancedIndex make_info(Tensor self, IOptTensorListRef orig);
 
-} // namespace at::native
+} // namespace native
 
-namespace at::meta {
+namespace meta {
 
 TORCH_META_FUNC(gather)
 (const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
@@ -467,9 +468,9 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
       .set_strides(std::move(info.indexed_strides));
 }
 
-} // namespace at::meta
+} // namespace meta
 
-namespace at::native {
+namespace native {
 
 DEFINE_DISPATCH(index_stub);
 DEFINE_DISPATCH(index_fill_stub);
@@ -2502,4 +2503,4 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
   return self;
 }
 
-} // namespace at::native
+}} // at::native

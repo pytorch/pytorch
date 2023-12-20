@@ -2,7 +2,7 @@ import operator
 import traceback
 import typing
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from functorch.experimental.control_flow import _unstack_pytree
@@ -27,16 +27,6 @@ Argument = Any
 Value = Any
 Fn = Callable[..., Any]
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
-
-
-_TORCH_SYM_OPS: Set[Callable] = {
-    torch.sym_int,
-    torch.sym_ite,
-    torch.sym_max,
-    torch.sym_min,
-    torch.sym_not,
-    torch.sym_sqrt,
-}
 
 
 class ExportPassBaseError(RuntimeError):
@@ -190,9 +180,6 @@ class _ExportPassBase(PassBase):
                 value, key = args
                 return self.callback.call_getitem(value, key, meta)
             elif getattr(target, "__module__", None) in {"_operator", "math"}:
-                assert callable(target)
-                return self.callback.call_sym(target, args, meta)
-            elif target in _TORCH_SYM_OPS:
                 assert callable(target)
                 return self.callback.call_sym(target, args, meta)
             elif isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):

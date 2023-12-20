@@ -9,7 +9,8 @@
 #include <ATen/ops/_test_functorch_fallback_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 bool is_nonzero(const Tensor& self) {
   auto n = self.numel();
@@ -43,4 +44,5 @@ Tensor _test_functorch_fallback(const Tensor& self, const Tensor& other) {
   return self.clone();
 }
 
-} // namespace at::meta
+} // namespace meta
+} // namespace at

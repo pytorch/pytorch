@@ -10,7 +10,8 @@
 #include <mkl.h>
 #endif // AT_MKL_ENABLED()
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -528,4 +529,5 @@ void Unfold3dAccCPU(
       });
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

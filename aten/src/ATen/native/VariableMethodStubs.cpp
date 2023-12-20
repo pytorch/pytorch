@@ -22,7 +22,8 @@
 // The stubs in here are used by dynamic dispatch. It just redirects everything
 // to the Tensor method we manually bind in TensorBody.h.
 
-namespace at::native {
+namespace at {
+namespace native {
 
 void _backward(const Tensor& self, TensorList inputs, const c10::optional<Tensor>& gradient_opt, c10::optional<bool> keep_graph, bool create_graph) {
   return self._backward(inputs, gradient_opt, keep_graph, create_graph);
@@ -72,4 +73,5 @@ Tensor _fw_primal(const Tensor& self, int64_t level) {
   return at::alias(self);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

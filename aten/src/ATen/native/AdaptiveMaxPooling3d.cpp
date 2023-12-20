@@ -14,7 +14,8 @@
 #include <ATen/ops/adaptive_max_pool3d_native.h>
 #endif
 
-namespace at::meta {
+namespace at {
+namespace meta {
 TORCH_META_FUNC(adaptive_max_pool3d) (const Tensor& input, IntArrayRef output_size) {
   auto ndim = input.ndimension();
   TORCH_CHECK(
@@ -71,7 +72,7 @@ TORCH_META_FUNC(adaptive_max_pool3d_backward)
 }
 } // namespace meta
 
-namespace at::native {
+namespace native {
 
 namespace {
 
@@ -432,4 +433,5 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cpu)
         });
   }
 }
-} // namespace at::native
+} // at::native
+} // at

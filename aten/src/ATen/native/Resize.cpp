@@ -15,7 +15,7 @@
 #include <ATen/ops/_resize_output_native.h>
 #endif
 
-namespace at::native {
+namespace at { namespace native {
 
 // Returns true if resize is necessary
 template <typename T>
@@ -281,4 +281,5 @@ const Tensor& resize__symint(
   return _resize_(self, size, optional_memory_format);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

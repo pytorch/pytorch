@@ -11,7 +11,8 @@
 #include <ATen/ops/item_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Scalar item(const Tensor& self) {
   auto numel = self.sym_numel();
@@ -57,4 +58,4 @@ Scalar _local_scalar_dense_cpu(const Tensor& self) {
   return r;
 }
 
-} // at::native
+}} // at::native

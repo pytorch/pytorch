@@ -12,7 +12,8 @@
 #include <ATen/ops/max_unpool3d_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Tensor& max_unpooling2d_forward_out_cpu(
     const Tensor& self_,
@@ -207,4 +208,5 @@ Tensor max_unpooling3d_forward_cpu(
 DEFINE_DISPATCH(max_unpool2d_kernel);
 DEFINE_DISPATCH(max_unpool3d_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

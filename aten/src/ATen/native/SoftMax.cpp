@@ -36,7 +36,8 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 
-namespace at::meta {
+namespace at {
+namespace meta {
 TORCH_META_FUNC(_softmax)
 (const Tensor& input, const int64_t dim, const bool half_to_float) {
   int64_t dim_ = maybe_wrap_dim(dim, input.dim());
@@ -144,9 +145,9 @@ TORCH_META_FUNC(_log_softmax_backward_data)
 
   set_output_raw_strided(0, grad.sizes(), {}, grad_input_options);
 }
-} // namespace at::meta
+}
 
-namespace at::native {
+namespace native {
 namespace {
 
 template <typename scalar_t, bool LogSoftMax, bool MaskedSoftMax = false>
@@ -679,4 +680,5 @@ Tensor masked_softmax_backward_cpu(
       });
   return grad_input;
 }
-} // namespace at::native
+}
+}

@@ -11,8 +11,6 @@
 
 C10_DECLARE_bool(torch_jit_enable_new_executor);
 
-C10_DECLARE_bool(torch_jit_execution_plan_reuse_code_graph);
-
 namespace torch::jit {
 struct GraphExecutorState;
 struct Code;
@@ -25,11 +23,7 @@ enum ExecutorExecutionMode {
 struct ExecutionPlan {
   ExecutionPlan() = default;
   ExecutionPlan(std::shared_ptr<Graph> graph, std::string function_name)
-      : code(graph, std::move(function_name)),
-        graph(
-            FLAGS_torch_jit_execution_plan_reuse_code_graph
-                ? code.graph()
-                : std::move(graph)) {}
+      : code(graph, std::move(function_name)), graph(std::move(graph)) {}
 
   operator bool() const {
     return static_cast<bool>(graph);

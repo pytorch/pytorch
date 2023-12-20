@@ -158,15 +158,7 @@ class Verifier(metaclass=_VerifierMeta):
                 return ret
 
             # TODO Remove this allowlist.
-            _allowed_torch_functions = (
-                torch.autograd.grad_mode.set_grad_enabled,
-                torch.sym_int,
-                torch.sym_ite,
-                torch.sym_max,
-                torch.sym_min,
-                torch.sym_not,
-                torch.sym_sqrt,
-            )
+            _allowed_torch_functions = (torch.autograd.grad_mode.set_grad_enabled,)
 
             if not isinstance(op, _allowed_op_types()):
                 if op not in _allowed_builtin_ops() and op not in _allowed_torch_functions:

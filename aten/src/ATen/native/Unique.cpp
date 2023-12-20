@@ -25,7 +25,8 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native{
 
 namespace {
 
@@ -495,4 +496,5 @@ unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool
   return unique_dim_consecutive_cpu(self, dim.value(), return_inverse, return_counts);
 }
 
-}  // namespace at::native
+}  // namespace native
+}  // namespace at

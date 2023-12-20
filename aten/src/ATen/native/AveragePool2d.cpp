@@ -11,8 +11,10 @@
 #include <ATen/ops/avg_pool2d_native.h>
 #endif
 
-namespace at::meta {
-using namespace ::at::native;
+namespace at {
+
+namespace meta{
+using namespace native;
 
 TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
 (const Tensor& input,
@@ -145,9 +147,9 @@ TORCH_META_FUNC(avg_pool2d_backward) (
   set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(memory_format));
 }
 
-} // namespace at::meta
+} // namespace meta
 
-namespace at::native {
+namespace native {
 
 TORCH_IMPL_FUNC(avg_pool2d_out_cpu)
 (const Tensor& input,
@@ -213,4 +215,5 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cpu) (
 DEFINE_DISPATCH(avg_pool2d_kernel);
 DEFINE_DISPATCH(avg_pool2d_backward_kernel);
 
-} // namespace at::native
+} // at::native
+} // at

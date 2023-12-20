@@ -26,7 +26,8 @@
 
 #include <c10/util/irange.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 bool is_same_size(const Tensor& self, const Tensor& other) {
   return self.sym_sizes().equals(other.sym_sizes());
@@ -134,4 +135,5 @@ bool is_set_to(const Tensor& self, const Tensor& src) {
   return false;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

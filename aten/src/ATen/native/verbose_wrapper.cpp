@@ -9,7 +9,8 @@
 #endif
 #include <ATen/native/verbose_wrapper.h>
 
-namespace torch::verbose {
+namespace torch {
+namespace verbose {
 
 int _mkl_set_verbose(int enable) {
 #if AT_MKL_ENABLED()
@@ -32,4 +33,5 @@ int _mkldnn_set_verbose(int level) {
 #endif
 }
 
-} // namespace torch::verbose
+} // namespace verbose
+} // namespace torch

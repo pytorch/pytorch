@@ -59,7 +59,8 @@
 
 static const int MIOPEN_DIM_MAX = 5;
 
-namespace at::meta {
+namespace at {
+namespace meta {
 
 TORCH_META_FUNC(renorm)(const Tensor& self, const Scalar& p, int64_t dim, const Scalar& maxnorm) {
   TORCH_CHECK(!p.isComplex(), "renorm: p must be real-valued");
@@ -72,9 +73,9 @@ TORCH_META_FUNC(renorm)(const Tensor& self, const Scalar& p, int64_t dim, const 
   set_output_raw_strided(0, self.sizes(), {}, self.options());
 }
 
-}  // namespace at::meta
+}  // namespace meta
 
-namespace at::native {
+namespace native {
 
 DEFINE_DISPATCH(batch_norm_cpu_stub);
 DEFINE_DISPATCH(batch_norm_cpu_collect_stats_stub);
@@ -884,4 +885,4 @@ TORCH_IMPL_FUNC(renorm_out)(const Tensor& self, const Scalar& p, int64_t dim,
   at::mul_outf(self, factor, const_cast<Tensor&>(out));
 }
 
-} // at::native
+}} // at::native

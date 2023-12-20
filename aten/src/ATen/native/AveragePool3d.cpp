@@ -15,8 +15,10 @@
 #include <ATen/ops/avg_pool3d_native.h>
 #endif
 
-namespace at::meta {
-using namespace ::at::native;
+namespace at {
+
+namespace meta{
+using namespace native;
 
 TORCH_META_FUNC(avg_pool3d) (
   const Tensor& input,
@@ -147,9 +149,9 @@ TORCH_META_FUNC(avg_pool3d_backward) (
   set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
 
-} // namespace at::meta
+} // namespace meta
 
-namespace at::native {
+namespace native {
 
 namespace {
 
@@ -523,4 +525,5 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
   }
 }
 
-} // namespace at::native
+} // at::native
+} // at

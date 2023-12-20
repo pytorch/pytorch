@@ -143,6 +143,7 @@ else()
       torch_cpu
       c10
       cpuinfo
+      clog
   )
 
   if(USE_NNPACK)
@@ -159,7 +160,6 @@ else()
 
   if(USE_PYTORCH_QNNPACK)
     list(APPEND pytorch_jni_LIBS pytorch_qnnpack)
-    list(APPEND pytorch_jni_LIBS clog)
   endif()
 
 endif()

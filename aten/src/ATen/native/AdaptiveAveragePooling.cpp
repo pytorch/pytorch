@@ -17,7 +17,8 @@
 #endif
 
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -152,4 +153,5 @@ namespace {
 DEFINE_DISPATCH(adaptive_avg_pool2d_kernel);
 DEFINE_DISPATCH(adaptive_avg_pool2d_backward_kernel);
 
-} // namespace at::native
+} // at::native
+} // at

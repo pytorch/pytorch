@@ -27,7 +27,6 @@ from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
     set_single_threaded_if_parallel_tbb,
-    skipIfTorchDynamo,
 )
 
 
@@ -800,15 +799,6 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adadelta,
         optim_error_inputs_func=optim_error_inputs_func_adadelta,
         supported_impls=("foreach", "differentiable"),
-        skips=(
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-        ),
     ),
     OptimizerInfo(
         Adagrad,
@@ -816,15 +806,6 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_adagrad,
         supported_impls=("foreach", "differentiable"),
         supports_sparse_on=("cpu"),
-        skips=(
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Adagrad is not currently supported by torch.compile, will error"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-        ),
     ),
     OptimizerInfo(
         Adam,
@@ -837,13 +818,6 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamax,
         optim_error_inputs_func=optim_error_inputs_func_adamax,
         supported_impls=("foreach", "differentiable"),
-        skips=(
-            DecorateInfo(
-                skipIfTorchDynamo("Adamax is not currently supported by torch.compile"),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-        ),
     ),
     OptimizerInfo(
         AdamW,
@@ -856,15 +830,6 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_asgd,
         optim_error_inputs_func=optim_error_inputs_func_asgd,
         supported_impls=("foreach", "differentiable"),
-        skips=(
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See discrepancy in https://github.com/pytorch/pytorch/issues/115607"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-        ),
     ),
     OptimizerInfo(
         LBFGS,
@@ -892,30 +857,12 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_rmsprop,
         optim_error_inputs_func=optim_error_inputs_func_rmsprop,
         supported_impls=("foreach", "differentiable"),
-        skips=(
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-        ),
     ),
     OptimizerInfo(
         Rprop,
         optim_inputs_func=optim_inputs_func_rprop,
         optim_error_inputs_func=optim_error_inputs_func_rprop,
         supported_impls=("foreach", "differentiable"),
-        skips=(
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-        ),
     ),
     OptimizerInfo(
         SGD,

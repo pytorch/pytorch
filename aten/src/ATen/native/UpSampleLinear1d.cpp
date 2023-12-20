@@ -17,7 +17,8 @@
 #include <ATen/ops/upsample_linear1d_native.h>
 #endif
 
-namespace at::meta {
+namespace at {
+namespace meta {
 
 TORCH_META_FUNC(upsample_linear1d) (
     const Tensor& input,
@@ -57,9 +58,9 @@ TORCH_META_FUNC(upsample_linear1d_backward) (
   set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
-} // namespace at::meta
+} // namespace meta
 
-namespace at::native {
+namespace native {
 
 TORCH_IMPL_FUNC(upsample_linear1d_out_cpu) (
     const Tensor& input,
@@ -101,4 +102,5 @@ Tensor upsample_linear1d(
 DEFINE_DISPATCH(upsample_linear1d_kernel);
 DEFINE_DISPATCH(upsample_linear1d_backward_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

@@ -40,8 +40,8 @@ class function_ref<Ret(Params...)> {
 
   template <typename Callable>
   static Ret callback_fn(intptr_t callable, Params... params) {
-    return (*reinterpret_cast<Callable*>(callable))(
-        std::forward<Params>(params)...);
+    return (*reinterpret_cast<Callable*>(callable))(std::forward<Params>(
+        params)...);
   }
 
  public:

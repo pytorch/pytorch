@@ -17,7 +17,8 @@
 #include <ATen/ops/upsample_trilinear3d_native.h>
 #endif
 
-namespace at::meta {
+namespace at {
+namespace meta {
 
 TORCH_META_FUNC(upsample_trilinear3d) (
   const Tensor& input,
@@ -64,8 +65,8 @@ TORCH_META_FUNC(upsample_trilinear3d_backward) (
   set_output_raw_strided(0, input_size, {}, grad_output.options().memory_format(grad_output.suggest_memory_format()));
 }
 
-} // namespace at::meta
-namespace at::native {
+} // namespace meta
+namespace native {
 
 TORCH_IMPL_FUNC(upsample_trilinear3d_out_cpu) (
     const Tensor& input,
@@ -113,4 +114,5 @@ Tensor upsample_trilinear3d(
 DEFINE_DISPATCH(upsample_trilinear3d_kernel);
 DEFINE_DISPATCH(upsample_trilinear3d_backward_kernel);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

@@ -19,7 +19,8 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at::meta {
+namespace at {
+namespace meta {
 
 TORCH_META_FUNC(tril)(const Tensor& self, int64_t k) {
   TORCH_CHECK(self.dim() >= 2, "tril: input tensor must have at least 2 dimensions")
@@ -31,9 +32,9 @@ TORCH_META_FUNC(triu)(const Tensor& self, int64_t k) {
   set_output_raw_strided(0, self.sizes(), {}, self.options());
 }
 
-}  // namespace at::meta
+}  // namespace meta
 
-namespace at::native {
+namespace native {
 namespace {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -201,4 +202,5 @@ Tensor trace_backward_symint(const Tensor& grad, c10::SymIntArrayRef sizes) {
   return grad_input.view_symint(sizes);
 }
 
-}  // namespace at::native
+}  // namespace native
+}  // namespace at

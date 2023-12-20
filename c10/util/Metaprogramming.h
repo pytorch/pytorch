@@ -17,7 +17,7 @@ namespace guts {
 template <class Func>
 struct function_traits {
   static_assert(
-      !std::is_same_v<Func, Func>,
+      !std::is_same<Func, Func>::value,
       "In function_traits<Func>, Func must be a plain function type.");
 };
 template <class Result, class... Args>

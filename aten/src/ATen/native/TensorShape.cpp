@@ -213,7 +213,8 @@
 #include <utility>
 #include <vector>
 
-namespace at::meta {
+namespace at {
+namespace meta {
 inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
   size_t i = 0;
   for (const Tensor& t : tensors) {
@@ -344,9 +345,9 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
       .set_all_same_sizes_and_stride(all_same_sizes_and_stride)
       .set_memory_format(memory_format);
 }
-} // namespace at::meta
+} // namespace meta
 
-namespace at::native {
+namespace native {
 
 DEFINE_DISPATCH(cat_serial_stub);
 DEFINE_DISPATCH(stack_serial_stub);
@@ -371,7 +372,6 @@ Tensor& set_(Tensor& result, Storage source) {
       static_cast<int64_t>(source.nbytes() / result.dtype().itemsize());
   return result.set_(std::move(source), 0, new_size, {});
 }
-
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
 Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
@@ -3064,12 +3064,14 @@ static inline Tensor sparse_compressed_transpose(
           return self.values().transpose(-2 - dense_dim, -1 - dense_dim);
         });
   }
-  return at::_sparse_compressed_tensor_unsafe(
+  return at::native::_sparse_compressed_tensor_unsafe(
       compressed_inds,
       plain_inds,
       result_vals,
       result_sizes,
-      self.options().layout(result_layout));
+      self.scalar_type(),
+      result_layout,
+      self.device());
 }
 } // namespace
 
@@ -4033,4 +4035,5 @@ int64_t dense_dim_strided(const at::Tensor& self) {
   return self.dim();
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at
