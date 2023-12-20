@@ -680,7 +680,7 @@ if torch._C._has_mkldnn:
                     :-1
                 ] == torch.Size(reshape_2[:-1])
                 can_remove_reshape = can_remove_reshape and (
-                    reduce(lambda x, y: x * y, reshape_2[:-1]) == reshape_1[0]
+                    reduce(operator.mul, reshape_2[:-1]) == reshape_1[0]
                 )
 
             if can_remove_reshape:

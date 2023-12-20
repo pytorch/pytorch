@@ -15,6 +15,7 @@ import pytest
 IS_WASM = False
 HAS_REFCOUNT = True
 
+import operator
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 from hypothesis import given, strategies as st
@@ -701,25 +702,19 @@ class TestFloatExceptions(TestCase):
         # The value of tiny for double double is NaN, so we need to
         # pass the assert
         if not np.isnan(ft_tiny):
-            self.assert_raises_fpe(underflow, lambda a, b: a / b, ft_tiny, ft_max)
-            self.assert_raises_fpe(underflow, lambda a, b: a * b, ft_tiny, ft_tiny)
-        self.assert_raises_fpe(overflow, lambda a, b: a * b, ft_max, ftype(2))
-        self.assert_raises_fpe(overflow, lambda a, b: a / b, ft_max, ftype(0.5))
-        self.assert_raises_fpe(overflow, lambda a, b: a + b, ft_max, ft_max * ft_eps)
-        self.assert_raises_fpe(overflow, lambda a, b: a - b, -ft_max, ft_max * ft_eps)
+            self.assert_raises_fpe(underflow, operator.truediv, ft_tiny, ft_max)
+            self.assert_raises_fpe(underflow, operator.mul, ft_tiny, ft_tiny)
+        self.assert_raises_fpe(overflow, operator.mul, ft_max, ftype(2))
+        self.assert_raises_fpe(overflow, operator.truediv, ft_max, ftype(0.5))
+        self.assert_raises_fpe(overflow, operator.add, ft_max, ft_max * ft_eps)
+        self.assert_raises_fpe(overflow, operator.sub, -ft_max, ft_max * ft_eps)
         self.assert_raises_fpe(overflow, np.power, ftype(2), ftype(2**fi.nexp))
-        self.assert_raises_fpe(divbyzero, lambda a, b: a / b, ftype(1), ftype(0))
-        self.assert_raises_fpe(
-            invalid, lambda a, b: a / b, ftype(np.inf), ftype(np.inf)
-        )
-        self.assert_raises_fpe(invalid, lambda a, b: a / b, ftype(0), ftype(0))
-        self.assert_raises_fpe(
-            invalid, lambda a, b: a - b, ftype(np.inf), ftype(np.inf)
-        )
-        self.assert_raises_fpe(
-            invalid, lambda a, b: a + b, ftype(np.inf), ftype(-np.inf)
-        )
-        self.assert_raises_fpe(invalid, lambda a, b: a * b, ftype(0), ftype(np.inf))
+        self.assert_raises_fpe(divbyzero, operator.truediv, ftype(1), ftype(0))
+        self.assert_raises_fpe(invalid, operator.truediv, ftype(np.inf), ftype(np.inf))
+        self.assert_raises_fpe(invalid, operator.truediv, ftype(0), ftype(0))
+        self.assert_raises_fpe(invalid, operator.sub, ftype(np.inf), ftype(np.inf))
+        self.assert_raises_fpe(invalid, operator.add, ftype(np.inf), ftype(-np.inf))
+        self.assert_raises_fpe(invalid, operator.mul, ftype(0), ftype(np.inf))
 
     @skipif(IS_WASM, reason="no wasm fp exception support")
     def test_warnings(self):
