@@ -974,8 +974,10 @@ class CheckFunctionManager:
         )
 
         # Break retain cycle. See test_release_scope_memory
-        def cleanup_builder(b):
-            b.scope = {}
+        def cleanup_builder(weak_b):
+            b = weak_b()
+            if b:
+                b.scope = {}
 
         # Break retain cycle. See test_release_input_memory
         w_builder = weakref.ref(builder, cleanup_builder)
