@@ -3,6 +3,8 @@ import argparse
 import asyncio
 import os.path
 import subprocess
+
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from queue import Empty
@@ -21,18 +23,27 @@ class FrontendWorker(mp.Process):
     """
 
     def __init__(
-        self, metrics_dict, request_queue, response_queue, batch_size, num_iters=10
+        self,
+        metrics_dict,
+        request_queue,
+        response_queue,
+        read_requests_event,
+        batch_size,
+        num_iters=10,
     ):
         super().__init__()
         self.metrics_dict = metrics_dict
         self.request_queue = request_queue
         self.response_queue = response_queue
+        self.read_requests_event = read_requests_event
         self.warmup_event = mp.Event()
         self.batch_size = batch_size
         self.num_iters = num_iters
         self.poll_gpu = True
+        self.start_send_time = None
+        self.end_recv_time = None
 
-    def _run_metrics(self):
+    def _run_metrics(self, metrics_lock):
         """
         This function will poll the response queue until it has received all
         responses. It records the startup latency, the average, max, min latency
@@ -49,18 +60,20 @@ class FrontendWorker(mp.Process):
             else:
                 response_times.append(time.time() - request_time)
 
+        self.end_recv_time = time.time()
         self.poll_gpu = False
 
         response_times = np.array(response_times)
-        self.metrics_dict["warmup_latency"] = warmup_response_time
-        self.metrics_dict["average_latency"] = response_times.mean()
-        self.metrics_dict["max_latency"] = response_times.max()
-        self.metrics_dict["min_latency"] = response_times.min()
-        self.metrics_dict["throughput"] = (
-            self.num_iters * self.batch_size / response_times.sum()
-        )
+        with metrics_lock:
+            self.metrics_dict["warmup_latency"] = warmup_response_time
+            self.metrics_dict["average_latency"] = response_times.mean()
+            self.metrics_dict["max_latency"] = response_times.max()
+            self.metrics_dict["min_latency"] = response_times.min()
+            self.metrics_dict["throughput"] = (self.num_iters * self.batch_size) / (
+                self.end_recv_time - self.start_send_time
+            )
 
-    def _run_gpu_utilization(self):
+    def _run_gpu_utilization(self, metrics_lock):
         """
         This function will poll nvidia-smi for GPU utilization every 100ms to
         record the average GPU utilization.
@@ -87,38 +100,51 @@ class FrontendWorker(mp.Process):
             gpu_utilization = get_gpu_utilization()
             if gpu_utilization != "N/A":
                 gpu_utilizations.append(float(gpu_utilization))
-            time.sleep(0.1)
 
-        self.metrics_dict["gpu_util"] = np.array(gpu_utilizations).mean()
+        with metrics_lock:
+            self.metrics_dict["gpu_util"] = torch.tensor(gpu_utilizations).mean().item()
 
     def _send_requests(self):
         """
         This function will send one warmup request, and then num_iters requests
         to the backend process.
         """
+
+        fake_data = torch.randn(self.batch_size, 3, 250, 250, requires_grad=False)
+        other_data = [
+            torch.randn(self.batch_size, 3, 250, 250, requires_grad=False)
+            for i in range(self.num_iters)
+        ]
+
         # Send one batch of warmup data
-        fake_data = torch.randn(
-            self.batch_size, 3, 250, 250, requires_grad=False, pin_memory=True
-        )
         self.request_queue.put((fake_data, time.time()))
+        # Tell backend to poll queue for warmup request
+        self.read_requests_event.set()
         self.warmup_event.wait()
+        # Tell backend to poll queue for rest of requests
+        self.read_requests_event.set()
 
         # Send fake data
+        self.start_send_time = time.time()
         for i in range(self.num_iters):
-            fake_data = torch.randn(
-                self.batch_size, 3, 250, 250, requires_grad=False, pin_memory=True
-            )
-            self.request_queue.put((fake_data, time.time()))
+            self.request_queue.put((other_data[i], time.time()))
 
     def run(self):
-        import threading
-
+        # Lock for writing to metrics_dict
+        metrics_lock = threading.Lock()
         requests_thread = threading.Thread(target=self._send_requests)
-        metrics_thread = threading.Thread(target=self._run_metrics)
-        gpu_utilization_thread = threading.Thread(target=self._run_gpu_utilization)
+        metrics_thread = threading.Thread(
+            target=self._run_metrics, args=(metrics_lock,)
+        )
+        gpu_utilization_thread = threading.Thread(
+            target=self._run_gpu_utilization, args=(metrics_lock,)
+        )
 
         requests_thread.start()
         metrics_thread.start()
+
+        # only start polling GPU utilization after the warmup request is complete
+        self.warmup_event.wait()
         gpu_utilization_thread.start()
 
         requests_thread.join()
@@ -137,6 +163,7 @@ class BackendWorker:
         metrics_dict,
         request_queue,
         response_queue,
+        read_requests_event,
         model_dir=".",
         compile_model=True,
     ):
@@ -145,6 +172,7 @@ class BackendWorker:
         self.metrics_dict = metrics_dict
         self.request_queue = request_queue
         self.response_queue = response_queue
+        self.read_requests_event = read_requests_event
         self.model_dir = model_dir
         self.compile_model = compile_model
         self._setup_complete = False
@@ -181,24 +209,30 @@ class BackendWorker:
         with torch.no_grad():
             data = data.to(self.device, non_blocking=True)
             out = model(data)
-        self.response_queue.put((out, request_time))
+        self.response_queue.put((out.cpu(), request_time))
 
     async def run(self):
         pool = ThreadPoolExecutor(max_workers=1)
-
+        self.read_requests_event.wait()
+        # Clear as we will wait for this event again before continuing to
+        # poll the request_queue for the non-warmup requests
+        self.read_requests_event.clear()
         while True:
             try:
-                data, request_time = self.request_queue.get(timeout=10)
+                data, request_time = self.request_queue.get(timeout=5)
             except Empty:
                 break
 
             if not self._setup_complete:
                 model = self._setup()
-                self._setup_complete = True
 
             asyncio.get_running_loop().run_in_executor(
                 pool, self.model_predict, model, data, request_time
             )
+
+            if not self._setup_complete:
+                self.read_requests_event.wait()
+                self._setup_complete = True
 
 
 if __name__ == "__main__":
@@ -232,6 +266,7 @@ if __name__ == "__main__":
         mp.set_start_method("forkserver")
         request_queue = mp.Queue()
         response_queue = mp.Queue()
+        read_requests_event = mp.Event()
 
         manager = mp.Manager()
         metrics_dict = manager.dict()
@@ -242,11 +277,17 @@ if __name__ == "__main__":
             metrics_dict,
             request_queue,
             response_queue,
+            read_requests_event,
             args.batch_size,
             num_iters=args.num_iters,
         )
         backend = BackendWorker(
-            metrics_dict, request_queue, response_queue, args.model_dir, args.compile
+            metrics_dict,
+            request_queue,
+            response_queue,
+            read_requests_event,
+            args.model_dir,
+            args.compile,
         )
 
         frontend.start()
