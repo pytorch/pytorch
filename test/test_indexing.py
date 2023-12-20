@@ -1395,6 +1395,15 @@ class TestIndexing(TestCase):
             tensor_b[6] = 1.0
             self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
 
+    def test_index_limits(self, device):
+        #  Regression test for https://github.com/pytorch/pytorch/issues/115415
+        t = torch.tensor([], device=device)
+        idx_min = torch.iinfo(torch.int64).min
+        idx_max = torch.iinfo(torch.int64).max
+        self.assertRaises(IndexError, lambda: t[idx_min])
+        self.assertRaises(IndexError, lambda: t[idx_max])
+
+
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:

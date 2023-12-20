@@ -1,3 +1,4 @@
+import itertools
 import logging
 import operator
 import os
@@ -1043,7 +1044,9 @@ class GraphLowering(torch.fx.Interpreter):
                     for param in tracing_context.params_flat  # type: ignore[union-attr]
                     if param is not None
                 ]
-                real_inputs = [materialize(x) for x in (params_flat + V.real_inputs)]
+                real_inputs = [
+                    materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
+                ]
             else:
                 real_inputs = [materialize(x) for x in V.real_inputs]
 
