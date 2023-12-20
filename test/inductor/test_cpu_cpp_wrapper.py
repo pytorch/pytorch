@@ -167,6 +167,7 @@ if RUN_CPU:
             slow=True,
         ),
         BaseTest("test_conv_transpose2d_packed", "cpu", test_cpu_repro.CPUReproTests()),
+        BaseTest("test_cumsum"),
         BaseTest("test_custom_op"),
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel

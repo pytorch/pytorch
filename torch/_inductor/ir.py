@@ -4401,6 +4401,7 @@ has_c_shim = {
 
 class FallbackKernel(ExternKernelAlloc):
     args_default_value: List[Dict[str, Any]]
+    args_name: List[str]
 
     def __init__(
         self,
@@ -4468,7 +4469,12 @@ class FallbackKernel(ExternKernelAlloc):
     def is_legacy_abi_kernel(self):
         return "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
 
-    def get_arg_default_value(self, pos):
+    def get_pos_arg_value(self, pos, kwargs):
+        # positional args may be provided in kwargs
+        pos_arg_name = self.args_name[pos]
+        if pos_arg_name in kwargs:
+            return kwargs[pos_arg_name]
+
         assert hasattr(
             self, "args_default_value"
         ), "self.args_default_value has to be provided"
@@ -4539,7 +4545,7 @@ class FallbackKernel(ExternKernelAlloc):
             # Some positional args are not provided, need to use their default value in cpp wrapper
             if n_args < n_pos_args:
                 pos_args = [
-                    self.get_arg_default_value(i) for i in range(n_args, n_pos_args)
+                    self.get_pos_arg_value(i, kwargs) for i in range(n_args, n_pos_args)
                 ]
                 pos_args = [V.graph.wrapper_code.val_to_arg_str(x) for x in pos_args]
                 args.extend(pos_args)
@@ -4690,6 +4696,7 @@ class FallbackKernel(ExternKernelAlloc):
                         for x in schema.arguments
                         if x.kwarg_only
                     }
+                    self.args_name = [x.name for x in schema.arguments]
             else:
                 self.python_kernel_name = f"aten.{op_base_name}"
 
