@@ -14224,7 +14224,15 @@ op_db: List[OpInfo] = [
         supports_forward_ad=False,
         supports_autograd=False,
         decorators=[skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 9.0')],
-        skips=()
+        skips=(
+            # Sample inputs isn't really parametrized on dtype
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
+                         device_type='cuda'),
+            # "mul_cuda" not implemented for float8_e4m3fn
+            # https://github.com/pytorch/pytorch/issues/107256
+            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                         dtypes=(torch.float8_e4m3fn,)),
+        )
     ),
     OpInfo(
         'nn.functional.scaled_dot_product_attention',

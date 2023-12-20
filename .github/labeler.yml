@@ -79,3 +79,7 @@
 - torch/nn/parallel/**
 - test/distributed/**
 - torch/testing/_internal/distributed/**
+
+"module: distributed_checkpoint":
+- torch/distributed/checkpoint/**
+- test/distributed/checkpoint/**
