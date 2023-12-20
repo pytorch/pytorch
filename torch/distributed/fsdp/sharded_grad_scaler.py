@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, Iterable, List, Optional, overload, Sequence, Tuple, Union
-
+from collections import abc
 import torch
 import torch.distributed as dist
 from torch.cuda.amp.grad_scaler import _MultiDeviceReplicator, GradScaler
@@ -103,10 +103,19 @@ class ShardedGradScaler(GradScaler):
         # format (fp16, bf16) and so the scaled loss should be of the same dtype.
         if isinstance(scaled_outputs, torch.Tensor):
             return scaled_outputs.type(outputs.dtype)  # type: ignore[union-attr]
-        iterable = map(lambda x, y: x.type(y.dtype), scaled_outputs, outputs)
-        if isinstance(scaled_outputs, (list, tuple)):
-            return type(scaled_outputs)(iterable)
-        return iterable
+        def apply_dtype(
+            scaled_val: Union[torch.Tensor, Iterable[torch.Tensor]],
+            orig_val: Union[torch.Tensor, Iterable[torch.Tensor]],
+        ):
+            if isinstance(scaled_val, torch.Tensor):
+                return scaled_val.type(orig_val.dtype)
+            if isinstance(scaled_val, abc.Iterable):
+                iterable = map(apply_dtype, scaled_val, orig_val)
+                if isinstance(scaled_val, (list, tuple)):
+                    return type(scaled_val)(iterable)
+                return iterable
+            raise ValueError("scaled_outputs/outputs must be a Tensor or an iterable of Tensors")
+        return apply_dtype(scaled_outputs, outputs)
 
     def _foreach_non_finite_check_and_unscale_cpu_(
         self,
@@ -158,7 +167,7 @@ class ShardedGradScaler(GradScaler):
         optimizer: torch.optim.Optimizer,
         inv_scale: torch.Tensor,
         found_inf: torch.Tensor,
-        allow_fp16: bool,
+        allow_fp16: bool = True,
     ) -> Dict[torch.device, torch.Tensor]:
         per_device_found_inf_dict = super()._unscale_grads_(
             optimizer, inv_scale, found_inf, allow_fp16
