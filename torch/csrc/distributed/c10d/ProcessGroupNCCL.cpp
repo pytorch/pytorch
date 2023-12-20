@@ -712,8 +712,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       terminateProcessGroup_(false),
       terminateHeartbeatMonitorThread_(false),
       collectiveDebugInfoMode_(false),
-      uid_(process_group_id++),
-      intraNodeComm_(initIntraNodeComm()) {
+      uid_(process_group_id++) {
   TORCH_CHECK_WITH(
       ValueError,
       at::cuda::getNumGPUs() != 0,
@@ -896,12 +895,6 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
 #endif
 }
 
-c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
-    initIntraNodeComm() {
-  return intra_node_comm::IntraNodeComm::rendezvous(
-      store_, std::to_string(uid_), rank_, size_);
-}
-
 void ProcessGroupNCCL::runHealthCheck() {
   // Run health check in a separate thread and wait on CV to handle timeouts,
   // since majority of getNCCLComm failures are hangs.
@@ -1075,10 +1068,9 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
   }
 }
 
-void abortCommsFromMap(
+void ProcessGroupNCCL::abortCommsFromMap(
     std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
         ncclCommsMap,
-    const int rank,
     c10::optional<std::string> abortReason) {
   // The process may control multiple devices, loop through the communicators on
   // each device
@@ -1099,7 +1091,7 @@ void abortCommsFromMap(
     // their responsibility to destroy the process group and recreate
     // it to recover from errors.
 
-    LOG(INFO) << "[Rank " << rank << "] Destroyed " << ncclComms.size()
+    LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
               << "communicators on CUDA device " << devName;
   }
 }
@@ -1121,8 +1113,8 @@ void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   ncclCommDevIdxMapMutex.unlock();
 
   std::lock_guard<std::mutex> lock(mutex_);
-  abortCommsFromMap(devNCCLCommMap_, rank_, abortReason);
-  abortCommsFromMap(inInitializationCommMap_, rank_, abortReason);
+  abortCommsFromMap(devNCCLCommMap_, abortReason);
+  abortCommsFromMap(inInitializationCommMap_, abortReason);
 }
 
 void ProcessGroupNCCL::shutdown() {
@@ -2846,16 +2838,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
-  if (intraNodeComm_ != nullptr && tensors.size() == 1 &&
-      opts.reduceOp == ReduceOp::SUM) {
-    using namespace intra_node_comm;
-    auto algo = intraNodeComm_->selectAllReduceAlgo(tensors[0]);
-    if (algo != intra_node_comm::AllReduceAlgo::NONE) {
-      intraNodeComm_->allReduce(tensors[0], algo);
-      return c10::make_intrusive<IntraNodeCommWork>();
-    }
-  }
-
   check_gpu_tensors_different_devices(tensors);
 
   // @lint-ignore CLANGTIDY

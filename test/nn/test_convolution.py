@@ -37,7 +37,6 @@ if TEST_SCIPY:
     import scipy.signal
     import scipy.ndimage
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestConvolutionNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -846,7 +845,6 @@ class TestConvolutionNN(NNTestCase):
             _test_conv2d(s, k, g, d)
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestConvolutionNNDeviceType(NNTestCase):
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
                                   inp_size, dilation, no_weight, groups=1, use_cuda=False,
