@@ -52,13 +52,6 @@ class _StoragePrefix:
 DEFAULT_SUFFIX = ".distcp"
 
 
-def _trim(tensor: torch.Tensor) -> torch.Tensor:
-    tensor = tensor.detach().cpu()
-    if tensor._typed_storage()._size() != tensor.numel():
-        tensor = tensor.clone()
-    return tensor
-
-
 def _result_from_write_item(
     item: WriteItem, size_in_bytes, storage_data
 ) -> WriteResult:
