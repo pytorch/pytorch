@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cuda_runtime_api.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 
 namespace torch::inductor {
@@ -7,15 +8,14 @@ namespace torch::inductor {
 class TORCH_API AOTIModelContainerRunnerCuda : public AOTIModelContainerRunner {
  public:
   AOTIModelContainerRunnerCuda(
-      const char* model_path,
+      const std::string& model_so_path,
       size_t num_models = 1,
-      const char* cubin_dir = nullptr)
-      : AOTIModelContainerRunner(model_path, num_models, false, cubin_dir) {}
+      const std::string& cubin_dir = "")
+      : AOTIModelContainerRunner(model_so_path, num_models, false, cubin_dir) {}
 
   std::vector<at::Tensor> run(
-      std::vector<at::Tensor> inputs,
-      AOTInductorStreamHandle cuda_stream_handle = nullptr,
-      AOTIProxyExecutorHandle proxy_executor_handle = nullptr);
+      std::vector<at::Tensor>& inputs,
+      cudaStream_t cuda_stream_handle = nullptr);
 };
 
 } // namespace torch::inductor
