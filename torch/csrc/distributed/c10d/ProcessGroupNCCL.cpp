@@ -466,10 +466,15 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
   std::unique_lock<std::mutex> lock(mutex_);
   exception_ = exception_ptr;
   if (exception_) {
-    LOG(INFO) << "[Rank " << rank_ << "]"
-              << " found async exception when checking for NCCL errors: "
+    LOG(INFO) << logPrefix()
+              << "found async exception when checking for NCCL errors: "
               << getExceptionMsgFromExceptionPtr(exception_);
   }
+}
+
+const std::string& ProcessGroupNCCL::WorkNCCL::logPrefix() const {
+  static std::string prefix = c10::str("[Rank ", rank_, "] ");
+  return prefix;
 }
 
 void ProcessGroupNCCL::WorkNCCL::setException(
@@ -527,9 +532,7 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
     return true;
 
   std::string exceptionMsg = c10::str(
-      "[Rank ",
-      rank_,
-      "] ",
+      logPrefix(),
       "Watchdog caught collective operation timeout: ",
       *this,
       " ran for ",
@@ -550,13 +553,13 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
         "Some NCCL operations have failed or timed out. Due to the ",
         "asynchronous nature of CUDA kernels, subsequent GPU operations ",
         "might run on corrupted/incomplete data.");
-    LOG(ERROR) << exceptionMsg;
+    LOG(ERROR) << logPrefix() << exceptionMsg;
     C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleException");
 
     if (SHOULD_TEAR_DOWN(errorHandling)) {
       auto tearDownMsg = c10::str(
           "To avoid data inconsistency, we are taking the entire process down.");
-      LOG(ERROR) << tearDownMsg;
+      LOG(ERROR) << logPrefix() << tearDownMsg;
       std::rethrow_exception(exception_);
     }
   }
@@ -597,9 +600,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
       // can not run new events successfully.
       if (timedOut) {
         std::string exceptionMsg = c10::str(
-            "[Rank ",
-            rank_,
-            "] Work ",
+            logPrefix(),
+            "Work ",
             (*this),
             " timed out in blocking wait (TORCH_NCCL_BLOCKING_WAIT=1).");
         LOG(ERROR) << exceptionMsg;
@@ -740,15 +742,15 @@ ProcessGroupNCCL::ProcessGroupNCCL(
           expandable_segments()) {
     useTensorRegisterAllocatorHook_ = false;
     LOG(INFO)
-        << "[Rank " << rank_
-        << "] disables TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
+        << logPrefix()
+        << "disables TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
   }
 #endif
 
   if (blockingWait_) {
     if (asyncErrorHandling_ != NoHandling || desyncDebug_) {
       LOG(INFO)
-          << "[Rank " << rank_ << "] TORCH_NCCL_BLOCKING_WAIT and "
+          << logPrefix() << "TORCH_NCCL_BLOCKING_WAIT and "
           << "TORCH_NCCL_ASYNC_ERROR_HANDLING|TORCH_NCCL_DESYNC_DEBUG"
           << "should not both be enabled. "
           << "Only TORCH_NCCL_BLOCKING_WAIT is being used in this process.";
@@ -758,8 +760,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   } else {
     if (desyncDebug_ && asyncErrorHandling_ == NoHandling) {
       LOG(INFO)
-          << "[Rank " << rank_
-          << "] TORCH_NCCL_DESYNC_DEBUG and TORCH_NCCL_ASYNC_ERROR_HANDLING "
+          << logPrefix()
+          << "TORCH_NCCL_DESYNC_DEBUG and TORCH_NCCL_ASYNC_ERROR_HANDLING "
           << "must both be enabled. "
           << "Enabling TORCH_NCCL_ASYNC_ERROR_HANDLING.";
       asyncErrorHandling_ = SkipCleanUp;
@@ -785,9 +787,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
   std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
-  LOG(INFO) << "[Rank " << rank_
-            << "] ProcessGroupNCCL initialization options: "
-            << "NCCL version: " << getNcclVersion()
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
+            << "NCCL version: " << getNcclVersion() << ", size: " << size
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -872,7 +873,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
   std::vector<at::Device> rankDevices = {device};
   const auto key = getKeyFromDevices(rankDevices);
-  LOG(INFO) << "Eagerly connecting nccl backend with device " << device;
+  LOG(INFO) << logPrefix() << "Eagerly connecting nccl backend with device "
+            << device;
   getNCCLComm(key, rankDevices, OpType::ALLREDUCE);
 }
 
@@ -883,8 +885,8 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
 #ifdef NCCL_HAS_COMM_SPLIT
   std::vector<at::Device> rankDevices = {device};
   const auto key = getKeyFromDevices(rankDevices);
-  LOG(INFO) << "Performing nocolor split on backend device " << device
-            << ", key " << key << ", i am " << this;
+  LOG(INFO) << logPrefix() << "Performing nocolor split on backend device "
+            << device << ", key " << key << ", i am " << this;
   auto comm = getNCCLComm(key, rankDevices, OpType::ALLREDUCE);
   TORCH_CHECK_WITH(
       DistBackendError,
@@ -940,8 +942,7 @@ void ProcessGroupNCCL::runHealthCheck() {
   // We don't need to join the thread, just need to verify health check via the
   // CV. Hence we detach the thread here.
   t.detach(); // NOLINT
-  LOG(INFO) << "[Rank " << rank_ << "]"
-            << " will wait up to " << options_->timeout.count()
+  LOG(INFO) << logPrefix() << "will wait up to " << options_->timeout.count()
             << " msec for NCCL health check to complete.";
   std::unique_lock<std::mutex> lock(healthCheckData.healthCheckMutex);
   healthCheckData.healthCheckCv.wait_for(
@@ -1045,10 +1046,39 @@ std::future<bool> ProcessGroupNCCL::launchAsyncDebugDump() {
   return resultFuture;
 }
 
-void abortCommsFromMap(
+void ProcessGroupNCCL::waitForDumpOrTimeout(
+    std::future<bool>& fut,
+    size_t timeout_sec) {
+  TORCH_CHECK(fut.valid(), "Expected a valid future");
+
+  auto futStatus = fut.wait_for(std::chrono::seconds(timeout_sec));
+  if (futStatus != std::future_status::ready) {
+    TORCH_CHECK(
+        futStatus != std::future_status::deferred,
+        "Expected the dump future to have been launched eagerly.");
+    LOG(INFO)
+        << logPrefix() << "Debug dump timed out and is being abandoned."
+        << " This may be due to slow ADDR2LINE performance processing stacktraces."
+        << " Try TORCH_DISABLE_ADDR2LINE=1 and TORCH_NCCL_TRACE_CPP_STACK=0 to work around.";
+  }
+
+  // Calling .get() will raise any exception stored in the promise associated
+  // with the future. (but we can ignore the return value, which will be false
+  // if dumping is not enabled)
+  try {
+    fut.get();
+  } catch (const std::exception& e) {
+    LOG(ERROR) << logPrefix() << "Caught exception during async debug dump: \""
+               << e.what() << "\"\n";
+  } catch (...) {
+    LOG(ERROR) << logPrefix()
+               << "Caught unknown exception during async debug dump.";
+  }
+}
+
+void ProcessGroupNCCL::abortCommsFromMap(
     std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
         ncclCommsMap,
-    const int rank,
     c10::optional<std::string> abortReason) {
   // The process may control multiple devices, loop through the communicators on
   // each device
@@ -1069,7 +1099,7 @@ void abortCommsFromMap(
     // their responsibility to destroy the process group and recreate
     // it to recover from errors.
 
-    LOG(INFO) << "[Rank " << rank << "] Destroyed " << ncclComms.size()
+    LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
               << "communicators on CUDA device " << devName;
   }
 }
@@ -1091,8 +1121,8 @@ void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   ncclCommDevIdxMapMutex.unlock();
 
   std::lock_guard<std::mutex> lock(mutex_);
-  abortCommsFromMap(devNCCLCommMap_, rank_, abortReason);
-  abortCommsFromMap(inInitializationCommMap_, rank_, abortReason);
+  abortCommsFromMap(devNCCLCommMap_, abortReason);
+  abortCommsFromMap(inInitializationCommMap_, abortReason);
 }
 
 void ProcessGroupNCCL::shutdown() {
@@ -1151,8 +1181,9 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
   // Serialize all calls to this function to avoid corrupting data, but allow
   // multiple calls in one runtime. User is responsible for preserving the
   // output file from an earlier call before a later call overwrites it.
-  std::lock_guard<std::mutex> lock(writeDebugInfoMutex_);
-  LOG(ERROR) << "ProcessGroupNCCL preparing to dump debug info.";
+  static std::mutex writeDebugInfoMutex;
+  std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
+  LOG(ERROR) << logPrefix() << "ProcessGroupNCCL preparing to dump debug info.";
   if (ncclTraceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
@@ -1173,7 +1204,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
 void ProcessGroupNCCL::terminateProcess(std::string errMsg) {
   // Logging with `FATAL`, after errMsg printed, it calls `std::abort()`
   // to terminate the program execution.
-  LOG(FATAL) << errMsg;
+  LOG(FATAL) << logPrefix() << errMsg;
 }
 
 void ProcessGroupNCCL::heartbeatMonitor() {
@@ -1208,13 +1239,21 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
+  // TODO(fduwjj): After having a hang debug wiki, we need to update the wiki
+  // url here.
   const auto exitMsg = c10::str(
-      "[Rank ",
-      rank_,
-      "] NCCL monitor thread timeout. Basically, this could ",
-      "be due to CUDA or NCCL calls being unexpectedly blocking, ",
-      "especially when your program enters a deadlock state in watchdog "
-      "or destructors. If you see this error, please file a bug to PyTorch.");
+      logPrefix(),
+      "ProcessGroupNCCL's watchdog got stuck for ",
+      heartbeatTimeoutInSec_,
+      "seconds without making progress in monitoring enqueued collectives. ",
+      "This typically indicates a NCCL/CUDA API hang blocking the watchdog, ",
+      "and could be triggered by another thread holding the GIL inside a ",
+      "CUDA api, or other deadlock-prone behaviors.",
+      "If you suspect the watchdog is not actually stuck and a longer timeout would help, ",
+      "you can either increase the timeout (TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC) to a larger value "
+      "or disable the heartbeat monitor (TORCH_NCCL_ENABLE_MONITORING=0)."
+      "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
+      "or false positive abort; otherwise, please attempt to debug the hang.");
 
   // There are two possible cases for the watchdog thread exit:
   // Case one: desync report runs quickly, and it follows the step:
@@ -1240,13 +1279,12 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // We already log completion inside the thread, so it may not be necessary to
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
-  asyncDebugDump.wait_for(std::chrono::seconds(heartbeatTimeoutInSec_));
+  waitForDumpOrTimeout(asyncDebugDump);
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     const auto logMsg = c10::str(
-        "[Rank ",
-        rank_,
-        "] monitoring thread detects no heartbeat and will finally kill the process!",
+        logPrefix(),
+        "monitoring thread detects no heartbeat and will finally kill the process!",
         " terminateProcessGroup_",
         terminateProcessGroup_,
         " collectiveDebugInfoMode_",
@@ -1258,28 +1296,26 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
-    VLOG(2) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
+    VLOG(2) << logPrefix() << "NCCL watchdog thread started!";
     if (monitorThreadEnabled_.load()) {
       ncclHeartbeatMonitorThread_ =
           std::thread(&ProcessGroupNCCL::heartbeatMonitor, this);
     }
     watchdogHandler();
-    VLOG(2) << "[Rank " << rank_
-            << "] NCCL watchdog thread terminated normally";
+    VLOG(2) << logPrefix() << "NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
       LOG(INFO)
-          << "[Rank " << rank_
-          << "] main process destroyed cuda before watchdog loop exited, terminating watchdog."
+          << logPrefix()
+          << "main process destroyed cuda before watchdog loop exited, terminating watchdog."
           << " (Watchdog caught exception: " << e.what();
 
     } else {
       // Append error message reported from watchdogHandler
       const auto exitMsg = c10::str(
-          "[Rank ",
-          rank_,
-          "] NCCL watchdog thread terminated with exception: ",
+          logPrefix(),
+          "NCCL watchdog thread terminated with exception: ",
           e.what());
       LOG(ERROR) << exitMsg;
       // TODO(whc) clean up the rethrow - why is it stored in a class var and
@@ -1290,9 +1326,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
     }
   } catch (...) {
     const auto exitMsg = c10::str(
-        "[Rank ",
-        rank_,
-        "] NCCL watchdog thread terminated with exception: unknown");
+        logPrefix(), "NCCL watchdog thread terminated with exception: unknown");
     LOG(ERROR) << exitMsg;
     watchDogException_ =
         std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
@@ -1382,6 +1416,11 @@ struct DumpPipe {
 };
 #endif
 
+const std::string& ProcessGroupNCCL::logPrefix() const {
+  static std::string prefix = c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+  return prefix;
+}
+
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
@@ -1426,13 +1465,10 @@ void ProcessGroupNCCL::watchdogHandler() {
         lastTimePollStore = currentTime;
         if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
           optAsyncDebugDump = launchAsyncDebugDump();
-          optAsyncDebugDump->wait_for(
-              std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
+          waitForDumpOrTimeout(*optAsyncDebugDump);
           const auto exitMsg = c10::str(
-              "Some other rank's watchdog thread detected a timeout and notified ",
-              "all other ranks, so we're dumping debug info and aborting [Rank ",
-              rank_,
-              "] as well.");
+              logPrefix(),
+              "Another rank reported a timeout and signaled a global abort.");
           LOG(ERROR) << exitMsg;
           C10_THROW_ERROR(DistBackendError, exitMsg);
         }
@@ -1473,20 +1509,21 @@ void ProcessGroupNCCL::watchdogHandler() {
 
             if (desyncDebug_) {
               auto desyncMsg = getNCCLWatchdogDebugInfo();
-              LOG(ERROR) << desyncMsg;
+              LOG(ERROR) << logPrefix() << desyncMsg;
             }
 
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
-              optAsyncDebugDump->wait_for(
-                  std::chrono::milliseconds(kWatchdogThreadSleepMillis * 30));
+              waitForDumpOrTimeout(*optAsyncDebugDump);
             }
 
           } catch (const std::exception& e) {
-            LOG(ERROR) << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
+            LOG(ERROR) << logPrefix()
+                       << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
                        << " Please file an issue. Error: " << e.what();
           } catch (...) {
             LOG(ERROR)
+                << logPrefix()
                 << "Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
                 << " Please file an issue.";
           }
@@ -1577,8 +1614,8 @@ void ProcessGroupNCCL::runHookLoop() {
       if (std::string(e.what()).find("driver shutting down") !=
           std::string::npos) {
         LOG(INFO)
-            << "[Rank " << rank_
-            << "] main process destroyed cuda before runHookLoop exited, terminating runHookLoop."
+            << logPrefix()
+            << "main process destroyed cuda before runHookLoop exited, terminating runHookLoop."
             << " (runHookLoop caught exception: " << e.what();
 
       } else {
@@ -1752,7 +1789,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   if (bound_device_id_) {
     for (const auto& device : devices) {
       if (*bound_device_id_ != device) {
-        LOG(ERROR) << "Tensor found on device " << device
+        LOG(ERROR) << logPrefix() << "Tensor found on device " << device
                    << " but backend constrained to " << *bound_device_id_;
         C10_THROW_ERROR(
             DistBackendError,
@@ -1905,7 +1942,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
   if (getRank() == 0) {
-    LOG(INFO) << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
+    LOG(INFO) << logPrefix()
+              << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
   }
 
   // See [Group Start/End Note]
@@ -3504,14 +3542,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
     // ensure that each process is on a different GPU
     auto numGPUs = at::cuda::getNumGPUs();
     int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
-    LOG(INFO) << c10::str(
-        "Rank ",
-        this->getRank(),
-        " using GPU ",
-        deviceIdx,
-        " to perform barrier as devices used by this process are currently unknown. ",
-        "This can potentially cause a hang if this rank to GPU mapping is incorrect.",
-        "Specify device_ids in barrier() to force use of a particular device.");
+    LOG(INFO)
+        << logPrefix()
+        << c10::str(
+               " using GPU ",
+               deviceIdx,
+               " to perform barrier as devices used by this process are currently unknown. ",
+               "This can potentially cause a hang if this rank to GPU mapping is incorrect.",
+               "Specify device_ids in barrier() to force use of a particular device.");
     devices.emplace_back(guessDeviceForRank());
   } else {
     for (auto usedDeviceIdx : usedDeviceIdxs_) {

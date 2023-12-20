@@ -279,7 +279,6 @@ def check_model(
     ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
     ref_kwargs = kwargs
     has_lowp_args = False
-    original_lowp_dtype = torch.half
 
     if reference_in_float and exact_dtype:
         # Store expected dtypes so we can check actual result gives the correct types
@@ -297,6 +296,7 @@ def check_model(
         ]
         del eager_result
 
+    ref_model = model
     if reference_in_float:
         # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
         def upcast_fn(x):
@@ -309,25 +309,14 @@ def check_model(
             else:
                 return x
 
-        def get_original_lowp_dtype(example_inputs):
-            dtypes = [x.dtype for x in example_inputs if isinstance(x, torch.Tensor)]
-            dtype_set = set(dtypes)
-            return dtype_set.pop() if len(dtype_set) == 1 else torch.half
-
         ref_inputs = list(map(upcast_fn, example_inputs))
         ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
-        if has_lowp_args:
-            original_lowp_dtype = get_original_lowp_dtype(example_inputs)
-            if hasattr(model, "to"):
-                model = model.to(torch.float)
+        if has_lowp_args and hasattr(model, "to"):
+            ref_model = copy.deepcopy(model).to(torch.float)
 
     torch.manual_seed(0)
 
-    correct = model(*ref_inputs, **ref_kwargs)
-    # downcast the model back if needed
-    if reference_in_float and has_lowp_args:
-        if hasattr(model, "to"):
-            model = model.to(original_lowp_dtype)
+    correct = ref_model(*ref_inputs, **ref_kwargs)
 
     torch._inductor.metrics.reset()
 
@@ -1125,19 +1114,6 @@ class CommonTemplate:
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)))
         self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
 
-    def test_multilayer_var_lowp(self):
-        if self.device == "cpu" and IS_MACOS and not IS_X86:
-            atol, rtol = 1e-5, 5e-3
-        else:
-            atol, rtol = None, None
-
-        def fn(a):
-            return torch.var(a)
-
-        run_test = functools.partial(self.common, atol=atol, rtol=rtol)
-        run_test(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
-        run_test(fn, (torch.rand((14923), dtype=torch.float16),))
-
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
             raise unittest.SkipTest("No CUDA implementation (it returns empty)")
@@ -1517,6 +1493,77 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    def test_builtins_round(self):
+        def fn(x, i):
+            return x[: round(i / 2 + 1)] + round(i / 2)
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(5, dtype=torch.int, device=self.device)
+        with torch.no_grad():
+            for i in range(1, 6):
+                self.assertEqual(cfn(x, i), fn(x, i))
+
+    def test_builtins_round_float_ndigits_pos(self):
+        def fn(x, i):
+            return x + round(i / 2 * 123.4567, 1)
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2, device=self.device)
+        i = 2
+
+        with torch.no_grad():
+            self.assertEqual(cfn(x, i), fn(x, i))
+
+    def test_builtins_round_float_ndigits_zero(self):
+        def fn(x, i):
+            return x + round(i / 2 * 123.4567, 0)
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2, device=self.device)
+        i = 2
+
+        with torch.no_grad():
+            self.assertEqual(cfn(x, i), fn(x, i))
+
+    def test_builtins_round_float_ndigits_neg(self):
+        def fn(x, i):
+            return x + round(i / 2 * 123.4567, -1)
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2, device=self.device)
+        i = 2
+
+        with torch.no_grad():
+            self.assertEqual(cfn(x, i), fn(x, i))
+
+    def test_builtins_round_int_ndigits_pos(self):
+        def fn(x, i):
+            return x + round(i, 1)
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2, device=self.device)
+        i = 123
+
+        with torch.no_grad():
+            self.assertEqual(cfn(x, i), fn(x, i))
+
+    def test_builtins_round_int_ndigits_zero(self):
+        def fn(x, i):
+            return x + round(i, 0)
+
+        cfn = torch.compile(fullgraph=True, dynamic=True)(fn)
+
+        x = torch.zeros(2, device=self.device)
+        i = 123
+
+        with torch.no_grad():
+            self.assertEqual(cfn(x, i), fn(x, i))
+
     def test_silu(self):
         def fn(a):
             return (torch.nn.functional.silu(a),)
@@ -1645,14 +1692,15 @@ class CommonTemplate:
         def fn(a, b):
             return (
                 aten.div(a, b, rounding_mode=None),
+                aten.div(a * 0.5, b, rounding_mode=None),
+                aten.div(a, b * 1.0, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
                 a / b,
                 a // b,
             )
 
-        # FIXME: returns the wrong dtype
-        self.common(fn, (1024, 100), exact_dtype=False)
+        self.common(fn, (1024, 100))
 
     def test_div9(self):
         def fn(x):
@@ -1700,15 +1748,13 @@ class CommonTemplate:
             )
 
     def test_floordiv(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("Fails on CPU")
-
         def fn_floor_input(a, i):
             n = (i * 1.234) // 8.234
             return a + n
 
         self.common(
-            fn_floor_input, (make_tensor(10, device="cpu", dtype=torch.float32), 33)
+            fn_floor_input,
+            (make_tensor(10, device=self.device, dtype=torch.float32), 33),
         )
 
         def fn_int_input(a, i):
@@ -1716,7 +1762,7 @@ class CommonTemplate:
             return a + n
 
         self.common(
-            fn_int_input, (make_tensor(10, device="cpu", dtype=torch.float32), 33)
+            fn_int_input, (make_tensor(10, device=self.device, dtype=torch.float32), 33)
         )
 
     def test_both_scalars(self):
@@ -2073,14 +2119,14 @@ class CommonTemplate:
                 .sub(8),
             )
 
-            self.common(
-                fn,
-                (
-                    torch.randn(8, 8),
-                    torch.randint(0, 255, (4, 8), dtype=torch.uint8),
-                ),
-                check_lowp=True,
-            )
+        self.common(
+            fn,
+            (
+                torch.randn(8, 8),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8),
+            ),
+            check_lowp=True,
+        )
 
     def test_mm_mixed_dtype(self):
         def fn(a, b):
@@ -7349,6 +7395,61 @@ class CommonTemplate:
             atol=0.02,
             rtol=1e4,
         )
+
+    @requires_cuda()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    @skipIfRocm
+    @config.patch(freezing=True)
+    def test_sdpa_unaligned_mask_freezing(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.arg3_1 = torch.rand(1, 1, 16, 15, device="cuda")
+
+            def forward(
+                self,
+                arg0_1: "f32[8, 8, 16, 16]",
+                arg1_1: "f32[8, 8, 15, 16]",
+                arg2_1: "f32[8, 8, 15, 16]",
+            ):
+                arg3_1 = self.arg3_1
+                constant_pad_nd: "f32[1, 1, 16, 16]" = (
+                    torch.ops.aten.constant_pad_nd.default(arg3_1, [0, 1], 0.0)
+                )
+                arg3_1 = None
+                slice_1: "f32[1, 1, 16, 15]" = torch.ops.aten.slice.Tensor(
+                    constant_pad_nd, -1, 0, 15
+                )
+                constant_pad_nd = None
+                expand: "f32[8, 8, 16, 15]" = torch.ops.aten.expand.default(
+                    slice_1, [8, 8, 16, 15]
+                )
+                slice_1 = None
+                _scaled_dot_product_efficient_attention = (
+                    torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                        arg0_1, arg1_1, arg2_1, expand, False
+                    )
+                )
+                arg0_1 = arg1_1 = arg2_1 = expand = None
+                getitem: "f32[8, 8, 16, 16]" = _scaled_dot_product_efficient_attention[
+                    0
+                ]
+                _scaled_dot_product_efficient_attention = None
+                return (getitem,)
+
+        query = torch.rand(8, 8, 16, 16, device="cuda")
+        key = torch.rand(8, 8, 15, 16, device="cuda")
+        value = torch.rand(8, 8, 15, 16, device="cuda")
+
+        mod = Mod()
+        out_eager = mod(query, key, value)
+
+        with torch.no_grad():
+            out_compiled = torch.compile(mod)(query, key, value)
+            self.assertEqual(out_eager, out_compiled, atol=0.02, rtol=1e4)
 
     def test_where_with_logical_op(self):
         def fn_and(x, y):
