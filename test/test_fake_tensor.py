@@ -1175,6 +1175,21 @@ class FakeTensorOperatorInvariants(TestCase):
 
         self.assertEqual(mode.count, 0)
 
+    # https://github.com/pytorch/pytorch/issues/107170
+    def test_fake_mode_with_none_generator(self):
+        shape_env = ShapeEnv()
+        mode = FakeTensorMode(shape_env=shape_env)
+        t1 = mode.from_tensor(
+            torch.randn(10),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC],
+                constraint_sizes=[None]
+            )
+        )
+        with mode:
+            # doesn't error
+            x = torch.randn(t1.shape, generator=None)
+
 
 class FakeTensorPropTest(TestCase):
     def test_fake_tensor_prop_on_nn_module(self):
