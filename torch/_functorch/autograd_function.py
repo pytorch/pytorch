@@ -650,8 +650,8 @@ class AutogradFunctionApply(HigherOrderOperator):
                 return output
 
             @staticmethod
-            def backward(ctx, grad):
-                return bwd(None, grad, *saved_values)
+            def backward(ctx, *grad):
+                return bwd(None, *grad, *saved_values)
 
         return ApplyTemplate.apply(*fwd_args)
 

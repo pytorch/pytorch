@@ -844,13 +844,11 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda()
     @skipIfRocm
-    def test_triton_kernel(self):
+    def test_triton_kernel_basic(self):
         class Add(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, y):
                 ctx.save_for_backward(x, y)
-                ctx.t1 = x
-                ctx.t2 = y
                 output = torch.zeros_like(x)
                 n_elements = output.numel()
                 grid = lambda meta: (  # noqa: E731
@@ -862,9 +860,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             @staticmethod
             def backward(ctx, grad_output):
                 x, y = ctx.saved_tensors
-                x1 = ctx.t1
-                y1 = ctx.t2
-                return x1 * grad_output, y1 * grad_output
+                return x * grad_output, y * grad_output
 
         @torch.compile(fullgraph=True, backend="inductor")
         def f(x, y):
@@ -877,6 +873,43 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         loss = z.sum()
         # loss.backward()
         self.assertEqual(x + y, z)
+
+    @requires_cuda()
+    @skipIfRocm
+    def test_triton_kernel_multiple_out(self):
+        class Add(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x, y)
+                ctx.t1 = x
+                ctx.t2 = y
+                output = torch.zeros_like(x)
+                n_elements = output.numel()
+                grid = lambda meta: (  # noqa: E731
+                    triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+                )
+                add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+                return output, x
+
+            @staticmethod
+            def backward(ctx, grad_output, old_x):
+                x, y = ctx.saved_tensors
+                x1 = ctx.t1
+                y1 = ctx.t2
+                return old_x * x * x1 * grad_output, y * y1 * grad_output
+
+        @torch.compile(fullgraph=True, backend="inductor")
+        def f(x, y):
+            z = Add.apply(x, y)
+            return z
+
+        x = torch.randn(10, device="cuda", requires_grad=True)
+        y = torch.randn(10, device="cuda", requires_grad=True)
+        zs = f(x, y)
+        for z in zs:
+            loss = z.sum()
+            # loss.backward()
+        self.assertEqual(x + y, zs[0])
 
 
 if __name__ == "__main__":

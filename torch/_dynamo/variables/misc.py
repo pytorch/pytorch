@@ -308,19 +308,6 @@ def produce_trampoline_autograd_bwd(fn_cls):
     return trampoline_autograd_bwd
 
 
-def produce_trampoline_autograd_bwd_with_saved(fn_cls):
-    def trampoline_autograd_bwd(ctx, num_saved_tensors, *args, **kwargs):
-        saved_tensors = args[:num_saved_tensors]
-        args = args[num_saved_tensors:]
-        ctx.saved_tensors = saved_tensors
-        for name, value in kwargs.items():
-            setattr(ctx, name, value)
-        return fn_cls.backward(ctx, *args)
-
-    trampoline_autograd_bwd._origin = produce_trampoline_autograd_bwd
-    return trampoline_autograd_bwd
-
-
 def produce_trampoline_autograd_apply(fn_cls):
     def trampoline_autograd_apply(*args, **kwargs):
         return fn_cls.apply(*args, **kwargs)
