@@ -1,6 +1,6 @@
 import contextlib
 import functools
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import torch
 from torch._dynamo.external_utils import call_backward, call_hook

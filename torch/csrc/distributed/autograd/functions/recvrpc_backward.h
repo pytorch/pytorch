@@ -25,7 +25,8 @@ class TORCH_API RecvRpcBackward : public torch::autograd::Node {
       rpc::worker_id_t fromWorkerId,
       rpc::DeviceMap deviceMap);
 
-  torch::autograd::variable_list apply(torch::autograd::variable_list&& grads) override;
+  torch::autograd::variable_list apply(
+      torch::autograd::variable_list&& grads) override;
 
  private:
   const AutogradMetadata autogradMetadata_;

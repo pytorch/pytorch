@@ -477,11 +477,7 @@ variable_list compiled_autograd(
   THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
   THPObjectPtr hooks(wrap_pyobject_list(compiler_call.hooks));
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
-      cache->compiled_fn.get(),
-      inputs.get(),
-      sizes.get(),
-      hooks.get(),
-      NULL)));
+      cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
   return outputs;

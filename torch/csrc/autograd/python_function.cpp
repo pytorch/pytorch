@@ -214,7 +214,9 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   return results;
 }
 
-auto PyNode::compiled_apply(variable_list&& inputs, std::optional<PyObject*> compiler) -> variable_list {
+auto PyNode::compiled_apply(
+    variable_list&& inputs,
+    std::optional<PyObject*> compiler) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
@@ -242,17 +244,20 @@ auto PyNode::compiled_apply(variable_list&& inputs, std::optional<PyObject*> com
 
     const auto& input_info = input_infos[i - offset];
 
-    // TODO: figure out how to pass symint sizes directly and remove this python call
+    // TODO: figure out how to pass symint sizes directly and remove this python
+    // call
     auto zeros_without_gil = [](const VariableInfo& variable,
                                 at::OptionalDeviceGuard& dg) {
       pybind11::gil_scoped_release gil;
       return variable.zeros(dg);
     };
     PyTuple_SET_ITEM(
-        fwdInputs.get(), static_cast<Py_ssize_t>(i), THPVariable_Wrap(zeros_without_gil(input_info, _device_guard)));
+        fwdInputs.get(),
+        static_cast<Py_ssize_t>(i),
+        THPVariable_Wrap(zeros_without_gil(input_info, _device_guard)));
   }
   PyObject* saved_tensors(unpack_saved_variables(
-        py_fn, [](const Variable& var) { return THPVariable_Wrap(var); }));
+      py_fn, [](const Variable& var) { return THPVariable_Wrap(var); }));
   TORCH_INTERNAL_ASSERT(
       _backward_idx.has_value(),
       "indices should already be set by compiled_args, called before apply_with_saved");
@@ -389,7 +394,9 @@ variable_list PyNode::apply_with_saved(
   return result;
 }
 
-PyObject* PyNode::to_py_args(const variable_list& inputs, at::OptionalDeviceGuard* device_guard) {
+PyObject* PyNode::to_py_args(
+    const variable_list& inputs,
+    at::OptionalDeviceGuard* device_guard) {
   THPFunction* py_fn = (THPFunction*)obj;
 
   auto zeros_without_gil = [](const VariableInfo& variable,
@@ -408,7 +415,7 @@ PyObject* PyNode::to_py_args(const variable_list& inputs, at::OptionalDeviceGuar
     PyObject* input;
     if (inputs[i].defined() || !py_fn->materialize_grads ||
         (input_metadata(i).was_default_constructed() &&
-        !py_fn->materialize_non_diff_grads)) {
+         !py_fn->materialize_non_diff_grads)) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
       input =
@@ -422,7 +429,9 @@ PyObject* PyNode::to_py_args(const variable_list& inputs, at::OptionalDeviceGuar
   return pyInputs;
 }
 
-variable_list PyNode::to_variable_list(const PyObject* outputs, const std::vector<bool>& is_variable_input) {
+variable_list PyNode::to_variable_list(
+    const PyObject* outputs,
+    const std::vector<bool>& is_variable_input) {
   auto num_outputs = PyTuple_GET_SIZE(outputs);
   variable_list results;
   results.reserve(num_outputs);
