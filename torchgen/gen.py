@@ -274,6 +274,7 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             "inplace_view" in f.tags
             and str(f.func.name) != "resize_"
             and str(f.func.name) != "resize_as_"
+            and str(f.func.name.name) != "set_"
         ):
             base_name = f.func.name.name
             overload_name = f.func.name.overload_name
@@ -1382,8 +1383,7 @@ def get_grouped_by_view_native_functions(
             )
         # Take the remaining functions that weren't part of the view group
         # and emit them separately
-        for func in d.values():
-            funcs.append(func)
+        funcs.extend(d.values())
         return funcs
 
     grouped_by_views: Dict[

@@ -84,6 +84,7 @@ from torch.testing._internal.common_utils import (
 import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 
 from torch.utils.data.distributed import DistributedSampler
+import operator
 
 try:
     import torchvision
@@ -2167,7 +2168,7 @@ class DistributedTest:
                 dist.ReduceOp.PRODUCT,
                 2,
                 10,
-                reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
+                reduce(operator.mul, [10] * (len(group) - 1), 2),
             )
 
         @skip_but_pass_in_sandcastle_if(
@@ -2233,7 +2234,7 @@ class DistributedTest:
                 dist.ReduceOp.PRODUCT,
                 2,
                 10,
-                reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
+                reduce(operator.mul, [10] * (len(group) - 1), 2),
             )
 
         @skip_but_pass_in_sandcastle_if(
@@ -2299,7 +2300,7 @@ class DistributedTest:
                 dist.ReduceOp.PRODUCT,
                 2,
                 10,
-                reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
+                reduce(operator.mul, [10] * (len(group) - 1), 2),
             )
 
         @skip_but_pass_in_sandcastle_if(
@@ -2821,7 +2822,7 @@ class DistributedTest:
                 dist.ReduceOp.PRODUCT,
                 2,
                 10,
-                reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
+                reduce(operator.mul, [10] * (len(group) - 1), 2),
             )
 
         @skip_but_pass_in_sandcastle_if(
@@ -2871,7 +2872,7 @@ class DistributedTest:
                 dist.ReduceOp.PRODUCT,
                 2,
                 10,
-                reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
+                reduce(operator.mul, [10] * (len(group) - 1), 2),
             )
 
         @skip_if_small_worldsize
@@ -2921,7 +2922,7 @@ class DistributedTest:
                 dist.ReduceOp.PRODUCT,
                 2,
                 10,
-                reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
+                reduce(operator.mul, [10] * (len(group) - 1), 2),
             )
 
         @skip_but_pass_in_sandcastle_if(
@@ -6923,6 +6924,7 @@ class DistributedTest:
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle("Currently failing in NVIDIA internal CI")
         def test_ddp_profiling_autograd_profiler(self):
             autograd_profiler_ctx = torch.autograd.profiler.profile()
             return self._test_ddp_profiling(profiler_ctx=autograd_profiler_ctx)
