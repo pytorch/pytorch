@@ -1587,8 +1587,8 @@ class TritonKernel(Kernel):
 
     def codegen_block_ptr(
         self, name: str, var: str, indexing: BlockPtrOptions, other=""
-    ) -> Tuple[str, str, str]:
-        advance_block_ptr = ""
+    ) -> Tuple[str, Optional[DeferredLine], str]:
+        advance_block_ptr = None
         check = indexing.boundary_check()
         if not check:
             # workaround https://github.com/openai/triton/issues/2813
@@ -1600,9 +1600,16 @@ class TritonKernel(Kernel):
             other = f", boundary_check={check!r}"
         if self.inside_reduction and not self.persistent_reduction:
             block_ptr = f"block_ptr{next(self.block_ptr_id)}"
-            self.body.writeline(DeferredLine(name, f"{block_ptr} = {indexing.format(var, roffset=False)}"))
+            self.body.writeline(
+                DeferredLine(
+                    name, f"{block_ptr} = {indexing.format(var, roffset=False)}"
+                )
+            )
             if not indexing.is_zero_roffset():
-                advance_block_ptr = DeferredLine(name, f"{block_ptr} = tl.advance({block_ptr}, {indexing.advance_roffset()})")
+                advance_block_ptr = DeferredLine(
+                    name,
+                    f"{block_ptr} = tl.advance({block_ptr}, {indexing.advance_roffset()})",
+                )
         else:
             block_ptr = indexing.format(var)
         return block_ptr, advance_block_ptr, other
@@ -1750,7 +1757,9 @@ class TritonKernel(Kernel):
 
         advance_block_ptr = None
         if isinstance(indexing, BlockPtrOptions):
-            block_ptr, advance_block_ptr, other = self.codegen_block_ptr(name, var, indexing)
+            block_ptr, advance_block_ptr, other = self.codegen_block_ptr(
+                name, var, indexing
+            )
             # block_ptr stores don't do implicit casting
             line = self.codegen_block_ptr_store_line(
                 name, indexing, block_ptr, value, other
