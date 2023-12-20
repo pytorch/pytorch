@@ -3500,7 +3500,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.sigmoid(torch.matmul(x, y))
 
         def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
 
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
@@ -3520,7 +3522,11 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(
-                gn, torch.sin(x), y, use_reentrant=True, preserve_rng_state=False
+                gn,
+                torch.sin(x),
+                y,
+                use_reentrant=True,
+                preserve_rng_state=False,
             )
 
         x = torch.randn(4, 4, requires_grad=True)
@@ -3540,7 +3546,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
 
         def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
         y = torch.randn(4, 4, device="cuda", requires_grad=True)
@@ -3563,7 +3571,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
 
         def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
         y = torch.randn(4, 4, device="cuda", requires_grad=True)
@@ -3581,7 +3591,11 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.sigmoid(torch.matmul(x, y))
 
         def fn(x, y):
-            return torch.cos(torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y))
+            return torch.cos(
+                torch.utils.checkpoint.checkpoint(
+                    gn, torch.sin(x), y, use_reentrant=True
+                ),
+            )
 
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
@@ -3614,7 +3628,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         mod = MockModule()
 
         def fn(x):
-            return torch.utils.checkpoint.checkpoint(mod, torch.sin(x))
+            return torch.utils.checkpoint.checkpoint(
+                mod, torch.sin(x), use_reentrant=True
+            )
 
         x = torch.randn(10, 10, requires_grad=True)
 

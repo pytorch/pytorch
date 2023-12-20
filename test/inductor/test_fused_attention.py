@@ -19,7 +19,7 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 def checkpoint_wrapper(fn):
     def inner(*args):
-        return torch.utils.checkpoint.checkpoint(fn, *args)
+        return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
 
     return inner
 
