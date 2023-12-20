@@ -2397,7 +2397,7 @@ def forward(self, x):
         constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
 
         example_inputs = (copy(x), y)
-        ep = torch._export._export(foo, example_inputs, constraints=constraints)
+        ep = torch.export.export(foo, example_inputs, constraints=constraints)
         with self.assertRaisesRegex(RuntimeError, "input.*shape.*to be equal to 2"):
             ep(torch.randn(3), y)
 
