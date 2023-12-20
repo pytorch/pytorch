@@ -69,9 +69,6 @@ static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
     "TORCH_NCCL_TRACE_BUFFER_SIZE"};
 
-constexpr const char* TORCH_NCCL_COLLECTIVE_HASH_DEBUG =
-    "TORCH_NCCL_COLLECTIVE_HASH_DEBUG";
-
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr const char* TIMEOUT_DUMP = "timeout_dump";
