@@ -3168,6 +3168,28 @@ class TestNestedTensorSubclass(TestCase):
         flattened = nt.flatten(-3, -2)
         self.assertEqual(flattened.shape, nt.view(3, -1, 10, 6).shape)
 
+    @xfailIfTorchDynamo
+    def test_chunk(self, device):
+        # normal case
+        D = 30
+        nt = random_nt_from_dims(
+            [4, None, D], device=device, dtype=torch.float32, layout=torch.jagged)
+        NUM_CHUNKS = 3
+        chunks = nt.chunk(NUM_CHUNKS, dim=-1)
+        self.assertEqual(len(chunks), NUM_CHUNKS)
+        for i in range(NUM_CHUNKS):
+            self.assertEqual(chunks[i].shape[-1], D // NUM_CHUNKS)
+
+        # chunk on batch dim not supported
+        with self.assertRaisesRegex(
+                RuntimeError, "chunk.* not supported for NestedTensor on dim=0 or dim=1"):
+            nt.chunk(2, dim=0)
+
+        # chunk on ragged dim not supported
+        with self.assertRaisesRegex(
+                RuntimeError, "chunk.* not supported for NestedTensor on dim=0 or dim=1"):
+            nt.chunk(2, dim=1)
+
     def test_binary_pointwise_broadcasting(self, device):
         # (B, j0, 3, 4)
         ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), device, requires_grad=True)
