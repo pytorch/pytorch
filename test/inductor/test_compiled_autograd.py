@@ -402,6 +402,29 @@ class TestCompiledAutograd(TestCase):
         def fn():
             class MyFn(torch.autograd.Function):
                 @staticmethod
+                def forward(ctx, x, y):
+                    ctx.save_for_backward(x, y)
+                    return torch.sin(x), torch.sin(y)
+
+                @staticmethod
+                def backward(ctx, gO_x, gO_y):
+                    (x, y) = ctx.saved_tensors
+                    return gO_x * torch.cos(x), gO_y * torch.cos(y)
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                y = torch.arange(0.0, i, requires_grad=True)
+                out1, out2 = MyFn.apply(x, y)
+                loss = (out1 * out2).sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn, 2)
+
+    def test_custom_fn_saved_multiple_tensors_dedup(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
                 def forward(ctx, x):
                     ctx.save_for_backward(x, x)
                     return torch.sin(x)
@@ -462,7 +485,7 @@ class TestCompiledAutograd(TestCase):
                 loss.backward()
                 yield x.grad
 
-        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
+        with self.assertRaisesRegex(torch._dynamo.exc.InternalTorchDynamoError, "'type' object is not subscriptable"):
             self.check_output_and_recompiles(fn, 2)
 
     def test_custom_fn_multiple_grads(self):
@@ -653,7 +676,6 @@ known_failing_tests = {
     "test_will_engine_execute_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
     "test_backward_to_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
     "test_custom_fn_saved_attr",  # torch._dynamo.exc.InternalTorchDynamoError: 'type' object is not subscriptable
-    "test_custom_fn_saved_multiple_tensors",  # AssertionError: assert len(val) == inst.argval
     "test_anomaly_detect_nan",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function aten.add.Tensor(*(FakeTensor(..., size=(s1,)), None), **{}):
     "test_autograd_multiple_views_python",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable() ConstantVariable(int) SkipFilesVariable()
     "test_autograd_node_isinstance",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsInstance

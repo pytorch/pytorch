@@ -30,8 +30,10 @@ namespace autograd {
 struct PyNode : public Node {
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
-  variable_list apply(variable_list&& inputs) override;
+  PyObject* to_py_args(const variable_list& inputs, at::OptionalDeviceGuard* device_guard);
+  variable_list to_variable_list(const PyObject* r, const std::vector<bool>& is_variable_input);
 
+  variable_list apply(variable_list&& inputs) override;
   variable_list compiled_apply(variable_list&& inputs, std::optional<PyObject*> compiler);
 
   void release_variables() override;
@@ -48,9 +50,6 @@ struct PyNode : public Node {
 
   // The AutogradCompilerCall::hooks idx corresponding to this node's backward
   std::optional<int> _backward_idx;
-  // The TensorArgs::inputs index corresponding to this node's tensors saved for backward
-  std::optional<int> _saved_tensors_start_idx;
-  std::optional<int> _saved_tensors_end_idx;
 
   ~PyNode() override {
     // Can't use THPObjectPtr as a field in this class; destructor won't take
