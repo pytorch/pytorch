@@ -13,15 +13,13 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(flatten_indices_stub);
 
-}
+} // namespace at::native
 
-namespace sparse {
+namespace at::sparse {
 
 // NOTE [ Flatten Sparse Indices ]
 // This helper function flattens a sparse indices tensor (a Tensor) into a 1D
@@ -127,4 +125,4 @@ Tensor zeros_like_with_indices(const Tensor& t) {
       t.is_coalesced());
 }
 
-}} // namespace at::sparse
+} // namespace at::sparse

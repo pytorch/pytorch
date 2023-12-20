@@ -1,5 +1,6 @@
 import functools
 import math
+import operator
 
 import torch
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
@@ -20,7 +21,7 @@ def _outer_to_inner_dim(ndim, dim):
     return 0 if dim < 2 else dim - 1
 
 
-def _wrap_jagged_dim(ndim, dim, op_name):
+def _wrap_jagged_dim(ndim, dim, op_name, convert_to_inner_dim=True):
     from torch._prims_common import canonicalize_dims
 
     wrapped = canonicalize_dims(ndim, dim)
@@ -28,7 +29,7 @@ def _wrap_jagged_dim(ndim, dim, op_name):
         raise RuntimeError(
             f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1"
         )
-    return _outer_to_inner_dim(ndim, wrapped)
+    return _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
 
 
 def _wrap_jagged_dims(ndim, dims, op_name):
@@ -123,7 +124,11 @@ def check_ragged_dim_same(
 # match those of the specified size
 def raggedness_matches(nt, size):
     end = nt._ragged_idx + 1
-    return list(nt._size[:end]) == list(size[:end])
+    nt_ragged = nt._size[:end]
+    size_ragged = size[:end]
+    return len(nt_ragged) == len(size_ragged) and (
+        all(ns == s or s == -1 for ns, s in zip(nt_ragged, size_ragged))
+    )
 
 
 def squeeze_leading_ones(t):
@@ -275,6 +280,20 @@ def jagged_torch_function(func, *args, **kwargs):
     if func is torch._C._nn.scaled_dot_product_attention:
         return jagged_scaled_dot_product_attention(*args, **kwargs)
 
+    # Handle reshape() / reshape_as() here because they're CompositeImplicit.
+    # TODO: Do the full view determination logic based on computeStride()
+    if func.__name__ == "reshape":
+        inp = args[0]
+        shape = args[1:]
+
+        return inp.view(shape) if inp.is_contiguous() else inp.contiguous().view(shape)
+
+    if func.__name__ == "reshape_as":
+        inp = args[0]
+        other = args[1]
+
+        return inp.reshape(*other.shape)
+
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
 
@@ -286,14 +305,22 @@ def jagged_torch_function(func, *args, **kwargs):
         )
 
         inp = new_kwargs.pop("input")
-        new_kwargs["start_dim"] = _wrap_jagged_dim(
-            inp.dim(), new_kwargs["start_dim"], "flatten"
+
+        # NB: stay in outer dim space because we're going to redispatch on a NT input
+        start_dim = _wrap_jagged_dim(
+            inp.dim(), new_kwargs["start_dim"], "flatten", convert_to_inner_dim=False
         )
-        new_kwargs["end_dim"] = _wrap_jagged_dim(
-            inp.dim(), new_kwargs["end_dim"], "flatten"
+        end_dim = _wrap_jagged_dim(
+            inp.dim(), new_kwargs["end_dim"], "flatten", convert_to_inner_dim=False
         )
 
-        return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+        if start_dim == end_dim:
+            return inp
+
+        product = functools.reduce(operator.mul, inp.shape[start_dim : end_dim + 1])
+        new_shape = (*inp.shape[:start_dim], product, *inp.shape[end_dim + 1 :])
+
+        return inp.reshape(*new_shape)
 
     raise NotImplementedError(func)
 
@@ -522,6 +549,22 @@ def split_with_sizes_default(func, *args, **kwargs):
     new_kwargs["dim"] = _wrap_jagged_dim(
         inp.dim(), new_kwargs["dim"], "split_with_sizes"
     )
+
+    return [
+        NestedTensor(values=x, **extract_kwargs(inp))
+        for x in func(inp._values, **new_kwargs)
+    ]
+
+
+@register_jagged_func(torch.ops.aten.chunk.default, "self: jt, chunks: any, dim: any?")
+def chunk_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    new_kwargs["dim"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "chunk")
 
     return [
         NestedTensor(values=x, **extract_kwargs(inp))

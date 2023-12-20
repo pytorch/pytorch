@@ -1,6 +1,6 @@
 #version 450 core
-#define PRECISION $precision
-#define FORMAT    $format
+#define PRECISION ${PRECISION}
+#define FORMAT ${FORMAT}
 
 layout(std430) buffer;
 
@@ -14,8 +14,6 @@ layout(set = 0, binding = 2)         uniform PRECISION restrict           Block 
   ivec2 stride;
   ivec2 padding;
   ivec2 dilate;
-  vec2 scale;
-  ivec2 zero_point;
 } uBlock;
 
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
@@ -37,13 +35,11 @@ void main() {
       for (int x = start.x; x < end.x; x += uBlock.dilate.x) {
         if ((x >= 0 && x < uBlock.kernel.z) && (y >= 0 && y < uBlock.kernel.w)) {
           vec4 outtexy = texelFetch(uInput, ivec3(x, y, pos.z), 0);
-          outtexy = uBlock.scale.x * (outtexy - uBlock.zero_point.x);
           outtex = max(outtexy, outtex);
         }
       }
     }
 
-    outtex = roundEven(outtex / uBlock.scale.x) + uBlock.zero_point.x;
     ivec4 store = ivec4(outtex);
     imageStore(uOutput, pos, store);
   }

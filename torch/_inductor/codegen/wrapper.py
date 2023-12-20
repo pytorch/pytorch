@@ -139,11 +139,18 @@ def user_defined_kernel_grid_fn_code(name, configs, grids):
         if len(grids) == 1:
             output.writeline(f"return {grids[0]}")
         else:
+            assert len(grids) > 1
             assert len(grids) == len(configs)
+            seen = set()
             for grid, c in zip(grids, configs):
                 guards = [f"meta['{name}'] == {val}" for name, val in c.kwargs.items()]
                 guards = " and ".join(guards)
-                output.writeline(f"if {guards}: return {grid}")
+                statement = f"if {guards}: return {grid}"
+                if statement in seen:
+                    continue
+                seen.add(statement)
+                output.writeline(statement)
+
     return fn_name, output.getvalue()
 
 
@@ -524,14 +531,14 @@ class WrapperCodeGen(CodeGen):
         self.generate_extern_kernel_alloc(fallback_kernel, args)
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
+        output_name = extern_kernel.get_name()
+        origin_node = extern_kernel.get_origin_node()
+        kernel_name = extern_kernel.get_kernel_name()
         ending = self.ending
-        if config.memory_planning and "view_as_complex" in str(extern_kernel.kernel):
+        if config.memory_planning and "view_as_complex" in kernel_name:
             # view operation fallbacks cause issues since inductor
             # doesn't know the memory is still needed and might reuse it.
             ending = f".clone(){ending}"
-        output_name = extern_kernel.get_name()
-        origin_node = extern_kernel.get_origin_node()
-        kernel_name = extern_kernel.codegen_kernel_name()
         self.writeline(
             f"{self.declare}{output_name} = {kernel_name}({', '.join(args)}){ending}"
         )
@@ -564,7 +571,7 @@ class WrapperCodeGen(CodeGen):
         )
 
     def generate_scatter_fallback(
-        self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
+        self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
     ):
         line = f"{kernel}({','.join(map(str, inputs))}"
         if kernel == "aten.scatter_":
@@ -1416,6 +1423,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #include <torch/types.h>
+                #include <ATen/ops/bernoulli_native.h>
+
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
@@ -1639,11 +1648,25 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
             if V.graph.aot_mode:
-                if not config.use_minimal_arrayref_interface:
+                if config.use_minimal_arrayref_interface:
+                    # TODO: input shape checking for regular tensor interface as well?
+                    self.codegen_input_numel_asserts()
+                else:
                     self.prefix.writeline("inputs.clear();")
                 self.prefix.writeline(
                     "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
+
+    def codegen_input_numel_asserts(self):
+        for name, buf in V.graph.graph_inputs.items():
+            if isinstance(buf, sympy.Expr):
+                continue
+
+            # comparing strides for 0 size tensor is tricky. Ignore them for now.
+            if sympy_product(buf.get_size()) == 0:
+                continue
+            numel = buf.get_numel()
+            self.prefix.writeline(f"assert_numel({name}, {numel});")
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
         if config.aot_inductor.abi_compatible:
@@ -1999,7 +2022,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.writeline(f"AtenTensorHandle {output_handle_name};")
         output_arg = f"&{output_handle_name}"
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.codegen_kernel_name(), args + [output_arg]
+            extern_kernel.get_kernel_name(), args + [output_arg]
         )
         self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
@@ -2037,7 +2060,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         args = args + output_args
         assert (
             fallback_kernel.abi_compatible_kernel is not None
-        ), f"abi_compatible_kernel is None for {fallback_kernel.kernel=}"
+        ), f"abi_compatible_kernel is None for {fallback_kernel.python_kernel_name=}"
         self.generate_c_shim_extern_kernel_call(
             fallback_kernel.abi_compatible_kernel, args
         )
@@ -2089,14 +2112,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
     def generate_scatter_fallback(
-        self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
+        self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
     ):
         # TODO: support other overload for cpp wrapper and remove the below assertions
         if V.graph.aot_mode and config.aot_inductor.abi_compatible:
             # call the ABI shim function instead of the ATen one
             kernel = kernel.replace("at::", "aoti_torch_")
         line = f"{kernel}({output}, {','.join(map(str, inputs))}"
-        if fn == "aten.scatter_":
+        if python_kernel_name == "aten.scatter_":
             if src_is_tensor:
                 if reduce:
                     line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
@@ -2284,7 +2307,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"{name}_storage",
                     size_array_var,
                     stride_array_var,
-                    dtype_code,
                     device_type,
                     device_idx,
                 ]
