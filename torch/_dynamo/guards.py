@@ -972,8 +972,13 @@ class CheckFunctionManager:
             output_graph.global_scope,
             self,
         )
+
+        # Break retain cycle. See test_release_scope_memory
+        def cleanup_builder(b):
+            b.scope = {}
+
         # Break retain cycle. See test_release_input_memory
-        w_builder = weakref.ref(builder)
+        w_builder = weakref.ref(builder, cleanup_builder)
 
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
