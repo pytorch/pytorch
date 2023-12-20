@@ -1422,8 +1422,8 @@ class TritonKernel(Kernel):
             and len(mask_vars - dense_mask_vars) == 0
             and not self.is_indirect_indexing(index)
             and have_loop_vars
-            # HACK workaround correctness issue in test_multilayer_sum_low_prec_cuda/test_multilayer_var_cuda
-            and not self.no_x_dim
+            # workaround https://github.com/openai/triton/issues/2821d
+            and self.index_dtype == "tl.int32"
         ):
             index_relative_to_xyr_index = sympy_subs(
                 index, {v: t.expr for v, t in self.range_tree_nodes.items()}
@@ -1433,7 +1433,7 @@ class TritonKernel(Kernel):
             strides = [sympy.Wild(f"stride_{s}", exclude=symbols) for s in symbols]
             offset = sympy.Wild("_offset", exclude=symbols)
             m = index_relative_to_xyr_index.match(sympy_dot(symbols, strides) + offset)
-            if m and self.index_dtype == "tl.int32":
+            if m:
                 strides = [m[s] for s in strides]
                 return BlockPtrOptions(
                     offset=m[offset],
@@ -1692,7 +1692,7 @@ class TritonKernel(Kernel):
                     line = f"{line}[{', '.join(expand_str)}]"
                 elif self.no_x_dim:
                     assert indexing.block_shape[0] == "XBLOCK"
-                    line = f"tl.view({line}, {self.index_to_str(indexing.block_shape[1:])})"
+                    line = f"tl.reshape({line}, {self.index_to_str(indexing.block_shape[1:])})"
             elif isinstance(original_index, sympy.Integer):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
