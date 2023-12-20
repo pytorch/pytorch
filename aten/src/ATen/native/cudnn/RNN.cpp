@@ -617,7 +617,7 @@ namespace {
                 &matrix_pointer
                 ));
 #else
-          void *unused_pointer;
+          void *unused_pointer = nullptr;
           TensorDescriptor unused_desc;
           TensorDescriptor lin_layer_mat_desc;
           for (int stateless = 0; stateless < 100; stateless++) {
