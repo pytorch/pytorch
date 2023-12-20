@@ -3630,7 +3630,7 @@ class CommonTemplate:
 
     def test_move_arange(self):
         def fn(x):
-            return torch.arange(len(x), device=self.device).to(x.device) + x
+            return torch.arange(len(x), device="cpu").to(x.device) + x
 
         self.common(fn, (torch.randn([32]),), check_lowp=False)
         # if we have a copy there will be more than 1 kernel
