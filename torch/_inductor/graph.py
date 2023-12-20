@@ -84,10 +84,9 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.bool,
         torch.bfloat16,
         torch.complex64,
-        # torch.float16, # TODO: implement this
+        torch.float16,
     }
     if cuda:
-        supported_dtype.add(torch.float16)
         supported_dtype.add(torch.float8_e4m3fn)
         supported_dtype.add(torch.float8_e5m2)
 
