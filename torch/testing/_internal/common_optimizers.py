@@ -808,6 +808,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -819,10 +826,17 @@ optim_db: List[OptimizerInfo] = [
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "Adagrad is not currently supported by torch.compile, will error"
+                    "See https://github.com/pytorch/pytorch/issues/115607"
                 ),
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115607 and #116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
             ),
         ),
     ),
@@ -831,6 +845,22 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adam,
         optim_error_inputs_func=optim_error_inputs_func_adam,
         supported_impls=("foreach", "differentiable", "fused"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Fixing #115607 should fix this test. fused is correct, but forloop is not."
+                ),
+                "TestOptimRenewed",
+                "test_fused_matches_forloop",
+            ),
+        ),
     ),
     OptimizerInfo(
         Adamax,
@@ -839,9 +869,18 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         skips=(
             DecorateInfo(
-                skipIfTorchDynamo("Adamax is not currently supported by torch.compile"),
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115607"
+                ),
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115607 and #116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
             ),
         ),
     ),
@@ -850,6 +889,22 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamw,
         optim_error_inputs_func=optim_error_inputs_func_adamw,
         supported_impls=("foreach", "differentiable", "fused"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Fixing #115607 should fix this test. fused is correct, but forloop is not."
+                ),
+                "TestOptimRenewed",
+                "test_fused_matches_forloop",
+            ),
+        ),
     ),
     OptimizerInfo(
         ASGD,
@@ -863,6 +918,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
             ),
         ),
     ),
@@ -880,12 +942,30 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_nadam,
         optim_error_inputs_func=optim_error_inputs_func_nadam,
         supported_impls=("foreach", "differentiable"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+        ),
     ),
     OptimizerInfo(
         RAdam,
         optim_inputs_func=optim_inputs_func_radam,
         optim_error_inputs_func=optim_error_inputs_func_radam,
         supported_impls=("foreach", "differentiable"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+        ),
     ),
     OptimizerInfo(
         RMSprop,
@@ -899,6 +979,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
             ),
         ),
     ),
@@ -915,6 +1002,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -923,6 +1017,15 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_sgd,
         supported_impls=("foreach", "differentiable"),
         supports_sparse_on=("cpu", "cuda"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
+                ),
+                "TestOptimRenewed",
+                "test_set_default_dtype_works_with_foreach",
+            ),
+        ),
     ),
     OptimizerInfo(
         SparseAdam,
