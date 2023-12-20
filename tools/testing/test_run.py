@@ -67,7 +67,7 @@ class TestRun:
         if self._included:
             return " or ".join(sorted(self._included))
         elif self._excluded:
-            return f"not ({' and '.join(sorted(self._excluded))})"
+            return f"not ({' or '.join(sorted(self._excluded))})"
         else:
             return ""
 
