@@ -126,7 +126,6 @@ test_failures = {
     "test_isinf2_dynamic_shapes": TestFailure(("cpu",)),
     "test_linspace1_dynamic_shapes": TestFailure(("cpu",)),
     "test_masked_scatter_dynamic_shapes": TestFailure(("cpu",)),
-    "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_stack_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor2_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor3_dynamic_shapes": TestFailure(("cpu",)),
@@ -228,6 +227,12 @@ test_failures = {
     "test_inplace_add_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_inplace_mixed_dtype_ops_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
+    ),
+    "test_mixed_dtype_linear_contiguous_dynamic_shapes": TestFailure(
+        ("cpu"), is_skip=True
+    ),
+    "test_weight_int4pack_mm_contiguous_dynamic_shapes": TestFailure(
+        ("cpu"), is_skip=True
     ),
     "test_input_mutation1_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_input_mutation2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),

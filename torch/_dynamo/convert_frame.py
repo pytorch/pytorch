@@ -17,7 +17,7 @@ except ModuleNotFoundError:
 import torch
 import torch._logging
 from torch._guards import compile_context, CompileContext, CompileId, tracing
-from torch._utils_internal import log_compilation_event, signpost_event
+from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -77,6 +77,7 @@ from .utils import (
     istype,
     LazyString,
     orig_code_map,
+    record_compilation_metrics,
     reset_graph_break_dup_checker,
     setup_compile_debug,
     troubleshooting_url,
@@ -453,7 +454,10 @@ def _compile(
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
+    fail_type: Optional[str] = None
     fail_reason: Optional[str] = None
+    fail_user_frame_filename: Optional[str] = None
+    fail_user_frame_lineno: Optional[int] = None
     speculation_log = SpeculationLog()
 
     @preserve_global_state
@@ -566,6 +570,41 @@ def _compile(
 
         assert output is not None
 
+        # Tests for new code objects.
+        # The rationale for these tests can be found in torch/csrc/dynamo/eval_frame.c
+        # Only test once the code object is created.
+        # They are not tested during runtime.
+
+        def count_args(code):
+            import inspect
+
+            return (
+                code.co_argcount
+                + code.co_kwonlyargcount
+                + bool(code.co_flags & inspect.CO_VARARGS)
+                + bool(code.co_flags & inspect.CO_VARKEYWORDS)
+            )
+
+        total_argcount_old = count_args(code)
+        total_argcount_new = count_args(out_code)
+        msg = "arg mismatch: "
+        msg += f"old code object has args {code.co_varnames[:total_argcount_old]}, "
+        msg += f"new code object has args {out_code.co_varnames[:total_argcount_new]}"
+        assert (
+            code.co_varnames[:total_argcount_old]
+            == out_code.co_varnames[:total_argcount_new]
+        ), msg
+
+        msg = "free var mismatch: "
+        msg += f"old code object has free var {code.co_freevars}, "
+        msg += f"new code object has free var {out_code.co_freevars}"
+        assert code.co_freevars == out_code.co_freevars, msg
+
+        msg = "cell var mismatch: "
+        msg += f"old code object has cell var {code.co_cellvars}, "
+        msg += f"new code object has cell var {out_code.co_cellvars}"
+        assert code.co_cellvars == out_code.co_cellvars, msg
+
         # Skipping Dynamo on a frame without any extracted graph.
         # This does not affect eager functionality. But this is necessary
         # for export for cases where Dynamo-reconstructed bytecode can create
@@ -610,68 +649,79 @@ def _compile(
             UncapturedHigherOrderOpError,
             BisectValidationException,
         ) as e:
+            fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
+            if e.innermost_user_frame_summary is not None:  # type: ignore[union-attr]
+                fail_user_frame_filename = e.innermost_user_frame_summary.filename  # type: ignore[union-attr]
+                fail_user_frame_lineno = e.innermost_user_frame_summary.lineno  # type: ignore[union-attr]
             raise
         except Exception as e:
+            fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
+            if e.innermost_user_frame_summary is not None:  # type: ignore[attr-defined]
+                fail_user_frame_filename = e.innermost_user_frame_summary.filename  # type: ignore[attr-defined]
+                fail_user_frame_lineno = e.innermost_user_frame_summary.lineno  # type: ignore[attr-defined]
             raise InternalTorchDynamoError(str(e)).with_traceback(
                 e.__traceback__
             ) from None
         finally:
-            if config.log_compilation_metrics:
-                from .utils import curr_frame
+            from .utils import curr_frame
 
-                frame_key = str(curr_frame)
-                if (
-                    fail_reason is None
-                    and output is not None
-                    and frame_key in frame_phase_timing
-                ):
-                    guard_count = len(output.guards)
-                    graph_op_count = output.count_calls()
-                    graph_node_count = len(output.graph.nodes)
-                    graph_input_count = len(output.placeholders)
-                    entire_frame_compile_time = frame_phase_timing[frame_key].get(
-                        "entire_frame_compile", None
-                    )
-                    backend_compile_time = frame_phase_timing[frame_key].get(
-                        "backend_compile", None
-                    )
-                    non_compliant_ops = {
-                        op.__qualname__ for op in output.non_compliant_ops
-                    }
-                    compliant_custom_ops = {
-                        op.__qualname__ for op in output.compliant_custom_ops
-                    }
-                else:
-                    guard_count = None
-                    graph_op_count = None
-                    graph_node_count = None
-                    graph_input_count = None
-                    entire_frame_compile_time = None
-                    backend_compile_time = None
-                    non_compliant_ops = set({})
-                    compliant_custom_ops = set({})
-                metrics = CompilationMetrics(
-                    frame_key,
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    cache_size.num_cache_entries_with_same_id_matched_objs,
-                    cache_size.num_cache_entries,
-                    guard_count,
-                    graph_op_count,
-                    graph_node_count,
-                    graph_input_count,
-                    entire_frame_compile_time,
-                    backend_compile_time,
-                    fail_reason,
-                    non_compliant_ops,
-                    compliant_custom_ops,
+            frame_key = str(curr_frame)
+            if (
+                fail_reason is None
+                and output is not None
+                and frame_key in frame_phase_timing
+            ):
+                guard_count = len(output.guards)
+                shape_env_guard_count = len(output.shape_env.guards)
+                graph_op_count = output.count_calls()
+                graph_node_count = len(output.graph.nodes)
+                graph_input_count = len(output.placeholders)
+                entire_frame_compile_time = frame_phase_timing[frame_key].get(
+                    "entire_frame_compile", None
                 )
-                log_compilation_event(metrics)
+                backend_compile_time = frame_phase_timing[frame_key].get(
+                    "backend_compile", None
+                )
+                non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
+                compliant_custom_ops = {
+                    op.__qualname__ for op in output.compliant_custom_ops
+                }
+            else:
+                guard_count = None
+                shape_env_guard_count = None
+                graph_op_count = None
+                graph_node_count = None
+                graph_input_count = None
+                entire_frame_compile_time = None
+                backend_compile_time = None
+                non_compliant_ops = set({})
+                compliant_custom_ops = set({})
+            metrics = CompilationMetrics(
+                frame_key,
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                cache_size.num_cache_entries_with_same_id_matched_objs,
+                cache_size.num_cache_entries,
+                guard_count,
+                shape_env_guard_count,
+                graph_op_count,
+                graph_node_count,
+                graph_input_count,
+                entire_frame_compile_time,
+                backend_compile_time,
+                fail_type,
+                fail_reason,
+                fail_user_frame_filename,
+                fail_user_frame_lineno,
+                non_compliant_ops,
+                compliant_custom_ops,
+            )
+            record_compilation_metrics(metrics)
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):

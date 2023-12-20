@@ -713,8 +713,6 @@ class TorchVariable(BaseTorchVariable):
                 ).call_function(tx, args, kwargs)
         elif can_dispatch_torch_function(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
-        elif isinstance(self.value, types.ModuleType):
-            unimplemented("TypeError(\"'module' object is not callable\")")
         else:
             # torch.LongTensor cannot accept a list of FakeTensors.
             # So we stack the list of FakeTensors instead.
