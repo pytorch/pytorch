@@ -106,8 +106,56 @@ class BlockPtrOptions:
     order: List[int]
     offsets: List[str]
     mask_vars: Set[sympy.Symbol]
-    expand_suffix: List[str]
     reshape_suffix: List[str]
+
+    @staticmethod
+    def create(
+        strides: List[sympy.Expr],
+        constant_offset: sympy.Expr,
+        range_trees: List[IterationRangesEntry],
+        mask_vars: Set[sympy.Symbol],
+    ) -> BlockPtrOptions:
+        """Helper to create a  BlockPtrOptions instance"""
+        block_shape = [f"{t.prefix.upper()}BLOCK" for t in range_trees]
+        reshape_suffix = [*block_shape]
+
+        broadcasting_dim = [s == 0 for s in strides]
+        for i, is_broadcasting in enumerate(broadcasting_dim):
+            if is_broadcasting:
+                # drop any stride==0 dimensions for performance
+                reshape_suffix[i] = "1"
+
+        if V.kernel.no_x_dim:
+            assert range_trees[0].prefix == "x"
+            reshape_suffix.pop(0)
+
+        if (
+            not V.kernel.inside_reduction
+            and len(strides) == len(V.kernel.numels) - 1
+            and V.kernel.numels[-1] != 1
+        ):
+            # Need to expand rank by 1 to match rank when self.inside_reduction=True
+            reshape_suffix.append("1")
+
+        def filter(it):
+            """Removes any broadcasting dims from a given sequence"""
+            assert len(it) == len(broadcasting_dim)
+            return [
+                item
+                for item, is_broadcasting in zip(it, broadcasting_dim)
+                if not is_broadcasting
+            ]
+
+        return BlockPtrOptions(
+            constant_offset=constant_offset,
+            shape=filter([t.numel for t in range_trees]),
+            strides=filter(strides),
+            block_shape=filter(block_shape),
+            order=V.graph.sizevars.guarded_order(filter(strides)),
+            offsets=filter([f"{t.prefix}offset" for t in range_trees]),
+            mask_vars=mask_vars,
+            reshape_suffix=reshape_suffix,
+        )
 
     def format(self, name: str, roffset=True) -> str:
         """
@@ -152,12 +200,6 @@ class BlockPtrOptions:
             ):
                 check.append(i)
         return check
-
-    def is_zero_roffset(self):
-        """True is roffset's stride is 0"""
-        return V.graph.sizevars.statically_known_equals(
-            self.strides[self.offsets.index("roffset")], 0
-        )
 
     def advance_roffset(self):
         """Codegen string to pass to tl.advance(name, ...)"""
@@ -1438,16 +1480,16 @@ class TritonKernel(Kernel):
             strides = [sympy.Wild(f"stride_{s}", exclude=symbols) for s in symbols]
             offset = sympy.Wild("_offset", exclude=symbols)
             m = index_relative_to_xyr_index.match(sympy_dot(symbols, strides) + offset)
+            # TODO(jansel): it is sometimes possible to do higher dimensional block_ptrs with
+            #               a tl.reshape the correct block.  We will miss these cases today.
             if m:
                 self.filter_masks(mask_vars)
-                return self.indexing_block_ptr(
+                return BlockPtrOptions.create(
                     [m[s] for s in strides],
                     m[offset],
                     range_trees,
                     mask_vars,
                 )
-                # TODO(jansel): it is sometimes possible to do higher dimensional block_ptrs with
-                #               a tl.reshape the correct block.  We will miss these cases today.
 
         expand_str = None
         index_str = self.index_to_str(index)
@@ -1474,57 +1516,6 @@ class TritonKernel(Kernel):
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
         return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex)
-
-    def indexing_block_ptr(
-        self, strides, constant_offset, range_trees, mask_vars
-    ) -> BlockPtrOptions:
-        """Helper to create a  BlockPtrOptions instance"""
-        block_shape = [f"{t.prefix.upper()}BLOCK" for t in range_trees]
-        expand_suffix = [":"] * len(strides)
-        reshape_suffix = [*block_shape]
-
-        broadcasting_dim = [s == 0 for s in strides]
-        for i, is_broadcasting in enumerate(broadcasting_dim):
-            if is_broadcasting:
-                # drop any stride==0 dimensions for performance
-                expand_suffix[i] = "None"
-                reshape_suffix[i] = "1"
-
-        if self.no_x_dim:
-            assert range_trees[0].prefix == "x"
-            if broadcasting_dim[0]:
-                expand_suffix.pop(0)
-            reshape_suffix.pop(0)
-
-        if (
-            not self.inside_reduction
-            and len(strides) == len(self.numels) - 1
-            and self.numels[-1] != 1
-        ):
-            # Need to expand rank by 1 to match rank when self.inside_reduction=True
-            expand_suffix.append("None")  # RBLOCK
-            reshape_suffix.append("1")
-
-        def filter(it):
-            """Removes any broadcasting dims from a given sequence"""
-            assert len(it) == len(broadcasting_dim)
-            return [
-                item
-                for item, is_broadcasting in zip(it, broadcasting_dim)
-                if not is_broadcasting
-            ]
-
-        return BlockPtrOptions(
-            constant_offset=constant_offset,
-            shape=filter([t.numel for t in range_trees]),
-            strides=filter(strides),
-            block_shape=filter(block_shape),
-            order=V.graph.sizevars.guarded_order(filter(strides)),
-            offsets=filter([f"{t.prefix}offset" for t in range_trees]),
-            mask_vars=mask_vars,
-            expand_suffix=expand_suffix,
-            reshape_suffix=reshape_suffix,
-        )
 
     def active_range_trees(self, reorder=False):
         trees = [
@@ -1651,18 +1642,21 @@ class TritonKernel(Kernel):
             other = f", boundary_check={check!r}, padding_option='zero'"
         else:
             other = f", boundary_check={check!r}"
-        if self.inside_reduction and not self.persistent_reduction:
+        if (
+            self.inside_reduction
+            and not self.persistent_reduction
+            and indexing.has_rindex()
+        ):
             block_ptr = f"block_ptr{next(self.block_ptr_id)}"
             self.body.writeline(
                 DeferredLine(
                     name, f"{block_ptr} = {indexing.format(var, roffset=False)}"
                 )
             )
-            if not indexing.is_zero_roffset():
-                advance_block_ptr = DeferredLine(
-                    name,
-                    f"{block_ptr} = tl.advance({block_ptr}, {indexing.advance_roffset()})",
-                )
+            advance_block_ptr = DeferredLine(
+                name,
+                f"{block_ptr} = tl.advance({block_ptr}, {indexing.advance_roffset()})",
+            )
         else:
             block_ptr = indexing.format(var)
         return block_ptr, advance_block_ptr, other
@@ -1735,8 +1729,6 @@ class TritonKernel(Kernel):
                     name, var, indexing, other
                 )
                 line = f"tl.load({block_ptr}{other}{ep})"
-                if any(s != ":" for s in indexing.expand_suffix):
-                    line = f"{line}[{', '.join(indexing.expand_suffix)}]"
                 if indexing.reshape_suffix != indexing.block_shape:
                     line = f"tl.reshape({line}, {self.index_to_str(indexing.reshape_suffix)})"
             elif isinstance(original_index, sympy.Integer):
