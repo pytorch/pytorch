@@ -158,13 +158,18 @@ class TensorVariable(VariableTracker):
                 [int(s) if is_symbolic(s) else s for s in value.size()]
             )
             props["stride"] = tuple(value.stride())
-            props["is_contiguous"] = tuple(
-                [
-                    x
-                    for x in torch._prims_common._memory_formats
-                    if value.is_contiguous(memory_format=x)
-                ]
-            )
+            if torch._C._functorch.is_batchedtensor(value):
+                # Batched tensors does not support contiguity patterns, so
+                # we refrain from computing the `is_contiguous` property
+                props["is_contiguous"] = None
+            else:
+                props["is_contiguous"] = tuple(
+                    [
+                        x
+                        for x in torch._prims_common._memory_formats
+                        if value.is_contiguous(memory_format=x)
+                    ]
+                )
         return props
 
     def dynamic_getattr(self, tx, name):
@@ -348,7 +353,6 @@ class TensorVariable(VariableTracker):
                 unimplemented(f"Illegal method invocation {name} in strict mode")
         from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
-        from .user_defined import UserDefinedClassVariable
 
         kwargs = dict(kwargs)
 
@@ -484,7 +488,7 @@ class TensorVariable(VariableTracker):
         elif (
             name == "as_subclass"
             and len(args) == 1
-            and isinstance(args[0], UserDefinedClassVariable)
+            and isinstance(args[0], TensorSubclassVariable)
         ):
             from .builder import VariableBuilder
             from .torch_function import TensorWithTFOverrideVariable
