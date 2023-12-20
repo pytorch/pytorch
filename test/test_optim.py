@@ -22,7 +22,7 @@ class TestOptimRenewed(TestCase):
     @optims(optim_db)
     def test_optim_infos_do_not_specify_global_cliquey_kwargs(self, device, dtype, optim_info):
         global_cliquey_flags = ["foreach", "fused", "differentiable"]
-        for optim_input in optim_info.optim_inputs_func():
+        for optim_input in optim_info.optim_inputs_func(device=device):
             self.assertFalse(any(f for f in global_cliquey_flags if f in optim_input.kwargs))
 
 
@@ -59,7 +59,7 @@ class TestOptimRenewed(TestCase):
         # after rho_t becomes greater than 5 in step 6.
         kIterations = 7
 
-        optim_inputs = optim_info.optim_inputs_func()
+        optim_inputs = optim_info.optim_inputs_func(device=device)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
             updated_params, state = [], []
@@ -160,7 +160,7 @@ class TestOptimRenewed(TestCase):
                 p.grad = torch.rand_like(p, device=p.device, dtype=p.dtype)
 
         kIterations = 7 if impl == "foreach" else 1
-        optim_inputs = optim_info.optim_inputs_func()
+        optim_inputs = optim_info.optim_inputs_func(device=device)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
             updated_params, state = [], []
@@ -228,7 +228,7 @@ class TestOptimRenewed(TestCase):
     @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float16])
     def test_foreach_large_tensor(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        optim_inputs = optim_info.optim_inputs_func()
+        optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
             params = [torch.ones(2 ** 32, device=device, dtype=dtype)]
             params[0].grad = torch.zeros_like(params[0])
@@ -240,7 +240,7 @@ class TestOptimRenewed(TestCase):
     @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float32])
     def test_peak_memory_foreach(self, device, dtype, optim_info):
         nparams = 10
-        optim_inputs = optim_info.optim_inputs_func()
+        optim_inputs = optim_info.optim_inputs_func(device=device)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
             kwargs = deepcopy(optim_input.kwargs)
@@ -301,12 +301,90 @@ class TestOptimRenewed(TestCase):
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float16])
     def test_fused_large_tensor(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
-        optim_inputs = optim_info.optim_inputs_func()
+        optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
             params = [torch.ones(2 ** 32, device=device, dtype=dtype)]
             params[0].grad = torch.zeros_like(params[0])
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_is_noop_when_params_have_no_grad(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+        params = [
+            torch.randn(2, 3, requires_grad=False, device=device, dtype=dtype)
+            for _ in range(2)]
+        old_params = [p.clone().detach() for p in params]
+
+        def closure():
+            return torch.tensor([1], device=device, dtype=dtype)
+
+        for optim_input in optim_inputs:
+            kwargs = optim_input.kwargs
+            if kwargs.get("capturable", False) and device == 'cpu':
+                # capturable is not supported on CPU
+                continue
+
+            flags = [None]
+            if str(device) == "cuda":
+                if "foreach" in optim_info.supported_impls:
+                    flags.append("foreach")
+                if "fused" in optim_info.supported_impls:
+                    flags.append("fused")
+            for flag in flags:
+                if flag is not None:
+                    kwargs[flag] = True
+                optimizer = optim_cls(params, **optim_input.kwargs)
+                optimizer.step(closure)
+                self.assertEqual(old_params, params)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_step_is_noop_for_empty_grads(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+        param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
+        old_param = param.clone().detach()
+
+        def closure():
+            return torch.tensor([1], device=device, dtype=dtype)
+
+        for optim_input in optim_inputs:
+            kwargs = optim_input.kwargs
+
+            # params will decay even if grads are empty if weight_decay != 0,
+            # and capturable doesn't work for CPU tensors
+            if (kwargs.get("weight_decay", 0) != 0
+               or kwargs.get("capturable", False) and device == 'cpu'):
+                continue
+
+            # AdamW params will be updated regardless of grads due to lr, so make lr smaller
+            if optim_cls.__name__ == "AdamW":
+                kwargs["lr"] = torch.tensor(1e-4) if isinstance(kwargs.get("lr", 1e-4), torch.Tensor) else 1e-4
+
+            flags = [None]
+            if str(device) == "cuda":
+                if "foreach" in optim_info.supported_impls:
+                    flags.append("foreach")
+                if "fused" in optim_info.supported_impls:
+                    flags.append("fused")
+            for flag in flags:
+                if flag is not None:
+                    kwargs[flag] = True
+                optimizer = optim_cls([param], **optim_input.kwargs)
+                if optim_cls.__name__ == "SparseAdam":
+                    # Intentionally construct a multidimensional empty v for the sparse grad
+                    # Single dim v passes the test while multidim correctly repros the issue
+                    # https://github.com/pytorch/pytorch/issues/82486
+                    i = torch.empty((1, 0), device=device, dtype=dtype)
+                    v = torch.empty((0, 1), device=device, dtype=dtype)
+                    param.grad = torch.sparse_coo_tensor(i, v, (5, 1), device=device, dtype=dtype)
+                else:
+                    param.grad = torch.zeros_like(param)
+                optimizer.step(closure)
+                self.assertEqual(old_param, param)
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
