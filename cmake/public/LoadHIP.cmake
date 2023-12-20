@@ -183,7 +183,6 @@ if(HIP_FOUND)
   else()
     find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${ROCM_PATH}/lib)
   endif()
-  # hiprtc is part of HIP
   find_library(ROCM_HIPRTC_LIB hiprtc HINTS ${ROCM_PATH}/lib)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
