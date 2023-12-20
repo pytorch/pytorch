@@ -179,6 +179,7 @@ def capture_pre_autograd_graph(
     }
 
     if _functional_pre_dispatch_IR:
+        from torch.export._trace import _export
         module = _export(f, args, kwargs, constraints=constraints, pre_dispatch=True, decomp_table=decomp_table).module()
     else:
         if kwargs is None:
@@ -267,8 +268,6 @@ def _export(
     constraints: Optional[List[Constraint]] = None,
     *,
     strict: bool = True,
-    decomp_table: Optional[Dict[str, Callable]] = None,
-    pre_dispatch: bool = False,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
