@@ -332,6 +332,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> distrib(1, *numWorkers_);
+    // TODO (xilunwu): this wait logic may be removed after fixing read_offset
     // stagger connecting to the store when there are too many ranks to
     // avoid causing a DDoS
     std::this_thread::sleep_for(std::chrono::milliseconds(distrib(gen)));
@@ -403,7 +404,7 @@ void TCPStore::_splitSet(
   detail::SendBuffer buffer(*client_, detail::QueryType::SET);
   buffer.appendString(keyPrefix_ + key);
   buffer.flush();
-  sleep(1);
+  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   buffer.appendBytes(data);
   buffer.flush();
 }

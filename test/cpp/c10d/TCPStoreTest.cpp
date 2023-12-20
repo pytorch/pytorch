@@ -206,14 +206,14 @@ TEST(TCPStoreTest, testCleanShutdown) {
 }
 
 TEST(TCPStoreTest, testLibUVPartialRead) {
-  int numWorkers = 2;
+  int numWorkers = 2; // thread 0 creates both server and client
 
   // server part
   c10d::TCPStoreOptions server_opts{
       0,
       true, // is master
       numWorkers,
-      false, // wait workers
+      false, // don't wait otherwise client thread won't spawn
       std::chrono::seconds(defaultTimeout)};
   server_opts.useLibUV = true;
 
