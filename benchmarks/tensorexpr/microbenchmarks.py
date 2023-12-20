@@ -106,10 +106,10 @@ def gen_float_comparison_tensors(N, M):
 
 te_bool = te.Dtype.Bool
 binary_ops = [
-    ("add", (operator.add), torch.add),
-    ("mul", (operator.mul), torch.mul),
-    ("sub", (operator.sub), torch.sub),
-    ("div", (operator.truediv), torch.div),
+    ("add", operator.add, torch.add),
+    ("mul", operator.mul, torch.mul),
+    ("sub", operator.sub, torch.sub),
+    ("div", operator.truediv, torch.div),
     (
         "eq",
         (lambda a, b: te.Cast.make(te_bool, a == b)),

@@ -395,7 +395,7 @@ class ShardedTensor(ShardedTensorBase):
                 Default: ``None``
         """
         def shard_size(shard_md):
-            return reduce((operator.mul), shard_md.shard_sizes)  # type: ignore[attr-defined]
+            return reduce(operator.mul, shard_md.shard_sizes)  # type: ignore[attr-defined]
 
         if enforce_dtype:
             warnings.warn("enforce_dtype is deprecated.  Please use dtype instead.")

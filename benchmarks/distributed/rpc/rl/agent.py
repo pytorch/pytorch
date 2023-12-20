@@ -76,7 +76,7 @@ class AgentBase:
             batch (bool): Whether to process and respond to observer requests as a batch or 1 at a time
         """
         self.batch = batch
-        self.policy = Policy(reduce((operator.mul), state_size), nlayers, out_features)
+        self.policy = Policy(reduce(operator.mul, state_size), nlayers, out_features)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=1e-2)
 
         self.batch_size = batch_size
