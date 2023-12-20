@@ -180,6 +180,30 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     def tearDownClass(cls):
         cls._exit_stack.close()
 
+    def test_no_call_to_new(self):
+        class BadNewTorchFunction(torch.Tensor):
+            def __new__(cls, *args, **kwargs):
+                raise RuntimeError("Oops!")
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+        with torch._dynamo.config.patch(
+            "traceable_tensor_subclasses", {BadNewTorchFunction}
+        ):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                return torch.add(x, 1)
+
+            input = torch.ones(2, 2).as_subclass(BadNewTorchFunction)
+
+            res = fn(input)
+            self.assertIsInstance(res, BadNewTorchFunction)
+
     def test_base_torch_function_tracing(self):
         def fn(x):
             return torch.add(x, 1)

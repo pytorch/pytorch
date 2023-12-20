@@ -46,10 +46,7 @@ banned_attrs = [
 
 def _get_subclass_type(var):
     assert isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable))
-    if isinstance(var, TensorWithTFOverrideVariable):
-        return var.class_type()
-    elif isinstance(var, UserDefinedObjectVariable):
-        return var.python_type()
+    return var.python_type()
 
 
 def _get_subclass_type_var(tx, var):
