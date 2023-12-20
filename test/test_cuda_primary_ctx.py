@@ -13,6 +13,7 @@ if not TEST_CUDA:
     TestCase = NoTest  # noqa: F811
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaPrimaryCtx(TestCase):
     CTX_ALREADY_CREATED_ERR_MSG = (
         "Tests defined in test_cuda_primary_ctx.py must be run in a process "
