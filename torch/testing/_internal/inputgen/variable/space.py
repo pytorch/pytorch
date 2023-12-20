@@ -50,6 +50,8 @@ class Discrete:
     def __str__(self) -> str:
         if len(self.values) == 0:
             return "{}"
+        if list(self.values)[0].__class__ in [bool, int, float, ScalarDtype]:
+            return "{" + str(sorted(self.values))[1:-1] + "}"
         return str(self.values)
 
     def empty(self) -> bool:
@@ -88,7 +90,7 @@ class Interval:
 
     >>> i = Interval(1, 3)
     >>> str(i)
-    "[1, 3]"
+    '[1, 3]'
     >>> i.contains(1)
     True
     >>> i.contains(2)
@@ -104,13 +106,13 @@ class Interval:
 
     >>> i = Interval(1, 3, lower_open=True)
     >>> str(i)
-    "(1, 3]"
+    '(1, 3]'
     >>> i.contains(1)
     False
 
     >>> i = Interval(1, 2, lower_open=True, upper_open=True)
     >>> str(i)
-    "(1, 2)"
+    '(1, 2)'
     >>> i.contains(1)
     False
     >>> i.contains(2)
@@ -181,27 +183,27 @@ class Intervals:
 
     >>> i = Intervals()
     >>> str(i)
-    "[-inf, inf]"
+    '[-inf, inf]'
     >>> i.contains(float('inf'))
     True
     >>> i.remove(float('inf'))
     >>> str(i)
-    "[-inf, inf)"
+    '[-inf, inf)'
     >>> i.contains(float('inf'))
     False
 
     >>> i = Intervals([Interval(1, 3), Interval(5, 7)])
     >>> str(i)
-    "[1, 3] [5, 7]"
+    '[1, 3] [5, 7]'
     >>> i.set_lower(7, lower_open=True)
     >>> str(i)
-    "{}"
+    '{}'
     >>> i.empty()
     True
 
     >>> i = Intervals([Interval(1, 3), Interval(5, 7, lower_open=True)])
     >>> str(i)
-    "[1, 3] (5, 7]"
+    '[1, 3] (5, 7]'
     >>> i.contains(4)
     False
     >>> i.contains(5)
@@ -210,13 +212,13 @@ class Intervals:
     True
     >>> i.set_lower(2, lower_open=True)
     >>> str(i)
-    "(2, 3] (5, 7]"
+    '(2, 3] (5, 7]'
     >>> i.set_upper(6, upper_open=True)
     >>> str(i)
-    "(2, 3] (5, 6)"
+    '(2, 3] (5, 6)'
     >>> i.remove(3)
     >>> str(i)
-    "(2, 3) (5, 6)"
+    '(2, 3) (5, 6)'
     >>> i.contains_int()
     False
     """
@@ -303,14 +305,14 @@ class VariableSpace:
 
     >>> s = VariableSpace(bool)
     >>> str(s)
-    '[False, True]'
+    '{False, True}'
     >>> s.contains(True)
     True
     >>> s.contains(1)
     True
     >>> s.remove(0)
     >>> str(s)
-    '[True]'
+    '{True}'
 
     >>> s = VariableSpace(int)
     >>> str(s)
@@ -349,7 +351,10 @@ class VariableSpace:
 
     def __str__(self) -> str:
         if self.discrete.initialized:
-            return str(self.discrete)
+            if self.vtype in [bool, int, float, str, ScalarDtype]:
+                return str(sorted(self.discrete.values))
+            else:
+                return str(self.discrete)
         else:
             return str(self.intervals)
 
