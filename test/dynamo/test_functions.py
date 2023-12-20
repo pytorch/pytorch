@@ -1826,7 +1826,8 @@ def forward(self, x_1, output_1):
 
         def prep():
             x = torch.ones(4, device="cuda", requires_grad=True)
-            x_func = FunctionalTensor.to_functional(x)
+            with FunctionalTensorMode():
+                x_func = FunctionalTensor.to_functional(x)
             self.assertTrue(torch._is_functional_tensor(x_func.elem))
             return x_func
 
