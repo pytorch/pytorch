@@ -63,6 +63,7 @@ from torch.utils.data.datapipes.utils.snapshot import (
 from torch.utils.data.datapipes.dataframe import CaptureDataFrame
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.iter.sharding import SHARDING_PRIORITIES
+import operator
 
 try:
     import dill
@@ -1361,8 +1362,8 @@ class TestFunctionalIterDataPipe(TestCase):
         # Unmatched input columns with fn arguments
         _helper(None, fn_n1, 1, error=ValueError)
         _helper(None, fn_n1, [0, 1, 2], error=ValueError)
-        _helper(None, lambda d0, d1: d0 + d1, 0, error=ValueError)
-        _helper(None, lambda d0, d1: d0 + d1, [0, 1, 2], error=ValueError)
+        _helper(None, operator.add, 0, error=ValueError)
+        _helper(None, operator.add, [0, 1, 2], error=ValueError)
         _helper(None, fn_cmplx, 0, 1, ValueError)
         _helper(None, fn_n1_pos, 1, error=ValueError)
         _helper(None, fn_n1_def, [0, 1, 2], 1, error=ValueError)

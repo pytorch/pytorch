@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes, skipXLA)
+import operator
 
 
 class TestIndexing(TestCase):
@@ -138,7 +139,7 @@ class TestIndexing(TestCase):
         def consec(size, start=1):
             # Creates the sequence in float since CPU half doesn't support the
             # needed operations. Converts to dtype before returning.
-            numel = reduce(lambda x, y: x * y, size, 1)
+            numel = reduce(operator.mul, size, 1)
             sequence = torch.ones(numel, dtype=torch.float, device=device).cumsum(0)
             sequence.add_(start - 1)
             return sequence.view(*size).to(dtype=dtype)
