@@ -10,7 +10,10 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_optimizers import optim_db, optims, OptimizerErrorEnum
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS)
-from torch.testing._internal.common_utils import markDynamoStrictTest, run_tests, TestCase
+from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase
+
+
+FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
 
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
@@ -102,9 +105,7 @@ class TestOptimRenewed(TestCase):
                 state.append(optimizer.state)
                 updated_params.append(model.parameters())
 
-            assert_eq_kwargs = {}
-            if reduced_precision:
-                assert_eq_kwargs = {'atol': 1e-5, 'rtol': 1e-4}
+            assert_eq_kwargs = {} if not reduced_precision else FP16_REDUCED_PRECISION
 
             og_state, new_state = state
             for og_p, new_p in zip(updated_params[0], updated_params[1]):
@@ -118,7 +119,17 @@ class TestOptimRenewed(TestCase):
                     self.assertEqual(og_p_state[k], new_p_state[k], **assert_eq_kwargs)
 
 
-    def _test_derived_optimizers_mixed_device_dtype(self, device, dtype, optim_info, flag):
+    @skipMPS  # MPS doesn't support torch.float64, see https://github.com/pytorch/pytorch/issues/115350
+    @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float64])
+    def test_foreach_matches_forloop(self, device, dtype, optim_info):
+        self._test_derived_optimizers(device, dtype, optim_info, "foreach")
+
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @parametrize("impl", ["foreach", "fused"])
+    @optims([optim for optim in optim_db if "foreach" in optim.supported_impls or "fused" in optim.supported_impls])
+    def test_mixed_device_dtype(self, device, dtype, optim_info, impl):
         """
         Similar in essence to _test_derived_optimizers above. The main difference is that
         _test_derived_optimizers uses model parameters whereas we randomly pass in
@@ -126,7 +137,11 @@ class TestOptimRenewed(TestCase):
         CPU and GPU) because fused adam only works on GPUs. (Thus we only run the tests
         that call into this helper when TEST_MULTIGPU.)
         """
-        assert flag in ("foreach", "fused")
+        assert impl in ("foreach", "fused")
+        if impl == "foreach" and "foreach" not in optim_info.supported_impls:
+            return unittest.skip(f"foreach not supported for {optim_info.optim_cls.__name__}")
+        elif impl == "fused" and "fused" not in optim_info.supported_impls:
+            return unittest.skip(f"fused not supported for {optim_info.optim_cls.__name__}")
 
         params = [
             torch.rand(2, 3, dtype=torch.float64, device='cuda:0', requires_grad=True),
@@ -144,7 +159,7 @@ class TestOptimRenewed(TestCase):
             if p.requires_grad:
                 p.grad = torch.rand_like(p, device=p.device, dtype=p.dtype)
 
-        kIterations = 7 if flag == "foreach" else 1
+        kIterations = 7 if impl == "foreach" else 1
         optim_inputs = optim_info.optim_inputs_func(device=device)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
@@ -153,8 +168,8 @@ class TestOptimRenewed(TestCase):
             if kwargs.get("capturable", False) and str(device) == "cpu":
                 # capturable is not supported on CPU
                 continue
-            for flag_value in (False, True):
-                kwargs[flag] = flag_value
+            for use_impl in (False, True):
+                kwargs[impl] = use_impl
                 params_clone = []
                 for p in params:
                     p_clone = p.clone().detach()
@@ -187,19 +202,6 @@ class TestOptimRenewed(TestCase):
                 for k in og_p_state:
                     actual = new_p_state[k]
                     self.assertEqual(og_p_state[k], actual, rtol=rtol, atol=atol)
-
-
-    @skipMPS  # MPS doesn't support torch.float64, see https://github.com/pytorch/pytorch/issues/115350
-    @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float64])
-    def test_foreach_matches_forloop(self, device, dtype, optim_info):
-        self._test_derived_optimizers(device, dtype, optim_info, "foreach")
-
-
-    @onlyCUDA
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @optims([optim for optim in optim_db if "foreach" in optim.supported_impls])
-    def test_foreach_mixed_device_dtype(self, device, dtype, optim_info):
-        self._test_derived_optimizers_mixed_device_dtype(device, dtype, optim_info, "foreach")
 
 
     @onlyCUDA
@@ -292,13 +294,6 @@ class TestOptimRenewed(TestCase):
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float64])
     def test_fused_matches_forloop(self, device, dtype, optim_info):
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
-
-
-    @onlyCUDA
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @optims([optim for optim in optim_db if "fused" in optim.supported_impls])
-    def test_fused_mixed_device_dtype(self, device, dtype, optim_info):
-        self._test_derived_optimizers_mixed_device_dtype(device, dtype, optim_info, "fused")
 
 
     @onlyCUDA
