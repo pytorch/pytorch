@@ -3987,7 +3987,7 @@ def fn():
 
         p_ref = None
 
-        x = torch.randn((10, 10), device="cuda:0")
+        x = torch.randn((10, 10))
         inner(x)
 
         p_ref = weakref.ref(x)
