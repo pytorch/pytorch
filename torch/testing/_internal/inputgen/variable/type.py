@@ -16,6 +16,9 @@ class ScalarDtype(Enum):
             return order.index(self.value) < order.index(other.value)
         return NotImplemented
 
+    def __str__(self):
+        return self.value.__name__
+
 
 SUPPORTED_TENSOR_DTYPES = [
     torch.bool,

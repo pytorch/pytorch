@@ -1,9 +1,9 @@
 from typing import Any, List, OrderedDict, Tuple
 
-from inputgen.argtuple.engine import MetaArgTupleEngine
-from inputgen.argument.engine import MetaArg
-from inputgen.argument.gen import ArgumentGenerator
-from inputgen.specs.model import Spec
+from torch.testing._internal.inputgen.argtuple.engine import MetaArgTupleEngine
+from torch.testing._internal.inputgen.argument.engine import MetaArg
+from torch.testing._internal.inputgen.argument.gen import ArgumentGenerator
+from torch.testing._internal.inputgen.specs.model import Spec
 
 
 class ArgumentTupleGenerator:
