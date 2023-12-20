@@ -39,17 +39,6 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
       num_models,
       is_cpu,
       cubin_dir.empty() ? nullptr : cubin_dir.c_str()));
-
-  /*
-  #ifdef FBCODE_CAFFE2
-    std::string extern_kernel_nodes_path =
-        model_so_path.substr(0, model_so_path.size() - 3) + ".json";
-    if (fileExists(extern_kernel_nodes_path)) {
-      proxy_executor_handle_ =
-          std::make_unique<torch::aot_inductor::FbProxyExecutor>(
-              extern_kernel_nodes_path, is_cpu);
-  #endif
-  */
 }
 
 AOTIModelContainerRunner::~AOTIModelContainerRunner() {

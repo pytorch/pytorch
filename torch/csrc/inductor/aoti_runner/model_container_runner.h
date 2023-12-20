@@ -56,7 +56,11 @@ class TORCH_API AOTIModelContainerRunner {
   decltype(&AOTInductorModelContainerSwapConstantBuffer)
       swap_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerGetCallSpec) get_call_spec_func_{nullptr};
+
   AOTInductorModelContainerHandle container_handle_ = nullptr;
+
+  // TODO: need an OSS proxy executor implementation. For now, proxy_executor_handle_
+  // will always be nullptr.
   AOTIProxyExecutorHandle proxy_executor_handle_ = nullptr;
 };
 
