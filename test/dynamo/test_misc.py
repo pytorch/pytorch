@@ -3382,6 +3382,77 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertTrue(same(ref, res))
 
+    def test_source_non_input_grad_access(self):
+        # This test creates a model, and accesses the grads
+        # from its parameter. This means that within dynamo,
+        # the tensor we are reading the grad from HAS a source,
+        # but is not known to graphargs.
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        class TrivialModel(torch.nn.Module):
+            def __init__(self):
+                super(TrivialModel, self).__init__()
+                self.linear = torch.nn.Linear(2, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def fn(a, b):
+            outs = []
+            for param in model.parameters():
+                outs.append(torch.ones(param.grad.size()))
+            return outs, param.grad + 1
+
+        model = TrivialModel()
+        # Eager
+        a = torch.ones([2, 2], requires_grad=True)
+        b = torch.ones([2, 2])
+        out = model(a)
+        out_sum = out.sum()
+        out_sum.backward()
+        ref = fn(a, b)
+
+        # Compiled
+        model = TrivialModel()
+        a = torch.ones([2, 2], requires_grad=True)
+        b = torch.ones([2, 2])
+        out = model(a)
+        out_sum = out.sum()
+        out_sum.backward()
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        res = opt_fn(a, b)
+
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 3)
+
+    def test_intermediary_tensor_grad_access(self):
+        # This test creates a model, and accesses the grads
+        # from its parameters and an entirely intermediary tensor.
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(a, b):
+            intermediary = torch.ones(2, 2)
+            c = a + intermediary
+            outs = []
+            outs.append(intermediary.grad)
+            return outs
+
+        # Eager
+        a = torch.ones([2, 2], requires_grad=True)
+        b = torch.ones([2, 2])
+        ref = fn(a, b)
+
+        # Compiled
+        a = torch.ones([2, 2], requires_grad=True)
+        b = torch.ones([2, 2])
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        res = opt_fn(a, b)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
     @skipIfNotPy311
     def test_linetable_311_writer1(self):
         def fn():
@@ -8803,6 +8874,51 @@ ShapeEnv not equal: field values don't match:
             all("aten.pow" not in code for code in source_code),
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
         )
+
+    def test_compilation_metrics_size_limit(self):
+        def fn1(x):
+            return x.relu()
+
+        def fn2(x):
+            return x.cos()
+
+        def fn3(x):
+            return x.sin()
+
+        def fn4(x):
+            return x.exp()
+
+        import contextlib
+
+        @contextlib.contextmanager
+        def metrics_limit_ctx():
+            try:
+                torch._dynamo.utils.set_compilation_metrics_limit(3)
+                yield
+            finally:
+                torch._dynamo.utils.set_compilation_metrics_limit(
+                    torch._dynamo.utils.DEFAULT_COMPILATION_METRICS_LIMIT
+                )
+
+        x = torch.rand((4, 4))
+        torch._dynamo.reset()
+        torch.compile(fn1, backend="eager")(x)
+        torch.compile(fn2, backend="eager")(x)
+        torch.compile(fn3, backend="eager")(x)
+        torch.compile(fn4, backend="eager")(x)
+
+        with metrics_limit_ctx():
+            torch._dynamo.utils.clear_compilation_metrics()
+            torch._dynamo.reset()
+            self.assertEqual(0, len(torch._dynamo.utils.get_compilation_metrics()))
+            torch.compile(fn1, backend="eager")(x)
+            self.assertEqual(1, len(torch._dynamo.utils.get_compilation_metrics()))
+            torch.compile(fn2, backend="eager")(x)
+            self.assertEqual(2, len(torch._dynamo.utils.get_compilation_metrics()))
+            torch.compile(fn3, backend="eager")(x)
+            self.assertEqual(3, len(torch._dynamo.utils.get_compilation_metrics()))
+            torch.compile(fn4, backend="eager")(x)
+            self.assertEqual(3, len(torch._dynamo.utils.get_compilation_metrics()))
 
     def test_funcname_cache(self):
         src = """\
