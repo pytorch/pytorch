@@ -37,6 +37,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 import torch.utils._pytree as pytree
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):
         self.assertTrue(isinstance(t, FakeTensor))
@@ -752,6 +753,7 @@ class FakeTensorTest(TestCase):
             self.assertTrue(torch._prims_common.suggest_memory_format(grad_in) == torch.channels_last)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):
         for arg in args:
@@ -848,6 +850,7 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     )
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorOpInfoTest(TestCase):
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
@@ -858,6 +861,7 @@ class FakeTensorOpInfoTest(TestCase):
             optests.fake_check(op, args, kwargs)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorConverterTest(TestCase):
     def test_memoized_conversion_to_meta(self):
         x = torch.rand(2, 2, 2)
@@ -967,6 +971,7 @@ class FakeTensorConverterTest(TestCase):
         assert y_weak() is None
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorOperatorInvariants(TestCase):
     @staticmethod
     def get_aten_op(schema):
@@ -1158,6 +1163,7 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(mode.count, 0)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class FakeTensorPropTest(TestCase):
     def test_fake_tensor_prop_on_nn_module(self):
         class ToyNnModuleWithParameters(torch.nn.Module):

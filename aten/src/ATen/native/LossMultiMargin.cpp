@@ -14,8 +14,7 @@
 #include <ATen/ops/multi_margin_loss_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -334,5 +333,4 @@ Tensor& multi_margin_loss_cpu_backward_out(const Tensor& grad_output,
   return grad_input;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
