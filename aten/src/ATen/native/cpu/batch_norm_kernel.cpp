@@ -330,7 +330,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
     */
 
     // Method 2: direct single reduction and vertical tile on n_channel when N <= num_threads
-    int64_t TILE_SIZE = 256;
+    int64_t TILE_SIZE = 16;
     // compute mean per input
     Tensor sum = at::zeros({n_channel}, input.options());
     scalar_t* sum_data = sum.data_ptr<scalar_t>();
@@ -358,6 +358,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
     });
 
     // compute variance per input
+    var_sum.zero_();
     at::parallel_for(0, (n_channel + TILE_SIZE - 1) / TILE_SIZE, 1, [&](int64_t tile_idx_begin, int64_t tile_idx_end) {
       for (int64_t tile_idx = tile_idx_begin; tile_idx < tile_idx_end; tile_idx++) {
         int64_t jj_begin = tile_idx * TILE_SIZE;
