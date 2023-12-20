@@ -236,6 +236,8 @@ CI_USE_SGD = {
     "pytorch_CycleGAN_and_pix2pix",
     "vision_maskrcnn",
     "resmlp_12_224",
+    "dlrm",
+    "resnet50",
 }
 
 
