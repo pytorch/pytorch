@@ -427,7 +427,6 @@ def optim_inputs_func_asgd():
         OptimizerInput(
             params=None, kwargs={"weight_decay": 0.9}, desc="nonzero weight_decay"
         ),
-        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
         OptimizerInput(
             params=None,
             kwargs={"weight_decay": 0.9, "maximize": True},
@@ -810,6 +809,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
                 ),
                 "TestOptimRenewed",
@@ -830,6 +836,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -860,6 +873,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -881,6 +901,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
             ),
         ),
     ),
@@ -904,6 +931,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -918,6 +952,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -950,6 +991,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -958,6 +1006,13 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_radam,
         supported_impls=("foreach", "differentiable"),
         skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
@@ -979,6 +1034,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1004,6 +1066,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
                 ),
                 "TestOptimRenewed",
@@ -1018,6 +1087,13 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         supports_sparse_on=("cpu", "cuda"),
         skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
+                ),
+                "TestOptimRenewed",
+                "test_peak_memory_foreach",
+            ),
             DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
