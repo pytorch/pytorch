@@ -235,10 +235,9 @@ class intrusive_ptr final {
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_base_of<
+      std::is_base_of_v<
           TTarget,
-          typename std::remove_pointer<decltype(NullType::singleton())>::type>::
-          value,
+          std::remove_pointer_t<decltype(NullType::singleton())>>,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;
@@ -369,7 +368,7 @@ class intrusive_ptr final {
   }
 
   intrusive_ptr& operator=(intrusive_ptr&& rhs) & noexcept {
-    return operator=<TTarget, NullType>(std::move(rhs));
+    return operator= <TTarget, NullType>(std::move(rhs));
   }
 
   template <class From, class FromNullType>
@@ -386,7 +385,7 @@ class intrusive_ptr final {
     if (this == &rhs) {
       return *this;
     }
-    return operator=<TTarget, NullType>(rhs);
+    return operator= <TTarget, NullType>(rhs);
   }
 
   template <class From, class FromNullType>
@@ -670,7 +669,7 @@ template <
 class weak_intrusive_ptr final {
  private:
   static_assert(
-      std::is_base_of<intrusive_ptr_target, TTarget>::value,
+      std::is_base_of_v<intrusive_ptr_target, TTarget>,
       "intrusive_ptr can only be used for classes that inherit from intrusive_ptr_target.");
 #ifndef _WIN32
   // This static_assert triggers on MSVC
@@ -680,10 +679,9 @@ class weak_intrusive_ptr final {
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_base_of<
+      std::is_base_of_v<
           TTarget,
-          typename std::remove_pointer<decltype(NullType::singleton())>::type>::
-          value,
+          std::remove_pointer_t<decltype(NullType::singleton())>>,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;
@@ -755,7 +753,7 @@ class weak_intrusive_ptr final {
   }
 
   weak_intrusive_ptr& operator=(weak_intrusive_ptr&& rhs) & noexcept {
-    return operator=<TTarget, NullType>(std::move(rhs));
+    return operator= <TTarget, NullType>(std::move(rhs));
   }
 
   template <class From, class FromNullType>
@@ -773,7 +771,7 @@ class weak_intrusive_ptr final {
     if (this == &rhs) {
       return *this;
     }
-    return operator=<TTarget, NullType>(rhs);
+    return operator= <TTarget, NullType>(rhs);
   }
 
   weak_intrusive_ptr& operator=(
