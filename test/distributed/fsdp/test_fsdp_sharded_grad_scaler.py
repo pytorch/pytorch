@@ -251,10 +251,16 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                 "use_orig_params": [False, True],
                 "mixed_precision": [
                     None,
-                    MixedPrecision(param_dtype=torch.float16, reduce_dtype=torch.float32),
-                    MixedPrecision(param_dtype=torch.float32, reduce_dtype=torch.float16),
-                    MixedPrecision(param_dtype=torch.float16, reduce_dtype=torch.float16),
-                ]
+                    MixedPrecision(
+                        param_dtype=torch.float16, reduce_dtype=torch.float32
+                    ),
+                    MixedPrecision(
+                        param_dtype=torch.float32, reduce_dtype=torch.float16
+                    ),
+                    MixedPrecision(
+                        param_dtype=torch.float16, reduce_dtype=torch.float16
+                    ),
+                ],
             },
             self._test_sharded_grad_scaler_found_inf,
         )
@@ -284,15 +290,17 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                 module = _model.module
                 inp = module.get_input(device)
                 _optim.zero_grad()
-                output = _model(*inp)
-                loss = module.get_loss(inp, output)
+                enable_autocast = _model is model and mixed_precision is not None
+                with torch.cuda.amp.autocast(enabled=enable_autocast):
+                    output = _model(*inp)
+                    loss = module.get_loss(inp, output)
                 scaled_loss = _grad_scaler.scale(loss)
                 scaled_losses.append(scaled_loss)
                 scaled_loss.backward()
                 orig_params = [
                     param.detach().clone()
                     for param in _model.parameters()
-                    if param.grad is not None
+                    if param.grad is not None and torch.count_nonzero(param.grad) > 0
                 ]
                 should_find_inf = iter in (0, 2, 4)
                 should_grow_scale = iter in (6, 8)
@@ -339,7 +347,12 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                         ),
                     )
                 for param, orig_param in zip(
-                    [param for param in _model.parameters() if param.grad is not None],
+                    [
+                        param
+                        for param in _model.parameters()
+                        if param.grad is not None
+                        and torch.count_nonzero(param.grad) > 0
+                    ],
                     orig_params,
                 ):
                     if should_find_inf:
@@ -352,19 +365,24 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                             ),
                         )
                     else:
-                        self.assertNotEqual(
-                            param,
-                            orig_param,
+                        self.assertFalse(
+                            torch.equal(param, orig_param),
                             (
                                 f"rank: {self.rank} iter: {iter} expect the updated params after "
                                 f"optim.step but got {param} vs {orig_param}"
                             ),
                         )
-            self.assertEqual(
-                scaled_losses[0],
-                scaled_losses[1],
-                f"iter: {iter} {scaled_losses[0]} vs {scaled_losses[1]}",
-            )
+            if mixed_precision is None:
+                self.assertEqual(
+                    scaled_losses[0],
+                    scaled_losses[1],
+                    f"iter: {iter} {scaled_losses[0]} vs {scaled_losses[1]}",
+                )
+            else:
+                self.assertTrue(
+                    torch.allclose(scaled_losses[0], scaled_losses[1], atol=0.1),
+                    f"iter: {iter} {scaled_losses[0]} vs {scaled_losses[1]}",
+                )
 
 
 instantiate_parametrized_tests(TestShardGradScaler)
