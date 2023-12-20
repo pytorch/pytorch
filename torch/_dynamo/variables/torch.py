@@ -32,7 +32,6 @@ from ..utils import (
     istype,
     product,
     proxy_args_kwargs,
-    tensortype_to_dtype,
 )
 from .base import VariableTracker
 from .ctx_manager import (
@@ -691,14 +690,6 @@ class TorchVariable(BaseTorchVariable):
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
 
-        # if self.can_constant_fold_through() and (constant_args or unspec_python_args):
-        #     # constant fold
-        #     return ConstantVariable.create(
-        #         self.as_python_constant()(
-        #             *[x.as_python_constant() for x in args],
-        #             **{k: v.as_python_constant() for k, v in kwargs.items()},
-        #         ),
-        #     )
         if istype(self.value, type) and issubclass(self.value, torch.nn.Module):
             if self.value is torch.nn.CrossEntropyLoss:
                 return self._call_cross_entropy_loss(tx, args, kwargs)
@@ -709,27 +700,6 @@ class TorchVariable(BaseTorchVariable):
         elif can_dispatch_torch_function(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
         else:
-            # torch.LongTensor cannot accept a list of FakeTensors.
-            # So we stack the list of FakeTensors instead.
-            if (
-                np
-                and self.value in tensortype_to_dtype
-                and len(args) == 1
-                and isinstance(args[0], ListVariable)
-                and len(args[0].items) > 1
-                and all(isinstance(x, variables.TensorVariable) for x in args[0].items)
-            ):
-                # Stack FakeTensor
-                stacked = wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        torch.stack,
-                        *proxy_args_kwargs(args, kwargs),
-                    ),
-                )
-                args = [stacked]
-
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
