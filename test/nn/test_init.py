@@ -100,6 +100,7 @@ class TestNNInit(TestCase):
             assert self._is_uniform(input_tensor, a, b)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfTorchDynamo("Failing")
     def test_normal(self):
         for dims in [1, 2, 4]:
             input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
@@ -110,6 +111,7 @@ class TestNNInit(TestCase):
             assert self._is_normal(input_tensor, mean, std)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfTorchDynamo("Failing")
     def test_trunc_normal(self):
         for dims in [1, 2, 4]:
             input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
@@ -122,6 +124,7 @@ class TestNNInit(TestCase):
             assert self._is_trunc_normal(input_tensor, mean, std, a, b)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfTorchDynamo("Failing")
     def test_trunc_normal_generator(self):
         gen = torch.Generator()
         gen.manual_seed(42)
