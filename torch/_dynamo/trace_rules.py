@@ -21,7 +21,7 @@ from .variables.base import VariableTracker
 
 """
 Map of torch objects to their tracing rules (Dynamo variables).
-* TorchVariable: The functions should be put into the FX graph or can be constant folded. E.g.,
+* TorchInGraphFunctionVariable: The functions should be put into the FX graph or can be constant folded. E.g.,
   - torch.add: should be put into the FX graph.
   - torch.is_floating_point: constant folded.
 * TorchCtxManagerClassVariable: The context manager classes are supported by Dynamo. E.g., torch.no_grad
@@ -42,7 +42,6 @@ If you are removing an existing torch level API:
 * Remove the entry represented the API from this map or test/dynamo/test_trace_rules.ignored_torch_name_rule_set
   depends on where it is.
 
-TODO: Add torch object names mapping to TorchVariable for in graph and constant fold functions.
 TODO: We would consolidate the skipfiles.check rules into trace_rules.lookup later.
 TODO: We would support explictly list objects treated as skip/inline after the skipfiles.check
 and trace_rules.lookup consolidation is done. Then the explicit listing of skip/inline objects have

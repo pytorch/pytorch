@@ -608,7 +608,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).call_function(tx, [var], kwargs)
         elif (
             istype(self.value, functools.partial)
-            and is_allowed(self.value.func)
+            and trace_rules.lookup(self.value.func) == variables.TorchInGraphFunctionVariable
             and all(
                 variables.ConstantVariable.is_literal(v)
                 for v in itertools.chain(self.value.args, self.value.keywords.values())
@@ -638,7 +638,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return build_checkpoint_variable().call_function(
                     tx, partial_args, partial_kwargs
                 )
-            return variables.TorchVariable(self.value.func).call_function(
+            return variables.TorchInGraphFunctionVariable(self.value.func).call_function(
                 tx, partial_args, partial_kwargs
             )
         elif callable(self.value):
@@ -668,6 +668,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return subobj
 
     def var_getattr(self, tx, name):
+        from .. import trace_rules
         from . import ConstantVariable
         from .builder import VariableBuilder
 
@@ -732,8 +733,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
-                elif is_allowed(func):
-                    return variables.TorchVariable(func, source=source)
+                elif trace_rules.lookup(func) == TorchInGraphFunctionVariable:
+                    return variables.TorchInGraphFunctionVariable(func, source=source)
                 return variables.UserFunctionVariable(func, source=source)
 
         if (

@@ -146,7 +146,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import torch_special_class_types, TorchVariable
+from .torch import torch_special_class_types, TorchInGraphFunctionVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
@@ -583,13 +583,13 @@ class VariableBuilder:
         elif isinstance(value, HigherOrderOperator):
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
-        elif type(value).__name__ == "builtin_function_or_method" and isinstance(
-            value.__self__, torch_special_class_types
-        ):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return TorchVariable(
-                value,
-            )
+        # elif type(value).__name__ == "builtin_function_or_method" and isinstance(
+        #     value.__self__, torch_special_class_types
+        # ):
+        #     self.install_guards(GuardBuilder.FUNCTION_MATCH)
+        #     return TorchVariable(
+        #         value,
+        #     )
         elif isinstance(value, _StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return StreamVariable(
@@ -1474,7 +1474,7 @@ def wrap_fx_proxy_cls(
         and isinstance(proxy.node.target.__self__, torch._C.Generator)
         or proxy.node.target == torch.random.set_rng_state
     ):
-        return TorchVariable(proxy.node.target)
+        return TorchInGraphFunctionVariable(proxy.node.target)
     elif (
         proxy.node.target == torch._C._DisableFuncTorch
         or proxy.node.target == torch.cuda._is_in_bad_fork
