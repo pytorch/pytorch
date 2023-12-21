@@ -109,9 +109,11 @@ class FakeTensorUpdater:
                 continue
 
             def is_aten_node(node):
-                return node.op == "call_function" and isinstance(
-                    node.target, torch._ops.OpOverload
-                ) and node.target.namespace == "aten"
+                return (
+                    node.op == "call_function"
+                    and isinstance(node.target, torch._ops.OpOverload)
+                    and node.target.namespace == "aten"
+                )
 
             if not is_aten_node(node):
                 continue
