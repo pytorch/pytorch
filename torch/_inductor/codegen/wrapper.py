@@ -926,10 +926,6 @@ class WrapperCodeGen(CodeGen):
             """,
             strip=True,
         )
-        from .triton import TritonKernel
-
-        if TritonKernel.gen_attr_descriptor_import():
-            compile_wrapper.splice(TritonKernel.gen_attr_descriptor_import())
         compile_wrapper.newline()
 
         from .common import SizeArg, TensorArg
