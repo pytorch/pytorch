@@ -1259,6 +1259,32 @@ def split_if_not_empty(x: str):
 
 NOTEST_CPU = "cpu" in split_if_not_empty(os.getenv('PYTORCH_TESTING_DEVICE_EXCEPT_FOR', ''))
 
+@contextlib.contextmanager
+def with_dill():
+    if not TEST_DILL:
+        yield
+        return
+
+    dill.extend(use_dill=True)
+    try:
+        yield:
+    finally:
+        dill.extend(use_dill=False)
+
+def import_dill():
+    if not TEST_DILL:
+        return None
+
+    import dill
+    # XXX: By default, dill writes the Pickler dispatch table to inject its
+    # own logic there. This globally affects the behavior of the standard library
+    # pickler for any user who transitively depends on this module!
+    # Undo this extension to avoid altering the behavior of the pickler globally.
+    dill.extend(use_dill=False)
+
+skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
+
+
 # Python 2.7 doesn't have spawn
 TestEnvironment.def_flag("NO_MULTIPROCESSING_SPAWN", env_var="NO_MULTIPROCESSING_SPAWN")
 TestEnvironment.def_flag("TEST_WITH_ASAN", env_var="PYTORCH_TEST_WITH_ASAN")

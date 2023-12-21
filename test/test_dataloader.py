@@ -35,7 +35,7 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_JETSON,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
-                                                  IS_MACOS, TEST_CUDA, parametrize)
+                                                  IS_MACOS, TEST_CUDA, parametrize, TEST_DILL, import_dill, with_dill)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 import functools
 import operator
@@ -53,17 +53,8 @@ except ImportError:
     else:
         warnings.warn(err_msg)
 
-try:
-    import dill
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
-    dill.extend(use_dill=False)
-    HAS_DILL = True
-except ImportError:
-    HAS_DILL = False
-skipIfNoDill = unittest.skipIf(not HAS_DILL, "no dill")
+dill = import_dill()
+HAS_DILL = TEST_DILL
 
 
 try:
@@ -967,7 +958,7 @@ def _test_get_worker_info():
     it = iter(dataloader)
     data = []
     for d in it:
-        data.append(d)
+        data.append(d)  # noqa: PERF402
     worker_pids = [w.pid for w in it._workers]
     data = torch.cat(data, 0)
     for d in data:
@@ -1590,6 +1581,7 @@ except RuntimeError as e:
 
     @skipIfNoNumpy
     @unittest.skipIf(IS_JETSON, "Not working on Jetson")
+    @with_dill()
     def test_multiprocessing_iterdatapipe(self):
         # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
         # and used with multiprocess DataLoader
