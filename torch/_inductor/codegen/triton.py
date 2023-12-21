@@ -10,7 +10,18 @@ import math
 import operator
 import os
 import textwrap
-from typing import Any, Counter, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Counter,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import sympy
 
@@ -46,6 +57,7 @@ from ..utils import (
 from ..virtualized import ops, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .common import (
+    CSE,
     CSEVariable,
     DeferredLine,
     free_symbol_startswith,
@@ -102,6 +114,30 @@ class TritonPrinter(PythonPrinter):
     def _print_Abs(self, expr):
         assert len(expr.args) == 1
         return f"tl.abs({self._print(expr.args[0])})"
+
+    def _print_FloorDiv(self, expr):
+        if expr.is_integer:
+            return super()._print_FloorDiv(expr)
+
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"tl.math.floor({x} / {div})"
+
+    def _print_Round(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.llrint({self._print(expr.args[0])})"
+
+    def _print_RoundDecimal(self, expr):
+        assert len(expr.args) == 2
+        number, ndigits = expr.args
+        if number.is_integer:
+            # ndigits < 0 should have been filtered by the sympy function
+            assert ndigits < 0
+            raise ValueError(
+                f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
+            )
+        return f"tl.math.nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits}"
 
 
 texpr = TritonPrinter().doprint
@@ -212,17 +248,23 @@ class TritonOverrides(OpOverrides):
         return f"{x}.to({triton_compute_type(dtype)})"
 
     @staticmethod
-    def to_dtype_bitcast(x, dtype: torch.dtype):
-        return f"{x}.to({triton_compute_type(dtype)}, bitcast=True)"
+    def to_dtype_bitcast(x, dtype: torch.dtype, src_dtype: torch.dtype):
+        triton_dtype = triton_compute_type(dtype)
+        # We may promote float16 or bfloat16 to float32 and cause the
+        # bitwidth of dtype to be different from the input tensor (i.e. float32).
+        # In such as case, we will have to convert the input tensor to
+        # its src_type, perform bitcast, and then convert the bit-casted
+        # tensor back to float to ensure we use values with the right precision.
+        if src_dtype in (torch.float16, torch.bfloat16):
+            triton_src_dtype = str(src_dtype).split(".")[-1]
+            cast_x = f"{x}.to(tl.{triton_src_dtype})"
+            cast_x = f"{cast_x}.to({triton_dtype}, bitcast=True)"
+            return f"{cast_x}.to(tl.float32)"
+        else:
+            return f"{x}.to({triton_dtype}, bitcast=True)"
 
-    @classmethod
-    def constant(cls, value, dtype):
-        if dtype == torch.uint8:
-            # tl.full is broken for uint8, remove once triton is fixed.
-            # See openai/triton#1919
-            tmp = cls.constant(value, torch.int16)
-            return cls.to_dtype(tmp, dtype)
-
+    @staticmethod
+    def _shaped_constant(value, dtype, shape):
         type_ = torch._prims_common.dtype_to_type(dtype)
         triton_val = triton_constant(type_(value))
         triton_type = triton_compute_type(dtype)
@@ -233,11 +275,11 @@ class TritonOverrides(OpOverrides):
 
         # NOTE: We use a tensor here in order to get the expected type.
         # Otherwise, e.g. float64 constants would be trunctated to float32.
-        # Also, we could just use shape=[1] here but starting with the correct
-        # ndim avoids extra `tt.expand_dim` ops appearing in the triton IR.
-        ndim = V.kernel.triton_tensor_ndim()
-        shape = [1] * ndim
         return f"tl.full({shape}, {triton_val}, {triton_type})"
+
+    @classmethod
+    def constant(cls, value, dtype):
+        return cls._shaped_constant(value, dtype, shape=[])
 
     @staticmethod
     def abs(x):
@@ -319,26 +361,11 @@ class TritonOverrides(OpOverrides):
 
     @classmethod
     def index_expr(cls, expr, dtype):
-        index_str, mask_vars, mask, expand_str = V.kernel.indexing(expr)
-        # This is called from CSEProxy.__getattr__,  so we'll set the bounds there
-        var = V.kernel.cse.generate(V.kernel.compute, index_str)
-
-        if dtype not in {torch.int32, torch.int64}:
-            var = V.kernel.cse.generate(V.kernel.compute, cls.to_dtype(var, dtype))
-        var.mask_vars = mask_vars
-        return var
+        raise NotImplementedError("ops.index_expr not implemented outside a kernel")
 
     @staticmethod
     def masked(mask, body, other):
-        with V.kernel.mask_loads(mask) as new_mask:
-            result = body()
-
-        # Take dtype from result to prevent accidental promotion
-        other = V.kernel.cse.generate(
-            V.kernel.compute,
-            f"tl.full({result}.shape, {triton_constant(other)}, {result}.dtype)",
-        )
-        return ops.where(new_mask, result, other)
+        raise NotImplementedError("ops.masked not implemented outside a kernel")
 
     @staticmethod
     def lgamma(x):
@@ -465,10 +492,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def load_seed(name, offset):
-        var = V.kernel.args.input(name)
-        return (
-            f"tl.load({var} + {V.kernel.args.seed_offset('load_seed_offset', offset)})"
-        )
+        raise NotImplementedError("ops.load_seed not implemented outside a kernel")
 
     @staticmethod
     def rsqrt(x):
@@ -563,6 +587,54 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def ceil(x):
         return f"tl.math.ceil({x})"
+
+
+class TritonKernelOverrides(TritonOverrides):
+    """Map element-wise ops to Triton within a TritonKernel
+
+    Unlike TritonOverrides, these assume the code is going to be inserted into
+    the body of the main triton kernel and so it may use indexing and mask
+    variables which are assumed to already be defined in the current scope.
+    """
+
+    @classmethod
+    def constant(cls, value, dtype):
+        # NOTE: Cannot use shape=[] as it's not supported by triton-rocm
+        # We could use shape=[1] instead but starting with the correct
+        # ndim avoids extra `tt.expand_dim` ops appearing in the triton IR.
+        ndim = V.kernel.triton_tensor_ndim()
+        shape = [1] * ndim
+        return cls._shaped_constant(value, dtype, shape=shape)
+
+    @classmethod
+    def index_expr(cls, expr, dtype):
+        index_str, mask_vars, mask, expand_str = V.kernel.indexing(expr)
+        # This is called from CSEProxy.__getattr__,  so we'll set the bounds there
+        var = V.kernel.cse.generate(V.kernel.compute, index_str)
+
+        if dtype not in {torch.int32, torch.int64}:
+            var = V.kernel.cse.generate(V.kernel.compute, cls.to_dtype(var, dtype))
+        var.mask_vars = mask_vars
+        return var
+
+    @staticmethod
+    def masked(mask, body, other):
+        with V.kernel.mask_loads(mask) as new_mask:
+            result = body()
+
+        # Take dtype from result to prevent accidental promotion
+        other = V.kernel.cse.generate(
+            V.kernel.compute,
+            f"tl.full({result}.shape, {triton_constant(other)}, {result}.dtype)",
+        )
+        return ops.where(new_mask, result, other)
+
+    @staticmethod
+    def load_seed(name, offset):
+        var = V.kernel.args.input(name)
+        return (
+            f"tl.load({var} + {V.kernel.args.seed_offset('load_seed_offset', offset)})"
+        )
 
 
 @dataclasses.dataclass
@@ -806,9 +878,50 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
+class HelperFunctions:
+    """An ordered set of helper functions."""
+
+    _templates_seen: Dict[str, str]  # Template code to function name
+    finalized_helpers: List[str]
+
+    def __init__(self):
+        self._templates_seen = {}
+        self.finalized_helpers = []
+
+    def add(self, template_code: str) -> str:
+        """This accepts a function definition with the function name
+        left as a format specifier e.g.
+
+            @triton.jit
+            def {name}(arg0, arg1):
+                return arg0 + arg1
+
+        We add the templated code to the function set and return the name
+        assigned to that function.
+
+        """
+        existing_name = self._templates_seen.get(template_code)
+        if existing_name is not None:
+            # Don't duplicate existing helpers
+            return existing_name
+
+        name = f"_triton_helper_fn{len(self.finalized_helpers)}"
+        self._templates_seen[template_code] = name
+        self.finalized_helpers.append(template_code.format(name=name))
+        return name
+
+    def __iter__(self):
+        return iter(self.finalized_helpers)
+
+    def __getitem__(self, idx):
+        return self.finalized_helpers[idx]
+
+
 class TritonKernel(Kernel):
-    overrides = TritonOverrides  # type: ignore[assignment]
+    overrides = TritonKernelOverrides  # type: ignore[assignment]
     sexpr = pexpr
+
+    helper_functions: HelperFunctions
 
     def __init__(
         self,
@@ -845,6 +958,8 @@ class TritonKernel(Kernel):
             and self.numels[-1] >= 256
         )
         self.initialize_range_tree(pid_cache)
+
+        self.helper_functions = HelperFunctions()
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints: Set[AutotuneHint] = set()
@@ -1712,7 +1827,34 @@ class TritonKernel(Kernel):
             DeferredLine(name, f"tl.store({var} + ({index}), {value}, {mask})")
         )
 
-    def scan(self, dtype, scan_op, value):
+    def _lift_helper(self, fn, num_args) -> str:
+        # Lift IR function into a triton function in the global namespace
+        helper = IndentedBuffer()
+        helper.writeline("@triton.jit")
+        args = [f"arg{n}" for n in range(num_args)]
+        signature = ", ".join(args)
+        helper.writeline(f"def {{name}}({signature}):")
+
+        cse = CSE(prefix="", suffix="")
+        overrides = TritonOverrides(V.MockHandler())
+
+        class CSEProxy:
+            def __getattr__(self, name: str) -> Callable[..., CSEVariable]:
+                def inner(*args, **kwargs):
+                    return cse.generate(
+                        helper,
+                        getattr(overrides, name)(*args, **kwargs),
+                    )
+
+                return inner
+
+        with helper.indent(), V.set_ops_handler(CSEProxy()):
+            outputs = fn(*args)
+            helper.writeline(f"return {outputs}")
+
+        return self.helper_functions.add(helper.getvalue())
+
+    def scan(self, dtype, combine_fn, value, init):
         assert self.inside_reduction
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
@@ -1725,22 +1867,24 @@ class TritonKernel(Kernel):
             self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
         )
 
-        default = triton_constant(ir.Reduction.default_value(scan_op, dtype))
+        default = init
         default_tensor = self.cse.generate(
             self.body,
             f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
         )
-
         dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
         acc_type = triton_acc_type(dtype)
         cond = " & ".join(masks)
+
+        combine_helper_fn = self._lift_helper(combine_fn, 2)
 
         if self.persistent_reduction:
             masked_value = self.cse.generate(
                 self.compute, f"tl.where({cond}, {value}, {default_tensor})"
             )
             result_var = self.cse.generate(
-                self.compute, f"tl.cum{scan_op}({masked_value}, {dim})"
+                self.compute,
+                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
             )
         else:
             accumulator = self.cse.newvar()
@@ -1755,13 +1899,16 @@ class TritonKernel(Kernel):
             masked_value = self.cse.generate(
                 self.compute, f"tl.where({cond}, {value}, {default_tensor})"
             )
-            combine_fn = ir.get_reduction_combine_fn(scan_op, dtype)
             partial_reduce = self.cse.generate(
-                self.compute, self.reduction_resize(f"tl.{scan_op}({value}, {dim})")
+                self.compute,
+                self.reduction_resize(
+                    f"tl.reduce({value}, {dim}, {combine_helper_fn})"
+                ),
             )
             acc_next = combine_fn(accumulator, partial_reduce)
             partial_scan = self.cse.generate(
-                self.compute, f"tl.cum{scan_op}({masked_value}, {dim})"
+                self.compute,
+                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
             )
             result_var = self.cse.generate(
                 self.compute, combine_fn(accumulator, partial_scan)
@@ -2039,6 +2186,12 @@ class TritonKernel(Kernel):
                 continue
             argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
 
+        self.codegen_body()
+
+        for helper in self.helper_functions:
+            code.writeline("")
+            code.splice(helper)
+
         if self.inside_reduction:
             reduction_hint = self.reduction_hint
             heuristics_line = f"""
@@ -2072,7 +2225,6 @@ class TritonKernel(Kernel):
         code.writeline(
             f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(argdefs)}):"
         )
-        self.codegen_body()
         with code.indent():
             self.codegen_static_numels(code)
             for old, new in self.args.aliases():

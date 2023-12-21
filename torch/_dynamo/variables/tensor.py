@@ -158,13 +158,18 @@ class TensorVariable(VariableTracker):
                 [int(s) if is_symbolic(s) else s for s in value.size()]
             )
             props["stride"] = tuple(value.stride())
-            props["is_contiguous"] = tuple(
-                [
-                    x
-                    for x in torch._prims_common._memory_formats
-                    if value.is_contiguous(memory_format=x)
-                ]
-            )
+            if torch._C._functorch.is_batchedtensor(value):
+                # Batched tensors does not support contiguity patterns, so
+                # we refrain from computing the `is_contiguous` property
+                props["is_contiguous"] = None
+            else:
+                props["is_contiguous"] = tuple(
+                    [
+                        x
+                        for x in torch._prims_common._memory_formats
+                        if value.is_contiguous(memory_format=x)
+                    ]
+                )
         return props
 
     def dynamic_getattr(self, tx, name):
@@ -251,6 +256,7 @@ class TensorVariable(VariableTracker):
         # <tensor> is later changed to another type
         if result is not None and self.source is not None:
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+            result.source = AttrSource(self.source, name)
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
@@ -262,7 +268,9 @@ class TensorVariable(VariableTracker):
                 and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
             ):
                 # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
-                return variables.misc.DelayGraphBreakVariable()
+                return variables.misc.DelayGraphBreakVariable(
+                    source=AttrSource(self.source, name)
+                )
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
@@ -287,10 +295,13 @@ class TensorVariable(VariableTracker):
                 if type(static_attr) != types.GetSetDescriptorType:
                     return None
 
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
-                )
+                proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
+                if self.source is not None:
+                    return wrap_fx_proxy(
+                        tx=tx, proxy=proxy, source=AttrSource(self.source, name)
+                    )
+                else:
+                    return wrap_fx_proxy(tx=tx, proxy=proxy)
 
             result = try_generic_attr_handling()
 
@@ -342,7 +353,6 @@ class TensorVariable(VariableTracker):
                 unimplemented(f"Illegal method invocation {name} in strict mode")
         from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
-        from .user_defined import UserDefinedClassVariable
 
         kwargs = dict(kwargs)
 
@@ -478,7 +488,7 @@ class TensorVariable(VariableTracker):
         elif (
             name == "as_subclass"
             and len(args) == 1
-            and isinstance(args[0], UserDefinedClassVariable)
+            and isinstance(args[0], TensorSubclassVariable)
         ):
             from .builder import VariableBuilder
             from .torch_function import TensorWithTFOverrideVariable

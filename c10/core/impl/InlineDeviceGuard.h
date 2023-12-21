@@ -9,8 +9,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Optional.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 /**
  * A DeviceGuard is an RAII class that sets a device to some value
@@ -244,7 +243,7 @@ class InlineOptionalDeviceGuard {
   /// and result in initialized OptionalDeviceGuard.
   template <typename... Args>
   explicit InlineOptionalDeviceGuard(Args&&... args)
-      : guard_(in_place, std::forward<Args>(args)...) {}
+      : guard_(std::in_place, std::forward<Args>(args)...) {}
 
   // TODO: Consider reading Tensor and TensorList constructors here, when
   // Tensor moves to c10.  (These are only valid on OptionalDeviceGuard,
@@ -423,5 +422,4 @@ class InlineOptionalDeviceGuard {
   optional<InlineDeviceGuard<T>> guard_;
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

@@ -3116,6 +3116,7 @@ coverage_ignore_classes = [
     "FractionalMaxPool3d",
     "LPPool1d",
     "LPPool2d",
+    "LPPool3d",
     "MaxPool1d",
     "MaxPool2d",
     "MaxPool3d",
