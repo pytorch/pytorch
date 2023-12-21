@@ -63,13 +63,17 @@ def dynamo_enable_grad(tx, enable=True):
         GradModeVariable.create(tx, org_value, initialized=True)
 
 
-def only_consist_of(var, types):
+def only_consist_of(var, types, allow_none=False):
     if isinstance(var, types):
         return True
+    if allow_none and var.is_python_constant() and var.as_python_constant() is None:
+        return True
     if isinstance(var, (TupleVariable, ListVariable)):
-        return all(only_consist_of(item, types) for item in var.items)
+        return all(only_consist_of(item, types, allow_none) for item in var.items)
     if isinstance(var, ConstDictVariable):
-        return all(only_consist_of(item, types) for item in var.items.values())
+        return all(
+            only_consist_of(item, types, allow_none) for item in var.items.values()
+        )
     return False
 
 
@@ -279,7 +283,8 @@ def speculate_subgraph(
             else:
                 from . import TensorVariable
 
-                if not only_consist_of(output, TensorVariable):
+                if not only_consist_of(output, TensorVariable, allow_none=True):
+                    breakpoint()
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
                     )
