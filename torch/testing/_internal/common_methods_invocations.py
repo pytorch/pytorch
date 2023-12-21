@@ -14564,7 +14564,6 @@ op_db: List[OpInfo] = [
     ),
     BinaryUfuncInfo('nextafter',
                     dtypes=floating_types_and(torch.bfloat16, torch.half),
-                    dtypesIfCUDA=floating_types_and(torch.bfloat16),
                     supports_autograd=False,
                     supports_rhs_python_scalar=False),
     OpInfo(
