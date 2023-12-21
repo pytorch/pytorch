@@ -19,7 +19,6 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.nested._internal.nested_tensor import (
-    DifferentiableValues,
     jagged_from_list,
     jagged_from_tensor_and_lengths,
 )
@@ -1047,11 +1046,11 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
         compiled_f = torch.compile(fn1, fullgraph=True, backend=backend, dynamic=True)
         out = compiled_f(nt, nt2)
-        out_buffer = DifferentiableValues.apply(out)
+        out_buffer = out.values()
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
 
         out_ref = fn1(nt, nt2)
-        out_buffer_ref = DifferentiableValues.apply(out_ref)
+        out_buffer_ref = out_ref.values()
         ga_ref, gb_ref, gc_ref = torch.autograd.grad(out_buffer_ref.sum(), (a, b, c))
 
         self.assertTrue(torch.allclose(ga, ga_ref))
