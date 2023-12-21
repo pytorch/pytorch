@@ -233,17 +233,6 @@ def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
     if not isinstance(body_graph, torch.fx.GraphModule):
         body_graph = make_fx(body_graph)(*example_input, *pos_args)
 
-    next_name = None
-    i = 0
-    while not next_name:
-        candidate = f"body_graph_{i}"
-        if hasattr(proxy_mode.tracer.root, candidate):
-            i += 1
-        else:
-            next_name = candidate
-
-    proxy_mode.tracer.root.register_module(next_name, body_graph)
-
     with disable_proxy_modes_tracing():
         example_outs = body_graph(*example_input, *pos_args)
 
@@ -254,6 +243,16 @@ def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
 
         expanded_outs = pytree.tree_map(expand_tensor, example_outs)
 
+    next_name = None
+    i = 0
+    while not next_name:
+        candidate = f"body_graph_{i}"
+        if hasattr(proxy_mode.tracer.root, candidate):
+            i += 1
+        else:
+            next_name = candidate
+
+    proxy_mode.tracer.root.register_module(next_name, body_graph)
     node_args = (body_graph, num_mapped, *args)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
