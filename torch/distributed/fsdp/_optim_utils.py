@@ -1018,10 +1018,9 @@ def _get_param_id_to_param_from_optim_input(
             'A parameter group should map "params" to a list of the '
             "parameters in the group"
         )
-        for param in param_group["params"]:  # type: ignore[index]
-            # Implicitly map `flat_param_id` (current length of the list) to
-            # `param`
-            param_id_to_param.append(param)
+        # Implicitly map `flat_param_id` (current length of the list) to
+        # `param`
+        param_id_to_param.extend(param_group["params"])  # type: ignore[index]
     return dict(enumerate(param_id_to_param))
 
 
