@@ -77,7 +77,7 @@ Tensor linear_hack(const Tensor& input, const Tensor& weight, const c10::optiona
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+    : c10::MaybeOwned<Tensor>::owned(std::in_place);
 
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, *bias);

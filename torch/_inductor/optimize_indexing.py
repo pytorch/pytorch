@@ -13,7 +13,7 @@ def val_expressable_in_32_bits(val):
         return True
 
     if isinstance(val, sympy.Expr):
-        assert val.is_constant()
+        assert val.is_number
         if val.is_Integer or val.is_Boolean:
             val = int(val)
         else:

@@ -24,8 +24,8 @@ import torch.distributed.fsdp._exec_order_utils as exec_order_utils
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
-from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.algorithms._comm_hooks import default_hooks
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
@@ -124,7 +124,7 @@ def _init_process_group_state(
     else:
         if device_mesh:
             state._device_mesh = device_mesh
-            state.process_group = device_mesh.get_dim_groups(mesh_dim=0)
+            state.process_group = device_mesh.get_group(mesh_dim=0)
         else:
             state.process_group = (
                 process_group if process_group is not None else _get_default_group()
@@ -157,12 +157,12 @@ def _init_process_group_state_for_hybrid_shard(
             state._device_mesh = device_mesh
             # We currently only allow _inter_node_pg to be the outermost dimension, and the
             # process_group(intra_node) to be the innermost dimension.
-            state._inter_node_pg = device_mesh.get_dim_groups(mesh_dim=0)
-            state.process_group = device_mesh.get_dim_groups(mesh_dim=1)
+            state._inter_node_pg = device_mesh.get_group(mesh_dim=0)
+            state.process_group = device_mesh.get_group(mesh_dim=1)
         else:
             raise ValueError(
                 "Expected device_mesh to have ndim=2 "
-                f"but got {len(device_mesh.get_dim_groups())}"
+                f"but got {len(device_mesh.get_group())}"
             )
     elif process_group is None:
         default_group = _get_default_group()
@@ -345,18 +345,14 @@ def _check_ignored_states(
         all_modules = all(isinstance(state, nn.Module) for state in ignored_states)
         if not all_params and not all_modules:
             # Sort for consistent ordering for unit test regex matching
-            sorted_types = sorted(
-                {type(state) for state in ignored_states}, key=lambda x: repr(x)
-            )
+            sorted_types = sorted({type(state) for state in ignored_states}, key=repr)
             raise ValueError(
                 "ignored_states expects all nn.Parameter or all nn.Module list "
                 f"elements but got types {sorted_types}"
             )
     else:
         if not all(isinstance(state, nn.Module) for state in ignored_states):
-            sorted_types = sorted(
-                {type(state) for state in ignored_states}, key=lambda x: repr(x)
-            )
+            sorted_types = sorted({type(state) for state in ignored_states}, key=repr)
             raise ValueError(
                 "ignored_modules expects nn.Module list elements but got "
                 f"types {sorted_types}"

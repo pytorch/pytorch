@@ -38,6 +38,10 @@ bool record_buffer_to_nchw_op(
     api::PipelineBarrier pipeline_barrier,
     const VkFence fence_handle);
 
+vTensor convert_image_channels_packed_to_height_packed(const vTensor& v_input);
+
+vTensor convert_image_channels_packed_to_width_packed(const vTensor& v_input);
+
 } // namespace packing
 } // namespace vulkan
 } // namespace native

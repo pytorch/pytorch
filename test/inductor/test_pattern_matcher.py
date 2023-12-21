@@ -5,7 +5,7 @@ import unittest
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
@@ -29,7 +29,8 @@ from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class TestPatternMatcher(TestCase):
@@ -49,10 +50,6 @@ class TestPatternMatcher(TestCase):
         if len(codes) == 1:
             codes = codes[0]
         torch.testing.assert_close(actual, expected)
-        if inductor_config.cpp_wrapper:
-            # CPP wrapper runs everything twice, so we'll match the pattern twice
-            expected_matches *= 2
-            expected_nodes *= 2
 
         self.assertEqual(
             counters["inductor"]["pattern_matcher_count"], expected_matches
@@ -481,6 +478,28 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(expect, actual)
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
 
+    def test_addmm_broadcasting_bias(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.functional.linear
+                self.linear_weight = torch.randn(4, 4).cuda()
+                self.bias = torch.randn(1, 4).cuda()
+
+            def forward(self, x):
+                x = self.linear(x, self.linear_weight, self.bias)
+                return x
+
+        input_tensor = torch.randn(1, 3, 4).cuda()
+
+        func = Model().cuda()
+
+        res1 = func(input_tensor)
+        jit_func = torch.compile(func)
+        res2 = jit_func(input_tensor)
+
+        self.assertEqual(res1, res2)
+
     def test_cat_mm(self):
         def fn(a, b, c):
             return torch.cat(
@@ -517,14 +536,7 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 2, 5)
 
-    def test_cat_slice_cat(self):
-        def check_counter(counter, expected):
-            if not inductor_config.cpp_wrapper:
-                self.assertEqual(counter, expected)
-            else:
-                # cpp_wrapper for the CUDA backend runs two passes
-                self.assertEqual(counter, 2 * expected)
-
+    def test_cat_slice_cat_cuda(self):
         def fn(a, b):
             cat_1 = torch.ops.aten.cat.default([a, b], 1)
             slice_1 = torch.ops.aten.slice.Tensor(cat_1, 0, 0, 9223372036854775807)
@@ -547,8 +559,8 @@ class TestPatternMatcher(TestCase):
         torch.testing.assert_close(actual, expected)
         # We don't recompile for dynamic-shape cases.
         if dynamo_config.assume_static_by_default:
-            check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-            check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         # Verify we fallback to non-optimal path for negative `end`.
         def fn(a, b):
@@ -584,11 +596,10 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
+    # Constant folding was explicitly turned off due to issue #108388
+    # Turn it back on for test
+    @inductor_config.patch(joint_graph_constant_folding=True)
     def test_pointless_cumsum(self):
-        # Constant folding was explicitly turned off due to issue #108388
-        # Turn it back on for test
-        torch._inductor.config.joint_graph_constant_folding = True
-
         def fn1():
             ones = torch.full(
                 [1, 128], 1, layout=torch.strided, dtype=torch.float32
@@ -1067,6 +1078,5 @@ class TestPatternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
-
-    run_inductor_tests(triton=True)
+    if IS_LINUX and HAS_CUDA:
+        run_tests()

@@ -40,11 +40,11 @@ class NAdam(Optimizer):
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
             for s in state_values:
-                s['step'] = torch.tensor(float(s['step']))
+                s['step'] = torch.tensor(float(s['step']), dtype=torch.float32)
         mu_product_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['mu_product'])
         if not mu_product_is_tensor:
             for s in state_values:
-                s['mu_product'] = torch.tensor(s['mu_product'])
+                s['mu_product'] = torch.tensor(s['mu_product'], dtype=torch.float32)
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps):
         has_complex = False
@@ -63,12 +63,12 @@ class NAdam(Optimizer):
                     # Deliberately host `step` and `mu_product` on CPU if capturable is False.
                     # This is because kernel launches are costly on CUDA and XLA.
                     state['step'] = (
-                        torch.zeros((), dtype=torch.float, device=p.device)
-                        if group['capturable'] else torch.tensor(0.)
+                        torch.zeros((), dtype=torch.float32, device=p.device)
+                        if group['capturable'] else torch.tensor(0.0, dtype=torch.float32)
                     )
                     state['mu_product'] = (
-                        torch.ones((), dtype=torch.float, device=p.device)
-                        if group['capturable'] else torch.tensor(1.)
+                        torch.ones((), dtype=torch.float32, device=p.device)
+                        if group['capturable'] else torch.tensor(1.0, dtype=torch.float32)
                     )
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)

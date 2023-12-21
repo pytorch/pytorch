@@ -59,7 +59,7 @@ inline typename remove_symint<T>::type unpackSymInt(T x) { return x; }
 
 template <>
 inline typename remove_symint<c10::SymInt>::type unpackSymInt(c10::SymInt x) {
-  return x.expect_int();
+  return x.guard_int(__FILE__, __LINE__);
 }
 
 template <>
@@ -69,7 +69,7 @@ inline typename remove_symint<c10::SymIntArrayRef>::type unpackSymInt(c10::SymIn
 
 template <>
 inline typename remove_symint<c10::optional<c10::SymInt>>::type unpackSymInt(c10::optional<c10::SymInt> x) {
-  return x.has_value() ? c10::make_optional(x->expect_int()) : c10::nullopt;
+  return x.has_value() ? c10::make_optional(x->guard_int(__FILE__, __LINE__)) : c10::nullopt;
 }
 
 template <>

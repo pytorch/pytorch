@@ -82,6 +82,10 @@ def log_compilation_event(metrics):
     log.info("%s", metrics)
 
 
+def print_graph(graph, msg: str):
+    pass
+
+
 TEST_MASTER_ADDR = "127.0.0.1"
 TEST_MASTER_PORT = 29500
 # USE_GLOBAL_DEPS controls whether __init__.py tries to load
