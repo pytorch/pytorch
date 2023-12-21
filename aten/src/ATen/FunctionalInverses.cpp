@@ -407,6 +407,15 @@ Tensor FunctionalInverses::alias_copy_inverse(const Tensor& base, const Tensor& 
     }
 }
 
+Tensor FunctionalInverses::chunk_copy_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, int chunks, int dim) {
+    // TODO: Can the logic from TensorShape.cpp be reused here somehow?
+    const auto dim_size = base.sym_size(dim);
+    auto split_size = (dim_size + chunks - 1) / chunks;
+    std::vector<c10::SymInt> split_sizes(chunks, split_size);
+    split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size);
+    return split_with_sizes_copy_inverse(base, mutated_view, inverse_return_mode, mutated_view_idx, split_sizes, dim);
+}
+
 Tensor FunctionalInverses::narrow_copy_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, int dim, c10::SymInt start, c10::SymInt length) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
