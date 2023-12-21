@@ -100,6 +100,7 @@ def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
 
 
 def get_device_op_overrides(device: str):
+    assert isinstance(device, str)
     if device == "cuda":
         from .cuda.device_op_overrides import CUDADeviceOpOverrides
 
