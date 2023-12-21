@@ -208,7 +208,7 @@ def extract_pointwise_load_strides(
     """
     if isinstance(node, ir.ComputedBuffer):
         pointwise_node = node.data
-    reference_layout = node.get_layout()
+    reference_layout = reference_buffer.get_layout()
     assert isinstance(
         reference_layout, ir.FixedLayout
     ), f"Expected FixedLayout from reference_buffer.get_layout(), got {reference_layout}"
