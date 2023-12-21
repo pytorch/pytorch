@@ -21,7 +21,6 @@ import torch.nn
 from torch._guards import TracingContext
 
 from .. import variables
-from ..allowed_functions import is_allowed
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
@@ -58,6 +57,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def python_type(self):
         return type(self.value)
+
+    def as_proxy(self):
+        return self.value
+
+    def __repr__(self):
+        return f"UserDefinedClassVariable({self.value})"
 
     @staticmethod
     @functools.lru_cache(None)
@@ -106,6 +111,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return VariableBuilder(tx, source)(obj)
             elif ConstantVariable.is_literal(obj):
                 return ConstantVariable.create(obj)
+        elif (
+            self.value.__module__.startswith("torch.")
+            or self.value.__module__ == "torch"
+        ):
+            if source:
+                return VariableBuilder(tx, source)(obj)
 
         return super().var_getattr(tx, name)
 
@@ -608,7 +619,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).call_function(tx, [var], kwargs)
         elif (
             istype(self.value, functools.partial)
-            and trace_rules.lookup(self.value.func) == variables.TorchInGraphFunctionVariable
+            and trace_rules.lookup(self.value.func)
+            == variables.TorchInGraphFunctionVariable
             and all(
                 variables.ConstantVariable.is_literal(v)
                 for v in itertools.chain(self.value.args, self.value.keywords.values())
@@ -638,9 +650,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return build_checkpoint_variable().call_function(
                     tx, partial_args, partial_kwargs
                 )
-            return variables.TorchInGraphFunctionVariable(self.value.func).call_function(
-                tx, partial_args, partial_kwargs
-            )
+            return variables.TorchInGraphFunctionVariable(
+                self.value.func
+            ).call_function(tx, partial_args, partial_kwargs)
         elif callable(self.value):
             if self.source:
                 install_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
@@ -701,6 +713,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.__get__.__func__, subobj_var, source=source
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
+            # torch._C._VariableFunctions.rsub
+            # pytest test/inductor/test_torchinductor_opinfo.py -k test_comprehensive___rsub___cpu_float64
+            if isinstance(self.value, torch._C._VariableFunctionsClass):
+                return variables.TorchInGraphFunctionVariable(
+                    subobj.__get__(self.value), source=source
+                )
             return variables.UserFunctionVariable(
                 subobj.__get__(self.value), source=source
             )
@@ -733,7 +751,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
-                elif trace_rules.lookup(func) == TorchInGraphFunctionVariable:
+                elif trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
                     return variables.TorchInGraphFunctionVariable(func, source=source)
                 return variables.UserFunctionVariable(func, source=source)
 

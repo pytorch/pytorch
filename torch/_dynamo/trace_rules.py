@@ -2810,10 +2810,8 @@ def lookup(obj):
     if id(obj) in _disallowed_function_ids:
         return None
     # Bug: is_user_defined_allowed(torch.distributed._tensor.api.DTensor) returns True.
-    # if torch.distributed.is_available():
-    #     import torch.distributed
-    #     if obj is torch.distributed._tensor.api.DTensor:
-    #         return None
+    # if torch.distributed.is_available() and obj is torch.distributed._tensor.api.DTensor:
+    #     return None
     if is_user_defined_allowed(obj):
         return TorchInGraphFunctionVariable
     # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
