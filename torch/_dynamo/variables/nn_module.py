@@ -681,6 +681,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         mod = self.value
+        # see comment on lazy module handling in NNModuleVariable.call_function for context
         if is_lazy_module(mod):
             if mod.cls_to_become is not None:
                 self.value_type = mod.cls_to_become
