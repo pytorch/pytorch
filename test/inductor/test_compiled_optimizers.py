@@ -292,6 +292,7 @@ class CompiledOptimizerTests(TestCase):
     @requires_cuda()
     def test_static_address_finalizer(self):
         import gc
+
         gc.disable()
         p_ref = None
 
