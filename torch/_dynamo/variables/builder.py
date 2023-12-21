@@ -5,6 +5,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import itertools
 import logging
 import operator
 import re
@@ -67,6 +68,7 @@ from ..utils import (
     get_fake_value,
     get_static_address_type,
     global_key_name,
+    is_function,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
@@ -111,6 +113,7 @@ from .functions import (
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
+from .iter import ItertoolsVariable
 from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
@@ -148,7 +151,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
+from .torch import torch_special_class_types, TorchVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
@@ -242,11 +245,10 @@ class VariableBuilder:
             if dup_guard:
                 self.install_guards(dup_guard)
             return side_effect_result
-        vt = self._wrap(value).clone(**self.options())
+        vt = self._wrap(value)
+        vt.source = self.source
         if self._can_lift_attrs_to_inputs(vt):
-            vt = self.tx.output.side_effects.track_object_existing(
-                self.source, value, vt
-            )
+            vt = self.tx.output.side_effects.track_object_existing(value, vt)
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt):
@@ -276,9 +278,6 @@ class VariableBuilder:
     def get_source(self):
         return self.source
 
-    def options(self):
-        return {"source": self.get_source()}
-
     def install_guards(self, *guards):
         source = self.get_source()
         if (
@@ -288,6 +287,11 @@ class VariableBuilder:
             return None
         install_guard(*[source.make_guard(guard) for guard in guards], skip=1)
         return {}
+
+    def set_source_and_track_mutable(self, value, var):
+        assert isinstance(var, VariableTracker)
+        var.source = self.source
+        return self.tx.output.side_effects.track_mutable(value, var)
 
     @classmethod
     @functools.lru_cache(None)
@@ -351,14 +355,6 @@ class VariableBuilder:
                 dataclasses.fields,
                 lambda self, value: LambdaVariable(
                     _dataclasses_fields_lambda,
-                    source=self.source,
-                    **self.install_guards(GuardBuilder.FUNCTION_MATCH),
-                ),
-            ),
-            (
-                tensor_dunder_fns,
-                lambda self, value: TorchVariable(
-                    value,
                     source=self.source,
                     **self.install_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
@@ -467,12 +463,13 @@ class VariableBuilder:
                 result = DefaultDictVariable(
                     result,
                     type(value),
-                    self._wrap(value.default_factory),
+                    default_factory=self._wrap(value.default_factory),
+                    source=self.source,
                 )
             else:
                 result = ConstDictVariable(result, type(value))
 
-            return self.tx.output.side_effects.track_dict(self.source, value, result)
+            return self.set_source_and_track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
             return self.wrap_module(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals
@@ -559,7 +556,6 @@ class VariableBuilder:
                 for n, v in enumerate(value.saved_tensors)
             ]
             return self.tx.output.side_effects.track_object_existing(
-                self.source,
                 value,
                 AutogradFunctionContextVariable(
                     value,
@@ -629,9 +625,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = KeyedJaggedTensorVariable(value, source=self.source)
             # TODO: this doing it manually is bad
-            return self.tx.output.side_effects.track_object_existing(
-                self.source, value, result
-            )
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return OptimizerVariable(value, source=self.source)
@@ -653,6 +647,9 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
+        elif istype(value, type) and value in itertools.__dict__.values():
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return ItertoolsVariable(value, source=self.source)
         elif isinstance(value, torch.SymBool):
             # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
             # user provided SymBool with a SymInt in dynamo.
@@ -714,19 +711,25 @@ class VariableBuilder:
                 source=self.source,
             )
         elif trace_rules.lookup(value) is not None:
+            if is_user_defined_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
+        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return PythonModuleVariable(
+                value,
+                source=self.source,
+            )
         elif is_allowed(value):
-            if is_user_defined_allowed(value):
-                self.tx.output.has_user_defined_allowed_in_graph = True
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchVariable(
                 value,
                 source=self.source,
             )
         elif (
-            istype(value, (type, types.FunctionType))
+            is_function(value)
             and skipfiles.check(value, is_inlined_call=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
@@ -769,18 +772,12 @@ class VariableBuilder:
                 self_obj,
                 source=self.source,
             )
-        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return PythonModuleVariable(
-                value,
-                source=self.source,
-            )
         elif isinstance(value, types.GetSetDescriptorType):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return MethodWrapperVariable(value, source=self.source)
+            return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return UserDefinedClassVariable(
@@ -789,8 +786,7 @@ class VariableBuilder:
             )
         elif RestrictedListSubclassVariable.is_matching_cls(type(value)):
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.LIST_LENGTH)
-            return self.tx.output.side_effects.track_list(
-                self.source,
+            return self.set_source_and_track_mutable(
                 value,
                 RestrictedListSubclassVariable(
                     [
@@ -809,9 +805,7 @@ class VariableBuilder:
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
-            return self.tx.output.side_effects.track_object_existing(
-                self.source, value, result
-            )
+            return self.tx.output.side_effects.track_object_existing(value, result)
 
     def tensor_can_be_dict_key(self, value):
         # only allow Parameter and another specific Tensor can be used as dict key
@@ -859,7 +853,7 @@ class VariableBuilder:
             output, mutable_local=MutableLocal()
         )
         if istype(value, list):
-            return self.tx.output.side_effects.track_list(self.source, value, result)
+            return self.set_source_and_track_mutable(value, result)
         return result
 
     def wrap_tuple_iterator(self, value: tuple_iterator):
@@ -870,7 +864,11 @@ class VariableBuilder:
             )
             for i in range(tuple_iterator_len(value))
         ]
-        return TupleIteratorVariable(output, mutable_local=MutableLocal())
+        result = TupleIteratorVariable(
+            output, mutable_local=MutableLocal(), source=self.source
+        )
+
+        return self.set_source_and_track_mutable(value, result)
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
@@ -881,9 +879,9 @@ class VariableBuilder:
         ]
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if isinstance(value, slice):
-            return SliceVariable(items)
+            return SliceVariable(items, source=self.source)
         else:
-            return RangeVariable(items)
+            return RangeVariable(items, source=self.source)
 
     def wrap_module(self, value: torch.nn.Module):
         from ..eval_frame import OptimizedModule
@@ -901,13 +899,11 @@ class VariableBuilder:
         if mutation_guard.is_dynamic_nn_module(value):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = UnspecializedNNModuleVariable(value)
+            result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
-            return self.tx.output.side_effects.track_object_existing(
-                self.source, value, result
-            )
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(
             value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
         ):
@@ -972,7 +968,7 @@ class VariableBuilder:
                 or self.source.guard_source().is_nn_module()
             ):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                return ConstantVariable.create(value=value)
+                return ConstantVariable.create(value=value, source=self.source)
             else:
                 return self.wrap_unspecialized_primitive(value)
         else:
@@ -1203,7 +1199,7 @@ class VariableBuilder:
                     # a constant (but this should have been handled
                     # in the caller, TBH)
                     self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                    return ConstantVariable.create(value=value)
+                    return ConstantVariable.create(value=value, source=self.source)
 
                 name = self.source.name()
                 if name not in self.tx.output.frame_state:

@@ -4,6 +4,7 @@ from functools import reduce
 from typing import Any, List, Optional, Tuple
 
 from .base_data_sparsifier import BaseDataSparsifier
+import operator
 
 __all__ = ['DataNormSparsifier']
 
@@ -35,7 +36,7 @@ class DataNormSparsifier(BaseDataSparsifier):
                  sparse_block_shape: Tuple[int, int] = (1, 4),
                  zeros_per_block: Optional[int] = None, norm: str = 'L1'):
         if zeros_per_block is None:
-            zeros_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
+            zeros_per_block = reduce(operator.mul, sparse_block_shape)
 
         assert norm in ['L1', 'L2'], "only L1 and L2 norm supported at the moment"
 
@@ -95,7 +96,7 @@ class DataNormSparsifier(BaseDataSparsifier):
         data_norm = F.avg_pool2d(data[None, None, :], kernel_size=sparse_block_shape,
                                  stride=sparse_block_shape, ceil_mode=True)
 
-        values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
+        values_per_block = reduce(operator.mul, sparse_block_shape)
 
         data_norm = data_norm.flatten()
         num_blocks = len(data_norm)
@@ -116,7 +117,7 @@ class DataNormSparsifier(BaseDataSparsifier):
     def update_mask(self, name, data, sparsity_level,
                     sparse_block_shape, zeros_per_block, **kwargs):
 
-        values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
+        values_per_block = reduce(operator.mul, sparse_block_shape)
         if zeros_per_block > values_per_block:
             raise ValueError("Number of zeros per block cannot be more than "
                              "the total number of elements in that block.")

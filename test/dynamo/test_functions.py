@@ -4,6 +4,7 @@ import collections
 import functools
 import inspect
 import itertools
+import math
 import operator
 import sys
 import unittest
@@ -1175,6 +1176,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #         case {"b": param}:
     #             return x / param
 
+    def test_math_radians(self):
+        def func(x, a):
+            return x + math.radians(a)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        cfunc = torch._dynamo.optimize_assert(cnt)(func)
+
+        assert cnt.frame_count == 0
+        x = torch.rand(10)
+        expected = func(x, 12)
+        output = cfunc(x, 12)
+        self.assertTrue(same(output, expected))
+        assert cnt.frame_count == 1
+
     @make_test
     def test_numpy_meshgrid(x, y):
         r1, r2 = np.meshgrid(x.numpy(), y.numpy())
@@ -1750,6 +1765,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI,
+            FunctionalTensorMode,
             FunctorchFunctionalizeAPI,
             PythonFunctionalizeAPI,
         )
@@ -1772,8 +1788,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         t1 = torch.rand(5, device="cuda")
         t2 = torch.rand(5, device="cuda")
-
-        gm = make_fx(PythonFunctionalizeAPI().functionalize(f))(t1, t2)
+        with FunctionalTensorMode():
+            gm = make_fx(PythonFunctionalizeAPI().functionalize(f))(t1, t2)
         # Make sure t2 was not modified
         self.assertNotEqual(gm(t1, t2), t2)
 
@@ -1810,7 +1826,8 @@ def forward(self, x_1, output_1):
 
         def prep():
             x = torch.ones(4, device="cuda", requires_grad=True)
-            x_func = FunctionalTensor.to_functional(x)
+            with FunctionalTensorMode():
+                x_func = FunctionalTensor.to_functional(x)
             self.assertTrue(torch._is_functional_tensor(x_func.elem))
             return x_func
 
@@ -2375,6 +2392,42 @@ def forward(self, x_1, output_1):
         # With user defined function kernel
         o6 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, o6, 2, 200), torch_add)
+
+    @requires_cuda()
+    def test_triton_kernel_mutation_not_mark_dirty(self):
+        @torch.compile
+        def f(x):
+            n_elements = x.numel()
+            add_kernel[(n_elements,)](x, x, x, n_elements, 16)
+            return x
+
+        x = torch.randn(5, device="cuda", requires_grad=True)
+        x_cloned = x.clone()
+        out = x_cloned.sin()
+        f(x_cloned)
+        out.sum().backward()
+
+    @requires_cuda()
+    def test_triton_kernel_matmul_tracking(self):
+        @triton.jit
+        def ones_kernel(x_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = 1.0
+            tl.store(x_ptr + offsets, x, mask=mask)
+
+        @torch.compile
+        def f(x):
+            out = torch.zeros_like(x)
+            ones_kernel[(4,)](out, 16, BLOCK_SIZE=16)
+            return torch.mm(out, x) + 10
+
+        x = torch.randn(4, 4, device="cuda")
+        torch_out = f(x)
+        python_out = torch.mm(torch.ones(4, 4, device="cuda"), x) + 10
+        self.assertEqual(torch_out, python_out)
 
     def test_dataclass_factory(self):
         @dataclass

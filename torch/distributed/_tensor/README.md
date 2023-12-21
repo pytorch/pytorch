@@ -57,7 +57,7 @@ import torch
 from torch.distributed._tensor import DTensor, Shard, Replicate, distribute_tensor, distribute_module, init_device_mesh
 
 # construct a device mesh with available devices (multi-host or single host)
-device_mesh = init_device_mesh("cuda", )
+device_mesh = init_device_mesh("cuda", (4,))
 # if we want to do row-wise sharding
 rowwise_placement=[Shard(0)]
 # if we want to do col-wise sharding

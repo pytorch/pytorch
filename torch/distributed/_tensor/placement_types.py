@@ -192,6 +192,8 @@ class Shard(Placement):
                 tensor, num_chunks, with_padding=True, contiguous=True
             )
             tensor = torch.cat(scattered_list, dim=self.dim)
+        elif not tensor.is_contiguous():
+            tensor = tensor.contiguous()
 
         output = funcol.reduce_scatter_tensor(
             tensor, reduce_op.name, scatter_dim=self.dim, group=(mesh, mesh_dim)
@@ -468,6 +470,12 @@ class DTensorSpec:
             if placement.is_shard():
                 num_shards *= self.mesh.size(i)
         return num_shards
+
+    @property
+    def device_mesh(self) -> DeviceMesh:
+        # simple aliasing for the mesh field, make some
+        # checks that mixes DTensor/DTensorSpec easier
+        return self.mesh
 
     @property
     def dim_map(self) -> List[int]:
