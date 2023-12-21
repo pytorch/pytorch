@@ -588,6 +588,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Performs the `Node`'s actual operation.
   virtual variable_list apply(variable_list&& inputs) = 0;
 
+  /// Calls `apply()`, but instruments it with tracing machinery.
+  variable_list traced_apply(variable_list inputs);
+
   // Sequence number used to correlate backward nodes with forward ops in the
   // profiler and provide determinism in the engine.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)

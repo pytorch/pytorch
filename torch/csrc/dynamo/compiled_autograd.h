@@ -375,10 +375,6 @@ class CompiledNodeArgs {
     return _compiler.emplace_hook(std::move(obj));
   }
 
-  int get_current_graph_inputs_size() {
-    return _compiler.tensor_args.inputs.size();
-  }
-
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);

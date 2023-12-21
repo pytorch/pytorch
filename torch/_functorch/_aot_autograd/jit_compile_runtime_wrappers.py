@@ -385,7 +385,7 @@ def aot_dispatch_autograd(
 
         @staticmethod
         def _compiled_autograd_key(ctx):
-            return (aot_config.aot_id, ctx._autograd_function_id, *ctx.symints)
+            return (ctx._autograd_function_id, *ctx.symints)
 
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):

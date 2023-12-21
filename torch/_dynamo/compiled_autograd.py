@@ -59,7 +59,7 @@ class AutogradCompilerInstance:
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
-        self.args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
+        args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
         sizes_proxy = self.fx_tracer.create_proxy("placeholder", "sizes", (), {})
         self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
 
@@ -68,7 +68,7 @@ class AutogradCompilerInstance:
             self.wrap_fake(x, self.source("inputs", idx))
             for idx, x in enumerate(inputs)
         ]
-        proxies = [self.args_proxy[i] for i in range(len(inputs))]
+        proxies = [args_proxy[i] for i in range(len(inputs))]
         self.bind_tensors_to_proxies(inputs, proxies)
 
         # size inputs to symints
@@ -94,12 +94,11 @@ class AutogradCompilerInstance:
     def proxy_call_backward(
         self,
         inputs,
-        outputs,
+        output_sizes,
         saved_tensors,
         backward_idx: int,
     ):
         assert self.hooks_proxy is not None
-        assert self.args_proxy is not None
         backward_fn = self.hooks_proxy[backward_idx]
         proxies = self.fx_tracer.create_proxy(
             kind="call_function",
@@ -113,7 +112,8 @@ class AutogradCompilerInstance:
         )
 
         with disable_proxy_modes_tracing():
-            grad_ins = [maybe_clone(x) for x in outputs]
+            # create fake Tensors
+            grad_ins = [torch.Tensor(output_size) for output_size in output_sizes]
             self.bind_tensors_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
 

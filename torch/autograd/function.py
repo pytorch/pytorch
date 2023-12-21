@@ -570,7 +570,7 @@ class Function(_SingleLevelFunction):
 
     @staticmethod
     def _compiled_autograd_key(ctx):
-        return (0, ctx._autograd_function_id)
+        return (ctx._autograd_function_id,)
 
 
 def once_differentiable(fn):

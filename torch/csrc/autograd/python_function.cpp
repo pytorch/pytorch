@@ -107,6 +107,26 @@ static PyObject* unpack_saved_variables(
   return saved.release();
 }
 
+PyObject* to_py_size(const VariableInfo& info) {
+  c10::SymIntArrayRef sym_sizes(info.size);
+
+  auto ret = THPObjectPtr(THPSizeType.tp_alloc(
+      &THPSizeType, static_cast<Py_ssize_t>(sym_sizes.size())));
+  if (!ret)
+    throw python_error();
+
+  for (auto i : c10::irange(sym_sizes.size())) {
+    auto symint = sym_sizes[i];
+    if (auto maybe_int = symint.maybe_as_int(); maybe_int.has_value()) {
+      PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(*maybe_int));
+    } else {
+      auto py_symint = py::cast(symint).release().ptr();
+      PyTuple_SET_ITEM(ret.get(), i, py_symint);
+    }
+  }
+  return ret.release();
+}
+
 } // namespace
 
 namespace torch {
@@ -179,30 +199,23 @@ auto PyNode::compiled_apply(
 
   // The gradients returned in the backwards should match the number of inputs
   // to the forward, and their shapes, so we pass the fwdInputs
-  THPObjectPtr fwdInputs(
+  THPObjectPtr fwdInputSizes(
       PyTuple_New(static_cast<Py_ssize_t>(is_variable_input.size())));
   int offset = 0;
   for (const auto i : c10::irange(is_variable_input.size())) {
     if (!is_variable_input[i]) {
       // input at i is not a variable, add an offset
-      PyTuple_SET_ITEM(fwdInputs.get(), i, Py_None);
+      PyTuple_SET_ITEM(fwdInputSizes.get(), i, Py_None);
       offset++;
       continue;
     }
 
     const auto& input_info = input_infos[i - offset];
 
-    // TODO: figure out how to pass symint sizes directly and remove this python
-    // call
-    auto zeros_without_gil = [](const VariableInfo& variable,
-                                at::OptionalDeviceGuard& dg) {
-      pybind11::gil_scoped_release gil;
-      return variable.zeros(dg);
-    };
     PyTuple_SET_ITEM(
-        fwdInputs.get(),
+        fwdInputSizes.get(),
         static_cast<Py_ssize_t>(i),
-        THPVariable_Wrap(zeros_without_gil(input_info, _device_guard)));
+        to_py_size(input_info));
   }
   PyObject* saved_tensors(unpack_saved_variables(
       py_fn, [](const Variable& var) { return THPVariable_Wrap(var); }));
@@ -214,7 +227,7 @@ auto PyNode::compiled_apply(
       "proxy_call_backward",
       "OOOi",
       pyInputs.get(),
-      fwdInputs.get(),
+      fwdInputSizes.get(),
       saved_tensors,
       *_backward_idx));
 
@@ -268,31 +281,20 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
       PyTuple_CheckExact(pykey.get()),
       "_compiled_autograd_key shoud return tuple of ints");
   auto size = PyTuple_GET_SIZE(pykey.get());
-
-  int key_size = 2;
-  // key should at least contain a graph id and a function id
-  TORCH_INTERNAL_ASSERT(size >= key_size);
+  TORCH_INTERNAL_ASSERT(size > 0);
   // first value is unique ID of the AotAutograd graph
-  auto graph_id = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
-  if (C10_UNLIKELY(graph_id < 0)) {
+  auto key = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
+  if (C10_UNLIKELY(key < 0)) {
     TORCH_CHECK(PyErr_Occurred(), "key must be positive");
     throw_python_error();
   }
-  // second value is unique ID of the autograd function
-  auto function_id = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 1));
-  if (C10_UNLIKELY(function_id < 0)) {
-    TORCH_CHECK(PyErr_Occurred(), "key must be positive");
-    throw_python_error();
-  }
-
-  args.collect_size(static_cast<size_t>(graph_id));
-  args.collect_size(static_cast<size_t>(function_id));
+  args.collect_size(static_cast<size_t>(key));
   args.collect_size(size);
 
   auto f = (THPFunction*)obj;
   f->compiled_autograd_symints.clear();
-  f->compiled_autograd_symints.reserve(size - key_size);
-  for (const auto i : c10::irange(key_size, size)) {
+  f->compiled_autograd_symints.reserve(size - 1);
+  for (const auto i : c10::irange(1, size)) {
     auto val = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), i));
     if (C10_UNLIKELY(val == -1 && PyErr_Occurred()))
       throw_python_error();
