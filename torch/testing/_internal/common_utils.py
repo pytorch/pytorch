@@ -1267,7 +1267,7 @@ def with_dill():
 
     dill.extend(use_dill=True)
     try:
-        yield:
+        yield
     finally:
         dill.extend(use_dill=False)
 
