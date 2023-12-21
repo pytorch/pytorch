@@ -436,7 +436,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 torch.ops.aten.hardtanh.default,
             ]:
                 input_act = getattr(m, n.args[0].target)
-                output_act = getattr(m, list(n.users)[0].target)
+                output_act = getattr(m, next(iter(n.users)).target)
                 self.assertIs(input_act, output_act)
 
         m = convert_pt2e(m, fold_quantize=True)

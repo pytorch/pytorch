@@ -64,6 +64,7 @@ if TEST_CUDA:
 _cycles_per_ms = None
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCuda(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -3304,6 +3305,30 @@ exit(2)
         # Exception would Corrupt Process and make other tests fail
         # self.assertTrue(throws_on_cuda_event("global"))
 
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    def test_cuda_graph_allocator_propagates_stream(self):
+        segments = torch.cuda.memory_snapshot()
+        existing_pools = {s["segment_pool_id"] for s in segments}
+        x = torch.randn(10240000, device="cuda")
+        y = torch.rand_like(x)
+        g = torch.cuda.CUDAGraph()
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        s0.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s0):
+            g.capture_begin()
+            z = x + y
+        with torch.cuda.stream(s1):
+            s1.wait_stream(s0)
+            w = z + y
+        s0.wait_stream(s1)
+        with torch.cuda.stream(s0):
+            g.capture_end()
+        segments = torch.cuda.memory_snapshot()
+        x = [s["segment_pool_id"] for s in segments if s["segment_pool_id"] not in existing_pools]
+        self.assertEqual(len(x), 2)
+        self.assertEqual(x[0], x[1])
+
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
         mean, invstd = torch.batch_norm_gather_stats(
@@ -3401,6 +3426,7 @@ exit(2)
         self.assertEqual(rc, "0")
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot(self):
@@ -3897,6 +3923,7 @@ def reconstruct_from_tensor_metadata(metadata):
 
 
 @unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlockStateAbsorption(TestCase):
 
     def checkCheckpointedBlock(self, before_block, after_block):
@@ -4166,7 +4193,7 @@ class TestBlockStateAbsorption(TestCase):
             try:
                 yield
             finally:
-                torch._C._cuda_endAllocateCurrentStreamToPool(device)
+                torch._C._cuda_endAllocateCurrentStreamToPool(device, mem_pool)
                 torch._C._cuda_releasePool(device, mem_pool)
                 stream_context.__exit__(None, None, None)
 

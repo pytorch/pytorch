@@ -19,7 +19,7 @@ import torch
 import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import dynamo_timed
-from torch.utils._triton import has_triton, has_triton_package
+from torch.utils._triton import has_triton_package
 
 from . import config
 from .codecache import cache_dir, CudaKernelParamCache
@@ -49,11 +49,6 @@ else:
     triton = None
     KernelInterface = object
     OutOfResources = object
-
-if has_triton():
-    from triton.runtime.jit import get_cuda_stream
-else:
-    get_cuda_stream = None
 
 
 _NUM_THREADS_PER_WARP = 32
@@ -370,6 +365,8 @@ class CachingAutotuner(KernelInterface):
                 launcher.n_spills,
             )
             return float("inf")
+
+        from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
 
         stream = get_cuda_stream(torch.cuda.current_device())
 

@@ -4,12 +4,13 @@ import os
 
 import torch
 import torch.distributed._functional_collectives as funcol
+from torch.distributed._tensor import DTensor
 from torch.distributed._tensor._collective_utils import (
     mesh_all_to_all,
     mesh_broadcast,
     mesh_scatter,
 )
-from torch.distributed._tensor.placement_types import Shard
+from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 
 from torch.distributed.distributed_c10d import (
@@ -292,9 +293,11 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         dp_group_idx = self.rank % 4
         self.assertEqual(mesh_2d["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx])
 
+
+class TestMeshEnv(DTensorTestBase):
     @with_comms
     def test_get_parent_mesh(self):
-        mesh_shape = (2, 4)
+        mesh_shape = (2, self.world_size // 2)
         mesh_dim_names = ("DP", "TP")
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
@@ -313,7 +316,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
 
     @with_comms
     def test_get_parent_mesh_dim_exist(self):
-        mesh_shape = (2, 4)
+        mesh_shape = (2, self.world_size // 2)
         mesh_dim_names = ("DP", "TP")
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
@@ -328,6 +331,17 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, mesh_shape)
 
         self.assertEqual(_mesh_resources.get_parent_mesh_dim(mesh), None)
+
+    @with_comms
+    def test_get_mesh_dim_by_name(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_dim_names = ("DP", "TP")
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "DP"), 0)
+        self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "TP"), 1)
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):
@@ -440,6 +454,48 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             self.assertEqual(all_gathered_tensor.size(), tensor_to_split.size())
             self.assertEqual(all_gathered_tensor, tensor_to_split)
+
+    @with_comms
+    def test_reduce_scatter_contiguous(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        my_rank = device_mesh.get_rank()
+
+        # Init the tensor
+        step = self.world_size * 2
+        total_elem = step**2
+        tensor = torch.arange(0, total_elem).view(step, -1).to(device=self.device_type)
+        tensor = tensor * (my_rank + 1)
+
+        # Get non-contiguous tensor by slicing
+        tensor_to_reduce = tensor[::2, :2]
+        tensor_contiguous = tensor_to_reduce.clone().contiguous()
+
+        # Partial to Shard to trigger reduce_scatter
+        tensor_to_reduce = DTensor.from_local(
+            tensor_to_reduce, device_mesh, [_Partial()]
+        )
+        tensor_contiguous = DTensor.from_local(
+            tensor_contiguous, device_mesh, [_Partial()]
+        )
+        new_tensor = tensor_to_reduce.redistribute(device_mesh, [Shard(0)])
+        new_tensor_contiguous = tensor_contiguous.redistribute(device_mesh, [Shard(0)])
+
+        # The output for contiguous and non-contiguous tensors of the same value
+        # should return the same reducescatter value.
+        new_tensor_local = new_tensor._local_tensor
+        new_tensor_contiguous_local = new_tensor_contiguous._local_tensor
+        self.assertEqual(new_tensor_local, new_tensor_contiguous_local)
+        self.assertEqual(list(new_tensor_local.size()), [1, 2])
+
+        # Check the reduce numerical value
+        sum_base = (1 + self.world_size) * self.world_size / 2
+        first_elem = my_rank * sum_base * step * 2
+        expected_tensor = torch.tensor(
+            [[first_elem, first_elem + sum_base]],
+            dtype=new_tensor_local.dtype,
+            device=self.device_type,
+        )
+        self.assertEqual(new_tensor_local, expected_tensor)
 
     @with_comms
     def test_reduce_scatter_uneven(self):

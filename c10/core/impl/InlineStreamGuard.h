@@ -4,8 +4,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 /**
  * A StreamGuard is an RAII class that changes the current device
@@ -149,7 +148,7 @@ class InlineOptionalStreamGuard {
   /// All constructors of StreamGuard are valid for OptionalStreamGuard
   template <typename... Args>
   explicit InlineOptionalStreamGuard(Args&&... args)
-      : guard_(in_place, std::forward<Args>(args)...) {}
+      : guard_(std::in_place, std::forward<Args>(args)...) {}
 
   // See Note [Move construction for RAII guards is tricky]
   InlineOptionalStreamGuard(InlineOptionalStreamGuard<T>&& other) = delete;
@@ -253,5 +252,4 @@ class InlineMultiStreamGuard {
   }
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

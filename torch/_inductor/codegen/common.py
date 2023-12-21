@@ -385,6 +385,16 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) >= 2
         return f"min({', '.join(map(self._print, expr.args))})"
 
+    def _print_Round(self, expr):
+        assert len(expr.args) == 1
+        return f"round({self._print(expr.args[0])})"
+
+    def _print_RoundDecimal(self, expr):
+        assert len(expr.args) == 2
+        number, ndigits = expr.args
+        assert isinstance(ndigits, sympy.Integer)
+        return f"round({self._print(number)}, {ndigits})"
+
 
 class OpOverrides:
     def __init__(self, parent):
@@ -976,7 +986,7 @@ class Kernel(CodeGen):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError()
 
-    def scan(self, dtype, scan_type, value):
+    def scan(self, dtype, combine_fn, value, init):
         raise NotImplementedError()
 
     def bucketize(
@@ -1122,8 +1132,8 @@ class Kernel(CodeGen):
                 return self.reduction(dtype, src_dtype, reduction_type, value)
 
             @staticmethod
-            def scan(dtype, scan_op, value):
-                return self.scan(dtype, scan_op, value)
+            def scan(dtype, combine_fn, value, init):
+                return self.scan(dtype, combine_fn, value, init)
 
             @staticmethod
             def bucketize(

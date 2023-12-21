@@ -1515,8 +1515,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return x_view + 1
 
         def f_functionalized(x):
-            x_wrapped = FunctionalTensor.to_functional(x)
-
             # Note [Disabling Functionalize TLS Above Python Functionalization]
             # This UX is pretty annoying (although python functionalization's main customer is AOTAutograd,
             # and is not really advertised as a user API).
@@ -1528,6 +1526,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             # so globally disabling functionalization here is easier.
             maybe_disable = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
             with maybe_disable, FunctionalTensorMode():
+                x_wrapped = FunctionalTensor.to_functional(x)
                 out_wrapped = f(x_wrapped)
             out_unwrapped = out_wrapped.elem
             torch._sync(out_unwrapped)
