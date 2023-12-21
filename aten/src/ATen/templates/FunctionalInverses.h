@@ -22,8 +22,9 @@ struct FunctionalInverses {
 
 ${view_inverse_declarations}
 
-// NB: This is not generated! It's manually implemented in the template.
-static at::Tensor narrow_copy_inverse(const at::Tensor & base, const at::Tensor & mutated_view, bool reapply_views, bool called_by_functionalization, int dim, c10::SymInt start, c10::SymInt length);
+// NB: These are not generated! They're manually implemented in the template.
+static at::Tensor chunk_copy_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, int chunks, int dim);
+static at::Tensor narrow_copy_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, int dim, c10::SymInt start, c10::SymInt length);
 
 };
 }
