@@ -674,6 +674,7 @@ class KernelArgs:
             arg_defs.append(inner)
             call_args.append(outer)
             precompile_args.append(SizeArg(inner, outer))
+            V.graph.wrapper_code.ensure_size_computed(outer)
 
         return arg_defs, call_args, precompile_args
 
