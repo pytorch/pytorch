@@ -342,6 +342,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 mutable_local=MutableLocal(),
             )
         elif self.value in tensortype_to_dtype or self.value in [
+            torch.Tensor,
             torch.cuda.Stream,
             torch.cuda.Event,
         ]:

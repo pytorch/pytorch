@@ -742,7 +742,7 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, types.MethodType) and isinstance(
-            value.__self__, torch.nn.Module
+            value.__self__, (torch.nn.Module, torch.utils._pytree.TreeSpec)
         ):
             # don't let MethodTypes fall through to UserDefinedObject,
             # which doesn't support 'CALL_FUNCTION'

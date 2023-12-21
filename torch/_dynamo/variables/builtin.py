@@ -1236,8 +1236,6 @@ class BuiltinVariable(VariableTracker):
                 #     return TorchInGraphFunctionVariable(member, **options)
                 if source is not None:
                     return VariableBuilder(tx, source)(member)
-                else:
-                    return SourcelessBuilder()(tx, member)
             elif (
                 isinstance(obj, variables.UserDefinedObjectVariable)
                 and obj.value.__class__.__module__.startswith("torch.")
@@ -1245,8 +1243,6 @@ class BuiltinVariable(VariableTracker):
                 member = getattr(obj.value, name)
                 if source is not None:
                     return VariableBuilder(tx, source)(member)
-                else:
-                    return SourcelessBuilder()(tx, member)
 
             try:
                 return obj.var_getattr(tx, name)
