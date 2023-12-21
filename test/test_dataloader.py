@@ -35,7 +35,7 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_JETSON,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
-                                                  IS_MACOS, TEST_CUDA, parametrize, TEST_DILL, import_dill, with_dill)
+                                                  IS_MACOS, TEST_CUDA, parametrize, TEST_DILL, with_dill)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 import functools
 import operator
@@ -52,9 +52,6 @@ except ImportError:
         raise ImportError(err_msg) from None
     else:
         warnings.warn(err_msg)
-
-dill = import_dill()
-HAS_DILL = TEST_DILL
 
 
 try:
@@ -1590,7 +1587,7 @@ except RuntimeError as e:
                      torch.as_tensor([[2, 3, 4, 5]], dtype=torch.int64)]
         datapipe: IterDataPipe = IterableWrapper([[1, 2, 3, 4], [1, 2, 3, 4, 5, 6]])
         datapipe = datapipe.map(row_processor)
-        datapipe = datapipe.filter(lambda row: len(row) == 4) if HAS_DILL else datapipe.filter(filter_len)
+        datapipe = datapipe.filter(lambda row: len(row) == 4) if TEST_DILL else datapipe.filter(filter_len)
 
         dl_common_args = dict(num_workers=2, batch_size=2, shuffle=True, pin_memory=(not TEST_CUDA))
         for ctx in supported_multiprocessing_contexts:
