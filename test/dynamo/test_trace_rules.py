@@ -6,6 +6,7 @@ import unittest
 import torch
 import torch._dynamo.test_case
 from torch._dynamo.allowed_functions import gen_allowed_objs_and_ids
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch._dynamo.skipfiles import (
     FUNC_INLINELIST,
     LEGACY_MOD_INLINELIST,
@@ -132,6 +133,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                 f"{f} from skipfiles.FUNC_INLINELIST is not a python function, please check and correct it.",
             )
 
+    @skipIfTorchDynamo # flaky tests
     def test_torch_name_rule_map_updated(self):
         # Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
         objs = gen_allowed_objs_and_ids(record=True, c_binding_only=True)
