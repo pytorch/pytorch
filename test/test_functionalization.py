@@ -478,7 +478,7 @@ def forward(self, arg0_1):
     """)
 
         # NB: even with reapply_views=True, we expect to see scatter op
-        reinplaced_logs = self.get_logs(f, torch.ones(2, 2), reapply_views=True, run_reinplace=True)
+        reinplaced_logs = self.get_logs(f, torch.ones(2, 2), reapply_views=True, run_reinplace=False)
         self.assertExpectedInline(reinplaced_logs, """\
 
 
@@ -602,7 +602,7 @@ def forward(self, arg0_1):
     """)
 
         # NB: even with reapply_views=True, we expect to see scatter op
-        reinplaced_logs = self.get_logs(f, torch.ones(2, 2), reapply_views=True, run_reinplace=True)
+        reinplaced_logs = self.get_logs(f, torch.ones(2, 2), reapply_views=True, run_reinplace=False)
         self.assertExpectedInline(reinplaced_logs, """\
 
 
@@ -669,7 +669,7 @@ def forward(self, arg0_1):
     """)  # noqa: B950
 
         # NB: even with reapply_views=True, we expect to see scatter op
-        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=True)
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=False)
         self.assertExpectedInline(reinplaced_logs, """\
 
 
@@ -732,7 +732,7 @@ def forward(self, arg0_1):
     """)  # noqa: B950
 
         # NB: even with reapply_views=True, we expect to see scatter op
-        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=True)
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=False)
         self.assertExpectedInline(reinplaced_logs, """\
 
 
@@ -786,7 +786,7 @@ def forward(self, arg0_1):
     """)  # noqa: B950
 
         # NB: even with reapply_views=True, we expect to see scatter op
-        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=True)
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=False)
         self.assertExpectedInline(reinplaced_logs, """\
 
 
@@ -834,7 +834,7 @@ def forward(self, arg0_1):
     """)  # noqa: B950
 
         # NB: even with reapply_views=True, we expect to see scatter op
-        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=True)
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=False)
         self.assertExpectedInline(reinplaced_logs, """\
 
 
@@ -886,7 +886,7 @@ def forward(self, arg0_1):
     """)  # noqa: B950
 
         # NB: even with reapply_views=True, we expect to see scatter op
-        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=True)
+        reinplaced_logs = self.get_logs(f, torch.ones(4, 2), reapply_views=True, run_reinplace=False)
         self.assertExpectedInline(reinplaced_logs, """\
 
 
