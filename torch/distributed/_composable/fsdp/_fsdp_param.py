@@ -391,12 +391,12 @@ class FSDPParam:
         if self.is_float8tensor:
             self._delattr_on_modules("_w_fp8")
         unsafe_free_storage(self._unsharded_param_data)
-        self.state = ShardedState.SHARDED
+        self.sharded_state = ShardedState.SHARDED
 
     def to_sharded_post_forward(self) -> None:
-        if self.state != ShardedState.UNSHARDED:
+        if self.sharded_state != ShardedState.UNSHARDED:
             print_and_raise_internal(
-                f"Expects state to be unsharded but got {self.state}"
+                f"Expects state to be unsharded but got {self.sharded_state}"
             )
         assert self.post_forward_mesh_info is not None  # mypy
         shard_world_size = self.post_forward_mesh_info.shard_mesh_size
@@ -414,7 +414,7 @@ class FSDPParam:
         # Do not strip padding here since this resharded parameter should never
         # be used in any ops and is only meant as a temporary storage
         unsafe_free_storage(self._unsharded_param_data)
-        self.state = ShardedState.SHARDED_POST_FORWARD
+        self.sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def to_unsharded(self) -> None:
         # Assume that the data has been allocated and all-gathered (e.g. from
@@ -426,7 +426,7 @@ class FSDPParam:
             )
         else:
             self._setattr_on_modules(self._unsharded_param)
-        if self.state == ShardedState.SHARDED_POST_FORWARD:
+        if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             # The sharded post-forward parameter data is allocated in the
             # default stream via the post-forward reshard and needs to be kept
             # alive until after the copy-in for the next all-gather. Since this
@@ -434,7 +434,7 @@ class FSDPParam:
             # all-gather to finish (via an event wait), this data's lifetime is
             # ensured without needing further synchronization.
             self._sharded_post_forward_param_data = None  # free
-        self.state = ShardedState.UNSHARDED
+        self.sharded_state = ShardedState.UNSHARDED
 
     def _setattr_on_modules(
         self,
@@ -509,7 +509,7 @@ class FSDPParam:
     @property
     def all_gather_input(self) -> torch.Tensor:  # 1D
         self._assert_in_sharded_state()
-        if self.state == ShardedState.SHARDED:
+        if self.sharded_state == ShardedState.SHARDED:
             sharded_param_data = self._sharded_param_data
             if self.offload_to_cpu:
                 sharded_param_data = sharded_param_data.to(
@@ -527,7 +527,7 @@ class FSDPParam:
                 )
                 sharded_param_data = sharded_param_data_float8._data
             return sharded_param_data
-        elif self.state == ShardedState.SHARDED_POST_FORWARD:
+        elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             return cast(torch.Tensor, self._sharded_post_forward_param_data)
         return torch.empty(0)  # mypy
 
@@ -536,9 +536,9 @@ class FSDPParam:
         # NOTE: This property only exists to avoid recomputing the fp32 ->
         # fp8 cast in `all_gather_input` to get the numel for the fp8 path.
         self._assert_in_sharded_state()
-        if self.state == ShardedState.SHARDED:
+        if self.sharded_state == ShardedState.SHARDED:
             return self._sharded_param_data.numel()
-        elif self.state == ShardedState.SHARDED_POST_FORWARD:
+        elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             return cast(torch.Tensor, self._sharded_post_forward_param_data).numel()
         return 0  # mypy
 
@@ -580,15 +580,18 @@ class FSDPParam:
         return self._unsharded_param.dtype
 
     def _assert_in_sharded_state(self) -> None:
-        if self.state not in (ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD):
+        if self.sharded_state not in (
+            ShardedState.SHARDED,
+            ShardedState.SHARDED_POST_FORWARD,
+        ):
             print_and_raise_internal(
-                f"Expects to be in a sharded state, not {self.state}"
+                f"Expects to be in a sharded state, not {self.sharded_state}"
             )
 
     def _assert_in_unsharded_state(self) -> None:
-        if self.state != ShardedState.UNSHARDED:
+        if self.sharded_state != ShardedState.UNSHARDED:
             print_and_raise_internal(
-                f"Expects to be in the UNSHARDED state, not {self.state}"
+                f"Expects to be in the UNSHARDED state, not {self.sharded_state}"
             )
 
 

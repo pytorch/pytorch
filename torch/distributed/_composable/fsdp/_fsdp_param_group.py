@@ -387,7 +387,8 @@ class FSDPParamGroup:
     def finalize_backward(self, wait_for_grad_sync: bool):
         log.info("finalizing backward for %s", self._module_fqn)
         if any(
-            fsdp_param.state != ShardedState.SHARDED for fsdp_param in self.fsdp_params
+            fsdp_param.sharded_state != ShardedState.SHARDED
+            for fsdp_param in self.fsdp_params
         ):
             # Reshard any unsharded parameters, which should mainly happen for
             # the root's parameters since its inputs may not require gradient
@@ -517,12 +518,12 @@ class FSDPParamGroup:
 
     @property
     def _sharded_state(self) -> ShardedState:
-        state = self.fsdp_params[0].state
+        state = self.fsdp_params[0].sharded_state
         for fsdp_param in self.fsdp_params[1:]:
-            if state != fsdp_param.state:
+            if state != fsdp_param.sharded_state:
                 print_and_raise_internal(
                     "Parameters in the same group should be in the same "
-                    f"sharded state but got {state} and {fsdp_param.state}"
+                    f"sharded state but got {state} and {fsdp_param.sharded_state}"
                 )
         return state
 

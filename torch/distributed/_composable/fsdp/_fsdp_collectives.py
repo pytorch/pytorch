@@ -77,14 +77,14 @@ def foreach_all_gather(
     unsharded_fsdp_params = [
         fsdp_param
         for fsdp_param in fsdp_params
-        if fsdp_param.state == ShardedState.UNSHARDED
+        if fsdp_param.sharded_state == ShardedState.UNSHARDED
     ]
     if len(unsharded_fsdp_params) == len(fsdp_params):
         return None  # already unsharded
     elif len(unsharded_fsdp_params) != 0:
         msg = "Expects all parameters to be all sharded or all unsharded but got:\n"
         for fsdp_param in fsdp_params:
-            msg += f"{fsdp_param._param_fqn}: {fsdp_param.state}\n"
+            msg += f"{fsdp_param._param_fqn}: {fsdp_param.sharded_state}\n"
         print_and_raise_internal(msg)
     # Already checked at construction time for a uniform unsharded parameter
     # dtype if not using uint8
