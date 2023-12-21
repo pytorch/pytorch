@@ -487,7 +487,7 @@ def emit_view_body(
         # See NOTE [ View + Inplace detection ] for more details about this logic
         if is_tensor_list_type(return_info.type):
             creation_meta = get_creation_meta_in_mode("CreationMeta::MULTI_OUTPUT_NODE")
-            view_idx = "mutated_view_idx"
+            view_idx = "view_idx"
             view_lambda = emit_view_lambda(
                 f, extract_bindings(f), view_idx=view_idx
             ).strip()
