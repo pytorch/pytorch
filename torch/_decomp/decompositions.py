@@ -3403,7 +3403,6 @@ def _upsample_linear(
     ]
     xs_f32, xs, xp1s = list(zip(*values))
 
-    dtype = torch.float32 if not input.is_floating_point() else input.dtype
     vs = []
     for a in product(*[[0, 1]] * d):
         idx = [None, None] + [xs[k] if a[k] == 0 else xp1s[k] for k in range(d)]
