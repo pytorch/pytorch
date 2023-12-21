@@ -691,6 +691,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # Dynamic modules should be routed via UnspecializedNNModuleVariable - however,
         # FSDP modules have their own path where they inherit from UnspecializedNNModuleVariable
         # but route here for registration of children.
+
+        # Dynamic Path 1 - module is dynamic, and NOT fsdp, the common case
         if is_dynamic_nn_module(target) and not getattr(
             target, "_is_fsdp_managed_module", False
         ):
@@ -700,6 +702,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert "source" in options
         source = options["source"]
 
+        # Dynamic Path 2 - module is dynamic, and is fsdp
         if is_dynamic_nn_module(target) and getattr(
             target, "_is_fsdp_managed_module", False
         ):

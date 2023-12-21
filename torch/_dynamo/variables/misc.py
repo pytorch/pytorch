@@ -797,32 +797,6 @@ class SkipFilesVariable(VariableTracker):
             return variables.functions.FunctoolsPartialVariable(
                 fn, args=rest_args, keywords=kwargs
             )
-        elif (
-            self.value is cast
-            and isinstance(args[0], variables.UserDefinedClassVariable)
-            and isinstance(args[1], variables.nn_module.FSDPManagedNNModuleVariable)
-        ):
-            new_obj = cast(args[0].value, args[1].value)
-            args[1].mutable_local = MutableLocal()
-            return args[1]
-        elif (
-            self.value is cast
-            and isinstance(args[0], variables.UserDefinedClassVariable)
-            and isinstance(args[1], variables.UserDefinedObjectVariable)
-        ):
-            new_obj = cast(args[0].value, args[1].value)
-            args[1].mutable_local = MutableLocal()
-            return variables.UserDefinedObjectVariable(new_obj)
-        elif (
-            self.value is cast
-            and isinstance(args[0], variables.UserDefinedClassVariable)
-            and isinstance(args[1], variables.NNModuleVariable)
-        ):
-            new_obj = cast(args[0].value, tx.output.nn_modules[args[1].module_key])
-            args[1].mutable_local = MutableLocal()
-            return args[1]
-        elif self.value is cast:
-            unimplemented(f"Cast with {args}")
         elif self.value is itertools.repeat:
             if len(args) < 2:
                 return variables.RepeatIteratorVariable(
@@ -834,10 +808,6 @@ class SkipFilesVariable(VariableTracker):
             return tx.inline_user_function_return(
                 SourcelessBuilder()(tx, polyfill.repeat), args, kwargs
             )
-        elif self.value is itertools.count:
-            return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
-        elif self.value is itertools.cycle:
-            return variables.CycleIteratorVariable(*args, mutable_local=MutableLocal())
         else:
             try:
                 path = inspect.getfile(self.value)

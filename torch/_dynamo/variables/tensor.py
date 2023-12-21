@@ -272,27 +272,10 @@ class TensorVariable(VariableTracker):
         if name == "__class__":
             return TorchVariable(self.python_type())
 
-        # This is somewhat annoying - you can get into states where a source
-        # poitns to a real object, one that is realized during tracing, but not realized
-        # in the real user frame.
-        # Consider a case of a None grad on a tensor, being assigned during trace
-        # or, the case of a tensor subclass starting with a None field that is then assigned
-        # to a tensor. In this case, the source is valid, but the realization of the value
-        # has not happeend, and so guarding on it will fail eval() at installation time.
-        # We do this check here, so as not to fail guard installation.
-        def tensor_property_realized():
-            scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
-            try:
-                eval(self.source.name(), scope)
-                return True
-            except Exception as exc:
-                return False
-
-
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
         # <tensor> is later changed to another type
-        if result is not None and self.source is not None and tensor_property_realized():
+        if result is not None and self.source is not None:
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
             result.source = AttrSource(self.source, name)
 
@@ -747,7 +730,8 @@ class TensorVariable(VariableTracker):
 
                 if not src:
                     unimplemented("No source for register_hook target fn")
-                    tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+
+                tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
 
                 if not compiled_autograd.compiled_autograd_enabled:
                     # TODO(voz):
