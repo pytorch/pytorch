@@ -2,12 +2,10 @@
 import copy
 import sys
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 from torch import distributed as dist
-from torch.distributed._shard.sharded_tensor.api import ShardedTensor
-from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._tensor import (
     DeviceMesh,
     distribute_module,
@@ -46,15 +44,6 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
-
-
-def _is_nested_tensor(val: Any) -> bool:
-    if type(val) is ShardedTensor:
-        if len(val.local_shards()) == 0:
-            return False
-        if type(val.local_shards()[0].tensor) is ShardedTensor:
-            return True
-    return False
 
 
 class SimpleModel(torch.nn.Module):
@@ -148,17 +137,6 @@ class TestTPFSDPIntegration(FSDPTest):
         fsdp_pg = twod_mesh.get_group(mesh_dim=0)
         tp_pg = twod_mesh.get_group(mesh_dim=1)
         return twod_mesh, fsdp_pg, tp_pg
-
-    def _get_chunk_sharding_spec(self, tp_world_size: int, tp_pg: dist.ProcessGroup):
-        placements = [
-            f"rank:{idx}/cuda:{dist.distributed_c10d.get_global_rank(tp_pg, idx) % torch.cuda.device_count()}"
-            for idx in range(tp_world_size)
-        ]
-        # Rowwise and colwise sharding are specified with respect to the
-        # transposed linear weight
-        colwise_spec = ChunkShardingSpec(dim=0, placements=placements)
-        rowwise_spec = ChunkShardingSpec(dim=1, placements=placements)
-        return colwise_spec, rowwise_spec
 
     def _sync_tp_grads(
         self,
