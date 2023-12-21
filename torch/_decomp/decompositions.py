@@ -3383,7 +3383,8 @@ def _upsample_linear(
         i = torch.arange(out, device=input.device).to(dtype=dtype)
 
         x_f32 = _compute_source_index(scale_factor, i, align_corners).clamp(min=0.0)
-        x_f32 = x_f32.reshape(len(x_f32), *[1] * (nsqueeze))
+        for _ in range(nsqueeze):
+            x_f32 = x_f32.unsqueeze(-1)
         x = x_f32.to(torch.int64)
 
         # We are using torch.where instead of torch.clamp below due to an expected failure
