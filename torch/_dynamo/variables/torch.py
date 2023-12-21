@@ -3,7 +3,6 @@ import logging
 
 import math
 import re
-import types
 from typing import Dict, List
 
 from torch._streambase import _StreamBase
