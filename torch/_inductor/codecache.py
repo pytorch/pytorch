@@ -65,7 +65,7 @@ if config.is_fbcode():
     from triton.fb import build_paths
     from triton.fb.build import _run_build_command
 
-    from torch._inductor.fb.utils import (  # type: ignore[import]
+    from torch._inductor.fb.utils import (
         log_global_cache_errors,
         log_global_cache_stats,
         log_global_cache_vals,
@@ -126,6 +126,10 @@ def cpp_wrapper_cache_dir(name: str) -> str:
     return cpp_wrapper_build_directory
 
 
+def get_cpp_wrapper_cubin_path_name():
+    return "cubin_path" if torch.version.hip is None else "hsaco_path"
+
+
 class CacheBase:
     @staticmethod
     @functools.lru_cache(None)
@@ -147,9 +151,6 @@ class CacheBase:
                 "version": {
                     "cuda": torch.version.cuda,
                     "triton": triton_version,
-                },
-                "other": {
-                    "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
                 },
             }
         except (AssertionError, RuntimeError):
@@ -202,22 +203,22 @@ class CacheBase:
 
 
 class LocalCache(CacheBase):
-    def lookup(self, *keys: Tuple[str]) -> Optional[Dict[str, Any]]:
+    def lookup(self, *keys: str) -> Optional[Dict[str, Any]]:
         cache = self.get_local_cache()
 
         sub_cache = cache
         for key in keys:
             if key in cache:
-                sub_cache = cache[key]  # type: ignore[index]
+                sub_cache = cache[key]
             else:
                 return None
 
         return sub_cache
 
-    def set_value(self, *keys: List[str], value: Any) -> None:
+    def set_value(self, *keys: str, value: Any) -> None:
         cache = self.get_local_cache()
 
-        sub_cache: Dict = cache  # type: ignore[type-arg]
+        sub_cache = cache
         for key in keys[0:-1]:
             sub_cache.setdefault(key, {})
             sub_cache = sub_cache[key]
@@ -238,7 +239,7 @@ class PersistentCache(CacheBase):
     def lookup(
         self,
         choices: List[ChoiceCaller],
-        name: str,
+        op: str,
         inputs: str,
         benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
     ) -> Dict[ChoiceCaller, float]:
@@ -246,17 +247,20 @@ class PersistentCache(CacheBase):
         Check to see if we have benchmarked the given choice callers. For each
         choice caller:
 
-            1. Check global_cache[name][inputs][choice], return benchmark if cached.
-            2. Check local_cache[name][inputs][choice], return benchmark if cached.
+            1. Check global_cache[op][inputs][choice][precision], return benchmark if cached.
+            2. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
             3.
                 a. `max_autotune_gemm=True`: benchmark the choice, update
-                    local_cache[name][inputs][choice], and return the benchmark.
+                    local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
+        precision = torch.get_float32_matmul_precision()
 
-        log_stats = partial(log_global_cache_stats, self.system, name, inputs)
-        log_vals = partial(log_global_cache_vals, self.system, name, inputs)
-        log_errors = partial(log_global_cache_errors, self.system, name, inputs)
+        log_stats = partial(log_global_cache_stats, self.system, op, inputs, precision)
+        log_vals = partial(log_global_cache_vals, self.system, op, inputs, precision)
+        log_errors = partial(
+            log_global_cache_errors, self.system, op, inputs, precision
+        )
         timings = {}
 
         def check_cache(cache, callback=None) -> bool:
@@ -264,9 +268,9 @@ class PersistentCache(CacheBase):
             hit = True
             for choice in choices:
                 choice_hash = choice.hash_key()
-                if choice_hash in cache.get(name, {}).get(inputs, {}):
+                if choice_hash in cache.get(op, {}).get(inputs, {}).get(precision, {}):
                     # cache hit
-                    timings[choice] = cache[name][inputs][choice_hash]
+                    timings[choice] = cache[op][inputs][precision][choice_hash]
                 else:
                     # cache miss
                     hit = False
@@ -286,11 +290,10 @@ class PersistentCache(CacheBase):
                     # re-benchmark everything to try to get consistent numbers from the same machine
                     timings = benchmark(choices)
                     assert all(choice in timings for choice in choices)
-
-                    local_cache.setdefault(name, {})
-                    local_cache[name].setdefault(inputs, {})
+                    local_cache.setdefault(op, {})
+                    local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
                     for choice, timing in timings.items():
-                        local_cache[name][inputs][choice.hash_key()] = timing
+                        local_cache[op][inputs][precision][choice.hash_key()] = timing
                 except RuntimeError as e:
                     # catch and log autotuning failures
                     log_errors(e)
@@ -346,7 +349,7 @@ def get_path(
 def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
     if hash_type == "code":
         return code_hash(content, extra)
-    if hash_type == "cubin":
+    if hash_type in ["cubin", "hsaco"]:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
 
@@ -358,7 +361,10 @@ def write(
     hash_type: str = "code",
     specified_dir: str = "",
 ) -> Tuple[str, str]:
-    key: str = get_hash(content, extra, hash_type)
+    # use striped content to compute hash so we don't end up with different
+    # hashes just because the content begins/ends with differnet number of
+    # spaces.
+    key: str = get_hash(content.strip(), extra, hash_type)
     basename, subdir, path = get_path(key, extension, specified_dir)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -682,9 +688,7 @@ class FxGraphCache:
         """
         Helper to get the shape env from the tracing context.
         """
-        tracing_context = torch._guards.TracingContext.get()
-        assert tracing_context is not None
-        return tracing_context.fake_mode.shape_env
+        return torch._guards.TracingContext.get().fake_mode.shape_env
 
     @staticmethod
     def _lookup_graph(
@@ -889,7 +893,7 @@ def _run_from_cache(compiled_graph: CompiledFxGraph, inputs: List[Any]) -> Any:
 
 def cpp_compiler() -> str:
     if config.is_fbcode():
-        return build_paths.gcc()
+        return build_paths.cc()
     if isinstance(config.cpp.cxx, (list, tuple)):
         search = tuple(config.cpp.cxx)
     else:
@@ -1026,6 +1030,9 @@ cdll.LoadLibrary("__lib_path__")
     def __bool__(self) -> bool:
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
+
+        if config.is_fbcode():
+            return True
 
         key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
@@ -1185,6 +1192,8 @@ def cpp_wrapper_flags() -> str:
 def optimization_flags() -> str:
     base_flags = "-O0 -g" if config.aot_inductor.debug_compile else "-O3 -DNDEBUG"
     base_flags += " -ffast-math -fno-finite-math-only"
+    if not config.cpp.enable_unsafe_math_opt_flag:
+        base_flags += " -fno-unsafe-math-optimizations"
 
     if config.is_fbcode():
         # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
@@ -1338,10 +1347,13 @@ def get_include_and_linking_paths(
             macros += " -D USE_CUDA"
 
         if cuda:
-            if config.is_fbcode():
-                libs += ["cuda"]
+            if torch.version.hip is not None:
+                libs += ["c10_hip", "torch_hip"]
             else:
-                libs += ["c10_cuda", "cuda", "torch_cuda"]
+                if config.is_fbcode():
+                    libs += ["cuda"]
+                else:
+                    libs += ["c10_cuda", "cuda", "torch_cuda"]
         build_arch_flags = vec_isa.build_arch_flags()
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
@@ -1442,6 +1454,7 @@ def cpp_compile_command(
     if isinstance(input, str):
         input = [input]
     ipaths_str = " ".join(["-I" + p for p in ipaths])
+    clang_flags = ""
     if config.is_fbcode():
         if aot_mode and not use_absolute_path:
             inp_name = input
@@ -1450,8 +1463,12 @@ def cpp_compile_command(
             # We need to copy any absolute-path torch includes
             inp_name = [os.path.basename(i) for i in input]
             out_name = os.path.basename(output)
-        linker_paths = [os.path.dirname(build_paths.ld()), build_paths.glibc_lib()]
-        linker_paths = " ".join(["-B" + p for p in linker_paths])
+        assert is_clang()
+        # Use clang runtime instead of libgcc
+        clang_flags += " --rtlib=compiler-rt"
+        clang_flags += " -fuse-ld=lld"
+        linker_paths = "-B" + build_paths.glibc_lib()
+        linker_paths += " -L" + build_paths.glibc_lib()
     else:
         inp_name = input
         out_name = output
@@ -1465,7 +1482,7 @@ def cpp_compile_command(
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}
-            {macros} {linker_paths}
+            {macros} {linker_paths} {clang_flags}
             {optimization_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
@@ -1499,15 +1516,18 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key: str, params: Dict[str, str], cubin: str) -> None:
+        bin_type = "cubin" if torch.version.hip is None else "hsaco"
         _, path = write(
             cubin,
-            "cubin",
-            hash_type="cubin",
+            bin_type,
+            hash_type=bin_type,
             specified_dir=split_aot_inductor_output_path(
                 config.aot_inductor.output_path
             )[0],
         )
-        params["cubin_path"] = path
+
+        params[get_cpp_wrapper_cubin_path_name()] = path
+
         cls.cache[key] = params
 
     @classmethod
@@ -1604,6 +1624,9 @@ class AotCodeCache:
                         # This serializes the tensor's untyped_storage to bytes by accessing
                         # the raw data of the underlying structure.
                         import ctypes
+
+                        if t.numel() == 0:
+                            return b""
 
                         t_cpu = t.untyped_storage().cpu()
                         raw_array = ctypes.cast(
@@ -2269,6 +2292,8 @@ def _load_kernel(kernel_name: str, source_code: str) -> ModuleType:
 
 
 class TritonFuture:
+    kernel: ModuleType
+
     def __init__(
         self,
         kernel_name: str,
@@ -2283,7 +2308,7 @@ class TritonFuture:
     def result(self) -> ModuleType:
         t0 = time()
         if hasattr(self, "kernel"):
-            return self.kernel  # type: ignore[has-type]
+            return self.kernel
         # If the worker failed this will throw an exception.
         self.future.result()
         kernel = self.kernel = _load_kernel(self.kernel_name, self.source_code)

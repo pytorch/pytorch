@@ -739,7 +739,8 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& self,
     const Tensor& input2,
     const Tensor& result,
-    const bool upper);
+    const bool upper,
+    std::array<bool, 2> output_mask);
 Tensor cholesky_solve_jvp(
     const Tensor& X,
     const Tensor& U,
@@ -1097,6 +1098,8 @@ mkldnn_rnn_layer_differentiable_backward(
     at::IntArrayRef batch_sizes,
     bool batch_first,
     const at::Tensor& workspace);
+
+Tensor values_backward(const Tensor& grad, const Tensor& self);
 
 } // namespace details
 } // namespace generated

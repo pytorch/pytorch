@@ -4,7 +4,6 @@ from typing import cast, List, Optional, Sequence, Tuple
 import torch
 
 import torch.distributed.distributed_c10d as c10d
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
     OpSchema,
     OpStrategy,
@@ -28,6 +27,7 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.distributed.device_mesh import DeviceMesh
 
 
 aten = torch.ops.aten
@@ -257,7 +257,7 @@ def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
 
 @register_op_strategy(
     [aten.native_layer_norm.default],
-    schema_info=RuntimeSchemaInfo(),
+    schema_info=RuntimeSchemaInfo(1),
 )
 def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     # args must be: input, normalized_shape, weight, bias, eps
