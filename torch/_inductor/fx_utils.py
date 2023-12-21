@@ -88,6 +88,7 @@ class FakeTensorUpdater:
                     is_fake_tensor_same(new_i, old_i) for new_i, old_i in zip(new, old)
                 )
             if not isinstance(new, torch.Tensor):
+                assert isinstance(new, (torch.SymInt, torch.SymBool, torch.SymFloat))
                 return new == old
             if new.shape != old.shape or new.layout != old.layout:
                 return False
