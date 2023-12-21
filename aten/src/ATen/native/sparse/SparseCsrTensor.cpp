@@ -349,22 +349,22 @@ static SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   return detail::make_tensor<SparseCsrTensorImpl>(DispatchKeySet(dispatch_key), options.device(), layout, options.dtype());
 }
 
-
-Tensor _sparse_compressed_tensor_unsafe(const Tensor& compressed_indices,
-                                        const Tensor& plain_indices,
-                                        const Tensor& values,
-                                        IntArrayRef size,
-                                        c10::optional<ScalarType> dtype,
-                                        c10::optional<Layout> layout,
-                                        c10::optional<Device> device,
-                                        c10::optional<bool> pin_memory) {
+Tensor _sparse_compressed_tensor_unsafe_symint(
+     const Tensor& compressed_indices,
+     const Tensor& plain_indices,
+     const Tensor& values,
+     c10::SymIntArrayRef size,
+     c10::optional<ScalarType> dtype,
+     c10::optional<Layout> layout,
+     c10::optional<Device> device,
+     c10::optional<bool> pin_memory) {
   if (!layout) {
     AT_ERROR("sparse_compressed_tensor_unsafe expected sparse compressed tensor layout but got none");
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
   if (at::globalContext().checkSparseTensorInvariants()) {
-    _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size, layout_);
+    _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, C10_AS_INTARRAYREF_SLOW(size), layout_);
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
@@ -487,7 +487,7 @@ Tensor sparse_compressed_tensor(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
 
-  return at::native::_sparse_compressed_tensor_unsafe(
+  return at::_sparse_compressed_tensor_unsafe(
       compressed_indices,
       plain_indices,
       values,
@@ -518,7 +518,7 @@ Tensor sparse_compressed_tensor(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
 
-  return at::native::_sparse_compressed_tensor_unsafe(
+  return at::_sparse_compressed_tensor_unsafe(
       compressed_indices,
       plain_indices,
       values,
@@ -591,14 +591,15 @@ Tensor empty_sparse_compressed(
   auto plain_indices = at::empty(plain_indices_and_values_size, options);
   auto values = at::empty(plain_indices_and_values_size, options.dtype(dtype));
 
-  return at::native::_sparse_compressed_tensor_unsafe(compressed_indices,
-                                                      plain_indices,
-                                                      values,
-                                                      size,
-                                                      dtype,
-                                                      layout,
-                                                      device,
-                                                      pin_memory);
+  return at::_sparse_compressed_tensor_unsafe(
+       compressed_indices,
+       plain_indices,
+       values,
+       size,
+       dtype,
+       layout,
+       device,
+       pin_memory);
 }
 
 const Tensor& resize_sparse_csr_(
@@ -755,15 +756,15 @@ SparseCsrTensor clone_sparse_compressed(
                                                                  "clone_sparse_compressed",
                                                                  [&]{ return self.col_indices(); },
                                                                  [&]{ return self.row_indices(); });
-  return at::native::_sparse_compressed_tensor_unsafe(
-                                                      compressed_indices.clone(),
-                                                      plain_indices.clone(),
-                                                      self.values().clone(),
-                                                      self.sizes(),
-                                                      optTypeMetaToScalarType(options.dtype_opt()),
-                                                      options.layout_opt(),
-                                                      options.device_opt(),
-                                                      options.pinned_memory_opt());
+  return at::_sparse_compressed_tensor_unsafe(
+       compressed_indices.clone(),
+       plain_indices.clone(),
+       self.values().clone(),
+       self.sizes(),
+       optTypeMetaToScalarType(options.dtype_opt()),
+       options.layout_opt(),
+       options.device_opt(),
+       options.pinned_memory_opt());
 }
 
 Tensor empty_like_sparse_csr(
@@ -883,7 +884,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
 
   if (dim < n_batch) {
     // Selecting batch dimension
-    return at::native::_sparse_compressed_tensor_unsafe(
+    return at::_sparse_compressed_tensor_unsafe(
         compressed_indices.select(dim, index),
         plain_indices.select(dim, index),
         select_strided(self.values(), dim, index),
@@ -1106,7 +1107,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
         // Block layout (2 sparse dims become 1 nnz dim + 2 block-shape dims in
         // values, so dim is found 1 position to the right)
         [&]() { return select_strided(self.values(), dim + 1, index); });
-    return at::native::_sparse_compressed_tensor_unsafe(
+    return at::_sparse_compressed_tensor_unsafe(
         compressed_indices,
         plain_indices,
         new_values,

@@ -77,6 +77,7 @@ from torch.nn import (
     ParameterList,
     Sequential,
 )
+from .dynamo_test_failures import dynamo_expected_failures
 from torch.onnx import (
     register_custom_op_symbolic,
     unregister_custom_op_symbolic,
@@ -1325,6 +1326,8 @@ if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.accumulated_cache_size_limit = 8
+    # Do not log compilation metrics from unit tests
+    torch._dynamo.config.log_compilation_metrics = False
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
@@ -1379,6 +1382,18 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
         return fn
 
     return decorator
+
+
+def unMarkDynamoStrictTest(cls=None):
+    def decorator(cls):
+        assert inspect.isclass(cls)
+        cls.dynamo_strict = False
+        return cls
+
+    if cls is None:
+        return decorator
+    else:
+        return decorator(cls)
 
 
 def markDynamoStrictTest(cls_or_func=None, nopython=False):
@@ -2692,6 +2707,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             elif TEST_WITH_TORCHDYNAMO:
                 # TorchDynamo optimize annotation
                 super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
+                key = f"{self.__class__.__name__}.{self._testMethodName}"
+                if key in dynamo_expected_failures:
+                    method = getattr(self, self._testMethodName)
+                    unittest.expectedFailure(self)
 
             super_run(result=result)
 

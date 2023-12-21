@@ -866,13 +866,17 @@ class DistributedDataParallel(Module, Joinable):
 
         self._lazy_init_ran = False
 
-        # Register the AccumulaGrad post hooks even if DDP is not compiled. This
+        # Register the AccumulateGrad post hooks even if DDP is not compiled. This
         # can avoid compiling the hooks twice. The Python hooks will be
         # deregistered later if DDP is not compiled.
         self._accum_grad_hooks: List[RemovableHandle] = []
         self._ddp_python_hook = torch._dynamo.config.ddp_python_hook
         if self._ddp_python_hook:
-            torch._dynamo.config.optimize_ddp = False
+            if torch._dynamo.config.optimize_ddp:
+                raise RuntimeError(
+                    "Only one of `torch._dynamo.config.optimize_ddp` and "
+                    "`torch._dynamo.config.ddp_python_hook` should be True."
+                )
             self._register_accum_grad_hook()
 
     def _register_accum_grad_hook(self):

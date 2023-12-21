@@ -303,7 +303,36 @@ def run_functionalized_fw_and_collect_metadata(
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
         intermediate_bases: List[torch.Tensor] = []
+        # Why Do We Care If Storage Changed?
+        # It's important to understand the implications of storage changes in complex scenarios. Take this example:
+        #
+        # def f(x):
+        #     x_storage = x.untyped_storage()
+        #     non_leaf_tensor = torch.ones(4, requires_grad=True).clone()
+        #
+        #     # Using no_grad() and _unsafe_preserve_version_counter to simulate the .data = operation
+        #     with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(x):
+        #         x.set_(non_leaf_tensor.untyped_storage())
+        #
+        #     out = x.view(-1)
+        #
+        #     # Restoring x to its original storage, again simulating .data = operation
+        #     with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(x):
+        #         x.set_(x_storage)
+        #
+        #     return out
+        #
+        # In this scenario, 'x' and 'out' have different shapes and are stored at different memory addresses, aka no aliasing.
+        # However, due to how set_() and more specificlaly, set is functionalized, is defined to preserve eager semantics,
+        # the autograd engine mistakenly assumes that 'x' and 'out' are aliased, treating 'x' as 'out._base'.
+        # This misinterpretation leads to an 'alias_of_input' flag, causing an unnecessary as_strided() call to be generated,
+        # which could lead to issues later in the code.
         for o in flat_f_outs:
+            functional_tensor_storage_changed = isinstance(
+                o, FunctionalTensor
+            ) and torch._functionalize_was_storage_changed(  # type: ignore[attr-defined]
+                o.elem
+            )
             curr_storage = (
                 None
                 if not isinstance(o, torch.Tensor)
@@ -338,7 +367,10 @@ def run_functionalized_fw_and_collect_metadata(
             ):
                 output_type = OutputType.custom_function_view
                 base_idx = None
-            elif curr_storage in inp_storage_refs:
+            elif (
+                curr_storage in inp_storage_refs
+                and not functional_tensor_storage_changed
+            ):
                 base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
                 num_aliased_outs = out_tensor_alias_counts[curr_storage]

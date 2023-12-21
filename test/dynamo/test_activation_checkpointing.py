@@ -15,6 +15,7 @@ from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import _pt2_selective_checkpoint_context_fn_gen, checkpoint
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -515,6 +516,59 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             # (2 matmul recompute and 2 mm ops per fwd matmul, so 2 + 2 * 2 = 6)
             # if we didn't enable selective checkpointing.
             freq=4,
+            op=torch.ops.aten.mm.default,
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        self._validate(fn, backend, x, y)
+        self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
+
+    @requires_cuda()
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @torch._dynamo.config.patch(
+        "_experimental_support_context_fn_in_torch_utils_checkpoint", True
+    )
+    def test_compile_selective_checkpoint_tensor_subclass(self):
+        def selective_checkpointing_context_fn():
+            no_recompute_list = [
+                torch.ops.aten.mm.default,
+            ]
+            return _pt2_selective_checkpoint_context_fn_gen(
+                _get_custom_policy(no_recompute_list=no_recompute_list)
+            )
+
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=selective_checkpointing_context_fn,
+            )
+
+        rand_tensor = torch.randn(4, 4, requires_grad=True, device="cuda")
+
+        # tensor subclasses as inputs
+        x = TwoTensor(rand_tensor, rand_tensor.clone())
+        y = TwoTensor(rand_tensor.clone(), rand_tensor.clone())
+
+        fw_compiler = functools.partial(
+            count_ops,
+            freq=4,
+            op=torch.ops.aten.mm.default,
+        )
+        bw_compiler = functools.partial(
+            count_ops,
+            # We would've expected 12 here
+            # (4 matmul recompute and 4 mm ops per fwd matmul, so 4 + 2 * 4 = 12)
+            # if we didn't enable selective checkpointing.
+            freq=8,
             op=torch.ops.aten.mm.default,
         )
         backend = aot_autograd(

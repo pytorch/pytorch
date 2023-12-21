@@ -291,7 +291,7 @@ def reorder_compute_for_overlap(
 def node_summary(snode):
     detail = ""
     if isinstance(snode.node, ir.ExternKernelOut):
-        detail = f" ({snode.node.kernel})"
+        detail = f" ({snode.node.python_kernel_name})"
     out_tensor_info = ""
     if (
         hasattr(snode.node, "layout")

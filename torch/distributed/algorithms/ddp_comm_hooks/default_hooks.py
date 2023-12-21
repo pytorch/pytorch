@@ -70,7 +70,7 @@ def fp16_compress_hook(
         if isinstance(bucket, tuple)
         else bucket.buffer()
     )
-    compressed_tensor = buffer.to(torch.bfloat16).div_(world_size)
+    compressed_tensor = buffer.to(torch.float16).div_(world_size)
 
     def decompress(fut):
         decompressed_tensor = buffer

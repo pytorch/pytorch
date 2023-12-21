@@ -18,8 +18,7 @@
 #include <ATen/ops/sum.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template<typename scalar_t>
 void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
@@ -998,5 +997,4 @@ static std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose3d_backward_cpu(
 
 REGISTER_ALL_CPU_DISPATCH(slow_conv_transpose3d_backward_stub, &slow_conv_transpose3d_backward_cpu);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

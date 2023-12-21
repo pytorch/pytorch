@@ -90,6 +90,7 @@ class ReplicateTest(MultiProcessTestCase):
             device = torch.device("cpu")
 
         torch._dynamo.config.ddp_python_hook = True
+        torch._dynamo.config.optimize_ddp = False
         torch.manual_seed(123)
         model = Net().to(device)
         input = torch.randn([1, DIM], device=device)
@@ -104,7 +105,7 @@ class ReplicateTest(MultiProcessTestCase):
 
         # Run multiple iterations so that we could test no_sync
         for i in range(6):
-            # Settting a different random seed so that if the allreduces are not
+            # Setting a different random seed so that if the allreduces are not
             # executed correctly, the gradients won't be correct compared to the
             # eager DDP.
             torch.manual_seed(123 + self.rank + i)
@@ -118,7 +119,7 @@ class ReplicateTest(MultiProcessTestCase):
                 loss = model(input).sum()
                 loss.backward()
 
-            compiled_m = getattr(compiled_model, "_orig_mod", compiled_model)
+            compiled_m = compiled_model._orig_mod
             if no_sync and i % 2 == 0:
                 context = replicate.state(compiled_m)._ddp.no_sync()
             else:
@@ -128,9 +129,9 @@ class ReplicateTest(MultiProcessTestCase):
                     compiled_loss = compiled_model(input).sum()
                     compiled_loss.backward()
 
+            for p1, p2 in zip(model.parameters(), compiled_model.parameters()):
+                self.assertEqual(p1.grad, p2.grad)
             if not no_sync or i % 2 == 1:
-                for p1, p2 in zip(model.parameters(), compiled_model.parameters()):
-                    self.assertEqual(p1.grad, p2.grad)
                 compiled_optim.step()
                 # Right now we have to use `set_to_none=False`, otherwise
                 # the backward will be recompiled every iteration.
@@ -158,7 +159,7 @@ class ReplicateTest(MultiProcessTestCase):
             replicate.state(model)._ddp.register_comm_hook(
                 None, ddp_default_hooks.bf16_compress_hook
             )
-            compiled_m = getattr(compiled_model, "_orig_mod", compiled_model)
+            compiled_m = compiled_model._orig_mod
             replicate.state(compiled_m)._ddp.register_comm_hook(
                 None, ddp_default_hooks.bf16_compress_hook
             )
@@ -172,7 +173,7 @@ class ReplicateTest(MultiProcessTestCase):
             replicate.state(model)._ddp.register_comm_hook(
                 None, ddp_default_hooks.fp16_compress_hook
             )
-            compiled_m = getattr(compiled_model, "_orig_mod", compiled_model)
+            compiled_m = compiled_model._orig_mod
             replicate.state(compiled_m)._ddp.register_comm_hook(
                 None, ddp_default_hooks.fp16_compress_hook
             )
