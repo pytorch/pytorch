@@ -107,14 +107,12 @@ def run(rank, world_size):
             if epoch % SAVE_PERIOD == 0:
                 if f is not None:
                     f.result()
-                f = checkpointer.async_save(state_dict)
+                f = checkpointer._async_save(state_dict)
 
             if FAULT_PERIOD > 0 and epoch % FAULT_PERIOD == 0:
                 raise InjectedException("Fault injection!")
 
         except InjectedException as e:
-            # TODO: This example assumes the exception is raised on all ranks. Updates this example
-            # once we have better support for fault tolerance.
             dist.barrier()
 
             _print("Trainer encountered exception:")
