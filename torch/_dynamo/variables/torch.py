@@ -29,7 +29,6 @@ from ..utils import (
     check_constant_args,
     check_unspec_python_args,
     has_torch_function,
-    istype,
     product,
     proxy_args_kwargs,
 )
@@ -681,96 +680,3 @@ class TorchVariable(BaseTorchVariable):
         if isinstance(self.value, type):
             return type
         return super().python_type()
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        from .builder import wrap_fx_proxy
-
-        constant_args = check_constant_args(args, kwargs)
-        unspec_python_args = check_unspec_python_args(args, kwargs)
-
-        if istype(self.value, type) and issubclass(self.value, torch.nn.Module):
-            if self.value is torch.nn.CrossEntropyLoss:
-                return self._call_cross_entropy_loss(tx, args, kwargs)
-            else:
-                return variables.UserDefinedClassVariable(
-                    self.value, source=self.source
-                ).call_function(tx, args, kwargs)
-        elif can_dispatch_torch_function(tx, args, kwargs):
-            return dispatch_torch_function(tx, self, args, kwargs)
-        else:
-            tensor_variable = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    self.value,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-            )
-
-            return tensor_variable
-
-    def _call_cross_entropy_loss(self, tx, args, kwargs):
-        """
-        functional: input, target, weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
-        label_smoothing=0.0
-
-        non functional ctor: weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
-        label_smoothing=0.0
-
-        non functional loss call: input, target, optional_output
-        """
-        from . import ConstantVariable
-
-        def normalize_args(
-            weight=ConstantVariable.create(None),
-            size_average=ConstantVariable.create(None),
-            ignore_index=ConstantVariable.create(-100),
-            reduce=ConstantVariable.create(None),
-            reduction=ConstantVariable.create("mean"),
-            label_smoothing=ConstantVariable.create(0.0),
-        ):
-            return (
-                weight,
-                size_average,
-                ignore_index,
-                reduce,
-                reduction,
-                label_smoothing,
-            )
-
-        (
-            weight,
-            size_average,
-            ignore_index,
-            reduce_arg,
-            reduction,
-            label_smoothing,
-        ) = normalize_args(*args, **kwargs)
-
-        def fake_cross_entropy_loss(input, target):
-            from .builder import wrap_fx_proxy
-
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    torch.nn.functional.cross_entropy,
-                    *proxy_args_kwargs(
-                        [
-                            input,
-                            target,
-                            weight,
-                            size_average,
-                            ignore_index,
-                            reduce_arg,
-                            reduction,
-                            label_smoothing,
-                        ],
-                        {},
-                    ),
-                ),
-            )
-
-        return variables.LambdaVariable(fake_cross_entropy_loss)
