@@ -80,10 +80,10 @@ PyObject* THPIInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
 
   if (at::isBitsType(scalar_type)) {
     std::unordered_map<at::ScalarType, at::ScalarType> _map = {
-      {at::kBits1x8, at::kByte},
-      {at::kBits2x4, at::kByte},
-      {at::kBits4x2, at::kByte},
-      {at::kBits8, at::kByte},
+        {at::kBits1x8, at::kByte},
+        {at::kBits2x4, at::kByte},
+        {at::kBits4x2, at::kByte},
+        {at::kBits8, at::kByte},
     };
     if (_map.find(scalar_type) != _map.end()) {
       scalar_type = _map.at(scalar_type);
