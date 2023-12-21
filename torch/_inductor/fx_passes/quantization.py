@@ -61,6 +61,14 @@ def _may_generate_pattern_with_reshape(pattern, reshape_size=Arg(), with_reshape
         return pattern
 
 
+def _unary_fusion_pattern(unary_fusion, call_fn, users, is_bf16):
+    # only insert to_dtype if is_bf16 is True
+    computation_call = _may_generate_pattern_with_dtype_convert(
+        call_fn, dtype=KeywordArg("to_float"), dtype_convert=is_bf16, users=users
+    )
+    return unary_fusion(computation_call)
+
+
 """
 dequantize activation:
     x = x.to(fp32)
@@ -133,8 +141,8 @@ dequantize_qconv_pt2e_pattern = CallFunction(
 )
 
 
-def get_qlinear(users=1, is_bf16=False):
-    computation_call = CallFunction(
+def get_qlinear(users=1):
+    return CallFunction(
         torch.ops.onednn.qlinear_pointwise.default,
         KeywordArg("x"),
         KeywordArg("x_scale"),
@@ -150,9 +158,6 @@ def get_qlinear(users=1, is_bf16=False):
         KeywordArg("postop_args"),
         KeywordArg("postop_algorithm"),
         _users=users,
-    )
-    return _may_generate_pattern_with_dtype_convert(
-        computation_call, dtype=KeywordArg("to_float"), dtype_convert=is_bf16, users=2
     )
 
 
@@ -601,11 +606,15 @@ def _register_quantization_unary_fusion():
                 dtype=original_pattern_output_dtype,
             ),
             UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
-                _gelu_fusion_erf(get_qlinear(1 if is_bf16 else 2, is_bf16)),
+                _unary_fusion_pattern(
+                    _gelu_fusion_erf, get_qlinear(1 if is_bf16 else 2), 2, is_bf16
+                ),
                 dtype=torch.float32,
             ),
             UnaryAttr("gelu", [], "tanh"): generate_pattern_with_output_quant(
-                _gelu_fusion_tanh(get_qlinear(1 if is_bf16 else 4, is_bf16)),
+                _unary_fusion_pattern(
+                    _gelu_fusion_tanh, get_qlinear(1 if is_bf16 else 2), 4, is_bf16
+                ),
                 dtype=torch.float32,
             ),
         }
@@ -626,10 +635,10 @@ def _register_quantization_unary_fusion():
                 get_qlinear(1), aten.relu.default
             ),
             UnaryAttr("gelu", [], "none"): _gelu_fusion_erf(
-                get_qlinear(1 if is_bf16 else 2, is_bf16)
+                get_qlinear(1 if is_bf16 else 2)
             ),
             UnaryAttr("gelu", [], "tanh"): _gelu_fusion_tanh(
-                get_qlinear(1 if is_bf16 else 4, is_bf16)
+                get_qlinear(1 if is_bf16 else 4)
             ),
         }
 
