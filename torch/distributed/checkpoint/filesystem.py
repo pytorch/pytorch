@@ -15,7 +15,7 @@ import torch.distributed as dist
 from torch import Tensor
 from torch._utils import _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed.checkpoint.checkpointer import _Checkpointer
+from torch.distributed.checkpoint._checkpointer import _Checkpointer
 from torch.futures import Future
 
 from .metadata import Metadata, MetadataIndex
