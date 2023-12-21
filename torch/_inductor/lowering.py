@@ -2296,6 +2296,26 @@ def clone(x, *, memory_format=None):
     )
 
 
+def clone_preserve_reinterpret_view(x):
+    reinterpret_view_layouts = []
+    if isinstance(x, TensorBox) and isinstance(x.data, ir.ReinterpretView):
+        x = x.data  # unwrap TensorBox
+        while isinstance(x, ir.ReinterpretView):
+            reinterpret_view_layouts.append(x.get_layout())
+            x = x.data
+        x = TensorBox(x)
+
+    x = clone(x)
+
+    if reinterpret_view_layouts:
+        x = x.data  # unwrap TensorBox
+        for layout in reinterpret_view_layouts[::-1]:
+            x = ir.ReinterpretView(x, layout)
+        x = TensorBox(x)
+
+    return x
+
+
 if hasattr(aten, "lift_fresh_copy"):
     register_lowering(aten.lift_fresh_copy)(clone)
 
@@ -5270,7 +5290,8 @@ def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
 @register_lowering(triton_kernel_wrapper_functional)
 def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
     kwargs = {
-        key: (clone(x) if key in tensors_to_clone else x) for key, x in kwargs.items()
+        key: (clone_preserve_reinterpret_view(x) if key in tensors_to_clone else x)
+        for key, x in kwargs.items()
     }
     return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
 
