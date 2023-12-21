@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 import torch
 import torch.distributed.checkpoint as dcp
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
@@ -43,9 +42,11 @@ class TestDCPCompatbility(TestCase):
     def test_shardedtensor_dependency(self) -> None:
         # Ensure that we can load the existing DCP checkpoints back even if the
         # metadata contain # _shard.sharded_tensor.metadata.
-        with patch(
-            "torch.distributed.checkpoint.metadata.TensorProperties", TensorProperties
-        ):
+        from torch.distributed._shard.sharded_tensor.metadata import (
+            TensorProperties as stp,
+        )
+
+        with patch("torch.distributed.checkpoint.metadata.TensorProperties", stp):
             dcp.save(
                 {"a": torch.zeros(4, 4)},
                 dcp.FileSystemWriter("/tmp/dcp_testing"),
