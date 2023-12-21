@@ -541,9 +541,9 @@ def _sympy_rshift(a, b):
 
 
 reflectable_magic_methods = {
-    "add": lambda a, b: a + b,
-    "sub": lambda a, b: a - b,
-    "mul": lambda a, b: a * b,
+    "add": operator.add,
+    "sub": operator.sub,
+    "mul": operator.mul,
     "mod": _sympy_mod,
     "pow": _sympy_pow,
     "and": _sympy_and,
@@ -676,7 +676,7 @@ def _sympy_is_integer(a):
 
 magic_methods = {
     **reflectable_magic_methods,
-    "sym_not": lambda a: ~a,
+    "sym_not": operator.invert,
     "eq": _sympy_eq,
     "ne": _sympy_ne,
     "gt": _sympy_gt,
@@ -686,7 +686,7 @@ magic_methods = {
     "floor": _sympy_floor,
     "sym_float": _sympy_sym_float,
     "ceil": _sympy_ceil,
-    "neg": lambda a: -a,
+    "neg": operator.neg,
     "sym_min": _sympy_min,
     "sym_max": _sympy_max,
     "sym_ite": _sympy_ite,
