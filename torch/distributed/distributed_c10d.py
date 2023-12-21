@@ -2217,10 +2217,9 @@ def _object_to_tensor(obj, device):
 
 
 def _tensor_to_object(tensor, tensor_size):
-    if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
-        cuda_tensor = tensor.cuda()
-        hash = torch._C._distributed_c10d._hash_tensors([cuda_tensor])
-        logger.warning(f"_tensor_to_object size: {cuda_tensor.numel()} hash value: {hash}")  # noqa: G004
+    if get_debug_level() == DebugLevel.DETAIL and is_nccl_available() and torch.cuda.device_count() > 0:
+        hash = torch._C._distributed_c10d._hash_tensors([tensor])
+        logger.warning(f"_tensor_to_object size: {tensor.numel()} hash value: {hash}")  # noqa: G004
     tensor = tensor.cpu()
     buf = tensor.numpy().tobytes()[:tensor_size]
     return _unpickler(io.BytesIO(buf)).load()
@@ -2313,8 +2312,6 @@ def all_gather_object(object_list, obj, group=None):
     # Deserialize outputs back to object.
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
-        if tensor.device != torch.device("cpu"):
-            tensor = tensor.cpu()
         tensor_size = object_size_list[i]
         object_list[i] = _tensor_to_object(tensor, tensor_size)
 
@@ -2535,8 +2532,6 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
             obj_view = obj_view.type(torch.uint8)
-            if obj_view.device != torch.device("cpu"):
-                obj_view = obj_view.cpu()
             offset += obj_size
             object_list[i] = _tensor_to_object(obj_view, obj_size)
 
