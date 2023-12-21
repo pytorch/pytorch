@@ -1019,9 +1019,7 @@ def forward(self, primals_1):
         inp_clone = inp.clone()
         out_ref = f3(inp_ref_clone)
         out_test = f3_compiled(inp_clone)
-        # We rely on autograd's view-replay here, and view-replay gives up and uses as_strided
-        # for multi-output views
-        self.assertTrue(all('AsStridedBackward' in str(o.grad_fn) for o in out_test[:3]))
+        self.assertTrue(all('UnbindBackward' in str(o.grad_fn) for o in out_test[:3]))
 
         # The last output is not from a multi-output view, so autograd will let us mutate it.
         out_ref[-1].mul_(2)
