@@ -417,8 +417,8 @@ Tensor FunctionalInverses::alias_copy_inverse(const Tensor& base, const Tensor& 
     }
 }
 
-Tensor FunctionalInverses::narrow_copy_inverse(const at::Tensor & base, const at::Tensor & mutated_view, bool reapply_views, bool called_by_functionalization, int dim, c10::SymInt start, c10::SymInt length) {
-    if (reapply_views && !called_by_functionalization) {
+Tensor FunctionalInverses::narrow_copy_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, int dim, c10::SymInt start, c10::SymInt length) {
+    if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
       return mutated_view.as_strided_symint(

@@ -412,10 +412,8 @@ def emit_view_lambda(f: NativeFunction, bindings: List[Binding]) -> str:
         unpacked_args=[
             "self",
             f"{input_view}",
-            # reapply_views=
-            "true",
-            # called_by_functionalization=
-            "false",
+            # inverse_return_mode=
+            "at::functionalization::InverseReturnMode::AlwaysView",
             # skip input_base arg
             *updated_unpacked_args[1:],
         ],
