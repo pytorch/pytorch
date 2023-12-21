@@ -242,6 +242,7 @@ code = 'CLANGTIDY'
 include_patterns = [
     'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
+    'c10/core/**/*.h',
     'torch/csrc/**/*.cpp',
 ]
 exclude_patterns = [
@@ -328,17 +329,6 @@ command = [
     """,
     '--',
     '@{{PATHSFILE}}'
-]
-
-[[linter]]
-code = 'CIRCLECI'
-include_patterns=['.circleci/**']
-command = [
-    'python3',
-    'tools/linter/adapters/circleci_linter.py',
-    '--regen-script-working-dir=.circleci',
-    '--config-yml=.circleci/config.yml',
-    '--regen-script=generate_config_yml.py',
 ]
 
 [[linter]]
@@ -878,6 +868,7 @@ exclude_patterns = [
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
     'test/fx/**',  # should be run through test/test_fx.py
     'test/bottleneck_test/**',  # excluded by test/run_test.py
+    'test/package/**',  # excluded by test/run_test.py
     'test/distributed/argparse_util_test.py',
     'test/distributed/bin/test_script.py',
     'test/distributed/elastic/agent/server/test/local_elastic_agent_test.py',
@@ -910,9 +901,6 @@ exclude_patterns = [
     'test/distributed/test_c10d_spawn.py',
     'test/distributed/test_collective_utils.py',
     'test/distributions/test_distributions.py',
-    'test/dynamo/test_compile.py',
-    'test/dynamo/test_sources.py',
-    'test/functorch/test_logging.py',
     'test/inductor/test_aot_inductor_utils.py',
     'test/lazy/test_bindings.py',
     'test/lazy/test_extract_compiled_graph.py',
@@ -925,10 +913,6 @@ exclude_patterns = [
     'test/optim/test_lrscheduler.py',
     'test/optim/test_optim.py',
     'test/optim/test_swa_utils.py',
-    'test/package/package_a/test_all_leaf_modules_tracer.py',
-    'test/package/package_a/test_module.py',
-    'test/package/package_a/test_nn_module.py',
-    'test/package/package_c/test_module.py',
     'test/run_test.py',
     'test/test_bundled_images.py',
     'test/test_cuda_expandable_segments.py',
@@ -1940,8 +1924,6 @@ exclude_patterns = [
     'torch/cuda/_memory_viz.py',  # mypy: Value of type "object" is not indexable
     'torch/distributed/__init__.py',
     'torch/distributed/_composable_state.py',
-    'torch/distributed/_functional_collectives.py',
-    'torch/distributed/_functional_collectives_impl.py',
     'torch/distributed/_shard/__init__.py',
     'torch/distributed/_shard/_utils.py',
     'torch/distributed/_shard/api.py',
@@ -2562,7 +2544,6 @@ exclude_patterns = [
     'torch/utils/data/datapipes/utils/common.py',
     'torch/utils/data/datapipes/utils/decoder.py',
     'torch/utils/data/datapipes/utils/snapshot.py',
-    'torch/utils/data/dataset.py',
     'torch/utils/data/distributed.py',
     'torch/utils/data/graph.py',
     'torch/utils/data/graph_settings.py',

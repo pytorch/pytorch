@@ -266,6 +266,12 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         DCP.save(sd, DCP.FileSystemWriter(self.temp_dir))
         DCP.load(sd, DCP.FileSystemReader(self.temp_dir))
 
+    @with_temp_dir
+    def test_no_dist(self):
+        checkpointer = DCP.FileSystemCheckpointer(self.temp_dir, no_dist=True)
+        checkpointer.save({})
+        checkpointer.load({})
+
 
 instantiate_parametrized_tests(TestE2ESaveAndLoad)
 if __name__ == "__main__":

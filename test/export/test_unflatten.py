@@ -9,8 +9,14 @@ import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import map, cond
 from torch import Tensor
-from torch.export import Constraint, Dim, export
-from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, capture_pre_autograd_graph, _export
+from torch.export import (
+    Constraint,
+    Dim,
+    dynamic_dim,
+    export,
+)
+from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch._export import capture_pre_autograd_graph
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -277,11 +283,11 @@ class TestUnflatten(TestCase):
                 return a
 
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
-        with self.assertRaisesRegex(RuntimeError, ".shape\[1\] is specialized at 3"):
+        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be equal to 2, but got 6"):
             export_module(torch.randn(6, 6))
 
         unflattened = export_module.module(flat=False)
-        with self.assertRaisesRegex(RuntimeError, ".shape\[1\] is specialized at 3"):
+        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be equal to 2, but got 6"):
             unflattened(torch.randn(6, 6))
 
     def test_unflatten_with_inplace_compile(self):

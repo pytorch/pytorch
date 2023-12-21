@@ -267,6 +267,7 @@ class GroupLinearFusion(GroupFusion):
             fused_mm = graph.call_function(
                 torch.ops.fbgemm.gmm.default,
                 args=(group_inputs, group_weights, group_biases),
+                kwargs={"smart_fused": True},
             )
 
         for i, original_mm in enumerate(group_nodes):

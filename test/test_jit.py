@@ -15775,7 +15775,7 @@ dedent """
             # type: (Dict[str, int]) -> List[int]
             out = [1]
             for i in range(d["hi"] if "hi" in d else 6):
-                out.append(i)
+                out.append(i)  # noqa: PERF402
             return out
 
         self.checkScript(fn, ({'hi': 2, 'bye': 3},))
