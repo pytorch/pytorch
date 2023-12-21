@@ -26,13 +26,10 @@ PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name) {
   END_HANDLE_TH_ERRORS
 }
 
-
-PyObject* THPDtype_pynew(
-    PyTypeObject* type,
-    PyObject* args,
-    PyObject* kwargs) {
+PyObject* THPDtype_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  static torch::PythonArgParser parser({"dtype(ScalarType scalartype, c10::string_view name)"});
+  static torch::PythonArgParser parser(
+      {"dtype(ScalarType scalartype, c10::string_view name)"});
   torch::ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
