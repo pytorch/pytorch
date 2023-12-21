@@ -3266,6 +3266,8 @@ class LoopLevel:
         return loop
 
     def lines(self):
+        from torch._inductor.jit_builder.cpp_builder import is_gcc
+
         offset_expr = cexpr_index(self.offset)
         size_expr = cexpr_index(self.size)
         if config.cpp.no_redundant_loops and offset_expr == size_expr:
@@ -3293,7 +3295,7 @@ class LoopLevel:
             line1 = ""
         elif self.simd_omp:
             line1 = f"#pragma omp {simd}{reduction}"
-        elif not self.reduction_var_map and codecache.is_gcc():
+        elif not self.reduction_var_map and is_gcc():
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
