@@ -19,6 +19,10 @@ class ModuleRecord:
 class DummyModule:
     name: str
 
+    @property
+    def __name__(self):
+        return self.name
+
 
 @dataclasses.dataclass
 class ExecutionRecord:
