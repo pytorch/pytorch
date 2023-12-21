@@ -17,6 +17,7 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
+    skip_if_rocm,
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.utils._triton import has_triton
@@ -158,6 +159,7 @@ class ReplicateTest(MultiProcessTestCase):
         self._test_compile(use_gpu=True, no_sync=False)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self):
         def setup(model, compiled_model) -> None:
@@ -174,6 +176,7 @@ class ReplicateTest(MultiProcessTestCase):
         )
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm
     @skip_if_lt_x_gpu(2)
     def test_compile_fp16(self):
         def setup(model, compiled_model) -> None:
