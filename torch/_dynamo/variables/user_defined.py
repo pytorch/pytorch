@@ -78,6 +78,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return self.value in self._constant_fold_functions()
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
+        from .. import trace_rules
         from . import ConstantVariable
         from .builder import VariableBuilder
 
@@ -91,9 +92,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             obj = None
 
         if isinstance(obj, staticmethod):
-            return variables.UserFunctionVariable(
-                obj.__get__(self.value), source=source
-            )
+            func = obj.__get__(self.value)
+            if trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
+                return variables.TorchInGraphFunctionVariable(func, source=source)
+            else:
+                return variables.UserFunctionVariable(func, source=source)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source and inspect.ismemberdescriptor(obj):
@@ -756,7 +759,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return build_checkpoint_variable(source=source)
                 elif trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
                     return variables.TorchInGraphFunctionVariable(func, source=source)
-                return variables.UserFunctionVariable(func, source=source)
+                else:
+                    return variables.UserFunctionVariable(func, source=source)
 
         if (
             name in getattr(value, "__dict__", {})
