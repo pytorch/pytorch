@@ -284,19 +284,20 @@ inline bool check_attn_mask_shape(sdp_params const& params, bool debug) {
   auto qSize = params.query.sym_size(2);
   auto kvSize = params.key.sym_size(2);
   auto num_head = params.query.sym_size(1);
-  if (attn_mask.value().dim() == 2) {
-    if (attn_mask.value().sym_size(0) == qSize && attn_mask.value().sym_size(1) == kvSize) {
-      return true;
-    }
+  if (attn_mask.value().sym_size(-2) != qSize && attn_mask.value().sym_size(-2) != 1) {
+    return false;
   }
-   else if (attn_mask.value().dim() == 3) {
-    if ((attn_mask.value().sym_size(0) == batchSize * num_head || attn_mask.value().sym_size(0) == 1)
-        && attn_mask.value().sym_size(1) == qSize && attn_mask.value().sym_size(2) == kvSize) {
+  if (attn_mask.value().sym_size(-1) != kvSize && attn_mask.value().sym_size(-1) != 1) {
+    return false;
+  }
+  if (attn_mask.value().dim() == 2) {
+    return true;
+  } else if (attn_mask.value().dim() == 3) {
+    if ((attn_mask.value().sym_size(0) == batchSize * num_head || attn_mask.value().sym_size(0) == 1)) {
       return true;
     };
   } else if (attn_mask.value().dim() == 4) {
-    if (attn_mask.value().sym_size(2) == qSize && attn_mask.value().sym_size(3) == kvSize
-        && (attn_mask.value().sym_size(0) == 1 || attn_mask.value().sym_size(0) == batchSize)
+    if ((attn_mask.value().sym_size(0) == 1 || attn_mask.value().sym_size(0) == batchSize)
         && (attn_mask.value().sym_size(1) == 1 || attn_mask.value().sym_size(1) == num_head)) {
       return true;
     }

@@ -145,9 +145,9 @@ void reshape_attn_mask_to_4d(
     int64_t qSize,
     int64_t kvSize) {
   // Support mask shapes:
-  // 2d: (Q_seq_len  x KV_seq_len)
-  // 3d: ({Batch * Num_heads, 1} x Q_seq_len  x KV_seq_len)
-  // 4d: ({Batch, 1} x {Num_heads, 1} x Q_seq_len  x KV_seq_len)
+  // 2d: ({Q_seq_len, 1}  x {KV_seq_len, 1})
+  // 3d: ({Batch * Num_heads, 1} x {Q_seq_len, 1}  x {KV_seq_len, 1})
+  // 4d: ({Batch, 1} x {Num_heads, 1} x {Q_seq_len, 1}  x {KV_seq_len, 1})
   // Guaranteed in check_attn_mask_shape
   int64_t attn_mask_size_0 = 1;
   int64_t attn_mask_size_1 = 1;
@@ -163,7 +163,9 @@ void reshape_attn_mask_to_4d(
       attn_mask_size_1 = num_head;
     }
   }
-  attn_mask = attn_mask.view({attn_mask_size_0, attn_mask_size_1, qSize, kvSize});
+  attn_mask = attn_mask
+                .view({attn_mask_size_0, attn_mask_size_1, attn_mask.size(-2), attn_mask.size(-1)})
+                .expand({attn_mask_size_0, attn_mask_size_1, qSize, kvSize});
 }
 
 template <typename scalar_t, int64_t q_split_size, int64_t kv_split_size>
