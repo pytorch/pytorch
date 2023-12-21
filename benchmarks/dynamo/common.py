@@ -2347,17 +2347,7 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                if self.args.backend == "ipex":
-                    print('Using IPEX Optimization...\n')
-                    prepared_model = copy.deepcopy(model)
-                    import intel_extension_for_pytorch as ipex
-                    if self.args.bfloat16 or self.args.amp:
-                        prepared_model = ipex.optimize(prepared_model, dtype=torch.bfloat16, weights_prepack=False)
-                    elif self.args.float32:
-                        prepared_model = ipex.optimize(prepared_model, weights_prepack=False)
-                else:
-                    prepared_model = model
-                model_copy = self.deepcopy_and_maybe_ddp(prepared_model)
+                model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_result = self.run_n_iterations(
                     model_copy, clone_inputs(example_inputs)
@@ -2378,7 +2368,7 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_ddp(prepared_model)
+                model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_rerun_result = self.run_n_iterations(
                     model_copy, clone_inputs(example_inputs)
@@ -2425,6 +2415,16 @@ class BenchmarkRunner:
             torch._dynamo.reset()
             model_copy = None
             try:
+                if self.args.backend == "ipex":
+                    print('Using IPEX Optimization...\n')
+                    prepared_model = copy.deepcopy(model)
+                    import intel_extension_for_pytorch as ipex
+                    if self.args.bfloat16 or self.args.amp:
+                        prepared_model = ipex.optimize(prepared_model, dtype=torch.bfloat16, weights_prepack=False)
+                    elif self.args.float32:
+                        prepared_model = ipex.optimize(prepared_model, weights_prepack=False)
+                else:
+                    prepared_model = model
                 model_copy = self.deepcopy_and_maybe_ddp(prepared_model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 if self.args.export or self.args.export_aot_inductor:
