@@ -438,16 +438,13 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 // `error: comparison of constant '255' with boolean expression is always false`
 // for `f > limit::max()` below
 template <typename To, typename From>
-typename std::enable_if<std::is_same<From, bool>::value, bool>::type overflows(
-    From /*f*/) {
+std::enable_if_t<std::is_same_v<From, bool>, bool> overflows(From /*f*/) {
   return false;
 }
 
 // skip isnan and isinf check for integral types
 template <typename To, typename From>
-typename std::enable_if<
-    std::is_integral<From>::value && !std::is_same<From, bool>::value,
-    bool>::type
+std::enable_if_t<std::is_integral_v<From> && !std::is_same_v<From, bool>, bool>
 overflows(From f) {
   using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
   if (!limit::is_signed && std::numeric_limits<From>::is_signed) {
@@ -462,8 +459,7 @@ overflows(From f) {
 }
 
 template <typename To, typename From>
-typename std::enable_if<std::is_floating_point<From>::value, bool>::type
-overflows(From f) {
+std::enable_if_t<std::is_floating_point_v<From>, bool> overflows(From f) {
   using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
   if (limit::has_infinity && std::isinf(static_cast<double>(f))) {
     return false;
@@ -481,7 +477,7 @@ C10_CLANG_DIAGNOSTIC_POP()
 #endif
 
 template <typename To, typename From>
-typename std::enable_if<is_complex<From>::value, bool>::type overflows(From f) {
+std::enable_if_t<is_complex<From>::value, bool> overflows(From f) {
   // casts from complex to real are considered to overflow if the
   // imaginary component is non-zero
   if (!is_complex<To>::value && f.imag() != 0) {

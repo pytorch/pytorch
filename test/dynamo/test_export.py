@@ -7,7 +7,6 @@ import copy
 import functools
 import inspect
 import io
-import math
 import operator
 import unittest
 from enum import Enum
@@ -2245,7 +2244,8 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "original output #1 is .* only the following types are supported",
+            "original output #1 is .*Tensors.*, "
+            "but only the following types are supported",
         ):
             torch._dynamo.export(f, torch.randn(10), torch.randn(10), aten_graph=False)
 
@@ -2963,15 +2963,9 @@ def forward(self, x):
         def f(x):
             return x[: round(x.shape[0] / 2)]
 
-        def f_correct(x):
-            return x[: math.floor(x.shape[0] / 2)]
+        gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Calling round()"):
-            gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
-
-        gm, _ = torch._dynamo.export(f_correct, aten_graph=True)(torch.ones(6, 4))
-
-        self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
+        self.assertEqual(f(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
     def test_cond_supported_pred_types(self):
         def true_fn(x):

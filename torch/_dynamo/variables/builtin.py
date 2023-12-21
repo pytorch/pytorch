@@ -361,18 +361,15 @@ class BuiltinVariable(VariableTracker):
         ]
         op_handlers[operator.add].extend(list_like_addition_handlers)
 
-        def list_iadd_handler(tx, a, b, options):
+        def list_iadd_handler(tx, a, b, _):
             if not a.mutable_local or not b.has_unpack_var_sequence(tx):
                 # Handler doesn't apply
                 return None
 
-            return tx.replace_all(
-                a,
-                ListVariable(
-                    list(a.items) + list(b.unpack_var_sequence(tx)),
-                    **options,
-                ),
-            )
+            seq = b.unpack_var_sequence(tx)
+            tx.output.side_effects.mutation(a)
+            a.items.extend(seq)
+            return a
 
         list_like_iadd_handlers = [
             (
@@ -666,14 +663,6 @@ class BuiltinVariable(VariableTracker):
                 ),
             )
 
-        if self.fn is round:
-            if len(args) > 0 and isinstance(args[0], SymNodeVariable):
-                raise UserError(
-                    UserErrorType.STANDARD_LIBRARY,
-                    "Calling round() on symbolic value is not supported. "
-                    "You can use floor() to implement this functionality",
-                    case_name="dynamic_shape_round",
-                )
         return super().call_function(tx, args, kwargs)
 
     def call_method(
@@ -798,6 +787,13 @@ class BuiltinVariable(VariableTracker):
             tx, [arg, ConstantVariable.create("__abs__")], {}
         )
         return abs_method.call_function(tx, [], {})
+
+    def call_round(self, tx, arg, *args, **kwargs):
+        # Call arg.__round__()
+        round_method = BuiltinVariable(getattr).call_function(
+            tx, [arg, ConstantVariable.create("__round__")], {}
+        )
+        return round_method.call_function(tx, args, kwargs)
 
     def call_range(self, tx, *args):
         if self.unspec_python_args(*args) or self.constant_args(*args):
@@ -1121,6 +1117,7 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
+            TorchInGraphFunctionVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1131,7 +1128,7 @@ class BuiltinVariable(VariableTracker):
         if not name_var.is_python_constant():
             unimplemented("non-const getattr() name")
 
-        if tx.output.side_effects.is_attribute_mutation(obj):
+        if tx.output.side_effects.is_attribute_mutation(obj) and name != "grad":
             try:
                 # re-read a pending side effect?
                 return tx.output.side_effects.load_attr(obj, name)
@@ -1212,9 +1209,13 @@ class BuiltinVariable(VariableTracker):
                             else:
                                 grapharg.example.grad = None
                         return VariableBuilder(tx, source)(grapharg.example.grad)
-                unimplemented("tensor grad")
+
+                return obj.dynamic_getattr(tx, name)
             else:
-                unimplemented("tensor grad")
+                example_value = obj.as_proxy().node.meta["example_value"]
+                if example_value.grad is not None:
+                    unimplemented("getattr on non-None grad - NYI")
+                return ConstantVariable(None)
         elif isinstance(
             obj,
             (
@@ -1226,9 +1227,13 @@ class BuiltinVariable(VariableTracker):
             ),
         ):
             try:
-                return obj.var_getattr(tx, name).clone(source=source)
+                return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
+        elif isinstance(obj, TorchInGraphFunctionVariable):
+            member = getattr(obj.value, name)
+            if trace_rules.lookup(member) is not None:
+                return trace_rules.lookup(member)(member, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
             if is_utils_checkpoint(member):
@@ -1251,7 +1256,7 @@ class BuiltinVariable(VariableTracker):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
             try:
-                return obj.var_getattr(tx, name).clone(source=source)
+                return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
 

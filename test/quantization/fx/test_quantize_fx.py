@@ -2508,7 +2508,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(len(qconfig_mapping.module_name_object_type_order_qconfigs), 2)
         key1 = ("mod1", torch.nn.Linear, 0)
         key2 = ("mod2", torch.nn.ReLU, 1)
-        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[0], key1)
+        self.assertEqual(next(iter(qconfig_mapping.module_name_object_type_order_qconfigs)), key1)
         self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[1], key2)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key1], qconfig1)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key2], qconfig2)
@@ -2519,7 +2519,7 @@ class TestQuantizeFx(QuantizationTestCase):
         # Override existing key
         qconfig_mapping.set_module_name_object_type_order("mod1", torch.nn.Linear, 0, qconfig3)
         self.assertEqual(len(qconfig_mapping.module_name_object_type_order_qconfigs), 2)
-        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[0], key1)
+        self.assertEqual(next(iter(qconfig_mapping.module_name_object_type_order_qconfigs)), key1)
         self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[1], key2)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key1], qconfig3)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key2], qconfig2)
@@ -6515,7 +6515,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
             # Match following quantize with the specific dtypes
             self.assertEqual(len(node.users), 1)
-            user = list(node.users.keys())[0]
+            user = next(iter(node.users.keys()))
             self.assertEqual(user.target, torch.quantize_per_tensor)
             self.assertEqual(user.args[-1], target_to_expected_dtypes[node.target])
 
