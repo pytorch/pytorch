@@ -274,8 +274,7 @@ def default_partition(
             # Since we can't save tuple of tensor values, we need to flatten out what we're saving
             users = node.users
             assert all(user.target == operator.getitem for user in users)
-            for user in users:
-                saved_values.append(user)
+            saved_values.extend(users)
         else:
             backward_usages = [n for n in node.users if n.name not in forward_node_names]
             if 'tensor_meta' in node.meta and all(is_sym_node(n) for n in backward_usages):
@@ -287,8 +286,7 @@ def default_partition(
                 # If the user mutated an input in the forward and uses its sizes/strides in the backward,
                 # then we would be obligated to clone the input before saving it to appease autograd.
                 # (This is how we originally found this bug).
-                for user in backward_usages:
-                    saved_sym_nodes.append(user)
+                saved_sym_nodes.extend(backward_usages)
             else:
                 saved_values.append(node)
     saved_values = list({k: None for k in saved_values}.keys())
