@@ -298,11 +298,12 @@ struct AttentionKernel {
       //  - we only launch kernels for head_id % kQueriesPerBlock == 0
       //  - we iterate over heads instead of queries (strideM = strideH)
       if (num_queries == 1 && k_strideH == 0 && v_strideH == 0 &&
-          logsumexp_ptr == nullptr && attn_bias_ptr == nullptr) {
+          logsumexp_ptr == nullptr) {
         if (head_id % kQueriesPerBlock != 0) {
           return false;
         }
         q_strideM = q_strideH;
+        bias_strideM = bias_strideH;
         num_queries = num_heads;
         num_heads = 1; // unused but here for intent
         // remove causal since n_query = 1
