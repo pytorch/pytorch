@@ -16,9 +16,9 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes, skipXLA)
+import operator
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestIndexing(TestCase):
     def test_index(self, device):
 
@@ -139,7 +139,7 @@ class TestIndexing(TestCase):
         def consec(size, start=1):
             # Creates the sequence in float since CPU half doesn't support the
             # needed operations. Converts to dtype before returning.
-            numel = reduce(lambda x, y: x * y, size, 1)
+            numel = reduce(operator.mul, size, 1)
             sequence = torch.ones(numel, dtype=torch.float, device=device).cumsum(0)
             sequence.add_(start - 1)
             return sequence.view(*size).to(dtype=dtype)
@@ -1396,6 +1396,15 @@ class TestIndexing(TestCase):
             tensor_b[6] = 1.0
             self.assertEqual(tensor_a, tensor_b.cpu(), atol=0, rtol=0)
 
+    def test_index_limits(self, device):
+        #  Regression test for https://github.com/pytorch/pytorch/issues/115415
+        t = torch.tensor([], device=device)
+        idx_min = torch.iinfo(torch.int64).min
+        idx_max = torch.iinfo(torch.int64).max
+        self.assertRaises(IndexError, lambda: t[idx_min])
+        self.assertRaises(IndexError, lambda: t[idx_max])
+
+
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:
@@ -1431,7 +1440,6 @@ class TestIndexing(TestCase):
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class NumpyTests(TestCase):
     def test_index_no_floats(self, device):
         a = torch.tensor([[[5.]]], device=device)

@@ -31,7 +31,12 @@ def make_test_cls_with_mocked_export(
 def _make_fn_with_mocked_export(fn, mocked_export_fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
-        with patch("test_export.export", mocked_export_fn):
+        try:
+            from . import test_export
+        except ImportError:
+            import test_export
+
+        with patch(f"{test_export.__name__}.export", mocked_export_fn):
             return fn(*args, **kwargs)
 
     return _fn
