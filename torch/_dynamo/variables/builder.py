@@ -68,6 +68,7 @@ from ..utils import (
     get_fake_value,
     get_static_address_type,
     global_key_name,
+    is_function,
     is_namedtuple,
     is_typing,
     is_utils_checkpoint,
@@ -728,7 +729,7 @@ class VariableBuilder:
                 source=self.source,
             )
         elif (
-            istype(value, (type, types.FunctionType))
+            is_function(value)
             and skipfiles.check(value, is_inlined_call=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
             and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)

@@ -21,7 +21,6 @@ from ..utils import (
     proxy_args_kwargs,
 )
 from .base import MutableLocal, VariableTracker
-from .dicts import DefaultDictVariable
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
@@ -743,26 +742,8 @@ class SkipFilesVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from .builtin import BuiltinVariable
-
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
-        # Allowlist a few popular classes(e.g, collections.OrderedDict) calls in skip files.
-        elif self.value is collections.OrderedDict:
-            return BuiltinVariable.call_custom_dict(
-                tx, collections.OrderedDict, *args, **kwargs
-            )
-        elif (
-            self.value is collections.defaultdict
-            and len(args) <= 1
-            and DefaultDictVariable.is_supported_arg(args[0])
-        ):
-            return DefaultDictVariable(
-                {},
-                collections.defaultdict,
-                args[0],
-                mutable_local=MutableLocal(),
-            )
         # Fold through the functions(e.g, collections.namedtuple)
         # that inputs & outputs are all python constants
         elif (
@@ -795,25 +776,6 @@ class SkipFilesVariable(VariableTracker):
                 unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps)
-        elif self.value is collections.deque and not kwargs:
-            if len(args) == 0:
-                items = []
-            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
-                items = args[0].unpack_var_sequence(tx)
-            else:
-                unimplemented("deque() with more than 1 arg not supported")
-            return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
-        elif self.value is functools.partial:
-            if not args:
-                unimplemented("functools.partial malformed")
-            # The first arg, a callable (the ctor below will assert on types)
-            fn = args[0]
-            rest_args = args[1:]
-            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
-            # args and keywords
-            return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs
-            )
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -822,24 +784,6 @@ class SkipFilesVariable(VariableTracker):
             msg = f"'skip function {self.value.__qualname__} in file {path}'"
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if (
-            self.value in {collections.OrderedDict, collections.defaultdict}
-            and name == "fromkeys"
-        ):
-            from .builtin import BuiltinVariable
-
-            return BuiltinVariable.call_custom_dict_fromkeys(
-                tx, self.value, *args, **kwargs
-            )
-        return super().call_method(tx, name, args, kwargs)
 
 
 class TypingVariable(VariableTracker):
