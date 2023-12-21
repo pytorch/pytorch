@@ -7683,7 +7683,6 @@
   dispatch:
     CPU, CUDA, Meta, MPS: set_
   autogen: set.source_Storage, set.source_Storage_out
-  tags: inplace_view
 
 - func: set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, SymInt storage_offset, SymInt[] size, SymInt[] stride=[]) -> Tensor(a!)
   variants: method
@@ -7696,7 +7695,6 @@
     MPS: set_storage_mps_
     QuantizedCPU, QuantizedCUDA: set_storage_quantized_
   autogen: set.source_Storage_storage_offset, set.source_Storage_storage_offset_out
-  tags: inplace_view
 
 - func: set_.source_Tensor_storage_offset(Tensor(a!) self, Tensor source, SymInt storage_offset, SymInt[] size, SymInt[] stride=[]) -> Tensor(a!)
   variants: method
@@ -7704,7 +7702,6 @@
   device_guard: False
   dispatch:
     CompositeImplicitAutograd: set__symint
-  tags: inplace_view
 
 - func: set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
@@ -7713,7 +7710,6 @@
   dispatch:
     CPU, CUDA, Meta, MPS: set_tensor_
   autogen: set.source_Tensor, set.source_Tensor_out
-  tags: inplace_view
 
 - func: set_(Tensor(a!) self) -> Tensor(a!)
   variants: method
@@ -7723,7 +7719,6 @@
     Meta: set_meta_
     MPS: set_mps_
   autogen: set, set.out
-  tags: inplace_view
 
 # Not making it CompositeImplicitAutograd because lift
 # should be a primitive w.r.t. functorch
