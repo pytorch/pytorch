@@ -2,12 +2,12 @@ from typing import List, Optional
 
 from torchgen.api import dispatcher
 from torchgen.api.types import (
+    BaseCppType,
     BaseCType,
     Binding,
     boolT,
     ConstRefCType,
     CType,
-    InverseReturnModeT,
     longT,
     NamedCType,
     tensorT,
@@ -69,6 +69,8 @@ reapply_views_binding = Binding(
     ),
     default=None,
 )
+
+InverseReturnModeT = BaseCppType("at::functionalization", "InverseReturnMode")
 inverse_return_mode_binding = Binding(
     name="inverse_return_mode",
     nctype=NamedCType(name="inverse_return_mode", type=BaseCType(InverseReturnModeT)),
