@@ -417,17 +417,19 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
     # Check if it's a valid Conv Binary Pattern:
     # * qconv2d_pointwise should only has one users
     # * Extra input of binary node comes from dequant pattern
+    # * the two inputs of binary node should have attribute "meta" and should be tensors
+    # * the two inputs of binary node should have the same shape
     # * All users of the extra input in this pattern should be
     #   ancestor nodes of the compute node, except for the binary node
     #   connected to the compute node.
     def fn(match):
         compute_node = filter_nodes(match.nodes, torch.ops.onednn.qconv2d_pointwise)[0]
-        # qconv2d_pointwise should only has one users
+        # qconv2d_pointwise should only have one user
         if len(compute_node.users) != 1:
             return False
+        binary_node_inputs = next(iter(compute_node.users)).args
+        assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
         if output_dtype is not None:
-            binary_node_inputs = next(iter(compute_node.users)).args
-            assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
             extra_input_of_binary_node = None
             for arg in binary_node_inputs:
                 if arg != compute_node:
@@ -439,6 +441,22 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
                 extra_input_of_binary_node.target != aten.mul.Tensor
             ):
                 return False
+
+        # the two inputs of binary node should have attribute "meta" and should be tensors
+        if not (
+            hasattr(binary_node_inputs[0], "meta")
+            and isinstance(binary_node_inputs[0].meta.get("val", None), torch.Tensor)
+        ) or not (
+            hasattr(binary_node_inputs[1], "meta")
+            and isinstance(binary_node_inputs[1].meta.get("val", None), torch.Tensor)
+        ):
+            return False
+        # the two inputs of binary node should have the same shape
+        if (
+            binary_node_inputs[0].meta["val"].size()
+            != binary_node_inputs[1].meta["val"].size()
+        ):
+            return False
 
         # All users of the extra input in this pattern should be
         # ancestor nodes of the compute node, except for the binary node
