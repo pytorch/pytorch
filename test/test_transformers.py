@@ -1852,6 +1852,7 @@ class TestSDPA(NNTestCase):
     @parametrize("seq_len", [267, 1030])
     @parametrize("n_head", [1, 3])
     @parametrize("head_dim", [8, 16])
+    @parametrize("mask_dim", [2, 3, 4])
     @parametrize("bool_mask", [0, 1])
     @parametrize("train", [True, False])
     def test_scaled_dot_product_fused_attention_mask_vs_math_cpu(
@@ -1863,6 +1864,7 @@ class TestSDPA(NNTestCase):
         seq_len,
         n_head,
         head_dim,
+        mask_dim,
         bool_mask,
         train,
     ):
@@ -1893,7 +1895,12 @@ class TestSDPA(NNTestCase):
         k = k.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
         q = q.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, n_head, head_dim).transpose(1, 2)
-        mask_shape = (batch_size, n_head, seq_len, seq_len)
+        if mask_dim == 4:
+            mask_shape = (batch_size, n_head, seq_len, seq_len)
+        elif mask_dim == 3:
+            mask_shape = (1, seq_len, seq_len)
+        elif mask_dim == 2:
+            mask_shape = (seq_len, seq_len)
         if bool_mask:
             attn_mask = torch.randint(0, 2, size=mask_shape, dtype=torch.bool, device=device)
         else:

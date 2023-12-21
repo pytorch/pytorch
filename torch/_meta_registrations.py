@@ -5053,153 +5053,6 @@ def meta_scatter_(self, dim, index, src_or_value, reduce=None):
 
 @register_meta(
     [
-        aten._scaled_dot_product_flash_attention,
-    ]
-)
-def meta__scaled_dot_product_flash(
-    query: Tensor,
-    key: Tensor,
-    value: Tensor,
-    dropout_p: float = 0.0,
-    is_causal: bool = False,
-    return_debug_mask: bool = False,
-    attn_mask: Optional[Tensor] = None,
-    scale: Optional[float] = None,
-):
-    batch_size = query.size(0)
-    num_heads = query.size(1)
-    max_seqlen_batch_q = query.size(2)
-    head_dim = query.size(3)
-
-    max_seqlen_batch_k = key.size(2)
-
-    if device_hint(query) == "cpu":
-        attention = torch.empty(
-            (batch_size, max_seqlen_batch_q, num_heads, head_dim),
-            dtype=query.dtype,
-            device=query.device,
-        ).transpose(1, 2)
-        logsumexp = torch.empty(
-            (
-                batch_size,
-                max_seqlen_batch_q,
-                num_heads,
-            ),
-            dtype=torch.float,
-            device=query.device,
-        ).transpose(1, 2)
-        return (
-            attention,
-            logsumexp,
-            torch.empty((), dtype=torch.int32, device="meta"),
-            torch.empty((), dtype=torch.int32, device="meta"),
-            0,
-            0,
-            torch.empty((), dtype=torch.long, device="meta"),
-            torch.empty((), dtype=torch.long, device="meta"),
-            torch.empty((), dtype=query.dtype, device=query.device),
-        )
-
-    # Cuda Path
-    query_t = query.transpose(1, 2)
-    attention = torch.empty_like(query_t).transpose(1, 2)
-    logsumexp = torch.empty(
-        (batch_size, num_heads, max_seqlen_batch_q),
-        dtype=torch.float,
-        device=query.device,
-    )
-
-    if return_debug_mask:
-        blocksize_c = 128 if head_dim > 64 else 256
-        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
-        if max_seqlen_batch_k <= 128:
-            max_seqlen_k = 128
-        elif max_seqlen_batch_k <= 256:
-            max_seqlen_k = 256
-        debug_mask = torch.empty(
-            (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_k),
-            dtype=query.dtype,
-            device=query.device,
-        )
-    else:
-        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
-
-    # Note [Seed and Offset]: device for seed and offset below depends on whether we are
-    # capturing or not, but at the time of tracing we don't know if we
-    # are going to use cudagraphs or not, so we return meta tensors here
-    # it's possible we'll need to have some special handling in inductor for sdpa
-
-    return (
-        attention,
-        logsumexp,
-        None,
-        None,
-        max_seqlen_batch_q,
-        max_seqlen_batch_k,
-        torch.empty((), dtype=torch.long, device="meta"),
-        torch.empty((), dtype=torch.long, device="meta"),
-        debug_mask,
-    )
-
-
-@register_meta(
-    [
-        aten._scaled_dot_product_flash_attention_backward,
-    ]
-)
-def meta__scaled_dot_product_flash_backward(
-    grad_out: Tensor,
-    query: Tensor,
-    key: Tensor,
-    value: Tensor,
-    out: Tensor,
-    logsumexp: Tensor,
-    cum_seq_q: Tensor,
-    cum_seq_k: Tensor,
-    max_q: int,
-    max_k: int,
-    dropout_p: float,
-    is_causal: bool,
-    philox_seed: Tensor,
-    philox_offset: Tensor,
-    scale: Optional[float] = None,
-):
-    if device_hint(query) != "cpu":
-        grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
-        grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
-        grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
-        return grad_q, grad_k, grad_v
-
-    batch_size = query.size(0)
-    num_heads = query.size(1)
-    head_dim = query.size(3)
-    len_q = query.size(2) if device_hint(query) == "cpu" else max_q
-    len_k = key.size(2) if device_hint(query) == "cpu" else max_k
-
-    grad_q = torch.empty_permuted(
-        (batch_size, num_heads, len_q, head_dim),
-        (0, 2, 1, 3),
-        dtype=query.dtype,
-        device=query.device,
-    )
-    grad_k = torch.empty_permuted(
-        (batch_size, num_heads, len_k, head_dim),
-        (0, 2, 1, 3),
-        dtype=key.dtype,
-        device=key.device,
-    )
-    grad_v = torch.empty_permuted(
-        (batch_size, num_heads, len_k, head_dim),
-        (0, 2, 1, 3),
-        dtype=value.dtype,
-        device=value.device,
-    )
-
-    return grad_q, grad_k, grad_v
-
-
-@register_meta(
-    [
         aten._scaled_dot_product_flash_attention_mask,
     ]
 )
@@ -5344,6 +5197,72 @@ def meta__scaled_dot_product_flash_mask_backward(
     )
 
     return grad_q, grad_k, grad_v
+
+
+@register_meta(
+    [
+        aten._scaled_dot_product_flash_attention,
+    ]
+)
+def meta__scaled_dot_product_flash(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    scale: Optional[float] = None,
+):
+    return meta__scaled_dot_product_flash_mask(
+            query,
+            key,
+            value,
+            dropout_p,
+            is_causal,
+            return_debug_mask,
+            None,
+            scale)
+
+
+@register_meta(
+    [
+        aten._scaled_dot_product_flash_attention_backward,
+    ]
+)
+def meta__scaled_dot_product_flash_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    cum_seq_q: Tensor,
+    cum_seq_k: Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
+    scale: Optional[float] = None,
+):
+    return meta__scaled_dot_product_flash_mask_backward(
+            grad_out,
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            cum_seq_q,
+            cum_seq_k,
+            max_q,
+            max_k,
+            dropout_p,
+            is_causal,
+            philox_seed,
+            philox_offset,
+            None,
+            scale)
 
 
 @register_meta(
