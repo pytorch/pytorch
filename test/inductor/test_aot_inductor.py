@@ -1477,6 +1477,16 @@ def fail_with_and_without_stack_allocation(is_skip=False):
     )
 
 
+def fail_stack_allocation(is_skip=False):
+    return TestFailure(
+        (
+            "abi_compatible_cpu_with_stack_allocation",
+            "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
+        ),
+        is_skip=is_skip,
+    )
+
+
 def fail_minimal_arrayref_interface(is_skip=False):
     return TestFailure(
         ("abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",),
@@ -1516,6 +1526,41 @@ CPU_TEST_FAILURES = {
     ),
     "test_simple_dynamic": fail_with_and_without_stack_allocation(),
 }
+
+if not IS_FBCODE:
+    # The following tests look like they pass in both pytest and unittest (xml
+    # and terminal output say pass), but the process will segfault.  This only
+    # happens in OSS CI and is fine internally.
+    CPU_TEST_FAILURES.update(
+        {
+            "test_duplicated_params": fail_stack_allocation(is_skip=True),
+            "test_fqn": fail_stack_allocation(is_skip=True),
+            "test_no_args": fail_stack_allocation(is_skip=True),
+            "test_output_misaligned": fail_stack_allocation(is_skip=True),
+            "test_pytree_inputs": fail_stack_allocation(is_skip=True),
+            "test_seq": fail_stack_allocation(is_skip=True),
+            "test_simple_split": fail_stack_allocation(is_skip=True),
+            "test_addmm": fail_minimal_arrayref_interface(is_skip=True),
+            "test_aliased_buffer_reuse": fail_minimal_arrayref_interface(is_skip=True),
+            "test_buffer_reuse": fail_minimal_arrayref_interface(is_skip=True),
+            "test_convolution": fail_minimal_arrayref_interface(is_skip=True),
+            "test_empty_graph": fail_minimal_arrayref_interface(is_skip=True),
+            "test_large": fail_minimal_arrayref_interface(is_skip=True),
+            "test_missing_output": fail_minimal_arrayref_interface(is_skip=True),
+            "test_output_path_1": fail_minimal_arrayref_interface(is_skip=True),
+            "test_repeat_interleave": fail_minimal_arrayref_interface(is_skip=True),
+            "test_return_constant": fail_minimal_arrayref_interface(is_skip=True),
+            "test_reuse_kernel": fail_minimal_arrayref_interface(is_skip=True),
+            "test_simple": fail_minimal_arrayref_interface(is_skip=True),
+            "test_small_constant": fail_minimal_arrayref_interface(is_skip=True),
+            "test_with_no_triton_profiler": fail_minimal_arrayref_interface(
+                is_skip=True
+            ),
+            "test_with_offset": fail_minimal_arrayref_interface(is_skip=True),
+            "test_with_profiler": fail_minimal_arrayref_interface(is_skip=True),
+            "test_zero_size_weight": fail_minimal_arrayref_interface(is_skip=True),
+        }
+    )
 
 copy_tests(
     AOTInductorTestsTemplate,
