@@ -30,6 +30,7 @@
 #include <stdint.h>
 #endif
 
+#include <array>
 #include <iosfwd>
 #include <ostream>
 
