@@ -158,9 +158,17 @@ CALL_DISPATCH = CodeTemplate(
 at::_ops::${unambiguous_name}::call(${unpacked_args})"""
 )
 
-INVERSE_VIEW_DISPATCH = CodeTemplate(
+REVERSE_VIEW_DISPATCH = CodeTemplate(
     """\
-at::functionalization::FunctionalInverses::${inverse_name}(${unpacked_args})"""
+at::functionalization::FunctionalInverses::${reverse_name}(${unpacked_args})"""
+)
+
+MULTI_OUTPUT_VIEW_ITERATION = CodeTemplate(
+    """\
+for (auto ${view_idx} : c10::irange(${var}.size())) {
+  ${body}
+}
+"""
 )
 
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate(
@@ -178,7 +186,7 @@ if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_s
 REPLAY_VIEW_LAMBDA_FUNC = CodeTemplate(
     """\
 func = [=](const at::Tensor& ${input_base}) {
-  return ${replay_view_call};
+  return ${replay_view_call}${view_indexing};
 };
 """
 )
@@ -349,7 +357,9 @@ def emit_view_call(
     )
 
 
-def emit_view_lambda(f: NativeFunction, bindings: List[Binding]) -> str:
+def emit_view_lambda(
+    f: NativeFunction, bindings: List[Binding], view_idx: Optional[str] = None
+) -> str:
     """Generate an additional lambda function to recover views in backward when as_strided is not supported.
     See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details.
     """
@@ -403,20 +413,25 @@ def emit_view_lambda(f: NativeFunction, bindings: List[Binding]) -> str:
 
     replay_view_call = emit_view_call(f, input_base, updated_unpacked_args)
     replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
-        input_base=input_base, replay_view_call=replay_view_call
+        input_base=input_base,
+        replay_view_call=replay_view_call,
+        view_indexing=("" if view_idx is None else f"[{view_idx}]"),
     )
 
     input_view = "input_view"
-    reverse_replay_view_call = INVERSE_VIEW_DISPATCH.substitute(
-        inverse_name=inverse_view_name(f),
-        unpacked_args=[
-            "self",
-            f"{input_view}",
-            # inverse_return_mode=
-            "at::functionalization::InverseReturnMode::AlwaysView",
-            # skip input_base arg
-            *updated_unpacked_args[1:],
-        ],
+    reverse_unpacked_args = [
+        "self",
+        f"{input_view}",
+        # inverse_return_mode=
+        "at::functionalization::InverseReturnMode::AlwaysView",
+        *(() if view_idx is None else (f"{view_idx}",)),
+        # skip input_base arg
+        *updated_unpacked_args[1:],
+    ]
+
+    reverse_replay_view_call = REVERSE_VIEW_DISPATCH.substitute(
+        reverse_name=inverse_view_name(f),
+        unpacked_args=reverse_unpacked_args,
     )
     reverse_replay_view_func = REVERSE_REPLAY_VIEW_LAMBDA_FUNC.substitute(
         input_view=input_view, reverse_replay_view_call=reverse_replay_view_call
@@ -474,14 +489,22 @@ def emit_view_body(
         # See NOTE [ View + Inplace detection ] for more details about this logic
         if is_tensor_list_type(return_info.type):
             creation_meta = get_creation_meta_in_mode("CreationMeta::MULTI_OUTPUT_NODE")
-            call += (
-                f"as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, "
-                "/* is_fw_differentiable */ true, "
+            view_idx = "mutated_view_idx"
+            view_lambda = emit_view_lambda(
+                f, extract_bindings(f), view_idx=view_idx
+            ).strip()
+            as_view_call = (
+                f"as_view(/* base */ {view_info}, /* output */ {var}[{view_idx}], "
+                "/* is_bw_differentiable */ true, /* is_fw_differentiable */ true, "
+                "/* view_func */ func, /* rev_view_func */ rev_func, "
                 f"/* creation_meta */ {creation_meta});"
+            )
+            call += MULTI_OUTPUT_VIEW_ITERATION.substitute(
+                var=var, view_idx=view_idx, body=f"{view_lambda}\n{as_view_call}"
             )
             rhs_value = f"std::move({var})"
         else:
-            call += emit_view_lambda(f, extract_bindings(f))
+            call += emit_view_lambda(f, extract_bindings(f), view_idx=None)
             creation_meta = get_creation_meta_in_mode("CreationMeta::DEFAULT")
             rhs_value = (
                 f"as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, "
