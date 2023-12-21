@@ -398,7 +398,7 @@ if torch._C._has_mkldnn:
                         _current_node, torch.fx.Node
                     ) and _current_node.op not in ["placeholder", "output", "get_attr"]:
                         for input in _current_node.all_input_nodes:
-                            _node_list.append(input)
+                            _node_list.append(input)  # noqa: PERF402
             return False
 
         return [
