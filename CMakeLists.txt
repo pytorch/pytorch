@@ -288,7 +288,7 @@ option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the 
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
-option(TORCH_DISABLE_GPU_ASSERTS "Disable GPU asserts by default" OFF)
+option(USE_ROCM_KERNEL_ASSERT "Use Kernel Assert for ROCm" OFF)
 # Ensure that an ITT build is the default for x86 CPUs
 cmake_dependent_option(
   USE_ITT "Use Intel(R) VTune Profiler ITT functionality" ON
