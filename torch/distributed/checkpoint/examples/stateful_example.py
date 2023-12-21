@@ -15,6 +15,7 @@ from torch.distributed.checkpoint.state_dict import (
     _patch_optimizer_state_dict,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.checkpoint.filesystem import _FileSystemCheckpointer
 
 
 CHECKPOINT_DIR = f"~/{os.environ['LOGNAME']}/checkpoint"
@@ -78,7 +79,7 @@ def run(rank, world_size, device="cuda"):
     model, optim = _init_model(device, world_size)
     _train(model, optim, train_steps=2)
 
-    checkpointer = DCP.FileSystemCheckpointer(CHECKPOINT_DIR)
+    checkpointer = DCP._FileSystemCheckpointer(CHECKPOINT_DIR)
     checkpointer.save(
         state_dict={"model": model, "optimizer": optim},
     )
