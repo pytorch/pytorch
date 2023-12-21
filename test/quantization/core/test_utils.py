@@ -191,3 +191,8 @@ class TestUtils(TestCase):
         quantized_tensor = _quantize_weight(float_tensor, observer)
         assert quantized_tensor.int_repr().max().item() == q8_max
         assert quantized_tensor.int_repr().min().item() == q8_min
+
+    def test_new_dtype(self):
+        # make sure we can create new dtypes
+        int4 = torch.dtype(torch.bits8, "int4")
+        int4_backup_by_bits16 = torch.dtype(torch.bits16, "int4")
