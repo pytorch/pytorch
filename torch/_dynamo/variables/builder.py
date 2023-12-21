@@ -795,6 +795,7 @@ class VariableBuilder:
                 ),
             )
         else:
+            # breakpoint()
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = UserDefinedObjectVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
