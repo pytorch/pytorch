@@ -825,7 +825,22 @@ Tensor add_sparse_csr(
     const Scalar& alpha) {
   auto commonDtype = at::result_type(self, other);
   alpha_check(commonDtype, alpha);
-  Tensor result = at::empty_like(self, self.options().dtype(commonDtype).memory_format(at::MemoryFormat::Contiguous));
+  Tensor result;
+  if (self.layout() != kStrided && other.layout() == kStrided) {
+    // add(sparse, dense) -> dense
+    result = at::empty_like(
+        other,
+        other.options()
+            .dtype(commonDtype)
+            .memory_format(at::MemoryFormat::Contiguous));
+  } else {
+    // add(dense, sparse) -> dense AND add(sparse, sparse) -> sparse
+    result = at::empty_like(
+        self,
+        self.options()
+            .dtype(commonDtype)
+            .memory_format(at::MemoryFormat::Contiguous));
+  }
   return at::add_out(result, self, other, alpha); // redispatch!
 }
 
@@ -952,6 +967,8 @@ Tensor& add_out_sparse_csr_cpu(
     SparseCsrTensor& out) {
   if (self.layout() == kStrided) {
     add_out_dense_sparse_csr_cpu(out, self, other, alpha);
+  } else if (other.layout() == kStrided) {
+    add_out_dense_sparse_csr_cpu(out, other, self, alpha);
   } else {
     TORCH_CHECK(
         self.sizes().equals(other.sizes()),
