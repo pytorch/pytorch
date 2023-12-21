@@ -2188,9 +2188,8 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def symbolic_locals_contain_module_class(self):
         for v in self.symbolic_locals.values():
-            if (
-                isinstance(v, UserDefinedClassVariable)
-                and issubclass(v.as_python_constant(), torch.nn.Module)
+            if isinstance(v, UserDefinedClassVariable) and issubclass(
+                v.as_python_constant(), torch.nn.Module
             ):
                 return True
         return False
