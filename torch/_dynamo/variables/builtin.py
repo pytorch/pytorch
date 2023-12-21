@@ -1229,7 +1229,7 @@ class BuiltinVariable(VariableTracker):
         ):
             if (
                 isinstance(obj, variables.UserDefinedClassVariable)
-                and obj.as_python_constant() is torch.Tensor
+                and obj.as_python_constant().__module__.startswith("torch.")
             ):
                 member = getattr(obj.value, name)
                 # if trace_rules.is_aten_op_or_tensor_method(member):
@@ -1238,6 +1238,16 @@ class BuiltinVariable(VariableTracker):
                     return VariableBuilder(tx, source)(member)
                 else:
                     return SourcelessBuilder()(tx, member)
+            elif (
+                isinstance(obj, variables.UserDefinedObjectVariable)
+                and obj.value.__class__.__module__.startswith("torch.")
+            ):
+                member = getattr(obj.value, name)
+                if source is not None:
+                    return VariableBuilder(tx, source)(member)
+                else:
+                    return SourcelessBuilder()(tx, member)
+
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
