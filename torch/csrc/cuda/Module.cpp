@@ -873,6 +873,12 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THCPModule_hasMagma(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return at::hasMAGMA() ? Py_True : Py_False;
+  END_HANDLE_TH_ERRORS
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -1285,8 +1291,6 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
     }
   };
 
-  set_module_attr("has_magma", at::hasMAGMA() ? Py_True : Py_False);
-
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for (const auto i : c10::irange(num_gpus)) {
@@ -1517,6 +1521,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_rocm_is_backward_pass,
      METH_NOARGS,
      nullptr},
+    {"_cuda_hasMagma", THCPModule_hasMagma, METH_NOARGS, nullptr},
     {nullptr}};
 
 PyMethodDef* THCPModule_methods() {
