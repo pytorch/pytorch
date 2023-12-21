@@ -53,6 +53,7 @@ modernize-*,
 performance-*,
 readability-container-size-empty,
 readability-delete-null-pointer,
+readability-duplicate-include
 readability-string-compare,
 '
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'

@@ -9,7 +9,6 @@
 #include <string>
 #include <c10/util/Exception.h>
 #include <ATen/core/interned_strings_class.h>
-#include <c10/util/Exception.h>
 
 namespace c10 {
 
