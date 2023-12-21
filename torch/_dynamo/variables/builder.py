@@ -316,6 +316,7 @@ class VariableBuilder:
                     torch.device,
                     torch.dtype,
                     torch.memory_format,
+                    torch.layout,
                 ),
                 cls.wrap_literal,
             ),

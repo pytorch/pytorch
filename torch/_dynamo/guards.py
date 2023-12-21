@@ -395,6 +395,7 @@ class GuardBuilder(GuardBuilderBase):
             torch.device,
             torch.dtype,
             torch.memory_format,
+            torch.layout,
             *np_types,
         )
         if istype(val, dict):

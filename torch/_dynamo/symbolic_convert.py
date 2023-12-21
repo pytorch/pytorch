@@ -2191,7 +2191,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             if (
                 isinstance(v, UserDefinedClassVariable)
                 and issubclass(v.as_python_constant(), torch.nn.Module)
-                or isinstance(v, NNModuleVariable)
             ):
                 return True
         return False
