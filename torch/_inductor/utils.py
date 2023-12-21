@@ -609,11 +609,16 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
-instance_descriptor = collections.namedtuple(
-    "instance_descriptor",
-    ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-    defaults=[tuple(), tuple(), tuple(), tuple()],
-)
+try:
+    from triton.compiler.compiler import AttrsDescriptor as instance_descriptor
+except ImportError:
+    # To support older version of triton which does not have AttrsDescriptor
+    # class
+    instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
+        "instance_descriptor",
+        ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
+        defaults=[tuple(), tuple(), tuple(), tuple()],
+    )
 
 
 @functools.lru_cache(None)
@@ -1203,7 +1208,7 @@ def aot_inductor_launcher(so_path: str, device: str):
                 return runner.run(input_tensors);
             }}
 
-            std::vector<const char*> get_call_spec() {{
+            std::vector<std::string> get_call_spec() {{
                 return runner.get_call_spec();
             }}
         """
@@ -1217,7 +1222,7 @@ def aot_inductor_launcher(so_path: str, device: str):
                 return runner.run(input_tensors);
             }}
 
-            std::vector<const char*> get_call_spec() {{
+            std::vector<std::string> get_call_spec() {{
                 return runner.get_call_spec();
             }}
         """
