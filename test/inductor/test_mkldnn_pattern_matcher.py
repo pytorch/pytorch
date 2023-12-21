@@ -670,6 +670,46 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    def test_qconv2d_add_broadcast_shapes_cpu(self):
+        r"""
+        This testcase will quantize Conv2d->add pattern using broadcast shape inputs.
+        Conv2d->Add fusion will fail for the broadcast shape inputs case.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(self, use_bias):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(32, 32, kernel_size=3, stride=1)
+
+            def forward(self, x1, x2):
+                return torch.add(self.conv(x1), x2)
+
+        bias_list = [True, False]
+        for bias in bias_list:
+            mod = M(bias).eval()
+            x1 = torch.randn((2, 32, 9, 9))
+            x2 = torch.randn((2, 32, 1, 1))
+
+            def matcher_check_fn():
+                # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 1
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 1
+                )
+                # 2. Qconv2d Binary Unary fusion in post-grad fusion pass * 0
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_binary_matcher_count"], 0
+                )
+
+            self._test_common(
+                mod,
+                (x1, x2),
+                check_quantization=True,
+                matcher_check_fn=matcher_check_fn,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
     def test_qconv2d_add_2(self):
         r"""
         This testcase prevents this pattern be matched as a conv_binary fusion by mistake.
