@@ -8,7 +8,6 @@ from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from torch.testing._internal.autocast_test_lists import AutocastCPUTestLists
 from torch.utils._python_dispatch import TorchDispatchMode
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAutocastCPU(TestCase):
     def setUp(self):
         super().setUp()
@@ -225,7 +224,6 @@ class WeightDTypeCastCounterMode(TorchDispatchMode):
         torch.clear_autocast_cache = self.old_clear_cache
         return super().__exit__(exc_type, exc_val, exc_tb)
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
 class TestAutocastGPU(TestCase):
     def test_cast_cache_is_global(self):
@@ -269,7 +267,6 @@ class TestAutocastGPU(TestCase):
             torch._C._set_cached_tensors_enabled(False)
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestTorchAutocast(TestCase):
     def test_autocast_fast_dtype(self):
         gpu_fast_dtype = torch.get_autocast_gpu_dtype()

@@ -4,8 +4,7 @@
 #include <functional>
 #include <type_traits>
 
-namespace c10 {
-namespace guts {
+namespace c10::guts {
 
 /**
  * Access information about result type or arguments from a function type.
@@ -222,5 +221,4 @@ auto tuple_map(std::tuple<Args...>&& tuple, const Mapper& mapper) {
       std::move(tuple), mapper, std::index_sequence_for<Args...>());
 }
 
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts
