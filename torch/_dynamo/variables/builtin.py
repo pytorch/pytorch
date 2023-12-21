@@ -1236,6 +1236,10 @@ class BuiltinVariable(VariableTracker):
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
+        elif isinstance(obj, TorchInGraphFunctionVariable):
+            member = getattr(obj.value, name)
+            if trace_rules.is_aten_op_or_tensor_method(member):
+                return TorchInGraphFunctionVariable(member, **options)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
             if obj.is_torch:
                 member = getattr(obj.value, name)
