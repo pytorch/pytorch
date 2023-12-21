@@ -277,7 +277,7 @@ def _init_meta_tensor(value: Any) -> Any:
 
     device = getattr(value, "device", None)
     # DCP does the initialization if it's meta tensor/DTensor.
-    if device and device == torch.device("meta"):
+    if device == torch.device("meta"):
         device_type = dist.distributed_c10d._get_pg_default_device().type
         device = cast(torch.device, _get_device_module(device_type).current_device())
         if isinstance(value, DTensor):
