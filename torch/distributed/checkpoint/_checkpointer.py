@@ -1,5 +1,5 @@
 from concurrent.futures import Future
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import torch.distributed as dist
 import torch.distributed.checkpoint.state_dict_loader as loader
@@ -13,7 +13,8 @@ from torch.distributed.checkpoint.storage import (
 )
 
 
-__all__ = []
+__all__: List[str] = []
+
 
 class _Checkpointer:
     """This base class specefies a high level API for saving and loading
