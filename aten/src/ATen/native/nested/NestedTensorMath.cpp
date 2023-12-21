@@ -880,6 +880,18 @@ Tensor _nested_view_from_values_offsets_lengths(
   return Tensor();
 }
 
+Tensor _nested_get_values(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(
+      false, "_nested_get_values(): expected to be implemented from Python");
+  return Tensor();
+}
+
+Tensor _nested_get_offsets(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(
+      false, "_nested_get_offsets(): expected to be implemented from Python");
+  return Tensor();
+}
+
 std::tuple<Tensor, Tensor> _nested_compute_contiguous_strides_offsets(const Tensor& nested_size) {
   return std::make_tuple(
       construct_nested_strides(nested_size),

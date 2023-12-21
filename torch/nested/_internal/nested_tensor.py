@@ -97,7 +97,7 @@ class NestedTensor(torch.Tensor):
 
         # subtract 1 to convert to values dim space
         r = self._ragged_idx - 1
-        self._size = (B, *values.shape[:r], ragged_size, *values.shape[r+1:])
+        self._size = (B, *values.shape[:r], ragged_size, *values.shape[r + 1 :])
         stride = values.stride()
         self._strides = (ragged_size * stride[r], *stride)
 
@@ -113,7 +113,8 @@ class NestedTensor(torch.Tensor):
         torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
 
     def values(self):
-        return DifferentiableValues.apply(self)
+        # dispatch to get proper view relationship
+        return torch._nested_get_values(self)  # type: ignore[return-value]
 
     def offsets(self):
         return self._offsets
@@ -177,12 +178,11 @@ class NestedTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
-        # inner tensors: _values, _offsets, [_lengths], [_base]
-        assert len(inner_tensors) >= 2 and len(inner_tensors) <= 4
+        # inner tensors: _values, _offsets, [_lengths]
+        assert len(inner_tensors) >= 2 and len(inner_tensors) <= 3
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
         lengths = inner_tensors.get("_lengths", None)
-        base = inner_tensors.get("_base", None)
         ragged_idx = meta["ragged_idx"]
 
         # Note that we cannot simply check if is_fake(values) because
@@ -195,27 +195,14 @@ class NestedTensor(torch.Tensor):
             ragged_size = outer_size[ragged_idx]
             _tensor_symint_registry[ragged_source] = ragged_size
 
-        if base is None:
-            return NestedTensor(
-                values,
-                offsets=offsets,
-                lengths=lengths,
-                requires_grad=meta["requires_grad"],
-                _ragged_idx=ragged_idx,
-                _metadata_cache=meta["metadata_cache"],
-            )
-
-        # return a view
-        values = base.as_strided(values.shape, values.stride(), values.storage_offset())
-        if lengths is None:
-            # Typical dense -> NT view case
-            ret_nt = nested_view_from_values_offsets(values, offsets)
-        else:
-            # base is a dense tensor that is the result of narrow()
-            ret_nt = nested_view_from_values_offsets_lengths(values, offsets, lengths)
-
-        ret_nt._metadata_cache = meta["metadata_cache"]
-        return ret_nt
+        return NestedTensor(
+            values,
+            offsets=offsets,
+            lengths=lengths,
+            requires_grad=meta["requires_grad"],
+            _ragged_idx=ragged_idx,
+            _metadata_cache=meta["metadata_cache"],
+        )
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -243,26 +230,6 @@ class NestedTensor(torch.Tensor):
             pass
         with torch._C.DisableTorchFunctionSubclass():
             return func(*args, **kwargs)
-
-
-# Returns nt.values() in a differentiable way
-class DifferentiableValues(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x: NestedTensor):  # type: ignore[override]
-        ctx.save_for_backward(x.offsets())
-        ctx.metadata_cache = x._metadata_cache
-        ctx.ragged_idx = x._ragged_idx
-        return x._values
-
-    @staticmethod
-    def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
-        (offsets,) = ctx.saved_tensors
-        return NestedTensor(
-            gO,
-            offsets=offsets,
-            _metadata_cache=ctx.metadata_cache,
-            _ragged_idx=ctx.ragged_idx,
-        )
 
 
 # Need to make it obvious that users should be passing in offsets
