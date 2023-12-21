@@ -1971,7 +1971,9 @@ def forward(self, x_1, output_1):
 
             tmp = torch.add(x, 1)
             grid = (x.numel(),)
-            add_kernel.run(x, y, output, n_elements, grid=grid, BLOCK_SIZE=16)
+            add_kernel.run(
+                x, y, output, n_elements, warmup=False, grid=grid, BLOCK_SIZE=16
+            )
 
             return output, tmp
 
