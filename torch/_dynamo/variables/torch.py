@@ -226,7 +226,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             and not in_compiled_backward
         )
 
-    def decompose_and_inline_torch_op(self, tx, op, args):
+    def decompose_and_inline_torch_op(self, tx, op, args, kwargs):
         import inspect
 
         from functorch import make_fx
@@ -247,25 +247,52 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # mostly handle tuple and scalar
                 fake_value_args.append(arg.as_proxy())
 
-        # Need to handle if default arg is actually provided
-        def get_default_args(func):
+        fake_value_kwargs = {}
+        for key, value in kwargs.items():
+            if type(value.as_proxy()) is torch.fx.proxy.Proxy:
+                fake_value_kwargs[key] = get_fake_value(value.as_proxy().node, tx)
+            else:
+                # mostly handle tuple and scalar
+                fake_value_kwargs[key] = value.as_proxy()
+
+        def get_full_args_with_default_value(func, args, kwargs):
             try:
                 signature = inspect.signature(func)
             except ValueError as ve:
                 # no signature found, just return an empty dict
-                return []
-            return [
-                v.default
-                for k, v in signature.parameters.items()
-                if v.default is not inspect.Parameter.empty
-            ]
+                return args
+
+            current_i = 0
+            res = []
+            for k, v in signature.parameters.items():
+                if v.default is inspect.Parameter.empty:
+                    # this arg does not have default value, expect user pass
+                    # it in as an arg
+                    assert current_i < len(args)
+                    res.append(args[current_i])
+                    current_i += 1
+                else:
+                    if current_i < len(args):
+                        # this arg is has a default value, first check if user pass it in
+                        # as an arg
+                        res.append(args[current_i])
+                        current_i += 1
+                    else:
+                        # now we need to check if it is being passed as a kaways
+                        if k in kwargs:
+                            res.append(kwargs.get(k))
+                        else:
+                            # use default value
+                            res.append(v.default)
+            return res
 
         # It seems like make_fx requires caller to pass into all args including
         # those with default value.
-        default_args = get_default_args(op)
-        fake_value_args += default_args
+        complete_fake_value_args = get_full_args_with_default_value(
+            op, fake_value_args, fake_value_kwargs
+        )
         with enable_python_dispatcher():
-            fx_g = make_fx(op, pre_dispatch=True)(*fake_value_args)
+            fx_g = make_fx(op, pre_dispatch=True)(*complete_fake_value_args)
 
         print("\nfx code")
         print(fx_g.code)
@@ -662,18 +689,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     # have to
                     fn_ = torch._refs.tensor
 
-            import inspect
-
-            from functorch import make_fx
-
-            from torch._dispatch.python import enable_python_dispatcher
-            from ..utils import get_fake_value
-            from .base import MutableLocal
             from .builder import SourcelessBuilder
-            from .lists import BaseListVariable
 
             if self.should_decompose_torch_op(fn_):
-                tensor_variable = self.decompose_and_inline_torch_op(tx, fn_,args)
+                tensor_variable = self.decompose_and_inline_torch_op(
+                    tx, fn_, args, kwargs
+                )
             else:
                 tensor_variable = wrap_fx_proxy(
                     tx=tx,
