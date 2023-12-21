@@ -753,7 +753,7 @@ class WrapperCodeGen(CodeGen):
                     )
 
     def ensure_size_computed(self, sym: sympy.Symbol):
-        if sym.name.startswith("ps"):
+        if isinstance(sym, sympy.Symbol) and sym.name.startswith("ps"):
             if sym in self.computed_sizes:
                 return
             self.computed_sizes.add(sym)
