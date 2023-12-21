@@ -5520,7 +5520,12 @@ def meta_scaled_mm(
         return stride[0] == 1 and stride[1] == shape[0]
 
     def is_fp8_type(dtype):
-        return dtype in (torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+        return dtype in (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        )
 
     torch._check(
         self.dim() == 2 and mat2.dim() == 2,

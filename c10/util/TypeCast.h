@@ -92,7 +92,9 @@ struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e5m2> {
 };
 
 template <>
-struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e5m2fnuz> {
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e5m2fnuz> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::Half>
   apply(c10::Float8_e5m2fnuz src) {
@@ -101,7 +103,9 @@ struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e5m2fnuz
 };
 
 template <>
-struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e4m3fn> {
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e4m3fn> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::Half>
   apply(c10::Float8_e4m3fn src) {
@@ -110,7 +114,9 @@ struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e4m3fn> 
 };
 
 template <>
-struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e4m3fnuz> {
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e4m3fnuz> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::Half>
   apply(c10::Float8_e4m3fnuz src) {

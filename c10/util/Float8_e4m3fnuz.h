@@ -1,8 +1,8 @@
 #pragma once
 
-/// Defines the Float8_e4m3fnuz type (8-bit floating-point) including conversions
-/// to standard C types and basic arithmetic operations. Note that arithmetic
-/// operations are implemented by converting to floating point and
+/// Defines the Float8_e4m3fnuz type (8-bit floating-point) including
+/// conversions to standard C types and basic arithmetic operations. Note that
+/// arithmetic operations are implemented by converting to floating point and
 /// performing the operation in float32.
 /// Binary configuration remains the same as Float8_e4m3fn:
 /// s eeee mmm
@@ -399,7 +399,9 @@ struct alignas(1) Float8_e4m3fnuz {
   inline C10_HOST_DEVICE bool isnan() const;
 };
 
-C10_API std::ostream& operator<<(std::ostream& out, const Float8_e4m3fnuz& value);
+C10_API std::ostream& operator<<(
+    std::ostream& out,
+    const Float8_e4m3fnuz& value);
 
 } // namespace c10
 
