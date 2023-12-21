@@ -503,11 +503,19 @@ class CutlassEVTEpilogueArgumentFormatter:
             strides: List[int] = map_pointwise_index_to_read_strides(
                 index_expr, self.gemm_output_layout, self.flip_mn
             )
+            # For the sanity check,
+            # output size dimensions need to be flipped if flip_mn=True for the GEMM
+            # since the output layout (incl. sizes) might have been flipped
+            # from what is actually written
+            gemm_write_sizes = list(self.gemm_output_layout.size)
+            if self.flip_mn:
+                gemm_write_sizes[-1], gemm_write_sizes[-2] = (
+                    gemm_write_sizes[-2],
+                    gemm_write_sizes[-1],
+                )
+
             load_stride_max_idx = sum(
-                [
-                    stride * (dim - 1)
-                    for stride, dim in zip(strides, self.gemm_output_layout.size)
-                ]
+                [stride * (dim - 1) for stride, dim in zip(strides, gemm_write_sizes)]
             )
             # The strides might have reinterpreted the buffer, but they may not read beyond it's bounds, let's check that...
             assert (
@@ -620,8 +628,18 @@ def create_cutlass_aux_load_descriptor(
     strides: List[int] = map_pointwise_index_to_read_strides(
         index_expr, gemm_output_layout, flip_mn
     )
+    # For the sanity check,
+    # output size dimensions need to be flipped if flip_mn=True for the GEMM
+    # since the output layout (incl. sizes) might have been flipped
+    # from what is actually written
+    gemm_write_sizes = list(gemm_output_layout.size)
+    if flip_mn:
+        gemm_write_sizes[-1], gemm_write_sizes[-2] = (
+            gemm_write_sizes[-2],
+            gemm_write_sizes[-1],
+        )
     load_stride_max_idx = sum(
-        [stride * (dim - 1) for stride, dim in zip(strides, gemm_output_layout.size)]
+        [stride * (dim - 1) for stride, dim in zip(strides, gemm_write_sizes)]
     )
     # The strides might have reinterpreted the buffer, but they may not read beyond it's bounds, let's check that...
     assert (
