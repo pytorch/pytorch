@@ -1667,8 +1667,7 @@ class TestExport(TestCase):
 
         inp = (torch.randn(5, 10),)
         m = M()
-        with unittest.mock.patch("torch._export.DECOMP_TABLE", None):
-            ep = export(m, inp)
+        ep = export(m, inp)
         state_dict = ep.state_dict
 
         FileCheck().check_count(
@@ -1698,8 +1697,7 @@ class TestExport(TestCase):
 
         inp = (torch.randn(5, 10),)
         m = M()
-        with unittest.mock.patch("torch._export.DECOMP_TABLE", None):
-            ep = export(m, inp, dynamic_shapes={"x": {0: Dim("batch")}})
+        ep = export(m, inp, dynamic_shapes={"x": {0: Dim("batch")}})
 
         core_aten_ep = ep.run_decompositions()
 
