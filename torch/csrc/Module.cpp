@@ -87,6 +87,7 @@
 #include <torch/csrc/utils/verbose.h>
 
 #include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <c10/util/Logging.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 #include <sstream>
 #ifdef USE_CUDA
