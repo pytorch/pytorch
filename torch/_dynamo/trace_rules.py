@@ -92,6 +92,14 @@ manual_torch_name_rule_map = {
     "torch.nn.Parameter": SkipFilesVariable,
     "torch._nested_tensor_from_mask": SkipFilesVariable,
     "torch._nested_from_padded": SkipFilesVariable,
+    # symbol operators implemented in Python
+    "torch.sym_not": TorchInGraphFunctionVariable,
+    "torch.sym_float": TorchInGraphFunctionVariable,
+    "torch.sym_int": TorchInGraphFunctionVariable,
+    "torch.sym_max": TorchInGraphFunctionVariable,
+    "torch.sym_min": TorchInGraphFunctionVariable,
+    "torch.sym_sqrt": TorchInGraphFunctionVariable,
+    "torch.sym_ite": TorchInGraphFunctionVariable,
 }
 
 
