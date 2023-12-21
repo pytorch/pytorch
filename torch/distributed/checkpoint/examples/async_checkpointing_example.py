@@ -6,11 +6,11 @@ import traceback
 
 import torch
 import torch.distributed as dist
-from torch.distributed.checkpoint.filesystem import _FileSystemCheckpointer
 import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._tensor.device_mesh import init_device_mesh
+from torch.distributed.checkpoint.filesystem import _FileSystemCheckpointer
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
@@ -113,8 +113,6 @@ def run(rank, world_size):
                 raise InjectedException("Fault injection!")
 
         except InjectedException as e:
-            # TODO: This example assumes the exception is raised on all ranks. Updates this example
-            # once we have better support for fault tolerance.
             dist.barrier()
 
             _print("Trainer encountered exception:")
