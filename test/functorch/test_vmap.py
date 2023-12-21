@@ -5274,7 +5274,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
             torch.randn(*size) for size in ret_sizes
         ], device=other.device)
 
-    @xfailIfTorchDynamo
     @allowVmapFallbackUsage
     def test_fallback_unary(self, device):
         def f(x):
@@ -5283,7 +5282,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         nt = self._create_nt([4, None, 3], device=device)
         self._vmap_test(f, (nt,))
 
-    @xfailIfTorchDynamo
     @allowVmapFallbackUsage
     def test_fallback_binary(self, device):
         def f(x, y):
@@ -5293,7 +5291,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         y = self._create_nt([5, 3, None], device=device)
         self._vmap_test(f, (x, y))
 
-    @xfailIfTorchDynamo
     @allowVmapFallbackUsage
     def test_fallback_binary_nt_and_unbatched_dense(self, device):
         def f(x, y):
@@ -5303,7 +5300,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         y = torch.randn(3, 4, device=device)
         self._vmap_test(f, (x, y), in_dims=(0, None))
 
-    @xfailIfTorchDynamo
     @allowVmapFallbackUsage
     def test_fallback_binary_nt_and_batched_dense(self, device):
         def f(x, y):
@@ -5313,7 +5309,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         y = torch.randn(5, 3, 4, device=device)
         self._vmap_test(f, (x, y))
 
-    @xfailIfTorchDynamo
     def test_nt_acts_as_dense_in_vmap(self, device):
         def f(x):
             assert not x.is_nested
@@ -5322,7 +5317,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         x = self._create_nt([5, None, 3], device=device)
         self._vmap_test(f, (x,))
 
-    @xfailIfTorchDynamo
     def test_cat_batching_rule(self, device):
         def f(x, y, dim):
             return torch.cat([x, y], dim=dim)

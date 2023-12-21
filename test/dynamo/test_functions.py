@@ -1318,16 +1318,79 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         triple = functools.partial(multiply, y=3)
         return triple(x)
 
-    @common_utils.parametrize("attr", ("__name__", "__call__"))
+    @common_utils.parametrize(
+        "attr",
+        (
+            # True
+            "__subclasshook__",
+            "__lt__",
+            "__hash__",
+            "__ge__",
+            "__le__",
+            "__gt__",
+            "__dict__",
+            "__getattribute__",
+            "__setattr__",
+            "__doc__",
+            "__repr__",
+            "__dir__",
+            "__init__",
+            "__new__",
+            "__class__",
+            "__eq__",
+            "__delattr__",
+            "__reduce__",
+            "__module__",
+            "__format__",
+            "__str__",
+            "__sizeof__",
+            "__ne__",
+            "__call__",
+            "__reduce_ex__",
+            "__init_subclass__",
+            # False
+            "__code__",
+            "__kwdefaults__",
+            "__defaults__",
+            "__name__",
+            "__annotations__",
+            "__get__",
+            "__builtins__",
+            "__qualname__",
+            "__globals__",
+            "__closure__",
+        ),
+    )
     def test_partials_hasattr(self, attr):
-        # "__name__" ought to be False, whereas "__call__" True
-        def fn():
-            multiply = lambda x, y: x * y
-            triple = functools.partial(multiply, y=3)
-            return hasattr(triple, attr)
+        def fn(t):
+            f = lambda x, y: torch.sin(x) + torch.cos(y)
+            p = functools.partial(f, y=t)
+            if hasattr(p, attr):
+                return p(t)
+            else:
+                return torch.zeros_like(t)
 
-        opt_fn = torch.compile(fullgraph=True, backend="aot_eager")(fn)
-        self.assertEqual(opt_fn(), fn())
+        t = torch.randn(3, 4)
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fullgraph=True, backend=counter)(fn)
+        self.assertEqual(opt_fn(t), fn(t))
+        self.assertGreater(counter.frame_count, 0)
+
+    @unittest.expectedFailure
+    def test_partials_hasattr_set_attr(self):
+        def fn(t):
+            f = lambda x, y: torch.sin(x) + torch.cos(y)
+            p = functools.partial(f, y=t)
+            p.__name__ = "test"
+            if hasattr(p, "__name__"):
+                return p(t)
+            else:
+                return torch.zeros_like(t)
+
+        t = torch.randn(3, 4)
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fullgraph=True, backend=counter)(fn)
+        self.assertEqual(opt_fn(t), fn(t))
 
     def test_pow_int(self):
         def fn(a, b):
@@ -1776,6 +1839,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI,
+            FunctionalTensorMode,
             FunctorchFunctionalizeAPI,
             PythonFunctionalizeAPI,
         )
@@ -1798,8 +1862,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         t1 = torch.rand(5, device="cuda")
         t2 = torch.rand(5, device="cuda")
-
-        gm = make_fx(PythonFunctionalizeAPI().functionalize(f))(t1, t2)
+        with FunctionalTensorMode():
+            gm = make_fx(PythonFunctionalizeAPI().functionalize(f))(t1, t2)
         # Make sure t2 was not modified
         self.assertNotEqual(gm(t1, t2), t2)
 
@@ -1836,7 +1900,8 @@ def forward(self, x_1, output_1):
 
         def prep():
             x = torch.ones(4, device="cuda", requires_grad=True)
-            x_func = FunctionalTensor.to_functional(x)
+            with FunctionalTensorMode():
+                x_func = FunctionalTensor.to_functional(x)
             self.assertTrue(torch._is_functional_tensor(x_func.elem))
             return x_func
 
