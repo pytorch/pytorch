@@ -30,7 +30,7 @@ from torch._inductor import metrics
 from torch.nn import functional as F
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
-    disable_translation_validation_if_dynamic_shapes
+    disable_translation_validation_if_dynamic_shapes,
 )
 
 # Defines all the kernels for tests
