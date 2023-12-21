@@ -131,6 +131,10 @@ class C10dRendezvousBackend(RendezvousBackend):
 
 
 def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
+    if not params.endpoint and params.min_nodes > 1:
+        raise ValueError(
+            "Rendezvous endpoint is required when using TCPStore based rendezvous for multinode jobs."
+        )
     host, port = parse_rendezvous_endpoint(params.endpoint, default_port=29400)
 
     cfg_is_host = params.get_as_bool("is_host")

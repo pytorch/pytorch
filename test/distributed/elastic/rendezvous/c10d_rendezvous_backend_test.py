@@ -221,6 +221,17 @@ class CreateBackendTest(TestCase):
                 ):
                     create_backend(self._params)
 
+    def test_create_backend_raises_error_if_endpoint_is_missing_and_more_than_one_node(self) -> None:
+        self._params.endpoint = None
+        self._params.min_nodes = 2
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"^Rendezvous endpoint is required when using TCPStore based rendezvous "
+            r"for multinode jobs.$",
+        ):
+            create_backend(self._params)
+
     def test_create_backend_raises_error_if_store_type_is_invalid(self) -> None:
         self._params.config["store_type"] = "dummy_store_type"
 
