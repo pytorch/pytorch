@@ -549,6 +549,33 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda()
+    def test_horizontal_fuse(self):
+        def fn(xs, ys, zs):
+            ops = []
+            for x, y, z in zip(xs, ys, zs):
+                add = x + y
+                sig = torch.ops.aten.sigmoid(add)
+                mul = sig * z
+                ops.append(mul)
+            return ops
+
+        nvertical = 5
+        a = [torch.randn(1, 4).cuda() for _ in range(nvertical)]
+        b = [torch.randn(1, 4).cuda() for _ in range(nvertical)]
+        c = [torch.randn(1, 4).cuda() for _ in range(nvertical)]
+        args = (a, b, c)
+
+        # We should have as many kernels as vertically fused ops.
+        self.check_model_cuda(fn, args)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, nvertical)
+
+        with torch._inductor.config.patch(
+            "aggressive_horizontal_fusion_into_foreach", True
+        ):
+            self.check_model_cuda(fn, args)
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
     def test_zero_elems(self):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])

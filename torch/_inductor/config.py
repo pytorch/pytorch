@@ -246,6 +246,9 @@ implicit_fallbacks = True
 # fuse even in cases without common reads
 aggressive_fusion = False
 
+# like aggressive fusion except we generate a foreach kernel instead.
+aggressive_horizontal_fusion_into_foreach = False
+
 # For each fused kernel in the wrapper, comment with the nodes that get fused.
 # Useful for debugging fusion.
 debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
