@@ -594,7 +594,7 @@ def maybe_mark_step(args):
         xm.mark_step()
 
 
-def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
+def speedup_experiment(args, model_iter_fn, model, prepared_model, example_inputs, **kwargs):
     """
     Measure speedups over eager.
 
@@ -663,7 +663,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
             with maybe_mark_profile(p=p, mark="actual"):
                 timings[rep, 1], actual_output = timed(
-                    model,
+                    prepared_model,
                     frozen_model_iter_fn,
                     inputs,
                     return_result=True,
@@ -2347,7 +2347,17 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_ddp(model)
+                if self.args.backend == "ipex":
+                    print('Using IPEX Optimization...\n')
+                    prepared_model = copy.deepcopy(model)
+                    import intel_extension_for_pytorch as ipex
+                    if self.args.bfloat16 or self.args.amp:
+                        prepared_model = ipex.optimize(prepared_model, dtype=torch.bfloat16, weights_prepack=False)
+                    elif self.args.float32:
+                        prepared_model = ipex.optimize(prepared_model, weights_prepack=False)
+                else:
+                    prepared_model = model
+                model_copy = self.deepcopy_and_maybe_ddp(prepared_model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_result = self.run_n_iterations(
                     model_copy, clone_inputs(example_inputs)
@@ -2368,7 +2378,7 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_ddp(model)
+                model_copy = self.deepcopy_and_maybe_ddp(prepared_model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 correct_rerun_result = self.run_n_iterations(
                     model_copy, clone_inputs(example_inputs)
@@ -2415,7 +2425,7 @@ class BenchmarkRunner:
             torch._dynamo.reset()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_ddp(model)
+                model_copy = self.deepcopy_and_maybe_ddp(prepared_model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 if self.args.export or self.args.export_aot_inductor:
                     # apply export on module directly
@@ -2565,6 +2575,17 @@ class BenchmarkRunner:
     def run_performance_test(
         self, name, model, example_inputs, optimize_ctx, experiment, tag=None
     ):
+        if self.args.backend == "ipex":
+            print('Using IPEX Optimization...\n')
+            prepared_model = copy.deepcopy(model)
+            import intel_extension_for_pytorch as ipex
+            if self.args.bfloat16:
+                prepared_model = ipex.optimize(prepared_model, dtype=torch.bfloat16, weights_prepack=False)
+            elif self.args.float32:
+                prepared_model = ipex.optimize(prepared_model, weights_prepack=False)
+
+        else:
+            prepared_model = model
         if self.args.xla:
             with self.pick_grad(name, self.args.training):
                 return experiment(*self.maybe_cast(model, example_inputs))
@@ -2596,10 +2617,11 @@ class BenchmarkRunner:
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
+        prepared_model, example_inputs = self.maybe_cast(prepared_model, example_inputs)
 
         # Use distributed wrapping as necessary
+        prepared_model = self.deepcopy_and_maybe_ddp(prepared_model)
         model = self.deepcopy_and_maybe_ddp(model)
-
         self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
@@ -2621,7 +2643,7 @@ class BenchmarkRunner:
                 aot_compilation_time = 0
 
             dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
-                optimized_model_iter_fn, model, example_inputs, "dynamo"
+                optimized_model_iter_fn, prepared_model, example_inputs, "dynamo"
             )
 
             compilation_time = dynamo_latency - eager_latency + aot_compilation_time
@@ -2666,7 +2688,7 @@ class BenchmarkRunner:
 
             if not hasattr(model, name):
                 model.name = name
-            results.append(experiment(model, example_inputs, **experiment_kwargs))
+            results.append(experiment(model, prepared_model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 
     def minify_model(
@@ -3301,6 +3323,13 @@ def process_entry(rank, runner, original_dir, args):
 def main(runner, original_dir=None, args=None):
     if original_dir:
         os.chdir(original_dir)
+    
+    #enabled ipex backend if installed
+    try:
+        import intel_extension_for_pytorch as ipex
+    except:
+        print('If ipex is used for benchmarking, you may install with pip install intel_extension_for_pytorch')
+    
     args = parse_args() if not args else parse_args(args)
     if args.baseline:
         args.baseline = os.path.abspath(args.baseline)
@@ -3321,6 +3350,7 @@ def main(runner, original_dir=None, args=None):
             )
 
     args.init_distributed = args.only and args.multiprocess
+
     if args.init_distributed:
         # NB: Do NOT query device count before CUDA initialization; we're
         # going to overwrite CUDA_VISIBLE_DEVICES and this will result in
