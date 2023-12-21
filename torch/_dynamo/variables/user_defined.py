@@ -81,6 +81,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         from . import ConstantVariable
         from .builder import VariableBuilder
 
+        if name == "__name__":
+            return ConstantVariable.create(self.value.__name__)
+
         source = AttrSource(self.source, name) if self.source is not None else None
         try:
             obj = inspect.getattr_static(self.value, name)
