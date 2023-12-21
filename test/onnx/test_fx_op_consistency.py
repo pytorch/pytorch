@@ -1827,7 +1827,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.binary_cross_entropy": [3e-2, 1e-3],
         "nn.functional.binary_cross_entropy_with_logits": [3e-2, 1e-3],
         "nn.functional.cosine_similarity": [3e-2, 1e-3],
-        "nn_functional_cosine_embedding_loss": [4e-2, 1e-2],
+        "nn.functional.cosine_embedding_loss": [1e-2, 1e-3],
         "nn.functional.hinge_embedding_loss": [4e-1, 3e-3],
         "nn.functional.kl_div": [2e-3, 2e-4],
         "nn.functional.poisson_nll_loss": [3e-2, 1e-3],
