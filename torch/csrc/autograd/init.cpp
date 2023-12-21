@@ -35,10 +35,6 @@
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 
-#ifdef USE_KINETO
-#include <libkineto.h>
-#endif
-
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -133,30 +129,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   ParameterClass = PyObject_GetAttrString(parameter_module, "Parameter");
   if (!ParameterClass)
     return nullptr;
-
-#if defined(USE_KINETO) && defined(__linux__) && !defined(USE_ROCM)
-  // Initialize the Kineto profilers, if they have not already.
-  // DO NOT REMOVE, this is needed for on-demand profiling.
-  if (!libkineto::api().isProfilerRegistered()) {
-    libkineto_init(
-        /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
-        /*logOnError=*/true);
-    libkineto::api().suppressLogMessages();
-  }
-  libkineto::api().initProfilerIfRegistered();
-
-  // Used for unit test to check profiler was initialized.
-  m.def("_isProfilerInitialized", []() {
-    return libkineto::api().isProfilerInitialized();
-  });
-#endif
-
-  m.def("_is_use_kineto_defined", []() -> bool {
-#ifdef USE_KINETO
-    return true;
-#endif
-    return false;
-  });
 
   py::class_<LegacyEvent>(m, "ProfilerEvent")
       .def("kind", &LegacyEvent::kindStr)
