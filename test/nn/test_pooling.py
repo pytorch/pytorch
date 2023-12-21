@@ -27,7 +27,6 @@ import torch.nn as nn
 from torch.autograd import gradcheck, gradgradcheck
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAvgPool(TestCase):
     def _sum_pool2d(self, x, kernel_size):
         windows = torch.nn.functional.unfold(x, kernel_size=kernel_size, stride=kernel_size)
@@ -133,7 +132,6 @@ class TestAvgPool(TestCase):
             self.assertTrue(not torch.isnan(y).any())
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPoolingNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -379,7 +377,6 @@ class TestPoolingNN(NNTestCase):
         with self.assertRaises(RuntimeError):
             F.max_unpool3d(x, torch.zeros(x.shape, dtype=int), [1, 1])
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
