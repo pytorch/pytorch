@@ -109,6 +109,70 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return super().var_getattr(tx, name)
 
+    def _call_cross_entropy_loss(self, tx, args, kwargs):
+        """
+        functional: input, target, weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
+        label_smoothing=0.0
+
+        non functional ctor: weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
+        label_smoothing=0.0
+
+        non functional loss call: input, target, optional_output
+        """
+        from . import ConstantVariable
+
+        def normalize_args(
+            weight=ConstantVariable.create(None),
+            size_average=ConstantVariable.create(None),
+            ignore_index=ConstantVariable.create(-100),
+            reduce=ConstantVariable.create(None),
+            reduction=ConstantVariable.create("mean"),
+            label_smoothing=ConstantVariable.create(0.0),
+        ):
+            return (
+                weight,
+                size_average,
+                ignore_index,
+                reduce,
+                reduction,
+                label_smoothing,
+            )
+
+        (
+            weight,
+            size_average,
+            ignore_index,
+            reduce_arg,
+            reduction,
+            label_smoothing,
+        ) = normalize_args(*args, **kwargs)
+
+        def fake_cross_entropy_loss(input, target):
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.nn.functional.cross_entropy,
+                    *proxy_args_kwargs(
+                        [
+                            input,
+                            target,
+                            weight,
+                            size_average,
+                            ignore_index,
+                            reduce_arg,
+                            reduction,
+                            label_smoothing,
+                        ],
+                        {},
+                    ),
+                ),
+            )
+
+        return variables.LambdaVariable(fake_cross_entropy_loss)
+
     def call_method(
         self,
         tx,
@@ -160,6 +224,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
             )
+        elif self.value is torch.nn.CrossEntropyLoss:
+            return self._call_cross_entropy_loss(tx, args, kwargs)
         elif self.value is contextlib.nullcontext:
             return NullContextVariable()
         elif self.value is collections.OrderedDict:
@@ -275,26 +341,30 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 user_cls_source=self.source,
                 mutable_local=MutableLocal(),
             )
-        # torch.LongTensor cannot accept a list of FakeTensors.
-        # So we stack the list of FakeTensors instead.
-        elif (
-            np
-            and self.value in tensortype_to_dtype
-            and len(args) == 1
-            and isinstance(args[0], variables.ListVariable)
-            and len(args[0].items) > 1
-            and all(isinstance(x, variables.TensorVariable) for x in args[0].items)
-        ):
-            # Stack FakeTensor
-            stacked = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    torch.stack,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-            )
-            args = [stacked]
+        elif self.value in tensortype_to_dtype or self.value in [
+            torch.cuda.Stream,
+            torch.cuda.Event,
+        ]:
+            # torch.LongTensor cannot accept a list of FakeTensors.
+            # So we stack the list of FakeTensors instead.
+            if (
+                np
+                and self.value in tensortype_to_dtype
+                and len(args) == 1
+                and isinstance(args[0], variables.ListVariable)
+                and len(args[0].items) > 1
+                and all(isinstance(x, variables.TensorVariable) for x in args[0].items)
+            ):
+                # Stack FakeTensor
+                stacked = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        torch.stack,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                )
+                args = [stacked]
 
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
