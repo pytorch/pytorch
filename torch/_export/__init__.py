@@ -96,9 +96,6 @@ class ExportDynamoConfig:
     allow_rnn: bool = True
 
 
-DECOMP_TABLE = core_aten_decompositions()
-
-
 @compatibility(is_backward_compatible=False)
 def capture_pre_autograd_graph(
     f: Callable,
