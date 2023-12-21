@@ -1363,6 +1363,17 @@ class TestExport(TestCase):
             _ = exported(torch.randn(4, 4), torch.randn(4), "floor")
         self.assertTrue(torch.allclose(exported(*inps), g(*inps)))
 
+    def test__scaled_dot_product_flash_attention(self):
+        class Module(torch.nn.Module):
+            def forward(self, q, k, v):
+                res = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v)
+                return res[0]
+
+        m = Module()
+        inputs = (torch.randn(5, 4, 3, 2), torch.randn(5, 4, 3, 2), torch.randn(5, 4, 3, 2))
+        ep = torch.export.export(m, inputs)
+        self.assertEqual(ep(*inputs), m(*inputs))
+
     def test_to_module_with_mutated_buffer_multiple_update_sub_later(self):
 
         class Bar(torch.nn.Module):
