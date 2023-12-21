@@ -26,7 +26,7 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
+from ..source import AttrSource, FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
 from .lists import ListVariable, TupleVariable
@@ -1367,7 +1367,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
             source_target="autograd.Function",
         )
 
-        fwd_fn = UserFunctionVariable(self.fwd_graph, source=self.source)
+        fwd_fn = UserFunctionVariable(
+            self.fwd_graph, source=AttrSource(self.source, member="forward")
+        )
         ctx = AutogradFunctionContextVariable.create(tx)
 
         # Speculate subgraph on the fwd
@@ -1385,7 +1387,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
         if fwd_freevars:
             unsupported("NYI")
 
-        bwd_fn = UserFunctionVariable(self.bwd_graph, source=self.source)
+        bwd_fn = UserFunctionVariable(
+            self.bwd_graph, source=AttrSource(self.source, member="backward")
+        )
         bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
             tx.output,
             parent=fwd_tracer,

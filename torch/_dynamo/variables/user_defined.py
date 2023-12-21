@@ -82,14 +82,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
             obj
         ):
-            from enum import Enum
-
-            from .constant import EnumVariable
-
             if source:
                 return VariableBuilder(tx, source)(obj)
-            elif isinstance(obj, Enum):
-                return EnumVariable(obj)
             elif ConstantVariable.is_literal(obj):
                 return ConstantVariable.create(obj)
 
