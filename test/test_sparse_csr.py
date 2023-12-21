@@ -22,6 +22,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex, floating_and_complex_types_and)
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
+import operator
 
 if TEST_SCIPY:
     import scipy.sparse as sp
@@ -306,7 +307,9 @@ class TestSparseCompressed(TestCase):
         compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[layout]
         for m, n, b in itertools.product(ns, ns, batch_shapes):
             shape = (*b, m, n)
-            result = torch.empty(shape, dtype=dtype, device=device, layout=layout)
+            with torch.sparse.check_sparse_tensor_invariants(enable=False):
+                # torch.empty may return invalid sparse compressed tensors
+                result = torch.empty(shape, dtype=dtype, device=device, layout=layout)
             self.assertEqual(result.shape, shape)
             self.assertEqual(result.dtype, dtype)
             self.assertEqual(result.device, torch.device(device))
@@ -727,11 +730,25 @@ class TestSparseCompressed(TestCase):
                    shape((2, 3)),
                    r'`compressed_indices\[..., 0\] == 0` is not satisfied.')
 
+            yield ('invalid compressed_indices[0] when nnz == 0',
+                   tensor([1, 0], dtype=torch.int64),
+                   tensor([], dtype=torch.int64),
+                   values([1])[:0],
+                   shape((1, 1)),
+                   r'`compressed_indices\[..., 0\] == 0` is not satisfied.')
+
             yield ('invalid compressed_indices[-1]',
                    tensor([0, 2, 5]),
                    tensor([0, 1, 0, 2]),
                    values([1, 2, 3, 4]),
                    shape((2, 3)),
+                   r'`compressed_indices\[..., -1\] == nnz` is not satisfied.')
+
+            yield ('invalid compressed_indices[-1] when nnz == 0',
+                   tensor([0, 1], dtype=torch.int64),
+                   tensor([], dtype=torch.int64),
+                   values([1])[:0],
+                   shape((1, 1)),
                    r'`compressed_indices\[..., -1\] == nnz` is not satisfied.')
 
             yield ('invalid compressed_indices.diff(dim=-1)',
@@ -3294,7 +3311,7 @@ class TestSparseCSR(TestCase):
 
             # random bool vector w/ length equal to max possible nnz for the sparse_shape
             mask_source = make_tensor(batch_mask_shape, dtype=torch.bool, device=device).flatten()
-            n_batch = functools.reduce(lambda x, y: x * y, batch_shape, 1)
+            n_batch = functools.reduce(operator.mul, batch_shape, 1)
 
             # stack random permutations of the source for each batch
             mask = torch.stack([mask_source[torch.randperm(mask_source.numel())]
