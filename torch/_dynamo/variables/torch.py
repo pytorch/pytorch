@@ -226,6 +226,68 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             and not in_compiled_backward
         )
 
+    def decompose_and_inline_torch_op(self, tx, op, args):
+        import inspect
+
+        from functorch import make_fx
+
+        from torch._dispatch.python import enable_python_dispatcher
+        from ..utils import get_fake_value
+        from .base import MutableLocal
+        from .builder import SourcelessBuilder
+        from .lists import BaseListVariable
+
+        # convert he arguments from VariableTracker to fake tensors + constants again
+        fake_value_args = []
+        # TODO(JackCaoG): include kwargs handling here
+        for arg in args:
+            if type(arg.as_proxy()) is torch.fx.proxy.Proxy:
+                fake_value_args.append(get_fake_value(arg.as_proxy().node, tx))
+            else:
+                # mostly handle tuple and scalar
+                fake_value_args.append(arg.as_proxy())
+
+        # Need to handle if default arg is actually provided
+        def get_default_args(func):
+            try:
+                signature = inspect.signature(func)
+            except ValueError as ve:
+                # no signature found, just return an empty dict
+                return []
+            return [
+                v.default
+                for k, v in signature.parameters.items()
+                if v.default is not inspect.Parameter.empty
+            ]
+
+        # It seems like make_fx requires caller to pass into all args including
+        # those with default value.
+        default_args = get_default_args(op)
+        fake_value_args += default_args
+        with enable_python_dispatcher():
+            fx_g = make_fx(op, pre_dispatch=True)(*fake_value_args)
+
+        print("\nfx code")
+        print(fx_g.code)
+
+        # TODO(JackCaoG): handle kwargs
+        def dummy_user_function_to_inline_bm(gm, args):
+            return gm(*args)
+
+        # now inline this fx graph and return the output
+        # question: will there be a loop? How do I tell if op is CompositeImplicitAutograd
+        user_fn_variable = SourcelessBuilder()(tx, dummy_user_function_to_inline_bm)
+        gm_variable = SourcelessBuilder()(tx, fx_g)
+        cls = BaseListVariable.cls_for(list)
+        input_list_variable = cls(
+            args,
+            mutable_local=MutableLocal(),
+        )
+        res = tx.inline_user_function_return(
+            user_fn_variable, (gm_variable, input_list_variable), {}
+        )
+        return res
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -611,56 +673,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             from .lists import BaseListVariable
 
             if self.should_decompose_torch_op(fn_):
-                # convert he arguments from VariableTracker to fake tensors + constants again
-                fake_value_args = []
-                # TODO(JackCaoG): include kwargs handling here
-                for arg in args:
-                    if type(arg.as_proxy()) is torch.fx.proxy.Proxy:
-                        fake_value_args.append(get_fake_value(arg.as_proxy().node, tx))
-                    else:
-                        # mostly handle tuple and scalar
-                        fake_value_args.append(arg.as_proxy())
-
-                def get_default_args(func):
-                    try:
-                        signature = inspect.signature(func)
-                    except ValueError as ve:
-                        # no signature found, just return an empty dict
-                        return []
-                    return [
-                        v.default
-                        for k, v in signature.parameters.items()
-                        if v.default is not inspect.Parameter.empty
-                    ]
-
-                # It seems like make_fx requires caller to pass into all args including
-                # those with default value.
-                default_args = get_default_args(fn_)
-                fake_value_args += default_args
-                with enable_python_dispatcher():
-                    fx_g = make_fx(fn_, pre_dispatch=True)(*fake_value_args)
-
-                print("\nfx code")
-                print(fx_g.code)
-
-                # TODO(JackCaoG): handle kwargs
-                def dummy_user_function_to_inline_bm(gm, args):
-                    return gm(*args)
-
-                # now inline this fx graph and return the output
-                # question: will there be a loop? How do I tell if op is CompositeImplicitAutograd
-                user_fn_variable = SourcelessBuilder()(
-                    tx, dummy_user_function_to_inline_bm
-                )
-                gm_variable = SourcelessBuilder()(tx, fx_g)
-                cls = BaseListVariable.cls_for(list)
-                input_list_variable = cls(
-                    args,
-                    mutable_local=MutableLocal(),
-                )
-                tensor_variable = tx.inline_user_function_return(
-                    user_fn_variable, (gm_variable, input_list_variable), {}
-                )
+                tensor_variable = self.decompose_and_inline_torch_op(tx, fn_,args)
             else:
                 tensor_variable = wrap_fx_proxy(
                     tx=tx,
