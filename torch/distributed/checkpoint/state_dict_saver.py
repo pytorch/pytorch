@@ -12,7 +12,7 @@ from torch.distributed.checkpoint.storage import StorageWriter
 from torch.distributed.checkpoint.utils import _DistWrapper
 
 
-__all__ = ["save_state_dict", "save", "async_save"]
+__all__ = ["save_state_dict", "save"]
 
 
 def save_state_dict(
@@ -106,7 +106,7 @@ def save(
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
     return _save_state_dict(
-        _stateful(state_dict),
+        _state_dict_to_stateful(state_dict),
         storage_writer,
         process_group,
         coordinator_rank,
@@ -115,7 +115,7 @@ def save(
     )
 
 
-def async_save(
+def _async_save(
     state_dict: STATE_DICT_TYPE,
     storage_writer: StorageWriter,
     *,
@@ -145,10 +145,9 @@ def async_save(
         Future: A future holding the resultant Metadata object from `save`.
 
     """
+    torch._C._log_api_usage_once("torch.distributed.checkpoint._async_save")
 
-    # since calling nccl collectives in new threads is risky, we call `_stateful` here in case users have
-    # defined custom collectives
-    cpu_state_dict = _offload_state_dict_to_cpu(_stateful(state_dict))
+    cpu_state_dict = _offload_state_dict_to_cpu(_state_dict_to_stateful(state_dict))
 
     executor = ThreadPoolExecutor(max_workers=1)
     f = executor.submit(
@@ -165,7 +164,9 @@ def async_save(
     return f
 
 
-def _stateful(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+def _state_dict_to_stateful(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+    """Creates a shallow copy of `state_dict` where `state_dict` is called for each Stateful object.
+    """
     stateful_state_dict = {}
     for key, elem in state_dict.items():
         stateful_state_dict[key] = (

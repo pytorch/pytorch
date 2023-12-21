@@ -80,15 +80,15 @@ class Checkpointer:
             planner=self.load_planner,
         )
 
-    def async_save(self, state_dict: STATE_DICT_TYPE) -> Future:
+    def _async_save(self, state_dict: STATE_DICT_TYPE) -> Future:
         """
-        Calls :py:meth: `torch.distributed.state_dict_saver.async_save`
+        Calls :py:meth: `torch.distributed.state_dict_saver._async_save`
 
         .. warning::
             This feature is experimental and subject to removal/change.
 
         """
-        return saver.async_save(
+        return saver._async_save(
             state_dict,
             self.storage_writer,
             process_group=self.process_group,

@@ -180,7 +180,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
         checkpointer = DCP.FileSystemCheckpointer(self.temp_dir)
         if async_op:
-            f = checkpointer.async_save(state_dict=sd)
+            f = checkpointer._async_save(state_dict=sd)
             t = time.monotonic()
             while not f.done():
                 time.sleep(1)
