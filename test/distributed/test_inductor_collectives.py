@@ -762,7 +762,31 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(inputs_compiled, inputs_eager)
 
+    def test_dynamo_support_collective_op_with_async_op_False(self):
 
+        def func(inp, out, *, pg):
+            # user explicitly set the attribute `async_op` to False,
+            # there should be no graph break
+            torch.distributed.reduce_scatter_tensor(
+                out,
+                inp,
+                group=pg,
+                async_op=False
+            )
+        local_size = [4, 4]
+        # single-proc test
+        global_size = local_size
+
+        inputs = torch.ones(local_size, device=self.device)
+        outputs = torch.empty(global_size, device=self.device)
+        correct_outputs = torch.empty(global_size, device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter)
+        compiled(inputs, outputs, pg=GroupMember.WORLD)
+        func(inputs, correct_outputs, pg=GroupMember.WORLD)
+        assert counter.frame_count == 1
+        assert counter.op_count == 3
+        assert same(outputs, correct_outputs)
 
     def test_dynamo_graphbreaks_unsupported_async_op(self):
 
