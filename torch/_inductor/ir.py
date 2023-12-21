@@ -4036,6 +4036,11 @@ class UserDefinedTritonKernel(ExternKernel):
         inputs = []
         kwargs = dict()
         constant_args = []
+
+        if "warmup" in kernel_args:
+            assert kernel_args["warmup"] is False
+            kernel_args.pop("warmup")
+
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
