@@ -284,7 +284,6 @@ def speculate_subgraph(
                 from . import TensorVariable
 
                 if not only_consist_of(output, TensorVariable, allow_none=True):
-                    breakpoint()
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
                     )
