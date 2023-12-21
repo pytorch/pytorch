@@ -1287,7 +1287,9 @@ class CommonTemplate:
             return torch.arange(0.1, 8.0001, 1, dtype=x.dtype, device=x.device)
 
         # Test that float arguments are truncated to int when dtype is set explicitly
-        make_arg = functools.partial(make_tensor, device="cpu", requires_grad=False)
+        make_arg = functools.partial(
+            make_tensor, device=self.device, requires_grad=False
+        )
         self.common(fn, (make_arg(1, dtype=torch.float32),))
         self.common(fn, (make_arg(1, dtype=torch.int64),))
 
@@ -1722,15 +1724,15 @@ class CommonTemplate:
             self.common(
                 fn,
                 (
-                    make_tensor(10, device="cpu", dtype=dtype),
-                    make_tensor((), device="cpu", dtype=dtype, exclude_zero=True),
+                    make_tensor(10, device=self.device, dtype=dtype),
+                    make_tensor((), device=self.device, dtype=dtype, exclude_zero=True),
                 ),
             )
             self.common(
                 fn,
                 (
-                    make_tensor((), device="cpu", dtype=dtype),
-                    make_tensor(10, device="cpu", dtype=dtype, exclude_zero=True),
+                    make_tensor((), device=self.device, dtype=dtype),
+                    make_tensor(10, device=self.device, dtype=dtype, exclude_zero=True),
                 ),
             )
 
@@ -1742,8 +1744,10 @@ class CommonTemplate:
             self.common(
                 fn,
                 (
-                    make_tensor(100, device="cpu", dtype=dtype),
-                    make_tensor(100, device="cpu", dtype=dtype, exclude_zero=True),
+                    make_tensor(100, device=self.device, dtype=dtype),
+                    make_tensor(
+                        100, device=self.device, dtype=dtype, exclude_zero=True
+                    ),
                 ),
             )
 
@@ -3767,9 +3771,11 @@ class CommonTemplate:
         def fn(value, mask, source):
             return torch.masked_scatter(value, mask, source)
 
-        value = make_tensor(10, 10, dtype=torch.float32, device="cpu")
-        mask = make_tensor(10, 10, dtype=torch.bool, device="cpu")
-        source = make_tensor(mask.count_nonzero(), dtype=torch.float32, device="cpu")
+        value = make_tensor(10, 10, dtype=torch.float32, device=self.device)
+        mask = make_tensor(10, 10, dtype=torch.bool, device=self.device)
+        source = make_tensor(
+            mask.count_nonzero(), dtype=torch.float32, device=self.device
+        )
 
         self.common(fn, (value, mask, source))
 
@@ -3840,7 +3846,7 @@ class CommonTemplate:
         for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
             intmax = torch.iinfo(dtype).max
             make_arg = functools.partial(
-                make_tensor, dtype=dtype, device="cpu", requires_grad=False
+                make_tensor, dtype=dtype, device=self.device, requires_grad=False
             )
             self.common(
                 fn,
@@ -4196,15 +4202,15 @@ class CommonTemplate:
         self.common(
             fn,
             (
-                make_tensor(10, device="cpu", dtype=torch.float32),
-                make_tensor((), device="cpu", dtype=torch.float32),
+                make_tensor(10, device=self.device, dtype=torch.float32),
+                make_tensor((), device=self.device, dtype=torch.float32),
             ),
         )
         self.common(
             fn,
             (
-                make_tensor((), device="cpu", dtype=torch.float32),
-                make_tensor(10, device="cpu", dtype=torch.float32),
+                make_tensor((), device=self.device, dtype=torch.float32),
+                make_tensor(10, device=self.device, dtype=torch.float32),
             ),
         )
 
@@ -4351,7 +4357,7 @@ class CommonTemplate:
             return a + torch.full_like(a, 7.777)
 
         for dtype in all_types():
-            self.common(fn, (make_tensor(8, dtype=dtype, device="cpu"),))
+            self.common(fn, (make_tensor(8, dtype=dtype, device=self.device),))
 
     def test_index1(self):
         def fn(a, b, c):
