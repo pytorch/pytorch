@@ -77,6 +77,19 @@ PyObject* THPIInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
     return PyErr_Format(
         PyExc_TypeError, "torch.bool is not supported by torch.iinfo");
   }
+
+  if (at::isBitsType(scalar_type)) {
+    std::unordered_map<at::ScalarType, at::ScalarType> _map = {
+      {at::kBits1x8, at::kByte},
+      {at::kBits2x4, at::kByte},
+      {at::kBits4x2, at::kByte},
+      {at::kBits8, at::kByte},
+    };
+    if (_map.find(scalar_type) != _map.end()) {
+      scalar_type = _map.at(scalar_type);
+    }
+  }
+
   if (!at::isIntegralType(scalar_type, /*includeBool=*/false) &&
       !at::isQIntType(scalar_type)) {
     return PyErr_Format(

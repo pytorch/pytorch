@@ -63,6 +63,7 @@ DTYPE_TO_CPP = {
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
     torch.complex64: "complex64",
+    torch.bits8: "unsigned char",
 }
 
 DTYPE_TO_ATEN = {
