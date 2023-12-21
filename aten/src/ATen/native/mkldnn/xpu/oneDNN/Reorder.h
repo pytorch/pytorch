@@ -11,17 +11,16 @@
 
 #include <oneapi/dnnl/dnnl.hpp>
 
-using namespace dnnl;
 // using namespace xpu::dpcpp;
-// using namespace at::AtenIpexTypeXPU;
 
+namespace at{
 namespace xpu {
-namespace oneDNN {
+namespace onednn {
 
 struct ReorderAttr {
  public:
   ReorderAttr(bool is_group = false)
-      : pattr_(primitive_attr()),
+      : pattr_(dnnl::primitive_attr()),
         src_has_sc_(false),
         src_has_zp_(false),
         dst_has_sc_(false),
@@ -51,7 +50,7 @@ struct ReorderAttr {
     dst_has_zp_ = true;
   }
 
-  primitive_attr pattr() const {
+  dnnl::primitive_attr pattr() const {
     return pattr_;
   }
 
@@ -72,18 +71,18 @@ struct ReorderAttr {
   }
 
  private:
-  primitive_attr pattr_;
+  dnnl::primitive_attr pattr_;
   bool src_has_sc_;
   bool src_has_zp_;
   bool dst_has_sc_;
   bool dst_has_zp_;
 };
 
-static inline memory::desc check_group_and_create_plain_md(
+static inline dnnl::memory::desc check_group_and_create_plain_md(
     const at::Tensor& src,
     const at::Tensor& dst) {
   if (src.ndimension() == dst.ndimension()) {
-    return memory::desc(
+    return dnnl::memory::desc(
         get_onednn_dims(src),
         get_onednn_dtype_include_double(src),
         get_onednn_strides(src));
@@ -93,7 +92,7 @@ static inline memory::desc check_group_and_create_plain_md(
       ((src.ndimension() == dst.ndimension() + 1) &&
        (dst.size(0) == src.size(0) * src.size(1)))) {
     // group tensor
-    return memory::desc(
+    return dnnl::memory::desc(
         get_onednn_dims(dst),
         get_onednn_dtype_include_double(src),
         get_onednn_strides(dst.contiguous()));
@@ -119,7 +118,7 @@ static inline void reorder(
   // memory::desc src_md = src_ctx.is_plain()
   //     ? check_group_and_create_plain_md(src, dst)
   //     : src_ctx.meta();
-  memory::desc src_md = check_group_and_create_plain_md(src, dst);
+  dnnl::memory::desc src_md = check_group_and_create_plain_md(src, dst);
   // auto src_mem = dpcpp_onednn_memory(src_md, engine, src.data_ptr());
 
   // auto dst_ctx = DPCPPTensorContext::get_tensor_ctx(dst);
@@ -129,13 +128,13 @@ static inline void reorder(
   //           get_onednn_dtype_include_double(dst),
   //           get_onednn_strides(dst))
   //     : dst_ctx.meta();
-  memory::desc dst_md = memory::desc(
+  dnnl::memory::desc dst_md = dnnl::memory::desc(
             get_onednn_dims(dst),
             get_onednn_dtype_include_double(dst),
             get_onednn_strides(dst));
   // auto dst_mem = dpcpp_onednn_memory(dst_md, engine, dst.data_ptr());
 
-  primitive prim;
+  dnnl::primitive prim;
   // prim = dnnl::reorder(src_mem, dst_mem);
 
   // DPCPP_ONEDNN_EXEC(
@@ -145,8 +144,9 @@ static inline void reorder(
 
 static inline void reorder_copy(const at::Tensor& src, at::Tensor& dst) {
   RECORD_FUNCTION("reorder_copy", std::vector<c10::IValue>({src}));
-  xpu::oneDNN::reorder(src, dst);
+  xpu::onednn::reorder(src, dst);
 }
 
 } // namespace oneDNN
 } // namespace xpu
+} // namespace at

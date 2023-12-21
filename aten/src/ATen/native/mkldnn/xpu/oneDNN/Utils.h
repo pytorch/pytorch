@@ -9,8 +9,6 @@
 #include <ATen/core/Tensor.h>
 
 #include <ATen/core/grad_mode.h>
-// #include <aten/quantized/QUtils.h>
-// #include <aten/quantized/Quantizer.h>
 #include <c10/core/MemoryFormat.h>
 // #include <core/detail/TensorInfo.h>
 // #include <oneDNN/Runtime.h>
@@ -21,8 +19,6 @@
 // #include <utils/Macros.h>
 // #include <utils/Settings.h>
 
-using namespace dnnl;
-
 #define DPCPP_ONEDNN_EXEC(prim, stream, ...)                           \
   {                                                                    \
     auto q = dnnl::sycl_interop::get_queue((stream));                  \
@@ -32,106 +28,70 @@ using namespace dnnl;
         dnnl::sycl_interop::execute((prim), (stream), ##__VA_ARGS__)); \
   }
 
-// FIXME: In some cases, for example, concat, reorder, and etc.
-// oneDNN only supports dims <= 6 for now.
-#define MAX_ONEDNN_SUPPORTED_DIMS 6
-
-// sc&zp always have same md for PerTensor Quantization
-// Following two mds would have external linkage, but with same
-// address in different compiation unit.
-inline memory::desc Q_PER_TENSOR_SC_MD =
-    memory::desc({1}, memory::data_type::f32, memory::format_tag::x);
-inline memory::desc Q_PER_TENSOR_ZP_MD =
-    memory::desc({1}, memory::data_type::s32, memory::format_tag::x);
-
+namespace at {
 namespace xpu {
-namespace oneDNN {
+namespace onednn {
 
-// static inline std::pair<memory, memory> q_get_sc_zp_gpu_mem(
-//     const Tensor& qx,
-//     dnnl::engine& engine) {
-//   memory qx_sc_m, qx_zp_m;
-//   using xpu::dpcpp::XPUQuantizerBase;
-//   xpu::dpcpp::lru_key_t key_sc_zp;
-//   auto quant_base =
-//       xpu::dpcpp::fetch_cached_quantizer_base(qx.q_scale(), qx.q_zero_point());
-//   auto sc_ptr = quant_base.scale_ptr();
-//   auto zp_ptr = quant_base.zero_point_ptr();
-//   qx_sc_m = dpcpp_onednn_memory(Q_PER_TENSOR_SC_MD, engine, sc_ptr);
-//   qx_zp_m = dpcpp_onednn_memory(Q_PER_TENSOR_ZP_MD, engine, zp_ptr);
-//   return {qx_sc_m, qx_zp_m};
-// }
-
-// static inline memory q_get_wgh_sc_gpu_mem(
-//     const Tensor& qw,
-//     dnnl::engine& engine) {
-//   float dnn_scale = qw.q_scale();
-//   auto quant_base = xpu::dpcpp::fetch_cached_quantizer_base(dnn_scale, 0);
-//   auto sc_ptr = quant_base.scale_ptr();
-//   memory sc_m = dpcpp_onednn_memory(Q_PER_TENSOR_SC_MD, engine, sc_ptr);
-//   return sc_m;
-// }
-
-static inline memory::format_tag get_dnnl_default_format(
+static inline dnnl::memory::format_tag get_dnnl_default_format(
     int ndims,
     bool is_channels_last = false,
     bool allow_undef = false) {
   switch (ndims) {
     case 1:
-      return memory::format_tag::a;
+      return dnnl::memory::format_tag::a;
     case 2:
-      return memory::format_tag::ab;
+      return dnnl::memory::format_tag::ab;
     case 3:
-      return is_channels_last ? memory::format_tag::acb
-                              : memory::format_tag::abc;
+      return is_channels_last ? dnnl::memory::format_tag::acb
+                              : dnnl::memory::format_tag::abc;
     case 4:
-      return is_channels_last ? memory::format_tag::acdb
-                              : memory::format_tag::abcd;
+      return is_channels_last ? dnnl::memory::format_tag::acdb
+                              : dnnl::memory::format_tag::abcd;
     case 5:
-      return is_channels_last ? memory::format_tag::acdeb
-                              : memory::format_tag::abcde;
+      return is_channels_last ? dnnl::memory::format_tag::acdeb
+                              : dnnl::memory::format_tag::abcde;
     case 6:
-      return memory::format_tag::abcdef;
+      return dnnl::memory::format_tag::abcdef;
     case 7:
-      return memory::format_tag::abcdefg;
+      return dnnl::memory::format_tag::abcdefg;
     case 8:
-      return memory::format_tag::abcdefgh;
+      return dnnl::memory::format_tag::abcdefgh;
     case 9:
-      return memory::format_tag::abcdefghi;
+      return dnnl::memory::format_tag::abcdefghi;
     case 10:
-      return memory::format_tag::abcdefghij;
+      return dnnl::memory::format_tag::abcdefghij;
     case 11:
-      return memory::format_tag::abcdefghijk;
+      return dnnl::memory::format_tag::abcdefghijk;
     case 12:
-      return memory::format_tag::abcdefghijkl;
+      return dnnl::memory::format_tag::abcdefghijkl;
     default:
       if (!allow_undef) {
         TORCH_CHECK(false, "oneDNN doesn't support tensor dimension > 12");
       }
-      return memory::format_tag::undef;
+      return dnnl::memory::format_tag::undef;
   }
 }
 
-static inline memory::data_type get_onednn_dtype(
+static inline dnnl::memory::data_type get_onednn_dtype(
     const at::Tensor& tensor,
     bool allow_undef = false) {
   switch (tensor.scalar_type()) {
     case at::ScalarType::Byte:
-      return memory::data_type::u8;
+      return dnnl::memory::data_type::u8;
     case at::ScalarType::Char:
-      return memory::data_type::s8;
+      return dnnl::memory::data_type::s8;
     case at::ScalarType::QInt8:
-      return memory::data_type::s8;
+      return dnnl::memory::data_type::s8;
     case at::ScalarType::QUInt8:
-      return memory::data_type::u8;
+      return dnnl::memory::data_type::u8;
     case at::ScalarType::Int:
-      return memory::data_type::s32;
+      return dnnl::memory::data_type::s32;
     case at::ScalarType::Half:
-      return memory::data_type::f16;
+      return dnnl::memory::data_type::f16;
     case at::ScalarType::Float:
-      return memory::data_type::f32;
+      return dnnl::memory::data_type::f32;
     case at::ScalarType::BFloat16:
-      return memory::data_type::bf16;
+      return dnnl::memory::data_type::bf16;
     default:
       if (!allow_undef) {
         TORCH_CHECK(
@@ -139,21 +99,21 @@ static inline memory::data_type get_onednn_dtype(
             c10::toString(tensor.scalar_type()),
             " is not supported in oneDNN!");
       }
-      return memory::data_type::undef;
+      return dnnl::memory::data_type::undef;
   };
 }
 
-static inline memory::data_type get_onednn_dtype_include_double(
+static inline dnnl::memory::data_type get_onednn_dtype_include_double(
     const at::Tensor& tensor,
     bool allow_undef = false) {
   if (tensor.scalar_type() == at::ScalarType::Double)
-    return memory::data_type::f64;
+    return dnnl::memory::data_type::f64;
   return get_onednn_dtype(tensor, allow_undef);
 }
 
 static bool is_supported_onednn_dtype(const at::Tensor& tensor) {
   return get_onednn_dtype(tensor, /*allow_undef*/ true) ==
-          memory::data_type::undef
+          dnnl::memory::data_type::undef
       ? false
       : true;
 }
@@ -202,21 +162,21 @@ static bool is_supported_onednn_dtype(const at::Tensor& tensor) {
 //   }
 // }
 
-static inline memory::dims get_onednn_dims(const at::Tensor& tensor) {
-  memory::dims dims;
-  for (int i = 0; i < tensor.sizes().size(); i++)
+static inline dnnl::memory::dims get_onednn_dims(const at::Tensor& tensor) {
+  dnnl::memory::dims dims;
+  for (size_t i = 0; i < tensor.sizes().size(); i++)
     dims.push_back(tensor.size(i));
   return dims;
 }
 
-static inline memory::dims get_onednn_strides(const at::Tensor& tensor) {
-  memory::dims strides;
-  for (int i = 0; i < tensor.strides().size(); i++)
+static inline dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor) {
+  dnnl::memory::dims strides;
+  for (size_t i = 0; i < tensor.strides().size(); i++)
     strides.push_back(tensor.stride(i));
   return strides;
 }
 
-static inline memory::desc get_onednn_md(const at::Tensor& tensor) {
+static inline dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
   return {
       get_onednn_dims(tensor),
       get_onednn_dtype(tensor),
@@ -230,12 +190,12 @@ inline void array_copy(T* dst, const T* src, size_t size) {
 }
 
 inline bool onednn_strides_check(const at::Tensor& src) {
-  auto adims = xpu::oneDNN::get_onednn_dims(src);
+  auto adims = xpu::onednn::get_onednn_dims(src);
   int ndims = (int)adims.size();
   auto dims = adims.data();
   auto data_type = static_cast<dnnl_data_type_t>(
-      xpu::oneDNN::get_onednn_dtype(src, /*allow_undef*/ true));
-  auto strides_info = xpu::oneDNN::get_onednn_strides(src);
+      xpu::onednn::get_onednn_dtype(src, /*allow_undef*/ true));
+  auto strides_info = xpu::onednn::get_onednn_strides(src);
   auto strides = strides_info.empty() ? nullptr : &strides_info[0];
 
   dnnl_memory_desc_t md;
@@ -337,7 +297,7 @@ static inline bool is_onednn_matmul_strides(
     return true;
 
   // the overlaped cases are not supported
-  memory::dims strides = get_onednn_strides(tensor);
+  dnnl::memory::dims strides = get_onednn_strides(tensor);
   int64_t storage_size = 1;
   for (size_t dim = 0; dim < tensor_dim; ++dim)
     storage_size += (sizes[dim] - 1) * strides[dim];
@@ -369,14 +329,14 @@ static inline bool is_onednn_matmul_strides(
 
 // static inline std::vector<int64_t> compatible_groups_conv_strides(
 //     const at::Tensor& wgh,
-//     memory::dims group_size) {
+//     dnnl::memory::dims group_size) {
 //   std::vector<int64_t> strides = wgh.strides().vec();
 //   strides.insert(strides.begin(), group_size[1] * wgh.stride(0));
 //   return strides;
 // }
 // static inline std::vector<int64_t> compatible_groups_deconv_strides(
 //     const at::Tensor& wgh,
-//     memory::dims group_size) {
+//     dnnl::memory::dims group_size) {
 //   std::vector<int64_t> strides = wgh.strides().vec();
 //   strides[0] = wgh.strides()[1];
 //   strides[1] = wgh.strides()[0];
@@ -392,7 +352,7 @@ static inline bool is_onednn_matmul_strides(
 // static inline bool iteratable_has_onednn_layout(T container) {
 //   bool has_onednn_layout_tensor =
 //       std::any_of(container.begin(), container.end(), [](const Tensor& t) {
-//         return xpu::oneDNN::is_onednn_layout(t);
+//         return xpu::onednn::is_onednn_layout(t);
 //       });
 //   return has_onednn_layout_tensor;
 // }
@@ -568,66 +528,6 @@ static inline bool binary_valid(
   return false;
 }
 
-// static inline bool softmax_valid(const at::Tensor& self) {
-//   if (!self.is_contiguous())
-//     return false;
-
-//   if (self.sizes().size() > 4 || self.sizes().size() < 1)
-//     return false;
-
-//   // the datatype should be supported by oneDNN primitive.
-//   switch (self.scalar_type()) {
-//     case at::ScalarType::Half:
-//       break;
-//     case at::ScalarType::Float:
-//       break;
-//     case at::ScalarType::BFloat16:
-//       break;
-//     default:
-//       return false;
-//   };
-//   return true;
-// }
-
-// static inline bool softmax_backward_valid(
-//     const at::Tensor& grad,
-//     const at::Tensor& output,
-//     const at::Tensor& input) {
-//   if (!grad.is_contiguous() || !output.is_contiguous())
-//     return false;
-
-//   if (input.sizes().size() > 4 || input.sizes().size() < 1)
-//     return false;
-
-//   // the datatype should be supported by oneDNN primitive.
-//   switch (input.scalar_type()) {
-//     case at::ScalarType::Float:
-//       break;
-//     case at::ScalarType::BFloat16:
-//       break;
-//     default:
-//       return false;
-//   };
-//   return true;
-// }
-
-// static inline bool cat_valid(const TensorList& tensors) {
-//   for (int i = 0; i < tensors.size(); i++) {
-//     const Tensor& tensor = tensors[i];
-//     if (tensor.defined()) {
-//       if (tensor.scalar_type() == ScalarType::Bool ||
-//           tensor.scalar_type() == ScalarType::Short ||
-//           tensor.scalar_type() == ScalarType::Double ||
-//           tensor.scalar_type() == ScalarType::Long ||
-//           tensor.scalar_type() == ScalarType::ComplexFloat ||
-//           tensor.scalar_type() == ScalarType::ComplexDouble ||
-//           tensor.dim() > MAX_ONEDNN_SUPPORTED_DIMS) {
-//         return false;
-//       }
-//     }
-//   }
-//   return true;
-// }
 
 enum MEMORY_LAYOUT_FOR_CONV {
   ChannelsFirst = 0, // using channels_first for conv computation.
@@ -735,153 +635,7 @@ static inline at::Tensor contiguous_if_needed(
   return t_;
 }
 
-// static inline bool eltwise_forward_valid(
-//     const Tensor& out,
-//     const Tensor& self) {
-//   bool onednn_path_valid = true;
-//   if (!(is_onednn_layout(self) && eltwise_forward_valid(self))) {
-//     onednn_path_valid = false;
-//   }
-//   if (!out.defined()) {
-//     return onednn_path_valid;
-//   } else {
-//     if (!out.is_view() && out.is_contiguous() &&
-//         self.scalar_type() == out.scalar_type()) {
-//       // The output tensor is not a slice of another tensor
-//       return onednn_path_valid;
-//     } else {
-//       // The output tensor is a slice of another tensor
-//       TORCH_CHECK(
-//           !xpu::oneDNN::is_onednn_layout(out),
-//           "cannot convert tensor slice to plain format");
-//       return false;
-//     }
-//   }
-// }
 
-// static inline bool eltwise_backward_valid(
-//     const Tensor& out,
-//     const Tensor& self,
-//     const Tensor& other) {
-//   bool onednn_path_valid = true;
-//   if (!(is_onednn_layout(self) && is_onednn_layout(other) &&
-//         eltwise_backward_valid(self) && eltwise_backward_valid(other))) {
-//     onednn_path_valid = false;
-//   }
-//   if (!out.defined()) {
-//     return onednn_path_valid;
-//   } else {
-//     if (!out.is_view() && out.is_contiguous() &&
-//         self.scalar_type() == out.scalar_type()) {
-//       // The output tensor is not a slice of another tensor
-//       return onednn_path_valid;
-//     } else {
-//       // The output tensor is a slice of another tensor
-//       TORCH_CHECK(
-//           !xpu::oneDNN::is_onednn_layout(out),
-//           "cannot convert tensor slice to plain format");
-//       return false;
-//     }
-//   }
-// }
-
-// static inline bool binary_forward_valid(
-//     const Tensor& out,
-//     const Tensor& self,
-//     const Tensor& other) {
-//   bool onednn_path_valid = true;
-//   if (!(IPEX_ANY(xpu::oneDNN::is_onednn_layout, self, other) &&
-//         binary_valid(self, other))) {
-//     onednn_path_valid = false;
-//   }
-//   if (!out.defined()) {
-//     return onednn_path_valid;
-//   } else {
-//     if (!out.is_view() && out.is_contiguous() &&
-//         self.scalar_type() == out.scalar_type()) {
-//       // The output tensor is not a slice of another tensor
-//       return onednn_path_valid;
-//     } else {
-//       // The output tensor is a slice of another tensor
-//       TORCH_CHECK(
-//           !xpu::oneDNN::is_onednn_layout(out),
-//           "cannot convert tensor slice to plain format");
-//       return false;
-//     }
-//   }
-// }
-
-// template <typename T>
-// static void print_vec_xpu(const char* str, T* vec, int size) {
-//   printf("%s", str);
-
-//   for (int d = 0; d < size; ++d)
-//     printf("%d ", (int)vec[d]);
-
-//   printf("\n");
-// }
-
-// static void dump_md_data_type(memory::data_type dt) {
-//   switch (dt) {
-//     case memory::data_type::undef:
-//       std::cout << "data_type undef";
-//       break;
-//     case memory::data_type::f16:
-//       std::cout << "data type:f16" << std::endl;
-//       break;
-//     case memory::data_type::bf16:
-//       std::cout << "data type:bf16" << std::endl;
-//       break;
-//     case memory::data_type::f32:
-//       std::cout << "data type:f32" << std::endl;
-//       break;
-//     case memory::data_type::f64:
-//       std::cout << "data type:f64" << std::endl;
-//       break;
-//     case memory::data_type::s32:
-//       std::cout << "data type:s32" << std::endl;
-//       break;
-//     case memory::data_type::s8:
-//       std::cout << "data type:s8" << std::endl;
-//       break;
-//     case memory::data_type::u8:
-//       std::cout << "data type:u8" << std::endl;
-//       break;
-//     default:
-//       std::cout << "unknown dtype" << std::endl;
-//   };
-// }
-
-// static void dump_md(const char* str, memory::desc md) {
-//   printf("%s\n", str);
-
-//   print_vec_xpu("\tdims : ", md.get_dims().data(), md.get_ndims());
-
-//   print_vec_xpu("\tpdims: ", md.get_padded_dims().data(), md.get_ndims());
-
-//   print_vec_xpu("\toffs : ", md.get_padded_offsets().data(), md.get_ndims());
-
-//   dump_md_data_type(md.get_data_type());
-
-//   print_vec_xpu("\tstrs : ", md.get_strides().data(), md.get_strides().size());
-
-//   printf("\t\tnblks : %d\n", md.get_inner_nblks());
-
-//   print_vec_xpu(
-//       "\t\tidxs  : ", md.get_inner_idxs().data(), md.get_inner_nblks());
-
-//   print_vec_xpu(
-//       "\t\tblks  : ", md.get_inner_blks().data(), md.get_inner_nblks());
-// }
-
-// static inline bool requires_runtime_zp(const Tensor& src) {
-//   TORCH_CHECK(src.is_quantized(), "Only qtensor needs runtime zero_point")
-//   TORCH_CHECK(
-//       src.qscheme() == kPerTensorAffine,
-//       "Only per tensor quantization has non-zero zp")
-//   // See [Note: Use symmetric quant implementation when zp is 0]
-//   return (src.q_zero_point() != 0);
-// }
-
-} // namespace oneDNN
+} // namespace onednn
 } // namespace xpu
+} // namespace at

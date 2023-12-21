@@ -2,7 +2,7 @@
 // #include "utils/CustomOperatorRegistration.h"
 
 namespace at {
-namespace AtenIpexTypeXPU {
+namespace xpu {
 
 using namespace impl;
 #define IPEX_LINEAR_DEFINATION(func)                                       \
@@ -50,12 +50,12 @@ using namespace impl;
   }
 
 
-Tensor dpcpp_linear(
+Tensor linear_xpu(
     const Tensor& input,
     const Tensor& weight,
     const c10::optional<Tensor>& bias) {
   auto post_op = [=]() {
-    xpu::oneDNN::Attr attr;
+    onednn::Attr attr;
     return attr;
   };
   auto linear_wrapper = LinearConverter();
@@ -63,5 +63,5 @@ Tensor dpcpp_linear(
   return linear_wrapper.call(result, input, weight, bias, post_op);
 }
 
-} // namespace AtenIpexTypeXPU
+} // namespace xpu
 } // namespace at

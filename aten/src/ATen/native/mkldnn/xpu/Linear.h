@@ -1,7 +1,7 @@
 #include "BlasImpl.h"
 
 namespace at {
-namespace AtenIpexTypeXPU {
+namespace xpu {
 
 struct LinearConverter {
   LinearConverter() {
@@ -16,10 +16,10 @@ struct LinearConverter {
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
       Func func) {
-    xpu::oneDNN::Attr attr = func();
+    xpu::onednn::Attr attr = func();
     Tensor _bias = bias.has_value() ? bias.value() : at::Tensor();
     Tensor _input =
-        input.dim() <= 2 ? input : xpu::oneDNN::contiguous_if_needed(input);
+        input.dim() <= 2 ? input : xpu::onednn::contiguous_if_needed(input);
     return impl::matmul_fusion_variants(
         result, _input, weight, false, attr, is_fused_, _bias);
   }
@@ -29,10 +29,10 @@ struct LinearConverter {
       const Tensor& input,
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
-      xpu::oneDNN::Attr attr) {
+      xpu::onednn::Attr attr) {
     Tensor _bias = bias.has_value() ? bias.value() : at::Tensor();
     Tensor _input =
-        input.dim() <= 2 ? input : xpu::oneDNN::contiguous_if_needed(input);
+        input.dim() <= 2 ? input : xpu::onednn::contiguous_if_needed(input);
     return impl::matmul_fusion_variants(
         result, _input, weight, /*trans*/ true, attr, is_fused_, _bias);
   }
@@ -44,49 +44,11 @@ struct LinearConverter {
   bool is_fused_;
 };
 
-Tensor dpcpp_linear(
+Tensor linear_xpu(
     const Tensor& input,
     const Tensor& weight,
     const c10::optional<Tensor>& bias);
 
-// // IPEX customer linear for weight prepack
-// Tensor linear(
-//     const Tensor& input,
-//     const Tensor& weight,
-//     const c10::optional<Tensor>& bias_opt);
 
-// Tensor& linear_out(
-//     const Tensor& input,
-//     const Tensor& weight,
-//     const c10::optional<Tensor>& bias_opt,
-//     Tensor& output);
-
-// Tensor linear_pow(
-//     const Tensor& input,
-//     const Tensor& weight,
-//     const c10::optional<Tensor>& bias,
-//     Scalar exponent);
-
-// Tensor linear_leaky_relu(
-//     const Tensor& input,
-//     const Tensor& weight,
-//     const c10::optional<Tensor>& bias,
-//     Scalar negative_slope);
-
-// Tensor linear_hardtanh(
-//     const Tensor& input,
-//     const Tensor& weight,
-//     const c10::optional<Tensor>& bias,
-//     Scalar minval,
-//     Scalar maxval);
-
-// Tensor linear_elu(
-//     const Tensor& input,
-//     const Tensor& weight,
-//     const c10::optional<Tensor>& bias,
-//     Scalar alpha,
-//     Scalar scale,
-//     Scalar input_scale);
-
-} // namespace AtenIpexTypeXPU
+} // namespace xpu
 } // namespace at

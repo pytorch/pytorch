@@ -9,11 +9,10 @@
 // #include <utils/Macros.h>
 #include "Utils.h"
 
-using namespace dnnl;
 // using namespace xpu::dpcpp;
-
+namespace at {
 namespace xpu {
-namespace oneDNN {
+namespace onednn{
 /* oneDNN quantization usage:
    https://oneapi-src.github.io/oneDNN/dev_guide_attributes_quantization.html#
 
@@ -89,7 +88,7 @@ to oneDNN doc.
 using kind_t = dnnl::primitive::kind;
 struct PostOpParam {
   // eltwise post op constructor
-  PostOpParam(float scale, float alpha, float beta, algorithm algo, kind_t kind)
+  PostOpParam(float scale, float alpha, float beta, dnnl::algorithm algo, kind_t kind)
       : scale_(scale), alpha_(alpha), beta_(beta), algo_(algo), kind_(kind) {}
   // sum post op constructor
   PostOpParam(float scale, kind_t kind) : scale_(scale), kind_(kind) {}
@@ -98,7 +97,7 @@ struct PostOpParam {
       at::Tensor& binary,
       dnnl::memory::desc& binary_md,
       dnnl::memory::desc& expected_md,
-      algorithm algo,
+      dnnl::algorithm algo,
       kind_t kind)
       : binary_(binary),
         meta_(binary_md),
@@ -109,7 +108,7 @@ struct PostOpParam {
   PostOpParam(int mask, kind_t kind) : mask_(mask), kind_(kind) {}
 
   // post sum or binary with scale post op constructor
-  PostOpParam(at::Tensor& binary, float scale, algorithm algo, kind_t kind)
+  PostOpParam(at::Tensor& binary, float scale, dnnl::algorithm algo, kind_t kind)
       : scale_(scale), binary_(binary), algo_(algo), kind_(kind) {}
 
   // for int8 sum/eltwise
@@ -121,12 +120,12 @@ struct PostOpParam {
   at::Tensor binary_ = at::Tensor();
   at::Tensor expected_binary_ = at::Tensor();
   void* binary_ptr_ = nullptr;
-  dnnl::memory::desc meta_ = memory::desc();
-  dnnl::memory::desc expected_meta_ = memory::desc();
+  dnnl::memory::desc meta_ = dnnl::memory::desc();
+  dnnl::memory::desc expected_meta_ = dnnl::memory::desc();
   // for prelu
   int mask_ = 0;
   // common
-  algorithm algo_ = algorithm::eltwise_relu;
+  dnnl::algorithm algo_ = dnnl::algorithm::eltwise_relu;
   kind_t kind_ = kind_t::eltwise;
 };
 
@@ -136,41 +135,41 @@ class Attr {
   Attr(float q_scale, int64_t zp = 0) : q_scale_(q_scale), q_zero_point_(zp) {}
 
   /***** eltwise *****/
-  algorithm kind_with_relu = algorithm::eltwise_relu;
-  algorithm kind_with_sigmoid = algorithm::eltwise_logistic;
-  algorithm kind_with_gelu_tanh = algorithm::eltwise_gelu_tanh;
-  algorithm kind_with_gelu_erf = algorithm::eltwise_gelu_erf;
-  algorithm kind_with_mish = algorithm::eltwise_mish;
-  algorithm kind_with_linear = algorithm::eltwise_linear;
-  algorithm kind_with_swish = algorithm::eltwise_swish;
-  algorithm kind_with_sqrt = algorithm::eltwise_sqrt;
-  algorithm kind_with_tanh = algorithm::eltwise_tanh;
-  algorithm kind_with_square = algorithm::eltwise_square;
-  algorithm kind_with_abs = algorithm::eltwise_abs;
-  algorithm kind_with_exp = algorithm::eltwise_exp;
-  algorithm kind_with_log = algorithm::eltwise_log;
-  algorithm kind_with_round = algorithm::eltwise_round;
-  algorithm kind_with_hardswish = algorithm::eltwise_hardswish;
-  algorithm kind_with_soft_relu = algorithm::eltwise_soft_relu;
-  algorithm kind_with_elu = algorithm::eltwise_elu;
-  algorithm kind_with_pow = algorithm::eltwise_pow;
-  algorithm kind_with_clip = algorithm::eltwise_clip;
+  dnnl::algorithm kind_with_relu = dnnl::algorithm::eltwise_relu;
+  dnnl::algorithm kind_with_sigmoid = dnnl::algorithm::eltwise_logistic;
+  dnnl::algorithm kind_with_gelu_tanh = dnnl::algorithm::eltwise_gelu_tanh;
+  dnnl::algorithm kind_with_gelu_erf = dnnl::algorithm::eltwise_gelu_erf;
+  dnnl::algorithm kind_with_mish = dnnl::algorithm::eltwise_mish;
+  dnnl::algorithm kind_with_linear = dnnl::algorithm::eltwise_linear;
+  dnnl::algorithm kind_with_swish = dnnl::algorithm::eltwise_swish;
+  dnnl::algorithm kind_with_sqrt = dnnl::algorithm::eltwise_sqrt;
+  dnnl::algorithm kind_with_tanh = dnnl::algorithm::eltwise_tanh;
+  dnnl::algorithm kind_with_square = dnnl::algorithm::eltwise_square;
+  dnnl::algorithm kind_with_abs = dnnl::algorithm::eltwise_abs;
+  dnnl::algorithm kind_with_exp = dnnl::algorithm::eltwise_exp;
+  dnnl::algorithm kind_with_log = dnnl::algorithm::eltwise_log;
+  dnnl::algorithm kind_with_round = dnnl::algorithm::eltwise_round;
+  dnnl::algorithm kind_with_hardswish = dnnl::algorithm::eltwise_hardswish;
+  dnnl::algorithm kind_with_soft_relu = dnnl::algorithm::eltwise_soft_relu;
+  dnnl::algorithm kind_with_elu = dnnl::algorithm::eltwise_elu;
+  dnnl::algorithm kind_with_pow = dnnl::algorithm::eltwise_pow;
+  dnnl::algorithm kind_with_clip = dnnl::algorithm::eltwise_clip;
   // note: hardsigmoid seems oneDNN still not support
-  algorithm kind_with_hardsigmoid = algorithm::eltwise_hardsigmoid;
+  dnnl::algorithm kind_with_hardsigmoid = dnnl::algorithm::eltwise_hardsigmoid;
 
   /***** binary *****/
-  algorithm kind_with_binary_mul = algorithm::binary_mul;
-  algorithm kind_with_binary_add = algorithm::binary_add;
-  algorithm kind_with_binary_sub = algorithm::binary_sub;
-  algorithm kind_with_binary_div = algorithm::binary_div;
-  algorithm kind_with_binary_eq = algorithm::binary_eq;
-  algorithm kind_with_binary_ne = algorithm::binary_ne;
-  algorithm kind_with_binary_ge = algorithm::binary_ge;
-  algorithm kind_with_binary_gt = algorithm::binary_gt;
-  algorithm kind_with_binary_le = algorithm::binary_le;
-  algorithm kind_with_binary_lt = algorithm::binary_lt;
-  algorithm kind_with_binary_max = algorithm::binary_max;
-  algorithm kind_with_binary_min = algorithm::binary_min;
+  dnnl::algorithm kind_with_binary_mul = dnnl::algorithm::binary_mul;
+  dnnl::algorithm kind_with_binary_add = dnnl::algorithm::binary_add;
+  dnnl::algorithm kind_with_binary_sub = dnnl::algorithm::binary_sub;
+  dnnl::algorithm kind_with_binary_div = dnnl::algorithm::binary_div;
+  dnnl::algorithm kind_with_binary_eq = dnnl::algorithm::binary_eq;
+  dnnl::algorithm kind_with_binary_ne = dnnl::algorithm::binary_ne;
+  dnnl::algorithm kind_with_binary_ge = dnnl::algorithm::binary_ge;
+  dnnl::algorithm kind_with_binary_gt = dnnl::algorithm::binary_gt;
+  dnnl::algorithm kind_with_binary_le = dnnl::algorithm::binary_le;
+  dnnl::algorithm kind_with_binary_lt = dnnl::algorithm::binary_lt;
+  dnnl::algorithm kind_with_binary_max = dnnl::algorithm::binary_max;
+  dnnl::algorithm kind_with_binary_min = dnnl::algorithm::binary_min;
 
   // append sum post op
   Attr& append_post_sum(
@@ -187,14 +186,14 @@ class Attr {
       float scale,
       float alpha,
       float beta,
-      algorithm algo) {
+      dnnl::algorithm algo) {
     ops_params_.push_back(
         PostOpParam(scale, alpha, beta, algo, kind_t::eltwise));
     return *this;
   }
 
   // append binary post op
-  Attr& append_post_binary(algorithm algo, const at::Tensor& binary) {
+  Attr& append_post_binary(dnnl::algorithm algo, const at::Tensor& binary) {
     // auto binary_ = binary.is_quantized() ? at::dequantize(binary) : binary;
     // auto ctx = DPCPPTensorContext::get_tensor_ctx(binary_);
     // memory::desc md;
@@ -211,16 +210,16 @@ class Attr {
                                       binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d);
 
     binary_ = binary_is_channels_last ? binary_ : binary_.contiguous();
-    memory::desc md = get_onednn_md(binary_);
-    auto expected_md = memory::desc(
-        md.get_dims(), md.get_data_type(), memory::format_tag::any);
+    dnnl::memory::desc md = get_onednn_md(binary_);
+    auto expected_md = dnnl::memory::desc(
+        md.get_dims(), md.get_data_type(), dnnl::memory::format_tag::any);
     ops_params_.push_back(
         PostOpParam(binary_, md, expected_md, algo, kind_t::binary));
     return *this;
   }
 
   Attr& append_scale_binary(
-      algorithm algo,
+      dnnl::algorithm algo,
       at::Tensor binary,
       float scale,
       float sum_q_scale = 1.f,
@@ -237,25 +236,25 @@ class Attr {
     // we expand its shape according to Conv dimension
     // Conv1d [OC, 1, 1], Conv2d [1, OC, 1, ,1], Conv3d [1, OC, 1, 1, 1]
     at::Tensor binary_ = binary.contiguous();
-    memory::desc binary_md;
+    dnnl::memory::desc binary_md;
     switch (N) {
       case 1:
-        binary_md = memory::desc(
+        binary_md = dnnl::memory::desc(
             {binary.size(0), 1, 1},
-            memory::data_type::f32,
-            memory::format_tag::abc);
+            dnnl::memory::data_type::f32,
+            dnnl::memory::format_tag::abc);
         break;
       case 2:
-        binary_md = memory::desc(
+        binary_md = dnnl::memory::desc(
             {1, binary.size(0), 1, 1},
-            memory::data_type::f32,
-            memory::format_tag::abcd);
+            dnnl::memory::data_type::f32,
+            dnnl::memory::format_tag::abcd);
         break;
       case 3:
-        binary_md = memory::desc(
+        binary_md = dnnl::memory::desc(
             {1, binary.size(0), 1, 1, 1},
-            memory::data_type::f32,
-            memory::format_tag::abcde);
+            dnnl::memory::data_type::f32,
+            dnnl::memory::format_tag::abcde);
         break;
       default:
         AT_ERROR(
@@ -273,14 +272,14 @@ class Attr {
     return *this;
   }
 
-  void extract_post_ops(post_ops& dnnl_post_ops, const at::Tensor& dst) {
+  void extract_post_ops(dnnl::post_ops& dnnl_post_ops, const at::Tensor& dst) {
     // this function is used to extract post ops params from the ops_params_
     // and put them into onednn post ops
-    for (int i = 0; i < ops_params_.size(); ++i) {
+    for (size_t i = 0; i < ops_params_.size(); ++i) {
       kind_t kind = ops_params_[i].kind_;
       switch (kind) {
         case kind_t::eltwise: {
-          algorithm algo = ops_params_[i].algo_;
+          dnnl::algorithm algo = ops_params_[i].algo_;
           float alpha = ops_params_[i].alpha_;
           float beta = ops_params_[i].beta_;
           dnnl_post_ops.append_eltwise(algo, alpha, beta);
@@ -294,7 +293,7 @@ class Attr {
           break;
         }
         case kind_t::binary: {
-          algorithm algo = ops_params_[i].algo_;
+          dnnl::algorithm algo = ops_params_[i].algo_;
           auto expected_md = ops_params_[i].expected_meta_;
           // In this case user may create src1 memory descriptor with
           // format_tag::any or set a specific tag. However, in later case if
@@ -330,7 +329,7 @@ class Attr {
   }
 
   bool with_sum() {
-    for (int i = 0; i < ops_params_.size(); ++i) {
+    for (size_t i = 0; i < ops_params_.size(); ++i) {
       if (ops_params_[i].kind_ == kind_t::sum) {
         return true;
       }
@@ -339,7 +338,7 @@ class Attr {
   }
 
   bool with_binary() {
-    for (int i = 0; i < ops_params_.size(); ++i) {
+    for (size_t i = 0; i < ops_params_.size(); ++i) {
       if (ops_params_[i].kind_ == kind_t::binary) {
         return true;
       }
@@ -348,9 +347,9 @@ class Attr {
   }
 
   void construct_post_binary(
-      primitive_desc& pd,
-      post_ops& dnnl_post_ops,
-      std::unordered_map<int, memory>& args) {
+      dnnl::primitive_desc& pd,
+      dnnl::post_ops& dnnl_post_ops,
+      std::unordered_map<int, dnnl::memory>& args) {
     // This function is used to construct binary memory desc in binary post ops.
     // According to oneDNN doc, the binary tensor can be in shape of
     // [1, 1, 1, 1], tensor broadcast
@@ -360,15 +359,15 @@ class Attr {
     // Zhiwei modified
     // auto engine =
     //     GpuEngineManager::Instance().get_engine({c10::kXPU, current_device()});
-    for (int i = 0; i < ops_params_.size(); ++i) {
+    for (size_t i = 0; i < ops_params_.size(); ++i) {
       kind_t kind = ops_params_[i].kind_;
       if (kind == kind_t::binary) {
-        memory binary_m;
+        dnnl::memory binary_m;
         auto binary = ops_params_[i].binary_;
         auto md = ops_params_[i].meta_;
         // qeury expected_md to achieve peak performance
         auto expected_md = pd.query_md(
-            query::exec_arg_md,
+            dnnl::query::exec_arg_md,
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);
 
         // if (md != expected_md) {
@@ -410,3 +409,4 @@ class Attr {
 
 } // namespace oneDNN
 } // namespace xpu
+} // namespace at

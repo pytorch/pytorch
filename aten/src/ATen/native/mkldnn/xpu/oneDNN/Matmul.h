@@ -5,21 +5,16 @@
 #include <ATen/record_function.h>
 
 // #include <oneDNN/Runtime.h>
-// #include <quantized/QUtils.h>
 // #include <runtime/Utils.h>
 // #include <tensor/Tensor.h>
-// #include <utils/LRUCache.h>
 #include "Attr.h"
 #include "Utils.h"
 
 #include <oneapi/dnnl/dnnl.hpp>
 
-using namespace dnnl;
-// using namespace xpu::dpcpp;
-// using namespace at::AtenIpexTypeXPU;
-
+namespace at{
 namespace xpu {
-namespace oneDNN {
+namespace onednn {
 static inline void matmul(
     at::Tensor& result,
     const at::Tensor& mat1,
@@ -42,10 +37,10 @@ static inline void matmul(
   // auto strm = GpuStreamManager::Instance().get_stream();
 
   at::Tensor m1 =
-      xpu::oneDNN::is_onednn_matmul_strides(mat1) ? mat1 : mat1.contiguous();
+      xpu::onednn::is_onednn_matmul_strides(mat1) ? mat1 : mat1.contiguous();
   at::Tensor m2 =
-      xpu::oneDNN::is_onednn_matmul_strides(mat2) ? mat2 : mat2.contiguous();
-  at::Tensor dst = xpu::oneDNN::is_onednn_matmul_strides(result, true)
+      xpu::onednn::is_onednn_matmul_strides(mat2) ? mat2 : mat2.contiguous();
+  at::Tensor dst = xpu::onednn::is_onednn_matmul_strides(result, true)
       ? result
       : result.contiguous();
 
@@ -112,8 +107,6 @@ static inline void matmul(
     }
   }
 
-  // bias is fused in post-op for quantized path
-  with_bias &= (!m1.is_quantized()) && (!m2.is_quantized());
   b = b.contiguous(); // avoid reorder 2 times
 
   // ipex matmul support both ab/ba shape for m2 tensor, we don't check any more
@@ -124,25 +117,25 @@ static inline void matmul(
   auto m1_dt = m1_usr_dt;
   auto m2_dt = m2_usr_dt;
   auto dst_dt = dst_usr_dt;
-  memory::data_type bias_dt;
+  dnnl::memory::data_type bias_dt;
 
-  memory::desc m1_md, m1_usr_md, m1_any_md;
-  memory::desc m2_md, m2_usr_md, m2_any_md;
-  memory::desc dst_md, dst_usr_md, dst_any_md;
-  memory::desc bias_md;
+  dnnl::memory::desc m1_md, m1_usr_md, m1_any_md;
+  dnnl::memory::desc m2_md, m2_usr_md, m2_any_md;
+  dnnl::memory::desc dst_md, dst_usr_md, dst_any_md;
+  dnnl::memory::desc bias_md;
 
   // Naive Master weight
-  if (m1_dt == memory::data_type::bf16 && m2_dt == memory::data_type::f32) {
-    m2_dt = memory::data_type::bf16;
-    dst_dt = memory::data_type::bf16;
+  if (m1_dt == dnnl::memory::data_type::bf16 && m2_dt == dnnl::memory::data_type::f32) {
+    m2_dt = dnnl::memory::data_type::bf16;
+    dst_dt = dnnl::memory::data_type::bf16;
   } else if (
-      m1_dt == memory::data_type::f32 && m2_dt == memory::data_type::bf16) {
-    m1_dt = memory::data_type::bf16;
-    dst_dt = memory::data_type::bf16;
+      m1_dt == dnnl::memory::data_type::f32 && m2_dt == dnnl::memory::data_type::bf16) {
+    m1_dt = dnnl::memory::data_type::bf16;
+    dst_dt = dnnl::memory::data_type::bf16;
   }
 
-  memory::dims m1_dims, m2_dims, dst_dims, bias_dims;
-  memory::dims m1_strides, m2_strides, dst_strides, bias_strides;
+  dnnl::memory::dims m1_dims, m2_dims, dst_dims, bias_dims;
+  dnnl::memory::dims m1_strides, m2_strides, dst_strides, bias_strides;
   if (dims == 2) {
     m1_dims = {m, k};
     m2_dims = {k, n};
@@ -177,96 +170,58 @@ static inline void matmul(
 
   auto is_onednn_layout_suggested = using_onednn_layout_for_matmul(m1);
 
-  post_ops po;
+  dnnl::post_ops po;
   attr.extract_post_ops(po, dst);
 
-//   lru_key_t key_primitive;
-// #ifdef USE_PRIMITIVE_CACHE
-//   create_key(
-//       key_primitive,
-//       m1_dims,
-//       m2_dims,
-//       dst_dims,
-//       bias_dims,
-//       m1_dt,
-//       m2_dt,
-//       dst_dt,
-//       bias_dt,
-//       m1_strides,
-//       m2_strides,
-//       dst_strides,
-//       bias_strides,
-//       dims,
-//       is_onednn_layout_suggested,
-//       attr);
-// #endif
-
-  std::unordered_map<int, memory> args;
-
+  std::unordered_map<int, dnnl::memory> args;
   dnnl::matmul matmul_p;
   dnnl::matmul::primitive_desc matmul_pd;
 
-#ifdef USE_PRIMITIVE_CACHE
-  bool load_from_cache = find_key<dnnl::matmul>(key_primitive);
-#else
-  bool load_from_cache = false;
-#endif
-  if (load_from_cache) {
-    // load primitive from cache
-    // matmul_p = fetch_m<dnnl::matmul>(key_primitive);
-    // auto matmul_pd_t = matmul_p.get_primitive_desc();
-    // matmul_pd = dnnl::matmul::primitive_desc(
-    //     const_cast<dnnl_primitive_desc_t>(matmul_pd_t));
+  // STEP1: create memory desc
+  if (dims == 2 && is_onednn_layout_suggested) {
+    m1_md = dnnl::memory::desc(m1_dims, m1_dt, dnnl::memory::format_tag::any);
+    m2_md = dnnl::memory::desc(m2_dims, m2_dt, dnnl::memory::format_tag::any);
+    dst_md = dnnl::memory::desc(dst_dims, dst_dt, dnnl::memory::format_tag::any);
   } else {
-    // STEP1: create memory desc
-    if (dims == 2 && is_onednn_layout_suggested) {
-      m1_md = memory::desc(m1_dims, m1_dt, memory::format_tag::any);
-      m2_md = memory::desc(m2_dims, m2_dt, memory::format_tag::any);
-      dst_md = memory::desc(dst_dims, dst_dt, memory::format_tag::any);
-    } else {
-      m1_md = memory::desc(m1_dims, m1_dt, m1_strides);
-      m2_md = memory::desc(m2_dims, m2_dt, m2_strides);
-      dst_md = memory::desc(dst_dims, dst_dt, dst_strides);
-    }
-
-    // STEP2: creat attribute
-    primitive_attr pattr;
-    pattr.set_post_ops(po);
-
-#ifdef USE_SCRATCHPAD_MODE
-    pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-#endif
-
-
-    // if (m1_dt == memory::data_type::f32) {
-    //   pattr.set_fpmath_mode(xpu::oneDNN::get_onednn_fpmath_mode());
-    // }
-
-    // STEP3: create primitive
-    if (with_bias) {
-      bias_md = memory::desc(bias_dims, bias_dt, bias_strides);
-      // matmul_pd =
-      //     matmul::primitive_desc(engine, m1_md, m2_md, bias_md, dst_md, pattr);
-    } else {
-      // matmul_pd = matmul::primitive_desc(engine, m1_md, m2_md, dst_md, pattr);
-    }
-
-#ifdef USE_PRIMITIVE_CACHE
-    matmul_p = create_and_fetch_m<dnnl::matmul>(key_primitive, matmul_pd);
-#else
-    matmul_p = dnnl::matmul(matmul_pd);
-#endif
+    m1_md = dnnl::memory::desc(m1_dims, m1_dt, m1_strides);
+    m2_md = dnnl::memory::desc(m2_dims, m2_dt, m2_strides);
+    dst_md = dnnl::memory::desc(dst_dims, dst_dt, dst_strides);
   }
 
-  m1_usr_md = memory::desc(m1_dims, m1_usr_dt, m1_strides);
-  m2_usr_md = memory::desc(m2_dims, m2_usr_dt, m2_strides);
-  dst_usr_md = memory::desc(dst_dims, dst_usr_dt, dst_strides);
+  // STEP2: creat attribute
+  dnnl::primitive_attr pattr;
+  pattr.set_post_ops(po);
+
+#ifdef USE_SCRATCHPAD_MODE
+  pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+#endif
+
+
+  // if (m1_dt == memory::data_type::f32) {
+  //   pattr.set_fpmath_mode(xpu::oneDNN::get_onednn_fpmath_mode());
+  // }
+
+  // STEP3: create primitive
+  if (with_bias) {
+    bias_md = dnnl::memory::desc(bias_dims, bias_dt, bias_strides);
+    // matmul_pd =
+    //     matmul::primitive_desc(engine, m1_md, m2_md, bias_md, dst_md, pattr);
+  } else {
+    // matmul_pd = matmul::primitive_desc(engine, m1_md, m2_md, dst_md, pattr);
+  }
+
+  matmul_p = dnnl::matmul(matmul_pd);
+
+  m1_usr_md = dnnl::memory::desc(m1_dims, m1_usr_dt, m1_strides);
+  m2_usr_md = dnnl::memory::desc(m2_dims, m2_usr_dt, m2_strides);
+  dst_usr_md = dnnl::memory::desc(dst_dims, dst_usr_dt, dst_strides);
 
   // STEP4: create memory
   // auto m1_ctx = at::AtenIpexTypeXPU::DPCPPTensorContext::get_tensor_ctx(m1);
   // auto m1_usr_m = m1_ctx.is_plain()
   //     ? dpcpp_onednn_memory(m1_usr_md, engine, m1.data_ptr())
   //     : dpcpp_onednn_memory({m1_ctx.meta()}, engine, m1.data_ptr());
+
 
   // auto m2_ctx = at::AtenIpexTypeXPU::DPCPPTensorContext::get_tensor_ctx(m2);
   // auto m2_usr_m = m2_ctx.is_plain()
@@ -284,13 +239,6 @@ static inline void matmul(
 
   // memory m1_m = m1_usr_m, m2_m = m2_usr_m, dst_m = dst_usr_m;
   at::Tensor m1_, m2_, dst_;
-
-  auto weight_cache_optimization = [&]() {
-    bool onoff = false;
-    onoff |= is_onednn_layout_suggested;
-    onoff &= c10::InferenceMode::is_enabled();
-    return onoff;
-  }();
 
   // reorder cases
   // case1: master weight support to reorder data type
@@ -350,7 +298,7 @@ static inline void matmul(
   if ((!m1.is_quantized()) && (!m2.is_quantized())) {
     // Path1: normal path for non quantized input
     // DPCPP_ONEDNN_EXEC(matmul_p, strm, args);
-  } 
+  }
   // if (is_onednn_layout_suggested && dst_m != dst_usr_m && dims == 2) {
   //   auto blk_ctx = DPCPPTensorContext::release_tensor_ctx(dst_);
   //   DPCPPTensorContext::set_tensor_ctx(dst, std::move(blk_ctx));
@@ -360,5 +308,6 @@ static inline void matmul(
     result.copy_(dst);
 }
 
-} // namespace oneDNN
+} // namespace onednn
 } // namespace xpu
+} // namespace at

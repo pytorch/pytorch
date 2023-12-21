@@ -18,7 +18,7 @@
 // using namespace xpu::oneDNN;
 
 namespace at {
-namespace AtenIpexTypeXPU {
+namespace xpu {
 namespace impl {
 
 static inline bool check_broadcast(
@@ -496,17 +496,17 @@ this helper function is used to adjust binary tensor size according different
 matmul cases.*/
 static bool get_onednn_matmul_binary_attr(
     Tensor& result,
-    xpu::oneDNN::Attr& attr,
+    xpu::onednn::Attr& attr,
     int dim_tensor1,
     int dim_tensor2,
     DimVector output_shape,
     bool t2_is_matrix = true,
     bool should_fold_tensor1 = false,
     bool should_fold_tensor2 = false) {
-  xpu::oneDNN::Attr attr_update;
+  xpu::onednn::Attr attr_update;
   for (int i = 0; i < attr.ops_params_.size(); ++i) {
-    xpu::oneDNN::kind_t kind = attr.ops_params_[i].kind_;
-    if (kind != xpu::oneDNN::kind_t::binary || !attr.ops_params_[i].binary_.defined()) {
+    xpu::onednn::kind_t kind = attr.ops_params_[i].kind_;
+    if (kind != xpu::onednn::kind_t::binary || !attr.ops_params_[i].binary_.defined()) {
       attr_update.ops_params_.push_back(attr.ops_params_[i]);
       continue;
     }
@@ -625,8 +625,8 @@ static bool get_onednn_matmul_binary_attr(
       }
     }
 
-    if (!xpu::oneDNN::binary_valid(result, binary_final, true)) {
-      attr = xpu::oneDNN::Attr();
+    if (!xpu::onednn::binary_valid(result, binary_final, true)) {
+      attr = xpu::onednn::Attr();
       return false;
     }
 
@@ -711,7 +711,7 @@ static Tensor& matmul_fusion_variants(
     const Tensor& tensor1,
     const Tensor& tensor2,
     bool trans,
-    xpu::oneDNN::Attr& attr,
+    xpu::onednn::Attr& attr,
     bool& is_fused,
     Tensor bias = at::Tensor()) {
   const auto dim_tensor1 = tensor1.dim();
@@ -736,7 +736,7 @@ static Tensor& matmul_fusion_variants(
     is_fused = true;
     Tensor result = output.defined() ? output.view({1, 1})
                                      : at::empty({1, 1}, tensor1.options());
-    xpu::oneDNN::matmul(
+    xpu::onednn::matmul(
         result,
         tensor1.view({1, tensor1.size(0)}),
         tensor2.view({tensor2.size(0), 1}),
@@ -763,7 +763,7 @@ static Tensor& matmul_fusion_variants(
 
     is_fused = get_onednn_matmul_binary_attr(
         result, attr, dim_tensor1, dim_tensor2, output_shape);
-    xpu::oneDNN::matmul(result, tensor1, t2, bias, trans, attr);
+    xpu::onednn::matmul(result, tensor1, t2, bias, trans, attr);
     if (output.defined() && !output.is_alias_of(result)) {
       output.copy_(result);
     } else {
@@ -785,7 +785,7 @@ static Tensor& matmul_fusion_variants(
 
     is_fused = get_onednn_matmul_binary_attr(
         result, attr, dim_tensor1, dim_tensor2, output_shape);
-    xpu::oneDNN::matmul(result, t1, tensor2, bias, trans, attr);
+    xpu::onednn::matmul(result, t1, tensor2, bias, trans, attr);
     if (output.defined() && !output.is_alias_of(result)) {
       output.copy_(result);
     } else {
@@ -805,7 +805,7 @@ static Tensor& matmul_fusion_variants(
 
     is_fused = get_onednn_matmul_binary_attr(
         result, attr, dim_tensor1, dim_tensor2, output_shape);
-    xpu::oneDNN::matmul(result, tensor1, tensor2, bias, trans, attr);
+    xpu::onednn::matmul(result, tensor1, tensor2, bias, trans, attr);
     if (output.defined() && !output.is_alias_of(result)) {
       output.copy_(result);
     } else {
@@ -846,7 +846,7 @@ static Tensor& matmul_fusion_variants(
         t2_is_matrix,
         should_fold_tensor1,
         should_fold_tensor2);
-    xpu::oneDNN::matmul(result, t1, t2, bias, trans, attr);
+    xpu::onednn::matmul(result, t1, t2, bias, trans, attr);
     if (output.defined() && !output.is_alias_of(result)) {
       output.copy_(result);
     } else {
@@ -899,7 +899,7 @@ static Tensor& matmul_fusion_variants(
         t2_is_matrix,
         should_fold_tensor1,
         should_fold_tensor2);
-    xpu::oneDNN::matmul(result, t1, t2, bias, trans, attr);
+    xpu::onednn::matmul(result, t1, t2, bias, trans, attr);
     if (output.defined() && !output.is_alias_of(result)) {
       output.copy_(result);
     } else {
@@ -961,7 +961,7 @@ static Tensor& matmul_fusion_variants(
 
     is_fused = get_onednn_matmul_binary_attr(
         result, attr, dim_tensor1, dim_tensor2, output_shape);
-    xpu::oneDNN::matmul(
+    xpu::onednn::matmul(
         result, tensor1_expanded, tensor2_expanded, bias, trans, attr);
     if (output.defined() && !output.is_alias_of(result)) {
       output.copy_(result);
@@ -978,7 +978,7 @@ static Tensor& matmul_fusion_variants_meta(
     const Tensor& tensor1,
     const Tensor& tensor2,
     bool trans,
-    xpu::oneDNN::Attr& attr,
+    xpu::onednn::Attr& attr,
     bool& is_fused,
     Tensor bias = at::Tensor()) {
   const auto dim_tensor1 = tensor1.dim();
@@ -1149,5 +1149,5 @@ static Tensor& matmul_fusion_variants_meta(
 
 } // namespace impl
 
-} // namespace AtenIpexTypeXPU
+} // namespace xpu
 } // namespace at
