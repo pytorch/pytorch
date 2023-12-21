@@ -3371,13 +3371,14 @@ def _upsample_linear(
     inp_size = input.shape[2:]
     d = len(inp_size)
 
+    _, dtype = utils.elementwise_dtypes(
+        input,
+        type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+
     def get_values(inp, out, scales, nsqueeze):
         # First Calculate scaling factor
         scale_factor = _compute_scale(inp, out, align_corners, scales)
-        _, dtype = utils.elementwise_dtypes(
-            input,
-            type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        )
         # We have to create arange with int64 dtype and use .to in order to avoid
         # additional kernels creation in inductor and get a perf slowdown
         i = torch.arange(out, device=input.device).to(dtype=dtype)
@@ -3396,13 +3397,13 @@ def _upsample_linear(
         xp1 = torch.where(x < inp - 1, x + 1, x)
         return x_f32, x, xp1
 
-    dtype = torch.float32 if not input.is_floating_point() else input.dtype
     values = [
         get_values(inp, out, scales, d - 1 - i)
         for i, (inp, out, scales) in enumerate(zip(inp_size, output_size, scales))
     ]
     xs_f32, xs, xp1s = list(zip(*values))
 
+    dtype = torch.float32 if not input.is_floating_point() else input.dtype
     vs = []
     for a in product(*[[0, 1]] * d):
         idx = [None, None] + [xs[k] if a[k] == 0 else xp1s[k] for k in range(d)]
