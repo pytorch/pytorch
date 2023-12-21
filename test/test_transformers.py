@@ -1908,21 +1908,35 @@ class TestSDPACudaOnly(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_mem_eff_attention_non_contig_mask_bug(self, device):
-        dtype = torch.float32
-        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
-        batch, num_heads, head_dim = 1, 16, 128
-        seq_len_q, seq_len_kv = 1, 16
-        query = make_tensor(batch, seq_len_q, num_heads * head_dim).view(batch, seq_len_q, num_heads, head_dim).transpose(1, 2)
-        kv_shape = (batch, seq_len_kv, head_dim)
-        key, value = make_tensor(kv_shape).unsqueeze(1), make_tensor(kv_shape).unsqueeze(1)
-        key = key.expand(-1, num_heads, -1, -1)
-        value = value.expand(-1, num_heads, -1, -1)
-        mask = torch.ones((1, 1, seq_len_q, seq_len_kv), device=device, dtype=torch.bool)
+        # Without the fix this produces `AssertionError: assert 0.07352933287620544 < 1e-07`
+        # Shapes taken from repro
+        query_size = (3, 16, 1, 128)
+        query_strides = (2304, 128, 2048, 1)
+        key_size = (3, 16, 14, 128)
+        key_strides = (3584, 0, 256, 1)
+        value_size = (3, 16, 14, 128)
+        value_strides = (3584, 0, 256, 1)
+        attention_mask_size = (3, 1, 1, 14)
+        attn_mask_strides = (14, 14, 14, 1)
+
+        # Calculate the number of elements needed for each tensor
+        query_num_elements = max([size * stride for size, stride in zip(query_size, query_strides)])
+        key_num_elements = max([size * stride for size, stride in zip(key_size, key_strides)])
+        value_num_elements = max([size * stride for size, stride in zip(value_size, value_strides)])
+        attention_mask_num_elements = max([size * stride for size, stride in zip(attention_mask_size, attn_mask_strides)])
+
+        # Create the tensors with the specified sizes and strides
+        query = torch.randn(query_num_elements, device=device).as_strided(query_size, query_strides)
+        key = torch.randn(key_num_elements, device=device).as_strided(key_size, key_strides)
+        value = torch.randn(value_num_elements, device=device).as_strided(value_size, value_strides)
+        bias = torch.randn(attention_mask_num_elements, device=device).as_strided(attention_mask_size, attn_mask_strides)
+
         with sdp_kernel(**backend_map[SDPBackend.EFFICIENT_ATTENTION]):
-            out = F.scaled_dot_product_attention(query, key, value, mask)
-            out_no_mask = F.scaled_dot_product_attention(query, key, value, None)
-        max_diff = (out - out_no_mask).abs().mean()
-        assert max_diff.item() < 1e-9
+            out = F.scaled_dot_product_attention(query, key, value, bias)
+            out_contig = F.scaled_dot_product_attention(query, key, value, bias.contiguous())
+
+        max_diff = (out - out_contig).abs().mean()
+        self.assertTrue(max_diff.item() < 1e-7)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
