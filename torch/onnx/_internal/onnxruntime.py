@@ -674,7 +674,7 @@ class OrtBackend:
         # Function which invokes ORT do to the real computation.
         self.run = (
             _run_onnx_session_with_ortvaluevector
-            if hasattr(ORTC, "push_back_batch")
+            if hasattr(ORTC.OrtValueVector, "push_back_batch")
             else _run_onnx_session_with_fetch
         )
 
