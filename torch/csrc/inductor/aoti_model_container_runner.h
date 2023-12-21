@@ -29,6 +29,10 @@ class TORCH_API AOTIModelContainerRunner {
       AOTIProxyExecutorHandle proxy_executor_handle = nullptr);
 
   void update_inactive_constant_buffer(const TensorConstantMap& const_map);
+  void update_constant_buffer(
+      const TensorConstantMap& const_map,
+      bool use_inactive,
+      bool validate_full_updates);
   void swap_constant_buffer();
 
   std::vector<const char*> get_call_spec();
@@ -46,6 +50,8 @@ class TORCH_API AOTIModelContainerRunner {
   decltype(&AOTInductorModelContainerGetNumOutputs) get_num_outputs_func_{
       nullptr};
   decltype(&AOTInductorModelContainerRun) run_func_{nullptr};
+  decltype(&AOTInductorModelContainerUpdateConstantBuffer)
+      update_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerUpdateInactiveConstantBuffer)
       update_inactive_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerSwapConstantBuffer)

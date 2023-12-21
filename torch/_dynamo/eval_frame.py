@@ -883,6 +883,14 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             )
         return result_proxy
 
+    def transform(self):
+        result_gm = super().transform()
+        if "dynamo_flat_name_to_original_fqn" in self.module.meta:
+            result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
+                "dynamo_flat_name_to_original_fqn"
+            ]
+        return result_gm
+
 
 class ExportResult(NamedTuple):
     graph_module: torch.fx.GraphModule
@@ -1525,9 +1533,7 @@ class TorchPatcher:
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook
             # which is the *last* hook applied, we want to keep the no_grad hook
-            # Note: skip AdamW as its step calls to Adam.step which already will
-            # unwrap once. Unwrapping twice will accidentally get rid of the no_grad hook too.
-            hooked = getattr(opt.step, "hooked", False) and opt.__name__ != "AdamW"
+            hooked = getattr(opt.step, "hooked", False)
             if hooked:
                 unwrapped_step = getattr(opt.step, "__wrapped__", None)
                 if unwrapped_step:

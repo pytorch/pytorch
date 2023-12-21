@@ -7,12 +7,17 @@
 
 #include <c10/core/OptionalRef.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/SymBool.h>
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymInt.h>
+#include <c10/core/SymNodeImpl.h>
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
+#include <c10/util/complex.h>
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10 {

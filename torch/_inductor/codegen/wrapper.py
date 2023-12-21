@@ -533,7 +533,7 @@ class WrapperCodeGen(CodeGen):
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         output_name = extern_kernel.get_name()
         origin_node = extern_kernel.get_origin_node()
-        kernel_name = extern_kernel.codegen_kernel_name()
+        kernel_name = extern_kernel.get_kernel_name()
         ending = self.ending
         if config.memory_planning and "view_as_complex" in kernel_name:
             # view operation fallbacks cause issues since inductor
@@ -571,7 +571,7 @@ class WrapperCodeGen(CodeGen):
         )
 
     def generate_scatter_fallback(
-        self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
+        self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
     ):
         line = f"{kernel}({','.join(map(str, inputs))}"
         if kernel == "aten.scatter_":
@@ -1423,6 +1423,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #include <torch/types.h>
+                #include <ATen/ops/bernoulli_native.h>
+
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
@@ -2020,7 +2022,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.writeline(f"AtenTensorHandle {output_handle_name};")
         output_arg = f"&{output_handle_name}"
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.codegen_kernel_name(), args + [output_arg]
+            extern_kernel.get_kernel_name(), args + [output_arg]
         )
         self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
@@ -2110,14 +2112,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
     def generate_scatter_fallback(
-        self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
+        self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
     ):
         # TODO: support other overload for cpp wrapper and remove the below assertions
         if V.graph.aot_mode and config.aot_inductor.abi_compatible:
             # call the ABI shim function instead of the ATen one
             kernel = kernel.replace("at::", "aoti_torch_")
         line = f"{kernel}({output}, {','.join(map(str, inputs))}"
-        if fn == "aten.scatter_":
+        if python_kernel_name == "aten.scatter_":
             if src_is_tensor:
                 if reduce:
                     line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"

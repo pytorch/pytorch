@@ -41,7 +41,6 @@ if TEST_SCIPY:
     import scipy
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 @unittest.skipIf(IS_ARM64, "Issue with numpy version on arm")
 class TestLinalg(TestCase):
     def setUp(self):
