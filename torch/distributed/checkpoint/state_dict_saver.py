@@ -122,7 +122,7 @@ def save(
                 elem.state_dict() if isinstance(elem, Stateful) else elem
             )
 
-        meta = _save_state_dict(
+        return _save_state_dict(
             dumpable_state_dict,
             storage_writer,
             process_group,
@@ -130,8 +130,6 @@ def save(
             no_dist,
             planner,
         )
-
-    return meta
 
 
 def _async_save(
