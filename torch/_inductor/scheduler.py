@@ -1775,6 +1775,16 @@ class Scheduler:
                 self.name_to_fused_node.update(
                     {n.get_name(): node3 for n in node3.get_nodes()}
                 )
+
+        if config.aggressive_horizontal_fusion_into_foreach:
+            for group in self.get_aggressive_horizontal_fusions():
+                foreach = ForeachKernelSchedulerNode(self, list(group))
+                fused_nodes = fused_nodes - group
+                fused_nodes.add(foreach)
+                self.name_to_fused_node.update(
+                    {n.get_name(): foreach for n in foreach.get_nodes()}
+                )
+
         self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         self.topological_sort_schedule()
         self.prune_redundant_deps()
@@ -1829,6 +1839,41 @@ class Scheduler:
                 fusion_log.debug("%s", fusion)
             fusion_log.debug("")
         return possible_fusions
+
+    def get_aggressive_horizontal_fusions(self) -> Set[BaseSchedulerNode]:
+        """
+        This function will find groups of nodes with the same computational size
+        i.e. groups with the same (numel, rnumel).
+        """
+        fusion_groups = []
+        groupings = collections.defaultdict(list)
+        for node in self.nodes:
+            group = getattr(node, "group", None)
+            if group:
+                groupings[group].append(node)
+
+        for nodes in groupings.values():
+            first = self.name_to_fused_node[nodes[0].get_first_name()]
+            eligible = {first}
+
+            for other in nodes[1:]:
+                other = self.name_to_fused_node[other.get_first_name()]
+                if (
+                    first.get_names() & other.ancestors
+                    or first.is_foreach() or other.is_foreach()
+                    or first.is_reduction() or other.is_reduction()
+                    or self.will_fusion_create_cycle(first, other)
+                    or not self.speedup_by_fusion(first, other)
+                ):
+                    continue
+                eligible.add(other)
+
+            if len(eligible) > 1:
+                fusion_groups.append(eligible)
+
+        return fusion_groups
+
+
 
     def will_fusion_create_cycle(self, node1, node2):
         """
