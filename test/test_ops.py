@@ -1770,6 +1770,13 @@ class TestTags(TestCase):
                 opoverloadpacket = getattr(torch.ops.aten, aten_name, None)
                 check_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
+class TestSelfKwarg(TestCase):
+    def test_self_kwargs(self):
+        """Verify that we can call the aten ops with all kwargs even if the
+        argument's name is "self"
+        """
+        torch.ops.aten.reshape.default(self=torch.rand(1, 2), shape=[2])
+        torch.ops.aten.min.default(self=torch.rand(100))
 
 @unMarkDynamoStrictTest
 class TestRefsOpsInfo(TestCase):

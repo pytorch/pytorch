@@ -189,6 +189,7 @@ class UnflattenedModule(torch.nn.Module):
         self.input_placeholders = [
             node for node in self.graph.nodes if node.op == "placeholder"
         ]
+        self.check_input_constraints = True
 
     def forward(self, *args, **kwargs):
         if is_fx_tracing():
@@ -227,13 +228,14 @@ class UnflattenedModule(torch.nn.Module):
                         f"Exported module: {signature.in_spec.num_leaves}"
                     )
 
-        # Import here to avoid an unfortunate circular dependency.
-        # TODO(suo): untangle this.
-        from torch._export.utils import _check_input_constraints_for_graph
+        if self.check_input_constraints:
+            # Import here to avoid an unfortunate circular dependency.
+            # TODO(suo): untangle this.
+            from torch._export.utils import _check_input_constraints_for_graph
 
-        _check_input_constraints_for_graph(
-            self.input_placeholders, flat_args, self.range_constraints
-        )
+            _check_input_constraints_for_graph(
+                self.input_placeholders, flat_args, self.range_constraints
+            )
         tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
             *flat_args, enable_io_processing=False
         )
