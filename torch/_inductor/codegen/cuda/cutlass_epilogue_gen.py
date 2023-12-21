@@ -17,6 +17,147 @@ from torch._inductor.utils import IndentedBuffer
 _MAGIC_SYMPY_ERROR_STRING = "[!sympy: unsupported expr!]"
 
 
+EVT_EXTRA_HEADER = """
+namespace cutlass::epilogue::fusion {
+
+using namespace cute;
+using namespace detail;
+
+// Sm90AuxLoadDirect implementation ( based on Sm90ColBroadcast )
+// which loads directly from global memory, without using shared memory
+template<
+  int _IgnoredStages,
+  class CtaTileShapeMNK,
+  class Element,
+  class StrideMNL,
+  class _IgnoredSmemLayoutAtom,
+  class _IgnoredCopyOpS2R,
+  int Alignment = 128 / sizeof_bits_v<Element>,
+  bool EnableNullptr = true // Fallback scalar broadcast for nullptr params
+>
+struct Sm90AuxLoadDirect {
+  constexpr static int Stages = 0;
+  static_assert(Stages == 0, "Direct load only supports 0 stages");
+  static_assert(Alignment * sizeof_bits_v<Element> % 128 == 0, "sub-16B alignment not supported yet");
+
+  // Accumulator distributes col elements evenly amongst threads so we can just directly load from gmem
+  struct SharedStorage { };
+
+  struct Arguments {
+    Element const* ptr_col = nullptr;
+    Element null_default = Element(0);
+    StrideMNL dCol = {};
+  };
+
+  using Params = Arguments;
+
+  template <class ProblemShape>
+  static constexpr Params
+  to_underlying_arguments(ProblemShape const& problem_shape, Arguments const& args, void* workspace) {
+    return args;
+  }
+
+  template <class ProblemShape>
+  static size_t
+  get_workspace_size(ProblemShape const& problem_shape, Arguments const& args) {
+    return 0;
+  }
+
+  template <class ProblemShape>
+  static cutlass::Status
+  initialize_workspace(ProblemShape const& problem_shape, Arguments const& args, void* workspace, cudaStream_t stream) {
+    return cutlass::Status::kSuccess;
+  }
+
+  CUTLASS_DEVICE bool
+  is_producer_load_needed() const {
+    return false;
+  }
+
+  CUTLASS_DEVICE bool
+  is_C_load_needed() const {
+    return false;
+  }
+
+  CUTLASS_HOST_DEVICE
+  Sm90AuxLoadDirect() { }
+
+  CUTLASS_HOST_DEVICE
+  Sm90AuxLoadDirect(Params const& params, SharedStorage const& shared_storage)
+      : params(params) { }
+
+  Params params;
+
+  template <class... Args>
+  CUTLASS_DEVICE auto
+  get_producer_load_callbacks(ProducerLoadArgs<Args...> const& args) {
+    return EmptyProducerLoadCallbacks{};
+  }
+
+  template<class GTensor, class RTensor>
+  struct ConsumerStoreCallbacks : EmptyConsumerStoreCallbacks {
+    CUTLASS_DEVICE
+    ConsumerStoreCallbacks(GTensor&& tCgCol, RTensor&& tCrCol, Params const& params)
+      : tCgCol(cute::forward<GTensor>(tCgCol)),
+        tCrCol(cute::forward<RTensor>(tCrCol)),
+        params(params) {}
+
+    GTensor tCgCol;                                                                    // (CPY,CPY_M,CPY_N,EPI_M,EPI_N)
+    RTensor tCrCol;                                                                    // (CPY,CPY_M,CPY_N,EPI_M,EPI_N)
+    Params const& params;
+
+    CUTLASS_DEVICE void
+    begin() {
+      if constexpr (EnableNullptr) {
+        if (params.ptr_col == nullptr) {
+          fill(tCrCol, params.null_default);
+          return;
+        }
+      }
+
+      // Filter so we don't issue redundant copies over stride-0 modes
+      // (only works if 0-strides are in same location, which is by construction)
+      copy_aligned(filter(tCgCol), filter(tCrCol));
+    }
+
+    template <typename ElementAccumulator, int FragmentSize>
+    CUTLASS_DEVICE Array<Element, FragmentSize>
+    visit(Array<ElementAccumulator, FragmentSize> const& frg_acc, int epi_v, int epi_m, int epi_n) {
+      Array<Element, FragmentSize> frg_col;
+      Tensor tCrCol_mn = tCrCol(_,_,_,epi_m,epi_n);
+
+      CUTLASS_PRAGMA_UNROLL
+      for (int i = 0; i < FragmentSize; ++i) {
+        frg_col[i] = tCrCol_mn(epi_v * FragmentSize + i);
+      }
+
+      return frg_col;
+    }
+
+  };
+
+  template <
+    bool ReferenceSrc, // do register tensors reference the src or dst layout of the tiled copy
+    class... Args
+  >
+  CUTLASS_DEVICE auto
+  get_consumer_store_callbacks(ConsumerStoreArgs<Args...> const& args) {
+
+    auto [M, N, K, L] = args.problem_shape_mnkl;
+    Tensor mCol = make_tensor(make_gmem_ptr(params.ptr_col), make_shape(M,N,L), params.dCol);
+    Tensor tCgCol = sm90_partition_for_epilogue<ReferenceSrc>(                         // (CPY,CPY_M,CPY_N,EPI_M,EPI_N)
+      mCol, args.tile_shape_mnk, args.tile_coord_mnkl, args.epi_tile, args.tiled_copy, args.thread_idx);
+    Tensor tCrCol = make_tensor_like(tCgCol);                                          // (CPY,CPY_M,CPY_N,EPI_M,EPI_N)
+
+    return ConsumerStoreCallbacks<decltype(tCgCol), decltype(tCrCol)>(
+      cute::move(tCgCol), cute::move(tCrCol), params);
+  }
+};
+
+} // namespace cutlass::epilogue::fusion
+"""
+
+
 def _arg_parse(a):
     if isinstance(a, sympy.Expr):
         return a
@@ -53,6 +194,7 @@ class CutlassEVTEpilogueTypeFormatter:
         c_operand_alias: Optional[str] = None,
         gemm_output_layout: Optional[Layout] = None,
         flip_mn: bool = False,
+        aux_load_direct: bool = True,
     ):
         """
 
@@ -66,6 +208,8 @@ class CutlassEVTEpilogueTypeFormatter:
                                     (typically addmm style bias addition etc.)
         - c_operand_alias (Optional[str]): Optional name of the C operand
         - gemm_output_layout: Output layout of the GEMM operation.
+        - flip_mn: Whether to flip the M and N dimensions of the GEMM output layout.
+        - aux_load_direct: Whether to use direct loads for auxiliary inputs (i.e. load directly from global memory)
 
         """
         self.accumulator_node_name = accumulator_node_name
@@ -78,6 +222,7 @@ class CutlassEVTEpilogueTypeFormatter:
         self.accumulator_index_expr = None
         self.gemm_output_layout = gemm_output_layout
         self.flip_mn = flip_mn
+        self.aux_load_direct = aux_load_direct
 
     @staticmethod
     def ir_to_evt_string(
@@ -88,6 +233,7 @@ class CutlassEVTEpilogueTypeFormatter:
         c_operand_alias: Optional[str] = None,
         gemm_output_layout: Optional[Layout] = None,
         flip_mn: bool = False,
+        aux_load_direct: bool = True,
     ):
         """
         Formats IR nodes into a string representation compatible with Cutlass EVT format.
@@ -101,6 +247,8 @@ class CutlassEVTEpilogueTypeFormatter:
                            (typically addmm style bias addition etc.)
             c_operand_alias: Optional name of the C operand
             gemm_output_layout: Output layout of the GEMM operation.
+            flip_mn: Whether to flip the M and N dimensions of the GEMM output layout.
+            aux_load_direct: Whether to use direct loads for auxiliary inputs (i.e. load directly from global memory)
 
         Returns:
             A string representation of the IR nodes formatted according to the Cutlass EVT format.
@@ -117,6 +265,7 @@ class CutlassEVTEpilogueTypeFormatter:
             c_operand_alias,
             gemm_output_layout,
             flip_mn,
+            aux_load_direct,
         )
 
         with virtualized.V.set_ops_handler(formatter), patch.object(  # type: ignore[call-arg]
@@ -240,8 +389,12 @@ class CutlassEVTEpilogueTypeFormatter:
                 f"Unsupported broadcast strides for aux input {name}: {strides_mnl=}"
             )
         else:
-            aux_load_op = "Sm90AuxLoad"
+            if self.aux_load_direct:
+                aux_load_op = "Sm90AuxLoadDirect"
+            else:
+                aux_load_op = "Sm90AuxLoad"
             aux_load_template_args = f"{ALD}::Stages, TileShapeMNK, typename {ALD}::Element, typename {ALD}::Stride, typename {ALD}::SmemLayoutAtom, typename {ALD}::CopyOpS2R"  # noqa: B950
+
         return f"""cutlass::epilogue::fusion::Sm90EVT<
                                         cutlass::epilogue::fusion::Sm90Compute<identity_op,ElementAcc, typename {ALD}::Element, RoundStyle >,
                                         cutlass::epilogue::fusion::{aux_load_op}<{aux_load_template_args}>> /* :={name} as aux operand, cast to accumulator dtype */"""  # noqa: B950

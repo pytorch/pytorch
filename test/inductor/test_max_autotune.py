@@ -1,6 +1,9 @@
 # Owner(s): ["module: inductor"]
+import functools
 import io
 import json
+import logging
+import operator
 import os
 import subprocess
 import sys
@@ -24,6 +27,7 @@ from torch._inductor.codegen.cuda.cutlass_utils import (
     cuda_standalone_runner_compile_command,
     CUDACompileSourceCapturingContext,
 )
+
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
@@ -52,6 +56,8 @@ if HAS_CUDA:
 
 _CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
 
+log = logging.getLogger(__name__)
+
 
 def _get_path_without_sccache() -> str:
     """
@@ -60,6 +66,10 @@ def _get_path_without_sccache() -> str:
     path_envs = os.environ.get("PATH", "").split(":")
     path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
     return ":".join(path_envs)
+
+
+def product(it):
+    return functools.reduce(operator.mul, it, 1)
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):
@@ -327,6 +337,7 @@ class TestMaxAutotune(TestCase):
         with_bias=False,
         bias_broadcast=(False, False),
         with_aux=False,
+        with_more_inputs=(),
         m=1024,
         n=1024,
         k=1024,
@@ -348,6 +359,7 @@ class TestMaxAutotune(TestCase):
             # so if these shapes don't all align to at least 8 elements
             # it can happen that no Cutlass 3.x op is available
             # that allows fusions
+
             if batch_size is None:
                 a = torch.randn(m, k).mul(1.0 / 32).cuda()
                 b = torch.randn(k, n).mul(1.0 / 32).cuda()
@@ -375,6 +387,11 @@ class TestMaxAutotune(TestCase):
                     if aux_shape is None:
                         aux_shape = (batch_size, m, n)
                     aux = torch.randn(*aux_shape).mul(1.0 / 32).cuda()
+                more_inputs = [
+                    torch.randn(*inp_shape).mul(1.0 / 32).cuda()
+                    for inp_shape in with_more_inputs
+                ]
+
             if fp16:
                 a = a.half()
                 b = b.half()
@@ -382,15 +399,18 @@ class TestMaxAutotune(TestCase):
                     bias = bias.half()
                 if with_aux:
                     aux = aux.half()
+                more_inputs = [inp.half() for inp in more_inputs]
             args = [a, b]
             if with_bias:
                 args.append(bias)
             if with_aux:
                 args.append(aux)
+            args.extend(more_inputs)
             conf_patch = {
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "benchmark_fusion": False,
+                "cuda.cutlass_backend_min_gemm_size": 1,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": max_profiling_configs,
@@ -425,6 +445,30 @@ class TestMaxAutotune(TestCase):
         #  The pointwise ops seem to be pre-fused into a single Pointwise
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
             mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_simple_fusion_fp16_layout_opt(self):
+        def mm(a, b, bias):
+            return torch.addmm(bias, a, b) * 3.0
+
+        #  The pointwise ops seem to be pre-fused into a single Pointwise
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=1,
+            mm=mm,
+            m=256,
+            n=512,
+            k=255,
+            with_bias=True,
+            config_override={
+                "layout_optimization": True,
+                "shape_padding": True,
+                "cuda.cutlass_backend_min_gemm_size": 1,
+            },
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -609,6 +653,7 @@ class TestMaxAutotune(TestCase):
                     k=128,
                     batch_size=1,
                     max_profiling_configs=1,
+                    use_autotuning_cache=False,
                 )
             finally:
                 self.cuda_test_compile_standalone_runner(
@@ -642,6 +687,28 @@ class TestMaxAutotune(TestCase):
                 self.cuda_test_compile_standalone_runner(
                     source_capture.sources[-1], do_run=True
                 )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(torch.version.hip, "HIP not supported")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_max_autotune_cutlass_backend_more_additional_inputs_random_mask(self):
+        def mm(a, b, c, aux1, aux2, aux3):
+            return ((a @ b) * torch.relu(c)) + aux3 - aux1 + aux2
+
+        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+            mixed_precision=False,
+            fp16=True,
+            expected_fuse_count=1,
+            mm=mm,
+            with_bias=True,
+            with_aux=True,
+            m=1024,
+            n=512,
+            k=2048,
+            with_more_inputs=((1024, 512), (1024, 512)),
+            batch_size=1,
+            max_profiling_configs=1,
+        )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")

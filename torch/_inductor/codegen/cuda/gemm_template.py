@@ -15,6 +15,7 @@ from .cuda_template import CUTLASSTemplate
 from .cutlass_epilogue_gen import (
     CutlassEVTEpilogueArgumentFormatter,
     CutlassEVTEpilogueTypeFormatter,
+    EVT_EXTRA_HEADER,
 )
 
 from .pointwise_stride_utils import extract_pointwise_load_strides
@@ -470,6 +471,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         )
         if inductor_cuda_config.generate_test_runner:
             res.splice(GEMM_STANDALONE_RUNNER_ADDITIONAL_INCLUDES)
+        if self.can_fuse_epilogue:
+            res.splice(EVT_EXTRA_HEADER)
         return res
 
     @staticmethod
