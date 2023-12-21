@@ -92,6 +92,7 @@ from torch.testing._comparison import (
 )
 from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
@@ -1220,20 +1221,6 @@ else:
 
 IS_FILESYSTEM_UTF8_ENCODING = sys.getfilesystemencoding() == 'utf-8'
 
-def _check_module_exists(name: str) -> bool:
-    r"""Returns if a top-level module with :attr:`name` exists *without**
-    importing it. This is generally safer than try-catch block around a
-    `import X`. It avoids third party libraries breaking assumptions of some of
-    our tests, e.g., setting multiprocessing start method when imported
-    (see librosa/#747, torchvision/#544).
-    """
-    try:
-        import importlib.util
-        spec = importlib.util.find_spec(name)
-        return spec is not None
-    except ImportError:
-        return False
-
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
@@ -1258,19 +1245,6 @@ def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
 
 NOTEST_CPU = "cpu" in split_if_not_empty(os.getenv('PYTORCH_TESTING_DEVICE_EXCEPT_FOR', ''))
-
-@contextlib.contextmanager
-def with_dill():
-    if not TEST_DILL:
-        yield
-        return
-
-    import dill
-    dill.extend(use_dill=True)
-    try:
-        yield
-    finally:
-        dill.extend(use_dill=False)
 
 def import_dill():
     if not TEST_DILL:

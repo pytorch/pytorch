@@ -35,7 +35,7 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_JETSON,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
-                                                  IS_MACOS, TEST_CUDA, parametrize, TEST_DILL, with_dill)
+                                                  IS_MACOS, TEST_CUDA, parametrize, TEST_DILL)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 import functools
 import operator
@@ -1578,7 +1578,6 @@ except RuntimeError as e:
 
     @skipIfNoNumpy
     @unittest.skipIf(IS_JETSON, "Not working on Jetson")
-    @with_dill()
     def test_multiprocessing_iterdatapipe(self):
         # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
         # and used with multiprocess DataLoader
