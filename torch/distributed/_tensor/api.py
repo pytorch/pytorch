@@ -176,10 +176,19 @@ class _FromTorchTensor(torch.autograd.Function):
         # so that the gradient layout matches, and we could return
         # local gradients directly
         if grad_output.placements != previous_placement:
-            # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
-            grad_output = Redistribute.apply(
-                grad_output, previous_device_mesh, previous_placement
+            current_spec = grad_output._spec
+            target_spec = DTensorSpec(
+                previous_device_mesh,
+                previous_placement,
+                tensor_meta=grad_output._spec.tensor_meta,
             )
+            local_tensor = grad_output._local_tensor
+            output = redistribute_local_tensor(
+                local_tensor, current_spec, target_spec, is_backward=True
+            )
+            # TODO: return the redistributed local tensor directly without
+            # differentiable backward. see if this make sense for all cases.
+            return output, None, None, None, None, None
 
         # TODO: backward is also differentiable now, add a test
         # to test higher level gradients.

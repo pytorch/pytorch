@@ -363,6 +363,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # presence of torch.no_grad) and there is a graph break.
         self.save_global_state()
 
+        # Tracks the original FQNs of the constant tensors from the original graph,
+        # i.e. buffers and parameters.
+        self.dynamo_flat_name_to_original_fqn: Dict[str, str] = {}
+
     # This gets its own helper function so guards DEBUG logs are more
     # informative
     def init_ambient_guards(self):
@@ -686,7 +690,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     ):
         # Dynamic modules should be routed via UnspecializedNNModuleVariable - however,
         # FSDP modules have their own path where they inherit from UnspecializedNNModuleVariable
-        # but route here fore registration of children.
+        # but route here for registration of children.
         if is_dynamic_nn_module(target) and not getattr(
             target, "_is_fsdp_managed_module", False
         ):
@@ -800,6 +804,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         new_source = ParamBufferSource(source, leaf_name)
                         new_name = f"{name}.{leaf_name}"
                         self.param_name_to_source[new_name] = new_source
+                        if isinstance(source, LocalSource):
+                            self.dynamo_flat_name_to_original_fqn[
+                                OutputGraph.module_key_name(new_source.name())
+                            ] = leaf_name
 
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
@@ -1075,6 +1083,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             register_finalizer(gm)
 
         gm.compile_subgraph_reason = self.compile_subgraph_reason
+        gm.meta[
+            "dynamo_flat_name_to_original_fqn"
+        ] = self.dynamo_flat_name_to_original_fqn.copy()
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
@@ -1396,6 +1407,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
         self.register_finalizer_fns.clear()
+        self.dynamo_flat_name_to_original_fqn.clear()
 
     def set_torch_function_state(self, enabled: bool) -> None:
         self.torch_function_enabled = enabled

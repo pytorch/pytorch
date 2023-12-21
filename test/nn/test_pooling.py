@@ -25,9 +25,9 @@ from torch.testing._internal.common_dtype import floating_types_and
 import torch.nn.functional as F
 import torch.nn as nn
 from torch.autograd import gradcheck, gradgradcheck
+import operator
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestAvgPool(TestCase):
     def _sum_pool2d(self, x, kernel_size):
         windows = torch.nn.functional.unfold(x, kernel_size=kernel_size, stride=kernel_size)
@@ -43,11 +43,11 @@ class TestAvgPool(TestCase):
         return joined_x.view(1, joined_x.numel())
 
     def _avg_pool2d(self, x, kernel_size):
-        size = reduce((lambda x, y: x * y), kernel_size)
+        size = reduce(operator.mul, kernel_size)
         return self._sum_pool2d(x, kernel_size) / size
 
     def _avg_pool3d(self, x, kernel_size):
-        size = reduce((lambda x, y: x * y), kernel_size)
+        size = reduce(operator.mul, kernel_size)
         return self._sum_pool3d(x, kernel_size) / size
 
     def test_doubletensor_avg_pool2d(self):
@@ -133,7 +133,6 @@ class TestAvgPool(TestCase):
             self.assertTrue(not torch.isnan(y).any())
 
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPoolingNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -379,7 +378,6 @@ class TestPoolingNN(NNTestCase):
         with self.assertRaises(RuntimeError):
             F.max_unpool3d(x, torch.zeros(x.shape, dtype=int), [1, 1])
 
-@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)

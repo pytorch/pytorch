@@ -883,6 +883,14 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             )
         return result_proxy
 
+    def transform(self):
+        result_gm = super().transform()
+        if "dynamo_flat_name_to_original_fqn" in self.module.meta:
+            result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
+                "dynamo_flat_name_to_original_fqn"
+            ]
+        return result_gm
+
 
 class ExportResult(NamedTuple):
     graph_module: torch.fx.GraphModule
@@ -1533,6 +1541,13 @@ class TorchPatcher:
 
             # disable future hooking
             opt.step.hooked = True  # type: ignore[attr-defined]
+
+        # annoying - we cannot annotate these functions directly due to
+        # torch.package issues, see https://github.com/pytorch/pytorch/pull/116229
+        if config.trace_distributed and torch.distributed.is_available():
+            import torch.distributed.fsdp._flat_param as flat_param
+
+            torch._dynamo.allow_in_graph(flat_param._same_storage_size)
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
