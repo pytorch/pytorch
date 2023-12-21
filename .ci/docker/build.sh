@@ -204,7 +204,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.6
+    ROCM_VERSION=5.7
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -215,7 +215,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.7
+    ROCM_VERSION=6.0
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
