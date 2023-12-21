@@ -5214,14 +5214,8 @@ def meta__scaled_dot_product_flash(
     scale: Optional[float] = None,
 ):
     return meta__scaled_dot_product_flash_mask(
-            query,
-            key,
-            value,
-            dropout_p,
-            is_causal,
-            return_debug_mask,
-            None,
-            scale)
+        query, key, value, dropout_p, is_causal, return_debug_mask, None, scale
+    )
 
 
 @register_meta(
@@ -5247,22 +5241,23 @@ def meta__scaled_dot_product_flash_backward(
     scale: Optional[float] = None,
 ):
     return meta__scaled_dot_product_flash_mask_backward(
-            grad_out,
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            cum_seq_q,
-            cum_seq_k,
-            max_q,
-            max_k,
-            dropout_p,
-            is_causal,
-            philox_seed,
-            philox_offset,
-            None,
-            scale)
+        grad_out,
+        query,
+        key,
+        value,
+        out,
+        logsumexp,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        dropout_p,
+        is_causal,
+        philox_seed,
+        philox_offset,
+        None,
+        scale,
+    )
 
 
 @register_meta(
