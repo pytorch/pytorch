@@ -2,7 +2,7 @@
 import sympy
 
 from torch._inductor.codegen.cpp import cexpr
-from torch._inductor.codegen.triton import texpr, TritonPrinter
+from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
 
 from torch._inductor.sizevars import SizeVarAllocator
@@ -291,18 +291,14 @@ class ExprPrinterTests(TorchTestCase):
             (sympy.Min, "min"),
             (sympy.Max, "max"),
         )
-        extra_arg = TritonPrinter._propagate_nan_arg()
         for f, s in cases:
             x = sympy.Symbol("x", integer=True)
             expr = f(-2, x)
-            self.assertEqual(texpr(expr), f"tl.math.{s}(-2, x{extra_arg})")
+            self.assertEqual(texpr(expr), f"tl.math.{s}(-2, x)")
             self.assertEqual(cexpr(expr), f"std::{s}(-2L, x)")
 
             expr = f(x, 2 * x, 3 * x)
-            self.assertEqual(
-                texpr(expr),
-                f"tl.math.{s}(x, tl.math.{s}(2*x, 3*x{extra_arg}){extra_arg})",
-            )
+            self.assertEqual(texpr(expr), f"tl.math.{s}(x, tl.math.{s}(2*x, 3*x))")
             self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
 
 
