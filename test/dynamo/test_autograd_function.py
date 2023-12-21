@@ -871,7 +871,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10, device="cuda", requires_grad=True)
         z = f(x, y)
         loss = z.sum()
-        # loss.backward()
+        loss.backward()
         self.assertEqual(x + y, z)
 
     @requires_cuda()
@@ -905,11 +905,10 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10, device="cuda", requires_grad=True)
         y = torch.randn(10, device="cuda", requires_grad=True)
-        zs = f(x, y)
-        for z in zs:
-            loss = z.sum()
-            # loss.backward()
-        self.assertEqual(x + y, zs[0])
+        z, _ = f(x, y)
+        loss = z.sum()
+        loss.backward()
+        self.assertEqual(x + y, z)
 
 
 if __name__ == "__main__":
