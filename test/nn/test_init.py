@@ -93,6 +93,7 @@ class TestNNInit(TestCase):
                 init.calculate_gain(random_string)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
     def test_uniform(self):
         for dims in [1, 2, 4]:
             input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
@@ -102,7 +103,7 @@ class TestNNInit(TestCase):
             assert self._is_uniform(input_tensor, a, b)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    @skipIfTorchDynamo("Failing")
+    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
     def test_normal(self):
         for dims in [1, 2, 4]:
             input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
@@ -113,7 +114,7 @@ class TestNNInit(TestCase):
             assert self._is_normal(input_tensor, mean, std)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    @skipIfTorchDynamo("Failing")
+    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
     def test_trunc_normal(self):
         for dims in [1, 2, 4]:
             input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
@@ -126,7 +127,7 @@ class TestNNInit(TestCase):
             assert self._is_trunc_normal(input_tensor, mean, std, a, b)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    @skipIfTorchDynamo("Failing")
+    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
     def test_trunc_normal_generator(self):
         gen = torch.Generator()
         gen.manual_seed(42)
@@ -282,6 +283,7 @@ class TestNNInit(TestCase):
                 assert self._is_uniform(input_tensor, -bounds, bounds)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
     def test_xavier_normal(self):
         for use_gain in [True, False]:
             for dims in [2, 4]:
@@ -326,6 +328,7 @@ class TestNNInit(TestCase):
             _ = init.kaiming_normal_(tensor)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
     def test_kaiming_uniform(self):
         for use_a in [True, False]:
             for dims in [2, 4]:
@@ -354,6 +357,7 @@ class TestNNInit(TestCase):
                     assert self._is_uniform(input_tensor, -bounds, bounds)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
     def test_kaiming_normal(self):
         for use_a in [True, False]:
             for dims in [2, 4]:
@@ -388,6 +392,7 @@ class TestNNInit(TestCase):
                 init.sparse_(tensor, sparsity)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
     def test_sparse_default_std(self):
         for use_random_std in [True, False]:
             input_tensor = self._create_random_nd_tensor(2, size_min=30, size_max=35)
