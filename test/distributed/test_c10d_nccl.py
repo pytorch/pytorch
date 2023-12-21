@@ -3611,7 +3611,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
         return os.path.join(self.tempdir.name, "trace_")
 
     def _trace_name(self, rank):
-        return self._trace_basename() + str(rank)
+        return self._trace_basename() + f"0_{rank}"
 
     def started_or_scheduled(self, timing_enabled):
         return "started" if timing_enabled else "scheduled"
@@ -3659,7 +3659,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertEqual(c.recv(), 'next')
 
             dump_file = self._trace_name(rank=0)
-            pipe_file = dump_file + ".pipe"
+            pipe_file = dump_file[:-2] + ".pipe"
             with open_file_with_timeout(pipe_file, 'w') as f:
                 f.write('1\n')
             with open_file_with_timeout(dump_file, 'rb', timeout=10.0) as f:
