@@ -5440,7 +5440,7 @@ def randn_generator(
 ) -> TensorLikeType:
     # We should eventually support the generator overload.
     # However, if someone passes in a None generator explicitly,
-    # we can jut fall back to randn.default
+    # we can just fall back to randn.default
     if generator is None:
         return randn(
             *shape,
