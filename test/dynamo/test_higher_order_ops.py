@@ -1182,9 +1182,39 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(cnt.frame_count, 1)
 
-        # We increase the number of ops to 3 and 4 for top-level graph because of an additional
+        # We increase the number of ops to 2 and 3 for top-level graph because of an additional
         # get_item call created by the flatten/unflatten logic in HOP speculation.
-        self.assertEqual(cnt.op_count, ifdynstaticdefault(3, 4))
+        self.assertEqual(cnt.op_count, ifdynstaticdefault(2, 3))
+
+    def test_map_lowers_to_graph(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        def fn(x, y):
+            def inner(x, y):
+                return torch.sin(x + y)
+
+            return control_flow.map(inner, x, y.size(0))
+
+        x = torch.randn(3, 1)
+        y = torch.randn(3, 1)
+        compiled_fn = torch.compile(fn, backend=backend)(x, y)
+        self.assertEqual(len(backend.graphs), 1)
+        graph = backend.graphs[0]
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        self.assertExpectedInline(
+            graph.code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    map_body_0 = self.map_body_0
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
+        )
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()

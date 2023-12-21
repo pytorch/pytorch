@@ -76,6 +76,7 @@ def redistribute_local_tensor(
     local_tensor: torch.Tensor,
     current_spec: DTensorSpec,
     target_spec: DTensorSpec,
+    is_backward: bool = False,
 ) -> torch.Tensor:
     """
     This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
@@ -159,9 +160,12 @@ def redistribute_local_tensor(
 
         elif target.is_partial():
             if current.is_replicate():
-                # For replicate -> partial, we perform division to num of chunks and generate
-                # parial, and recover it back when pending sum get cleared.
-                new_local_tensor = local_tensor / num_chunks
+                # For replicate -> partial forward pass we perform division to num of chunks
+                # and generate parial, and recover it back when pending sum get cleared.
+                # Skip/pass through when replicate -> partial is in backward pass.
+                new_local_tensor = (
+                    local_tensor / num_chunks if not is_backward else local_tensor
+                )
             else:
                 raise RuntimeError(
                     f"redistribute from {current_placements} to {target_placements} not supported yet"

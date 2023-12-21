@@ -2242,6 +2242,14 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           py::arg("size"),
           py::arg("timeout") = kProcessGroupDefaultTimeout,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_default_timeout",
+          [](const c10::intrusive_ptr<::c10d::ProcessGroupGloo>& self,
+             std::chrono::milliseconds timeout) {
+            self->getOptions()->timeout = timeout;
+          },
+          py::arg("timeout"),
+          py::call_guard<py::gil_scoped_release>())
       .def_property_readonly("options", &::c10d::ProcessGroupGloo::getOptions);
 
   // ProcessGroupWrapper is a wrapper pg that includes a helper gloo process
@@ -2308,7 +2316,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                  std::chrono::milliseconds timeout) {
                 self->getOptions()->timeout = timeout;
               },
-              py::arg("timeout_mil_sec"),
+              py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
@@ -2387,7 +2395,10 @@ Example::
       .def_readwrite(
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
-          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color);
+          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
+      .def_readwrite(
+          "global_ranks_in_group",
+          &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group);
 
 #endif
 

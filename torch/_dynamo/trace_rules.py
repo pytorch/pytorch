@@ -1637,6 +1637,7 @@ torch_c_binding_in_graph_functions = {
         "torch.ge",
         "torch.geqrf",
         "torch.ger",
+        "torch.get_default_device",
         "torch.get_device",
         "torch.gradient",
         "torch.greater_equal",

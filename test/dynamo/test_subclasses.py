@@ -23,6 +23,11 @@ from torch.nested._internal.nested_tensor import (
     jagged_from_tensor_and_lengths,
     ViewBufferFromNested,
 )
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    subtest,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -49,6 +54,21 @@ class DummyNDim(torch.Tensor):
             return 10
 
         return super().__torch_function__(func, types, args, kwargs)
+
+
+class WrapperSubclass:
+    def __init__(self, tensor):
+        self.tensor = tensor
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        args = pytree.tree_map_only(WrapperSubclass, lambda x: x.tensor, args)
+        kwargs = pytree.tree_map_only(WrapperSubclass, lambda x: x.tensor, kwargs)
+
+        return func(*args, **kwargs)
 
 
 class SigmoidToExpSubclass(torch.Tensor):
@@ -120,7 +140,11 @@ class EagerRecordGraphAndInputs:
         return gm
 
 
-GLOBAL_TEST_SUBCLASSES = {MockSubclass, DummyNDim, SigmoidToExpSubclass}
+GLOBAL_TEST_SUBCLASSES = {
+    MockSubclass,
+    DummyNDim,
+    SigmoidToExpSubclass,
+}
 
 
 # Returns True if the function recompiles between inputs1 and inputs2 with the
@@ -231,16 +255,31 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res = fn(input)
             self.assertIsInstance(res, LocalSubclass)
 
-    def test_isinstance_check_subclass(self):
+    @parametrize(
+        "comparison",
+        [
+            subtest(isinstance, "isinstance"),
+            subtest(lambda instance, type_: type(instance) == type_, "equality"),
+            subtest(lambda instance, type_: type(instance) is type_, "identity"),
+        ],
+    )
+    @parametrize(
+        "input_type",
+        [
+            subtest(torch.Tensor, "tensor"),
+            subtest(DummyNDim, "subclass"),
+        ],
+    )
+    def test_type_check(self, comparison, input_type):
         with torch._dynamo.config.patch("traceable_tensor_subclasses", {DummyNDim}):
 
             def fn(x):
-                if isinstance(x, DummyNDim):
+                if comparison(x, DummyNDim):
                     return torch.ones(1, 1)
                 else:
                     return torch.zeros(2, 2)
 
-            input = torch.ones(2, 2)
+            input = torch.ones(2, 2).as_subclass(input_type)
             exp_res = fn(input)
             act_res = torch.compile(backend="eager", fullgraph=True)(fn)(input)
             self.assertEqual(exp_res, act_res)
@@ -390,6 +429,19 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res_exp, res_act)
         self.assertEqual(res_exp, torch.ones(2) + 10)
+
+    def test_torch_function_wrapper_class(self):
+        x = torch.ones(2, 2)
+        wrapped = WrapperSubclass(x)
+
+        def fn(w):
+            return torch.add(w, 1.0)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped)
+        self.assertEqual(res_exp, res_act)
 
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
@@ -913,6 +965,9 @@ class GraphModule(torch.nn.Module):
             return typ.__bases__
 
         self.assertEqual(f(torch.randn(1)), (Multistreamable,))
+
+
+instantiate_parametrized_tests(SubclassTests)
 
 
 class TestNestedTensor(torch._dynamo.test_case.TestCase):
