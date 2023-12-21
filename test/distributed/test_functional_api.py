@@ -597,6 +597,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_tracing_with_fakepg(self):
         exit_if_lt_x_gpu(self.world_size)
+
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
 
