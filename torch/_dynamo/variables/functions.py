@@ -787,6 +787,7 @@ class TritonKernelVariable(VariableTracker):
             if "grid" not in kwargs:
                 raise Unsupported("Triton kernel requires to be called with a grid")
             grid = kwargs.pop("grid")
+            kwargs.pop("warmup", None)
             # rewrite kernel.run(*args, grid=grid) to kernel[grid](*args)
             return TritonKernelVariable(
                 kernel=self.kernel, kernel_idx=self.kernel_idx, grid=grid
