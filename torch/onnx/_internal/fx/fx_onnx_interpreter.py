@@ -252,6 +252,17 @@ def _fill_tensor_shape_type(
                 type(expected_value)
             )
             onnxscript_value.shape = torch.Size([])
+        elif isinstance(expected_value, complex):
+            # From complex scalar to real representation
+            onnxscript_value_to_torch_dtype = (
+                fx_type_utils.from_scalar_type_to_torch_dtype(type(expected_value))
+            )
+            onnxscript_value.dtype = (
+                fx_type_utils.from_complex_to_float(onnxscript_value_to_torch_dtype)
+                if onnxscript_value_to_torch_dtype is not None
+                else None
+            )
+            onnxscript_value.shape = torch.Size([2])
         elif fx_type_utils.is_torch_complex_dtype(expected_value.dtype):
             # Like torch.view_as_real, we flatten complex tensors to real tensors with
             # additional last dimension of 2
@@ -332,6 +343,7 @@ def _wrap_fx_args_as_onnxscript_args(
                 float,
                 bool,
                 list,
+                complex,
             ]
         ]
     ],
@@ -642,13 +654,13 @@ class FxOnnxInterpreter:
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
         # torch_args and torch_kwargs are for op-level validation
         fx_args, fx_kwargs = _fill_in_default_kwargs(node)
+
         onnx_args, onnx_kwargs = _wrap_fx_args_as_onnxscript_args(
             fx_args,
             fx_kwargs,
             fx_name_to_onnxscript_value,
             onnxscript_tracer,
         )
-
         # Dispatch to ONNX op through OpShema. The input argument dtypes are compared to
         # function signature in OpSchema, and find the best matched overload.
         symbolic_fn = onnxfunction_dispatcher.dispatch(
