@@ -377,6 +377,7 @@ class WrapperCodeGen(CodeGen):
         self.unbacked_symbol_decls = set()
         self.allow_stack_allocation = None
         self.stack_allocated_buffers = {}
+        self.computed_sizes = set()
 
         self.write_header()
         self.write_prefix()
@@ -647,7 +648,6 @@ class WrapperCodeGen(CodeGen):
 
             self.generate_return(output_refs)
 
-        self.append_precomputed_sizes_to_prefix()
         self.finalize_prefix()
         result.splice(self.prefix)
 
@@ -752,12 +752,15 @@ class WrapperCodeGen(CodeGen):
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
 
-    def append_precomputed_sizes_to_prefix(self):
-        with self.prefix.indent():
-            for sym, expr in V.graph.sizevars.inv_precomputed_replacements.items():
-                self.prefix.writeline(
-                    f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
-                )
+    def ensure_size_computed(self, sym: sympy.Symbol):
+        if sym.name.startswith("ps"):
+            if sym in self.computed_sizes:
+                return
+            self.computed_sizes.add(sym)
+            expr = V.graph.sizevars.inv_precomputed_replacements[sym]
+            self.writeline(
+                f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
+            )
 
     def finalize_prefix(self):
         pass
@@ -926,6 +929,10 @@ class WrapperCodeGen(CodeGen):
             """,
             strip=True,
         )
+        from .triton import TritonKernel
+
+        if TritonKernel.gen_attr_descriptor_import():
+            compile_wrapper.splice(TritonKernel.gen_attr_descriptor_import())
         compile_wrapper.newline()
 
         from .common import SizeArg, TensorArg
