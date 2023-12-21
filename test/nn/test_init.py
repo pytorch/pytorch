@@ -6,7 +6,7 @@ import string
 from functools import reduce
 from operator import mul
 
-from torch.testing._internal.common_utils import TestCase, TEST_SCIPY, skipIfNoLapack
+from torch.testing._internal.common_utils import TestCase, TEST_SCIPY, skipIfNoLapack, run_tests
 import torch
 import torch.nn.init as init
 import torch.nn.functional as F
@@ -432,3 +432,7 @@ class TestNNInit(TestCase):
 
         with self.assertWarnsRegex(UserWarning, 'deprecated', msg='methods not suffixed with underscore should be deprecated'):
             fn()
+
+
+if __name__ == '__main__':
+    run_tests()

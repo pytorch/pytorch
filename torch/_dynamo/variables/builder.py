@@ -5,6 +5,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import itertools
 import logging
 import operator
 import re
@@ -111,6 +112,7 @@ from .functions import (
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
+from .iter import ItertoolsVariable
 from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
@@ -644,6 +646,9 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
+        elif istype(value, type) and value in itertools.__dict__.values():
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return ItertoolsVariable(value, source=self.source)
         elif isinstance(value, torch.SymBool):
             # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
             # user provided SymBool with a SymInt in dynamo.
@@ -710,6 +715,12 @@ class VariableBuilder:
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
+        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return PythonModuleVariable(
+                value,
+                source=self.source,
+            )
         elif is_allowed(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchVariable(
@@ -758,12 +769,6 @@ class VariableBuilder:
             return UserMethodVariable(
                 value.__func__,
                 self_obj,
-                source=self.source,
-            )
-        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return PythonModuleVariable(
-                value,
                 source=self.source,
             )
         elif isinstance(value, types.GetSetDescriptorType):

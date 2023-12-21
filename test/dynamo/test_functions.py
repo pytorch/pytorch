@@ -2405,6 +2405,28 @@ def forward(self, x_1, output_1):
         f(x_cloned)
         out.sum().backward()
 
+    @requires_cuda()
+    def test_triton_kernel_matmul_tracking(self):
+        @triton.jit
+        def ones_kernel(x_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = 1.0
+            tl.store(x_ptr + offsets, x, mask=mask)
+
+        @torch.compile
+        def f(x):
+            out = torch.zeros_like(x)
+            ones_kernel[(4,)](out, 16, BLOCK_SIZE=16)
+            return torch.mm(out, x) + 10
+
+        x = torch.randn(4, 4, device="cuda")
+        torch_out = f(x)
+        python_out = torch.mm(torch.ones(4, 4, device="cuda"), x) + 10
+        self.assertEqual(torch_out, python_out)
+
     def test_dataclass_factory(self):
         @dataclass
         class Output:

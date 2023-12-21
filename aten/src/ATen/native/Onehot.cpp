@@ -10,7 +10,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor one_hot(const Tensor &self, int64_t num_classes) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
@@ -55,5 +55,4 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     return ret;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
