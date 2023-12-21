@@ -487,7 +487,7 @@ class TestCompiledAutograd(TestCase):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
-            "'type' object is not subscriptable",
+            "is not subscriptable",
         ):
             self.check_output_and_recompiles(fn, 2)
 
