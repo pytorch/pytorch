@@ -5932,7 +5932,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             accum_zp, o_inv_scale, o_zp, fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = len(inputs) == 6
-        self.binary_attr = constant_args[-5]
+        self.idx_for_inplace_sum = 3 if self.has_bias else 2
         super().__init__(
             layout,
             inputs,
@@ -6032,14 +6032,10 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             self.codegen_size_asserts(wrapper)
 
     def get_mutation_names(self):
-        assert (
-            self.binary_attr == "sum"
-        ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
-        return (
-            [self.inputs[3].get_name() if self.has_bias else self.inputs[2].get_name()]
-            if self.binary_attr == "sum"  # return the name of accum if post op sum
-            else []
-        )
+        return [self.inputs[self.idx_for_inplace_sum].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
 
     @classmethod
     def create(
@@ -6126,7 +6122,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         mark_node_as_mutating(packed, accum)
 
         # Return accum since it has been inplace changed.
-        return packed.inputs[2] if bias is None else packed.inputs[3]
+        return packed.inputs[packed.idx_for_inplace_sum]
 
 
 class QLinearPointwisePT2E(ExternKernelAlloc):
