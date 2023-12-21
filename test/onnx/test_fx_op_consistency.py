@@ -738,6 +738,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("data-dependent"),
     ),
     xfail(
+        "native_layer_norm",
+        dtypes=(torch.float16,),
+        reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/16438",
+    ),
+    xfail(
         "new_full",
         dtypes=onnx_test_common.COMPLEX_TYPES,
         reason=onnx_test_common.reason_dynamo_does_not_support("new_full", "complex64")
@@ -878,6 +883,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.instance_norm",
         model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
         reason="Functionalize pass failed",
+    ),
+    xfail(
+        "nn.functional.layer_norm",
+        dtypes=(torch.float16,),
+        reason="fixme: ORT optimizer error: https://github.com/microsoft/onnxruntime/issues/16438",
     ),
     xfail(
         "nn.functional.local_response_norm",
