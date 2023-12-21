@@ -257,6 +257,8 @@ Tensor& add_out_sparse_csr_cuda(
     SparseCsrTensor& out) {
   if (self.layout() == kStrided) {
     add_out_dense_sparse_csr_cuda(out, self, other, alpha);
+  } else if (other.layout() == kStrided) {
+    add_out_dense_sparse_csr_cuda(out, other, self, alpha);
   } else {
     TORCH_CHECK(
         self.sizes().equals(other.sizes()),
