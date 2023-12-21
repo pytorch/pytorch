@@ -108,12 +108,20 @@ def foreach_all_gather(
         all_gather_input = all_gather_output.narrow(
             0, total_sharded_numel * group_rank, total_sharded_numel
         )
-        shards_to_cat = [fsdp_param.all_gather_input for fsdp_param in fsdp_params]
-        if use_uint8:
-            shards_to_cat = [t.view(torch.uint8) for t in shards_to_cat]
-        # TODO: If foreach copy supports different src/dst dtypes, then we
-        # should use that for the mixed precision case for fusion.
-        torch.cat(shards_to_cat, out=all_gather_input)
+        foreach_copy_srcs = (
+            [fsdp_param.all_gather_input for fsdp_param in fsdp_params]
+            if not use_uint8
+            else [
+                # TODO: This incurs an extra fp32 -> bf16 copy.
+                fsdp_param.all_gather_input.to(
+                    fsdp_param.unsharded_param_data_dtype
+                ).view(torch.uint8)
+                for fsdp_param in fsdp_params
+            ]
+        )
+        split_sizes = [t.numel() for t in foreach_copy_srcs]
+        foreach_copy_dsts = torch.split(all_gather_input, split_sizes)
+        torch._foreach_copy_(foreach_copy_dsts, foreach_copy_srcs)
         all_gather_copy_in_event = torch.cuda.Event()
         all_gather_copy_in_event.record()
     all_gather_stream.wait_event(all_gather_copy_in_event)
