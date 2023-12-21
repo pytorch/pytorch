@@ -296,13 +296,33 @@ Tensor FunctionalInverses::_nested_view_from_buffer_copy_inverse(const Tensor& b
 }
 
 Tensor FunctionalInverses::_nested_view_from_values_offsets_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, const Tensor& offsets, const Tensor& dummy) {
-    TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_values_offsets() during the functionalization pass. For now, creating nested tensors isn't supported during functionalization");
-    return Tensor();
+  auto values = at::_nested_get_values(mutated_view);
+  if (inverse_return_mode != InverseReturnMode::NeverView) {
+    return values;
+  } else {
+    return values.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
+  }
 }
 
 Tensor FunctionalInverses::_nested_view_from_values_offsets_lengths_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, const Tensor& offsets, const Tensor& lengths, const Tensor& dummy) {
-    TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_values_offsets_lengths() during the functionalization pass. For now, creating nested tensors isn't supported during functionalization");
-    return Tensor();
+  // TODO: Does anything need to be done with lengths?
+  auto values = at::_nested_get_values(mutated_view);
+  if (inverse_return_mode != InverseReturnMode::NeverView) {
+    return values;
+  } else {
+    return values.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
+  }
+}
+
+Tensor FunctionalInverses::_nested_get_values_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+  // TODO: Handle lengths here too.
+  auto nt = at::_nested_view_from_values_offsets(
+      mutated_view, at::_nested_get_offsets(base), base);
+  if (inverse_return_mode != InverseReturnMode::NeverView) {
+    return nt;
+  } else {
+    return nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
+  }
 }
 
 Tensor FunctionalInverses::unsqueeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim) {

@@ -59,6 +59,7 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
     "view_as_real",
     "_conj",
     "_neg_view",
+    "_nested_get_values",
     "_nested_view_from_buffer",
     "_nested_view_from_values_offsets",
     "_nested_view_from_values_offsets_lengths",

@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     subtest,
     TEST_WITH_ROCM,
-    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
