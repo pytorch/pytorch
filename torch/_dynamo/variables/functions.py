@@ -10,7 +10,7 @@ from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
-from ..utils import make_cell
+from ..utils import get_first_attr, make_cell
 from .base import typestr, VariableTracker
 
 
@@ -654,9 +654,20 @@ class TritonKernelVariable(VariableTracker):
             # We only support configs and keys arguments of triton.autotune
             # Make sure other arguments are defaulted
             defaults = inspect.signature(Autotuner).parameters
+
+            # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
+            # The call to get_first_attr is to maintain backward-compatibility.
             if (
-                ("warmup" in defaults and defaults["warmup"].default != kernel.warmup)
-                or ("rep" in defaults and defaults["rep"].default != kernel.rep)
+                (
+                    "warmup" in defaults
+                    and defaults["warmup"].default
+                    != get_first_attr(kernel, "num_warmups", "warmup")
+                )
+                or (
+                    "rep" in defaults
+                    and defaults["rep"].default
+                    != get_first_attr(kernel, "num_reps", "rep")
+                )
                 or (
                     "prune_configs_by" in defaults
                     and defaults["prune_configs_by"].default
