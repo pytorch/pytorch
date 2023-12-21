@@ -1323,10 +1323,11 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
 
 
 class AutogradFunctionApplyVariable(VariableTracker):
-    def __init__(self, fwd_graph, bwd_graph, **kwargs):
+    def __init__(self, fwd_graph, bwd_graph, parent_source, **kwargs):
         super().__init__(**kwargs)
         self.fwd_graph = fwd_graph
         self.bwd_graph = bwd_graph
+        self.parent_source = parent_source
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -1365,15 +1366,15 @@ class AutogradFunctionApplyVariable(VariableTracker):
         limitation in general that we should check for.
         """
 
+        prev_side_effects = tx.output.side_effects.clone()
         fwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
             tx.output,
             parent=tx.output.current_tracer,
             source_target="autograd.Function",
         )
 
-        fwd_fn = UserFunctionVariable(
-            self.fwd_graph, source=AttrSource(self.source, member="forward")
-        )
+        fwd_src = AttrSource(self.parent_source, member="forward")
+        fwd_fn = UserFunctionVariable(self.fwd_graph, source=fwd_src)
         ctx = AutogradFunctionContextVariable.create(tx)
 
         # Speculate subgraph on the fwd
@@ -1389,11 +1390,17 @@ class AutogradFunctionApplyVariable(VariableTracker):
         )
 
         if fwd_freevars:
-            unsupported("NYI")
+            unimplemented("NYI")
 
-        bwd_fn = UserFunctionVariable(
-            self.bwd_graph, source=AttrSource(self.source, member="backward")
-        )
+        if ctx.mutable_local in tx.output.side_effects.store_attr_mutations:
+            if (
+                "_materialize_non_diff_grads"
+                in tx.output.side_effects.store_attr_mutations[ctx.mutable_local]
+            ):
+                unimplemented("NYI")
+
+        bwd_src = AttrSource(self.parent_source, member="backward")
+        bwd_fn = UserFunctionVariable(self.bwd_graph, source=bwd_src)
         bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
             tx.output,
             parent=fwd_tracer,
@@ -1447,7 +1454,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         fwd_nn_modules = tx.copy_graphstate().output.nn_modules
         fwd_name = add_subgraph(
             tx,
-            self.source,
+            fwd_src,
             "fwd_body",
             torch.fx.GraphModule(fwd_nn_modules.nn_modules, fwd_graph),
         )
@@ -1458,12 +1465,14 @@ class AutogradFunctionApplyVariable(VariableTracker):
         bwd_nn_modules = tx.copy_graphstate().output.nn_modules
         bwd_name = add_subgraph(
             tx,
-            self.source,
+            bwd_src,
             "bwd_body",
             torch.fx.GraphModule(bwd_nn_modules.nn_modules, bwd_graph),
         )
 
         bwd_node = make_attr(tx, bwd_name)
+
+        tx.output.side_effects = prev_side_effects
 
         p_args = (fwd_node, bwd_node, *(arg.as_proxy() for arg in args))
         example_value = pytree.tree_map_only(

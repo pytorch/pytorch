@@ -347,10 +347,17 @@ class AutogradFunctionVariable(VariableTracker):
 
             from .higher_order_ops import AutogradFunctionApplyVariable
 
+            source = self.source
+            if source is None:
+                source = AttrSource(
+                    tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
+                )
+
             return AutogradFunctionApplyVariable(
                 self.fn_cls.forward,
                 self.fn_cls.backward,
-                source=self.source,
+                source,
+                source=AttrSource(source, member="apply"),
             ).call_function(tx, args, kwargs)
 
         source = None
