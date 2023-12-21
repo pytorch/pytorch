@@ -7,7 +7,6 @@ import torch
 import torch.distributed as dist
 from torch._utils import _get_device_module
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed._shard.sharded_tensor.shard import Shard
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShardingSpec
 from torch.distributed._tensor import DTensor
@@ -19,6 +18,7 @@ from torch.distributed.checkpoint.metadata import (
     Metadata,
     MetadataIndex,
     STATE_DICT_TYPE,
+    TensorProperties,
     TensorStorageMetadata,
 )
 from torch.distributed.checkpoint.planner import LoadPlan, LoadPlanner

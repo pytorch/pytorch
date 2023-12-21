@@ -1,6 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
+from unittest.mock import patch
+
 import torch
+import torch.distributed.checkpoint as dcp
+from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
@@ -9,7 +13,6 @@ from torch.distributed.checkpoint.metadata import (
     TensorProperties,
     TensorStorageMetadata,
 )
-
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -36,6 +39,24 @@ class TestDCPCompatbility(TestCase):
             raise RuntimeError(
                 "The change may break the BC of distributed checkpoint."
             ) from e
+
+    def test_shardedtensor_dependency(self) -> None:
+        # Ensure that we can load the existing DCP checkpoints back even if the
+        # metadata contain # _shard.sharded_tensor.metadata.
+        with patch(
+            "torch.distributed.checkpoint.metadata.TensorProperties", TensorProperties
+        ):
+            dcp.save(
+                {"a": torch.zeros(4, 4)},
+                dcp.FileSystemWriter("/tmp/dcp_testing"),
+                no_dist=True,
+            )
+
+        dcp.load(
+            {"a": torch.zeros(4, 4)},
+            dcp.FileSystemReader("/tmp/dcp_testing"),
+            no_dist=True,
+        )
 
 
 if __name__ == "__main__":

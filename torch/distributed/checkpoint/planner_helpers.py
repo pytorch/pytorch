@@ -3,7 +3,6 @@ from typing import Any, List
 import torch
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
 
@@ -13,6 +12,7 @@ from .metadata import (
     MetadataIndex,
     STATE_DICT_TYPE,
     STORAGE_TYPES,
+    TensorProperties,
     TensorStorageMetadata,
 )
 from .planner import (
@@ -47,9 +47,19 @@ def _chunk_for_shard(shard_md: ShardMetadata) -> ChunkStorageMetadata:
 def _sharded_tensor_metadata(
     sharded_tensor: ShardedTensor, shard_md: ShardMetadata
 ) -> TensorWriteData:
+    shard_properties = sharded_tensor.metadata().tensor_properties
+
+    properties = TensorProperties(
+        dtype=shard_properties.dtype,
+        layout=shard_properties.layout,
+        requires_grad=shard_properties.requires_grad,
+        memory_format=shard_properties.memory_format,
+        pin_memory=shard_properties.pin_memory,
+    )
+
     return TensorWriteData(
         chunk=_chunk_for_shard(shard_md),
-        properties=sharded_tensor.metadata().tensor_properties,
+        properties=properties,
         size=sharded_tensor.metadata().size,
     )
 
@@ -68,7 +78,6 @@ def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
                 offsets=offsets,
                 sizes=sizes,
             ),
-            # TODO:update this to not use TensorProperties from ST.
             properties=TensorProperties.create_from_tensor(tensor.to_local()),
             size=tensor.size(),
         ),
