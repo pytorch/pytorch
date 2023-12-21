@@ -189,6 +189,7 @@ def export(
         args,
         kwargs,
         constraints,
+        strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
     )
 

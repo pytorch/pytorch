@@ -11,12 +11,13 @@ import zipfile
 
 import torch
 import torch._dynamo as torchdynamo
-from torch.export import export, save, load
+from torch.export import export, save, load, Dim
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    canonicalize,
     deserialize,
     serialize,
     SerializeError,
@@ -184,6 +185,22 @@ class TestSerialize(TestCase):
         self.assertEqual(node.inputs[2].arg.as_bool, True)
         self.assertEqual(node.inputs[3].name, "side")
         self.assertEqual(node.inputs[3].arg.as_string, "right")
+
+    def test_canonicalize(self) -> None:
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                a = y + x
+                b = x + y
+                return b + a
+
+        ep = torch.export.export(Module(), (torch.randn(3, 2), torch.randn(3, 2)))
+        s = ExportedProgramSerializer().serialize(ep)
+        c = canonicalize(s.exported_program)
+        g = c.graph_module.graph
+        self.assertLess(
+            g.nodes[0].inputs[0].arg.as_tensor.name,
+            g.nodes[1].inputs[0].arg.as_tensor.name
+        )
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -453,6 +470,15 @@ class TestDeserialize(TestCase):
 
         inputs = (torch.rand(8, 8, 8), torch.rand(8, 8, 8), torch.rand(8, 8, 4))
         self.check_graph(MyModule(), inputs)
+
+    def test_sym_ite(self):
+        def f(x):
+            b = x.shape[0] == 5
+            ret = torch.sym_ite(b, x.shape[0], x.shape[1])
+            return ret
+
+        dynamic_shapes = {'x': {0: Dim("dim0"), 1: Dim("dim1")}}
+        self.check_graph(f, (torch.ones(4, 5),), dynamic_shapes=dynamic_shapes)
 
     @parametrize(
         "name,case",

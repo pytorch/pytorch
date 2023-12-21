@@ -1182,9 +1182,39 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(cnt.frame_count, 1)
 
-        # We increase the number of ops to 3 and 4 for top-level graph because of an additional
+        # We increase the number of ops to 2 and 3 for top-level graph because of an additional
         # get_item call created by the flatten/unflatten logic in HOP speculation.
-        self.assertEqual(cnt.op_count, ifdynstaticdefault(3, 4))
+        self.assertEqual(cnt.op_count, ifdynstaticdefault(2, 3))
+
+    def test_map_lowers_to_graph(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        def fn(x, y):
+            def inner(x, y):
+                return torch.sin(x + y)
+
+            return control_flow.map(inner, x, y.size(0))
+
+        x = torch.randn(3, 1)
+        y = torch.randn(3, 1)
+        compiled_fn = torch.compile(fn, backend=backend)(x, y)
+        self.assertEqual(len(backend.graphs), 1)
+        graph = backend.graphs[0]
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        self.assertExpectedInline(
+            graph.code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    map_body_0 = self.map_body_0
+    map_impl = torch.ops.higher_order.map_impl(map_body_0, 1, l_x_, 3);  map_body_0 = l_x_ = None
+    getitem_1 = map_impl[0];  map_impl = None
+    return (getitem_1,)""",
+        )
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
@@ -3282,13 +3312,12 @@ class GraphModule(torch.nn.Module):
 
         actual = fn(x, y)
         expected = torch.compile(fn, backend="aot_eager", fullgraph=False)(x, y)
-        self.assertEqual(len(counters["graph_break"]), 2)
+        self.assertEqual(len(counters["graph_break"]), 1)
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
             {
                 ".*torch.vmap with body that accepts non-Tensors as input": 2,
-                "Unsupported: meta converter nyi with fake tensor propagation.": 1,
             },
         )
         self.assertEqual(actual, expected)
@@ -3470,7 +3499,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.sigmoid(torch.matmul(x, y))
 
         def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
 
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
@@ -3490,7 +3521,11 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(
-                gn, torch.sin(x), y, use_reentrant=True, preserve_rng_state=False
+                gn,
+                torch.sin(x),
+                y,
+                use_reentrant=True,
+                preserve_rng_state=False,
             )
 
         x = torch.randn(4, 4, requires_grad=True)
@@ -3510,7 +3545,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
 
         def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
         y = torch.randn(4, 4, device="cuda", requires_grad=True)
@@ -3533,7 +3570,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
 
         def fn(x, y):
-            return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
         y = torch.randn(4, 4, device="cuda", requires_grad=True)
@@ -3551,7 +3590,11 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.sigmoid(torch.matmul(x, y))
 
         def fn(x, y):
-            return torch.cos(torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y))
+            return torch.cos(
+                torch.utils.checkpoint.checkpoint(
+                    gn, torch.sin(x), y, use_reentrant=True
+                ),
+            )
 
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
@@ -3584,7 +3627,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         mod = MockModule()
 
         def fn(x):
-            return torch.utils.checkpoint.checkpoint(mod, torch.sin(x))
+            return torch.utils.checkpoint.checkpoint(
+                mod, torch.sin(x), use_reentrant=True
+            )
 
         x = torch.randn(10, 10, requires_grad=True)
 

@@ -29,6 +29,7 @@ from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
+import operator
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -1427,7 +1428,7 @@ class TestMakeTensor(TestCase):
     @parametrize("noncontiguous", [False, True])
     @parametrize("shape", [tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
     def test_noncontiguous(self, dtype, device, noncontiguous, shape):
-        numel = functools.reduce(lambda a, b: a * b, shape, 1)
+        numel = functools.reduce(operator.mul, shape, 1)
 
         t = torch.testing.make_tensor(shape, dtype=dtype, device=device, noncontiguous=noncontiguous)
         self.assertEqual(t.is_contiguous(), not noncontiguous or numel < 2)
