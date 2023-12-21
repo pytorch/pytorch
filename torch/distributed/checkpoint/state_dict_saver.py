@@ -164,7 +164,7 @@ def _async_save(
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint._async_save")
 
-    cpu_state_dict = _offload_state_dict_to_cpu(_state_dict_to_stateful(state_dict))
+    cpu_state_dict = _offload_state_dict_to_cpu(_stateful_to_state_dict(state_dict))
 
     executor = ThreadPoolExecutor(max_workers=1)
     f = executor.submit(
@@ -181,7 +181,7 @@ def _async_save(
     return f
 
 
-def _state_dict_to_stateful(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
+def _stateful_to_state_dict(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
     """Creates a shallow copy of `state_dict` where `state_dict` is called for each Stateful object."""
     stateful_state_dict = {}
     for key, elem in state_dict.items():
