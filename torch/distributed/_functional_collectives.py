@@ -678,7 +678,9 @@ def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_
 # communicate the output_split_sizes ahead of time (which is dynamic),
 # but then you pass those sizes explicitly, and the all to all itself
 # isn't dynamic, it just follows the specified output splits
-def _all_to_all_single_meta(input, output_split_sizes, input_split_sizes, *args, **kwargs):
+def _all_to_all_single_meta(
+    input, output_split_sizes, input_split_sizes, *args, **kwargs
+):
     if output_split_sizes is None:
         return input.new_empty(input.size())
     else:
