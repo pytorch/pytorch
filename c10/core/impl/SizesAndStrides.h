@@ -30,7 +30,7 @@ class C10_API SizesAndStrides {
   using strides_iterator = int64_t*;
   using strides_const_iterator = const int64_t*;
 
-  SizesAndStrides() : size_(1) {
+  SizesAndStrides() {
     size_at_unchecked(0) = 0;
     stride_at_unchecked(0) = 1;
   }
@@ -297,7 +297,7 @@ class C10_API SizesAndStrides {
     memcpy(outOfLineStorage_, rhs.outOfLineStorage_, storageBytes(rhs.size_));
   }
 
-  size_t size_;
+  size_t size_{1};
   union {
     int64_t* outOfLineStorage_;
     int64_t inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * 2]{};

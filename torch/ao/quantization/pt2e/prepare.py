@@ -55,16 +55,16 @@ def _union(parent: EdgeOrNode, child: EdgeOrNode, shared_with_map: Dict[EdgeOrNo
     # union the two trees by pointing the root of child to root of parent
     shared_with_map[root_child] = root_parent
 
-def _update_shared_with(edge_or_node: EdgeOrNode, qspec: QuantizationSpecBase, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]):
+def _update_shared_with(child: EdgeOrNode, qspec: QuantizationSpecBase, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]):
     """Update the `shared_with_map` based on the qspec, this applies the `SharedQuantizationSpec`
     configuration and established the relationship between `edge_or_node` with the edge/node that it
     is pointing to, we'll use this information in the end to get the group id
     """
     if isinstance(qspec, SharedQuantizationSpec):
-        sharing_with = qspec.edge_or_node
+        parent = qspec.edge_or_node
         # we point from edge_or_node to the node that it is sharing_with, e.g.
         # qspec for a = SharedQuantizationSpec(b) means `a` points to `b`
-        _union(sharing_with, edge_or_node, shared_with_map)
+        _union(parent, child, shared_with_map)
 
 def _unwrap_shared_qspec(
     qspec: QuantizationSpecBase,
@@ -114,7 +114,10 @@ def _get_edge_or_node_to_qspec(model: torch.fx.GraphModule) -> Dict[EdgeOrNode, 
     return edge_or_node_to_qspec
 
 def _union_input_edge_with(input_edge, input_edge_root_qspec, edge_or_node, edge_or_node_to_qspec, shared_with_map):
-    # find root_qspec for `arg` Node (the output of previous node)
+    """Union input edge with another edge or node, used in implicit sharing to point the current input
+    edge to other user edges of the producer node, or the output of producer node since these are
+    referring to the same Tensor
+    """
     root_qspec = None
     if edge_or_node in edge_or_node_to_qspec:
         qspec = edge_or_node_to_qspec[edge_or_node]
@@ -195,10 +198,22 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
             assert isinstance(input_edge, tuple)
             arg, n = input_edge
             if n.meta["quantization_annotation"].allow_implicit_sharing:
-                # sharing with previous output
-                _union_input_edge_with(input_edge, input_edge_root_qspec, arg, edge_or_node_to_qspec, shared_with_map)
+                # NOTE: the order is important here, we first share with other users and then share with previous
+                # output because the reverse order could cause circular dependency
+                # e.g node1 -> node2
+                #          \ -> node3
+                # when processing (node1, node2), if we first point (node1, node2) to node1
+                # Step 1. shared_map = {(node1, node2): node1}
+                # Step 2. after that, we point the (node1, node2) to its other user (node1, node3) ,
+                # which means shared_map = {(node1, node2): node1, node1: (node1, node3)}
+                # because we will point the root of (node1, node2) (in this case node1) to the root of (node1, node3)
+                # Step 3. and when we process (node1, node3), it can try to point to node1 as well, then we'll
+                # have a circular dependency
+                # the following order works around this issue, but this does not allow arbitrary configuration
+                # of sharing so it might break in a different case in the future, when it breaks
+                # quantizer writer can check the notes here to debug the issue
 
-                # sharing with other users of the previous output
+                # sharing with other users of the producer node
                 # (arg, user)
                 for user in arg.users:
                     if user is n:
@@ -211,6 +226,9 @@ def _get_edge_or_node_to_group_id(edge_or_node_to_qspec: Dict[EdgeOrNode, Quanti
                         edge_or_node_to_qspec,
                         shared_with_map
                     )
+
+                # sharing with output of producer node
+                _union_input_edge_with(input_edge, input_edge_root_qspec, arg, edge_or_node_to_qspec, shared_with_map)
 
             _update_shared_with(input_edge, qspec, shared_with_map)
 

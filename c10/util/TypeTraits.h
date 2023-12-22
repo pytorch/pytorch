@@ -101,7 +101,7 @@ namespace detail {
 template <class LambdaType, class FuncType>
 struct is_stateless_lambda__ final {
   static_assert(
-      !std::is_same<LambdaType, LambdaType>::value,
+      !std::is_same_v<LambdaType, LambdaType>,
       "Base case shouldn't be hit");
 };
 // implementation idea: According to the C++ standard, stateless lambdas are
@@ -137,7 +137,7 @@ template <template <class> class C>
 struct is_type_condition<
     C,
     std::enable_if_t<
-        std::is_same<bool, std::remove_cv_t<decltype(C<int>::value)>>::value>>
+        std::is_same_v<bool, std::remove_cv_t<decltype(C<int>::value)>>>>
     : std::true_type {};
 
 /**

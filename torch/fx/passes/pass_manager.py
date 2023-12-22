@@ -228,6 +228,16 @@ class PassManager:
         self.passes = passes_left
         self._validated = False
 
+    def replace_pass(self, _target, _replacement):
+        passes_left = []
+        for ps in self.passes:
+            if ps.__name__ == _target.__name__:
+                passes_left.append(_replacement)
+            else:
+                passes_left.append(ps)
+        self.passes = passes_left
+        self._validated = False
+
     def validate(self):
         """
         Validates that current pass schedule defined by `self.passes` is valid

@@ -5,7 +5,7 @@ import sys
 from enum import Enum
 from functools import partial, reduce
 from itertools import chain, product
-from typing import Callable, cast, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch._prims as prims
@@ -1095,6 +1095,10 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
     if train and p != 0:
         if p == 1:
             return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
+        if not input.dtype.is_floating_point:
+            raise RuntimeError(
+                "result type Float can't be cast to the desired output type Long"
+            )
         bool_mask = torch.rand_like(input) > p
         res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)
@@ -3050,7 +3054,7 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
 def select_one_layer_lstm_function(input, hx, params):
     r"""Check whether we could use decompose lstm with mkldnn_rnn_layer.
     All the below conditions need to be met:
-        * ``torch._C._has_mkldnn`` returns ``True``.
+        * ``torch._C._get_mkldnn_enabled()`` returns ``True``.
         * All the input args are on CPU.
         * The dtypes of args are either torch.float or torch.bfloat16.
         * Inference.
@@ -3063,7 +3067,7 @@ def select_one_layer_lstm_function(input, hx, params):
     """
 
     def use_mkldnn(input, hx, params):
-        if not torch._C._has_mkldnn:
+        if not torch._C._get_mkldnn_enabled():
             return False
 
         tensors = [input] + list(hx) + list(chain.from_iterable(params))
@@ -3264,6 +3268,20 @@ def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)
 
 
+def _compute_scale(in_size, out_size, align_corners, scale=None):
+    if align_corners:
+        return (in_size - 1.0) / (out_size - 1.0) if out_size > 1 else 0
+    else:
+        return 1.0 / scale if scale is not None and scale > 0 else in_size / out_size
+
+
+def _compute_source_index(scale, dst_index, align_corners):
+    if align_corners:
+        return scale * dst_index
+    else:
+        return scale * (dst_index + 0.5) - 0.5
+
+
 @register_decomposition(aten.upsample_bilinear2d.default)
 @aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
@@ -3275,62 +3293,55 @@ def upsample_bilinear2d(
     scales_w: Optional[float] = None,
 ) -> Tensor:
     # get dimensions of original image
-    n_batch, n_channels, in_h, in_w = input.shape
-
-    out_h = output_size[0]
-    out_w = output_size[1]
+    _, n_channels, in_h, in_w = input.shape
 
     # Calculate horizontal and vertical scaling factor
-    # TODO: Figure out if scales_h/scales_w matters here
-    if out_h > 1:
-        if align_corners:
-            h_scale_factor = (in_h - 1) / (out_h - 1)
-        else:
-            h_scale_factor = 1.0 / scales_h if scales_h is not None else in_h / out_h
-    else:
-        h_scale_factor = 0.0
+    h_scale_factor = _compute_scale(in_h, output_size[0], align_corners, scales_h)
+    w_scale_factor = _compute_scale(in_w, output_size[1], align_corners, scales_w)
 
-    if out_w > 1:
-        if align_corners:
-            w_scale_factor = (in_w - 1) / (out_w - 1)
-        else:
-            w_scale_factor = 1.0 / scales_w if scales_w is not None else in_w / out_w
-    else:
-        w_scale_factor = 0.0
+    _, dtype = utils.elementwise_dtypes(
+        input, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    )
+    # We have to create arange with int64 dtype and use .to in order to avoid
+    # additional kernels creation in inductor and get a perf slowdown
+    i = torch.arange(output_size[0], device=input.device).to(dtype=dtype)
+    j = torch.arange(output_size[1], device=input.device).to(dtype=dtype)
 
-    i = torch.arange(out_h, dtype=input.dtype, device=input.device)
-    j = torch.arange(out_w, dtype=input.dtype, device=input.device)
+    x_f32 = _compute_source_index(w_scale_factor, j, align_corners).clamp(min=0.0)
+    y_f32 = _compute_source_index(h_scale_factor, i, align_corners).clamp(min=0.0)
+    y_f32 = y_f32.unsqueeze(-1)
 
-    if align_corners:
-        x = h_scale_factor * i
-        y = w_scale_factor * j
-    else:
-        x = (h_scale_factor * (i + 0.5) - 0.5).clamp(min=0.0)
-        y = (w_scale_factor * (j + 0.5) - 0.5).clamp(min=0.0)
+    x = x_f32.to(torch.int64)
+    y = y_f32.to(torch.int64)
 
-    x_floor = x.to(torch.int64)
-    x_ceil = torch.ceil(x).clamp(max=in_h - 1).to(torch.int64)
-    y_floor = y.to(torch.int64)
-    y_ceil = torch.ceil(y).clamp(max=in_w - 1).to(torch.int64)
+    # We are using torch.where instead of torch.clamp below due to an expected failure
+    # in test_aot_autograd_symbolic_exhaustive_nn_functional_interpolate_bilinear_cpu_float32 test
+    # torch.ops.aten.clamp.default(add, None, sub) on int64 input tensor is returning float32 and
+    # fails with torch.ops.aten._unsafe_index.Tensor(primals_1, [None, None, _to_copy_1, clamp_2])
+    # RuntimeError: _unsafe_index found unexpected index type Float
+    # xp1 = (x + 1).clamp(max=in_w - 1); yp1 = (y + 1).clamp(max=in_h - 1)
+    xp1 = torch.where(x < in_w - 1, x + 1, x)
+    yp1 = torch.where(y < in_h - 1, y + 1, y)
 
-    x_view = x.unsqueeze(1)
-    x_floor_view = x_floor.unsqueeze(1)
-    x_ceil_view = x_ceil.unsqueeze(1)
+    v1 = aten._unsafe_index(input, [None, None, y, x])
+    v2 = aten._unsafe_index(input, [None, None, y, xp1])
+    v3 = aten._unsafe_index(input, [None, None, yp1, x])
+    v4 = aten._unsafe_index(input, [None, None, yp1, xp1])
 
-    v1 = aten._unsafe_index(input, [None, None, x_floor_view, y_floor])
-    v2 = aten._unsafe_index(input, [None, None, x_ceil_view, y_floor])
-    v3 = aten._unsafe_index(input, [None, None, x_floor_view, y_ceil])
-    v4 = aten._unsafe_index(input, [None, None, x_ceil_view, y_ceil])
+    dtype = torch.float32 if not input.is_floating_point() else input.dtype
+    if not input.is_floating_point():
+        v1 = v1.to(dtype)
+        v2 = v2.to(dtype)
+        v3 = v3.to(dtype)
+        v4 = v4.to(dtype)
 
-    xscale2 = x_view - x_floor_view
-    xscale1 = 1.0 - xscale2
+    yscale = (y_f32 - y).clamp(0.0, 1.0).to(dtype)
+    xscale = (x_f32 - x).clamp(0.0, 1.0).to(dtype)
 
-    yscale2 = y - y_floor
-    yscale1 = 1.0 - yscale2
-
-    q1 = torch.mul(v1, xscale1) + torch.mul(v2, xscale2)
-    q2 = torch.mul(v3, xscale1) + torch.mul(v4, xscale2)
-    result = torch.mul(q1, yscale1) + torch.mul(q2, yscale2)
+    # x1 * (1 - alpha) + x2 * alpha == x1 + (x2 - x1) * alpha
+    q1 = v1 + torch.mul(v2 - v1, xscale)
+    q2 = v3 + torch.mul(v4 - v3, xscale)
+    result = q1 + torch.mul(q2 - q1, yscale)
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(input)
@@ -3340,6 +3351,9 @@ def upsample_bilinear2d(
         memory_format = torch.contiguous_format
 
     result = result.contiguous(memory_format=memory_format)
+
+    if not input.is_floating_point():
+        result = result.round()
 
     return result
 
@@ -4018,6 +4032,68 @@ def upsample_bicubic2d_vec(
         )
     scale_h, scale_w = scale_factors if scale_factors else (None, None)
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
+
+
+@register_decomposition(aten.reflection_pad1d)
+@register_decomposition(aten.reflection_pad2d)
+@register_decomposition(aten.reflection_pad3d)
+@pw_cast_for_opmath
+@out_wrapper()
+def _reflection_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
+    def idx(left, middle, right):
+        dim_idx = torch.arange(-left, middle + right, device=a.device)
+        return middle - 1 - (middle - 1 - dim_idx.abs()).abs()
+
+    return _reflection_or_replication_pad(
+        a,
+        padding,
+        idx,
+    )
+
+
+@register_decomposition(aten.replication_pad1d)
+@register_decomposition(aten.replication_pad2d)
+@register_decomposition(aten.replication_pad3d)
+@pw_cast_for_opmath
+@out_wrapper()
+def _replication_pad(a: Tensor, padding: Tuple[int, ...]) -> Tensor:
+    def idx(left, middle, right):
+        dim_idx = torch.arange(-left, middle + right, device=a.device)
+        return torch.clamp(dim_idx, 0, middle - 1)
+
+    return _reflection_or_replication_pad(
+        a,
+        padding,
+        idx,
+    )
+
+
+def _reflection_or_replication_pad(
+    a: Tensor,
+    padding: Tuple[int, ...],
+    idx_fn: Callable[[int, int, int], Tensor],
+) -> Tensor:
+    dim = len(padding) // 2
+    torch._check(
+        a.dim() in (dim + 1, dim + 2),
+        lambda: f"reflection_pad{dim}d requires {dim + 1}D or {dim + 2}D input",
+    )
+    inp_shape = a.shape[-dim:]
+    nc_dim = a.dim() - dim
+
+    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
+    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
+
+    result = a
+    for i in range(dim):
+        idx: List[Any] = [None] * result.dim()
+        idx[i + nc_dim] = idx_fn(padding_left[i], inp_shape[i], padding_right[i])
+        result = aten._unsafe_index(result, idx)
+
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(result)
+    result = result.contiguous(memory_format=memory_format)
+    return result
 
 
 @register_decomposition(aten.aminmax)

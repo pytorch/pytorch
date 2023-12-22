@@ -22,8 +22,16 @@ compiling it into a shared library, and conducting model predictions using C++.
 Model Compilation
 ---------------------------
 
-Using AOTInductor, you can still author the model in Python. The following example demonstrates how to
-invoke ``aot_compile`` to transform the model into a shared library.
+Using AOTInductor, you can still author the model in Python. The following
+example demonstrates how to invoke ``aot_compile`` to transform the model into a
+shared library.
+
+This API uses ``torch.export`` to capture the model into a computational graph,
+and then uses TorchInductor to generate a .so which can be run in a non-Python
+environment.  For comprehensive details on the ``torch._export.aot_compile``
+API, you can refer to the code
+`here <https://github.com/pytorch/pytorch/blob/92cc52ab0e48a27d77becd37f1683fd442992120/torch/_export/__init__.py#L891-L900C9>`__.
+For more details on ``torch.export``, you can refer to the :ref:`torch.export docs <torch.export>`.
 
 .. note::
 
@@ -69,9 +77,6 @@ In this illustrative example, the ``Dim`` parameter is employed to designate the
 the input variable "x" as dynamic. Notably, the path and name of the compiled library remain unspecified,
 resulting in the shared library being stored in a temporay directory.
 To access this path from the C++ side, we save it to a file for later retrieval within the C++ code.
-For comprehensive details on the 'torch._export.aot_compile' API,
-you can refer to the code
-`here <https://github.com/pytorch/pytorch/blob/92cc52ab0e48a27d77becd37f1683fd442992120/torch/_export/__init__.py#L891-L900C9>`__.
 
 
 Inference in C++

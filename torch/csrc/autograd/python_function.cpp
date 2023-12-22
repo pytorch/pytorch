@@ -543,8 +543,10 @@ static void _wrap_outputs(
       PyTuple_SetItem(outputs, i, obj);
     } else {
       if (is_executable) {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         self->output_info.emplace_back(*wrapped_outputs[i]);
       }
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
     }
   }

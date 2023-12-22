@@ -12,7 +12,11 @@ from torch.distributed.checkpoint.default_planner import (
     DefaultSavePlanner,
 )
 
-from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
 from torch.testing._internal.common_utils import run_tests
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -36,7 +40,11 @@ class TestTpCheckpoint(DTensorTestBase):
         # create model and move it to GPU with id rank
         model = MLPModule(self.device_type).cuda(self.rank)
         # Parallelize the module based on the given Parallel Style.
-        model = parallelize_module(model, tp_mesh, PairwiseParallel())
+        parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+        }
+        model = parallelize_module(model, tp_mesh, parallelize_plan)
         optimizer = torch.optim.SGD(model.parameters(), lr=0.25)
         original_state_dict = deepcopy(model.state_dict())
 

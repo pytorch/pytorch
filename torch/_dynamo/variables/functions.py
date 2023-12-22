@@ -82,8 +82,8 @@ class BaseUserFunctionVariable(VariableTracker):
             self, list(self.self_args()) + list(args), kwargs
         )
 
-    def num_parameters(self):
-        return len(inspect.signature(self.get_function()).parameters)
+    def inspect_parameter_names(self):
+        return list(inspect.signature(self.get_function()).parameters)
 
     def closure_vars(self, tx):
         return {}
@@ -198,9 +198,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                         closure_cell_contents = AttrSource(
                             closure_cell, "cell_contents"
                         )
-                        contents_var = VariableBuilder(parent, closure_cell_contents)(
-                            cell.cell_contents
-                        )
+                        try:
+                            contents_var = VariableBuilder(
+                                parent, closure_cell_contents
+                            )(cell.cell_contents)
+                        except ValueError:
+                            # Cell has not yet been assigned
+                            contents_var = variables.DeletedVariable()
 
                         if (
                             closure_cell_contents.name()
@@ -293,8 +297,8 @@ class UserMethodVariable(UserFunctionVariable):
                 )
         return super().call_function(tx, args, kwargs)
 
-    def num_parameters(self):
-        return super().num_parameters() - 1
+    def inspect_parameter_names(self):
+        return super().inspect_parameter_names()[1:]
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
@@ -364,7 +368,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         annotations,
         closure,
         closure_scope,
-        wraps_source=None,
+        wrapped_reconstructible=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -381,7 +385,10 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if closure is None:
             closure_scope = None
         self.closure_scope = closure_scope
-        self.wraps_source = wraps_source
+        # Either a source or a VT with .can_reconstruct() == True
+        self.wrapped_reconstructible: Optional[
+            Union[Source, VariableTracker]
+        ] = wrapped_reconstructible
 
     def self_args(self):
         return []
@@ -511,9 +518,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         codegen.extend_output(create_call_function(7, push_null=True))
 
-        if self.wraps_source:
+        if self.wrapped_reconstructible:
             codegen.load_import_from("functools", "wraps")
-            codegen(self.wraps_source)
+            codegen(self.wrapped_reconstructible)
             codegen.extend_output(create_call_function(1, True))
             codegen.extend_output(create_rot_n(2))
             codegen.extend_output(create_call_function(1, True))
@@ -534,13 +541,8 @@ def _traceable_collective_remaps():
 
 def _traceable_collectives_source(tx, fn):
     assert torch.distributed.is_available(), "Illegal invocation."
-    from torch.distributed._functional_collectives import (
-        all_gather_tensor_inplace,
-        reduce_scatter_tensor_inplace,
-    )
+    assert fn in _traceable_collective_remaps().values()
 
-    valid_values = {all_gather_tensor_inplace, reduce_scatter_tensor_inplace}
-    assert fn in valid_values
     inner_name = fn.__name__
     path_source = tx.import_source("torch.distributed._functional_collectives")
     return AttrSource(path_source, inner_name)
@@ -769,7 +771,10 @@ class TritonKernelVariable(VariableTracker):
             if "grid" not in kwargs:
                 raise Unsupported("Triton kernel requires to be called with a grid")
             grid = kwargs.pop("grid")
-            return self.clone(grid=grid).call_function(tx, args, kwargs)
+            # rewrite kernel.run(*args, grid=grid) to kernel[grid](*args)
+            return TritonKernelVariable(
+                kernel=self.kernel, kernel_idx=self.kernel_idx, grid=grid
+            ).call_function(tx, args, kwargs)
 
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)

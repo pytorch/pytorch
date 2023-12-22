@@ -640,7 +640,7 @@ a NumPy function into a PyTorch one. Using it, we can simply write
 
    @torch.compile
    @torch.compiler.wrap_numpy
-   def numpy_fn(X, Y):
+   def numpy_fn(X: np.ndarray, Y: np.ndarray):
        return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
 
    X = torch.randn(1024, 64, device="cuda")
@@ -656,7 +656,7 @@ compute gradients along NumPy functions!
 
    @torch.compile
    @torch.compiler.wrap_numpy
-   def numpy_fn(X, Y):
+   def numpy_fn(X: np.ndarray, Y: np.ndarray):
        return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
 
    X = torch.randn(1024, 64, device="cuda", requires_grad=True)

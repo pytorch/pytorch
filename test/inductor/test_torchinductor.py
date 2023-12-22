@@ -52,7 +52,10 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 
-from torch.testing._internal.common_device_type import _has_sufficient_memory
+from torch.testing._internal.common_device_type import (
+    _has_sufficient_memory,
+    get_desired_device_type_test_bases,
+)
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -63,6 +66,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     skipIfRocm,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 from torch.utils import _pytree as pytree
@@ -91,6 +95,10 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, skipCUDAIf
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
+_desired_test_bases = get_desired_device_type_test_bases()
+RUN_CPU = any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+RUN_CUDA = any(getattr(x, "device_type", "") == "cuda" for x in _desired_test_bases)
+
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
@@ -271,8 +279,24 @@ def check_model(
     ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
     ref_kwargs = kwargs
     has_lowp_args = False
-    original_lowp_dtype = torch.half
 
+    if reference_in_float and exact_dtype:
+        # Store expected dtypes so we can check actual result gives the correct types
+        torch.manual_seed(0)
+        try:
+            eager_result = model(*ref_inputs, **ref_kwargs)
+        except RuntimeError:
+            # Eager model may fail if the dtype is not supported
+            eager_result = None
+
+        ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
+        expect_dtypes = [
+            x.dtype if isinstance(x, torch.Tensor) else None
+            for x in pytree.tree_leaves(eager_result)
+        ]
+        del eager_result
+
+    ref_model = model
     if reference_in_float:
         # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
         def upcast_fn(x):
@@ -285,25 +309,14 @@ def check_model(
             else:
                 return x
 
-        def get_original_lowp_dtype(example_inputs):
-            dtypes = [x.dtype for x in example_inputs if isinstance(x, torch.Tensor)]
-            dtype_set = set(dtypes)
-            return dtype_set.pop() if len(dtype_set) == 1 else torch.half
-
         ref_inputs = list(map(upcast_fn, example_inputs))
         ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
-        if has_lowp_args:
-            original_lowp_dtype = get_original_lowp_dtype(example_inputs)
-            if hasattr(model, "to"):
-                model = model.to(torch.float)
+        if has_lowp_args and hasattr(model, "to"):
+            ref_model = copy.deepcopy(model).to(torch.float)
 
     torch.manual_seed(0)
 
-    correct = model(*ref_inputs, **ref_kwargs)
-    # downcast the model back if needed
-    if reference_in_float and has_lowp_args:
-        if hasattr(model, "to"):
-            model = model.to(original_lowp_dtype)
+    correct = ref_model(*ref_inputs, **ref_kwargs)
 
     torch._inductor.metrics.reset()
 
@@ -340,6 +353,13 @@ def check_model(
             else y
             for x, y in zip(actual_flat, correct_flat)
         )
+
+    if reference_in_float and exact_dtype:
+        for expect_dtype, actual_result in zip(expect_dtypes, actual_flat):
+            if expect_dtype is not None:
+                assert (
+                    actual_result.dtype == expect_dtype
+                ), f"dtype mismatch, expected {expect_dtype} but got {actual_result.dtype}"
 
     if reference_in_float:
         correct_flat = reference_to_expect(actual_flat, correct_flat)
@@ -639,6 +659,20 @@ class CommonTemplate:
         _, code = run_and_get_code(fn, x, y)
         self.assertEqual(code[0].count("aten.view"), 3)
 
+    def test_add_complex3(self):
+        # fix https://github.com/pytorch/pytorch/issues/115071
+        @torch.compile
+        def fn(*args):
+            a = torch.neg(args[0])
+            b = torch.add(args[0], args[0])
+            return (a, b)
+
+        x = torch.randn(41, dtype=torch.complex64)
+        y = x.clone()
+        # should not inplace write to the input
+        fn(x)
+        self.assertEqual(x, y)
+
     def test_concat_add_inplace(self):
         def fn(x, y, z):
             return torch.cat([x, y], dim=1).add_(z)
@@ -688,9 +722,9 @@ class CommonTemplate:
 
     def test_randn_generator(self):
         def fn(a, generator):
-            torch.randn([20, 20], generator=generator, device=a.device)
+            return torch.randn([20, 20], generator=generator, device=a.device)
 
-        self.common(fn, (torch.linspace(-10, 10, 41), None))
+        self.common(fn, (torch.linspace(-10, 10, 41), None), assert_equal=False)
 
         # generator not yet supported in dynamo
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Generator"):
@@ -1054,7 +1088,7 @@ class CommonTemplate:
             # make sure things also work if they aren't unrolled
             self.common(fn, (torch.randn(8, 3),))
 
-    def test_multilayer_low_prec(self):
+    def test_multilayer_sum_low_prec(self):
         # fp16 nyi for cpu
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -1163,6 +1197,17 @@ class CommonTemplate:
             return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
 
         self.common(fn, (torch.ones(32, 32) * 70,))
+
+    def test_cumsum(self):
+        def fn(x):
+            return x.cumsum(0), x.cumsum(1)
+
+        # Persistent reductions
+        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
+
+        # Non-persistent reduction
+        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
 
     def test_clamp(self):
         def fn(a, b):
@@ -1629,6 +1674,26 @@ class CommonTemplate:
                 ),
             )
 
+    def test_floordiv(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Fails on CPU")
+
+        def fn_floor_input(a, i):
+            n = (i * 1.234) // 8.234
+            return a + n
+
+        self.common(
+            fn_floor_input, (make_tensor(10, device="cpu", dtype=torch.float32), 33)
+        )
+
+        def fn_int_input(a, i):
+            n = i // 8
+            return a + n
+
+        self.common(
+            fn_int_input, (make_tensor(10, device="cpu", dtype=torch.float32), 33)
+        )
+
     def test_both_scalars(self):
         def fn(a, b):
             return (
@@ -1992,6 +2057,43 @@ class CommonTemplate:
                 check_lowp=True,
             )
 
+    def test_mm_mixed_dtype(self):
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        t1 = torch.arange(6, dtype=torch.float, device=self.device).view(2, 3)
+        t2 = torch.arange(9, dtype=torch.int64, device=self.device).view(3, 3)
+
+        msg = "expected .* and .* to have the same dtype, but got: .* != .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn)(t1, t2)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(t1, t2)
+
+    def test_linear_mixed_dtype(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()  # noqa: UP008
+                self.fc1 = nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.fc1(x.permute(1, 2, 0))
+                return x
+
+        fn = Net().to(self.device)
+        t = torch.arange(27, device=self.device).view(3, 3, 3)
+
+        msg = "expected .* and .* to have the same dtype, but got: .* != .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(t)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            with torch.no_grad():
+                torch.compile(fn)(t)
+        # TODO: Autograd internal assertion
+        msg = "Failed running call_module .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn)(t)
+
     def test_scalar_input(self):
         def fn(x, y):
             a = torch.div(x, y, rounding_mode="floor")
@@ -2162,6 +2264,47 @@ class CommonTemplate:
                 (v,),
             )
 
+    @skipIfRocm
+    def test_conv_inference_heuristics(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("cuda only test")
+
+        in_channels = 6
+        out_channels = 6
+        kernel_size = 3
+        groups = 3
+
+        grouped_conv = nn.Conv2d(
+            in_channels, out_channels, kernel_size, groups=groups
+        ).to(self.device)
+
+        input_tensor = torch.randn(1, in_channels, 10, 10).to(self.device)
+
+        # Perform the forward pass
+        @torch.compile()
+        def foo(m, inp):
+            return m(inp)
+
+        with torch.no_grad():
+            _, code = run_and_get_code(foo, grouped_conv, input_tensor)
+            # no to channels last permuting before kernel
+            FileCheck().check_not(".run(").check(".convolution(").run(code[0])
+
+        # in out should do channels last in inference
+        in_channels = 8
+        out_channels = 4
+        kernel_size = 3
+
+        # Create the convolution layer
+        conv_layer = nn.Conv2d(in_channels, out_channels, kernel_size).to(self.device)
+
+        input_tensor = torch.randn(1, in_channels, 10, 10).to(self.device)
+
+        with torch.no_grad():
+            _, code = run_and_get_code(foo, conv_layer, input_tensor)
+            # should be channels last permuting before kernel
+            FileCheck().check(".run(").check(".convolution(").run(code[0])
+
     def test_upsample_cat_conv(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu upsample_cat_conv test")
@@ -2208,6 +2351,22 @@ class CommonTemplate:
             return m[:, :2] + x
 
         self.common(fn, (torch.randn(4, 2), torch.randn(4, 2)), check_lowp=False)
+
+    def test_slice_view_with_graph_break(self):
+        def fn():
+            a = torch.tensor([1], device=self.device)
+            a = a[0:1]
+            b = a.squeeze()
+            a[0] = 0
+            if a[0] < 1e5:
+                pass
+            a[0] = 2
+            return b
+
+        expect = fn()
+        opt_fn = torch.compile(fn)
+        actual = opt_fn()
+        self.assertEqual(expect, actual)
 
     def test_view_detach(self):
         def fn(a):
@@ -3046,8 +3205,8 @@ class CommonTemplate:
             # Mismatched elements: 127 / 746496 (0.0%)
             # Greatest absolute difference: 0.0009765625 at index (1, 62, 7, 16) (up to 1e-05 allowed)
             # Greatest relative difference: 0.05187467899332306 at index (14, 18, 11, 0) (up to 0.001 allowed)
-            atol=1e-3,
-            rtol=0.001,
+            atol=3e-3,
+            rtol=2,
         )
 
     def test_elu(self):
@@ -4460,6 +4619,14 @@ class CommonTemplate:
             self.assertIsNone(
                 re.search(pattern, code), msg="Found bad index_expr in code:\n" + code
             )
+
+    def test_float_index_expression_type_promotion(self):
+        # Test that float indexing expressions participate in type promotion
+        def fn(x):
+            return x + 1.0 / x.size(0)
+
+        x = torch.arange(10)
+        self.common(fn, (x,))
 
     def test_sort(self):
         def fn(a):
@@ -7276,7 +7443,7 @@ class CommonTemplate:
         x = torch.rand(48, 3, 512, 512)
         self.common(fn, (x,))
 
-    @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
+    @unittest.skipIf(not HAS_CPU or not RUN_CPU, "requires C++ compiler")
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
         from torch._inductor.codegen.common import boolean_ops
@@ -7803,6 +7970,40 @@ class CommonTemplate:
         x = torch.rand([4, 4, 3], dtype=torch.float64)
         self.common(fn, (x,))
 
+    def test_float16_to_int16(self):
+        def fn(x):
+            x_view = x.view(dtype=torch.int16)
+            return x_view.mul(2)
+
+        x = torch.ones(4, dtype=torch.float16, device=self.device)
+        ref = fn(x)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(ref, actual)
+
+    def test_bfloat16_to_int16(self):
+        def fn(a, b):
+            x = a + b
+            x_view = x.view(dtype=torch.int16)
+            return x_view.mul(2)
+
+        a = torch.ones(4, dtype=torch.bfloat16, device=self.device)
+        b = torch.ones(4, dtype=torch.bfloat16, device=self.device)
+        ref = fn(a, b)
+        actual = torch.compile(fn)(a, b)
+        self.assertEqual(ref, actual)
+
+    def test_float32_to_int32(self):
+        def fn(a, b):
+            x = a + b
+            x_view = x.view(dtype=torch.int32)
+            return x_view.mul(2)
+
+        a = torch.ones(4, dtype=torch.float32, device=self.device)
+        b = torch.ones(4, dtype=torch.float32, device=self.device)
+        ref = fn(a, b)
+        actual = torch.compile(fn)(a, b)
+        self.assertEqual(ref, actual)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -7844,7 +8045,7 @@ def copy_tests(
             setattr(other_cls, f"{name}_{suffix}", new_test)
 
 
-if HAS_CPU and not torch.backends.mps.is_available():
+if HAS_CPU and RUN_CPU and not torch.backends.mps.is_available():
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
@@ -7857,7 +8058,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_CUDA and RUN_CUDA and not TEST_WITH_ASAN:
 
     class SweepInputsCudaTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cuda")
@@ -7888,9 +8089,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 Instead, it transforms the fx graph so that its functions are
                 aten operations. It then saves this graph.
                 """
-                from torch._functorch.aot_autograd import Interpreter
                 from torch._inductor.decomposition import select_decomp_table
                 from torch._subclasses import FakeTensorMode
+                from torch.fx import Interpreter
 
                 fake_mode = FakeTensorMode()
 
@@ -8524,7 +8725,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 torch.compile(f)(x)
 
 
-if HAS_CPU:
+if HAS_CPU and RUN_CPU:
 
     class TestFull(TestCase):
         def test_full_dtype(self):

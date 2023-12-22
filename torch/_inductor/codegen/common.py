@@ -381,6 +381,10 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) >= 2
         return f"max({', '.join(map(self._print, expr.args))})"
 
+    def _print_Min(self, expr):
+        assert len(expr.args) >= 2
+        return f"min({', '.join(map(self._print, expr.args))})"
+
 
 class OpOverrides:
     def __init__(self, parent):
@@ -972,6 +976,9 @@ class Kernel(CodeGen):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError()
 
+    def scan(self, dtype, combine_fn, value, init):
+        raise NotImplementedError()
+
     def bucketize(
         self,
         values,
@@ -1113,6 +1120,10 @@ class Kernel(CodeGen):
             @staticmethod
             def reduction(dtype, src_dtype, reduction_type, value):
                 return self.reduction(dtype, src_dtype, reduction_type, value)
+
+            @staticmethod
+            def scan(dtype, combine_fn, value, init):
+                return self.scan(dtype, combine_fn, value, init)
 
             @staticmethod
             def bucketize(

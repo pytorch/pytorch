@@ -136,7 +136,7 @@ def wrap_numpy(fn):
         >>> # Compile a NumPy function as a Tensor -> Tensor function
         >>> @torch.compile(fullgraph=True)
         >>> @torch.compiler.wrap_numpy
-        >>> def fn(a):
+        >>> def fn(a: np.ndarray):
         >>>     return np.sum(a * a)
         >>> # Execute the NumPy function on CUDA and compute the gradients
         >>> x = torch.arange(6, dtype=torch.float32, device="cuda", requires_grad=True)

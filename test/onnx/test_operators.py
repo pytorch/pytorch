@@ -906,7 +906,7 @@ class TestOperators(common_utils.TestCase):
             def forward(self, x_in):
                 x_out = {}
                 x_out["test_key_out"] = torch.add(
-                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]
+                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]  # noqa: RUF015
                 )
                 return x_out
 

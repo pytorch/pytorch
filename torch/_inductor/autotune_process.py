@@ -255,7 +255,7 @@ class TuningProcessPool:
 
             atexit.register(self.terminate)
 
-    def get_device_list(self) -> List[Optional[int]]:
+    def get_device_list(self) -> Sequence[Optional[int]]:
         """
         Gather the list of devices to be used in the pool.
         """
@@ -269,7 +269,7 @@ class TuningProcessPool:
         if CUDA_VISIBLE_DEVICES in os.environ:
             devices = [int(d) for d in os.environ[CUDA_VISIBLE_DEVICES].split(",")]
             assert len(devices) <= count
-            return devices  # type: ignore[return-value]
+            return devices
 
         return list(range(count))
 
