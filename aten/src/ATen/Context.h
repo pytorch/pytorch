@@ -63,6 +63,8 @@ class TORCH_API Context {
       return c10::DeviceType::CPU;
     } else if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks().getDeviceFromPtr(data);
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks().getDeviceFromPtr(data);
     } else if (device_type == at::kPrivateUse1) {
       return at::GetPrivateUse1HooksInterface()->getDeviceFromPtr(data);
     } else {

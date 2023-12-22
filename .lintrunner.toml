@@ -57,6 +57,8 @@ code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
     'aten/src/ATen/mps/**/*.mm',
+    'aten/src/ATen/xpu/**/*.h',
+    'aten/src/ATen/xpu/**/*.cpp',
     'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/vulkan/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.cpp',
