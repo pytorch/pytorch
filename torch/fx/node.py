@@ -383,7 +383,7 @@ class Node:
         self._args = args_left + (arg,) + args_right
 
         _new_input_nodes = {}
-        map_arg(arg, lambda n: _new_input_nodes.setdefault(n))
+        map_arg(arg, _new_input_nodes.setdefault)
 
         for new_use in _new_input_nodes.keys():
             if new_use not in self._input_nodes:
@@ -434,8 +434,8 @@ class Node:
             old_use.users.pop(self)
 
         self._input_nodes = {}
-        map_arg(self._args, lambda n: self._input_nodes.setdefault(n))
-        map_arg(self._kwargs, lambda n: self._input_nodes.setdefault(n))
+        map_arg(self._args, self._input_nodes.setdefault)
+        map_arg(self._kwargs, self._input_nodes.setdefault)
 
         for new_use in self._input_nodes.keys():
             new_use.users.setdefault(self)

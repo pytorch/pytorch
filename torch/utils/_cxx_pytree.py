@@ -13,6 +13,7 @@ collection support for PyTorch APIs.
 """
 
 import functools
+import warnings
 from typing import (
     Any,
     Callable,
@@ -26,6 +27,11 @@ from typing import (
     Union,
 )
 
+import torch
+
+if torch._running_with_deploy():
+    raise ImportError("C++ pytree utilities do not work with torch::deploy.")
+
 import optree
 from optree import PyTreeSpec  # direct import for type annotations
 
@@ -35,6 +41,9 @@ __all__ = [
     "Context",
     "FlattenFunc",
     "UnflattenFunc",
+    "DumpableContext",
+    "ToDumpableContextFn",
+    "FromDumpableContextFn",
     "TreeSpec",
     "LeafSpec",
     "register_pytree_node",
@@ -62,12 +71,15 @@ U = TypeVar("U")
 R = TypeVar("R")
 
 
-Context = Optional[Any]
+Context = Any
 PyTree = Any
 TreeSpec = PyTreeSpec
-FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
-UnflattenFunc = Callable[[Iterable, Context], PyTree]
-OpTreeUnflattenFunc = Callable[[Context, Iterable], PyTree]
+FlattenFunc = Callable[[PyTree], Tuple[List[Any], Context]]
+UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
+OpTreeUnflattenFunc = Callable[[Context, Iterable[Any]], PyTree]
+DumpableContext = Any  # Any json dumpable text
+ToDumpableContextFn = Callable[[Context], DumpableContext]
+FromDumpableContextFn = Callable[[DumpableContext], Context]
 
 
 def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
@@ -84,9 +96,71 @@ def register_pytree_node(
     unflatten_fn: UnflattenFunc,
     *,
     serialized_type_name: Optional[str] = None,
-    namespace: str = "torch",
+    to_dumpable_context: Optional[ToDumpableContextFn] = None,
+    from_dumpable_context: Optional[FromDumpableContextFn] = None,
 ) -> None:
-    """Extend the set of types that are considered internal nodes in pytrees.
+    """Register a container-like type as pytree node.
+
+    Args:
+        cls (type): A Python type to treat as an internal pytree node.
+        flatten_fn (callable): A function to be used during flattening, taking an instance of
+            ``cls`` and returning a pair, with (1) an iterable for the children to be flattened
+            recursively, and (2) some hashable auxiliary data to be stored in the treespec and to be
+            passed to the ``unflatten_fn``.
+        unflatten_fn (callable): A function taking two arguments: the auxiliary data that was
+            returned by ``flatten_fn`` and stored in the treespec, and the unflattened children.
+            The function should return an instance of ``cls``.
+        serialized_type_name (str, optional): A keyword argument used to specify the fully
+            qualified name used when serializing the tree spec.
+        to_dumpable_context (callable, optional): An optional keyword argument to custom specify how
+            to convert the context of the pytree to a custom json dumpable representation. This is
+            used for json serialization, which is being used in :mod:`torch.export` right now.
+        from_dumpable_context (callable, optional): An optional keyword argument to custom specify
+            how to convert the custom json dumpable representation of the context back to the
+            original context. This is used for json deserialization, which is being used in
+            :mod:`torch.export` right now.
+
+    Example::
+
+        >>> # xdoctest: +SKIP
+        >>> # Registry a Python type with lambda functions
+        >>> register_pytree_node(
+        ...     set,
+        ...     lambda s: (sorted(s), None, None),
+        ...     lambda children, _: set(children),
+        ... )
+    """
+    _private_register_pytree_node(
+        cls,
+        flatten_fn,
+        unflatten_fn,
+        serialized_type_name=serialized_type_name,
+        to_dumpable_context=to_dumpable_context,
+        from_dumpable_context=from_dumpable_context,
+    )
+
+    from . import _pytree as python
+
+    python._private_register_pytree_node(
+        cls,
+        flatten_fn,
+        unflatten_fn,
+        serialized_type_name=serialized_type_name,
+        to_dumpable_context=to_dumpable_context,
+        from_dumpable_context=from_dumpable_context,
+    )
+
+
+def _register_pytree_node(
+    cls: Type[Any],
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
+    *,
+    serialized_type_name: Optional[str] = None,
+    to_dumpable_context: Optional[ToDumpableContextFn] = None,
+    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+) -> None:
+    """Register a container-like type as pytree node for the C++ pytree only.
 
     The ``namespace`` argument is used to avoid collisions that occur when different libraries
     register the same Python type with different behaviors. It is recommended to add a unique prefix
@@ -109,116 +183,55 @@ def register_pytree_node(
             The function should return an instance of ``cls``.
         serialized_type_name (str, optional): A keyword argument used to specify the fully
             qualified name used when serializing the tree spec.
-        namespace (str, optional): A non-empty string that uniquely identifies the namespace of the
-            type registry. This is used to isolate the registry from other modules that might
-            register a different custom behavior for the same type. (default: :const:`"torch"`)
-
-    Example::
-
-        >>> # xdoctest: +SKIP
-        >>> # Registry a Python type with lambda functions
-        >>> register_pytree_node(
-        ...     set,
-        ...     lambda s: (sorted(s), None, None),
-        ...     lambda children, _: set(children),
-        ...     namespace='set',
-        ... )
-
-        >>> # xdoctest: +SKIP
-        >>> # Register a Python type into a namespace
-        >>> import torch
-        >>> register_pytree_node(
-        ...     torch.Tensor,
-        ...     flatten_func=lambda tensor: (
-        ...         (tensor.cpu().detach().numpy(),),
-        ...         {'dtype': tensor.dtype, 'device': tensor.device, 'requires_grad': tensor.requires_grad},
-        ...     ),
-        ...     unflatten_func=lambda children, metadata: torch.tensor(children[0], **metadata),
-        ...     namespace='torch2numpy',
-        ... )
-
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-        >>> tree = {'weight': torch.ones(size=(1, 2)).cuda(), 'bias': torch.zeros(size=(2,))}
-        >>> tree
-        {'weight': tensor([[1., 1.]], device='cuda:0'), 'bias': tensor([0., 0.])}
-
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-        >>> # Flatten without specifying the namespace
-        >>> tree_flatten(tree)  # `torch.Tensor`s are leaf nodes  # xdoctest: +SKIP
-        ([tensor([0., 0.]), tensor([[1., 1.]], device='cuda:0')], PyTreeSpec({'bias': *, 'weight': *}))
-
-        >>> # xdoctest: +SKIP
-        >>> # Flatten with the namespace
-        >>> tree_flatten(tree, namespace='torch2numpy')  # xdoctest: +SKIP
-        (
-            [array([0., 0.], dtype=float32), array([[1., 1.]], dtype=float32)],
-            PyTreeSpec(
-                {
-                    'bias': CustomTreeNode(Tensor[{'dtype': torch.float32, ...}], [*]),
-                    'weight': CustomTreeNode(Tensor[{'dtype': torch.float32, ...}], [*])
-                },
-                namespace='torch2numpy'
-            )
-        )
-
-        >>> # xdoctest: +SKIP
-        >>> # Register the same type with a different namespace for different behaviors
-        >>> def tensor2flatparam(tensor):
-        ...     return [torch.nn.Parameter(tensor.reshape(-1))], tensor.shape, None
-        ...
-        >>> def flatparam2tensor(children, metadata):
-        ...     return children[0].reshape(metadata)
-        ...
-        >>> register_pytree_node(
-        ...     torch.Tensor,
-        ...     flatten_func=tensor2flatparam,
-        ...     unflatten_func=flatparam2tensor,
-        ...     namespace='tensor2flatparam',
-        ... )
-
-        >>> # xdoctest: +SKIP
-        >>> # Flatten with the new namespace
-        >>> tree_flatten(tree, namespace='tensor2flatparam')  # xdoctest: +SKIP
-        (
-            [
-                Parameter containing: tensor([0., 0.], requires_grad=True),
-                Parameter containing: tensor([1., 1.], device='cuda:0', requires_grad=True)
-            ],
-            PyTreeSpec(
-                {
-                    'bias': CustomTreeNode(Tensor[torch.Size([2])], [*]),
-                    'weight': CustomTreeNode(Tensor[torch.Size([1, 2])], [*])
-                },
-                namespace='tensor2flatparam'
-            )
-        )
+        to_dumpable_context (callable, optional): An optional keyword argument to custom specify how
+            to convert the context of the pytree to a custom json dumpable representation. This is
+            used for json serialization, which is being used in :mod:`torch.export` right now.
+        from_dumpable_context (callable, optional): An optional keyword argument to custom specify
+            how to convert the custom json dumpable representation of the context back to the
+            original context. This is used for json deserialization, which is being used in
+            :mod:`torch.export` right now.
     """
-    from ._pytree import _register_pytree_node
+    warnings.warn(
+        "torch.utils._cxx_pytree._register_pytree_node is deprecated. "
+        "Please use torch.utils._cxx_pytree.register_pytree_node instead.",
+        stacklevel=2,
+    )
 
-    _register_pytree_node(
+    _private_register_pytree_node(
         cls,
         flatten_fn,
         unflatten_fn,
         serialized_type_name=serialized_type_name,
-    )
-
-    optree.register_pytree_node(
-        cls,
-        flatten_fn,
-        _reverse_args(unflatten_fn),
-        namespace=namespace,
+        to_dumpable_context=to_dumpable_context,
+        from_dumpable_context=from_dumpable_context,
     )
 
 
-_register_pytree_node = register_pytree_node
-
-
-def tree_flatten(
-    tree: PyTree,
+def _private_register_pytree_node(
+    cls: Type[Any],
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
     *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
-) -> Tuple[List[Any], TreeSpec]:
+    serialized_type_name: Optional[str] = None,
+    to_dumpable_context: Optional[ToDumpableContextFn] = None,
+    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+) -> None:
+    """This is an internal function that is used to register a pytree node type
+    for the C++ pytree only. End-users should use :func:`register_pytree_node`
+    instead.
+    """
+    # TODO(XuehaiPan): remove this condition when we make Python pytree out-of-box support
+    # PyStructSequence types
+    if not optree.is_structseq_class(cls):
+        optree.register_pytree_node(
+            cls,
+            flatten_fn,
+            _reverse_args(unflatten_fn),
+            namespace="torch",
+        )
+
+
+def tree_flatten(tree: PyTree) -> Tuple[List[Any], TreeSpec]:
     """Flatten a pytree.
 
     See also :func:`tree_unflatten`.
@@ -229,14 +242,10 @@ def tree_flatten(
     >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> tree_flatten(tree)
     ([1, 2, 3, 4, None, 5], PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': *, 'd': *}, NoneIsLeaf))
-    >>> tree_flatten(tree, none_is_leaf=False)
-    ([1, 2, 3, 4, 5], PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': None, 'd': *}))
     >>> tree_flatten(1)
     ([1], PyTreeSpec(*, NoneIsLeaf))
     >>> tree_flatten(None)
     ([None], PyTreeSpec(*, NoneIsLeaf))
-    >>> tree_flatten(None, none_is_leaf=False)
-    ([], PyTreeSpec(None))
 
     For unordered dictionaries, :class:`dict` and :class:`collections.defaultdict`, the order is
     dependent on the **sorted** keys in the dictionary. Please use :class:`collections.OrderedDict`
@@ -246,16 +255,9 @@ def tree_flatten(
     >>> tree = OrderedDict([('b', (2, [3, 4])), ('a', 1), ('c', None), ('d', 5)])
     >>> tree_flatten(tree)
     ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict([('b', (*, [*, *])), ('a', *), ('c', *), ('d', *)]), NoneIsLeaf))
-    >>> tree_flatten(tree, none_is_leaf=False)
-    ([2, 3, 4, 1, 5], PyTreeSpec(OrderedDict([('b', (*, [*, *])), ('a', *), ('c', None), ('d', *)])))
 
     Args:
         tree (pytree): A pytree to flatten.
-        none_is_leaf (bool, optional): Whether to treat :data:`None` as a leaf. If :data:`False`,
-            :data:`None` is a non-leaf node with arity 0. Thus :data:`None` is contained in the
-            treespec rather than in the leaves list. (default: :data:`True`)
-        namespace (str, optional): The registry namespace used for custom pytree node types.
-            (default: :const:`"torch"`)
 
     Returns:
         A pair ``(leaves, treespec)`` where the first element is a list of leaf values and the
@@ -263,8 +265,8 @@ def tree_flatten(
     """
     return optree.tree_flatten(  # type: ignore[return-value]
         tree,
-        none_is_leaf=none_is_leaf,
-        namespace=namespace,
+        none_is_leaf=True,
+        namespace="torch",
     )
 
 
@@ -295,12 +297,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
     return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
 
 
-def tree_leaves(
-    tree: PyTree,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
-) -> List[Any]:
+def tree_leaves(tree: PyTree) -> List[Any]:
     """Get the leaves of a pytree.
 
     See also :func:`tree_flatten`.
@@ -308,35 +305,21 @@ def tree_leaves(
     >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> tree_leaves(tree)
     [1, 2, 3, 4, None, 5]
-    >>> tree_leaves(tree, none_is_leaf=False)
-    [1, 2, 3, 4, 5]
     >>> tree_leaves(1)
     [1]
     >>> tree_leaves(None)
     [None]
-    >>> tree_leaves(None, none_is_leaf=False)
-    []
 
     Args:
         tree (pytree): A pytree to flatten.
-        none_is_leaf (bool, optional): Whether to treat :data:`None` as a leaf. If :data:`False`,
-            :data:`None` is a non-leaf node with arity 0. Thus :data:`None` is contained in the
-            treespec rather than in the leaves list. (default: :data:`True`)
-        namespace (str, optional): The registry namespace used for custom pytree node types.
-            (default: :const:`"torch"`)
 
     Returns:
         A list of leaf values.
     """
-    return optree.tree_leaves(tree, none_is_leaf=none_is_leaf, namespace=namespace)
+    return optree.tree_leaves(tree, none_is_leaf=True, namespace="torch")
 
 
-def tree_structure(
-    tree: PyTree,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
-) -> TreeSpec:
+def tree_structure(tree: PyTree) -> TreeSpec:
     """Get the treespec for a pytree.
 
     See also :func:`tree_flatten`.
@@ -344,40 +327,25 @@ def tree_structure(
     >>> tree = {'b': (2, [3, 4]), 'a': 1, 'c': None, 'd': 5}
     >>> tree_structure(tree)
     PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': *, 'd': *}, NoneIsLeaf)
-    >>> tree_structure(tree, none_is_leaf=False)
-    PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': None, 'd': *})
     >>> tree_structure(1)
     PyTreeSpec(*, NoneIsLeaf)
     >>> tree_structure(None)
     PyTreeSpec(*, NoneIsLeaf)
-    >>> tree_structure(None, none_is_leaf=False)
-    PyTreeSpec(None)
 
     Args:
         tree (pytree): A pytree to flatten.
-        none_is_leaf (bool, optional): Whether to treat :data:`None` as a leaf. If :data:`False`,
-            :data:`None` is a non-leaf node with arity 0. Thus :data:`None` is contained in the
-            treespec rather than in the leaves list. (default: :data:`True`)
-        namespace (str, optional): The registry namespace used for custom pytree node types.
-            (default: :const:`"torch"`)
 
     Returns:
         A treespec object representing the structure of the pytree.
     """
     return optree.tree_structure(  # type: ignore[return-value]
         tree,
-        none_is_leaf=none_is_leaf,
-        namespace=namespace,
+        none_is_leaf=True,
+        namespace="torch",
     )
 
 
-def tree_map(
-    func: Callable[..., Any],
-    tree: PyTree,
-    *rests: PyTree,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
-) -> PyTree:
+def tree_map(func: Callable[..., Any], tree: PyTree, *rests: PyTree) -> PyTree:
     """Map a multi-input function over pytree args to produce a new pytree.
 
     See also :func:`tree_map_`.
@@ -386,10 +354,6 @@ def tree_map(
     {'x': 8, 'y': (43, 65)}
     >>> tree_map(lambda x: x is None, {'x': 7, 'y': (42, 64), 'z': None})
     {'x': False, 'y': (False, False), 'z': True}
-    >>> tree_map(lambda x: x + 1, {'x': 7, 'y': (42, 64), 'z': None}, none_is_leaf=False)
-    {'x': 8, 'y': (43, 65), 'z': None}
-    >>> tree_map(lambda x: x is None, {'x': 7, 'y': (42, 64), 'z': None}, none_is_leaf=False)
-    {'x': False, 'y': (False, False), 'z': None}
 
     If multiple inputs are given, the structure of the tree is taken from the first input;
     subsequent inputs need only have ``tree`` as a prefix:
@@ -402,13 +366,8 @@ def tree_map(
             corresponding leaves of the pytrees.
         tree (pytree): A pytree to be mapped over, with each leaf providing the first positional
             argument to function ``func``.
-        rests (tuple of pytrees): A tuple of pytrees, each of which has the same structure as
+        rests (tuple of pytree): A tuple of pytrees, each of which has the same structure as
             ``tree`` or has ``tree`` as a prefix.
-        none_is_leaf (bool, optional): Whether to treat :data:`None` as a leaf. If :data:`False`,
-            :data:`None` is a non-leaf node with arity 0. Thus :data:`None` is contained in the
-            treespec rather than in the leaves list. (default: :data:`True`)
-        namespace (str, optional): The registry namespace used for custom pytree node types.
-            (default: :const:`"torch"`)
 
     Returns:
         A new pytree with the same structure as ``tree`` but with the value at each leaf given by
@@ -419,18 +378,12 @@ def tree_map(
         func,
         tree,
         *rests,
-        none_is_leaf=none_is_leaf,
-        namespace=namespace,
+        none_is_leaf=True,
+        namespace="torch",
     )
 
 
-def tree_map_(
-    func: Callable[..., Any],
-    tree: PyTree,
-    *rests: PyTree,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
-) -> PyTree:
+def tree_map_(func: Callable[..., Any], tree: PyTree, *rests: PyTree) -> PyTree:
     """Like :func:`tree_map`, but do an inplace call on each leaf and return the original tree.
 
     See also :func:`tree_map`.
@@ -440,13 +393,8 @@ def tree_map_(
             corresponding leaves of the pytrees.
         tree (pytree): A pytree to be mapped over, with each leaf providing the first positional
             argument to function ``func``.
-        rests (tuple of pytrees): A tuple of pytrees, each of which has the same structure as
+        rests (tuple of pytree): A tuple of pytrees, each of which has the same structure as
             ``tree`` or has ``tree`` as a prefix.
-        none_is_leaf (bool, optional): Whether to treat :data:`None` as a leaf. If :data:`False`,
-            :data:`None` is a non-leaf node with arity 0. Thus :data:`None` is contained in the
-            treespec rather than in the leaves list. (default: :data:`True`)
-        namespace (str, optional): The registry namespace used for custom pytree node types.
-            (default: :const:`"torch"`)
 
     Returns:
         The original ``tree`` with the value at each leaf is given by the side-effect of function
@@ -457,8 +405,8 @@ def tree_map_(
         func,
         tree,
         *rests,
-        none_is_leaf=none_is_leaf,
-        namespace=namespace,
+        none_is_leaf=True,
+        namespace="torch",
     )
 
 
@@ -534,9 +482,6 @@ def tree_map_only(
     __type_or_types: Type[T],
     func: Fn[T, Any],
     tree: PyTree,
-    *rests: PyTree,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> PyTree:
     ...
 
@@ -546,9 +491,6 @@ def tree_map_only(
     __type_or_types: Type2[T, S],
     func: Fn2[T, S, Any],
     tree: PyTree,
-    *rests: PyTree,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> PyTree:
     ...
 
@@ -558,9 +500,6 @@ def tree_map_only(
     __type_or_types: Type3[T, S, U],
     func: Fn3[T, S, U, Any],
     tree: PyTree,
-    *rests: PyTree,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> PyTree:
     ...
 
@@ -569,17 +508,8 @@ def tree_map_only(
     __type_or_types: TypeAny,
     func: FnAny[Any],
     tree: PyTree,
-    *rests: PyTree,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> PyTree:
-    return tree_map(
-        map_only(__type_or_types)(func),
-        tree,
-        *rests,
-        none_is_leaf=none_is_leaf,
-        namespace=namespace,
-    )
+    return tree_map(map_only(__type_or_types)(func), tree)
 
 
 @overload
@@ -587,9 +517,6 @@ def tree_map_only_(
     __type_or_types: Type[T],
     func: Fn[T, Any],
     tree: PyTree,
-    *rests: PyTree,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> PyTree:
     ...
 
@@ -599,9 +526,6 @@ def tree_map_only_(
     __type_or_types: Type2[T, S],
     func: Fn2[T, S, Any],
     tree: PyTree,
-    *rests: PyTree,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> PyTree:
     ...
 
@@ -611,9 +535,6 @@ def tree_map_only_(
     __type_or_types: Type3[T, S, U],
     func: Fn3[T, S, U, Any],
     tree: PyTree,
-    *rests: PyTree,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> PyTree:
     ...
 
@@ -622,38 +543,17 @@ def tree_map_only_(
     __type_or_types: TypeAny,
     func: FnAny[Any],
     tree: PyTree,
-    *rests: PyTree,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> PyTree:
-    return tree_map_(
-        map_only(__type_or_types)(func),
-        tree,
-        *rests,
-        none_is_leaf=none_is_leaf,
-        namespace=namespace,
-    )
+    return tree_map_(map_only(__type_or_types)(func), tree)
 
 
-def tree_all(
-    pred: Callable[[Any], bool],
-    tree: PyTree,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
-) -> bool:
-    flat_args = tree_leaves(tree, none_is_leaf=none_is_leaf, namespace=namespace)
+def tree_all(pred: Callable[[Any], bool], tree: PyTree) -> bool:
+    flat_args = tree_leaves(tree)
     return all(map(pred, flat_args))
 
 
-def tree_any(
-    pred: Callable[[Any], bool],
-    tree: PyTree,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
-) -> bool:
-    flat_args = tree_leaves(tree, none_is_leaf=none_is_leaf, namespace=namespace)
+def tree_any(pred: Callable[[Any], bool], tree: PyTree) -> bool:
+    flat_args = tree_leaves(tree)
     return any(map(pred, flat_args))
 
 
@@ -662,9 +562,6 @@ def tree_all_only(
     __type_or_types: Type[T],
     pred: Fn[T, bool],
     tree: PyTree,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> bool:
     ...
 
@@ -674,9 +571,6 @@ def tree_all_only(
     __type_or_types: Type2[T, S],
     pred: Fn2[T, S, bool],
     tree: PyTree,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> bool:
     ...
 
@@ -686,9 +580,6 @@ def tree_all_only(
     __type_or_types: Type3[T, S, U],
     pred: Fn3[T, S, U, bool],
     tree: PyTree,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> bool:
     ...
 
@@ -697,11 +588,8 @@ def tree_all_only(
     __type_or_types: TypeAny,
     pred: FnAny[bool],
     tree: PyTree,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> bool:
-    flat_args = tree_leaves(tree, none_is_leaf=none_is_leaf, namespace=namespace)
+    flat_args = tree_leaves(tree)
     return all(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
@@ -710,9 +598,6 @@ def tree_any_only(
     __type_or_types: Type[T],
     pred: Fn[T, bool],
     tree: PyTree,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> bool:
     ...
 
@@ -722,9 +607,6 @@ def tree_any_only(
     __type_or_types: Type2[T, S],
     pred: Fn2[T, S, bool],
     tree: PyTree,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> bool:
     ...
 
@@ -734,9 +616,6 @@ def tree_any_only(
     __type_or_types: Type3[T, S, U],
     pred: Fn3[T, S, U, bool],
     tree: PyTree,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> bool:
     ...
 
@@ -745,21 +624,12 @@ def tree_any_only(
     __type_or_types: TypeAny,
     pred: FnAny[bool],
     tree: PyTree,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
 ) -> bool:
-    flat_args = tree_leaves(tree, none_is_leaf=none_is_leaf, namespace=namespace)
+    flat_args = tree_leaves(tree)
     return any(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
-def broadcast_prefix(
-    prefix_tree: PyTree,
-    full_tree: PyTree,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
-) -> List[Any]:
+def broadcast_prefix(prefix_tree: PyTree, full_tree: PyTree) -> List[Any]:
     """Return a list of broadcasted leaves in ``prefix_tree`` to match the number of leaves in ``full_tree``.
 
     If a ``prefix_tree`` is a prefix of a ``full_tree``, this means the ``full_tree`` can be
@@ -781,8 +651,6 @@ def broadcast_prefix(
     [1, 2, 3, 3]
     >>> broadcast_prefix([1, 2, 3], [1, 2, {'a': 3, 'b': 4, 'c': (None, 5)}])
     [1, 2, 3, 3, 3, 3]
-    >>> broadcast_prefix([1, 2, 3], [1, 2, {'a': 3, 'b': 4, 'c': (None, 5)}], none_is_leaf=False)
-    [1, 2, 3, 3, 3]
 
     Args:
         prefix_tree (pytree): A pytree with the same structure as a prefix of ``full_tree``.
@@ -791,11 +659,6 @@ def broadcast_prefix(
             flattening step. It should return a boolean, with :data:`True` stopping the traversal
             and the whole subtree being treated as a leaf, and :data:`False` indicating the
             flattening should traverse the current object.
-        none_is_leaf (bool, optional): Whether to treat :data:`None` as a leaf. If :data:`False`,
-            :data:`None` is a non-leaf node with arity 0. Thus :data:`None` is contained in the
-            treespec rather than in the leaves list. (default: :data:`True`)
-        namespace (str, optional): The registry namespace used for custom pytree node types.
-            (default: :const:`"torch"`)
 
     Returns:
         A list of leaves in ``prefix_tree`` broadcasted to match the number of leaves in ``full_tree``.
@@ -803,8 +666,8 @@ def broadcast_prefix(
     return optree.broadcast_prefix(
         prefix_tree,
         full_tree,
-        none_is_leaf=none_is_leaf,
-        namespace=namespace,
+        none_is_leaf=True,
+        namespace="torch",
     )
 
 
@@ -816,27 +679,16 @@ def broadcast_prefix(
 # a user can pass in vmap(fn, in_dims)(*inputs). `in_dims` should be
 # broadcastable to the tree structure of `inputs` and we use
 # _broadcast_to_and_flatten to check this.
-def _broadcast_to_and_flatten(
-    tree: PyTree,
-    treespec: TreeSpec,
-    *,
-    none_is_leaf: bool = True,
-    namespace: str = "torch",
-) -> Optional[List[Any]]:
+def _broadcast_to_and_flatten(tree: PyTree, treespec: TreeSpec) -> Optional[List[Any]]:
     assert isinstance(treespec, TreeSpec)
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
-        return broadcast_prefix(
-            tree,
-            full_tree,
-            none_is_leaf=none_is_leaf,
-            namespace=namespace,
-        )
+        return broadcast_prefix(tree, full_tree)
     except ValueError:
         return None
 
 
-def treespec_dumps(treespec: TreeSpec) -> str:
+def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     """Serialize a treespec to a JSON string."""
     if not isinstance(treespec, TreeSpec):
         raise TypeError(
@@ -849,7 +701,7 @@ def treespec_dumps(treespec: TreeSpec) -> str:
     )
 
     orig_treespec = _tree_structure(tree_unflatten([0] * treespec.num_leaves, treespec))
-    return _treespec_dumps(orig_treespec)
+    return _treespec_dumps(orig_treespec, protocol=protocol)
 
 
 def treespec_loads(serialized: str) -> TreeSpec:
@@ -884,5 +736,5 @@ class LeafSpecMeta(type(TreeSpec)):  # type: ignore[misc]
 
 
 class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):
-    def __new__(cls, none_is_leaf: bool = True) -> "LeafSpec":
-        return optree.treespec_leaf(none_is_leaf=none_is_leaf)  # type: ignore[return-value]
+    def __new__(cls) -> "LeafSpec":
+        return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]

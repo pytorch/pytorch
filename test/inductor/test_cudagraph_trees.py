@@ -1,6 +1,9 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import functools
 import gc
+import importlib
+import sys
 import unittest
 import warnings
 
@@ -15,15 +18,35 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import (
+    IS_CI,
     IS_LINUX,
+    IS_WINDOWS,
     skipIfRocm,
+    TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA, requires_multigpu
 from torch.utils._python_dispatch import TorchDispatchMode
 
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
+
+importlib.import_module("functorch")
+importlib.import_module("filelock")
+
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
+HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_multigpu = functools.partial(
+    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
+)
 
 
 def cdata(t):
@@ -408,6 +431,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_unaligned_static_input_no_cudagraphs(self):
             self._test_unaligned_static_input_impl()
 
+        def test_sparsity(self):
+            def foo(view_6, buf31):
+                return aten._sparse_coo_tensor_with_dims_and_tensors(
+                    1,
+                    1,
+                    [1000000, 64],
+                    view_6,
+                    buf31,
+                    dtype=torch.float32,
+                    layout=torch.sparse_coo,
+                    device="cuda",
+                    pin_memory=None,
+                )
+
+            foo_opt = torch.compile(foo)
+
+            view_6 = torch.zeros([1, 102397], dtype=torch.int64, device="cuda")
+            buf31 = torch.rand([102397, 64], device="cuda")
+
+            for _ in range(3):
+                self.assertEqual(foo_opt(view_6, buf31), foo(view_6, buf31))
+
         def test_accumulate_multiple_recordings(self):
             def foo(x):
                 y = x + x + x
@@ -762,6 +807,19 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             # didnt do additional recordings
             self.assertTrue(self.get_manager().new_graph_id().id == 2)
+
+        def test_empty_cpu_tensor(self):
+            def foo(x):
+                return x @ x, torch.tensor([])
+
+            foo_opt = torch.compile(foo)
+            x = torch.rand([4], device="cuda")
+
+            for _ in range(3):
+                out_opt = foo_opt(x)
+                self.assertEqual(foo(x), out_opt)
+
+            self.assertTrue(self.get_manager().new_graph_id().id == 1)
 
         def test_output_alias(self):
             inp = torch.rand([20, 20], device="cuda")
@@ -1287,6 +1345,12 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    from torch._dynamo.test_case import run_tests
 
-    run_inductor_tests(cudagraphs=True)
+    if not TEST_CUDA_GRAPH:
+        if __name__ == "__main__":
+            sys.exit(0)
+        raise unittest.SkipTest("cuda graph test is skipped")
+
+    if HAS_CPU or HAS_CUDA:
+        run_tests(needs="filelock")

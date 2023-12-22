@@ -26,7 +26,9 @@ def register_prop_rule(op, schema_info=None):
     def wrapper(impl):
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
-            DTensor._propagator.register_sharding_prop_rule(overload, impl, schema_info)
+            DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(
+                overload, impl, schema_info
+            )
         return impl
 
     return wrapper
@@ -39,7 +41,9 @@ def register_op_strategy(op, schema_info=None):
     def wrapper(impl):
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
-            DTensor._propagator.register_op_strategy(overload, impl, schema_info)
+            DTensor._op_dispatcher.sharding_propagator.register_op_strategy(
+                overload, impl, schema_info
+            )
         return impl
 
     return wrapper

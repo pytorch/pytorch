@@ -212,6 +212,29 @@ def _rebuild_tensor_v2(
     return tensor
 
 
+def _rebuild_tensor_v3(
+    storage,
+    storage_offset,
+    size,
+    stride,
+    requires_grad,
+    backward_hooks,
+    dtype,
+    metadata=None,
+):
+    t = torch.tensor(
+        [],
+        dtype=dtype,
+        device=storage._untyped_storage.device,
+        requires_grad=requires_grad,
+    )
+    t.set_(storage._untyped_storage, storage_offset, size, stride)
+    if metadata:
+        set_tensor_metadata(t, metadata)
+    t._backward_hooks = backward_hooks
+    return t
+
+
 _sparse_tensors_to_validate: List["torch.Tensor"] = []
 
 
@@ -468,22 +491,6 @@ def _import_dotted_name(name):
     for component in components[1:]:
         obj = getattr(obj, component)
     return obj
-
-
-# Taken from python 3.5 docs
-def _accumulate(iterable, fn=lambda x, y: x + y):
-    "Return running totals"
-    # _accumulate([1,2,3,4,5]) --> 1 3 6 10 15
-    # _accumulate([1,2,3,4,5], operator.mul) --> 1 2 6 24 120
-    it = iter(iterable)
-    try:
-        total = next(it)
-    except StopIteration:
-        return
-    yield total
-    for element in it:
-        total = fn(total, element)
-        yield total
 
 
 def _flatten_dense_tensors(tensors):
