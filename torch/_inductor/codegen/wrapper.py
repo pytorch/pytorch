@@ -72,15 +72,22 @@ def is_float(s: str):
     return True
 
 
-def convert_arg_type(python_type: str):
+def convert_arg_type(arg: torch.Argument):
     from .cpp import CONTAINER_PYTHON_TO_CPP, PYTHON_TO_CPP
+
+    # use x.real_type instead of x.type so that we get ScalarType instead of int
+    python_type = repr(arg.real_type)  # type: ignore[attr-defined]
 
     if python_type == "Tensor":
         # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
-        return f"at::{python_type} const&"
+        if arg.alias_info is not None and arg.alias_info.is_write:
+            return f"at::{python_type}&"
+        else:
+            return f"at::{python_type} const&"
 
     if python_type in PYTHON_TO_CPP:
-        return PYTHON_TO_CPP[python_type]
+        cpp_type = PYTHON_TO_CPP[python_type]
+        return cpp_type
 
     # Convert args of container types e.g. Optional[*]
     for py_container, cpp_container in CONTAINER_PYTHON_TO_CPP.items():
@@ -96,8 +103,9 @@ def convert_arg_type(python_type: str):
     raise AssertionError(f"unsupport python_type: {python_type}")
 
 
-def convert_return_type(python_type: str):
-    # TODO: support alias
+def convert_return_type(ret: torch.Argument):
+    # use x.real_type instead of x.type so that we get ScalarType instead of int
+    python_type = repr(ret.real_type)  # type: ignore[attr-defined]
     python_to_cpp = {
         "Tensor": "at::Tensor",
         "List[Tensor]": "std::vector<at::Tensor>",
@@ -105,14 +113,17 @@ def convert_return_type(python_type: str):
 
     cpp_type = python_to_cpp.get(python_type, None)
     assert cpp_type is not None, f"NYI return type: {python_type}"
+    # An output aliasing an input is returned by reference only when it's a
+    # Tensor, not when it's a Tensor[]. For example, aten.split.Tensor's output
+    # aliases the input tensor, but the op returns a vector by value.
+    if python_type == "Tensor" and ret.alias_info is not None:
+        cpp_type += "&"
     return cpp_type
 
 
 def get_cpp_op_schema(kernel):
-    # use x.real_type instead of x.type so that we get ScalarType instead of int
-    arg_types = [repr(x.real_type) for x in kernel._schema.arguments]
-    arg_names = [x.name for x in kernel._schema.arguments]
-    returns = [repr(x.real_type) for x in kernel._schema.returns]
+    args = kernel._schema.arguments
+    returns = kernel._schema.returns
 
     num_returns = len(returns)
     assert num_returns > 0, "must have at least one return value"
@@ -123,10 +134,7 @@ def get_cpp_op_schema(kernel):
         tuple_returns = ", ".join([convert_return_type(r) for r in returns])
         cpp_return_value = f"std::tuple<{tuple_returns}>"
 
-    cpp_arg_type = [
-        f"{convert_arg_type(arg_type)} {arg_name}"
-        for arg_type, arg_name in zip(arg_types, arg_names)
-    ]
+    cpp_arg_type = [f"{convert_arg_type(arg)} {arg.name}" for arg in args]
     return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
 
 
