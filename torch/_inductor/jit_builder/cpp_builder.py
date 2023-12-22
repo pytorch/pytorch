@@ -833,8 +833,9 @@ def get_name_and_dir_from_output_file_path(
     name, ext = os.path.splitext(name_and_ext)
     dir = os.path.dirname(file_path)
 
-    if aot_mode and use_absolute_path:
-        dir = "."
+    if config.is_fbcode():
+        if not (aot_mode and not use_absolute_path):
+            dir = "."
     return name, dir
 
 
