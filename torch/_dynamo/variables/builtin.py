@@ -953,7 +953,7 @@ class BuiltinVariable(VariableTracker):
                 ListIteratorVariable,
             ),
         ):
-            keys = [DictVariableType.get_key(x) for x in arg.unpack_var_sequence(tx)]
+            keys = [DictVariableType.get_key(tx, x) for x in arg.unpack_var_sequence(tx)]
             return DictVariableType(
                 dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
             )
