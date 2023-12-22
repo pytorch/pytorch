@@ -68,7 +68,6 @@ default_rtol = {torch.float16: 1e-3, torch.bfloat16: 1.6e-2, torch.float32: 1.3e
 isSM86or89Device = torch.cuda.is_available() and torch.cuda.get_device_capability() in [(8, 6), (8, 9)]
 isSM90Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0)
 isSM5xDevice = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 5
-isLessThanSM80Device = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8
 
 def get_rtol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
     deviation = true_value - computed_value
@@ -1227,6 +1226,66 @@ class TestTransformers(NNTestCase):
 
         torch.jit.script(mha)
 
+    @torch.no_grad()
+    def test_disable_fastpath(self):
+        def _test_te_fastpath_called(model, args, kwargs=None, return_value=None, is_called=True):
+            if kwargs is None:
+                kwargs = {}
+            with patch('torch._transformer_encoder_layer_fwd') as fastpath_mock:
+                fastpath_mock.return_value = return_value
+                output = model(*args, **kwargs)
+                self.assertTrue(fastpath_mock.called == is_called)
+
+        def _test_mha_fastpath_called(model, args, kwargs=None, return_value=None, is_called=True):
+            if kwargs is None:
+                kwargs = {}
+            with patch('torch._native_multi_head_attention') as fastpath_mock:
+                fastpath_mock.return_value = return_value
+                output = model(*args, **kwargs)
+                self.assertTrue(fastpath_mock.called == is_called)
+
+        inp = torch.tensor([[[1, 2], [3, 4], [5, 6]]], dtype=torch.float32, device='cuda')
+        aligned_key_padding_mask = torch.tensor([[0, 0, 1]], dtype=torch.bool, device='cuda')
+        src_key_padding_mask = torch.tensor([[1, 0, 1]], dtype=torch.bool, device='cuda')
+        attn_mask = torch.tensor([[1, 0, 1], [0, 1, 0], [1, 0, 1]], dtype=torch.bool, device='cuda')
+        te_return_value = torch.ones((1, 3, 2), dtype=torch.float32)
+
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=2, nhead=2, dim_feedforward=8, batch_first=True)
+        te = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True, mask_check=True)
+        te = te.to('cuda').eval()
+
+        t = torch.nn.Transformer(d_model=2, nhead=2, batch_first=True, device='cuda').eval()
+        src = torch.tensor([[[0, 1], [2, 3], [4, 5]]], dtype=torch.float32, device='cuda')
+        tgt = torch.tensor([[[0, 1], [2, 3], [4, 5], [6, 7]]], dtype=torch.float32, device='cuda')
+        t_return_value = torch.ones((1, 3, 2), dtype=torch.float32, device='cuda')
+
+        mha = nn.MultiheadAttention(2, 2, batch_first=True, device='cuda').eval()
+        q = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.float32, device='cuda')
+        mha_return_value = torch.ones((1, 3, 2), dtype=torch.float32, device='cuda')
+
+        _test_te_fastpath_called(
+            te, (inp,), kwargs={'src_key_padding_mask': src_key_padding_mask},
+            return_value=te_return_value, is_called=True
+        )
+        _test_te_fastpath_called(t, (src, tgt), return_value=t_return_value, is_called=True)
+        _test_mha_fastpath_called(mha, (q, q, q,), return_value=mha_return_value, is_called=True)
+
+        torch.backends.mha.set_fastpath_enabled(False)
+        _test_te_fastpath_called(
+            te, (inp,), kwargs={'src_key_padding_mask': src_key_padding_mask},
+            return_value=te_return_value, is_called=False
+        )
+        _test_te_fastpath_called(t, (src, tgt), return_value=t_return_value, is_called=False)
+        _test_mha_fastpath_called(mha, (q, q, q,), return_value=mha_return_value, is_called=False)
+
+        torch.backends.mha.set_fastpath_enabled(True)
+        _test_te_fastpath_called(
+            te, (inp,), kwargs={'src_key_padding_mask': src_key_padding_mask},
+            return_value=te_return_value, is_called=True
+        )
+        _test_te_fastpath_called(t, (src, tgt), return_value=t_return_value, is_called=True)
+        _test_mha_fastpath_called(mha, (q, q, q,), return_value=mha_return_value, is_called=True)
+
 
 class TestSDPAFailureModes(NNTestCase):
     """ Used to test the failure modes of scaled_dot_product_attention
@@ -1504,9 +1563,8 @@ class TestSDPAFailureModes(NNTestCase):
 
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION or not isLessThanSM80Device,
-                     "Current platform does not support fused SDPA or is an SM80+ device.")
-    def test_mem_efficient_fail_bfloat16_less_than_sm80(self, device):
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION or not isSM5xDevice, "Does not support fused SDPA or not SM50 hardware")
+    def test_mem_efficient_fail_bfloat16_sm50(self, device):
         dtype = torch.bfloat16
         size = SdpaShape(16, 16, 32, 32)
         make_tensor = partial(torch.rand, size, device=device, dtype=dtype)

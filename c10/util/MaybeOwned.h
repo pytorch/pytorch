@@ -77,7 +77,8 @@ class MaybeOwned final {
       : isBorrowed_(true), borrow_(MaybeOwnedTraits<T>::createBorrow(t)) {}
 
   /// Don't use this; use owned() instead.
-  explicit MaybeOwned(T&& t) noexcept(std::is_nothrow_move_constructible_v<T>)
+  explicit MaybeOwned(T&& t) noexcept(
+      std::is_nothrow_move_constructible<T>::value)
       : isBorrowed_(false), own_(std::move(t)) {}
 
   /// Don't use this; use owned() instead.
@@ -170,7 +171,7 @@ class MaybeOwned final {
   }
 
   static MaybeOwned owned(T&& t) noexcept(
-      std::is_nothrow_move_constructible_v<T>) {
+      std::is_nothrow_move_constructible<T>::value) {
     return MaybeOwned(std::move(t));
   }
 
