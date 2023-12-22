@@ -1368,7 +1368,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         """
 
         if not isinstance(self.fwd_graph, types.FunctionType) or not isinstance(
-            self.backward, types.FunctionType
+            self.bwd_graph, types.FunctionType
         ):
             unimplemented("NYI")
 
