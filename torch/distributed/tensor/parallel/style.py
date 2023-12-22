@@ -61,7 +61,7 @@ class ColwiseParallel(ParallelStyle):
         >>> )
         >>> ...
 
-    .. note:: By default ``ColwiseParallel`` output is sharded on the last dimension if the ``output_layouts`` not
+    ... note:: By default ``ColwiseParallel`` output is sharded on the last dimension if the ``output_layouts`` not
         specified, if there're operators that require specific tensor shape (i.e. before the paired ``RowwiseParallel``),
         keep in mind that if the output is sharded the operator might need to be adjusted to the sharded size.
     """
@@ -280,8 +280,6 @@ class PrepareModuleInput(ParallelStyle):
         prepared_inputs = []
         if not isinstance(inputs, tuple):
             inputs = (inputs,)
-        assert len(inputs) == len(self.input_layouts), \
-            "module inputs and input_layouts should have same length!"
         for inp, input_layout, desired_layout in zip(inputs, self.input_layouts, self.desired_input_layouts):
             if input_layout is not None:
                 if isinstance(inp, DTensor):
@@ -347,15 +345,11 @@ class PrepareModuleOutput(ParallelStyle):
         self.desired_output_layouts = \
             (desired_output_layouts,) if isinstance(desired_output_layouts, Placement) else desired_output_layouts
         self.use_local_output = use_local_output
-        assert len(self.output_layouts) == len(self.desired_output_layouts), \
-            "output_layouts and desired_output_layouts should have same length!"
 
     def _prepare_out_fn(self, outputs, device_mesh):
         prepared_outputs = []
         if not isinstance(outputs, tuple):
             outputs = (outputs,)
-        assert len(outputs) == len(self.output_layouts), \
-            "module outputs and output_layouts should have same length!"
         for out, out_layout, desired_out_layout in zip(outputs, self.output_layouts, self.desired_output_layouts):
             if out_layout is not None:
                 if isinstance(out, DTensor):

@@ -3,7 +3,6 @@
 #include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
 
-#include <cstdint>
 #include <ostream>
 
 namespace c10 {

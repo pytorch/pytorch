@@ -1432,8 +1432,8 @@ static at::Tensor _quantized_convolution_onednn(
 
   bool has_binary_post_op = binary_attr.has_value() && binary_attr.value() != "none";
   bool has_unary_post_op = unary_attr.has_value() && unary_attr.value() != "none";
-  // has_accum_postop_sum: extra input besides the conv to do conv add fusion with post op sum.
-  bool has_accum_postop_sum = has_binary_post_op && binary_attr.value() == "add";
+  // has_accum_postop_sum: extra input besides the conv to do conv post op sum fusion.
+  bool has_accum_postop_sum = has_binary_post_op && binary_attr.value() == "sum";
 
   if (has_accum_postop_sum && (fp32_output || bfloat16_output)) {
     TORCH_CHECK(accum_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, accum_scale must be 1.0.");
@@ -1894,7 +1894,7 @@ class QConvoneDNN final {
 #if AT_MKLDNN_ENABLED()
     // Conv2D post op check
     TORCH_CHECK(
-      act.dim() == 4 && binary_attr == "add" && (
+      act.dim() == 4 && binary_attr == "sum" && (
         !unary_attr.has_value() ||
         (unary_attr.has_value() &&
           (
@@ -1902,7 +1902,7 @@ class QConvoneDNN final {
           )
         )
       ),
-      "post_op add or post_op add_relu is supported for quantized pointwise conv2d. Got binary_post_op: ",
+      "post_op sum or post_op sum_relu is supported for quantized pointwise conv2d. Got binary_post_op: ",
       binary_attr,
       " unary_post_op: ",
       unary_attr.has_value() ? unary_attr.value() : "none",

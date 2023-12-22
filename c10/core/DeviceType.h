@@ -7,11 +7,8 @@
 
 #include <c10/macros/Export.h>
 
-#include <cstddef>
-#include <cstdint>
 #include <functional>
 #include <ostream>
-#include <string>
 
 namespace c10 {
 

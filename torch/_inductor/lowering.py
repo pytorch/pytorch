@@ -2242,6 +2242,7 @@ make_fallback(aten.fractional_max_pool3d_backward)
 make_fallback(aten._linalg_check_errors)
 make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten._pdist_backward)
+make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
 make_fallback(aten.replication_pad2d_backward)
 make_fallback(aten.soft_margin_loss_backward, warn=False)
@@ -3503,24 +3504,22 @@ def upsample_bicubic2d_default(
     )
 
 
-@register_lowering(aten.reflection_pad1d_backward)
 @register_lowering(aten.reflection_pad2d_backward)
-@register_lowering(aten.reflection_pad3d_backward)
-def _reflection_padnd_backward(grad_output, x, padding):
-    dim = len(padding) // 2
+def reflection_pad2d_backward(grad_output, x, padding):
+    assert len(padding) == 4
+    left, right, top, bot = padding
 
-    dhw = [h - 1 for h in x.get_size()[-dim:]]
+    *_, h, w = x.get_size()
+    h = V.graph.sizevars.evaluate_static_shape(h) - 1
+    w = V.graph.sizevars.evaluate_static_shape(w) - 1
     grad_loader = grad_output.make_loader()
-
-    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
-    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
+    *_, h_grad, w_grad = grad_output.get_size()
 
     def fn(idx):
-        b = idx[:-dim]
-        xyz = idx[-dim:]
+        *b, x, y = idx
 
-        def load_from_output(x):
-            return grad_loader([*b, *x])
+        def load_from_output(x, y):
+            return grad_loader([*b, x, y])
 
         def index_range_condition(index_range):
             i, lb, ub = index_range
@@ -3539,58 +3538,46 @@ def _reflection_padnd_backward(grad_output, x, padding):
         #
         # The center area is the original matrix. Other areas are reflections.
 
-        center = [xyz[i] + padding_left[i] for i in range(dim)]
-        left_reflect = [padding_left[i] - xyz[i] for i in range(dim)]
-        right_reflect = [2 * dhw[i] + padding_left[i] - xyz[i] for i in range(dim)]
+        center_x, center_y = x + top, y + left
+        top_reflect_x, left_reflect_y = top - x, left - y
+        bot_reflect_x, right_reflect_y = 2 * h + top - x, 2 * w + left - y
 
         # Accumulate gradients from different areas
         # If some of the padding is negative, center load is not always valid
-        range_c = [
-            (center[i], 0, dhw[i] + padding_left[i] + padding_right[i])
-            for i in range(dim)
-        ]
-        cond = functools.reduce(
-            ops.and_, [index_range_condition(range_c[i]) for i in range(dim)]
+        range_cx = (center_x, 0, h + top + bot)
+        range_cy = (center_y, 0, w + left + right)
+        cond = ops.and_(
+            index_range_condition(range_cx), index_range_condition(range_cy)
         )
-        grad = ops.masked(cond, lambda: load_from_output(center), 0.0)
+        grad = ops.masked(cond, lambda: load_from_output(center_x, center_y), 0.0)
 
-        def accumulate(grad, out, index_ranges):
+        def accumulate(out_x, out_y, index_range1, index_range2=None):
+            nonlocal grad
+
             # If the upper bound is less than the lower bound, we can get rid of one accumulation.
             # This happens when the padding size is zero.
-            for i in range(dim):
-                upper_less_than_lower = index_ranges[i][2] < index_ranges[i][1]
-                if isinstance(upper_less_than_lower, bool) and upper_less_than_lower:
-                    return grad
-            cond = functools.reduce(
-                ops.and_,
-                [index_range_condition(index_range) for index_range in index_ranges],
-            )
-            g = ops.masked(cond, lambda: load_from_output(out), 0.0)
-            return ops.add(grad, g)
+            upper_less_than_lower1 = index_range1[2] < index_range1[1]
+            if isinstance(upper_less_than_lower1, bool) and upper_less_than_lower1:
+                return
+            cond = index_range_condition(index_range1)
+            if index_range2 is not None:
+                upper_less_than_lower2 = index_range2[2] < index_range2[1]
+                if isinstance(upper_less_than_lower2, bool) and upper_less_than_lower2:
+                    return
+                cond = ops.and_(cond, index_range_condition(index_range2))
+            g = ops.masked(cond, lambda: load_from_output(out_x, out_y), 0.0)
+            grad = ops.add(grad, g)
 
-        for area in itertools.product(*[[-1, 0, 1] for _ in range(dim)]):
-            if area == tuple([0] * dim):
-                # center, this is already done.
-                continue
-
-            outs = []
-            index_ranges = []
-
-            for i in range(dim):
-                if area[i] == 0:
-                    out = center[i]
-                    index_range = range_c[i]
-                elif area[i] == -1:
-                    out = left_reflect[i]
-                    index_range = (xyz[i], 1, padding_left[i])
-                elif area[i] == 1:
-                    out = right_reflect[i]
-                    index_range = (xyz[i], dhw[i] - padding_right[i], dhw[i] - 1)
-
-                outs.append(out)
-                index_ranges.append(index_range)
-
-            grad = accumulate(grad, outs, index_ranges)
+        accumulate(center_x, left_reflect_y, range_cx, (y, 1, left))
+        accumulate(center_x, right_reflect_y, range_cx, (y, w - right, w - 1))
+        accumulate(top_reflect_x, center_y, (x, 1, top), range_cy)
+        accumulate(bot_reflect_x, center_y, (x, h - bot, h - 1), range_cy)
+        accumulate(top_reflect_x, left_reflect_y, (x, 1, top), (y, 1, left))
+        accumulate(top_reflect_x, right_reflect_y, (x, 1, top), (y, w - right, w - 1))
+        accumulate(bot_reflect_x, left_reflect_y, (x, h - bot, h - 1), (y, 1, left))
+        accumulate(
+            bot_reflect_x, right_reflect_y, (x, h - bot, h - 1), (y, w - right, w - 1)
+        )
 
         return grad
 
@@ -4949,7 +4936,7 @@ def prod(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
-@register_lowering(aten.any, type_promotion_kind=None)
+@register_lowering(aten.any)
 def reduce_any(x, dim=None, keepdim=False):
     x = to_dtype(x, torch.bool)
     return make_reduction("any")(x, axis=dim, keepdims=keepdim)

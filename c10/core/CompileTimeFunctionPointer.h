@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/util/TypeTraits.h>
-#include <type_traits>
 
 namespace c10 {
 

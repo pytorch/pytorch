@@ -129,12 +129,11 @@ class RedistributeTest(DTensorTestBase):
         )
 
         # test backward to have replicate grad on partial
-        # for from_local backward, we want the replicate() -> partial() to be
-        # pass through.
         global_partial_tensor.backward(torch.ones_like(global_partial_tensor))
         self.assertIsNotNone(partial_local.grad)
-        self.assertEqual(partial_local.grad.size(), partial_local.size())
-        self.assertEqual(partial_local.grad, torch.ones_like(partial_local))
+        self.assertEqual(
+            partial_local.grad, torch.ones_like(partial_local) / self.world_size
+        )
 
     @with_comms
     def test_replicate_to_partial(self):

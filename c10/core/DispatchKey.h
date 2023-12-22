@@ -2,9 +2,7 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Export.h>
-#include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <ostream>
 #include <string>
 
