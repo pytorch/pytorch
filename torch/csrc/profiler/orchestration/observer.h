@@ -108,7 +108,7 @@ struct TORCH_API ProfilerConfig {
 // -- Profiler base class -----------------------------------------------------
 // ----------------------------------------------------------------------------
 struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
-  explicit ProfilerStateBase(const ProfilerConfig& config);
+  explicit ProfilerStateBase(ProfilerConfig config);
   ~ProfilerStateBase() override;
 
   static ProfilerStateBase* get(bool global);

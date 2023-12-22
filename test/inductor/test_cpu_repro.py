@@ -1,4 +1,4 @@
-# Owner(s): ["module: inductor"]
+# Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import copy
 import itertools
@@ -34,21 +34,29 @@ from torch._inductor.utils import timed
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import (
-    check_model,
-    run_and_get_cpp_code,
-    TestCase,
-    vec_dtypes,
-)
+from torch.testing._internal.common_utils import IS_MACOS, slowTest
 from torch.utils._python_dispatch import TorchDispatchMode
 
+try:
+    try:
+        from . import test_torchinductor
+    except ImportError:
+        import test_torchinductor
+except unittest.SkipTest:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
 
+
+vec_dtypes = test_torchinductor.vec_dtypes
 _lowp_fp_dtypes = (
     torch.bfloat16,
     torch.float16,
 )
+run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
+TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
+check_model = test_torchinductor.check_model
 
 
 class LstmModule(torch.nn.Module):
@@ -1026,7 +1034,7 @@ class CPUReproTests(TestCase):
                     2,
                 ),
             )
-            assert metrics.generated_cpp_vec_kernel_count == 1
+            assert metrics.generated_cpp_vec_kernel_count == 2
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -1291,6 +1299,7 @@ class CPUReproTests(TestCase):
                 cpp_op_list.append(k)
 
         diff = [
+            "constant",
             "index_expr",
             "signbit",
             "isinf",
@@ -2116,7 +2125,7 @@ class CPUReproTests(TestCase):
                     m = Model().eval() if eval_mode else Model()
                     self.common(m, (x,))
                     if simdlen != 1:
-                        assert metrics.generated_cpp_vec_kernel_count == 6
+                        assert metrics.generated_cpp_vec_kernel_count == 8
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -2414,6 +2423,21 @@ class CPUReproTests(TestCase):
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
+    def test_invalid_dropout_args(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                x = x * 2
+                x = torch.nn.functional.dropout(x, p=0.5)
+                x = torch.relu(x)
+                return x
+
+        example_inputs = torch.tensor([[1, 2, 3], [4, 5, 6]])
+
+        func = MyModel()
+        jit_func = torch.compile(func)
+        self.assertRaises(RuntimeError, lambda: func(example_inputs))
+        self.assertRaises(RuntimeError, lambda: jit_func(example_inputs))
+
     @config.patch(inplace_buffers=True)
     def test_in_out_buffer(self):
         def fn(x, y):
@@ -2453,6 +2477,55 @@ class CPUReproTests(TestCase):
             ],
         )
         self.assertEqual(metrics.generated_kernel_count, 1)
+
+    def test_attention_size_mismatch(self):
+        class Attention(torch.nn.Module):
+            def __init__(self, hidden_size, num_heads):
+                super().__init__()
+                self.hidden_size = hidden_size
+                self.num_heads = num_heads
+                self.head_size = hidden_size // num_heads
+                self.query = torch.nn.Linear(hidden_size, hidden_size)
+                self.key = torch.nn.Linear(hidden_size, hidden_size)
+                self.value = torch.nn.Linear(hidden_size, hidden_size)
+                self.inv_scale = torch.nn.Parameter(
+                    torch.Tensor([1 / self.head_size**0.5]), requires_grad=False
+                )
+
+            def forward(self, x):
+                query = self.query(x)
+                key = self.key(x)
+                value = self.value(x)
+                (batch_size, seq_len, hidden_size) = query.size()
+                query = query.view(
+                    batch_size, seq_len, self.num_heads, self.head_size
+                ).permute(0, 2, 1, 3)
+                key = key.view(
+                    batch_size, seq_len, self.num_heads, self.head_size
+                ).permute(0, 2, 3, 1)
+                value = value.view(
+                    batch_size, seq_len, self.num_heads, self.head_size
+                ).permute(0, 2, 1, 3)
+                attention_weights = (
+                    torch.matmul(query, key).div(self.inv_scale).softmax(dim=-1)
+                )
+                output = torch.matmul(attention_weights, value)
+                return output
+
+        torch.manual_seed(123)
+        hidden_size = 16
+        num_heads = 1
+        seq_len = 4
+        batch_size = 1
+        x = torch.randn(batch_size, seq_len, hidden_size)
+
+        func = Attention(hidden_size, num_heads).to("cpu")
+
+        with torch.no_grad():
+            res1 = func(x)
+            jit_func = torch.compile(func)
+            res2 = jit_func(x)
+        self.assertEqual(res1, res2)
 
     def test_scalar_mul_bfloat16(self):
         def f(x):
@@ -2575,11 +2648,7 @@ class CPUReproTests(TestCase):
     def test_uint8_add(self):
         # https://github.com/pytorch/pytorch/issues/113016
         def fn(x, y):
-            add = torch.add(x, y)
-            matmul = torch.matmul(add, add)
-            neg = torch.neg(add)
-            to = neg.to(torch.int32)
-            return (matmul, to)
+            return torch.add(x, y).neg().to(torch.int32)
 
         x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
@@ -2588,18 +2657,72 @@ class CPUReproTests(TestCase):
     def test_uint8_sub(self):
         # https://github.com/pytorch/pytorch/issues/113016
         def fn(x, y):
-            add = torch.sub(x, y)
-            matmul = torch.matmul(add, add)
-            neg = torch.neg(add)
-            to = neg.to(torch.int32)
-            return (matmul, to)
+            return torch.sub(x, y).neg().to(torch.int32)
 
         x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         self.common(fn, (x, y))
 
+    def test_non_contiguous_reduction_store(self):
+        # https://github.com/pytorch/pytorch/issues/113018
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(39, 1, kernel_size=(1, 17), stride=(2, 2))
+
+            def forward(self, x):
+                return self.conv(x.max(3).values)
+
+        m = M()
+        x = torch.randn(1, 39, 1, 18, 17)
+        self.common(m, (x,))
+
+    def test_embedding_vec(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(64, 128)
+
+            def forward(self, idx, x):
+                return self.emb(idx) + x
+
+        idx = torch.randint(0, 64, (4, 32))
+        x = torch.randn(4, 32, 128)
+        m = M().eval()
+        with torch.no_grad():
+            metrics.reset()
+            self.common(m, (idx, x))
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_embedding_vec_bf16(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(64, 128)
+
+            def forward(self, idx, x):
+                return self.emb(idx)
+
+        idx = torch.randint(0, 64, (4, 32))
+        x = torch.randn(4, 32, 128).to(torch.bfloat16)
+        m = M().eval()
+        with torch.no_grad():
+            metrics.reset()
+            self.common(m, (idx, x))
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+        # we are doing direct load/store, make sure we do not generate
+        # redundant type casts
+        m_opt = torch.compile(m)
+        _, code = run_and_get_cpp_code(m_opt, idx, x)
+        self.assertTrue("Vectorized" in code)
+        self.assertTrue("cvt_lowp_fp_to_fp32" not in code)
+        self.assertTrue("cvt_fp32_to_lowp_fp" not in code)
+
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import HAS_CPU
 
-    run_inductor_tests(skip_mac=True)
+    if HAS_CPU and not IS_MACOS:
+        run_tests(needs="filelock")
