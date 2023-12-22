@@ -153,7 +153,7 @@ class AutotuningLogParser:
 
     @classmethod
     def load_records(
-        cls, path_or_fd: str | io.TextIOWrapper | List[str | io.TextIOWrapper]
+        cls, path_or_fd: str | io.TextIOWrapper | typing.List[str | io.TextIOWrapper]
     ):
         if isinstance(path_or_fd, list):
             for pf in path_or_fd:
