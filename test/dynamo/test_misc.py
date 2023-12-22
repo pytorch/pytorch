@@ -7668,7 +7668,7 @@ def ___make_guard_fn():
 
         # use checkpoint to trigger a "sourceless" tensor subclass
         def checkpoint_fn(xs):
-            return checkpoint(fn, xs)
+            return checkpoint(fn, xs, use_reentrant=True)
 
         xs = TwoTensor(torch.ones(2, 2), torch.ones(2, 2))
 
