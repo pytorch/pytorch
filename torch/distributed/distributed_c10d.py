@@ -4090,7 +4090,7 @@ def _get_process_group_name(pg: ProcessGroup) -> str:
 def _get_process_group_store(pg: ProcessGroup) -> Store:
     return _world.pg_map[pg][1]
 
-# This ops are not friently to TorchDynamo. So, we decide to disallow these ops
+# This ops are not friendly to TorchDynamo. So, we decide to disallow these ops
 # in FX graph, allowing them to run them on eager, with torch.compile.
 dynamo_unsupported_distributed_c10d_ops = [
     recv,

@@ -60,9 +60,9 @@ bool mkldnn_bf32_gemm(
     const float *a, int64_t lda,
     const float *b, int64_t ldb,
     float beta,
-    float *c, int64_t ldc) {
-  return false;
-}
+    float *c, int64_t ldc){
+      return false;
+    }
 
 bool use_mkldnn_bf32_matmul(
     const Tensor& mat1,
