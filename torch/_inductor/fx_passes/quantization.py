@@ -634,11 +634,11 @@ def _register_quantization_unary_fusion():
             UnaryAttr("relu", [], ""): generate_pattern_with_unary(
                 get_qlinear(1), aten.relu.default
             ),
-            UnaryAttr("gelu", [], "none"): _gelu_fusion_erf(
-                get_qlinear(1 if is_bf16 else 2)
+            UnaryAttr("gelu", [], "none"): _unary_fusion_pattern(
+                _gelu_fusion_erf, get_qlinear(1 if is_bf16 else 2), 2, is_bf16
             ),
-            UnaryAttr("gelu", [], "tanh"): _gelu_fusion_tanh(
-                get_qlinear(1 if is_bf16 else 4)
+            UnaryAttr("gelu", [], "tanh"): _unary_fusion_pattern(
+                _gelu_fusion_tanh, get_qlinear(1 if is_bf16 else 4), 4, is_bf16
             ),
         }
 
