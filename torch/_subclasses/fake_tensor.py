@@ -188,6 +188,9 @@ def is_fake(x):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
         return is_fake(unwrapped)
+    elif isinstance(x, torch.Tensor) and torch._C._functorch.is_batchedtensor(x):
+        unwrapped = torch._C._functorch.get_unwrapped(x)
+        return is_fake(unwrapped)
     return False
 
 
@@ -205,6 +208,9 @@ def maybe_get_fake_mode(t):
     elif isinstance(t, torch.Tensor) and torch._is_functional_tensor(t):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
+        return maybe_get_fake_mode(unwrapped)
+    elif isinstance(t, torch.Tensor) and torch._C._functorch.is_batchedtensor(t):
+        unwrapped = torch._C._functorch.get_unwrapped(t)
         return maybe_get_fake_mode(unwrapped)
     return None
 
