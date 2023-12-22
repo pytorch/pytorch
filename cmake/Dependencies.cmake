@@ -1765,11 +1765,6 @@ if(NOT INTERN_BUILD_MOBILE)
       message(WARNING "MKLDNN could not be found.")
       caffe2_update_option(USE_MKLDNN OFF)
     endif()
-
-    # Build mkldnn for Intel GPU
-    if(USE_XPU)
-      include(${CMAKE_CURRENT_LIST_DIR}/External/XPUMKLDNN.cmake)
-    endif()
   else()
     message("disabling MKLDNN because USE_MKLDNN is not set")
   endif()
