@@ -9,7 +9,6 @@
 // NB: This Registry works poorly when you have other namespaces.
 // Make all macro invocations from inside the at namespace.
 
-#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
@@ -20,6 +19,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Type.h>
 
