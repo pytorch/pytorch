@@ -54,6 +54,7 @@ def make_dynamic_cls(cls):
     test_classes[test_class.__name__] = test_class
     # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
     globals()[test_class.__name__] = test_class
+    test_class.__module__ = __name__
     return test_class
 
 

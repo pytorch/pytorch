@@ -51,6 +51,7 @@ test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # calling div on only symint args
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_conv_inference_heuristics_dynamic_shapes": TestFailure("cuda"),
 }
 
 if TEST_WITH_ROCM:
@@ -436,6 +437,21 @@ class TestInductorDynamic(TestCase):
         b = torch.randn(2, 16, device=device)
         expect = fn(a, b)
         actual = cfn(a, b)
+        self.assertEqual(expect, actual)
+
+    def test_float_is_integer(self, device):
+        def fn(x, mul, dim=-1):
+            size = x.size(dim)
+            m = size / mul
+            if m.is_integer():
+                return m
+            return size
+
+        a = torch.randn((3, 6, 4, 2), device=device)
+        cfn = self.compile_fn(fn)
+
+        expect = fn(a, 2)
+        actual = cfn(a, 2)
         self.assertEqual(expect, actual)
 
     @onlyCPU

@@ -22,15 +22,20 @@ struct InlineEvent final {
 
   // Move constructor and move assignment operator
   InlineEvent(InlineEvent&& other) noexcept
-      : InlineEvent(other.device_type_, other.flag_) {
-    swap(std::move(other));
+      : event_(other.event_),
+        backend_(std::move(other.backend_)),
+        device_type_(other.device_type_),
+        device_index_(other.device_index_),
+        flag_(other.flag_),
+        was_marked_for_recording_(other.was_marked_for_recording_) {
+    other.event_ = nullptr;
   }
   InlineEvent& operator=(InlineEvent&& other) noexcept {
-    swap(std::move(other));
+    swap(other);
     return *this;
   }
 
-  void swap(InlineEvent&& other) {
+  void swap(InlineEvent& other) noexcept {
     std::swap(event_, other.event_);
     std::swap(backend_, other.backend_);
     std::swap(device_type_, other.device_type_);

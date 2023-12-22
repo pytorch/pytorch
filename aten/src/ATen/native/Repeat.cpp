@@ -37,8 +37,7 @@ static void compute_cpu(
   });
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor repeat_interleave_cpu(
     const Tensor& repeat,
@@ -124,5 +123,4 @@ Tensor repeat_interleave_symint(
   return input.clone(at::MemoryFormat::Contiguous).flatten(dim, dim + 1);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

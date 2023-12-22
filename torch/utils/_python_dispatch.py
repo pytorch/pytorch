@@ -142,13 +142,34 @@ def is_traceable_wrapper_subclass(t):
     is 'traceable' with torch.compile.
     In order for a tensor subclass to support TorchDispatchMode-style tracing in PT2,
     It must implement two magic methods: __tensor_flatten__ and __tensor_unflatten__.
-    It is also expected to obey some restrictions around traceability and aliasing
-    (TODO: add clear documentation around this.)
+    It is also expected to obey some restrictions around traceability and aliasing:
+        * The subclass's __torch_dispatch__() implementation should desugar into pytorch
+            dispatcher operations that can be traced into a graph.
+        * The subclass should use return_and_correct_aliasing(). This is needed today to make
+            sure that torch.compile does the right thing in a few cases around input mutation
+            and output aliasing.
+
+    Expected magic method signatures:
+        attrs, ctx = t.__tensor_flatten__()
+            attrs: list of attribute name strings for inner tensors
+            ctx: dict containing any other subclass-specific metadata needed for unflattening
+
+        t = MySubClass.__tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride)
+            inner_tensors: dict mapping attribute name -> tensor for each inner tensor
+            ctx: dict with subclass metadata in the form that __tensor_flatten__() produces
+            outer_size: expected (possibly symbolic) size that the returned subclass
+                instance should have. Note that this arg is useful for certain subclasses
+                that require the shape info to be constructed. In most cases, this arg can be
+                safely ignored.
+            outer_stride: expected (possibly symbolic) stride that the returned subclass
+                instance should have. Note that this arg is useful for certain subclasses
+                that require the stride info to be constructed. In most cases, this arg can be
+                safely ignored.
     """
     is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
     return is_subclass and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
 
-def transform_subclass(t, callback):
+def transform_subclass(t, callback, outer_size=None, outer_stride=None):
     """
     Given a traceable, wrapper tensor subclass ``t`` that implements
     ``__torch_dispatch__`` and holds some inner tensors,
@@ -162,11 +183,28 @@ def transform_subclass(t, callback):
     gets the same (autograd, and aliasing) metadata as the original tensor.
     This is generally handled in other subsystems like AOTAutograd.
     """
+    outer_size = outer_size if outer_size is not None else t.size()
+    outer_stride = outer_stride if outer_stride is not None else t.stride()
+
     attrs, ctx = t.__tensor_flatten__()
     transformed_tensors_dict = {}
     for attr in attrs:
         transformed_tensors_dict[attr] = callback(attr, getattr(t, attr))
-    return type(t).__tensor_unflatten__(transformed_tensors_dict, ctx)
+    sub = type(t).__tensor_unflatten__(
+        transformed_tensors_dict, ctx, outer_size, outer_stride
+    )
+
+    # NB: Purposefully guard here to simplify the inner / outer symbols.
+    # Using sym_eq() for symbolic comparison can result in an expression that's too
+    # difficult to guard on, so we use == here.
+    assert sub.shape == outer_size, \
+        f"Expected return value from {type(t)}__tensor_unflatten__() to have " \
+        f"shape equal to {outer_size}, but got: {sub.shape}"
+    assert sub.stride() == outer_stride, \
+        f"Expected return value from {type(t)}__tensor_unflatten__() to have " \
+        f"stride equal to {outer_stride}, but got: {sub.stride()}"
+
+    return sub
 
 def _correct_storage_aliasing(func, schema_info, args, outs):
     """

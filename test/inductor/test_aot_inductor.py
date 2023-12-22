@@ -9,17 +9,16 @@ from typing import Dict
 import torch
 import torch._export
 import torch._inductor
-import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
-from torch._inductor.utils import aot_inductor_launcher, cache_dir
+from torch._inductor.utils import cache_dir
 
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_quantization import skip_if_no_torchvision
-
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
@@ -50,115 +49,15 @@ if IS_WINDOWS and IS_CI:
 
 try:
     try:
+        from .test_aot_inductor_utils import AOTInductorModelRunner
         from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
     except ImportError:
+        from test_aot_inductor_utils import AOTInductorModelRunner
         from test_torchinductor import copy_tests, requires_multigpu, TestFailure
 except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
     raise
-
-
-class AOTInductorModelRunner:
-    @classmethod
-    def compile(
-        cls,
-        model,
-        example_inputs,
-        options=None,
-        constraints=None,
-        disable_constraint_solver=False,
-    ):
-        # The exact API is subject to change
-        so_path = torch._export.aot_compile(
-            model,
-            example_inputs,
-            options=options,
-            constraints=constraints,
-            remove_runtime_assertions=True,
-            disable_constraint_solver=disable_constraint_solver,
-        )
-        return so_path
-
-    @classmethod
-    def load(cls, device, so_path, example_inputs):
-        if IS_FBCODE:
-            from .fb import test_aot_inductor_model_runner_pybind
-
-            module = test_aot_inductor_model_runner_pybind.Runner(
-                so_path, device == "cpu"
-            )
-
-            call_spec = module.get_call_spec()
-            in_spec = pytree.treespec_loads(call_spec[0])
-            out_spec = pytree.treespec_loads(call_spec[1])
-
-            def optimized(*args):
-                flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
-                flat_outputs = module.run(flat_inputs)
-                return pytree.tree_unflatten(flat_outputs, out_spec)
-
-        else:
-            module = torch.utils.cpp_extension.load_inline(
-                name="aot_inductor",
-                cpp_sources=[aot_inductor_launcher(so_path, device)],
-                # use a unique build directory to avoid test interference
-                build_directory=tempfile.mkdtemp(dir=cache_dir()),
-                functions=["run", "get_call_spec"],
-                with_cuda=(device == "cuda"),
-            )
-
-            call_spec = module.get_call_spec()
-            in_spec = pytree.treespec_loads(call_spec[0])
-            out_spec = pytree.treespec_loads(call_spec[1])
-
-            def optimized(*args):
-                flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
-                flat_outputs = module.run(flat_inputs)
-                return pytree.tree_unflatten(flat_outputs, out_spec)
-
-        return optimized
-
-    @classmethod
-    def run(
-        cls,
-        device,
-        model,
-        example_inputs,
-        options=None,
-        constraints=None,
-        disable_constraint_solver=False,
-    ):
-        so_path = AOTInductorModelRunner.compile(
-            model,
-            example_inputs,
-            options=options,
-            constraints=constraints,
-            disable_constraint_solver=disable_constraint_solver,
-        )
-        optimized = AOTInductorModelRunner.load(device, so_path, example_inputs)
-        return optimized(example_inputs)
-
-    @classmethod
-    def run_multiple(
-        cls,
-        device,
-        model,
-        list_example_inputs,
-        options=None,
-        constraints=None,
-    ):
-        so_path = AOTInductorModelRunner.compile(
-            model,
-            list_example_inputs[0],
-            options=options,
-            constraints=constraints,
-        )
-        optimized = AOTInductorModelRunner.load(device, so_path, list_example_inputs[0])
-        list_output_tensors = []
-        for example_inputs in list_example_inputs:
-            list_output_tensors.append(optimized(example_inputs))
-        return list_output_tensors
 
 
 def check_model(
@@ -170,7 +69,11 @@ def check_model(
     disable_constraint_solver=False,
 ):
     with torch.no_grad(), config.patch(
-        "aot_inductor.abi_compatible", self.abi_compatible
+        {
+            "aot_inductor.abi_compatible": self.abi_compatible,
+            "allow_stack_allocation": self.allow_stack_allocation,
+            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+        }
     ):
         torch.manual_seed(0)
         model = model.to(self.device)
@@ -199,7 +102,10 @@ def check_model_with_multiple_inputs(
     constraints=None,
 ):
     with torch.no_grad(), config.patch(
-        "aot_inductor.abi_compatible", self.abi_compatible
+        {
+            "aot_inductor.abi_compatible": self.abi_compatible,
+            "allow_stack_allocation": self.allow_stack_allocation,
+        }
     ):
         torch.manual_seed(0)
         model = model.to(self.device)
@@ -569,6 +475,50 @@ class AOTInductorTestsTemplate:
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, constraints=constraints)
 
+    @unittest.skipIf(
+        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        "FP8 is only supported on H100+",
+    )
+    def test_fp8(self):
+        class Model(torch.nn.Module):
+            def __init__(self, dtype):
+                super().__init__()
+                self.out_dtype = dtype
+
+            def forward(self, x, weight, bias, scale_a, scale_b):
+                weight = weight.to(torch.float8_e4m3fn)
+                output, updated_amax = torch._scaled_mm(
+                    x,
+                    weight,
+                    bias=input_bias,
+                    out_dtype=self.out_dtype,
+                    scale_a=scale_a,
+                    scale_b=scale_b,
+                )
+                return output
+
+        dtype = torch.float16
+
+        a_scale = torch.Tensor([1.0]).to(device="cuda")
+        b_scale = torch.Tensor([1.0]).to(device="cuda")
+        input_bias = torch.rand(32, device="cuda", dtype=dtype)
+        weight_shape = (32, 16)
+        weight = torch.rand(*weight_shape, device="cuda", dtype=dtype).T
+        a_inverse_scale = 1 / a_scale
+        b_inverse_scale = 1 / b_scale
+
+        x_shape = (16, 16)
+        x = torch.rand(*x_shape, device="cuda", dtype=dtype).to(torch.float8_e4m3fn)
+        constraints = [
+            torch._export.dynamic_dim(x, 0) >= 1,
+            torch._export.dynamic_dim(x, 0) <= 2048,
+        ]
+        self.check_model(
+            Model(dtype),
+            (x, weight, input_bias, a_inverse_scale, b_inverse_scale),
+            constraints=constraints,
+        )
+
     def test_poi_multiple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -726,6 +676,7 @@ class AOTInductorTestsTemplate:
 
     # scaled_dot_product_flash_attention
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
+    @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
     def test_sdpa(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -742,6 +693,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
+    @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
     def test_sdpa_2(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -773,9 +725,11 @@ class AOTInductorTestsTemplate:
                 d = (b + c) @ y
                 return d.sum()
 
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
         example_inputs = (
-            torch.tensor([1, 1, 1], device="cuda"),
-            torch.randn((1, 32), dtype=torch.float16, device="cuda"),
+            torch.tensor([1, 1, 1], device=self.device),
+            torch.randn((1, 32), dtype=torch.float16, device=self.device),
         )
         self.check_model(Repro(), example_inputs)
 
@@ -787,7 +741,7 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.aten.repeat_interleave.Tensor(x, output_size=12)
 
-        example_inputs = (torch.ones((1,), dtype=torch.int32, device="cuda") * 12,)
+        example_inputs = (torch.ones((1,), dtype=torch.int32, device=self.device) * 12,)
         self.check_model(Repro(), example_inputs)
 
     def test_dynamic_cat(self):
@@ -1092,6 +1046,18 @@ class AOTInductorTestsTemplate:
         with config.patch({"profile_bandwidth": "1", "profile_bandwidth_regex": ""}):
             self.check_model(Model(), example_inputs)
 
+    def test_with_no_triton_profiler(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.permute(x, (1, 0))
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"profile_bandwidth": "1", "profile_bandwidth_regex": ""}):
+            self.check_model(Model(), example_inputs)
+
     def test_repeat_output(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1364,6 +1330,27 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), inputs)
 
+    def test_convolution(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, w, b):
+                return torch.ops.aten.convolution(x, w, b, [4], [0], [1], True, [0], 1)
+
+        example_inputs = (
+            torch.randn([2, 32, 90], device=self.device),
+            torch.randn([32, 16, 8], device=self.device),
+            torch.randn([16], device=self.device),
+        )
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "Triton",
+            }
+        ):
+            self.check_model(Model(), example_inputs)
+
     def test_zero_size_weight(self):
         class Model(torch.nn.Module):
             def __init__(self, channel, r=8):
@@ -1386,6 +1373,86 @@ class AOTInductorTestsTemplate:
         inputs = (torch.rand(4, 4, 4, 4, device=self.device),)
         self.check_model(Model(4), inputs)
 
+    def test_no_args(self):
+        class Model(torch.nn.Module):
+            def __init__(self, m, n):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    torch.randn(m, n),
+                )
+                self.alpha = torch.nn.Parameter(torch.randn(m, n))
+
+            def forward(self):
+                return self.weight * self.alpha
+
+        self.check_model(Model(6, 4), ())
+
+    def test_dynamic_scalar(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.criterion_ce = torch.nn.CrossEntropyLoss(reduction="none")
+
+            def forward(self, inputs, targets, split_index=None):
+                statistics = {}
+                total_loss = self.criterion_ce(inputs, targets).sum()
+                statistics["dl"] = total_loss.item()
+                return total_loss, statistics
+
+        inputs = (
+            torch.rand(4, 4, 4, 4, device=self.device),
+            torch.rand(4, 4, 4, 4, device=self.device),
+        )
+        self.check_model(Model(), inputs)
+
+    def test_fqn(self):
+        class NestedChild(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("nestedchild3buffer", torch.ones(2, 3) * 3)
+
+            def forward(self, x):
+                return x / self.nestedchild3buffer
+
+        class Child1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = NestedChild()
+                self.register_parameter(
+                    "child1param", torch.nn.Parameter(torch.ones(2, 3))
+                )
+
+            def forward(self, x):
+                x = self.nested(x)
+                return x + self.child1param
+
+        class Child2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("child2buffer", torch.ones(2, 3) * 2)
+
+            def forward(self, x):
+                return x - self.child2buffer
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = Child1()
+                self.bar = Child2()
+                self.register_parameter(
+                    "rootparam", torch.nn.Parameter(torch.ones(2, 3) * 4)
+                )
+
+            def forward(self, x):
+                x = x * self.rootparam
+                x = self.foo(x)
+                x = self.bar(x)
+                return x
+
+        orig_eager = MyModule()
+
+        self.check_model(MyModule(), (torch.randn(2, 3, device=self.device),))
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1395,39 +1462,102 @@ class AOTInductorTestABICompatibleCpu(TestCase):
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
 
+
+def fail_with_and_without_stack_allocation(is_skip=False):
+    return TestFailure(
+        (
+            "abi_compatible_cpu",
+            "abi_compatible_cpu_with_stack_allocation",
+            "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
+        ),
+        is_skip=is_skip,
+    )
+
+
+def fail_minimal_arrayref_interface(is_skip=False):
+    return TestFailure(
+        ("abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",),
+        is_skip=is_skip,
+    )
+
+
+# test_failures, xfail by default, set is_skip=True to skip
+CPU_TEST_FAILURES = {
+    "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
+    "test_dynamic_cat": fail_with_and_without_stack_allocation(),
+    "test_dynamic_scalar": fail_with_and_without_stack_allocation(),
+    "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
+    "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
+    #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
+    "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    # FIXME: failed with Segfault while exiting the Python runtime
+    "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
+    # minimal arrayref interface only works with CPU; test crashes.
+    "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
+    "test_normal_functional": fail_with_and_without_stack_allocation(),
+    "test_poi_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    # There is a double-free issue which will be fixed in another PR
+    "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
+    # the test segfaults
+    "test_scatter_fallback": fail_with_and_without_stack_allocation(is_skip=True),
+    # Minimal arrayref interface doesn't support bfloat16 yet.
+    "test_sdpa": fail_minimal_arrayref_interface(is_skip=True),
+    # Minimal arrayref interface doesn't support bfloat16 yet.
+    "test_sdpa_2": fail_minimal_arrayref_interface(is_skip=True),
+    # error: could not find s0
+    "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
+    "test_simple_dynamic": fail_with_and_without_stack_allocation(),
+}
 
 copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleCpu,
     "abi_compatible_cpu",
-    # test_failures, xfail by default, set is_skip=True to skip
-    {
-        "test_addmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        "test_bmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        "test_dynamic_cat": TestFailure(("abi_compatible_cpu",)),
-        "test_dynamic_smem_above_default_limit": TestFailure(("abi_compatible_cpu",)),
-        "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cpu",)),
-        "test_foreach_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
-        #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
-        "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
-        # Need to support convolution
-        "test_missing_cubin": TestFailure(("abi_compatible_cpu",)),
-        "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
-        "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        # There is a double-free issue which will be fixed in another PR
-        "test_repeat_output": TestFailure(("abi_compatible_cpu",), is_skip=True),
-        "test_sdpa": TestFailure(("abi_compatible_cpu",)),
-        "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
-        "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        # error: could not find s0
-        "test_shifted_constraint_ranges": TestFailure(
-            ("abi_compatible_cpu",), is_skip=True
-        ),
-        # the test segfaults
-        "test_scatter_fallback": TestFailure(("abi_compatible_cpu",), is_skip=True),
-    },
+    CPU_TEST_FAILURES,
+)
+
+
+class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
+    device = "cpu"
+    abi_compatible = True
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = True
+    use_minimal_arrayref_interface = False
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestABICompatibleCpuWithStackAllocation,
+    "abi_compatible_cpu_with_stack_allocation",
+    CPU_TEST_FAILURES,
+)
+
+
+class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface(
+    TestCase
+):
+    device = "cpu"
+    abi_compatible = True
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = True
+    use_minimal_arrayref_interface = True
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface,
+    "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
+    CPU_TEST_FAILURES,
 )
 
 
@@ -1436,6 +1566,8 @@ class AOTInductorTestABICompatibleCuda(TestCase):
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
 
 
 copy_tests(
@@ -1445,8 +1577,8 @@ copy_tests(
     # test_failures, xfail by default, set is_skip=True to skip
     {
         "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
-        # Need to support convolution
-        "test_missing_cubin": TestFailure(("abi_compatible_cuda",)),
+        # will add .item support later
+        "test_dynamic_scalar": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
         # There is a double-free issue which will be fixed in another PR
         "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),
@@ -1460,6 +1592,8 @@ class AOTInductorTestNonABICompatibleCpu(TestCase):
     abi_compatible = False
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
 
 
 copy_tests(
@@ -1486,6 +1620,8 @@ class AOTInductorTestNonABICompatibleCuda(TestCase):
     abi_compatible = False
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = False
+    use_minimal_arrayref_interface = False
 
 
 copy_tests(

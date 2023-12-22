@@ -363,6 +363,8 @@ try:
                 "not_": z3.Not,
                 "floor": self._ops.floor,
                 "ceil": self._ops.ceil,
+                "minimum": self._ops.min,
+                "maximum": self._ops.max,
             }
 
             if name in REPLACEMENT:
@@ -661,7 +663,7 @@ def bisect(shape_env):
             shape_env.produce_guards(
                 [new_with_shape_env(shape_env, a.fake) for a in tracked_fakes],
                 [a.source for a in tracked_fakes],
-                constraint_inputs=[a.constraint_dims for a in tracked_fakes],
+                input_contexts=[a.symbolic_context for a in tracked_fakes],
             )
             return None
         except ValidationException as e:

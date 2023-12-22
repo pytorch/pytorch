@@ -264,6 +264,18 @@ class FunctionalTensorMode(TorchDispatchMode):
             any_functional_inputs = True
             return x.elem
 
+        from torch._higher_order_ops.auto_functionalize import (
+            can_auto_functionalize,
+            do_auto_functionalize,
+        )
+
+        if can_auto_functionalize(
+            func
+        ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
+            func.name(), torch._C.DispatchKey.Functionalize
+        ):
+            return do_auto_functionalize(func, args, kwargs)
+
         args_unwrapped, kwargs_unwrapped = pytree.tree_map_only(
             FunctionalTensor, unwrap, (args, kwargs)
         )
@@ -432,7 +444,7 @@ class BaseFunctionalizeAPI(ABC):
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
     def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         return torch.utils._pytree.tree_map_only(
-            FunctionalTensor, FunctionalTensor.to_functional, args
+            torch.Tensor, FunctionalTensor.to_functional, args
         )
 
     def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:

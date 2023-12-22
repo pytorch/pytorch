@@ -19,7 +19,7 @@ import torch
 import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import dynamo_timed
-from torch.utils._triton import has_triton, has_triton_package
+from torch.utils._triton import has_triton_package
 
 from . import config
 from .codecache import cache_dir, CudaKernelParamCache
@@ -50,11 +50,6 @@ else:
     KernelInterface = object
     OutOfResources = object
 
-if has_triton():
-    from triton.runtime.jit import get_cuda_stream
-else:
-    get_cuda_stream = None
-
 
 _NUM_THREADS_PER_WARP = 32
 
@@ -78,7 +73,7 @@ class AutotuneHint(Enum):
 
 
 def autotune_hints_to_configs(
-    hints: Set[AutotuneHint], size_hints, block_size
+    hints: Set[AutotuneHint], size_hints, block_size: int
 ) -> List[Config]:
     """
     AutotuneHints can be attached to the metadata of triton kernels for providing
@@ -89,15 +84,15 @@ def autotune_hints_to_configs(
     Based on those hints, this function will generate a list of additional autotuning
     configs to try.
     """
-    xyz_options: Tuple[Tuple[Any, ...], ...]
+    xyz_options: Tuple[Tuple[int, Optional[int], Optional[int]], ...]
     configs = []
 
     for hint in hints:
         if hint == AutotuneHint.ELEMENTS_PER_WARP_32:
             if len(size_hints) == 1:
-                xyz_options = ((block_size // 4,),)
+                xyz_options = ((block_size // 4, None, None),)
             elif len(size_hints) == 2:
-                xyz_options = ((block_size // 4, 1), (1, block_size // 4))
+                xyz_options = ((block_size // 4, 1, None), (1, block_size // 4, None))
             elif len(size_hints) == 3:
                 xyz_options = (
                     (block_size // 4, 1, 1),
@@ -106,7 +101,7 @@ def autotune_hints_to_configs(
                 )
             for xyz in xyz_options:
                 configs.append(
-                    triton_config(  # type: ignore[misc]
+                    triton_config(
                         size_hints,
                         *xyz,
                         num_elements_per_warp=32,
@@ -209,9 +204,9 @@ class CachingAutotuner(KernelInterface):
                 config.dynamic_scale_rblock
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
-                # TODO not enable for H100 yet since we haven't got a chance to test this
-                # on H100. Will remove this check once we test on H100
-                and device_prop.major == 8
+                # Disable for AMDGPU as Triton is not ready to return n_regs for a compiled_binary.
+                and torch.version.hip is None
+                and device_prop.major >= 8
             ):
                 for triton_config, compiled_binary in zip(
                     self.configs, compiled_binaries
@@ -238,8 +233,11 @@ class CachingAutotuner(KernelInterface):
                     # from PLBartForCausalLM, latency improve from
                     # 7.795ms to 4.883ms.
                     #
-                    # Note both A100 and H100 have 65536 32-bit registers per SM.
-                    if nreg <= 65536 // device_prop.max_threads_per_multi_processor:
+                    if (
+                        nreg
+                        <= device_prop.regs_per_multiprocessor
+                        // device_prop.max_threads_per_multi_processor
+                    ):
                         continue
 
                     nreg_per_warp = nreg * 32
@@ -247,14 +245,16 @@ class CachingAutotuner(KernelInterface):
 
                     # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
                     # The formula below is a tighter upper bound since we have the assumption that
-                    #   nreg > 65536 // device_prop.max_threads_per_multi_processor
+                    #   nreg > device_prop.regs_per_multiprocessor // device_prop.max_threads_per_multi_processor
                     # due to the if condition above and:
-                    #   65536 / nreg_per_block
-                    #   = 65536 / (nreg * 32 * num_warps)
-                    #   < 65536 / ((65536 / max_threads_per_multi_processor) * 32 * num_warps)
+                    #   regs_per_multiprocessor / nreg_per_block
+                    #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
+                    #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
                     #   = max_threads_per_multi_processor / (32 * num_warps)
                     # Using a tigher upper bound can reveal more optimization opportunities.
-                    max_blocks_per_sm = max(65536 // nreg_per_block, 1)
+                    max_blocks_per_sm = max(
+                        device_prop.regs_per_multiprocessor // nreg_per_block, 1
+                    )
 
                     if (
                         total_block
@@ -366,6 +366,8 @@ class CachingAutotuner(KernelInterface):
             )
             return float("inf")
 
+        from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+
         stream = get_cuda_stream(torch.cuda.current_device())
 
         def kernel_call():
@@ -461,7 +463,19 @@ class CachingAutotuner(KernelInterface):
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,
         }
-        CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
+
+        if torch.version.hip is None:
+            CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
+        else:
+            # There is some divergence between CUDA and ROCm here.
+            # On ROCm's triton we only have the the path to the binary, not the binary itself.
+            # For ROCm we will copy the binary to the new location instead of writing to file
+            import pathlib
+
+            launcher.bin.asm["hsaco"] = pathlib.Path(
+                launcher.bin.asm["hsaco_path"]
+            ).read_bytes()
+            CudaKernelParamCache.set(key, params, launcher.bin.asm["hsaco"])
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """
@@ -617,7 +631,11 @@ def end_graph():
                     file.write(bw_info_str + "\n")
                 file.write(f"{summary_str}\n\n")
         except Exception as e:
-            log.warning("failed to write profile bandwidth result into %s", output_file)
+            log.warning(
+                "failed to write profile bandwidth result into %s: %s",
+                output_file,
+                e,
+            )
 
 
 class DebugAutotuner(CachingAutotuner):

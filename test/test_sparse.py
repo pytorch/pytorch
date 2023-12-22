@@ -162,58 +162,6 @@ class TestSparseLegacyAndDeprecation(TestCase):
             # Check warn-once:
             self.assertEqual(len(cm.warnings), 1)
 
-    @parametrize('fast_mode', (True, False))
-    def test_gradcheck_check_sparse_nnz(self, fast_mode):
-        """Tests for deprecated check_sparse_nnz keyword argument of gradcheck.
-
-        Deprecation steps:
-        2.1: Specification of check_sparse_nnz triggers a warning.
-        2.2: Specification of check_sparse_nnz triggers an
-             exception. Remove all check_sparse_nnz usages from
-             gradcheck and delete this test.
-        """
-        def fn(x, masked_grad):
-            return x.to_dense(masked_grad=masked_grad)
-
-        def test(x, masked_grad, masked, check_sparse_nnz):
-            x = x.detach().clone().requires_grad_()
-            torch.autograd.gradcheck(fn, (x, masked_grad), masked=masked, check_sparse_nnz=check_sparse_nnz, fast_mode=fast_mode)
-
-        x = torch.tensor([[0, 2], [3, 4]], dtype=torch.float64).to_sparse()
-
-        for masked_grad, masked, check_sparse_nnz in itertools.product(*[(True, False, None)] * 3):
-            effective_masked_grad = True if masked_grad is None else masked_grad
-            effective_check_sparse_nnz = False if check_sparse_nnz is None else check_sparse_nnz
-            # For BC, the effective masked depends on the value of specified check_sparse_nnz:
-            effective_masked = (check_sparse_nnz if check_sparse_nnz is not None else False) if masked is None else masked
-
-            warn_using_check_sparse_nnz = self.assertWarns(
-                UserWarning,
-                msg=('Backwards compatibility: check_sparse_nnz is deprecated, it will be removed in a future version of PyTorch.'
-                     f' Use masked={effective_check_sparse_nnz} instead.'))
-            raise_on_non_equal_masked_and_check_sparse_nnz = self.assertRaisesRegex(
-                ValueError,
-                f"Expected specified check_sparse_nnz [(]={effective_check_sparse_nnz}[)]"
-                f" to be equal to masked [(]={effective_masked}[)]")
-            raise_jacobian_mismatch = self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 0")
-
-            def run_test():
-                if effective_masked_grad != effective_masked and not fast_mode:
-                    with raise_jacobian_mismatch:
-                        test(x, masked_grad, masked, check_sparse_nnz)
-                else:
-                    test(x, masked_grad, masked, check_sparse_nnz)
-
-            if masked != check_sparse_nnz and None not in {masked, check_sparse_nnz}:
-                # the specified masked and check_sparse_nnz must match
-                with warn_using_check_sparse_nnz:
-                    with raise_on_non_equal_masked_and_check_sparse_nnz:
-                        test(x, masked_grad, masked, check_sparse_nnz)
-            elif check_sparse_nnz is not None:
-                with warn_using_check_sparse_nnz:
-                    run_test()
-            else:
-                self.assertNotWarn(run_test)
 
 class TestSparseBase(TestCase):
     def run(self, result=None):
@@ -1595,13 +1543,12 @@ class TestSparse(TestSparseBase):
         true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @coalescedonoff
+    @precisionOverride({torch.bfloat16: 5e-2})
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     def test_sparse_addmm(self, device, dtype, coalesced):
-        if dtype is torch.bfloat16:
-            # RuntimeError: "addmm_sparse_dense" not implemented for 'BFloat16'
-            self.skipTest('See https://github.com/pytorch/pytorch/issues/73145')
+        if dtype is torch.bfloat16 and device.startswith("cuda"):
+            self.skipTest('addmm_sparse_cuda is not implemented for BFloat16')
 
         def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
             if alpha_beta is None:
@@ -1620,6 +1567,10 @@ class TestSparse(TestSparseBase):
             Y = torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
             Y_dense = torch.addmm(D1, S_dense, D2, beta=beta, alpha=alpha)
             self.assertEqual(Y, Y_dense)
+
+            if dtype not in {torch.double, torch.cdouble}:
+                # gradcheck will likely fail with low-precision input dtypes.
+                return
 
             def fn(S, D1, D2, beta=beta, alpha=alpha):
                 return torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
@@ -5114,11 +5065,6 @@ class TestSparseAny(TestCase):
                      torch.Tensor.to_sparse,
                      torch.Tensor.values,
                      ):
-            if layout in sparse_compressed_layouts and func.__name__ == 'values':
-                # FIXME: RuntimeError: indices expected sparse
-                # coordinate tensor layout but got SparseCsr. Likely
-                # works when gh-107126 is fixed.
-                continue
             for x in self.generate_simple_inputs(
                     layout,
                     device=device,
@@ -5155,6 +5101,22 @@ class TestSparseAny(TestCase):
 
         loaded_data = list(loader)
         self.assertEqual(data, loaded_data)
+
+    @onlyCPU
+    def test_invalid_blocksize(self):
+        # Blocksize should be a tuple/list/torch.Size containing two values
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 1"):
+            torch.randn(1).to_sparse(blocksize=(1,))
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 1"):
+            torch.randn(1).to_sparse(blocksize=[1])
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 1"):
+            torch.randn(1).to_sparse(blocksize=torch.Size((1,)))
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
+            torch.randn(1).to_sparse(blocksize=(1, 1, 1))
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
+            torch.randn(1).to_sparse(blocksize=[1, 1, 1])
+        with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
+            torch.randn(1).to_sparse(blocksize=torch.Size((1, 1, 1)))
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA

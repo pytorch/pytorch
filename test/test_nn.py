@@ -5318,6 +5318,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         bn.load_state_dict(empty_dict, strict=False)
         self.assertEqual(bn.state_dict()["num_batches_tracked"], torch.tensor(10))
 
+        # test that when `num_batches_tracked` is not in loaded state_dict,
+        # meta num_batches_tracked is still replaced with singleton 0 tensor
+        with torch.device('meta'):
+            meta_bn = torch.nn.BatchNorm2d(3)
+        self.assertTrue(meta_bn.num_batches_tracked.device == torch.device('meta'))
+        meta_bn.load_state_dict(empty_dict, assign=True, strict=False)
+        self.assertEqual(meta_bn.state_dict()["num_batches_tracked"], torch.tensor(0))
+
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
         input2 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
@@ -8265,6 +8273,21 @@ class TestNNDeviceType(NNTestCase):
         ).to('cpu')
 
         self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
+
+    @onlyCUDA
+    @largeTensorTest("60GB", "cpu")
+    @largeTensorTest("16GB", "cuda")
+    def test_avg_pool_large_tensor(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/113833
+        a = torch.randn(128, 256, 256, 256, dtype=torch.half, device=device, requires_grad=True)
+        a_cpu = a.detach().cpu().float()
+        m = torch.nn.AvgPool2d(2)
+        o = m(a)
+        a_cpu.requires_grad = True
+        o.sum().backward()
+        o_cpu = m(a_cpu)
+        o_cpu.sum().backward()
+        self.assertTrue(torch.allclose(a.grad.cpu(), a_cpu.grad.half()))
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
