@@ -50,6 +50,7 @@ class function_ref<Ret(Params...)> {
 
   template <typename Callable>
   function_ref(
+      // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       Callable&& callable,
       std::enable_if_t<
           !std::is_same_v<std::remove_reference_t<Callable>, function_ref>>* =

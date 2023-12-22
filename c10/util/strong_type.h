@@ -105,6 +105,7 @@ class type : public modifier<M, type<T, Tag, M...>>... {
       : val(std::forward<U>(u)...) {}
 
   friend STRONG_CONSTEXPR void swap(type& a, type& b) noexcept(
+      // NOLINTNEXTLINE(*noexcept-swap*)
       std::is_nothrow_move_constructible_v<T> &&
       std::is_nothrow_move_assignable_v<T>) {
     using std::swap;
