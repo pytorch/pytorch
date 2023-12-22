@@ -8,15 +8,6 @@
 
 namespace c10d {
 
-std::string parse_env(const char* env_var_name) {
-  char* stringValue = std::getenv(env_var_name);
-  std::string res = "N/A";
-  if (stringValue != nullptr) {
-    res = stringValue;
-  }
-  return res;
-}
-
 std::vector<at::Tensor> getTensorShapes(
     const std::vector<at::Tensor>& tensors) {
   std::vector<at::Tensor> shapeTensors;

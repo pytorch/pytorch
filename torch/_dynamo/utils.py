@@ -35,6 +35,7 @@ from typing import (
     ClassVar,
     Counter,
     DefaultDict,
+    Deque,
     Dict,
     Iterator,
     List,
@@ -89,6 +90,7 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map_only
@@ -146,8 +148,9 @@ def cprofile_wrapper(func):
                 ],
                 stdout=subprocess.PIPE,
             )
-            subprocess.run(
-                ["dot", "-Tsvg", "-o", str(svg_path)], stdin=gprof2dot_process.stdout
+            subprocess.check_call(
+                ["dot", "-Tsvg", "-o", str(svg_path)],
+                stdin=gprof2dot_process.stdout,
             )
             print(f"Generated SVG from profile at {str(svg_path)}")
         except FileNotFoundError:
@@ -375,7 +378,7 @@ def setup_log_file():
     exitstack = contextlib.ExitStack()
     if config.log_file_name is not None:
         log_file_handler = logging.FileHandler(config.log_file_name)
-        for logger in logging.get_loggers():
+        for logger in torch._logging._internal.get_loggers():
             logger.addHandler(log_file_handler)
             exitstack.callback(lambda: logger.removeHandler(log_file_handler))
         return exitstack
@@ -399,7 +402,7 @@ def write_record_to_file(filename, exec_record):
             with open(filename, "wb") as f:
                 exec_record.dump(f)
     except Exception:
-        log.error("Unable to write execution record %s", filename, exc_info=True)
+        log.exception("Unable to write execution record %s", filename)
 
 
 def count_calls(g: fx.Graph):
@@ -511,6 +514,18 @@ def is_numpy_float_type(value):
     )
 
 
+def is_function(value):
+    return istype(
+        value,
+        (
+            types.FunctionType,
+            types.BuiltinFunctionType,
+            types.MethodDescriptorType,
+            types.WrapperDescriptorType,
+        ),
+    )
+
+
 def is_numpy_ndarray(value):
     if not np:
         return False
@@ -572,13 +587,50 @@ class CompilationMetrics:
     cache_size: int
     accumulated_cache_size: int
     guard_count: Optional[int]
+    shape_env_guard_count: Optional[int]
     graph_op_count: Optional[int]
     graph_node_count: Optional[int]
     graph_input_count: Optional[int]
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
+    fail_type: Optional[str]
     fail_reason: Optional[str]
+    fail_user_frame_filename: Optional[str]
+    fail_user_frame_lineno: Optional[int]
     non_compliant_ops: Set[str]
+    compliant_custom_ops: Set[str]
+
+
+DEFAULT_COMPILATION_METRICS_LIMIT = 64
+
+
+_compilation_metrics: Deque[CompilationMetrics] = collections.deque(
+    maxlen=DEFAULT_COMPILATION_METRICS_LIMIT
+)
+
+
+def record_compilation_metrics(compilation_metrics: CompilationMetrics):
+    global _compilation_metrics
+    _compilation_metrics.append(compilation_metrics)
+    if config.log_compilation_metrics:
+        log_compilation_event(compilation_metrics)
+
+
+def set_compilation_metrics_limit(new_size: int) -> None:
+    global _compilation_metrics
+    while len(_compilation_metrics) > new_size:
+        _compilation_metrics.popleft()
+    new_deque = collections.deque(_compilation_metrics, maxlen=new_size)
+    _compilation_metrics = new_deque
+
+
+def clear_compilation_metrics() -> None:
+    global _compilation_metrics
+    _compilation_metrics.clear()
+
+
+def get_compilation_metrics() -> List[CompilationMetrics]:
+    return list(_compilation_metrics)
 
 
 @dataclasses.dataclass
@@ -635,7 +687,7 @@ def clone_input(x, *, dtype=None):
         if x.is_leaf and x.grad is not None:
             y.grad = clone_input(x.grad, dtype=dtype)
         if hasattr(x, "_dynamo_dynamic_indices"):
-            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
+            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
         return y
 
     with torch.no_grad():
@@ -668,7 +720,7 @@ def clone_input(x, *, dtype=None):
             # performing the operation.
             return torch_clone(x)
         if hasattr(x, "_dynamo_dynamic_indices"):
-            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
+            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
         return result
 
 
@@ -739,7 +791,7 @@ def torchscript(model, example_inputs, verbose=False):
 def getfile(obj):
     try:
         return inspect.getfile(obj)
-    except TypeError:
+    except (TypeError, OSError):
         return None
 
 
@@ -924,6 +976,13 @@ def product(it):
 def tuple_iterator_getitem(it, index):
     _, (obj,), start = it.__reduce__()
     return obj[start + index]
+
+
+iter_next = next
+
+
+def to_subclass(t, cls):
+    return t.as_subclass(cls)
 
 
 def enum_repr(value, local):
@@ -1305,7 +1364,7 @@ class CompileProfiler:
     def __init__(self):
         self.frame_count = 0
         self.op_count = 0
-        self.backend_ctx_ctor = lambda: disable_cache_limit()
+        self.backend_ctx_ctor = disable_cache_limit
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         self.frame_count += 1
@@ -1444,6 +1503,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         If `True`, you must be prepared to deal with such return values, ideally
         by further wrapping them as this graph's fakes.
     """
+    from torch.utils._sympy.value_ranges import ValueRangeError
     from .exc import (
         TorchRuntimeError,
         unimplemented,
@@ -1517,7 +1577,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                 f"constrain_as_value OR constrain_as_size APIs.  {cause}",
                 case_name="constrain_as_size_example",
             )
-        elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
+        elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
@@ -1932,6 +1992,8 @@ class numpy_operator_wrapper:
 def defake(x):
     if not isinstance(x, FakeTensor):
         return x
+    size: "torch._prims_common.ShapeType"
+    stride: "torch._prims_common.StrideType"
     if x._has_symbolic_sizes_strides:
         size = [
             s.node.shape_env.size_hint(s.node.expr)
@@ -2254,10 +2316,6 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
     return result
 
 
-def is_guard_failure_reporting_enabled():
-    return torch._logging._internal.log_state.is_artifact_enabled("recompiles")
-
-
 def get_static_address_type(t):
     if isinstance(t, torch.Tensor):
         return getattr(t, "_dynamo_static_input_type", None)
@@ -2267,11 +2325,14 @@ def get_static_address_type(t):
 
 def is_rng_state_getter_or_setter(value):
     getters = (
+        # The following two functions are not identical, so don't remove anyone!
+        torch._C.Generator.get_state,
         torch.default_generator.get_state,
         torch.get_rng_state,
         torch.cuda.get_rng_state,
     )
     setters = (
+        torch._C.Generator.set_state,
         torch.default_generator.set_state,
         torch.set_rng_state,
         torch.cuda.set_rng_state,
@@ -2287,6 +2348,10 @@ def is_tensor_base_attr_getter(value):
     )
 
 
+def is_torch_function_object(value):
+    return hasattr(value, "__torch_function__")
+
+
 def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
     from torch._dynamo.variables import UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
@@ -2294,4 +2359,18 @@ def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bo
     return isinstance(vt, TensorWithTFOverrideVariable) or (
         isinstance(vt, UserDefinedObjectVariable)
         and hasattr(vt.value, "__torch_function__")
+    )
+
+
+# see note [Tensor Fakification and Symbol Caching]
+def to_fake_tensor(t, fake_mode):
+    symbolic_context = None
+    source = None
+    if tracing_context := torch._guards.TracingContext.try_get():
+        if t in tracing_context.tensor_to_context:
+            symbolic_context = tracing_context.tensor_to_context[t]
+            source = symbolic_context.tensor_source
+
+    return fake_mode.from_tensor(
+        t, static_shapes=False, symbolic_context=symbolic_context, source=source
     )

@@ -4,7 +4,7 @@ import itertools
 from contextlib import contextmanager
 from itertools import chain
 from threading import local
-from typing import Any, Callable, Union
+from typing import Any, Callable, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy
@@ -14,6 +14,9 @@ from torch._inductor.utils import IndentedBuffer
 from torch.fx.graph import inplace_methods, magic_methods
 
 from .utils import reduction_num_outputs, sympy_str, sympy_symbol
+
+if TYPE_CHECKING:
+    from torch._inductor.graph import GraphLowering
 
 threadlocal = local()
 
@@ -138,7 +141,7 @@ class KernelFormatterHandler:
                 )
                 formatter.output.writeline(f"{lhs} = {name}")
 
-        with V.set_ops_handler(formatter), patch.object(  # type: ignore[call-arg]
+        with V.set_ops_handler(formatter), patch.object(
             FlexibleLayout, "allow_indexing", True
         ):
             result = ir_fn(*args)
@@ -287,7 +290,7 @@ class _V:
 
     set_ops_handler: Callable[[Any], Any] = _ops._set_handler
     get_ops_handler: Callable[[], Any] = _ops._get_handler
-    set_graph_handler: Callable[[Any], Any] = _graph._set_handler
+    set_graph_handler: Callable[[GraphLowering], Any] = _graph._set_handler
     set_real_inputs: Callable[[Any], Any] = _real_inputs._set_handler
     get_real_inputs: Callable[[], Any] = _real_inputs._get_handler
     set_fake_mode: Callable[[Any], Any] = _fake_mode._set_handler
@@ -306,7 +309,7 @@ class _V:
         return _ops._get_handler()
 
     @property
-    def graph(self):
+    def graph(self) -> GraphLowering:
         """The graph currently being generated"""
         return _graph._get_handler()
 

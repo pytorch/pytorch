@@ -134,7 +134,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                 stderr.getvalue().encode("utf-8"),
             )
         else:
-            return subprocess.run(args, capture_output=True, cwd=cwd)
+            return subprocess.run(args, capture_output=True, cwd=cwd, check=False)
 
     # Run `code` in a separate python process.
     # Returns the completed process state and the directory containing the

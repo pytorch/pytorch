@@ -16,7 +16,7 @@ from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.sym_node import to_node, sym_sqrt, SymNode
+from torch.fx.experimental.sym_node import to_node, sym_sqrt, SymNode, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     ShapeEnv,
     is_symbolic,
+    StatelessSymbolicContext,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -136,8 +137,10 @@ def create_symbolic_tensor(name, arg, shape_env):
         shape_env.create_symbolic_sizes_strides_storage_offset(
             arg,
             source=ConstantSource(name),
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=dynamic_dims,
+                constraint_sizes=constraint_dims
+            ),
         )
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
@@ -494,7 +497,7 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 <= s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[i0 <= s0]"""
+            """[i0 - s0 <= 0]"""
         )
         self.assertTrue(i0 <= s0)
         self.assertFalse(i0 > s0)
@@ -676,14 +679,7 @@ class TestSymNumberMagicMethods(TestCase):
             else:
                 return contextlib.nullcontext()
 
-        if fn in sym_node.magic_methods_on_math:
-            lambda_apply = getattr(math, fn)
-        elif fn in sym_node.magic_methods_on_submodule:
-            lambda_apply = getattr(sym_node, fn)
-        elif fn in sym_node.magic_methods_on_operator_with_trailing_underscore:
-            lambda_apply = getattr(operator, f"{fn}_")
-        else:
-            lambda_apply = getattr(operator, fn)
+        lambda_apply = method_to_operator(fn)
 
         def guard_fn(v):
             if type(v) in (SymBool, bool):
@@ -739,7 +735,7 @@ class TestSymNumberMagicMethods(TestCase):
         if fn not in sym_node.bool_magic_methods or fn == "sym_ite":
             self.skipTest(f"{fn} is non-bool")
 
-        is_unary_fn = fn in sym_node.unary_magic_methods
+        is_unary_fn = fn in sym_node.unary_methods
         shape_env = ShapeEnv()
         self._do_test(fn, True, False, shape_env, is_unary_fn)
 
@@ -752,7 +748,10 @@ class TestSymNumberMagicMethods(TestCase):
             # TODO: Hmm, this looks like we skip all floats
             self.skipTest(f"{fn} is not a float magic method")
 
-        is_unary_fn = fn in sym_node.unary_magic_methods
+        if (first_type == "int" or second_type == "int") and fn in sym_node.only_float_magic_methods:
+            self.skipTest(f"{fn} is not an int method")
+
+        is_unary_fn = fn in sym_node.unary_methods or fn == "round"
         # Second argument is ignored for unary function. So only run for one type
         if is_unary_fn and second_type == "float":
             self.skipTest(f"{fn} is unary and already tested")
@@ -797,7 +796,7 @@ class TestSymNumberMagicMethods(TestCase):
             create_symbool(shape_env, True),
             # We should be passing in float here, but create_symbol currently
             # only supports int
-            create_symfloat(shape_env, 3),
+            create_symfloat(shape_env, 3.0),
         )
 
         for x in unhashable:

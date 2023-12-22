@@ -1,3 +1,4 @@
+import operator
 import sys
 from abc import abstractmethod
 from copy import copy
@@ -179,14 +180,10 @@ class TestPrioritizations:
             self._test_priorities[new_relevance.value].append(upgraded_tests)
 
     def set_test_relevance(self, test_run: TestRun, new_relevance: Relevance) -> None:
-        return self._update_test_relevance(
-            test_run, new_relevance, lambda curr, new: curr == new
-        )
+        return self._update_test_relevance(test_run, new_relevance, operator.eq)
 
     def raise_test_relevance(self, test_run: TestRun, new_relevance: Relevance) -> None:
-        return self._update_test_relevance(
-            test_run, new_relevance, lambda curr, new: curr >= new
-        )
+        return self._update_test_relevance(test_run, new_relevance, operator.ge)
 
     def validate_test_priorities(self) -> None:
         # Union all TestRuns that contain include/exclude pairs
@@ -263,41 +260,51 @@ class TestPrioritizations:
             _print_tests(f"{Relevance(relevance_group).name.title()} Relevance", tests)
 
     def _get_test_relevance_group(self, test_run: TestRun) -> Relevance:
-        """Returns the rank of the given test run."""
+        """
+        Returns the relevance of the given test run.
+        If the heuristic split this test run among multiple runs, then return the
+        highest relevance of any of the test runs.
+        """
         for relevance_group, tests in self._traverse_priorities():
-            if any(t.contains(test_run) for t in tests):
-                return Relevance(relevance_group)
-
-        print("holup, retry")
-        for relevance_group, tests in self._traverse_priorities():
-            if any(
-                t.contains(test_run) for t in tests
-            ):  # t could be the entire test_run or a superset
+            #  Different heuristics may result in a given test file being split
+            #  into different test runs, so look for the overlapping tests to
+            #  find the match
+            if any(t & test_run for t in tests):
                 return Relevance(relevance_group)
 
         raise ValueError(f"Test {test_run} not found in any relevance group")
 
     def _get_test_order(self, test_run: TestRun) -> int:
-        """Returns the rank this heuristic suggested for the test run."""
+        """
+        Returns the rank this heuristic suggested for the test run.
+        If the heuristic split this test run among multiple runs, then return the
+        highest relevance of any of the test runs.
+        """
         base_rank = 0
 
         for _, relevance_group_tests in self._traverse_priorities():
             for idx, test in enumerate(relevance_group_tests):
-                if test.contains(
-                    test_run
-                ):  # test could be the entire test_run or a superset
+                #  Different heuristics may result in a given test file being split
+                #  into different test runs, so look for the overlapping tests to
+                #  find the match
+                if test & test_run:
                     return base_rank + idx
             base_rank += len(relevance_group_tests)
 
         raise ValueError(f"Test {test_run} not found in any relevance group")
 
     def _get_test_order_within_relevance_group(self, test_run: TestRun) -> int:
-        """Returns the highest test order of any test class within the same relevance group."""
+        """
+        Returns the highest test order of any test class within the same relevance group.
+        If the heuristic split this test run among multiple runs, then return the
+        highest relevance of any of the test runs.
+        """
         for _, relevance_group_tests in self._traverse_priorities():
             for idx, test in enumerate(relevance_group_tests):
-                if test.contains(
-                    test_run
-                ):  # test could be the entire test_run or a superset
+                #  Different heuristics may result in a given test file being split
+                #  into different test runs, so look for the overlapping tests to
+                #  find the match
+                if test & test_run:
                     return idx
 
         raise ValueError(f"Test {test_run} not found in any relevance group")
