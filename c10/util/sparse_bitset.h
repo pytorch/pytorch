@@ -319,7 +319,7 @@ class SparseBitVector {
     unsigned WordNumber{0};
 
     // Current bits from the element.
-    typename SparseBitVectorElement<ElementSize>::BitWord Bits;
+    typename SparseBitVectorElement<ElementSize>::BitWord Bits{0};
 
     // Move our iterator to the first non-zero bit in the bitmap.
     void AdvanceToFirstNonZero() {
@@ -387,7 +387,6 @@ class SparseBitVector {
         : AtEnd(end),
           BitVector(RHS),
           Iter(BitVector->Elements.begin()),
-          Bits(0),
           WordNumber(~0) {
       AdvanceToFirstNonZero();
     }
