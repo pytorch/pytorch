@@ -626,13 +626,19 @@ def _register_quantization_unary_fusion():
             ),
             UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
                 _unary_fusion_pattern(
-                    _gelu_fusion_erf, qlinear_pt2e_pattern(1 if is_bf16 else 2), 2, is_bf16
+                    _gelu_fusion_erf,
+                    qlinear_pt2e_pattern(1 if is_bf16 else 2),
+                    2,
+                    is_bf16,
                 ),
                 dtype=torch.float32,
             ),
             UnaryAttr("gelu", [], "tanh"): generate_pattern_with_output_quant(
                 _unary_fusion_pattern(
-                    _gelu_fusion_tanh, qlinear_pt2e_pattern(1 if is_bf16 else 2), 4, is_bf16
+                    _gelu_fusion_tanh,
+                    qlinear_pt2e_pattern(1 if is_bf16 else 2),
+                    4,
+                    is_bf16,
                 ),
                 dtype=torch.float32,
             ),
