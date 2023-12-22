@@ -202,7 +202,7 @@ class MemoryPlanningState:
 
 
 @dataclasses.dataclass
-class EnterCudaDeviceContextManagerLine:
+class EnterDeviceContextManagerLine:
     device_idx: int
     last_seen_device_guard_index: Optional[int]
 
@@ -237,14 +237,12 @@ class EnterCudaDeviceContextManagerLine:
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
-            code.writeline(f"with torch.cuda._DeviceGuard({self.device_idx}):")
+            code.writeline(f"with {V.graph.device_ops.device_guard(self.device_idx)}:")
             device_cm_stack.enter_context(code.indent())
-            code.writeline(
-                f"torch.cuda.set_device({self.device_idx}) # no-op to ensure context"
-            )
+            code.writeline(V.graph.device_ops.set_device(self.device_idx))
 
 
-class ExitCudaDeviceContextManagerLine:
+class ExitDeviceContextManagerLine:
     def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
         if not V.graph.cpp_wrapper:
             device_cm_stack.close()
@@ -449,8 +447,10 @@ class WrapperCodeGen(CodeGen):
             import triton
             import triton.language as tl
             from torch._inductor.triton_heuristics import grid, start_graph, end_graph
-            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-            """
+            {}
+            """.format(
+                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+            )
         )
 
     def add_meta_once(self, meta):
@@ -492,7 +492,7 @@ class WrapperCodeGen(CodeGen):
         )
         with self.prefix.indent():
             if config.triton.debug_sync_graph:
-                self.prefix.writeline("torch.cuda.synchronize()")
+                self.prefix.writeline(V.graph.device_ops.synchronize())
             inp_len = len(V.graph.graph_inputs.keys())
             if inp_len != 0:
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
@@ -506,7 +506,7 @@ class WrapperCodeGen(CodeGen):
     def write_get_raw_stream(self, index):
         self.write_triton_header_once()
         name = f"stream{index}"
-        self.writeline(f"{name} = get_cuda_stream({index})")
+        self.writeline(f"{name} = get_raw_stream({index})")
         return name
 
     def next_kernel_suffix(self):
@@ -514,14 +514,12 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_device_guard_enter(self, device_idx):
         self.writeline(
-            EnterCudaDeviceContextManagerLine(
-                device_idx, self.last_seen_device_guard_index
-            )
+            EnterDeviceContextManagerLine(device_idx, self.last_seen_device_guard_index)
         )
         self.last_seen_device_guard_index = device_idx
 
     def codegen_device_guard_exit(self):
-        self.writeline(ExitCudaDeviceContextManagerLine())
+        self.writeline(ExitDeviceContextManagerLine())
 
     def generate_return(self, output_refs):
         if output_refs:
@@ -637,8 +635,8 @@ class WrapperCodeGen(CodeGen):
                 elif isinstance(
                     line,
                     (
-                        EnterCudaDeviceContextManagerLine,
-                        ExitCudaDeviceContextManagerLine,
+                        EnterDeviceContextManagerLine,
+                        ExitDeviceContextManagerLine,
                     ),
                 ):
                     line.codegen(self.wrapper_call, device_cm_stack)
@@ -648,7 +646,7 @@ class WrapperCodeGen(CodeGen):
             output_refs = self.get_output_refs()
             self.mark_output_type()
             if config.triton.debug_sync_graph:
-                self.wrapper_call.writeline("torch.cuda.synchronize()")
+                self.wrapper_call.writeline(V.graph.device_ops.synchronize())
 
             if config.profile_bandwidth:
                 self.generate_end_graph()
