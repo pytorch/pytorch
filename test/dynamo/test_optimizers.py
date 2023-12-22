@@ -24,7 +24,7 @@ def get_optimizer_step(opt, closure=None):
     # run the patcher so that step has the expected structure
     torch._dynamo.eval_frame.TorchPatcher.patch()
 
-    # unwrap step TWICE to avoid a deliberate graph break due to a limitation of 
+    # unwrap step TWICE to avoid a deliberate graph break due to a limitation of
     # functionalization/no_grad detection--see the [Note on graph break] in optimizer.py
     # This ignores the _use_grad_if_differentiable wrapper, which is fine for now as
     # dynamo does not support differentiable optimizers anyway.
