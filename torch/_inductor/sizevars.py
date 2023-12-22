@@ -331,7 +331,7 @@ class SizeVarAllocator:
     def expect_true(self, expr: Expr, *, msg: str) -> None:
         expr = sympy_subs(expr, self.inv_precomputed_replacements)
         self.shape_env.defer_runtime_assert(
-            self.expr, msg, fx_node=V.graph.current_node
+            expr, msg, fx_node=V.graph.current_node
         )
 
     def expect_equals(self, left: Expr, right: Expr, *, msg: str) -> Expr:
