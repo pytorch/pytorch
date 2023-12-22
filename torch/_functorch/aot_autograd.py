@@ -1019,7 +1019,8 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
     # Next, the input args
     full_args.extend(args)
 
-    with ctx():
+    from torch.export.safeguard import GradModeUnsupportedSafeguard
+    with ctx(), GradModeUnsupportedSafeguard():
         fx_g, metadata, in_spec, out_spec = _aot_export_function(
             fn_to_trace,
             full_args,
