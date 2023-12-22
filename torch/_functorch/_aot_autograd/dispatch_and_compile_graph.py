@@ -29,11 +29,7 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
     with enable_python_dispatcher():
-        fx_g = make_fx(
-            f,
-            decomposition_table=aot_config.decompositions,
-            record_module_stack=True,
-        )(*args)
+        fx_g = make_fx(f, decomposition_table=aot_config.decompositions)(*args)
 
     return fx_g
 
