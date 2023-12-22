@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -187,21 +188,6 @@ inline int8_t log2(uint64_t value) {
   value |= value >> 32;
   return table[((value - (value >> 1)) * 0x07EDD5E59A4E28C2) >> 58];
 }
-
-template <typename T, bool>
-struct AssignIfTrue {
-  void operator()(T& lhs, const T& rhs) {
-    lhs = rhs;
-  }
-  void operator()(T& lhs, T&& rhs) {
-    lhs = std::move(rhs);
-  }
-};
-template <typename T>
-struct AssignIfTrue<T, false> {
-  void operator()(T&, const T&) {}
-  void operator()(T&, T&&) {}
-};
 
 inline uint64_t next_power_of_two(uint64_t i) {
   --i;
@@ -383,15 +369,13 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
       return *this;
 
     clear();
-    if (AllocatorTraits::propagate_on_container_copy_assignment::value) {
+    if constexpr (AllocatorTraits::propagate_on_container_copy_assignment::
+                      value) {
       if (static_cast<EntryAlloc&>(*this) !=
           static_cast<const EntryAlloc&>(other)) {
         reset_to_empty_state();
       }
-      AssignIfTrue<
-          EntryAlloc,
-          AllocatorTraits::propagate_on_container_copy_assignment::value>()(
-          *this, other);
+      static_cast<EntryAlloc&>(*this) = other;
     }
     _max_load_factor = other._max_load_factor;
     static_cast<Hasher&>(*this) = other;
@@ -403,13 +387,11 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
   sherwood_v3_table& operator=(sherwood_v3_table&& other) noexcept {
     if (this == std::addressof(other))
       return *this;
-    else if (AllocatorTraits::propagate_on_container_move_assignment::value) {
+    else if constexpr (AllocatorTraits::propagate_on_container_move_assignment::
+                           value) {
       clear();
       reset_to_empty_state();
-      AssignIfTrue<
-          EntryAlloc,
-          AllocatorTraits::propagate_on_container_move_assignment::value>()(
-          *this, std::move(other));
+      static_cast<EntryAlloc&>(*this) = std::move(other);
       swap_pointers(other);
     } else if (
         static_cast<EntryAlloc&>(*this) == static_cast<EntryAlloc&>(other)) {
