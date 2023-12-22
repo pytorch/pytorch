@@ -74,14 +74,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             torch.Size,
         }
 
+    @staticmethod
+    @functools.lru_cache(None)
     def _in_graph_classes():
-        return set(tensortype_to_dtype.keys()).update(
-            {
-                torch.Tensor,
-                torch.cuda.Stream,
-                torch.cuda.Event,
-            }
-        )
+        return set(tensortype_to_dtype.keys()) | {
+            torch.Tensor,
+            torch.cuda.Stream,
+            torch.cuda.Event,
+        }
 
     def can_constant_fold_through(self):
         return self.value in self._constant_fold_classes()
