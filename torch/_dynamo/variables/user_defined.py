@@ -95,6 +95,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             func = obj.__get__(self.value)
             if trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
                 return variables.TorchInGraphFunctionVariable(func, source=source)
+            elif trace_rules.lookup(func) == variables.SkipFilesVariable:
+                return variables.SkipFilesVariable(func, source=source)
             else:
                 return variables.UserFunctionVariable(func, source=source)
         elif isinstance(obj, classmethod):
@@ -719,15 +721,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.__get__.__func__, subobj_var, source=source
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
-            # torch._C._VariableFunctions.rsub
-            # pytest test/inductor/test_torchinductor_opinfo.py -k test_comprehensive___rsub___cpu_float64
-            if isinstance(self.value, torch._C._VariableFunctionsClass):
-                return variables.TorchInGraphFunctionVariable(
-                    subobj.__get__(self.value), source=source
-                )
-            return variables.UserFunctionVariable(
-                subobj.__get__(self.value), source=source
-            )
+            func = subobj.__get__(self.value)
+            if trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
+                return variables.TorchInGraphFunctionVariable(func, source=source)
+            elif trace_rules.lookup(func) == variables.SkipFilesVariable:
+                return variables.SkipFilesVariable(func, source=source)
+            else:
+                return variables.UserFunctionVariable(func, source=source)
         elif isinstance(subobj, classmethod):
             return variables.UserMethodVariable(subobj.__func__, self, source=source)
         elif isinstance(subobj, types.FunctionType) or (
@@ -759,6 +759,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return build_checkpoint_variable(source=source)
                 elif trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
                     return variables.TorchInGraphFunctionVariable(func, source=source)
+                elif trace_rules.lookup(func) == variables.SkipFilesVariable:
+                    return variables.SkipFilesVariable(func, source=source)
                 else:
                     return variables.UserFunctionVariable(func, source=source)
 
