@@ -1038,9 +1038,6 @@ class CustomDict(dict):
 
 
 def row_processor(row):
-    # FIXME: Only needed in CI for some reason,
-    # likely related to dill
-    import np
     return np.add(row, 1)
 
 

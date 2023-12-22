@@ -42,8 +42,9 @@ import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
 import torch.utils.data.graph_settings
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, suppress_warnings, skipIfTorchDynamo, TEST_DILL, import_dill, skipIfNoDill,
+    TestCase, run_tests, suppress_warnings, skipIfTorchDynamo, TEST_DILL, skipIfNoDill,
 )
+from torch.utils._import_utils import import_dill
 from torch.utils.data import (
     DataLoader,
     DataChunk,
