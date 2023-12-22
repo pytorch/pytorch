@@ -11,6 +11,7 @@ import torch.fx
 
 import torch.utils._pytree as pytree
 from torch._dynamo.exc import UserError, UserErrorType
+from torch._export.non_strict_utils import make_constraints, make_fake_inputs
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
@@ -27,6 +28,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError
+
 from .dynamic_shapes import _process_constraints, Constraint
 from .exported_program import (
     _disable_prexisiting_fake_mode,
@@ -491,7 +493,6 @@ def _export(
     if not strict:
         assert isinstance(f, torch.nn.Module)
         assert len(preserve_module_call_signature) == 0
-        assert len(constraints) == 0, "dynamic shape NYI"
         assert len(kwargs) == 0, "keyword arguments NYI"
         out_spec = None
 
@@ -533,8 +534,14 @@ def _export(
 
             return _aot_export_non_strict
 
+        fake_mode, fake_args, src_equalities, original_signature = make_fake_inputs(
+            f, args, constraints
+        )
         ep_non_strict = _export_non_strict(
-            f, args, {}, f.state_dict(), transform=_tuplify_outputs
+            f, fake_args, {}, f.state_dict(), transform=_tuplify_outputs
+        )
+        range_constraints, equality_constraints = make_constraints(
+            fake_mode, src_equalities, original_signature, ep_non_strict.gm
         )
         assert out_spec is not None
         return ExportedProgram(
@@ -542,8 +549,8 @@ def _export(
             ep_non_strict.gm.graph,
             ep_non_strict.sig,
             _get_params_buffers(f),
-            {},
-            [],
+            range_constraints,
+            equality_constraints,
             [
                 ModuleCallEntry(
                     "",
