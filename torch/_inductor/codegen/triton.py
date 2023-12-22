@@ -222,6 +222,27 @@ class BlockPtrOptions:
         return bool(self.boundary_check())
 
 
+def triton_reshape(value: str, old_shape: List[str], new_shape: List[str]):
+    """Workaround https://github.com/openai/triton/issues/2836"""
+    assert isinstance(old_shape, list) and isinstance(new_shape, list)
+    if old_shape == new_shape:
+        return value
+    if [s for s in new_shape if s != "1"] != old_shape:
+        return f"tl.reshape({value}, [{', '.join(new_shape)}])"
+    # rewrite to [:, None] syntax, which is less buggy
+    idx = 0
+    expand = []
+    for size in new_shape:
+        if idx < len(old_shape) and size == old_shape[idx]:
+            expand.append(":")
+            idx += 1
+        else:
+            assert size == "1"
+            expand.append("None")
+    assert idx == len(old_shape)
+    return f"{value}[{', '.join(expand)}]"
+
+
 class TritonPrinter(PythonPrinter):
     def _print_floor(self, expr):
         assert len(expr.args) == 1
@@ -1696,9 +1717,8 @@ class TritonKernel(Kernel):
         value = (
             f"tl.broadcast_to({value}, {self.index_to_str(indexing.reshape_suffix)})"
         )
-        if indexing.block_shape != indexing.reshape_suffix:
-            # drop any extra size=1 dimensions
-            value = f"tl.reshape({value}, {self.index_to_str(indexing.block_shape)})"
+        # drop any extra size=1 dimensions
+        value = triton_reshape(value, indexing.reshape_suffix, indexing.block_shape)
         # workaround https://github.com/openai/triton/issues/2814
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
         return f"tl.store({block_ptr}, {value}{other})"
@@ -1763,8 +1783,10 @@ class TritonKernel(Kernel):
                     name, var, indexing, other
                 )
                 line = f"tl.load({block_ptr}{other}{ep})"
-                if indexing.reshape_suffix != indexing.block_shape:
-                    line = f"tl.reshape({line}, {self.index_to_str(indexing.reshape_suffix)})"
+                # add needed size=1 dimensions
+                line = triton_reshape(
+                    line, indexing.block_shape, indexing.reshape_suffix
+                )
             elif isinstance(original_index, sympy.Integer):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
