@@ -1525,13 +1525,6 @@ class CudaKernelParamCache:
         return cls.cache.get(key, None)
 
 
-def _get_name_and_dir_from_path(file_path: str):
-    name_and_ext = os.path.basename(file_path)
-    name, ext = os.path.splitext(name_and_ext)
-    dir = os.path.dirname(file_path)
-    return name, dir
-
-
 class AotCodeCache:
     cache: Dict[str, str] = dict()
     clear = staticmethod(cache.clear)
@@ -1547,6 +1540,7 @@ class AotCodeCache:
         from torch._inductor.jit_builder.cpp_builder import (
             CppBuilder,
             CppTorchCudaOptions,
+            get_name_and_dir_from_output_file_path,
         )
 
         """
@@ -1611,11 +1605,19 @@ class AotCodeCache:
                     if specified_so_name
                     else os.path.splitext(input_path)[0] + ".so"
                 )
-                name_so, dir_so = _get_name_and_dir_from_path(output_so)
+                name_so, dir_so = get_name_and_dir_from_output_file_path(
+                    aot_mode=graph.aot_mode,
+                    use_absolute_path=use_absolute_path,
+                    file_path=output_so,
+                )
 
                 if not os.path.exists(output_so):
                     output_o = os.path.splitext(input_path)[0] + ".o"
-                    name_o, dir_o = _get_name_and_dir_from_path(output_o)
+                    name_o, dir_o = get_name_and_dir_from_output_file_path(
+                        aot_mode=graph.aot_mode,
+                        use_absolute_path=use_absolute_path,
+                        file_path=output_o,
+                    )
                     """
                     cmd = cpp_compile_command(
                         input=input_path,

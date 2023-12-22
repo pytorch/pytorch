@@ -826,6 +826,18 @@ class CppTorchCudaOptions(CppTorchOptions):
         self._remove_duplicate_options()
 
 
+def get_name_and_dir_from_output_file_path(
+    aot_mode: bool, use_absolute_path: bool, file_path: str
+):
+    name_and_ext = os.path.basename(file_path)
+    name, ext = os.path.splitext(name_and_ext)
+    dir = os.path.dirname(file_path)
+
+    if aot_mode and use_absolute_path:
+        dir = "."
+    return name, dir
+
+
 class CppBuilder:
     """
     CppBuilder is a cpp jit builder, and it supports both Windows, Linux and MacOS.
@@ -878,10 +890,14 @@ class CppBuilder:
         self._name = name
 
         if config.is_fbcode():
-            if BuildOption.get_aot_mode() and use_absolute_path:
+            if BuildOption.get_aot_mode() and not use_absolute_path:
+                inp_name = sources
+                # output process @ get_name_and_dir_from_output_file_path
+            else:
                 # We need to copy any absolute-path torch includes
                 inp_name = [os.path.basename(i) for i in sources]
-                self._sources_args = " ".join(inp_name)
+
+            self._sources_args = " ".join(inp_name)
 
             if is_clang(self._compiler):
                 self._passthough_parameters_args += " --rtlib=compiler-rt"
