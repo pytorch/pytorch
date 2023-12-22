@@ -236,6 +236,7 @@ __all__ = [
     "atleast_3d",
     "as_strided",
     "as_strided_scatter",
+    "block_diag",
     "broadcast_shapes",
     "broadcast_tensors",
     "broadcast_to",
@@ -1074,7 +1075,10 @@ def add(
         ):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
-        b = prims.mul(b, alpha)
+        if isinstance(b, TensorLike):
+            b = prims.mul(b, alpha)
+        else:
+            b = b * alpha
 
     output = prims.add(a, b)
     return handle_noncontiguous_outputs([a, b], output)
@@ -1939,7 +1943,7 @@ def item(a: TensorLikeType) -> NumberType:
 # fast path when `to` returns an alias to input. This mimics the same function in aten
 def _to_will_alias(
     a: TensorLikeType,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     dtype: Optional[torch.dtype] = None,
     copy: Optional[bool] = None,
     layout: Optional[torch.layout] = None,
@@ -4274,6 +4278,53 @@ def diag_embed(
     return utils.mask_tensor(cond, t).contiguous()
 
 
+@register_decomposition(aten.block_diag)
+@out_wrapper()
+def _block_diag_iterable(tensors: List[TensorLikeType]) -> TensorLikeType:
+    """
+    Reference implementation of torch.block_diag
+    """
+    tensors_2d = [
+        tensor.view(1, -1) if tensor.dim() <= 1 else tensor for tensor in tensors
+    ]
+
+    ncols = builtins.sum(tensor.shape[1] for tensor in tensors_2d)
+    device = tensors_2d[0].device
+
+    result = []
+
+    col_start = 0
+    for i, tensor in enumerate(tensors_2d):
+        torch._check(
+            tensor.dim() == 2,
+            lambda: "Input tensors must have 2 or fewer dimensions. "
+            f"Input {i} has {tensor.dim()} dimensions",
+        )
+        torch._check(
+            tensor.device == device,
+            lambda: "Input tensors must all be on the same device. "
+            f"Input 0 is on device {device} and input {i} is on device {tensor.device}.",
+        )
+        row, col = tensor.shape
+        left = torch.zeros((row, col_start), device=device, dtype=tensor.dtype)
+        right = torch.zeros(
+            (row, ncols - col_start - col), device=device, dtype=tensor.dtype
+        )
+        result += [torch.cat((left, tensor, right), dim=1)]
+        col_start += col
+
+    return torch.cat(result, dim=0)
+
+
+def block_diag(*tensors: List[TensorLikeType]) -> TensorLikeType:
+    """
+    This is used as an input to PythonRefInfo. `torch.block_diag`
+    expects arguments splatted, but `aten.block_diag` expects only
+    one argument that is a list of Tensors.
+    """
+    return _block_diag_iterable(tensors)
+
+
 # CompositeImplicitAutograd - don't register decomp
 def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
     if a.ndim < 3:
@@ -4478,7 +4529,7 @@ def empty(
     *shape,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     requires_grad: bool = False,
     pin_memory: bool = False,
     memory_format: torch.memory_format = torch.contiguous_format,
@@ -4518,7 +4569,7 @@ def empty_permuted(
     physical_layout,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     requires_grad: bool = False,
     pin_memory: bool = False,
 ) -> TensorLikeType:
@@ -4539,7 +4590,7 @@ def new_empty(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
     dtype = a.dtype if dtype is None else dtype
@@ -4564,7 +4615,7 @@ def new_empty_strided(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
     """
@@ -4591,7 +4642,7 @@ def zeros(
     *size,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
@@ -4619,7 +4670,7 @@ def new_zeros(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
@@ -4644,7 +4695,7 @@ def ones(
     *size,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
@@ -4672,7 +4723,7 @@ def new_ones(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
@@ -4700,7 +4751,7 @@ def new_full(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
     dtype = a.dtype if dtype is None else dtype
@@ -4723,7 +4774,7 @@ def empty_like(
     a: TensorLikeType,
     *,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     layout: Optional[torch.layout] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
@@ -4769,7 +4820,7 @@ def arange(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
@@ -4896,7 +4947,7 @@ def linspace(
     steps: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     layout: torch.layout = torch.strided,
     pin_memory: bool = False,
     requires_grad: bool = False,
@@ -4986,7 +5037,7 @@ def logspace(
     base: NumberType = 10,
     *,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     layout: torch.layout = torch.strided,
     pin_memory: bool = False,
     requires_grad: bool = False,
@@ -5185,7 +5236,7 @@ def empty_strided(
     strides: StrideType,
     *,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     layout: torch.layout = torch.strided,
     requires_grad: bool = False,
     pin_memory: bool = False,
@@ -5215,7 +5266,7 @@ def eye(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,  # TODO: unused
 ) -> TensorLikeType:
@@ -5257,7 +5308,7 @@ def full(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
@@ -5284,7 +5335,7 @@ def full_like(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
@@ -5308,7 +5359,7 @@ def zeros_like(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
@@ -5332,7 +5383,7 @@ def ones_like(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
@@ -5354,7 +5405,7 @@ def ones_like(
 def randn(
     *shape,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     layout: Optional[torch.layout] = None,
     requires_grad: bool = False,
     pin_memory: bool = False,
@@ -5381,7 +5432,7 @@ def scalar_tensor(
     *,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: Optional[DeviceLikeType] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
     utils.check_layout(layout)
@@ -5900,7 +5951,6 @@ def normal(
     device=None,
     pin_memory=None,
 ):
-    assert generator is None
     assert layout is None or layout == torch.strided
 
     if not isinstance(std, TensorLike):
@@ -5937,6 +5987,7 @@ def normal(
         dtype=dtype,
         device=device,
         requires_grad=False,
+        generator=generator,
     )
     return std * normal_samples + mean
 

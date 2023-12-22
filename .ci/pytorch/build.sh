@@ -63,6 +63,12 @@ else
   export LLVM_DIR=/opt/llvm/lib/cmake/llvm
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *executorch* ]]; then
+  # To build test_edge_op_registration
+  export BUILD_EXECUTORCH=ON
+  export USE_CUDA=0
+fi
+
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
   # intel cpu and later run tests on machines with amd cpu.

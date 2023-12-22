@@ -641,6 +641,10 @@ if(USE_CUDA)
     append_filelist("libtorch_cuda_distributed_base_sources" Caffe2_GPU_SRCS)
     if(NOT WIN32)
       append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_GPU_SRCS)
+      set_source_files_properties(
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
+        PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
+      )
     endif()
   endif()
   set_source_files_properties(
@@ -694,7 +698,7 @@ if(USE_ROCM)
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
   target_link_libraries(caffe2_nvrtc ${PYTORCH_HIP_LIBRARIES} ${ROCM_HIPRTC_LIB})
   target_include_directories(caffe2_nvrtc PRIVATE ${CMAKE_BINARY_DIR})
-  target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_HCC__)
+  target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_AMD__)
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 
@@ -848,6 +852,25 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS
       set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
     endif()
   endforeach()
+endif()
+
+option(TORCH_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
+if(TORCH_USE_IWYU)
+  find_program(iwyu NAMES include-what-you-use)
+  if(iwyu)
+    set(iwyu_cmd
+        "include-what-you-use"
+        "-Xiwyu"
+        "--transitive_includes_only"
+        "-Xiwyu"
+        "--no_fwd_decls"
+        "-Xiwyu"
+        "--prefix_header_includes=keep"
+        "-Xiwyu"
+        "--mapping_file=${CMAKE_CURRENT_LIST_DIR}/../tools/iwyu/all.imp"
+        )
+    set_property(TARGET torch_cpu PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_cmd})
+  endif()
 endif()
 
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
@@ -1311,9 +1334,6 @@ if(USE_DISTRIBUTED)
       target_compile_definitions(torch_hip PUBLIC USE_C10D_NCCL)
     else()
       target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
-      if(USE_NCCL_WITH_UCC)
-        target_compile_definitions(torch_cuda PUBLIC USE_NCCL_WITH_UCC)
-      endif()
     endif()
   endif()
   if(USE_MPI AND USE_C10D_MPI)

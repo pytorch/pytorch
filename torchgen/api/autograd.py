@@ -319,6 +319,7 @@ _foreach_with_inplace_ref = {"_foreach_zero_"}
 _foreach_with_tensor_overload = {
     "_foreach_add.Tensor",
     "_foreach_mul.Tensor",
+    "_foreach_div.Tensor",
 }
 
 

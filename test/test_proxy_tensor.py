@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db, skip, xfail, skipOps
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
     eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
@@ -42,7 +43,7 @@ def strip_end(s, suffix):
 def show_guards(gm):
     names = [strip_end(n, "_1") for n in fx_placeholder_targets(gm)]
     return "\n".join(
-        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True, constraint_inputs=None)
+        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True, input_contexts=None)
     )
 
 
@@ -443,6 +444,58 @@ def forward(self, x_1):
             )
         )
 
+    def test_pre_dispatch_functionalization(self):
+        def f(x):
+            a = FunctionalTensorMode(pre_dispatch=True)
+            with a:
+                x_unwrapped = FunctionalTensor.to_functional(x, is_pre_dispatch=True)
+                y = torch.matmul(x_unwrapped, x_unwrapped)
+                y = y + x_unwrapped
+                y.mul_(5)
+                y_unwrapped = torch._from_functional_tensor(y.elem)
+                return y_unwrapped
+
+        from torch._dispatch.python import enable_python_dispatcher
+
+        with enable_python_dispatcher():
+            inp = torch.randn(4, 4)
+            gm = make_fx(f, pre_dispatch=True)(inp)
+
+        # TODO actually not decompose
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    mm = torch.ops.aten.mm.default(x_1, x_1)
+    add = torch.ops.aten.add.Tensor(mm, x_1);  mm = x_1 = None
+    mul = torch.ops.aten.mul.Tensor(add, 5);  add = None
+    return mul""")
+
+    def test_pre_dispatch_functionalization_view_op(self):
+        def f(x):
+            a = FunctionalTensorMode(pre_dispatch=True)
+            with a:
+                x_unwrapped = FunctionalTensor.to_functional(x, is_pre_dispatch=True)
+                y = torch.matmul(x_unwrapped, x_unwrapped)
+                x_unwrapped = x_unwrapped.transpose(1, 0)
+                y = y + x_unwrapped
+                y = y.view(2, 8)
+                y_unwrapped = torch._from_functional_tensor(y.elem)
+                return y_unwrapped
+
+        from torch._dispatch.python import enable_python_dispatcher
+
+        with enable_python_dispatcher():
+            inp = torch.randn(4, 4)
+            gm = make_fx(f, pre_dispatch=True)(inp)
+
+        # TODO actually not decompose
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    mm = torch.ops.aten.mm.default(x_1, x_1)
+    transpose = torch.ops.aten.transpose.int(x_1, 1, 0);  x_1 = None
+    add = torch.ops.aten.add.Tensor(mm, transpose);  mm = transpose = None
+    view = torch.ops.aten.view.default(add, [2, 8]);  add = None
+    return view""")
+
     def test_val_metadata_mutation(self):
         def f(x):
             y = x.clone()
@@ -755,7 +808,17 @@ del TestGenericProxyTensor
 
 
 class TestRealProxyTensor(TestCase):
-    pass
+    def test_error_on_data_dependent_ops(self):
+        def f():
+            x = torch.randn([])
+            y = torch.randn([])
+            assert torch.allclose(x * y, y * x)
+            z = float(x)
+            z2 = float(y)
+
+        # Smoke tests
+        make_fx(f, _error_on_data_dependent_ops=False)()
+        make_fx(f, pre_dispatch=True, _error_on_data_dependent_ops=False)()
 
 class TestFakeProxyTensor(TestCase):
     def test_issue82547(self):
@@ -923,6 +986,16 @@ class TestSymbolicTracing(TestCase):
             lambda: interp.run(torch.randn(3, 3))
         )
 
+    def test_int_input(self):
+        def f(x, y):
+            return x.view(y)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(3, 4), 12).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    view = torch.ops.aten.view.default(x_1, [y_1]);  x_1 = y_1 = None
+    return view""")
+
     def test_resize_from_zero(self):
         def f(x, y):
             x.resize_(y.size(0))
@@ -934,6 +1007,16 @@ def forward(self, x_1, y_1):
     resize_ = torch.ops.aten.resize_.default(x_1, [sym_size_int]);  x_1 = sym_size_int = None
     return None""")
 
+    def test_broadcast_shapes(self):
+        def f(x, y):
+            return torch.functional.broadcast_shapes(x.size(), y.size()[0])
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(3, 1), torch.empty(5)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0);  x_1 = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
+    return (sym_size_int, sym_size_int_1)""")
 
     def test_unary(self):
         def f(x):
@@ -1695,10 +1778,18 @@ symbolic_tensor_failures = {
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
+
+    # AssertionError: False != True - https://github.com/pytorch/pytorch/issues/113905
+    xfail('dist', ''),
+    xfail('norm', ''),
+    xfail('linalg.vector_norm', ''),
+    xfail('linalg.norm', 'subgradients_at_zero'),
+    xfail('renorm', ''),
+
+    xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
 
     # many complex operators incorrect striding, metadata
     xfail('fft.fft', ''),
@@ -1726,6 +1817,11 @@ symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 outplace_symbolic_tensor_failures = {
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
+
+    xfail('linalg.norm', ''),
+    xfail('round', 'decimals_0'),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('round', 'decimals_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('round', 'decimals_neg_3'),  # Cannot call numel() on tensor with symbolic sizes/strides
 }
 
 inplace_symbolic_tensor_failures = {
@@ -1789,6 +1885,11 @@ out_symbolic_tensor_failures = {
     xfail('topk', ''),
     xfail('triangular_solve', ''),
     xfail('view_copy', ''),
+
+    # SymIntArrayRef expected to contain only concrete
+    xfail('ones', ''),
+    xfail('randn', ''),
+    xfail('zeros', ''),
 }
 
 out_symbolic_tensor_segfaults = {

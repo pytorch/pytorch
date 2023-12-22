@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import math
+import sys
 import unittest
 
 import torch
@@ -19,10 +20,29 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     IS_FBCODE,
     skipIfRocm,
+    TEST_WITH_ASAN,
 )
-from torch.testing._internal.inductor_utils import check_model_cuda, TestCase, ToTuple
-from torch.testing._internal.triton_utils import tl, triton
 
+try:
+    try:
+        import triton
+        from triton import language as tl
+    except ImportError:
+        raise unittest.SkipTest("requires triton")  # noqa: TRY200
+
+    try:
+        from . import test_torchinductor
+    except ImportError:
+        import test_torchinductor
+except unittest.SkipTest:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
+
+
+TestCase = test_torchinductor.TestCase
+ToTuple = test_torchinductor.ToTuple
+check_model_cuda = test_torchinductor.check_model_cuda
 aten = torch.ops.aten
 
 
@@ -1054,6 +1074,8 @@ class CudaReproTests(TestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import HAS_CUDA
 
-    run_inductor_tests(triton=True, skip_asan=True)
+    if HAS_CUDA and not TEST_WITH_ASAN:
+        run_tests(needs="filelock")

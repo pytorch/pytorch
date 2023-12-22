@@ -2508,7 +2508,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(len(qconfig_mapping.module_name_object_type_order_qconfigs), 2)
         key1 = ("mod1", torch.nn.Linear, 0)
         key2 = ("mod2", torch.nn.ReLU, 1)
-        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[0], key1)
+        self.assertEqual(next(iter(qconfig_mapping.module_name_object_type_order_qconfigs)), key1)
         self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[1], key2)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key1], qconfig1)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key2], qconfig2)
@@ -2519,7 +2519,7 @@ class TestQuantizeFx(QuantizationTestCase):
         # Override existing key
         qconfig_mapping.set_module_name_object_type_order("mod1", torch.nn.Linear, 0, qconfig3)
         self.assertEqual(len(qconfig_mapping.module_name_object_type_order_qconfigs), 2)
-        self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[0], key1)
+        self.assertEqual(next(iter(qconfig_mapping.module_name_object_type_order_qconfigs)), key1)
         self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[1], key2)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key1], qconfig3)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key2], qconfig2)
@@ -6515,7 +6515,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
             # Match following quantize with the specific dtypes
             self.assertEqual(len(node.users), 1)
-            user = list(node.users.keys())[0]
+            user = next(iter(node.users.keys()))
             self.assertEqual(user.target, torch.quantize_per_tensor)
             self.assertEqual(user.args[-1], target_to_expected_dtypes[node.target])
 
@@ -8636,12 +8636,24 @@ class TestQuantizeFxOps(QuantizationTestCase):
             indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
             example_inputs = (indices,)
             quantized_node = ns.call_module(nnq.Embedding)
+
+            # check dynamic quant
+            self.checkGraphModeFxOp(
+                model,
+                example_inputs,
+                QuantType.DYNAMIC,
+                quantized_node,
+                custom_qconfig_dict={"": qconfig_type}
+            )
+            model = M().eval()
+
             configs = [
                 (qconfig_type, ns.call_module(nnq.Embedding)),
                 (None, ns.call_module(nn.Embedding)),
                 (default_qconfig, ns.call_module(nn.Embedding)),
             ]
 
+            # check static quantization
             for qconfig, node in configs:
                 qconfig_dict = {"": qconfig}
                 m = prepare_fx(model, qconfig_dict, example_inputs=example_inputs)
