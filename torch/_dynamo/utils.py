@@ -519,7 +519,6 @@ def is_function(value):
         value,
         (
             types.FunctionType,
-            types.MethodType,
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
@@ -980,6 +979,10 @@ def tuple_iterator_getitem(it, index):
 
 
 iter_next = next
+
+
+def to_subclass(t, cls):
+    return t.as_subclass(cls)
 
 
 def enum_repr(value, local):
@@ -2371,3 +2374,14 @@ def to_fake_tensor(t, fake_mode):
     return fake_mode.from_tensor(
         t, static_shapes=False, symbolic_context=symbolic_context, source=source
     )
+
+
+def get_first_attr(obj, *attrs):
+    """
+    Return the first available attribute or throw an exception if none is present.
+    """
+    for attr in attrs:
+        if hasattr(obj, attr):
+            return getattr(obj, attr)
+
+    raise AssertionError(f"{obj} does not has any of the attributes: {attrs}")
