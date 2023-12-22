@@ -221,6 +221,31 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
     ]
 
 
+def mocked_read_merge_rules_approvers(
+    repo: Any, org: str, project: str
+) -> List[MergeRule]:
+    return [
+        MergeRule(
+            name="Core Reviewers",
+            patterns=["*"],
+            approved_by=["1", "2", "3", "4", "5", "6"],
+            mandatory_checks_name=[
+                "Lint",
+                "pull",
+            ],
+        ),
+        MergeRule(
+            name="Core Maintainers",
+            patterns=["*"],
+            approved_by=["1", "2", "malfet"],
+            mandatory_checks_name=[
+                "Lint",
+                "pull",
+            ],
+        ),
+    ]
+
+
 def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
     raise RuntimeError("testing")
 
@@ -285,6 +310,27 @@ class TestTryMerge(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "testing", lambda: find_matching_merge_rule(pr, repo)
         )
+
+    @mock.patch(
+        "trymerge.read_merge_rules", side_effect=mocked_read_merge_rules_approvers
+    )
+    def test_match_rules_approvers(self, *args: Any) -> None:
+        "Tests that PR has the necessary approvers"
+        repo = DummyGitRepo()
+
+        pr = GitHubPR("pytorch", "pytorch", 115329)
+        # Test that all potential approvers across all rules are listed if the
+        # PR doesn't have one of them
+        for mock_rule in ["Core Reviewers", "Core Maintainers"]:
+            self.assertRaisesRegex(
+                RuntimeError,
+                mock_rule,
+                lambda: find_matching_merge_rule(pr, repo),
+            )
+
+        pr = GitHubPR("pytorch", "pytorch", 115495)
+        # Test that PR with the correct approvers doesn't raise any exception
+        self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
     def test_lint_fails(self, *args: Any) -> None:
