@@ -1,6 +1,7 @@
 
 import torch
 from torch.overrides import TorchFunctionMode
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
 class GradModeUnsupportedSafeguard(TorchFunctionMode):
 
@@ -9,6 +10,6 @@ class GradModeUnsupportedSafeguard(TorchFunctionMode):
         unsupported_grad_mode_ops = [
             torch._C._set_grad_enabled,
         ]
-        if func in unsupported_grad_mode_ops:
+        if func in unsupported_grad_mode_ops and torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY):
             raise RuntimeError(f"{func} is not supported for grad mode")
         return func(*args, **kwargs)
