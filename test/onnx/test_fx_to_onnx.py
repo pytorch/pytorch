@@ -5,6 +5,8 @@ import io
 
 import tempfile
 
+from typing import Mapping, Tuple
+
 import onnx
 import pytorch_test_common
 import torch
@@ -131,6 +133,26 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             diagnostic_rule,
             diagnostics.levels.NONE,
             expected_node="aten.convolution.default",
+        )
+
+    def test_no_warnings_on_complex_dtype_in_op_level_debug(self):
+        class ComplexModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.ops.aten.mul(input, input)
+
+        real = torch.tensor([1, 2], dtype=torch.float32)
+        imag = torch.tensor([3, 4], dtype=torch.float32)
+        x = torch.complex(real, imag)
+
+        onnx_program = dynamo_export(
+            ComplexModel(), x, export_options=ExportOptions(op_level_debug=True)
+        )
+
+        assert_has_diagnostics(
+            onnx_program.diagnostic_context,
+            diagnostics.rules.op_level_debugging,
+            diagnostics.levels.NONE,
+            expected_node="aten.mul.Tensor",
         )
 
     def test_trace_only_op_with_evaluator(self):
@@ -265,6 +287,105 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             diagnostics.levels.NONE,
             expected_node="aten.clone.default",
         )
+
+    def test_missing_complex_onnx_variant_raises_errors_in_dispatcher(self):
+        registry = torch.onnx.OnnxRegistry()
+
+        # NOTE: simulate unsupported nodes
+        aten_mul_tensor = registration.OpName.from_name_parts(
+            namespace="aten", op_name="mul", overload="Tensor"
+        )
+
+        # Only keep real aten.mul to test missing complex aten.mul
+        registry._registry[aten_mul_tensor] = [
+            onnx_func
+            for onnx_func in registry._registry[aten_mul_tensor]
+            if not onnx_func.is_complex
+        ]
+
+        class TraceModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.ops.aten.mul.Tensor(input, input)
+
+        x = torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)
+
+        with self.assertRaises(torch.onnx.OnnxExporterError) as e:
+            torch.onnx.dynamo_export(
+                TraceModel(),
+                x,
+                export_options=torch.onnx.ExportOptions(onnx_registry=registry),
+            )
+
+        try:
+            torch.onnx.dynamo_export(
+                TraceModel(),
+                x,
+                export_options=torch.onnx.ExportOptions(onnx_registry=registry),
+            )
+        except torch.onnx.OnnxExporterError as e:
+            assert_has_diagnostics(
+                e.onnx_program.diagnostic_context,
+                diagnostics.rules.no_symbolic_function_for_call_function,
+                diagnostics.levels.ERROR,
+                expected_node="aten.mul.Tensor",
+            )
+
+    def test_symbolic_shape_of_values_inside_function_is_exported_as_graph_value_info(
+        self,
+    ):
+        class SubModule(torch.nn.Module):
+            def forward(self, x, y, bias):
+                output = x @ y
+                return output + bias
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submodule = SubModule()
+
+            def forward(self, x, y, bias):
+                return self.submodule(x, y, bias)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 4)
+        bias = torch.randn(4)
+        onnx_program = torch.onnx.dynamo_export(
+            Module(),
+            x,
+            y,
+            bias,
+            export_options=torch.onnx.ExportOptions(dynamic_shapes=True),
+        )
+        model_proto = onnx_program.model_proto
+
+        # Assert value_info for values inside local function can be retrieved
+        def _assert_node_outputs_has_value_info(
+            node: onnx.NodeProto,
+            value_infos: Mapping[str, onnx.ValueInfoProto],
+            local_functions: Mapping[Tuple[str, str], onnx.FunctionProto],
+            prefix: str = "",
+        ):
+            for output in node.output:
+                output_prefix = f"{prefix}/{output}" if prefix else output
+                self.assertIn(output_prefix, value_infos)
+            if node.domain.startswith("pkg.onnxscript.torch_lib"):
+                # No shape info available for values inside torchlib functions.
+                return
+            if (
+                function := local_functions.get((node.domain, node.op_type))
+            ) is not None:
+                for node in function.node:
+                    node_prefix = (
+                        f"{prefix}/{function.name}" if prefix else function.name
+                    )
+                    _assert_node_outputs_has_value_info(
+                        node, value_infos, local_functions, node_prefix
+                    )
+
+        type_infos = {vi.name: vi for vi in model_proto.graph.value_info}
+        functions = {(f.domain, f.name): f for f in model_proto.functions}
+        for node in model_proto.graph.node:
+            _assert_node_outputs_has_value_info(node, type_infos, functions)
 
     def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):
         class SubModule(torch.nn.Module):
@@ -565,6 +686,21 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         onnx_model = onnx.load_from_string(f.getvalue())
         onnx_nodes = [n.op_type for n in onnx_model.graph.node]
         self.assertTrue("ReduceL2" in onnx_nodes)
+
+    def test_exported_program_as_input_with_model_signature(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1.0
+
+        x = torch.randn(1, 1, 2, dtype=torch.float)
+        exported_program = torch.export.export(Model(), args=(x,))
+
+        onnx_program = torch.onnx.dynamo_export(
+            exported_program,
+            x,
+        )
+
+        self.assertTrue(onnx_program.model_signature, torch.export.ExportGraphSignature)
 
 
 if __name__ == "__main__":

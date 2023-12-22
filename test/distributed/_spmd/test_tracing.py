@@ -46,7 +46,7 @@ class TraceDeviceMeshTestBase:
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
 
         # check all dim groups
-        dim_to_subgroups = mesh.get_dim_groups()
+        dim_to_subgroups = mesh.get_group()
         for dim, dim_group in enumerate(dim_to_subgroups):
             dim_group_size = get_world_size(dim_group)
             global_ranks = [
@@ -71,7 +71,7 @@ class TraceDeviceMeshTestBase:
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # check all dim groups
-        dim_to_subgroups = mesh.get_dim_groups()
+        dim_to_subgroups = mesh.get_group()
         for dim, dim_group in enumerate(dim_to_subgroups):
             dim_group_size = get_world_size(dim_group)
             global_ranks = [
@@ -98,7 +98,7 @@ class TraceDeviceMeshTestBase:
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # check all dim groups
-        dim_to_subgroups = mesh.get_dim_groups()
+        dim_to_subgroups = mesh.get_group()
         for dim, dim_group in enumerate(dim_to_subgroups):
             dim_group_size = get_world_size(dim_group)
             global_ranks = [
@@ -129,7 +129,7 @@ class TraceDeviceMeshTestBase:
         # each rank have its own tensor, all_gather gives a big tensor
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
 
-        dim_to_subgroups = mesh.get_dim_groups()
+        dim_to_subgroups = mesh.get_group()
         for dim, dim_group in enumerate(dim_to_subgroups):
             dim_group_size = get_world_size(dim_group)
             global_ranks = [

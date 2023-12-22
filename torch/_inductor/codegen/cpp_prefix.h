@@ -401,4 +401,10 @@ template <>
 inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<float> src) {
   return src;
 }
+
+inline at::vec::Vectorized<float> to_float_mask(int src) {
+  float mask;
+  *(uint32_t*)&mask = src ? 0xFFFFFFFF : 0;
+  return at::vec::Vectorized<float>(mask);
+}
 #endif

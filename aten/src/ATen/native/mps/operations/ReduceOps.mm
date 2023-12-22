@@ -220,6 +220,7 @@ static void reduction_out_mps(const Tensor& input_t,
            (dtype.value() == kLong && macOS13_3_plus))) {
         inputCastType = getMPSDataType(dtype.value());
       } else if (inputScalarType != kInt && inputScalarType != kHalf && inputScalarType != kFloat &&
+                 inputScalarType != kComplexFloat && inputScalarType != kComplexHalf &&
                  (inputScalarType != kLong || !macOS13_3_plus)) {
         inputCastType = getMPSDataType(kFloat);
       } else if (!is_macos_13_or_newer() && inputScalarType == kHalf) {

@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import sys
 import unittest
 
 import torch
@@ -13,14 +14,27 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-from torch.testing._internal.inductor_utils import (
-    check_model,
-    check_model_cuda,
-    requires_cuda,
-)
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
 
+try:
+    try:
+        from .test_torchinductor import check_model, check_model_cuda, requires_cuda
+    except ImportError:
+        from test_torchinductor import check_model, check_model_cuda, requires_cuda
+except (unittest.SkipTest, ImportError) as e:
+    sys.stderr.write(f"{type(e)}: {e}\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
+
+inplace_bin_ops_under_test = [
+    torch._foreach_add_,
+    torch._foreach_mul_,
+    torch._foreach_sub_,
+    torch._foreach_div_,
+]
 
 bin_ops_under_test = [
     torch._foreach_add,
@@ -46,7 +60,13 @@ all_ops = parametrize(
     "op", bin_ops_under_test + un_ops_under_test, name_fn=lambda f: f.__name__
 )
 bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
+inplace_bin_ops = parametrize(
+    "op", inplace_bin_ops_under_test, name_fn=lambda f: f.__name__
+)
 scalar_bin_ops = parametrize("op", bin_ops_under_test[:4], name_fn=lambda f: f.__name__)
+scalar_tensor_bin_ops = parametrize(
+    "op", bin_ops_under_test[:2], name_fn=lambda f: f.__name__
+)
 decomp_ops = parametrize("op", compose_ops, name_fn=lambda f: f.__name__)
 
 
@@ -107,9 +127,21 @@ class ForeachTests(TestCase):
             ),
         )
 
-    # called in test_cpp_wrapper.py
+    def _test_single_scalar_tensor(self, op):
+        def fn(a0, a1):
+            return op([a0, a1], torch.tensor(3.3, device="cuda:0"))
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(20, 20, device="cuda:0"),
+            ),
+        )
+
+    # called in test_cuda_cpp_wrapper.py
     @requires_cuda()
-    def test_foreach_cpp_wrapper(self):
+    def test_foreach_cpp_wrapper_cuda(self):
         self._test_single_list(op=torch._foreach_add)
 
     @requires_cuda()
@@ -122,6 +154,12 @@ class ForeachTests(TestCase):
     @scalar_bin_ops
     def test_single_scalar(self, op):
         self._test_single_scalar(op)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
+    @scalar_tensor_bin_ops
+    def test_single_scalar_tensor(self, op):
+        self._test_single_scalar_tensor(op)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
@@ -585,8 +623,83 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @requires_cuda()
+    @inplace_bin_ops
+    def test_reinplacing(self, op):
+        def fn(a0, a1, b0, b1):
+            op([a0, a1], [b0, b1])
+            return [a0, a1]
+
+        inputs = (
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+        )
+
+        self.check_model_cuda(fn, inputs, check_lowp=False)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
+    @inplace_bin_ops
+    def test_reinplacing_mut_before(self, op):
+        def fn(a0, a1, b0, b1):
+            a0.add_(torch.ones(10, 10, device="cuda:0"))
+            op([a0, a1], [b0, b1])
+            return [a0, a1]
+
+        inputs = (
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+        )
+
+        self.check_model_cuda(fn, inputs, check_lowp=False)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
+    @inplace_bin_ops
+    def test_reinplacing_mut_after(self, op):
+        def fn(a0, a1, b0, b1):
+            op([a0, a1], [b0, b1])
+            a0.add_(torch.ones(10, 10, device="cuda:0"))
+            return [a0, a1]
+
+        inputs = (
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+        )
+
+        self.check_model_cuda(fn, inputs, check_lowp=False)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
+    def test_multi_device(self):
+        def test_foreach_add(a0, a1, b0, b1):
+            return torch._foreach_add([a0, a1], [b0, b1])
+
+        inps = [
+            torch.ones(10, 10, device="cuda"),
+            torch.ones(20, 20, device="cpu"),
+            torch.zeros(10, 10, device="cuda"),
+            torch.zeros(20, 20, device="cpu"),
+        ]
+
+        out_eager = test_foreach_add(*inps)
+        out_compiled = torch.compile(test_foreach_add)(*inps)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import run_inductor_tests
+    from torch._dynamo.test_case import run_tests
 
-    run_inductor_tests(skip_rocm=True)
+    if HAS_CPU or HAS_CUDA:
+        run_tests(needs="filelock")

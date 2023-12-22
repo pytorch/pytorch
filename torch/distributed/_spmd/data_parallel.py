@@ -120,7 +120,7 @@ def gradients_tagging(params: Dict[str, torch.Tensor]):
     tagging_hooks = []
     try:
         for p in params.values():
-            h = p.register_hook(lambda grad: torch.ops._spmd.tag_grad(grad))
+            h = p.register_hook(torch.ops._spmd.tag_grad)
             tagging_hooks.append(h)
         yield
     finally:
@@ -598,7 +598,7 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
         for idx, placement in enumerate(spec.placements):
             if placement.is_shard():
                 placement = cast(Shard, placement)
-                num_chunks = spec.mesh.size(dim=idx)
+                num_chunks = spec.mesh.size(mesh_dim=idx)
                 my_coord = spec.mesh.get_coordinate()
                 assert my_coord is not None, "current rank not in mesh!"
                 my_coord_on_mesh_dim = my_coord[idx]

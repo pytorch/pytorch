@@ -1,7 +1,7 @@
 from typing import Any, Dict, Iterable, List, Tuple
 
 from ._compatibility import compatibility
-from torch.utils._pytree import Context, _register_pytree_node
+from torch.utils._pytree import Context, register_pytree_node
 
 __all__ = ["immutable_list", "immutable_dict"]
 
@@ -50,5 +50,5 @@ def _immutable_list_unflatten(values: Iterable[Any], context: Context) -> List[A
     return immutable_list(values)
 
 
-_register_pytree_node(immutable_dict, _immutable_dict_flatten, _immutable_dict_unflatten)
-_register_pytree_node(immutable_list, _immutable_list_flatten, _immutable_list_unflatten)
+register_pytree_node(immutable_dict, _immutable_dict_flatten, _immutable_dict_unflatten)
+register_pytree_node(immutable_list, _immutable_list_flatten, _immutable_list_unflatten)
