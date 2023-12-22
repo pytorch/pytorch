@@ -15,13 +15,12 @@ import sympy
 
 import torch
 from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import counters, identity
+from torch._dynamo.utils import counters, identity, preserve_rng_state
 
 from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import ChoiceCaller, IndentedBuffer, KernelTemplate
-from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
@@ -107,6 +106,9 @@ class TritonTemplateKernel(TritonKernel):
         self.epilogue_fn = epilogue_fn
         self.render_hooks = dict()
 
+    def need_numel_args(self):
+        return False
+
     def jit_line(self):
         if self.use_jit:
             return "@triton.jit"
@@ -119,10 +121,18 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        triton_meta["kernel_name"] = str(Placeholder.DESCRIPTIVE_NAME)
-        return (
-            f"@template(num_stages={self.num_stages}, num_warps={self.num_warps}, meta={triton_meta!r})\n"
-            + "@triton.jit"
+
+        inductor_meta = {"kernel_name": str(Placeholder.DESCRIPTIVE_NAME)}
+        return textwrap.dedent(
+            f"""
+            @template(
+                num_stages={self.num_stages},
+                num_warps={self.num_warps},
+                triton_meta={triton_meta!r},
+                inductor_meta={inductor_meta!r},
+            )
+            @triton.jit
+            """
         )
 
     def def_kernel(self, *argnames):
@@ -177,6 +187,7 @@ class TritonTemplateKernel(TritonKernel):
                     "from torch._inductor.triton_heuristics import template",
                     "from torch._inductor.utils import instance_descriptor",
                     "from torch._inductor import triton_helpers",
+                    TritonKernel.gen_attr_descriptor_import(),
                     "",
                     self.jit_line(),
                     f"def {self.kernel_name}({', '.join(arg_defs)}):",
@@ -258,7 +269,7 @@ class TritonTemplateKernel(TritonKernel):
             input_node.freeze_layout()
             epilogue_args.append(input_node.make_loader()(index_symbols))
 
-        V.ops.store(  # type: ignore[attr-defined]
+        V.ops.store(
             self.output_node.get_name(),
             output_index,
             self.epilogue_fn(*epilogue_args),
@@ -366,8 +377,7 @@ class TritonTemplateKernel(TritonKernel):
                 grid=grid,
             )
         else:
-            call_args = ", ".join(call_args)  # type: ignore[assignment]
-            stream_name = wrapper.write_get_cuda_stream(
+            stream_name = wrapper.write_get_raw_stream(
                 V.graph.scheduler.current_device.index
             )
 
@@ -379,7 +389,7 @@ class TritonTemplateKernel(TritonKernel):
             ] + [meta]
             grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
             wrapper.writeline(
-                f"{name}.run({call_args}, grid={grid_call}, stream={stream_name})"
+                f"{name}.run({', '.join(call_args)}, grid={grid_call}, stream={stream_name})"
             )
 
 
@@ -485,7 +495,8 @@ class TritonTemplate(KernelTemplate):
             expected_args,
         )
         extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, call_args[len(expected_args) :])
+            map(sympy.expand, call_args[len(expected_args) :]),
+            fallback=config.unbacked_symint_fallback,
         )
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
@@ -506,7 +517,13 @@ class TritonTemplate(KernelTemplate):
 
         # create the BenchmarkRequest
         assert mod.__file__ is not None
-        grid = self.grid(*V.graph.sizevars.size_hints(layout.size), kwargs)
+        grid = self.grid(
+            *V.graph.sizevars.size_hints(
+                layout.size,
+                fallback=config.unbacked_symint_fallback,
+            ),
+            kwargs,
+        )
         bmreq = TritonBenchmarkRequest(
             module_path=mod.__file__,
             module_cache_key=mod.key,
@@ -543,7 +560,7 @@ class ExternKernelChoice:
         assert callable(kernel)
         assert not hasattr(extern_kernels, name), "duplicate extern kernel"
         self.name = name
-        self.cpp_kernel = cpp_kernel
+        self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
         setattr(extern_kernels, name, kernel)
 
@@ -635,7 +652,7 @@ class ExternKernelCaller(ChoiceCaller):
         else:
             algo = self.to_callable()
             out_new = algo(*args)
-            torch._C._dynamo.guards.assert_size_stride(  # type: ignore[attr-defined]
+            torch._C._dynamo.guards.assert_size_stride(
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
@@ -670,8 +687,8 @@ class ExternKernelCaller(ChoiceCaller):
             cls(
                 layout=self.layout,
                 inputs=self.input_nodes,
-                kernel=self.choice.call_name(),
-                cpp_kernel=self.choice.cpp_kernel,
+                python_kernel_name=self.choice.call_name(),
+                cpp_kernel_name=self.choice.cpp_kernel_name,
                 ordered_kwargs_for_cpp_kernel=self.choice.ordered_kwargs_for_cpp_kernel,
                 kwargs=self.kwargs,
             )
@@ -699,6 +716,8 @@ class AlgorithmSelectorCache(PersistentCache):
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
     ):
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
         if len(choices) == 0:
@@ -706,7 +725,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
-        log.info("Max autotune selects from %s choices.", str(len(choices)))
+        log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         if len(choices) == 1:
             if not isinstance(choices[0], CUDATemplateCaller):
@@ -768,9 +787,18 @@ class AlgorithmSelectorCache(PersistentCache):
         example_inputs_extern = [
             torch.as_strided(
                 unique_example_inputs[input_node.get_name()],
-                V.graph.sizevars.size_hints(input_node.get_size()),
-                V.graph.sizevars.size_hints(input_node.get_stride()),
-                V.graph.sizevars.size_hint(input_node.get_layout().offset),
+                V.graph.sizevars.size_hints(
+                    input_node.get_size(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                V.graph.sizevars.size_hints(
+                    input_node.get_stride(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                V.graph.sizevars.size_hint(
+                    input_node.get_layout().offset,
+                    fallback=config.unbacked_symint_fallback,
+                ),
             )
             for input_node in input_nodes
         ]
@@ -833,9 +861,9 @@ class AlgorithmSelectorCache(PersistentCache):
                     else:
                         if "illegal memory access" in msg:
                             msg += "\n\nEither error in template or triton bug.\n"
-                        raise ErrorFromChoice(msg, choice, debug_str())
+                        raise ErrorFromChoice(msg, choice, debug_str())  # noqa: TRY200
                 except AssertionError as e:
-                    raise AssertionError(
+                    raise AssertionError(  # noqa: TRY200
                         f"Incorrect result from choice {choice}\n\n{e}"
                     )
 
@@ -869,7 +897,14 @@ class AlgorithmSelectorCache(PersistentCache):
             return
         sizes = ", ".join(
             [
-                "x".join(map(str, V.graph.sizevars.size_hints(n.get_size())))
+                "x".join(
+                    map(
+                        str,
+                        V.graph.sizevars.size_hints(
+                            n.get_size(), fallback=config.unbacked_symint_fallback
+                        ),
+                    )
+                )
                 for n in input_nodes
             ]
         )
@@ -905,13 +940,22 @@ class AlgorithmSelectorCache(PersistentCache):
         # triton templates want the base tensor.
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
-        return rand_strided(
-            V.graph.sizevars.size_hints(node.get_size()),
-            V.graph.sizevars.size_hints(node.get_stride()),
-            device=node.get_device(),
-            dtype=node.get_dtype(),
-            extra_size=node.layout.offset,
-        )
+        # preserve rng states to avoid the rand_strided call below changes
+        # the rng states for the real model code.
+        with preserve_rng_state():
+            return rand_strided(
+                V.graph.sizevars.size_hints(
+                    node.get_size(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                V.graph.sizevars.size_hints(
+                    node.get_stride(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                device=node.get_device(),
+                dtype=node.get_dtype(),
+                extra_size=node.layout.offset,
+            )
 
     @staticmethod
     def key_of(node):
@@ -923,9 +967,18 @@ class AlgorithmSelectorCache(PersistentCache):
         return (
             node.get_device().type,
             str(node.get_dtype()),
-            *sizevars.size_hints(node.get_size()),
-            *sizevars.size_hints(node.get_stride()),
-            sizevars.size_hint(node.get_layout().offset),
+            *sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            *sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            sizevars.size_hint(
+                node.get_layout().offset,
+                fallback=config.unbacked_symint_fallback,
+            ),
         )
 
 

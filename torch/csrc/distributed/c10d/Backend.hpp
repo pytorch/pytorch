@@ -15,7 +15,6 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
-#include <torch/csrc/distributed/c10d/sequence_num.hpp>
 
 constexpr auto kBackendDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
@@ -56,6 +55,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // with its collectives.
   int64_t getID() const {
     return reinterpret_cast<std::intptr_t>(this);
+  }
+
+  virtual bool supportsSplitting() const {
+    return false;
   }
 
   virtual void startCoalescing() {
@@ -100,7 +103,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       const AllreduceOptions& /* opts */ = AllreduceOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), "does not support allreduce"));
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support allreduce sparse"));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
@@ -363,13 +369,30 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return pg_name_;
   }
 
+  // See similar functions in ProcessGroup.hpp for context.
+  c10::optional<at::Device> getBoundDeviceId() const {
+    return bound_device_id_;
+  }
+
+  // Perform an eager connect to the specified device if the backend supports
+  // it.
+  virtual void eagerConnectSingleDevice(at::Device device) {
+    // no-op in the default case; this is an optimization some
+    // backends may perform
+  }
+
+  void setBoundDeviceId(c10::optional<at::Device> device) {
+    if (device) {
+      TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
+    }
+    bound_device_id_ = device;
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();
 
-  // Optional sequence number structure for matching collectives.
-  c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
   const int rank_;
   const int size_;
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
@@ -378,6 +401,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   std::string pg_name_;
 
   std::function<void(std::shared_ptr<WorkInfo>)> onCompletionHook_;
+
+  c10::optional<at::Device> bound_device_id_;
 };
 
 } // namespace c10d

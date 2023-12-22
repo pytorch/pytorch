@@ -836,7 +836,6 @@ void qsigmoid_kernel(
   float scale = qx.q_scale();
   auto scale_vec = Vectorized<float>(scale);
   auto zero_point_vec = Vectorized<float>((float)zero_point);
-  auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qsigmoid", [&]() {
     float inv_output_scale = 1.0 / output_scale;
@@ -861,8 +860,7 @@ void qsigmoid_kernel(
               output_scale, output_zero_point, value_dy);
         },
         [&](Vec value_qx) -> Vec {
-          auto value_dx = value_qx.dequantize(
-              scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
+          auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec);
           for (auto & value : value_dx) {
             value = value.neg();
             value = value.exp();
@@ -2307,8 +2305,7 @@ void qupsample_bilinear2d_nhwc_kernel(
       int64_t b{0}, h2{0}, w2{0};
       data_index_init(begin, b, nbatch, h2, output_height, w2, output_width);
 
-      for (const auto i : c10::irange(begin, end)) {
-        (void)i; //Suppress unused variable warning
+      for (C10_UNUSED const auto i : c10::irange(begin, end)) {
         auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
             idata + b * input_height * input_width * channels);
         auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(

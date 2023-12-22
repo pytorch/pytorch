@@ -74,10 +74,8 @@ def get_py_torch_functions(
 # TODO: Consider defining some aliases for our Union[...] types, to make
 # the stubs to read on the human eye.
 
-DEVICE_PARAM = "device: Device = None"
-FACTORY_PARAMS = (
-    f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False"
-)
+DEVICE_PARAM = "device: Optional[DeviceLikeType] = None"
+FACTORY_PARAMS = f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False, pin_memory: _bool = False"
 
 # NOTE: specifying indices for Tensor.__getitem__
 # We can imitate numpy's definition of ndarray.__getitem__ found in numpy/__init__.pyi:
@@ -626,7 +624,7 @@ def gen_pyi(
                                 "size: Optional[_size] = None",
                                 "*",
                                 "dtype: Optional[_dtype] = None",
-                                "device: Union[_device, str, None] = None",
+                                "device: Optional[DeviceLikeType] = None",
                                 "requires_grad: _bool = False",
                                 "check_invariants: Optional[_bool] = None",
                             ]
@@ -647,7 +645,7 @@ def gen_pyi(
                             "obj: Any",
                             "*",
                             "dtype: Optional[_dtype] = None",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "copy: Optional[_bool] = None",
                             "requires_grad: _bool = False",
                         ]
@@ -664,7 +662,7 @@ def gen_pyi(
                             "dtype: _dtype",
                             "count: int = -1",
                             "offset: int = 0",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                         ]
                     )
@@ -702,7 +700,7 @@ def gen_pyi(
                             "size: Optional[_size] = None",
                             "*",
                             "dtype: Optional[_dtype] = None",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                             "check_invariants: Optional[_bool] = None",
                             "is_coalesced: Optional[_bool] = None",
@@ -721,7 +719,7 @@ def gen_pyi(
                             "*",
                             "dtype: Optional[_dtype] = None",
                             "layout: Optional[_layout] = None",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                             "check_invariants: Optional[_bool] = None",
                         ]
@@ -738,6 +736,22 @@ def gen_pyi(
             "_to_functional_tensor": [
                 "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
+            "_functionalize_replace": [
+                "def _functionalize_replace(self_: Tensor, other: Tensor) -> None: ..."
+            ],
+            "_functionalize_commit_update": [
+                "def _functionalize_commit_update(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_mark_mutation_hidden_from_autograd": [
+                "def _functionalize_mark_mutation_hidden_from_autograd(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_are_all_mutations_hidden_from_autograd": [
+                "def _functionalize_are_all_mutations_hidden_from_autograd(t: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_are_all_mutations_under_no_grad_or_inference_mode": [
+                "def _functionalize_are_all_mutations_under_no_grad_or_inference_mode(t: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
             ],
@@ -972,12 +986,12 @@ def gen_pyi(
     unsorted_tensor_method_hints.update(
         {
             "size": [
-                "def size(self) -> Size: ...",
+                "def size(self, dim: None = None) -> Size: ...",
                 "def size(self, dim: _int) -> _int: ...",
             ],
             "stride": [
-                "def stride(self) -> Tuple[_int, ...]: ...",
-                "def stride(self, _int) -> _int: ...",
+                "def stride(self, dim: None = None) -> Tuple[_int, ...]: ...",
+                "def stride(self, dim: _int) -> _int: ...",
             ],
             "new_ones": [
                 f"def new_ones(self, size: _size, {FACTORY_PARAMS}) -> Tensor: ..."
@@ -985,10 +999,11 @@ def gen_pyi(
             "new_tensor": [
                 f"def new_tensor(self, data: Any, {FACTORY_PARAMS}) -> Tensor: ..."
             ],
+            "__new__": ["def __new__(self, *args, **kwargs) -> Tensor: ..."],
             # new and __init__ have the same signatures differ only in return type
             # Adapted from legacy_tensor_ctor and legacy_tensor_new
             "new": [
-                f"def new(self, *args: Any, {DEVICE_PARAM}) ->Tensor: ...",
+                f"def new(self, *args: Any, {DEVICE_PARAM}) -> Tensor: ...",
                 "def new(self, storage: Storage) -> Tensor: ...",
                 "def new(self, other: Tensor) -> Tensor: ...",
                 f"def new(self, size: _size, *, {DEVICE_PARAM}) -> Tensor: ...",
@@ -1082,19 +1097,15 @@ def gen_pyi(
             "is_ipu": ["is_ipu: _bool"],
             "storage_offset": ["def storage_offset(self) -> _int: ..."],
             "to": [
-                "def to(self, dtype: _dtype, non_blocking: _bool = False, copy: _bool = False) -> Tensor: ...",
-                "def to({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "self",
-                            "device: Optional[Union[_device, str]] = None",
-                            "dtype: Optional[_dtype] = None",
-                            "non_blocking: _bool = False",
-                            "copy: _bool = False",
-                        ]
-                    )
-                ),
-                "def to(self, other: Tensor, non_blocking: _bool = False, copy: _bool = False) -> Tensor: ...",
+                (
+                    f"def to(self, {args}, non_blocking: _bool = False, copy: _bool = False, *, "
+                    "memory_format: Optional[torch.memory_format] = None) -> Tensor: ..."
+                )
+                for args in [
+                    "dtype: _dtype",
+                    "device: Optional[DeviceLikeType] = None, dtype: Optional[_dtype] = None",
+                    "other: Tensor",
+                ]
             ],
             "item": ["def item(self) -> Number: ..."],
             "copy_": [
@@ -1206,6 +1217,7 @@ def gen_pyi(
     for c in (
         "DoubleTensor",
         "FloatTensor",
+        "BFloat16Tensor",
         "LongTensor",
         "IntTensor",
         "ShortTensor",
@@ -1231,7 +1243,9 @@ def gen_pyi(
             "float16",
             "bfloat16",
             "float8_e4m3fn",
+            "float8_e4m3fnuz",
             "float8_e5m2",
+            "float8_e5m2fnuz",
             "half",
             "uint8",
             "int8",
@@ -1253,6 +1267,11 @@ def gen_pyi(
             "bool",
             "quint4x2",
             "quint2x4",
+            "bits1x8",
+            "bits2x4",
+            "bits4x2",
+            "bits8",
+            "bits16",
         ]
     ]
 

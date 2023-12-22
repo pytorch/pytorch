@@ -30,7 +30,7 @@ def get_kernel_category_by_source_code(src_code):
 def get_kernel_category(kernel_mod):
     """
     Given the module defining a triton kernel, return the category of the kernel.
-    Cateogry can be one of:
+    Category can be one of:
     - pointwise
     - reduction
     - persistent_reduction

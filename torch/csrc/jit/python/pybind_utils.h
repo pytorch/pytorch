@@ -53,8 +53,7 @@
 #define VISIBILITY_HIDDEN __attribute__((visibility("hidden")))
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ResolutionCallback = std::function<py::object(std::string)>;
 
@@ -398,6 +397,8 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPDevice_Check(input.ptr())) {
     return InferredType(DeviceObjType::get());
+  } else if (THPGenerator_Check(input.ptr())) {
+    return InferredType(GeneratorType::get());
   } else if (THPStream_Check(input.ptr())) {
     return InferredType(StreamObjType::get());
   } else if (THPDtype_Check(input.ptr())) {
@@ -1111,5 +1112,4 @@ TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     bool is_overload,
     c10::optional<c10::DispatchKey> dk = c10::nullopt);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,6 +1,5 @@
 # Owner(s): ["module: unknown"]
 
-import importlib
 import os.path
 import sys
 import tempfile
@@ -11,6 +10,7 @@ from torch import ops
 from model import Model, get_custom_op_library_path
 from torch.testing._internal.common_utils import TestCase, run_tests
 
+torch.ops.import_module("pointwise")
 
 class TestCustomOperators(TestCase):
     def setUp(self):
@@ -20,6 +20,16 @@ class TestCustomOperators(TestCase):
     def test_custom_library_is_loaded(self):
         self.assertIn(self.library_path, ops.loaded_libraries)
 
+    def test_op_with_no_abstract_impl_pystub(self):
+        x = torch.randn(3, device='meta')
+        with self.assertRaisesRegex(RuntimeError, "pointwise"):
+            torch.ops.custom.tan(x)
+
+    def test_op_with_incorrect_abstract_impl_pystub(self):
+        x = torch.randn(3, device='meta')
+        with self.assertRaisesRegex(RuntimeError, "pointwise"):
+            torch.ops.custom.cos(x)
+
     def test_abstract_impl_pystub_faketensor(self):
         from functorch import make_fx
         x = torch.randn(3, device='cpu')
@@ -28,7 +38,7 @@ class TestCustomOperators(TestCase):
         with self.assertRaises(torch._subclasses.fake_tensor.UnsupportedOperatorException):
             gm = make_fx(torch.ops.custom.nonzero.default, tracing_mode="symbolic")(x)
 
-        importlib.import_module("my_custom_ops")
+        torch.ops.import_module("my_custom_ops")
         gm = make_fx(torch.ops.custom.nonzero.default, tracing_mode="symbolic")(x)
         self.assertExpectedInline("""\
 def forward(self, arg0_1):
@@ -41,7 +51,7 @@ def forward(self, arg0_1):
         self.assertNotIn("my_custom_ops2", sys.modules.keys())
         with self.assertRaisesRegex(NotImplementedError, r"import the 'my_custom_ops2'"):
             y = torch.ops.custom.sin.default(x)
-        importlib.import_module("my_custom_ops2")
+        torch.ops.import_module("my_custom_ops2")
         y = torch.ops.custom.sin.default(x)
 
     def test_calling_custom_op_string(self):

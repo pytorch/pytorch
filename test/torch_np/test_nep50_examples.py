@@ -3,6 +3,7 @@
 """Test examples for NEP 50."""
 
 import itertools
+from unittest import skipIf as skipif, SkipTest
 
 try:
     import numpy as _np
@@ -28,6 +29,14 @@ from torch._numpy import (  # noqa: F401
 )
 from torch._numpy.testing import assert_allclose
 
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
+
+
 uint16 = uint8  # can be anything here, see below
 
 
@@ -36,7 +45,6 @@ uint16 = uint8  # can be anything here, see below
 # import numpy as np
 # np._set_promotion_state('weak')
 
-import pytest
 from pytest import raises as assert_raises
 
 unchanged = None
@@ -78,22 +86,25 @@ examples = {
 }
 
 
-@pytest.mark.parametrize("example", examples)
-def test_nep50_exceptions(example):
-    old, new = examples[example]
+@skipif(not HAVE_NUMPY, reason="NumPy not found")
+@instantiate_parametrized_tests
+class TestNEP50Table(TestCase):
+    @parametrize("example", examples)
+    def test_nep50_exceptions(self, example):
+        old, new = examples[example]
 
-    if new == Exception:
-        with assert_raises(OverflowError):
-            eval(example)
+        if new == Exception:
+            with assert_raises(OverflowError):
+                eval(example)
 
-    else:
-        result = eval(example)
+        else:
+            result = eval(example)
 
-        if new is unchanged:
-            new = old
+            if new is unchanged:
+                new = old
 
-        assert_allclose(result, new, atol=1e-16)
-        assert result.dtype == new.dtype
+            assert_allclose(result, new, atol=1e-16)
+            assert result.dtype == new.dtype
 
 
 # ### Directly compare to numpy ###
@@ -127,34 +138,6 @@ else:
     dtypes = (None,)
 
 
-@pytest.mark.skipif(not HAVE_NUMPY, reason="NumPy not found")
-@pytest.mark.parametrize(
-    "scalar, array, dtype", itertools.product(weaks, non_weaks, dtypes)
-)
-def test_direct_compare(scalar, array, dtype):
-    # compare to NumPy w/ NEP 50.
-    try:
-        state = _np._get_promotion_state()
-        _np._set_promotion_state("weak")
-
-        if dtype is not None:
-            kwargs = {"dtype": dtype}
-        try:
-            result_numpy = _np.add(scalar, array.tensor.numpy(), **kwargs)
-        except Exception:
-            return
-
-        kwargs = {}
-        if dtype is not None:
-            kwargs = {"dtype": getattr(tnp, dtype.__name__)}
-        result = tnp.add(scalar, array, **kwargs).tensor.numpy()
-        assert result.dtype == result_numpy.dtype
-        assert result == result_numpy
-
-    finally:
-        _np._set_promotion_state(state)
-
-
 # ufunc name: [array.dtype]
 corners = {
     "true_divide": ["bool_", "uint8", "int8", "int16", "int32", "int64"],
@@ -168,45 +151,69 @@ corners = {
 }
 
 
-@pytest.mark.skipif(not HAVE_NUMPY, reason="NumPy not found")
-@pytest.mark.parametrize("name", tnp._ufuncs._binary)
-@pytest.mark.parametrize("scalar, array", itertools.product(weaks, non_weaks))
-def test_compare_ufuncs(name, scalar, array):
-    if name in corners and (
-        array.dtype.name in corners[name]
-        or tnp.asarray(scalar).dtype.name in corners[name]
-    ):
-        return pytest.skip(f"{name}(..., dtype=array.dtype)")
+@skipif(not HAVE_NUMPY, reason="NumPy not found")
+@instantiate_parametrized_tests
+class TestCompareToNumpy(TestCase):
+    @parametrize("scalar, array, dtype", itertools.product(weaks, non_weaks, dtypes))
+    def test_direct_compare(self, scalar, array, dtype):
+        # compare to NumPy w/ NEP 50.
+        try:
+            state = _np._get_promotion_state()
+            _np._set_promotion_state("weak")
 
-    try:
-        state = _np._get_promotion_state()
-        _np._set_promotion_state("weak")
+            if dtype is not None:
+                kwargs = {"dtype": dtype}
+            try:
+                result_numpy = _np.add(scalar, array.tensor.numpy(), **kwargs)
+            except Exception:
+                return
 
-        if name in ["matmul", "modf", "divmod", "ldexp"]:
-            return
-        ufunc = getattr(tnp, name)
-        ufunc_numpy = getattr(_np, name)
+            kwargs = {}
+            if dtype is not None:
+                kwargs = {"dtype": getattr(tnp, dtype.__name__)}
+            result = tnp.add(scalar, array, **kwargs).tensor.numpy()
+            assert result.dtype == result_numpy.dtype
+            assert result == result_numpy
+
+        finally:
+            _np._set_promotion_state(state)
+
+    @parametrize("name", tnp._ufuncs._binary)
+    @parametrize("scalar, array", itertools.product(weaks, non_weaks))
+    def test_compare_ufuncs(self, name, scalar, array):
+        if name in corners and (
+            array.dtype.name in corners[name]
+            or tnp.asarray(scalar).dtype.name in corners[name]
+        ):
+            raise SkipTest(f"{name}(..., dtype=array.dtype)")
 
         try:
-            result = ufunc(scalar, array)
-        except RuntimeError:
-            # RuntimeError: "bitwise_xor_cpu" not implemented for 'ComplexDouble' etc
-            result = None
+            state = _np._get_promotion_state()
+            _np._set_promotion_state("weak")
 
-        try:
-            result_numpy = ufunc_numpy(scalar, array.tensor.numpy())
-        except TypeError:
-            # TypeError: ufunc 'hypot' not supported for the input types
-            result_numpy = None
+            if name in ["matmul", "modf", "divmod", "ldexp"]:
+                return
+            ufunc = getattr(tnp, name)
+            ufunc_numpy = getattr(_np, name)
 
-        if result is not None and result_numpy is not None:
-            assert result.tensor.numpy().dtype == result_numpy.dtype
+            try:
+                result = ufunc(scalar, array)
+            except RuntimeError:
+                # RuntimeError: "bitwise_xor_cpu" not implemented for 'ComplexDouble' etc
+                result = None
 
-    finally:
-        _np._set_promotion_state(state)
+            try:
+                result_numpy = ufunc_numpy(scalar, array.tensor.numpy())
+            except TypeError:
+                # TypeError: ufunc 'hypot' not supported for the input types
+                result_numpy = None
+
+            if result is not None and result_numpy is not None:
+                assert result.tensor.numpy().dtype == result_numpy.dtype
+
+        finally:
+            _np._set_promotion_state(state)
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

@@ -102,7 +102,7 @@ class TORCH_API TensorBase {
     }
   }
   TensorBase(const TensorBase&) = default;
-  TensorBase(TensorBase&&) = default;
+  TensorBase(TensorBase&&) noexcept = default;
 
  public:
   // Creates a new wrapper from TensorImpl. Intentionally a free method because
@@ -205,6 +205,7 @@ class TORCH_API TensorBase {
     impl_.reset();
   }
 
+#if defined (_MSC_VER)
   TensorBase& operator=(const TensorBase& x) & {
     impl_ = x.impl_;
     return *this;
@@ -213,6 +214,10 @@ class TORCH_API TensorBase {
     impl_ = std::move(x.impl_);
     return *this;
   }
+#else
+  TensorBase& operator=(const TensorBase& x) & = default;
+  TensorBase& operator=(TensorBase&& x) & noexcept = default;
+#endif
 
   // Ban assignment to rvalues, since at::Tensor (weirdly) performs a deep copy here
   TensorBase& operator=(const TensorBase&) && = delete;
@@ -469,6 +474,12 @@ class TORCH_API TensorBase {
   bool is_ve() const {
     // NB: this is not a native function to avoid dispatching overhead.
     return impl_->is_ve();
+  }
+
+  /// Returns if a `Tensor` has PrivateUse1 backend.
+  bool is_privateuseone() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_privateuseone();
   }
 
   /// Returns if a `Tensor` has sparse backend.
@@ -985,7 +996,7 @@ inline c10::MaybeOwned<TensorBase> borrow_from_optional_tensor(
     const c10::optional<TensorBase>& opt) {
   return opt.has_value()
     ? c10::MaybeOwned<TensorBase>::borrowed(*opt)
-    : c10::MaybeOwned<TensorBase>::owned(c10::in_place);
+    : c10::MaybeOwned<TensorBase>::owned(std::in_place);
 }
 
 inline c10::MaybeOwned<TensorBase> TensorBase::expect_contiguous(MemoryFormat memory_format) const & {

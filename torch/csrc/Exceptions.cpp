@@ -221,7 +221,7 @@ void translate_exception_to_python(const std::exception_ptr& e_ptr) {
         "called with invalid exception pointer");
     std::rethrow_exception(e_ptr);
   }
-  CATCH_ALL_ERRORS(return )
+  CATCH_ALL_ERRORS(return)
 }
 
 IndexError::IndexError(const char* format, ...) {
@@ -286,7 +286,7 @@ PyObject* map_warning_to_python_type(const c10::Warning& warning) {
       return PyExc_DeprecationWarning;
     }
   };
-  return c10::visit(Visitor(), warning.type());
+  return std::visit(Visitor(), warning.type());
 }
 
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification

@@ -2,10 +2,10 @@ from typing import List, Optional, Union, Tuple
 
 import torch
 from torch import Tensor
-from .optimizer import (Optimizer, params_t, _use_grad_for_differentiable, _get_value,
+from .optimizer import (Optimizer, ParamsT, _use_grad_for_differentiable, _get_value,
                         _stack_if_compiling, _dispatch_sqrt, _default_to_fused_or_foreach,
                         _capturable_doc, _differentiable_doc, _foreach_doc, _fused_doc,
-                        _maximize_doc)
+                        _maximize_doc, _view_as_real)
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 __all__ = ['Adam', 'adam']
@@ -13,7 +13,7 @@ __all__ = ['Adam', 'adam']
 
 class Adam(Optimizer):
     def __init__(self,
-                 params: params_t,
+                 params: ParamsT,
                  lr: Union[float, Tensor] = 1e-3,
                  betas: Tuple[float, float] = (0.9, 0.999),
                  eps: float = 1e-8,
@@ -75,7 +75,7 @@ class Adam(Optimizer):
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
             for s in state_values:
-                s['step'] = torch.tensor(float(s['step']))
+                s['step'] = torch.tensor(float(s['step']), dtype=torch.float32)
 
     def _init_group(
         self,
@@ -87,8 +87,10 @@ class Adam(Optimizer):
         max_exp_avg_sqs,
         state_steps
     ):
+        has_complex = False
         for p in group['params']:
             if p.grad is not None:
+                has_complex |= torch.is_complex(p)
                 params_with_grad.append(p)
                 if p.grad.is_sparse:
                     raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
@@ -101,9 +103,9 @@ class Adam(Optimizer):
                     # Deliberately host `step` on CPU if both capturable and fused are off.
                     # This is because kernel launches are costly on CUDA and XLA.
                     state['step'] = (
-                        torch.zeros((), dtype=torch.float, device=p.device)
+                        torch.zeros((), dtype=torch.float32, device=p.device)
                         if group['capturable'] or group['fused']
-                        else torch.tensor(0.)
+                        else torch.tensor(0.0, dtype=torch.float32)
                     )
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
@@ -126,10 +128,11 @@ class Adam(Optimizer):
                     raise RuntimeError('lr as a Tensor is not supported for capturable=False and foreach=True')
 
                 state_steps.append(state['step'])
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -151,7 +154,7 @@ class Adam(Optimizer):
             state_steps = []
             beta1, beta2 = group['betas']
 
-            self._init_group(
+            has_complex = self._init_group(
                 group,
                 params_with_grad,
                 grads,
@@ -168,6 +171,7 @@ class Adam(Optimizer):
                 max_exp_avg_sqs,
                 state_steps,
                 amsgrad=group['amsgrad'],
+                has_complex=has_complex,
                 beta1=beta1,
                 beta2=beta2,
                 lr=group['lr'],
@@ -265,6 +269,7 @@ def adam(params: List[Tensor],
          fused: Optional[bool] = None,
          grad_scale: Optional[Tensor] = None,
          found_inf: Optional[Tensor] = None,
+         has_complex: bool = False,
          *,
          amsgrad: bool,
          beta1: float,
@@ -274,9 +279,9 @@ def adam(params: List[Tensor],
          eps: float,
          maximize: bool):
     r"""Functional API that performs Adam algorithm computation.
+
     See :class:`~torch.optim.Adam` for details.
     """
-
     # Respect when the user inputs False/True for foreach or fused. We only want to change
     # the default when neither have been user-specified. Note that we default to foreach
     # and pass False to use_fused. This is not a mistake--we want to give the fused impl
@@ -315,6 +320,7 @@ def adam(params: List[Tensor],
          max_exp_avg_sqs,
          state_steps,
          amsgrad=amsgrad,
+         has_complex=has_complex,
          beta1=beta1,
          beta2=beta2,
          lr=lr,
@@ -337,6 +343,7 @@ def _single_tensor_adam(params: List[Tensor],
                         found_inf: Optional[Tensor],
                         *,
                         amsgrad: bool,
+                        has_complex: bool,
                         beta1: float,
                         beta2: float,
                         lr: Union[float, Tensor],
@@ -448,6 +455,7 @@ def _multi_tensor_adam(params: List[Tensor],
                        found_inf: Optional[Tensor],
                        *,
                        amsgrad: bool,
+                       has_complex: bool,
                        beta1: float,
                        beta2: float,
                        lr: Union[float, Tensor],
@@ -486,14 +494,20 @@ def _multi_tensor_adam(params: List[Tensor],
             device_grads = torch._foreach_neg(device_grads)
 
         # Handle complex parameters
-        device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
-        device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
-        device_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avg_sqs]
-        device_max_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_max_exp_avg_sqs]
-        device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
+        if has_complex:
+            if amsgrad:
+                _view_as_real(device_params, device_grads, device_exp_avgs, device_exp_avg_sqs, device_max_exp_avg_sqs)
+            else:
+                _view_as_real(device_params, device_grads, device_exp_avgs, device_exp_avg_sqs)
 
-        # update steps
-        torch._foreach_add_(device_state_steps, 1)
+        # Update steps
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if device_state_steps[0].is_cpu:
+            torch._foreach_add_(device_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+        else:
+            torch._foreach_add_(device_state_steps, 1)
 
         if weight_decay != 0:
             # Re-use the intermediate memory (device_grads) already allocated for maximize
@@ -580,6 +594,7 @@ def _fused_adam(
     found_inf: Optional[Tensor],
     *,
     amsgrad: bool,
+    has_complex: bool,  # Needed for consistency.
     beta1: float,
     beta2: float,
     lr: Union[float, Tensor],

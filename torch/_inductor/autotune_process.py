@@ -12,7 +12,17 @@ from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 from torch import multiprocessing
@@ -243,9 +253,9 @@ class TuningProcessPool:
             EXIT_HANDLER_REGISTERED = True
             import atexit
 
-            atexit.register(lambda: self.terminate())
+            atexit.register(self.terminate)
 
-    def get_device_list(self) -> List[Optional[int]]:
+    def get_device_list(self) -> Sequence[Optional[int]]:
         """
         Gather the list of devices to be used in the pool.
         """
@@ -259,7 +269,7 @@ class TuningProcessPool:
         if CUDA_VISIBLE_DEVICES in os.environ:
             devices = [int(d) for d in os.environ[CUDA_VISIBLE_DEVICES].split(",")]
             assert len(devices) <= count
-            return devices  # type: ignore[return-value]
+            return devices
 
         return list(range(count))
 
@@ -313,7 +323,7 @@ class TuningProcessPool:
 
         results = {}
 
-        # Use a ThreadExecutorPool to spread the work across the subproccesses and
+        # Use a ThreadExecutorPool to spread the work across the subprocesses and
         # to grab subprocesses as soon as they're free.
         for choice, result in zip(choices, self.executor.map(self.target, choices)):
             results[choice] = result
@@ -331,15 +341,15 @@ LayoutOrBuffer = Union[ir.Layout, ir.Buffer]
 class TensorMeta:
     device: torch.device
     dtype: torch.dtype
-    sizes: List[int]
-    strides: List[int]
+    sizes: torch._prims_common.ShapeType
+    strides: torch._prims_common.StrideType
     offset: int
 
     @classmethod
     def from_irnodes(
-        cls, irnodes: Union[LayoutOrBuffer, Tuple[LayoutOrBuffer], List[LayoutOrBuffer]]
+        cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
     ) -> Union[TensorMeta, List[TensorMeta]]:
-        if isinstance(irnodes, (tuple, list)):
+        if isinstance(irnodes, Sequence):
             result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
             assert all(isinstance(x, TensorMeta) for x in result)
             return result
@@ -354,9 +364,18 @@ class TensorMeta:
         return TensorMeta(
             device=node.get_device(),
             dtype=dtype,
-            sizes=V.graph.sizevars.size_hints(node.get_size()),
-            strides=V.graph.sizevars.size_hints(node.get_stride()),
-            offset=V.graph.sizevars.size_hint(node.get_layout().offset),
+            sizes=V.graph.sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            strides=V.graph.sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            offset=V.graph.sizevars.size_hint(
+                node.get_layout().offset,
+                fallback=config.unbacked_symint_fallback,
+            ),
         )
 
     def to_tensor(self) -> torch.Tensor:
@@ -381,7 +400,7 @@ class BenchmarkRequest:
         kernel_name: str,
         input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        extra_args: Dict[str, Any],
+        extra_args: Iterable[Any],
     ):
         # the kernel name defined in the module
         self.kernel_name = kernel_name
@@ -469,7 +488,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         kernel_name: str,
         input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        extra_args: Dict[str, Any],
+        extra_args: Iterable[Any],
         module_path: str,  # the path of the module defining the triton kernel
         module_cache_key: str,
         grid: List[int],
@@ -494,6 +513,15 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         )
 
         run_method = getattr(mod, self.kernel_name).run
+        extra_args = list(self.extra_args)
+
+        # Newer version of triton add warmup argument to JITFunction.run.
+        # This code handles backward-compatibility.
+        warmup_arg = {}
+        import inspect
+
+        if "warmup" in inspect.signature(run_method).parameters:
+            warmup_arg["warmup"] = False
 
         return functools.partial(
             run_method,
@@ -501,9 +529,9 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             output_tensor,
             *self.extra_args,
             grid=self.grid,
+            **warmup_arg,
             num_stages=self.num_stages,
             num_warps=self.num_warps,
-            stream=torch.cuda.current_stream().cuda_stream,
         )
 
     def __str__(self) -> str:
@@ -516,7 +544,7 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         kernel_name: str,
         input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
-        extra_args: Dict[str, Any],
+        extra_args: Iterable[Any],
         source_code: str,
     ):
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)

@@ -81,7 +81,6 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
         deps = [
             ":ScalarType",
-            ":impl_cow_context",
             "//third_party/cpuinfo",
             "//c10/macros",
             "//c10/util:TypeCast",
@@ -94,20 +93,19 @@ def define_targets(rules):
     )
 
     rules.cc_library(
-        name = "impl_cow_context",
-        srcs = [
-            "impl/cow/context.cpp",
-            "impl/cow/deleter.cpp",
-        ],
-        hdrs = [
-            "impl/cow/context.h",
-            "impl/cow/deleter.h",
-        ],
+        name = "impl_cow",
+        srcs = rules.glob([
+            "impl/cow/*.cpp",
+        ]),
+        hdrs = rules.glob([
+            "impl/cow/*.h",
+        ]),
         deps = [
-            "//c10/macros",
-            "//c10/util:base",
+            ":base",
+            ":CPUAllocator",
         ],
         visibility = ["//c10/test:__pkg__"],
+
     )
 
     rules.filegroup(

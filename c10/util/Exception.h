@@ -3,11 +3,11 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/StringUtil.h>
-#include <c10/util/variant.h>
 
 #include <cstddef>
 #include <exception>
 #include <string>
+#include <variant>
 #include <vector>
 
 #if defined(_MSC_VER) && _MSC_VER <= 1900
@@ -115,7 +115,7 @@ class C10_API Warning {
   class C10_API UserWarning {};
   class C10_API DeprecationWarning {};
 
-  using warning_variant_t = c10::variant<UserWarning, DeprecationWarning>;
+  using warning_variant_t = std::variant<UserWarning, DeprecationWarning>;
 
   Warning(
       warning_variant_t type,
@@ -210,7 +210,7 @@ class C10_API WarningHandlerGuard {
 /// setWarnAlways(true) to turn it into TORCH_WARN, which can be
 /// tested for more easily.
 C10_API void set_warnAlways(bool) noexcept(true);
-C10_API bool get_warnAlways(void) noexcept(true);
+C10_API bool get_warnAlways() noexcept(true);
 
 // A RAII guard that sets warn_always (not thread-local) on
 // construction, and sets it back to the original value upon destruction.
@@ -323,6 +323,9 @@ C10_API std::string GetExceptionString(const std::exception& e);
 #define C10_THROW_ERROR(err_type, msg) \
   throw ::c10::err_type(               \
       {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
+
+#define C10_BUILD_ERROR(err_type, msg) \
+  ::c10::err_type({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
 
 // Private helper macro for workaround MSVC misexpansion of nested macro
 // invocations involving __VA_ARGS__.  See
@@ -442,8 +445,8 @@ C10_API std::string GetExceptionString(const std::exception& e);
     C10_THROW_ERROR(Error, TORCH_CHECK_MSG(cond, type, __VA_ARGS__)); \
   }
 #else
-namespace c10 {
-namespace detail {
+
+namespace c10::detail {
 template <typename... Args>
 decltype(auto) torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
   return ::c10::str(args...);
@@ -457,8 +460,7 @@ inline C10_API const char* torchCheckMsgImpl(
     const char* args) {
   return args;
 }
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail
 
 #define TORCH_CHECK_MSG(cond, type, ...)                   \
   (::c10::detail::torchCheckMsgImpl(                       \
@@ -473,8 +475,7 @@ inline C10_API const char* torchCheckMsgImpl(
   }
 #endif
 
-namespace c10 {
-namespace detail {
+namespace c10::detail {
 
 [[noreturn]] C10_API void torchCheckFail(
     const char* func,
@@ -513,8 +514,7 @@ namespace detail {
     const char* condMsg,
     const std::string& userMsg);
 
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail
 
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK(cond, ...)                   \
@@ -583,7 +583,8 @@ namespace detail {
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
 
 #define TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(cond, ...) \
-  TORCH_CHECK_WITH_MSG(ErrorAlwaysShowCppStacktrace, cond, "TYPE", __VA_ARGS__)
+  TORCH_CHECK_WITH_MSG(                                   \
+      ErrorAlwaysShowCppStacktrace, cond, "TYPE", ##__VA_ARGS__)
 
 #ifdef STRIP_ERROR_MESSAGES
 #define WARNING_MESSAGE_STRING(...) \
@@ -641,8 +642,7 @@ namespace detail {
 // Deprecated macros
 // ----------------------------------------------------------------------------
 
-namespace c10 {
-namespace detail {
+namespace c10::detail {
 
 /*
 // Deprecation disabled until we fix sites in our codebase
@@ -671,8 +671,7 @@ https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERTM() {}
 
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail
 
 // Deprecated alias; this alias was deprecated because people kept mistakenly
 // using it for user error checking.  Use TORCH_INTERNAL_ASSERT or TORCH_CHECK

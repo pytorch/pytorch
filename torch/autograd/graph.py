@@ -1,12 +1,18 @@
 import abc
+import collections
 import contextlib
+import logging
 import weakref
-from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from collections import defaultdict, namedtuple
+from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Set, Tuple
 
 import torch
+from torch.autograd.variable import Variable
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.hooks import RemovableHandle
+
+log = logging.getLogger(__name__)
+
 
 __all__ = [
     "saved_tensors_hooks",
@@ -15,6 +21,8 @@ __all__ = [
     "register_multi_grad_hook",
     "allow_mutation_on_saved_tensors",
     "Node",
+    "GradientEdge",
+    "get_gradient_edge",
     "increment_version",
 ]
 
@@ -22,7 +30,7 @@ __all__ = [
 class Node(abc.ABC):
     @abc.abstractmethod
     def name(self) -> str:
-        r"""Returns the name.
+        r"""Return the name.
 
         Example::
 
@@ -42,7 +50,7 @@ class Node(abc.ABC):
 
     @abc.abstractmethod
     def metadata(self) -> dict:
-        r"""Returns the metadata."""
+        r"""Return the metadata."""
         ...
 
     @abc.abstractmethod
@@ -51,7 +59,7 @@ class Node(abc.ABC):
 
     @abc.abstractmethod
     def register_hook(self, fn: Callable[..., Any]) -> RemovableHandle:
-        r"""Registers a backward hook.
+        r"""Register a backward hook.
 
         The hook will be called every time a gradient with respect to the
         Node is computed. The hook should have the following signature::
@@ -89,7 +97,7 @@ class Node(abc.ABC):
 
     @abc.abstractmethod
     def register_prehook(self, fn: Callable[..., Any]) -> RemovableHandle:
-        r"""Registers a backward pre-hook.
+        r"""Register a backward pre-hook.
 
         The hook will be called every time a gradient with respect to the
         Node is computed. The hook should have the following signature::
@@ -133,11 +141,43 @@ class Node(abc.ABC):
         return NotImplemented
 
 
-def increment_version(tensor):
-    """This function can be used to let autograd know that a given Tensor was modified
-    inplace to enable more accurate error checking within the autograd engine.
+def _get_grad_fn_or_grad_acc(t):
+    if t.requires_grad and t.grad_fn is None:
+        return t.view_as(t).grad_fn.next_functions[0][0]
+    else:
+        return t.grad_fn
 
-    This is already done automatically by PyTorch functions and within custom Function
+
+GradientEdge = namedtuple("GradientEdge", ("node output_nr"))
+GradientEdge.__doc__ = """\
+Object representing a given gradient edge within the autograd graph.
+To get the gradient edge where a given Tensor gradient will be computed,
+you can do ``edge = autograd.graph.get_gradient_edge(tensor)``.
+"""
+
+
+def get_gradient_edge(tensor):
+    """Get the gradient edge for computing the gradient of the given Tensor.
+
+    In particular, it is equivalent to call
+    ``g = autograd.grad(loss, input)`` and ``g = autograd.grad(loss, get_gradient_edge(input))``.
+    """
+    if not tensor.requires_grad:
+        raise RuntimeError(
+            "It is not possible to get the gradient edge for a Tensor that does not require gradients"
+        )
+    grad_fn = _get_grad_fn_or_grad_acc(tensor)
+
+    # Note that output_nr default to 0 which is the right value
+    # for the AccumulateGrad node.
+    return GradientEdge(grad_fn, tensor.output_nr)
+
+
+def increment_version(tensor):
+    """Update autograd metadata tracking whether the given Tensor was modified in place.
+
+    This is to enable more accurate error checking within the autograd engine.
+    It is already done automatically by PyTorch functions and within custom Function
     when mark_dirty() is called appropriately so you only need to call this explicitly
     if you are doing inplace operation on the Tensor data in a way that Pytorch doesn't
     know about. For example a custom kernel that reads the Tensor data_ptr and modifies
@@ -229,8 +269,7 @@ class saved_tensors_hooks:
 
 
 class save_on_cpu(saved_tensors_hooks):
-    """Context-manager under which tensors saved by the forward pass will be
-    stored on cpu, then retrieved for backward.
+    """Context manager under which tensors saved by the forward pass will be stored on cpu, then retrieved for backward.
 
     When performing operations within this context manager, intermediary
     results saved in the graph during the forward pass will be moved to CPU,
@@ -333,7 +372,7 @@ def register_multi_grad_hook(
     tensors: Sequence[torch.Tensor],
     fn: Callable[[Sequence[Optional[torch.Tensor]]], None],
 ):
-    r"""Registers a multi-grad backward hook.
+    r"""Register a multi-grad backward hook.
 
     The hook will be called after gradients with respect to every tensor in
     :attr:`tensors` have been computed. If a tensor is in :attr:`tensors` but
@@ -378,14 +417,7 @@ def register_multi_grad_hook(
     nb_calls = None
     buffer: Dict[int, List[Optional[torch.Tensor]]] = dict()
 
-    def get_grad_fn(t):
-        # or grad accumulator
-        if t.requires_grad and t.grad_fn is None:
-            return t.expand_as(t).grad_fn.next_functions[0][0]
-        else:
-            return t.grad_fn
-
-    grad_fns = list(map(get_grad_fn, tensors))
+    grad_fns = list(map(_get_grad_fn_or_grad_acc, tensors))
     len_tensors = len(tensors)
 
     def get_inner_hook(idx):
@@ -556,7 +588,7 @@ class _AllowMutationOnSavedContext:
 
 @contextlib.contextmanager
 def allow_mutation_on_saved_tensors():
-    """Context manager under which mutating tensors saved for backward is allowed
+    """Context manager under which mutating tensors saved for backward is allowed.
 
     Under this context manager, tensors saved for backward are cloned on mutation,
     so the original version can still be used during backward. Normally, mutating a tensor
@@ -600,3 +632,55 @@ def allow_mutation_on_saved_tensors():
         finally:
             ctx.clear()
             _allow_mutation_on_saved_tensors_enabled = False
+
+
+def _register_logging_hooks_on_whole_graph(t_outputs: List[torch.Tensor]):
+    grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
+
+    def iter_graph(roots):
+        if not roots:
+            return
+        seen = set()
+        q: Deque = collections.deque()
+        for node in roots:
+            if node is not None:
+                seen.add(node)
+                q.append(node)
+
+        while q:
+            node = q.popleft()
+            for fn, _idx in node.next_functions:
+                if fn in seen or fn is None:
+                    continue
+                seen.add(fn)
+                q.append(fn)
+
+            yield node
+
+    def prehook(grad_output):
+        node = torch._C._current_autograd_node()
+        log_str = f"Executing: {node} with grad_output: {grad_output}"
+        log.info(log_str)
+
+    handles = []
+    for node in iter_graph(grad_fns):
+        handles.append(node.register_prehook(prehook))
+
+    def unregister_hooks():
+        for handle in handles:
+            handle.remove()
+
+    return unregister_hooks
+
+
+def _engine_run_backward(t_outputs, *args, **kwargs):
+    attach_logging_hooks = log.getEffectiveLevel() <= logging.INFO
+    if attach_logging_hooks:
+        unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)
+    try:
+        return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+            t_outputs, *args, **kwargs
+        )  # Calls into the C++ engine to run the backward pass
+    finally:
+        if attach_logging_hooks:
+            unregister_hooks()

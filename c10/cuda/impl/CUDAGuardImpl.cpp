@@ -4,8 +4,6 @@ namespace c10 {
 namespace cuda {
 namespace impl {
 
-constexpr DeviceType CUDAGuardImpl::static_type;
-
 C10_REGISTER_GUARD_IMPL(CUDA, CUDAGuardImpl);
 
 } // namespace impl

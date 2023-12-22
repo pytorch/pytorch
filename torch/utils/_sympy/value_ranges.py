@@ -10,6 +10,7 @@ from typing import Union, Dict, Optional, SupportsFloat
 
 from torch._prims_common import dtype_to_type
 from .interp import sympy_interp
+from .functions import Round, RoundDecimal
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def simple_sympify(e):
             return sympy.oo if e > 0 else -sympy.oo
         return sympy.Float(e)
     elif isinstance(e, sympy.Expr):
-        assert e.is_constant(), e
+        assert e.is_number, e
         # NaNs can occur when doing things like 0 * sympy.oo, but it is better
         # if the operator notices this and takes care of it, because sometimes
         # the NaN is inappropriate (for example, for ints, the [-oo, oo] range
@@ -126,19 +127,19 @@ class ValueRanges:
 
     @classmethod
     def increasing_map(cls, x, fn):
-        """Increasing: x <= y => f(x) <= f(y)"""
+        """Increasing: x <= y => f(x) <= f(y)."""
         x = cls.wrap(x)
         return ValueRanges(fn(x.lower), fn(x.upper))
 
     @classmethod
     def decreasing_map(cls, x, fn):
-        """Decreasing: x <= y => f(x) >= f(y)"""
+        """Decreasing: x <= y => f(x) >= f(y)."""
         x = cls.wrap(x)
         return ValueRanges(fn(x.upper), fn(x.lower))
 
     @classmethod
     def monotone_map(cls, x, fn):
-        """It's increasing or decreasing"""
+        """It's increasing or decreasing."""
         x = cls.wrap(x)
         l = fn(x.lower)
         u = fn(x.upper)
@@ -146,7 +147,7 @@ class ValueRanges:
 
     @classmethod
     def convex_min_zero_map(cls, x, fn):
-        """fn is convex and has a minimum at 0"""
+        """Fn is convex and has a minimum at 0."""
         x = ValueRanges.wrap(x)
         if 0 in x:
             return ValueRanges(0, max(fn(x.lower), fn(x.upper)))
@@ -156,7 +157,9 @@ class ValueRanges:
     @classmethod
     def coordinatewise_increasing_map(cls, x, y, fn):
         """
-        Increasing on each coordinate. Mathematically:
+        It's increasing on each coordinate.
+
+        Mathematically:
         For every 1 <= i <= n and x_i <= y_i we have that
         f(x1, .., xn) <= f(x1, , yi, ..., xn)
         """
@@ -168,7 +171,7 @@ class ValueRanges:
 
     @classmethod
     def coordinatewise_monotone_map(cls, x, y, fn):
-        """It's increasing or decreasing on each coordinate"""
+        """It's increasing or decreasing on each coordinate."""
         x, y = cls.wrap(x), cls.wrap(y)
         products = [
             fn(a, b)
@@ -324,6 +327,10 @@ class SymPyValueRangeAnalysis:
         return cls.mod(cls.floordiv(a, b), c)
 
     @classmethod
+    def is_non_overlapping_and_dense_indicator(cls, *args):
+        return ValueRanges.unknown()
+
+    @classmethod
     def pow(cls, a, b):
         def is_integer(val):
             return isinstance(val, int) or (
@@ -437,6 +444,19 @@ class SymPyValueRangeAnalysis:
     def ceil(cls, x):
         return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.ceiling)
 
+    @classmethod
+    def round(cls, number, ndigits=None):
+        if ndigits is None:
+            fn = Round
+        else:
+            assert ndigits.is_singleton()
+            ndigits = ndigits.lower
+            # We can't use functools.partial here since sympy doesn't support keyword arguments, but we have to bind
+            # the second parameter.
+            fn = lambda number: RoundDecimal(number, ndigits)  # noqa: E731
+
+        return ValueRanges.increasing_map(number, fn)
+
     # It's used in some models on symints
     @staticmethod
     def sqrt(x):
@@ -518,7 +538,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         return index
 
     @staticmethod
-    def to_dtype(x, dtype: torch.dtype):
+    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
         x = ValueRanges.wrap(x)
 
         if dtype == torch.bool:
@@ -585,7 +605,7 @@ def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRange
     ranges = ranges or {}
 
     # If there's a tracing context, augment available constrained ranges.
-    context = torch._guards.TracingContext.get()
+    context = torch._guards.TracingContext.try_get()
     if context and context.fake_mode.shape_env:
         ranges = {**ranges, **context.fake_mode.shape_env.var_to_range}
 

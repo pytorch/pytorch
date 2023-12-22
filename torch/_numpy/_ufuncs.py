@@ -99,7 +99,7 @@ def deco_binary_ufunc(torch_func):
             x1, x2 = _util.typecast_tensors((x1, x2), dtype, casting)
         else:
             x1, x2 = _dtypes_impl.nep50_to_tensors(
-                x1, x2, torch_func.__name__ in NEP50_FUNCS
+                x1, x2, torch_func.__name__ in NEP50_FUNCS, torch_func.__name__
             )
 
         result = torch_func(x1, x2)

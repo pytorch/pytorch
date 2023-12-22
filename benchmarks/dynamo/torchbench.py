@@ -56,6 +56,11 @@ USE_SMALL_BATCH_SIZE = {
     "hf_T5_base": 4,
     "timm_efficientdet": 1,
     "llama_v2_7b_16h": 1,
+    "yolov3": 8,  # reduced from 16 due to cudagraphs OOM in TorchInductor dashboard
+}
+
+INFERENCE_SMALL_BATCH_SIZE = {
+    "timm_efficientdet": 32,
 }
 
 DETECTRON2_MODELS = {
@@ -83,18 +88,32 @@ SKIP = {
     "maml",
     # Failing in eager mode
     "clip",
+    # multi gpu not always available in benchmark runners
+    "simple_gpt_tp_manual",
+}
+
+SKIP_DUE_TO_CONTROL_FLOW = {
+    "cm3leon_generate",
+    "detectron2_fcos_r_50_fpn",
+    "fastNLP_Bert",
+    "hf_Longformer",
+    "hf_Reformer",
+    "hf_T5_generate",
+    "opacus_cifar10",
+    "speech_transformer",
 }
 
 SKIP_FOR_CPU = {
     "hf_T5_generate",  # OOMs
     "cm3leon_generate",  # model is CUDA only
-    "nanogpt_generate",  # timeout
+    "nanogpt",  # timeout
     "sam",  # timeout
     "llama_v2_7b_16h",  # model is CUDA only
     "stable_diffusion",  # flaky
     "torchrec_dlrm",  # requires FBGEMM, CUDA only
     "simple_gpt",
     "hf_Whisper",  # works on cuda, accuracy failure on cpu
+    "stable_diffusion_text_encoder",
 }
 
 SKIP_FOR_CUDA = {
@@ -113,6 +132,8 @@ SKIP_TRAIN = {
     "llama",
     "llama_v2_7b_16h",
     "simple_gpt",
+    # doesnt fit in memory
+    "phi_1_5",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -222,6 +243,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
     "llama_v2_7b_16h",
     "Background_Matting",
+    "stable_diffusion_unet",
 }
 
 SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
@@ -245,9 +267,12 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "detectron2_fcos_r_50_fpn",
 }
 
+FORCE_FP16_FOR_BF16_MODELS = {"vision_maskrcnn"}
+
 # models in canary_models that we should run anyway
 CANARY_MODELS = {
     "torchrec_dlrm",
+    "clip",  # torchbench removed torchtext dependency
 }
 
 ONLY_MULTIPROCESS = {
@@ -299,6 +324,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return FORCE_AMP_FOR_FP16_BF16_MODELS
 
     @property
+    def force_fp16_for_bf16_models(self):
+        return FORCE_FP16_FOR_BF16_MODELS
+
+    @property
     def skip_accuracy_checks_large_models_dashboard(self):
         if self.args.dashboard or self.args.accuracy:
             return SKIP_ACCURACY_CHECK_MODELS
@@ -313,6 +342,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def skip_multiprocess_models(self):
         return ONLY_MULTIPROCESS
+
+    @property
+    def skip_models_due_to_control_flow(self):
+        return SKIP_DUE_TO_CONTROL_FLOW
 
     def load_model(
         self,
@@ -344,6 +377,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         else:
             raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
+        if benchmark_cls is None:
+            raise NotImplementedError(f"{model_name}.Model is None")
+
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
 
@@ -355,6 +391,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             batch_size = None
         if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
+        elif (
+            batch_size is None
+            and not is_training
+            and model_name in INFERENCE_SMALL_BATCH_SIZE
+        ):
+            batch_size = INFERENCE_SMALL_BATCH_SIZE[model_name]
 
         # Control the memory footprint for few models
         if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
@@ -373,8 +415,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             # comparison hard with torch.compile. torch.compile can cause minor
             # divergences in the output because of how fusion works for amp in
             # TorchInductor compared to eager.  Therefore, instead of looking at
-            # all the bounding boxes, we compare only top 5.
-            model_kwargs = {"box_detections_per_img": 5}
+            # all the bounding boxes, we compare only top 4.
+            model_kwargs = {"box_detections_per_img": 4}
             benchmark = benchmark_cls(
                 test="train",
                 device=device,
@@ -486,13 +528,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return reduce_to_scalar_loss(pred)
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             return mod(*inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             pred = mod(*cloned_inputs)
             loss = self.compute_loss(pred)
         self.grad_scaler.scale(loss).backward()

@@ -7,7 +7,6 @@
 #include <c10/util/irange.h>
 #include <algorithm>
 #include <climits>
-#include <iostream>
 #include <limits>
 
 namespace {
@@ -72,7 +71,7 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 #endif // AT_BLAS_USE_CBLAS_DOT
 #endif // AT_BUILD_WITH_BLAS
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace blas_impl {
 
@@ -156,6 +155,7 @@ INSTANTIATE(int16_t);
 INSTANTIATE(int);
 INSTANTIATE(int64_t);
 INSTANTIATE(c10::BFloat16);
+INSTANTIATE(c10::Half);
 #undef INSTANTIATE
 
 } // namespace blas_impl
@@ -250,7 +250,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
 
 #define INSTANTIATE(scalar_t, _) \
 template void gemv<scalar_t>(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, int64_t lda, const scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
-AT_FORALL_SCALAR_TYPES_AND(BFloat16, INSTANTIATE);
+AT_FORALL_SCALAR_TYPES_AND2(BFloat16, Half, INSTANTIATE);
 AT_FORALL_COMPLEX_TYPES(INSTANTIATE);
 #undef INSTANTIATE
 
@@ -403,4 +403,4 @@ INSTANTIATE_VDOT_IMPL(c10::complex<double>);
 
 #undef INSTANTIATE_DOT_IMPL
 
-}} // namespace at::native
+} // namespace at::native

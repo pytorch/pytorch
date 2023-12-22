@@ -227,7 +227,7 @@ template <uint32_t kSpatialDim>
 class QMaxPool_arr_args final {
  public:
   static Tensor run(
-      Tensor qx,
+      const Tensor& qx,
       std::vector<int64_t> kernel_size,
       std::vector<int64_t> stride,
       std::vector<int64_t> padding,

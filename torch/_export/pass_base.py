@@ -2,11 +2,10 @@ import operator
 import traceback
 import typing
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import torch
-from functorch.experimental import _map
-from functorch.experimental._map import _unstack_pytree
+from functorch.experimental.control_flow import _unstack_pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._export.pass_infra.node_metadata import NodeMetadata
@@ -28,6 +27,16 @@ Argument = Any
 Value = Any
 Fn = Callable[..., Any]
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
+
+
+_TORCH_SYM_OPS: Set[Callable] = {
+    torch.sym_int,
+    torch.sym_ite,
+    torch.sym_max,
+    torch.sym_min,
+    torch.sym_not,
+    torch.sym_sqrt,
+}
 
 
 class ExportPassBaseError(RuntimeError):
@@ -180,7 +189,10 @@ class _ExportPassBase(PassBase):
             if target == operator.getitem:
                 value, key = args
                 return self.callback.call_getitem(value, key, meta)
-            elif getattr(target, "__module__", None) == "_operator":
+            elif getattr(target, "__module__", None) in {"_operator", "math"}:
+                assert callable(target)
+                return self.callback.call_sym(target, args, meta)
+            elif target in _TORCH_SYM_OPS:
                 assert callable(target)
                 return self.callback.call_sym(target, args, meta)
             elif isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
@@ -193,7 +205,7 @@ class _ExportPassBase(PassBase):
             elif target == torch.ops.higher_order.cond:
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
-            elif target == _map.map_impl:
+            elif target == torch.ops.higher_order.map_impl:
                 f, num_args, *rest = args  # type: ignore[assignment]
                 return self.callback.call_map(f, num_args, list(rest), meta)
             # For other unregistered HigherOrderOps, just interpret them blindly
@@ -273,7 +285,10 @@ class _ExportPassBase(PassBase):
 
         def extract_input(node: torch.fx.Node) -> Optional[FakeTensor]:
             if "val" in node.meta:
-                return node.meta["val"]
+                fake = node.meta["val"]
+                if hasattr(fake, "constant") and fake.constant is not None:
+                    return fake.constant
+                return fake
             elif tensor_meta := node.meta.get("tensor_meta"):
                 assert self.fake_tensor_mode is not None
                 return FakeTensor(
@@ -358,7 +373,7 @@ class _ExportPassBase(PassBase):
         assert f_branch is not None
         return self._fx(
             "call_function",
-            _map.map_impl,
+            torch.ops.higher_order.map_impl,
             (f_branch.graph_module, num_args, *args),
             {},
             meta,
@@ -416,6 +431,7 @@ class _ExportPassBase(PassBase):
             fake_tensor_mode = nullcontext()  # type: ignore[assignment]
             dispatcher_mode = nullcontext()  # type: ignore[assignment]
         else:
+            fake_tensor_mode.allow_non_fake_inputs = True
             self.tracer.fake_tensor_mode = fake_tensor_mode
             dispatcher_mode = enable_python_dispatcher()  # type: ignore[assignment]
         self.fake_tensor_mode = self.tracer.fake_tensor_mode

@@ -20,8 +20,7 @@
 #include <ATen/ops/slow_conv_dilated3d_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 // hyper-volume to column, CPU
@@ -220,8 +219,8 @@ void slow_conv_dilated_all_cpu_template(
   std::vector<int64_t> dims(dim);
   std::iota(dims.begin(), dims.end(), 1);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        at::ScalarType::Long, at::ScalarType::BFloat16, input.scalar_type(), "slow_conv_dilated<>", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND3(
+        at::ScalarType::Long, at::ScalarType::BFloat16, at::ScalarType::Half, input.scalar_type(), "slow_conv_dilated<>", [&] {
     // For each elt in batch, do:
     for (const auto elt : c10::irange(batchSize)) {
       // Matrix multiply per output:
@@ -745,5 +744,4 @@ static std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
 REGISTER_ALL_CPU_DISPATCH(slow_conv_dilated2d_backward_stub, &slow_conv_dilated2d_backward_cpu);
 REGISTER_ALL_CPU_DISPATCH(slow_conv_dilated3d_backward_stub, &slow_conv_dilated3d_backward_cpu);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

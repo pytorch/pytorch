@@ -19,8 +19,7 @@
 #include <ATen/ops/zero_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor& fill_out(Tensor& self, const Scalar& value) {
@@ -55,7 +54,16 @@ Tensor& fill_quantized_(Tensor& self, const Scalar& value) {
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
-  self.copy_(value);
+  if (self.device() != value.device()){
+    return fill_out(self, value.item());
+  }
+  // Check if value is a view of self and if it is we clone
+  // it to avoid overwriting self prematurely
+  if(self.is_alias_of(value)) {
+    self.copy_(value.clone());
+  } else{
+    self.copy_(value);
+  }
   return self;
 }
 
@@ -158,5 +166,4 @@ Tensor& zero_meta_(Tensor& self) {
   return self;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

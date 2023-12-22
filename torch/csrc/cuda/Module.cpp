@@ -22,6 +22,7 @@
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/cuda/jiterator.h>
 #include <c10/core/StorageImpl.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -310,8 +311,11 @@ PyObject* THCPModule_cudaCachingAllocator_raw_alloc(
   }
   auto size = PyLong_AsSsize_t(size_o);
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
-  void* mem =
-      c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
+  void* mem = nullptr;
+  {
+    pybind11::gil_scoped_release no_gil;
+    mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
+  }
   return PyLong_FromVoidPtr(mem);
   END_HANDLE_TH_ERRORS
 }
@@ -420,7 +424,10 @@ PyObject* THCPModule_cudaCachingAllocator_raw_delete(
     PyObject* obj) {
   HANDLE_TH_ERRORS
   void* mem_ptr = PyLong_AsVoidPtr(obj);
-  c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
+  {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -442,8 +449,10 @@ PyObject* THCPModule_getAllocatorBackend(PyObject* _unused, PyObject* noargs) {
 }
 
 PyObject* THCPModule_cudaSynchronize(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  c10::cuda::device_synchronize();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::device_synchronize();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -459,7 +468,11 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
   HANDLE_TH_ERRORS
   THPUtils_assert(
       THPUtils_checkLong(cycles), "torch.cuda._sleep(): expected 'int'");
-  at::cuda::sleep(THPUtils_unpackLong(cycles));
+  int64_t unpacked_cycles = THPUtils_unpackLong(cycles);
+  {
+    pybind11::gil_scoped_release no_gil;
+    at::cuda::sleep(unpacked_cycles);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -654,13 +667,14 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str blocks_s = "blocks";
   py::str is_expandable_s = "is_expandable";
   py::str frames_s = "frames";
+  py::str time_us_s = "time_us";
 
   py::list empty_frames;
   std::vector<CapturedTraceback*> to_gather_frames;
   std::vector<py::dict> to_gather_dest;
 
   auto add_frame_key = [&](const py::dict& d,
-                           const std::shared_ptr<c10::GatheredContext> ctx) {
+                           const std::shared_ptr<c10::GatheredContext>& ctx) {
     if (ctx) {
       auto sc = getFromContext(ctx);
       to_gather_frames.emplace_back(sc);
@@ -769,6 +783,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           te.addr_;
       trace_entry[size_s] = te.size_;
       trace_entry[stream_s] = int64_t(te.stream_);
+      trace_entry[time_us_s] = te.time_.t_;
       trace.append(trace_entry);
     }
     traces.append(trace);
@@ -877,10 +892,27 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
+#if !USE_ROCM
+      // NVIDA only property
+      .def_readonly(
+          "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
+#endif // USE_ROCM
+      // HIP-only property; reuse name attribute for CUDA builds
+      .def_readonly(
+          "gcnArchName",
+#if USE_ROCM
+          &cudaDeviceProp::gcnArchName
+#else
+          &cudaDeviceProp::name
+#endif // USE_ROCM
+          )
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
                << "', major=" << prop.major << ", minor=" << prop.minor
+#if USE_ROCM
+               << ", gcnArchName='" << prop.gcnArchName << "'"
+#endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
                << ")";
@@ -947,8 +979,6 @@ void addStorageDeleterFns(
     if (storage_pair != storages.end()) {
       auto ctx = storage_pair->second->data_ptr().get_context();
       TORCH_CHECK(ctx == nullptr, " Not expecting deleter function");
-
-      auto curr_deleter = storage_pair->second->data_ptr().get_deleter();
       storage_pair->second->set_data_ptr_noswap(std::move(data_ptr));
     } else {
       data_ptr.release_context();
@@ -1025,22 +1055,23 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             self.set_record_stream_fn(func);
           })
       .def(
-          "set_begin_allocate_stream_to_pool",
+          "set_begin_allocate_to_pool",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
-            using FuncType = void(int, cudaStream_t, c10::cuda::MempoolId_t);
+            using FuncType = void(
+                int, c10::cuda::MempoolId_t, std::function<bool(cudaStream_t)>);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
-            self.set_begin_allocate_stream_to_pool(func);
+            self.set_begin_allocate_to_pool(func);
           })
       .def(
-          "set_end_allocate_stream_to_pool_fn",
+          "set_end_allocate_to_pool_fn",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
-            using FuncType = void(int, cudaStream_t);
+            using FuncType = void(int, c10::cuda::MempoolId_t);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
-            self.set_end_allocate_stream_to_pool_fn(func);
+            self.set_end_allocate_to_pool_fn(func);
           })
       .def(
           "set_release_pool",
@@ -1077,7 +1108,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     auto data_ptr = storage_impl->data_ptr().get();
     bool succeeded = storage_impl->mutable_data_ptr().compare_exchange_deleter(
         alloc->raw_deleter(), c10::detail::deleteNothing);
-    TORCH_CHECK("Expected standard deleter");
+    TORCH_CHECK(succeeded, "Expected standard deleter");
     c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
   });
 
@@ -1089,7 +1120,6 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
-    auto data_ptr = storage_impl->data_ptr().get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
   });
 
@@ -1137,15 +1167,17 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       [](int device, at::cuda::MempoolId_t mempool_id) {
         auto stream = at::cuda::getCurrentCUDAStream(device);
         TORCH_CHECK(stream, "Expected stream capture to be under way");
-        c10::cuda::CUDACachingAllocator::beginAllocateStreamToPool(
-            device, stream, mempool_id);
+        c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+            device, mempool_id, [stream](cudaStream_t target) {
+              return target == stream;
+            });
       });
 
-  m.def("_cuda_endAllocateCurrentStreamToPool", [](int device) {
-    auto stream = at::cuda::getCurrentCUDAStream(device);
-    TORCH_CHECK(stream, "Expected stream capture to be under way");
-    c10::cuda::CUDACachingAllocator::endAllocateStreamToPool(device, stream);
-  });
+  m.def(
+      "_cuda_endAllocateCurrentStreamToPool",
+      [](int device, at::cuda::MempoolId_t mempool_id) {
+        c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
+      });
 
   m.def("_cuda_releasePool", [](int device, at::cuda::MempoolId_t mempool_id) {
     c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
@@ -1184,7 +1216,6 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         auto delta = c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
             device, pps);
         auto& freed_pointers = delta.ptrs_freed;
-        auto& allocd_pointers = delta.dataptrs_allocd;
 
         std::unordered_set<void*> allocd_set;
         for (auto& data_ptr : delta.dataptrs_allocd) {
@@ -1247,8 +1278,6 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   if (!m)
     throw python_error();
 
-  bool has_half = true;
-
   auto set_module_attr = [&](const char* name, PyObject* v) {
     // PyObject_SetAttrString doesn't steal reference. So no need to incref.
     if (PyObject_SetAttrString(m, name, v) < 0) {
@@ -1257,7 +1286,6 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   };
 
   set_module_attr("has_magma", at::hasMAGMA() ? Py_True : Py_False);
-  set_module_attr("has_half", has_half ? Py_True : Py_False);
 
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
@@ -1329,13 +1357,13 @@ PyObject* THCPModule_setBenchmarkLimitCuDNN(PyObject* _unused, PyObject* arg) {
       "set_benchmark_limit_cudnn expects an int, "
       "but got %s",
       THPUtils_typename(arg));
-  auto benchmark_limit = static_cast<int>(THPUtils_unpackLong(arg));
 #if defined(USE_ROCM)
   TORCH_WARN_ONCE(
       "cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
 #endif
 #if AT_CUDNN_ENABLED()
 #if HAS_CUDNN_V8()
+  auto benchmark_limit = static_cast<int>(THPUtils_unpackLong(arg));
   at::globalContext().setBenchmarkLimitCuDNN(benchmark_limit);
 #else
   TORCH_WARN_ONCE(
@@ -1470,6 +1498,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
 #ifdef USE_NCCL
     {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
+    {"_nccl_version_suffix",
+     THCPModule_nccl_version_suffix,
+     METH_NOARGS,
+     nullptr},
     {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},
     {"_nccl_init_rank", THCPModule_nccl_init_rank, METH_VARARGS, nullptr},
     {"_nccl_reduce", THCPModule_nccl_reduce, METH_VARARGS, nullptr},

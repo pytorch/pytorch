@@ -46,13 +46,13 @@ if(USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
     # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
-    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-      caffe2::cufft caffe2::curand caffe2::cublas)
+    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS )
     if(CAFFE2_USE_NVRTC)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
     else()
       caffe2_update_option(USE_NVRTC OFF)
     endif()
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::curand caffe2::cufft caffe2::cublas)
     if(CAFFE2_USE_CUDNN)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cudnn)
     else()
@@ -127,10 +127,9 @@ endif()
 find_package(Threads REQUIRED)
 if(TARGET Threads::Threads)
   list(APPEND Caffe2_DEPENDENCY_LIBS Threads::Threads)
-  add_library(caffe2::Threads ALIAS Threads::Threads)
 else()
   message(FATAL_ERROR
-      "Cannot find threading library. Caffe2 requires Threads to compile.")
+      "Cannot find threading library. PyTorch requires Threads to compile.")
 endif()
 
 if(USE_TBB)
@@ -433,43 +432,44 @@ else()
   set(USE_PTHREADPOOL OFF CACHE BOOL "" FORCE)
 endif()
 
-# ---[ Caffe2 uses cpuinfo library in the thread pool
-if(NOT TARGET cpuinfo AND USE_SYSTEM_CPUINFO)
-  add_library(cpuinfo SHARED IMPORTED)
-  find_library(CPUINFO_LIBRARY cpuinfo)
-  if(NOT CPUINFO_LIBRARY)
-    message(FATAL_ERROR "Cannot find cpuinfo")
-  endif()
-  message("Found cpuinfo: ${CPUINFO_LIBRARY}")
-  set_target_properties(cpuinfo PROPERTIES IMPORTED_LOCATION "${CPUINFO_LIBRARY}")
-elseif(NOT TARGET cpuinfo)
-  if(NOT DEFINED CPUINFO_SOURCE_DIR)
-    set(CPUINFO_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
-  endif()
-
-  set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
-  set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
-  set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
-  if(MSVC)
-    if(CAFFE2_USE_MSVC_STATIC_RUNTIME)
-      set(CPUINFO_RUNTIME_TYPE "static" CACHE STRING "")
-    else()
-      set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
+  # ---[ Caffe2 uses cpuinfo library in the thread pool
+  # ---[ But it doesn't support s390x/powerpc and thus not used on s390x/powerpc
+  if(NOT TARGET cpuinfo AND USE_SYSTEM_CPUINFO)
+    add_library(cpuinfo SHARED IMPORTED)
+    find_library(CPUINFO_LIBRARY cpuinfo)
+    if(NOT CPUINFO_LIBRARY)
+      message(FATAL_ERROR "Cannot find cpuinfo")
     endif()
+    message("Found cpuinfo: ${CPUINFO_LIBRARY}")
+    set_target_properties(cpuinfo PROPERTIES IMPORTED_LOCATION "${CPUINFO_LIBRARY}")
+  elseif(NOT TARGET cpuinfo)
+    if(NOT DEFINED CPUINFO_SOURCE_DIR)
+      set(CPUINFO_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
+    endif()
+
+    set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
+    set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
+    set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
+    set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+    set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
+    if(MSVC)
+      if(CAFFE2_USE_MSVC_STATIC_RUNTIME)
+        set(CPUINFO_RUNTIME_TYPE "static" CACHE STRING "")
+      else()
+        set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
+      endif()
+    endif()
+    add_subdirectory(
+      "${CPUINFO_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
+    # We build static version of cpuinfo but link
+    # them into a shared library for Caffe2, so they need PIC.
+    set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
-  add_subdirectory(
-    "${CPUINFO_SOURCE_DIR}"
-    "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
-  # We build static version of cpuinfo but link
-  # them into a shared library for Caffe2, so they need PIC.
-  set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
-  # Need to set this to avoid conflict with XNNPACK's clog external project
-  set(CLOG_SOURCE_DIR "${CPUINFO_SOURCE_DIR}/deps/clog")
+  list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 endif()
-list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 
 # ---[ QNNPACK
 if(USE_QNNPACK)
@@ -617,7 +617,13 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     # Disable ARM BF16 and FP16 vector for now; unused and causes build failures because
     # these new ISA features may not be supported on older compilers
     set(XNNPACK_ENABLE_ARM_BF16 OFF CACHE BOOL "")
-    set(XNNPACK_ENABLE_ARM_FP16_VECTOR OFF CACHE BOOL "")
+
+    # Disable AVXVNNI for now, older clang versions seem not to support it
+    # (clang 12 is where avx-vnni support is added)
+    set(XNNPACK_ENABLE_AVXVNNI OFF CACHE BOOL "")
+
+    # Disable I8MM For CI since clang 9 does not support neon i8mm.
+    set(XNNPACK_ENABLE_ARM_I8MM OFF CACHE BOOL "")
 
     # Setting this global PIC flag for all XNNPACK targets.
     # This is needed for Object libraries within XNNPACK which must
@@ -631,14 +637,6 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
 
     # Revert to whatever it was before
     set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG})
-
-    # Workaround for https://github.com/pytorch/pytorch/issues/47292
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.5.0))
-      # Compiling qu8-requantization/precise-psimd.c without any optimization flags on gcc-7.4 or older i
-      # Fails with internal compiler error
-      # Workaround by forcing -O1 for XNNPACK (i.e. build it with RelWithDebInfo)
-      set_property(TARGET XNNPACK APPEND_STRING PROPERTY COMPILE_FLAGS "-O1")
-    endif()
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
@@ -682,8 +680,6 @@ if(USE_GLOG)
   include(${CMAKE_CURRENT_LIST_DIR}/public/glog.cmake)
   if(TARGET glog::glog)
     set(CAFFE2_USE_GOOGLE_GLOG 1)
-    include_directories(SYSTEM ${GLOG_INCLUDE_DIR})
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS glog::glog)
   else()
     message(WARNING
         "glog is not found. Caffe2 will build without glog support but it is "
@@ -815,6 +811,9 @@ if(USE_FBGEMM)
     else()
       set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
     endif()
+    if(USE_ASAN)
+      set(USE_SANITIZER "address,undefined" CACHE STRING "-fsanitize options for FBGEMM")
+    endif()
     add_subdirectory("${FBGEMM_SOURCE_DIR}")
     set_property(TARGET fbgemm_generic PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -881,10 +880,7 @@ endif()
 if(USE_NUMA)
   if(LINUX)
     find_package(Numa)
-    if(NUMA_FOUND)
-      include_directories(SYSTEM ${Numa_INCLUDE_DIR})
-      list(APPEND Caffe2_DEPENDENCY_LIBS ${Numa_LIBRARIES})
-    else()
+    if(NOT NUMA_FOUND)
       message(WARNING "Not compiling with NUMA. Suppress this warning with -DUSE_NUMA=OFF")
       caffe2_update_option(USE_NUMA OFF)
     endif()
@@ -1150,9 +1146,6 @@ if(USE_MPI)
     message(STATUS "MPI include path: " ${MPI_CXX_INCLUDE_PATH})
     message(STATUS "MPI LINK flags path: " ${MPI_CXX_LINK_FLAGS})
     message(STATUS "MPI libraries: " ${MPI_CXX_LIBRARIES})
-    include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${MPI_CXX_LIBRARIES})
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${MPI_CXX_LINK_FLAGS}")
     find_program(OMPI_INFO
       NAMES ompi_info
       HINTS ${MPI_CXX_LIBRARIES}/../bin)
@@ -1203,16 +1196,6 @@ if(ANDROID)
   list(APPEND Caffe2_DEPENDENCY_LIBS log)
 endif()
 
-# ---[ Kernel asserts
-# Kernel asserts are enabled by default for CUDA and disabled for ROCm.
-# For ROCm, it can be enabled by setting ROCM_FORCE_ENABLE_GPU_ASSERTS
-if(USE_ROCM AND ROCM_FORCE_ENABLE_GPU_ASSERTS)
-  message(STATUS "Forcefully enabling kernel asserts on ROCM")
-elseif(USE_ROCM AND NOT ROCM_FORCE_ENABLE_GPU_ASSERTS)
-  message(STATUS "Disabling kernel asserts for ROCm")
-  caffe2_update_option(TORCH_DISABLE_GPU_ASSERTS ON)
-endif()
-
 # ---[ LLVM
 if(USE_LLVM)
   message(STATUS "Looking for LLVM in ${USE_LLVM}")
@@ -1260,8 +1243,9 @@ if(USE_ROCM)
       caffe2_update_option(USE_SYSTEM_NCCL ON)
     endif()
 
+
     list(APPEND HIP_CXX_FLAGS -fPIC)
-    list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_HCC__=1)
+    list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_AMD__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
     list(APPEND HIP_CXX_FLAGS -DUSE_ROCM)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
@@ -1273,6 +1257,15 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "6.0.0")
+      list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
+    endif()
+    if(HIPBLASLT_CUSTOM_DATA_TYPE)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_DATA_TYPE)
+    endif()
+    if(HIPBLASLT_CUSTOM_COMPUTE_TYPE)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_COMPUTE_TYPE)
+    endif()
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
@@ -1297,10 +1290,22 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
+      ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
+    endif()
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
+
+    # ---[ Kernel asserts
+    # Kernel asserts is disabled for ROCm by default.
+    # It can be turned on by turning on the env USE_ROCM_KERNEL_ASSERT to the build system.
+    if(USE_ROCM_KERNEL_ASSERT)
+      message(STATUS "Enabling Kernel Assert for ROCm")
+    else()
+      message(STATUS "Disabling Kernel Assert for ROCm")
+    endif()
 
   else()
     caffe2_update_option(USE_ROCM OFF)

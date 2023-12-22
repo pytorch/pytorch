@@ -56,7 +56,7 @@ struct PyTensorType {
 };
 
 static_assert(
-    std::is_standard_layout<PyTensorType>::value,
+    std::is_standard_layout_v<PyTensorType>,
     "PyTensorType must be standard layout");
 
 static Backend default_backend = Backend::CPU;
@@ -182,6 +182,7 @@ static PyTypeObject metaclass = {
 };
 
 static void py_initialize_metaclass(PyTypeObject& metaclass) {
+  // NOLINTNEXTLINE(misc-redundant-expression)
   metaclass.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
   metaclass.tp_methods = metaclass_methods;
   metaclass.tp_getset = metaclass_properties;
