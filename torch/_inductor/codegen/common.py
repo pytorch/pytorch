@@ -99,6 +99,16 @@ def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
 
 
+def get_device_op_overrides(device: str):
+    assert isinstance(device, str)
+    if device == "cuda":
+        from .cuda.device_op_overrides import CUDADeviceOpOverrides
+
+        return CUDADeviceOpOverrides()
+
+    return DeviceOpOverrides()
+
+
 @functools.lru_cache(None)
 def boolean_ops():
     return (
@@ -459,6 +469,20 @@ class OpOverrides:
     @staticmethod
     def load_seed(name, offset):
         return ops.load(name, sympy.Integer(offset))
+
+
+class DeviceOpOverrides:
+    def import_get_raw_stream_as(self, name):
+        raise NotImplementedError()
+
+    def set_device(self, device_idx):
+        raise NotImplementedError()
+
+    def synchronize(self):
+        raise NotImplementedError()
+
+    def device_guard(self, device_idx):
+        raise NotImplementedError()
 
 
 class DeferredLine(DeferredLineBase):

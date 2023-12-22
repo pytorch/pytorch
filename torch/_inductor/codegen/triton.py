@@ -2032,10 +2032,10 @@ class TritonKernel(Kernel):
         extra_args_str = None
         index = V.graph.scheduler.current_device.index
         with result.indent():
-            result.writeline(f"with torch.cuda._DeviceGuard({index}):")
+            result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
             with result.indent():
                 result.writeline(
-                    f"torch.cuda.set_device({index})"
+                    V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
                 for tree in self.range_trees:
                     expr = pexpr(V.graph.sizevars.size_hint(tree.numel))
@@ -2045,7 +2045,7 @@ class TritonKernel(Kernel):
                         grid.append(expr)
 
                 stream_name = f"stream{index}"
-                result.writeline(f"{stream_name} = get_cuda_stream({index})")
+                result.writeline(f"{stream_name} = get_raw_stream({index})")
 
                 if self.need_numel_args():
                     extra_args_str = ", ".join(map(str, extra_args)) + ", "
@@ -2059,10 +2059,10 @@ class TritonKernel(Kernel):
         # benchmark all configs
         result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
         with result.indent():
-            result.writeline(f"with torch.cuda._DeviceGuard({index}):")
+            result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
             with result.indent():
                 result.writeline(
-                    f"torch.cuda.set_device({index})"
+                    V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
                 result.writeline(
                     f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"  # noqa: B950 line too long
@@ -2093,10 +2093,12 @@ class TritonKernel(Kernel):
         return textwrap.dedent(
             """
             from torch._dynamo.testing import rand_strided
-            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+            {}
             import torch
             from torch._inductor.triton_heuristics import grid
-        """
+        """.format(
+                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+            )
         )
 
     @staticmethod
@@ -2971,7 +2973,7 @@ class TritonScheduling(BaseScheduling):
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
-        V.graph.wrapper_code.writeline("torch.cuda.synchronize()")
+        V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
 
     def codegen_foreach(self, foreach_node):
         from .triton_foreach import ForeachKernel
