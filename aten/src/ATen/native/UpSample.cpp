@@ -5,9 +5,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/TypeCast.h>
 
-namespace at {
-namespace native {
-namespace upsample {
+namespace at::native::upsample {
 
 TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
     c10::IntArrayRef input_size,  // Full input tensor size.
@@ -32,6 +30,4 @@ TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
   TORCH_CHECK(false, "Must specify exactly one of output_size and scale_factors");
 }
 
-} // namespace upsample
-} // namespace native
-} // namespace at
+} // namespace at::native::upsample

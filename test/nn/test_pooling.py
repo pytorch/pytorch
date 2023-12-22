@@ -25,6 +25,7 @@ from torch.testing._internal.common_dtype import floating_types_and
 import torch.nn.functional as F
 import torch.nn as nn
 from torch.autograd import gradcheck, gradgradcheck
+import operator
 
 
 class TestAvgPool(TestCase):
@@ -42,11 +43,11 @@ class TestAvgPool(TestCase):
         return joined_x.view(1, joined_x.numel())
 
     def _avg_pool2d(self, x, kernel_size):
-        size = reduce((lambda x, y: x * y), kernel_size)
+        size = reduce(operator.mul, kernel_size)
         return self._sum_pool2d(x, kernel_size) / size
 
     def _avg_pool3d(self, x, kernel_size):
-        size = reduce((lambda x, y: x * y), kernel_size)
+        size = reduce(operator.mul, kernel_size)
         return self._sum_pool3d(x, kernel_size) / size
 
     def test_doubletensor_avg_pool2d(self):

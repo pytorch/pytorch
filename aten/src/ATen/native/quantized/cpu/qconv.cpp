@@ -770,19 +770,32 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
       output_zero_point,
       c10::MemoryFormat::ChannelsLast);
 
-  // Setup the operator
-  status = at::native::xnnp_utils::xnnp_setup_convolution2d_nhwc(
+  // Reshape the operator
+  status = at::native::xnnp_utils::xnnp_reshape_convolution2d_nhwc(
       xnnp_convolution_op.get(),
       N,
       H,
       W,
-      reinterpret_cast<const underlying_t*>(act_nhwc.template data_ptr<scalar_t>()),
-      reinterpret_cast<underlying_t*>(output.template data_ptr<scalar_t>()),
       caffe2::pthreadpool_(),
       per_channel(),
       transpose(),
       output_padding()[0],
       output_padding()[1]);
+
+  TORCH_CHECK(
+      status == xnn_status_success,
+      func_name,
+      ": xnn setup operator failed(",
+      status,
+      ")");
+
+  // Setup the operator
+  status = at::native::xnnp_utils::xnnp_setup_convolution2d_nhwc(
+      xnnp_convolution_op.get(),
+      reinterpret_cast<const underlying_t*>(act_nhwc.template data_ptr<scalar_t>()),
+      reinterpret_cast<underlying_t*>(output.template data_ptr<scalar_t>()),
+      per_channel(),
+      transpose());
 
   TORCH_CHECK(
       status == xnn_status_success,
