@@ -34,6 +34,11 @@ class TestFXSplit(TestCase):
                     self.assertIn("name", n.meta)
                     self.assertEqual(n.meta["name"], n.name)
 
+        # Validate that metadata is copied correctly for graph placeholder nodes
+        for node in split_gm.graph.nodes:
+            if node.op == "placeholder":
+                self.assertIn("name", node.meta)
+                self.assertEqual(node.meta["name"], node.name)
 
 class TestSplitByTags(TestCase):
     class TestModule(torch.nn.Module):

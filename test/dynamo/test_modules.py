@@ -21,10 +21,10 @@ from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-
-test_functions = torch._dynamo.testing.load_test_module(
-    __file__, "dynamo.test_functions"
-)
+try:
+    from . import test_functions
+except ImportError:
+    import test_functions
 
 
 class BasicModule(torch.nn.Module):
@@ -214,6 +214,26 @@ class ModuleProperty(torch.nn.Module):
 
     def forward(self, x):
         return x * self.scale_alias
+
+
+class NestedModuleList(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList([])
+        for _ in range(3):
+            self.layers.append(
+                torch.nn.ModuleList(
+                    [
+                        torch.nn.Linear(10, 10),
+                        torch.nn.ReLU(),
+                    ]
+                )
+            )
+
+    def forward(self, x):
+        for layer, act in self.layers:
+            x = act(layer(x))
+        return x
 
 
 class ConstLoop(torch.nn.Module):
@@ -1046,6 +1066,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
+    test_modulelist_nested = make_test(NestedModuleList())
     test_modulelist_custom = make_test(CustomGetItemModuleList())
     test_moduledict = make_test(ModuleDict())
     test_moduledict_custom = make_test(CustomGetItemModuleDict())

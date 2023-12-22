@@ -5,7 +5,7 @@ import torch
 from functorch.experimental import control_flow
 from torch import Tensor
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import export
+from torch.export import export
 
 from torch._export.verifier import SpecViolationError, Verifier
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
@@ -101,19 +101,21 @@ class TestVerifier(TestCase):
         ep._validate()
 
     def test_ep_verifier_invalid_param(self) -> None:
-        def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            return x + y
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_parameter(name="a", param=torch.nn.Parameter(torch.randn(100)))
 
-        ep = export(f, (torch.randn(100), torch.randn(100)))
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                return x + y + self.a
+
+        ep = export(M(), (torch.randn(100), torch.randn(100)))
 
         # Parameter doesn't exist in the state dict
-        ep.graph_signature.input_specs.insert(
-            0,
-            InputSpec(
-                kind=InputKind.PARAMETER,
-                arg=TensorArgument(name="arg0_1"),
-                target="bad_param"
-            )
+        ep.graph_signature.input_specs[0] = InputSpec(
+            kind=InputKind.PARAMETER,
+            arg=TensorArgument(name="arg0_1"),
+            target="bad_param"
         )
         with self.assertRaisesRegex(SpecViolationError, "not in the state dict"):
             ep._validate()
@@ -125,37 +127,24 @@ class TestVerifier(TestCase):
         ):
             ep._validate()
 
-        # Add torch.nn.Parameter to state dict, but this should still error
-        # because there are an incorrect number of placeholder nodes
-        ep.state_dict["bad_param"] = torch.nn.Parameter(torch.randn(100))
-        with self.assertRaisesRegex(
-            SpecViolationError, "the number of inputs specified by the graph signature"
-        ):
-            ep._validate()
-
     def test_ep_verifier_invalid_buffer(self) -> None:
-        def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            return x + y
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor(3.0)
 
-        ep = export(f, (torch.randn(100), torch.randn(100)))
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                return x + y + self.a
+
+        ep = export(M(), (torch.randn(100), torch.randn(100)))
 
         # Buffer doesn't exist in the state dict
-        ep.graph_signature.input_specs.insert(
-            0,
-            InputSpec(
-                kind=InputKind.BUFFER,
-                arg=TensorArgument(name="arg0_1"),
-                target="bad_buffer"
-            )
+        ep.graph_signature.input_specs[0] = InputSpec(
+            kind=InputKind.BUFFER,
+            arg=TensorArgument(name="arg0_1"),
+            target="bad_buffer"
         )
         with self.assertRaisesRegex(SpecViolationError, "not in the state dict"):
-            ep._validate()
-
-        # Incorrect number of placeholder nodes
-        ep.state_dict["bad_buffer"] = torch.randn(100)
-        with self.assertRaisesRegex(
-            SpecViolationError, "the number of inputs specified by the graph signature"
-        ):
             ep._validate()
 
     def test_ep_verifier_buffer_mutate(self) -> None:
@@ -207,7 +196,7 @@ class TestVerifier(TestCase):
         output_node.args = (
             (
                 output_node.args[0][0],
-                list(ep.graph.nodes)[0],
+                next(iter(ep.graph.nodes)),
                 output_node.args[0][1],
             ),
         )
