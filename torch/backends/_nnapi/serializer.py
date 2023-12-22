@@ -2,6 +2,7 @@ import array
 import enum
 import functools
 import logging
+import operator
 import struct
 import sys
 from typing import List, NamedTuple, Optional, Tuple
@@ -1032,11 +1033,7 @@ class _NnapiSerializer:
 
         out_shape = (
             in_oper.shape[:start_dim]
-            + (
-                functools.reduce(
-                    lambda x, y: x * y, in_oper.shape[start_dim : end_dim + 1]
-                ),
-            )
+            + (functools.reduce(operator.mul, in_oper.shape[start_dim : end_dim + 1]),)
             + in_oper.shape[end_dim + 1 :]
         )
 

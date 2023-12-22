@@ -35,7 +35,6 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import parametrize, instantiate_parametrized_tests
 from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
 from torch.testing._internal.optests import _test_aot_autograd_forwards_backwards_helper, aot_autograd_check
-from torch._higher_order_ops.out_dtype import out_dtype
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx

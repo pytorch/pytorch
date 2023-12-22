@@ -18219,7 +18219,7 @@ op_db: List[OpInfo] = [
             }
             """,
             num_outputs=1),
-        ref=lambda i0, i1: i0 + i1,
+        ref=operator.add,
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
         sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=2, alpha=-0.42),
         supports_out=False,
