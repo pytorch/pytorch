@@ -5,7 +5,9 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/eq.h>
 #include <ATen/ops/one_hot_native.h>
 #include <ATen/ops/zeros.h>
 #endif
@@ -28,8 +30,14 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     }
 
     // using meta bit test to catch Fake Tensor as well until __torch__function defined
-    if (self.key_set().has_all(DispatchKeySet(BackendComponent::MetaBit))) {
-        AT_ERROR("Can not infer total number of classes from meta tensor.");
+    if (self.key_set().has_all(DispatchKeySet(BackendComponent::MetaBit)) ||
+            self.key_set().has_all(DispatchKeySet(DispatchKey::Python))) {
+        // functional version that torch.compiles better
+        if (num_classes == -1) {
+          num_classes = self.max().item().toLong() + 1;
+        }
+        at::Tensor index = at::arange(num_classes, self.options());
+        return at::eq(self.unsqueeze(-1), index).to(kLong);
     }
 
     // non-empty tensor
