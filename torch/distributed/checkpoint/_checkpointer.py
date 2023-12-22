@@ -1,9 +1,10 @@
-from typing import Any, Dict, Optional
+from concurrent.futures import Future
+from typing import Any, Dict, List, Optional
 
 import torch.distributed as dist
 import torch.distributed.checkpoint.state_dict_loader as loader
 import torch.distributed.checkpoint.state_dict_saver as saver
-from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
+from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
 from torch.distributed.checkpoint.storage import (
     LoadPlanner,
     SavePlanner,
@@ -11,16 +12,20 @@ from torch.distributed.checkpoint.storage import (
     StorageWriter,
 )
 
-__all__ = ["Checkpointer"]
+
+__all__: List[str] = []
 
 
-class Checkpointer:
+class _Checkpointer:
     """This base class specefies a high level API for saving and loading
     distributed `state_dict` 's. It provides an abstraction over the low-level APIs
     provided by :py:mod:`torch.distributed.checkpoint.storage`, essentially calling
     :py:meth: `torch.distributed.state_dict_saver.save` and
     :py:meth: `torch.distributed.state_dict_loader.load` with the provided storage
     readers and writers.
+
+    .. warning::
+        This feature is experimental and subject to removal/change.
 
     """
 
@@ -57,9 +62,9 @@ class Checkpointer:
     def save(
         self,
         state_dict: STATE_DICT_TYPE,
-    ):
+    ) -> Metadata:
         """Calls :py:meth: `torch.distributed.state_dict_saver.save`. Utilizing values passed during initialization."""
-        saver.save(
+        return saver.save(
             state_dict,
             self.storage_writer,
             process_group=self.process_group,
@@ -68,7 +73,26 @@ class Checkpointer:
             planner=self.save_planner,
         )
 
-    def load(self, state_dict: Dict[str, Any]):
+    def async_save(
+        self,
+        state_dict: STATE_DICT_TYPE,
+    ) -> Future:
+        """
+        Calls :py:meth: `torch.distributed.state_dict_saver._async_save`. Utilizing values passed during initialization.
+
+        Returns:
+            Future: A future holding the resultant Metadata object from `save`.
+        """
+        return saver._async_save(
+            state_dict,
+            self.storage_writer,
+            process_group=self.process_group,
+            coordinator_rank=self.coordinator_rank,
+            no_dist=self.no_dist,
+            planner=self.save_planner,
+        )
+
+    def load(self, state_dict: Dict[str, Any]) -> None:
         """Calls :py:meth: `torch.distributed.state_dict_loader.load`. Utilizing values passed during initialization."""
         loader.load(
             state_dict,

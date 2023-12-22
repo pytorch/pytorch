@@ -15,7 +15,7 @@ import torch.distributed as dist
 from torch import Tensor
 from torch._utils import _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed.checkpoint.checkpointer import Checkpointer
+from torch.distributed.checkpoint._checkpointer import _Checkpointer
 from torch.futures import Future
 
 from .metadata import Metadata, MetadataIndex
@@ -32,7 +32,7 @@ from .planner import (
 from .storage import StorageReader, StorageWriter, WriteResult
 from .utils import _create_file_view
 
-__all__ = ["FileSystemWriter", "FileSystemReader", "FileSystemCheckpointer"]
+__all__ = ["FileSystemWriter", "FileSystemReader"]
 
 
 @dataclass
@@ -474,9 +474,13 @@ class FileSystemReader(StorageReader):
         return global_plan
 
 
-class FileSystemCheckpointer(Checkpointer):
+class _FileSystemCheckpointer(_Checkpointer):
     """An implementation of :py:class:`torch.distributed.checkpoint.checkpointer.Checkpointer`
     for the file system. Wraps the creation and usage of ``FileSystemWriter`` and ``FileSystemReader``.
+
+    .. warning::
+        This feature is experimental and subject to removal/change.
+
     """
 
     def __init__(

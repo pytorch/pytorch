@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import time
 from enum import auto, Enum
 
 import torch
@@ -8,6 +9,7 @@ import torch.distributed.checkpoint as DCP
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._tensor.device_mesh import init_device_mesh
+from torch.distributed.checkpoint.filesystem import _FileSystemCheckpointer
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
@@ -21,12 +23,12 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
 )
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -91,7 +93,11 @@ def _train(model, optim, train_steps=1):
 
 
 class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
-    def _create_model(self, compile, model_type):
+    @property
+    def backend(self):
+        return "cpu:gloo,cuda:nccl"
+
+    def _create_model(self, compile, model_type, state_dict_options=None):
         dummy_model = TestDummyModel().cuda()
 
         assert model_type in ModelType, f"{model_type} is not supported."
@@ -132,8 +138,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
         optim = self._optim(model)
         if model_type is not ModelType.NONE:
-            _patch_model_state_dict(model)
-            _patch_optimizer_state_dict(model, optimizers=optim)
+            _patch_model_state_dict(model, options=state_dict_options)
+            _patch_optimizer_state_dict(
+                model, optimizers=optim, options=state_dict_options
+            )
 
         return model, optim
 
@@ -149,6 +157,15 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     # @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.FSDP_TP])
     @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP])
     def test_e2e(self, compile, model_type):
+        self._run_e2e_test(compile, model_type)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    def test_e2e_async(self):
+        self._run_e2e_test(compile=False, model_type=ModelType.FSDP, async_op=True)
+
+    def _run_e2e_test(self, compile, model_type, async_op=False):
         model, optim = self._create_model(compile, ModelType.NONE)
         _train(model, optim, train_steps=2)
 
@@ -156,15 +173,26 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         _train(dist_model, dist_optim, train_steps=2)
 
         original_stateful_obj = TestStatefulObj()  # tests arbitrary saving/loading
+        sd = {
+            "model": dist_model,
+            "optimizer": dist_optim,
+            "s": original_stateful_obj,
+        }
 
-        checkpointer = DCP.FileSystemCheckpointer(self.temp_dir)
-        checkpointer.save(
-            state_dict={
-                "model": dist_model,
-                "optimizer": dist_optim,
-                "s": original_stateful_obj,
-            }
-        )
+        checkpointer = _FileSystemCheckpointer(self.temp_dir)
+        if async_op:
+            f = checkpointer.async_save(state_dict=sd)
+            t = time.monotonic()
+            while not f.done():
+                time.sleep(1)
+                print(f"still waiting... {time.monotonic() - t}")
+
+            f.result()
+        else:
+            checkpointer.save(state_dict=sd)
+
+        loaded_stateful_obj = TestStatefulObj()
+        dist_model, dist_optim = self._create_model(compile, model_type)
 
         loaded_stateful_obj = TestStatefulObj()
         dist_model, dist_optim = self._create_model(compile, model_type)
@@ -244,7 +272,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
     @with_temp_dir
     def test_no_dist(self):
-        checkpointer = DCP.FileSystemCheckpointer(self.temp_dir, no_dist=True)
+        checkpointer = _FileSystemCheckpointer(self.temp_dir, no_dist=True)
         checkpointer.save({})
         checkpointer.load({})
 
