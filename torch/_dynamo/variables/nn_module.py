@@ -8,7 +8,6 @@ from typing import Any, Dict, List
 import torch.nn
 
 from .. import skipfiles, variables
-from ..allowed_functions import is_allowed
 from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker

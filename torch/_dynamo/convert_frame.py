@@ -26,7 +26,7 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.utils._traceback import format_traceback_short
 
 from . import config, exc
-from .allowed_functions import is_allowed, is_numpy
+from .allowed_functions import is_numpy
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
@@ -176,6 +176,18 @@ def has_tensor_in_frame(frame):
     if frame.f_code in always_optimize_code_objects:
         return True
 
+    # Check if there is global import of torch.*
+    for co_name in frame.f_code.co_names:
+        if co_name in frame.f_globals:
+            obj = frame.f_globals[co_name]
+            if isinstance(obj, types.ModuleType) and (
+                obj.__name__.startswith("torch.") or obj is torch
+            ):
+                return True
+            # ... or a global import of numpy.*
+            if np and config.trace_numpy and (obj is np or is_numpy(obj)):
+                return True
+
     seen_ids: Dict[int, bool] = dict()
 
     def has_tensor(obj):
@@ -219,16 +231,6 @@ def has_tensor_in_frame(frame):
             #         f"Assuming that object of type {type(obj)} does not have a tensor"
             #     )
             return False
-
-    # Check if there is global import of torch.*
-    for co_name in frame.f_code.co_names:
-        if co_name in frame.f_globals:
-            obj = frame.f_globals[co_name]
-            if has_tensor(obj):
-                return True
-            # ... or a global import of numpy.*
-            if np and config.trace_numpy and (obj is np or is_numpy(obj)):
-                return True
 
     # Check if the passed arguments are of type Tensor
     for value in frame.f_locals.values():
