@@ -400,7 +400,7 @@ allow_stack_allocation: bool = True
 use_minimal_arrayref_interface: bool = False
 
 # flag to decide whether to create a submodule for constant graph.
-use_runtime_constant_folding: bool = True
+split_const_graph: bool = True
 
 
 # config specific to codegen/cpp.py
