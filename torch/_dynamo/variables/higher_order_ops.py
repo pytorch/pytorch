@@ -546,8 +546,12 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             all_diffs = []
             for i, (var1, var2) in enumerate(zip(tensor_vars1, tensor_vars2)):
                 # We check the meta data associated with meta["example_value"]
-                meta1 = _extract_tensor_metadata(var1.proxy.node.meta["example_value"])
-                meta2 = _extract_tensor_metadata(var2.proxy.node.meta["example_value"])
+                meta1 = _extract_tensor_metadata(
+                    var1.proxy.node.meta["example_value"], include_contiguity=False
+                )
+                meta2 = _extract_tensor_metadata(
+                    var2.proxy.node.meta["example_value"], include_contiguity=False
+                )
                 if meta1 != meta2:
                     all_diffs.append((f"pair{i}:", meta1, meta2))
             return all_diffs
