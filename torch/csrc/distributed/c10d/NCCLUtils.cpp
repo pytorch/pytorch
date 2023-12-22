@@ -4,7 +4,9 @@
 #include <c10/util/env.h>
 
 #ifdef USE_C10D_NCCL
+#include <vector>
 
+#include <cuda_runtime.h>
 #include <mutex>
 
 namespace c10d {
@@ -59,6 +61,31 @@ std::string getNcclVersion() {
 
   return versionString;
 }
+
+#ifdef USE_C10D_NCCL
+size_t hashTensors(const std::vector<at::Tensor>& tensors) {
+  size_t hash = 0;
+  for (auto& tensor : tensors) {
+    if (tensor.numel() > 0 && tensor.storage()) {
+      size_t data_size = tensor.storage().nbytes();
+      if (data_size > 0 && tensor.storage().data_ptr()) {
+        auto src = static_cast<const char*>(tensor.storage().data_ptr().get());
+        char* dst = (char*)std::calloc(data_size, sizeof(char));
+        // This is needed so that we trigger a device synchronization so we can
+        // get the collective finished if launched on GPU and hash its output.
+        cudaMemcpy(dst, src, data_size, cudaMemcpyDeviceToHost);
+        for (size_t i = 0; i < data_size; ++i) {
+          // Update the hash for each byte in the tensor
+          hash = c10::hash_combine(
+              hash, c10::get_hash(((char*)dst)[i], data_size));
+        }
+        free(dst);
+      }
+    }
+  }
+  return hash;
+}
+#endif
 
 bool nccl_use_nonblocking() {
   static bool nccl_use_nonblocking_ =

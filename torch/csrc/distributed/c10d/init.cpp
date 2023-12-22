@@ -2792,6 +2792,16 @@ such as `dist.all_reduce(tensor, async_op=True)`.
            )");
 
 #ifdef USE_C10D_NCCL
+  module.def(
+      "_hash_tensors",
+      [](const std::vector<at::Tensor>& tensors) {
+        return ::c10d::hashTensors(tensors);
+      },
+      py::arg("tensors"),
+      R"(
+        Arguments:
+          tensors(List[torch.Tensor]): List of tensors we want to hash.
+      )");
   module.def("_dump_nccl_trace", []() {
     return py::bytes(::c10d::dump_nccl_trace());
   });
