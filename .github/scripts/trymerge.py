@@ -1288,6 +1288,9 @@ def find_matching_merge_rule(
         ignore_current_checks=ignore_current_checks,
     )
 
+    # This keeps the list of all approvers that could stamp the change
+    all_rule_approvers = {}
+
     # PRs can fail multiple merge rules, but it only needs to pass one rule to be approved.
     # If it fails all rules, we need to find the rule that it came closest to passing and report
     # that to the dev.
@@ -1331,24 +1334,31 @@ def find_matching_merge_rule(
             continue
 
         # Does the PR have the required approvals for this rule?
-        rule_approvers_set = set()
+        rule_approvers = set()
         for approver in rule.approved_by:
             if "/" in approver:
                 org, name = approver.split("/")
-                rule_approvers_set.update(gh_get_team_members(org, name))
+                rule_approvers.update(gh_get_team_members(org, name))
             else:
-                rule_approvers_set.add(approver)
-        approvers_intersection = approved_by.intersection(rule_approvers_set)
+                rule_approvers.add(approver)
+        approvers_intersection = approved_by.intersection(rule_approvers)
         # If rule requires approvers but they aren't the ones that reviewed PR
-        if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
-            if reject_reason_score < 10000:
+        if len(approvers_intersection) == 0 and len(rule_approvers) > 0:
+            # Less than or equal is intentionally used here to gather all potential
+            # approvers
+            if reject_reason_score <= 10000:
                 reject_reason_score = 10000
-                reject_reason = "\n".join(
-                    (
-                        "Approval needed from one of the following:",
-                        f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}",
-                    )
-                )
+
+                all_rule_approvers[rule.name] = rule.approved_by
+                # Prepare the reject reason
+                all_rule_approvers_msg = [
+                    f"- {name} ({', '.join(approved_by[:5])}{', ...' if len(approved_by) > 5 else ''})"
+                    for name, approved_by in all_rule_approvers.items()
+                ]
+
+                reject_reason = "Approvers from one of the following sets are needed:\n"
+                reject_reason += "\n".join(all_rule_approvers_msg)
+
             continue
 
         # Does the PR pass the checks required by this rule?
