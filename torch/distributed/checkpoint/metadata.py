@@ -11,6 +11,8 @@ __all__ = [
     "BytesStorageMetadata",
     "Metadata",
     "MetadataIndex",
+    "MEM_FORMAT_ENCODING",
+    "TensorProperties"
 ]
 
 
