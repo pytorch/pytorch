@@ -112,7 +112,7 @@ def _get_cpp_compiler() -> str:
         compiler = os.environ.get("CXX", "cl")
     else:
         if config.is_fbcode():
-            compiler = build_paths.cc()
+            return build_paths.cc()
         if isinstance(config.cpp.cxx, (list, tuple)):
             search = tuple(config.cpp.cxx)
         else:
