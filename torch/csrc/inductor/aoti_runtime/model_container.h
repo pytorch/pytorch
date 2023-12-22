@@ -24,6 +24,7 @@ class AOTInductorModelContainer {
     constants_map_ = std::make_shared<ConstantMap>();
     constants_array_ = std::make_shared<std::vector<ConstantHandle>>();
     use_secondary_ = false;
+    constant_folded_ = false;
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
@@ -80,6 +81,22 @@ class AOTInductorModelContainer {
       AOTIProxyExecutorHandle proxy_executor) {
     std::shared_lock model_lk(model_exec_mutex_);
     auto* model = get_available_model();
+
+    if (!constant_folded_) {
+      // At this point, constant is not ready yet. We need to call constant
+      // folding before we execute the model. We obtain a unique lock at this
+      // point to make sure constant is ready for all.
+      model_lk.unlock();
+      std::unique_lock constants_folding_lk(model_exec_mutex_);
+      // Double locking to make sure constant folding is only ran once.
+      if (!constant_folded_) {
+        auto folded_const_map = model->const_run_impl(stream, proxy_executor);
+        update_constant_buffer(folded_const_map, false, false);
+      }
+      constants_folding_lk.unlock();
+      model_lk.lock();
+    }
+
     try {
       model->run(input_handles, output_handles, stream, proxy_executor);
     } catch (...) {
@@ -252,6 +269,9 @@ class AOTInductorModelContainer {
   // constants_map_secondary/constant_blob_secondary/constants_array_secondary
   // is being used.
   bool use_secondary_;
+
+  // Determine whether we have ran constant folding
+  bool constant_folded_;
 
   // Holds the mapping of constants to at::Tensor.
   // The underlying data of at::Tensor is in either constant_blob_ (for CUDA).

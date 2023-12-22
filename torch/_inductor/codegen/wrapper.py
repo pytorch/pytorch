@@ -1800,6 +1800,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].data_size = {tensor.untyped_storage().nbytes()};"
                 )
+                from_folded = "true" if "_FOLDED_CONST_" in name else "false"
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].from_folded = {from_folded};"
+                )
 
                 size_str = ", ".join([str(s) for s in tensor.size()])
                 self.prefix.writeline(f"constants_info_[{idx}].shape = {{{size_str}}};")
@@ -1843,21 +1847,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def codegen_const_run_driver(self):
         """
         // Generated code example
-        void AOTInductorModel::const_run_impl(
-        DeviceStreamType stream,
-        AOTIProxyExecutorHandle proxy_executor
+        std::unordered_map<std::string, AtenTensorHandle> AOTInductorModel::const_run_impl(
+            DeviceStreamType stream,
+            AOTIProxyExecutorHandle proxy_executor
         ) {
-        std::vector<AtenTensorHandle> output_handles;
-        // build up output_handles over here.
-        _const_run_impl(output_handles, stream, proxy_executor);
+            std::unordered_map<std::string, AtenTensorHandle> folded_constants_map;
+            std::vector<AtenTensorHandle> output_handles;
+            // build up output_handles over here.
+            _const_run_impl(output_handles, stream, proxy_executor);
+            // build up folded_constants_map
+            return folded_constants_map;
         }
         """
 
         self.prefix.splice(
             """
-            void AOTInductorModel::const_run_impl(
-            DeviceStreamType stream,
-            AOTIProxyExecutorHandle proxy_executor
+            std::unordered_map<std::string, AtenTensorHandle> AOTInductorModel::const_run_impl(
+                DeviceStreamType stream,
+                AOTIProxyExecutorHandle proxy_executor
             ) {
             """
         )
@@ -1872,16 +1879,26 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 if name not in V.graph.const_output_index:
                     continue
                 else:
-                    const_index_mapping[V.graph.const_output_index[name]] = idx  # type: ignore[call-overload]
+                    const_index_mapping[V.graph.const_output_index[name]] = (idx, name)  # type: ignore[call-overload]
             assert (
                 None not in const_index_mapping
             ), "Not all constant gets mapped for constant folding graph."
 
-            self.prefix.writeline(
-                f"std::vector<AtenTensorHandle> output_handles({len(const_index_mapping)});"
+            self.prefix.splice(
+                f"""
+                std::unordered_map<std::string, AtenTensorHandle> folded_constants_map;
+                folded_constants_map.reserve({len(const_index_mapping)});
+                std::vector<AtenTensorHandle> output_handles({len(const_index_mapping)});
+                """
             )
 
-            for output_idx, const_idx in enumerate(const_index_mapping):
+            self.prefix.splice(
+                """
+                // The below assignment of output_handles to constants is not used directly.
+                // But it's used to memo the correspondence of handle and constants.
+                """
+            )
+            for output_idx, (const_idx, _) in enumerate(const_index_mapping):
                 self.prefix.writeline(
                     f"output_handles[{output_idx}] = constants_->at({const_idx});"
                 )
@@ -1889,6 +1906,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.prefix.writeline(
                 "_const_run_impl(output_handles, stream, proxy_executor);"
             )
+
+            for output_idx, (_, const_name) in enumerate(const_index_mapping):
+                self.prefix.writeline(
+                    f'folded_constants_map["{const_name}"] = output_handles[{output_idx}];'
+                )
+            self.prefix.writeline("return folded_constants_map;")
 
         self.prefix.writeline("}")
 
