@@ -585,13 +585,6 @@ class VariableBuilder:
         elif isinstance(value, HigherOrderOperator):
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
-        # elif type(value).__name__ == "builtin_function_or_method" and isinstance(
-        #     value.__self__, torch_special_class_types
-        # ):
-        #     self.install_guards(GuardBuilder.FUNCTION_MATCH)
-        #     return TorchVariable(
-        #         value,
-        #     )
         elif isinstance(value, _StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return StreamVariable(
@@ -715,9 +708,9 @@ class VariableBuilder:
             )
         elif (
             istype(value, (types.ModuleType, replay_record.DummyModule))
-            or value in [torch.backends.cudnn, torch.ops]
-            # type(torch.ops) -> <class 'torch._ops._Ops'>
             # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
+            # type(torch.ops) -> <class 'torch._ops._Ops'>
+            or value in [torch.backends.cudnn, torch.ops]
             or isinstance(value, torch._ops._OpNamespace)
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)

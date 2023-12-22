@@ -100,7 +100,6 @@ manual_torch_name_rule_map = {
     "torch.sym_min": TorchInGraphFunctionVariable,
     "torch.sym_sqrt": TorchInGraphFunctionVariable,
     "torch.sym_ite": TorchInGraphFunctionVariable,
-    "torch.Tensor#_make_wrapper_subclass": TorchInGraphFunctionVariable,
 }
 
 

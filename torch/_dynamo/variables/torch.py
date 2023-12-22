@@ -45,8 +45,6 @@ from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 log = logging.getLogger(__name__)
 
 
-torch_special_class_types = (torch._C.Generator,)
-
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = [
     torch.onnx.operators.shape_as_tensor,
     torch._shape_as_tensor,

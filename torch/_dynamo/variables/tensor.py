@@ -436,7 +436,7 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable.create(self.dtype.is_floating_point)
         elif name == "is_contiguous":
             memory_format = (
-                kwargs.pop("memory_format").value
+                kwargs.pop("memory_format").as_python_constant()
                 if "memory_format" in kwargs
                 else torch.contiguous_format
             )

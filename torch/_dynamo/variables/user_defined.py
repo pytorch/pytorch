@@ -66,7 +66,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     @staticmethod
     @functools.lru_cache(None)
-    def _constant_fold_functions():
+    def _constant_fold_classes():
         return {
             torch.device,
             torch.finfo,
@@ -74,8 +74,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             torch.Size,
         }
 
+    def _in_graph_classes():
+        return set(tensortype_to_dtype.keys()).update(
+            {
+                torch.Tensor,
+                torch.cuda.Stream,
+                torch.cuda.Event,
+            }
+        )
+
     def can_constant_fold_through(self):
-        return self.value in self._constant_fold_functions()
+        return self.value in self._constant_fold_classes()
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from .. import trace_rules
@@ -93,6 +102,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
+            # TODO: Merge the if/else into trace_rules.lookup()
             if trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
                 return variables.TorchInGraphFunctionVariable(func, source=source)
             else:
@@ -110,19 +120,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if self.value is collections.OrderedDict and name == "fromkeys":
             return super().var_getattr(tx, name)
 
-        if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
-            obj
-        ):
-            if source:
-                return VariableBuilder(tx, source)(obj)
-            elif ConstantVariable.is_literal(obj):
-                return ConstantVariable.create(obj)
-        elif (
+        if name in getattr(self.value, "__dict__", {}) or (
             self.value.__module__.startswith("torch.")
             or self.value.__module__ == "torch"
         ):
             if source:
                 return VariableBuilder(tx, source)(obj)
+        elif ConstantVariable.is_literal(obj):
+            return ConstantVariable.create(obj)
 
         return super().var_getattr(tx, name)
 
@@ -358,11 +363,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 user_cls_source=self.source,
                 mutable_local=MutableLocal(),
             )
-        elif self.value in tensortype_to_dtype or self.value in [
-            torch.Tensor,
-            torch.cuda.Stream,
-            torch.cuda.Event,
-        ]:
+        elif self.value in self._in_graph_classes():
             # torch.LongTensor cannot accept a list of FakeTensors.
             # So we stack the list of FakeTensors instead.
             if (
@@ -719,15 +720,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.__get__.__func__, subobj_var, source=source
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
-            # torch._C._VariableFunctions.rsub
-            # pytest test/inductor/test_torchinductor_opinfo.py -k test_comprehensive___rsub___cpu_float64
-            if isinstance(self.value, torch._C._VariableFunctionsClass):
-                return variables.TorchInGraphFunctionVariable(
-                    subobj.__get__(self.value), source=source
-                )
-            return variables.UserFunctionVariable(
-                subobj.__get__(self.value), source=source
-            )
+            func = subobj.__get__(self.value)
+            # TODO: Merge if/else into trace_rules.lookup()
+            if trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
+                return variables.TorchInGraphFunctionVariable(func, source=source)
+            else:
+                return variables.UserFunctionVariable(func, source=source)
         elif isinstance(subobj, classmethod):
             return variables.UserMethodVariable(subobj.__func__, self, source=source)
         elif isinstance(subobj, types.FunctionType) or (
@@ -757,6 +755,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
+                # TODO: Merge elif/else into trace_rules.lookup()
                 elif trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
                     return variables.TorchInGraphFunctionVariable(func, source=source)
                 else:
