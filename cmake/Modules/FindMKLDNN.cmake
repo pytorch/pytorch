@@ -22,7 +22,7 @@ IF(NOT MKLDNN_FOUND)
   if(USE_XPU) # Build oneDNN GPU library
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       set(DNNL_HOST_COMPILER "g++")
-      # g++ is soft linked to /usr/bin/cxx, oneDNN woule not treat it as an absolute path
+      # g++ is soft linked to /usr/bin/cxx, oneDNN would not treat it as an absolute path
     else()
       set(DNNL_HOST_COMPILER DEFAULT)
     endif()
