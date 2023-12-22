@@ -288,7 +288,7 @@ class GraphLowering(torch.fx.Interpreter):
                 for n in conv_nodes
                 for idx in [0, 1]
             )
-            and torch.backends.mkldnn.enabled
+            and getattr(torch.backends.mkldnn, 'enabled', False)
             and torch.backends.mkldnn.is_available()
         ):
             return True
