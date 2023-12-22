@@ -909,7 +909,6 @@ def aot_module_simplified(
 
     return forward
 
-
 def aot_export_module(
     mod: nn.Module,
     args,
@@ -953,7 +952,6 @@ def aot_export_module(
     (5) If an input is mutated, it is not allowed to alias any other inputs.
     (6) Parameters must not be duplicated.
     """
-
     if pre_dispatch and trace_joint:
         raise RuntimeError("pre_dispatch is not supported when trace_joint is True.")
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
@@ -966,7 +964,7 @@ def aot_export_module(
     params_and_buffers_flat = tuple(params_and_buffers_flat)
     params_len = len(params_and_buffers_flat)
 
-    functional_call = create_functional_call(mod, params_spec, params_len, store_orig_mod=True)
+    functional_call = create_functional_call(mod, params_spec, params_len)
 
     num_fw_outs = None
 
