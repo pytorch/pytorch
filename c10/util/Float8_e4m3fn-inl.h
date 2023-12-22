@@ -1,6 +1,8 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
+#include <cstring>
+#include <limits>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
