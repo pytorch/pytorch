@@ -369,7 +369,7 @@ def compile_fx_inner(
                     len(compiled_graph.device_idxs) == 1
                     or not config.triton.cudagraph_trees
                 ),
-                "multiple device indices without cudagraph_trees",
+                "multiple device indices with cudagraph_trees",
             ),
         ]
         cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
@@ -510,7 +510,7 @@ def fx_codegen_and_compile(
         # has some issues with memory in training
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
-        post_grad_graphs_log.info("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
+        post_grad_graphs_log.debug("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
 
     with V.set_fake_mode(fake_mode):
         graph = GraphLowering(

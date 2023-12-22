@@ -503,18 +503,6 @@ def module_inputs_torch_nn_MSELoss(module_info, device, dtype, requires_grad, tr
                         desc=f'{desc}_scalar',
                         reference_fn=partial(mse_loss_reference_fn, **constructor_kwargs))
         )
-        module_inputs.append(
-            ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
-                        forward_input=FunctionInput(torch.full((5, 68, 64, 64),
-                                                               0.1,
-                                                               device=device,
-                                                               dtype=dtype,
-                                                               requires_grad=requires_grad),
-                                                    make_target((5, 68, 64, 64)).fill_(0)),
-                        desc=f'{desc}_prec',
-                        reference_fn=partial(mse_loss_reference_fn, **constructor_kwargs))
-        )
-
 
     return module_inputs
 

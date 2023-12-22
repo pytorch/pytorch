@@ -15,6 +15,8 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
     at::ScalarType dType,
     std::vector<int64_t> inSplitSizes,
     std::vector<int64_t> outSplitSizes,
+    int globalRankStart,
+    int globalRankStride,
     int worldSize)
     : rank_(rank),
       worldSize_(worldSize),
@@ -23,6 +25,8 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
       outMessageNelems_(outNelems),
       dType_(dType),
       inputSplitSizes_(std::move(inSplitSizes)),
-      outputSplitSizes_(std::move(outSplitSizes)) {}
+      outputSplitSizes_(std::move(outSplitSizes)),
+      globalRankStart_(globalRankStart),
+      globalRankStride_(globalRankStride) {}
 
 } // namespace torch

@@ -3017,6 +3017,33 @@ else:
                 actual, expected = self._inf_nan_preprocess(list(actual), expected)
                 self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.long, torch.float32, torch.complex64)
+    def test_gradient_spacing_list_length_error(self, device, dtype):
+        t = make_tensor((2, 2), device=device, dtype=dtype)
+
+        spacing = (make_tensor((2,), device=device, dtype=dtype),)
+        with self.assertRaisesRegex(RuntimeError, r'expected spacing to be'):
+            torch.gradient(t, spacing=spacing)
+
+        spacing = (make_tensor((2,), device=device, dtype=dtype),) * 2
+        torch.gradient(t, spacing=spacing)
+
+        spacing = (make_tensor((2,), device=device, dtype=dtype),) * 3
+        with self.assertRaisesRegex(RuntimeError, r'expected spacing to be'):
+            torch.gradient(t, spacing=spacing)
+
+        spacing = (2,)
+        with self.assertRaisesRegex(RuntimeError, r'expected spacing to be'):
+            torch.gradient(t, spacing=spacing)
+
+        spacing = (2, 2)
+        torch.gradient(t, spacing=spacing)
+
+        spacing = (2, 2, 2)
+        with self.assertRaisesRegex(RuntimeError, r'expected spacing to be'):
+            torch.gradient(t, spacing=spacing)
+
     def _test_large_cum_fn_helper(self, x, fn):
         expected = fn(x.cpu().float())
         actual = fn(x).cpu().float()
@@ -9691,10 +9718,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # Refcount values get modified by Dynamo resume frames
             0 if TEST_WITH_TORCHDYNAMO else sys.getrefcount(t),
         )
+        slotnames = copyreg._slotnames(t.__class__)
         moved = (
-            copyreg._slotnames(t.__class__),
+            slotnames,
             id(t.__dict__),
             tuple(t.__dict__.keys()),
+            [getattr(t, name, None) for name in slotnames]
         )
         return preserved, moved
 
@@ -9745,7 +9774,11 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             __slots__ = ("b", "a")
 
         class MyTwoTensor3(TwoTensor):
-            __slots__ = ("a", "b", "c")
+            __slots__ = ("a", "b", "c", "d")
+
+        class MyTwoTensor4(TwoTensor):
+            __slots__ = ("a", "c")
+
 
         t1 = torch.rand(4)
         t2 = TwoTensor(torch.rand(4), torch.rand(4))
@@ -9753,21 +9786,28 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         t4 = MyTwoTensor(torch.rand(4), torch.rand(4))
         t5 = MyTwoTensor2(torch.rand(4), torch.rand(4))
         t6 = MyTwoTensor3(torch.rand(4), torch.rand(4))
+        t7 = MyTwoTensor3(torch.rand(4), torch.rand(4))
+        t8 = MyTwoTensor4(torch.rand(4), torch.rand(4))
 
         self._checked_swap(t1, t2)
-        with self.assertRaisesRegex(TypeError, "object layout differs"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot swap t1 and t2 if they have different slots"):
             torch.utils.swap_tensors(t1, t3)
-        with self.assertRaisesRegex(TypeError, "object layout differs"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot swap t1 and t2 if they have different slots"):
             torch.utils.swap_tensors(t2, t3)
+        with self.assertRaisesRegex(RuntimeError, "Cannot swap t1 and t2 if they have different slots"):
+            torch.utils.swap_tensors(t2, t8)
         self._checked_swap(t3, t4)
         self._checked_swap(t3, t5)
-        with self.assertRaisesRegex(TypeError, "object layout differs"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot swap t1 and t2 if they have different slots"):
             torch.utils.swap_tensors(t3, t6)
         t3.c = "foo"
         t4.d = "bar"
         self._checked_swap(t3, t4)
         self.assertEqual(t4.c, "foo")
         self.assertEqual(t3.d, "bar")
+        t6.c = "cat"
+        t7.d = "dog"
+        self._checked_swap(t6, t7)
 
 
 # The following block extends TestTorch with negative dim wrapping tests

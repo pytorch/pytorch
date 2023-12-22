@@ -681,14 +681,13 @@ def reinplace_inplaceable_ops(graph):
     """
 
     copy_args_to_copy_nodes = {}
-    foreach_node_to_copy_nodes = defaultdict(list)
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
     node_order: Dict[Any, int] = {}
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
-        if node.target == aten.copy_.default:
+        if node.target == aten.copy_.default and node.args[0].op == "placeholder":
             dst = node.args[0]
             src = node.args[1]
             # If the target is a getitem and it indexes a possible clone,
@@ -704,7 +703,6 @@ def reinplace_inplaceable_ops(graph):
 
             copy_args_to_copy_nodes[(dst, src)] = node
 
-            assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
