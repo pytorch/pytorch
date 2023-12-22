@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <type_traits>
 
 /** Helper class for allocating temporary fixed size arrays with SBO.

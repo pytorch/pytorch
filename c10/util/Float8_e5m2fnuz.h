@@ -20,17 +20,10 @@
 /// the existing Float8_e4m3fn implementation.
 
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/floating_point_utils.h>
 
-#if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cstdint>
-#elif !defined(__OPENCL_VERSION__)
-#include <math.h>
-#include <stdint.h>
-#endif
-
 #include <iosfwd>
 #include <ostream>
 
