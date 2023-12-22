@@ -76,9 +76,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 self.assertGreaterEqual(counters["inductor"]["fuse_attention"], 1)
             if contains:
                 # many of the patterns get re-expanded in dispatcher
-                self.assertIn(
-                    "aten._scaled_dot_product",
-                    source_code,
+                self.assertTrue(
+                    any(
+                        s in source_code
+                        for s in ["aten._scaled_dot_product", "aten._sdpa"]
+                    )
                 )
 
             # some tests configured with very low dropout where we still want to check equality
