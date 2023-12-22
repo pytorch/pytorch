@@ -195,7 +195,7 @@ class ConstDictVariable(VariableTracker):
             for x in args[0].unpack_var_sequence(tx):
                 k, v = x.unpack_var_sequence(tx)
                 assert ConstDictVariable.is_valid_key(k)
-                self.items[ConstDictVariable.get_key(k)] = v
+                self.items[ConstDictVariable.get_key(tx, k)] = v
             self.items.update(kwargs)  # all keys in kwargs are valid (`str`s)
             return ConstantVariable.create(None)
         elif (

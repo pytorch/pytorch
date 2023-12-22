@@ -19,9 +19,10 @@ import torch._numpy as tnp
 import torch.fx
 import torch.random
 
+from torch._dynamo import compiled_autograd
+
 from torch._dynamo.variables.base import VariableTracker
 
-from torch.fx.experimental.symbolic_shapes import guard_scalar, SymTypes
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
     GuardOnDataDependentSymNode,
@@ -29,8 +30,6 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SymTypes,
 )
-
-from torch._dynamo import compiled_autograd
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 
@@ -541,7 +540,9 @@ class TensorVariable(VariableTracker):
             if len(args) == 1:
                 return constant_result.getitem_const(tx, args[0])
             elif args:
-                return TupleVariable([constant_result.getitem_const(tx, a) for a in args])
+                return TupleVariable(
+                    [constant_result.getitem_const(tx, a) for a in args]
+                )
             return constant_result
         elif name == "numpy":
             if not config.trace_numpy:

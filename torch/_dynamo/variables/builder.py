@@ -1937,7 +1937,7 @@ class SourcelessBuilder:
             )
         elif isinstance(value, set):
             return SetVariable(
-                [self(tx, x) for x in value], mutable_local=MutableLocal()
+                tx, [self(tx, x) for x in value], mutable_local=MutableLocal()
             )
         elif isinstance(value, (tuple, list)):
             cls = BaseListVariable.cls_for(type(value))

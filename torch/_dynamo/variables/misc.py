@@ -5,7 +5,7 @@ import inspect
 import itertools
 import sys
 import types
-from typing import cast, Dict, List
+from typing import Dict, List
 
 import torch._C
 import torch._numpy as tnp
