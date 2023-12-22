@@ -2,6 +2,7 @@ import contextlib
 import functools
 import itertools
 import logging
+import types
 
 from typing import Dict, List, Optional
 
@@ -1365,6 +1366,11 @@ class AutogradFunctionApplyVariable(VariableTracker):
         All these steps work if MySin.backward doesn't capture any values. This is a
         limitation in general that we should check for.
         """
+
+        if not isinstance(self.fwd_graph, types.FunctionType) or not isinstance(
+            self.backward, types.FunctionType
+        ):
+            unimplemented("NYI")
 
         prev_side_effects = tx.output.side_effects.clone()
         fwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
