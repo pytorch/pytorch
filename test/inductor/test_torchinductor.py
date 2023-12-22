@@ -4048,7 +4048,7 @@ class CommonTemplate:
             y[:, [2, 0]] = y[:, [0, 2]]
             return y + x
 
-        self.common(fn, (torch.randn(1, 4),))
+        self.common(fn, (torch.randn(2, 4),))
 
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):

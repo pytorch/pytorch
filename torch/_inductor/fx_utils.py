@@ -88,8 +88,12 @@ class FakeTensorUpdater:
                     is_fake_tensor_same(new_i, old_i) for new_i, old_i in zip(new, old)
                 )
             if not isinstance(new, torch.Tensor):
-                assert isinstance(new, (torch.SymInt, torch.SymBool, torch.SymFloat))
-                return new == old
+                assert isinstance(
+                    new, (torch.SymInt, torch.SymBool, torch.SymFloat)
+                ), f"Unknown type {type(new)}"
+                return V.graph.sizevars.statically_known_equals(
+                    new.node.expr, old.node.expr
+                )
             if new.shape != old.shape or new.layout != old.layout:
                 return False
             if new.layout == torch.strided and new.stride() != old.stride():
@@ -105,8 +109,12 @@ class FakeTensorUpdater:
                 return True
             return False
 
+        to_process = set()
         for node in self.graph.nodes:
-            if self.hash_node(node) in self.processed_hashes:
+            if (
+                self.hash_node(node) in self.processed_hashes
+                and id(node) not in to_process
+            ):
                 continue
 
             def is_aten_node(node):
@@ -119,32 +127,22 @@ class FakeTensorUpdater:
             if not is_aten_node(node):
                 continue
 
-            processing = [node]
-            while len(processing) > 0:
-                updating_node = processing.pop()
-                if updating_node in processed:
-                    continue
-                if not is_aten_node(updating_node):
-                    continue
+            is_valid, args, kwargs = get_fake_args_kwargs(node)
+            if not is_valid:
+                continue
+            with V.fake_mode:
+                new_fake_tensor = node.target(*args, **kwargs)
+            if "val" in node.meta and is_fake_tensor_same(
+                new_fake_tensor, node.meta["val"]
+            ):
+                continue
+            node.meta["val"] = new_fake_tensor
 
-                is_valid, args, kwargs = get_fake_args_kwargs(updating_node)
-                if not is_valid:
-                    continue
-                with V.fake_mode:
-                    new_fake_tensor = updating_node.target(*args, **kwargs)
-                if "val" in updating_node.meta and is_fake_tensor_same(
-                    new_fake_tensor, updating_node.meta["val"]
-                ):
-                    continue
-                updating_node.meta["val"] = new_fake_tensor
+            existing_storages[get_node_storage(node)] += 1
 
-                # todo(chilli): This code path is not exercised by our existing
-                # tests - add a test
-                existing_storages[get_node_storage(updating_node)] += 1
-                processed.add(updating_node)
-                processing.extend(updating_node.users)
+            to_process.update([id(user) for user in node.users])
 
-                self.processed_hashes.add(self.hash_node(updating_node))
+            self.processed_hashes.add(self.hash_node(node))
 
 
 def get_storage(t: torch.Tensor) -> int:
