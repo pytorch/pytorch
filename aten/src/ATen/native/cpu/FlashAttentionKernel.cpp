@@ -172,19 +172,11 @@ template <typename scalar_t, int64_t q_split_size, int64_t kv_split_size>
 void cpu_flash_attention(
     const Tensor& output,
     const Tensor& logsumexp,
-    const Tensor& cum_seq_q,
-    const Tensor& cum_seq_k,
-    int64_t& max_q,
-    int64_t& max_k,
-    const Tensor& philox_seed,
-    const Tensor& philox_offset,
-    const Tensor& debug_attn_mask,
     const at::Tensor& q,
     const at::Tensor& k,
     const at::Tensor& v,
     double dropout_p,
     bool is_causal,
-    bool return_debug_mask,
     c10::optional<Tensor> attn_mask,
     c10::optional<double> scale) {
   // Query (Batch x Num_heads  x Q_seq_len  x Dim_per_head)
@@ -434,14 +426,8 @@ void cpu_flash_attention_backward(
     const at::Tensor& value,
     const at::Tensor& out,
     const at::Tensor& logsumexp,
-    const Tensor& cumulative_sequence_length_q,
-    const Tensor& cumulative_sequence_length_k,
-    const int64_t max_seqlen_batch_q,
-    const int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
-    const at::Tensor& philox_seed,
-    const at::Tensor& philox_offset,
     c10::optional<Tensor> attn_mask,
     c10::optional<double> scale) {
   constexpr bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
@@ -731,19 +717,11 @@ void cpu_flash_attention_backward(
 void flash_attention_kernel_impl(
     const Tensor& output,
     const Tensor& logsumexp,
-    const Tensor& cum_seq_q,
-    const Tensor& cum_seq_k,
-    int64_t& max_q,
-    int64_t& max_k,
-    const Tensor& philox_seed,
-    const Tensor& philox_offset,
-    const Tensor& debug_attn_mask,
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
     double dropout_p,
     bool is_causal,
-    bool return_debug_mask,
     c10::optional<Tensor> attn_mask,
     c10::optional<double> scale) {
   auto q_seq_len = query.size(2);
@@ -751,22 +729,16 @@ void flash_attention_kernel_impl(
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, query.scalar_type(), "flash_attention", [&] {
     if (q_seq_len >= 768) {
       cpu_flash_attention<scalar_t, 256, 512>(
-        output, logsumexp, cum_seq_q, cum_seq_k,
-        max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
-        query, key, value, dropout_p, is_causal, return_debug_mask,
-        attn_mask, scale);
+        output, logsumexp, query, key, value,
+        dropout_p, is_causal, attn_mask, scale);
     } else if (q_seq_len >= 192) {
       cpu_flash_attention<scalar_t, 64, 512>(
-        output, logsumexp, cum_seq_q, cum_seq_k,
-        max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
-        query, key, value, dropout_p, is_causal, return_debug_mask,
-        attn_mask, scale);
+        output, logsumexp, query, key, value,
+        dropout_p, is_causal, attn_mask, scale);
     } else {
       cpu_flash_attention<scalar_t, 32, 512>(
-        output, logsumexp, cum_seq_q, cum_seq_k,
-        max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
-        query, key, value, dropout_p, is_causal, return_debug_mask,
-        attn_mask, scale);
+        output, logsumexp, query, key, value,
+        dropout_p, is_causal, attn_mask, scale);
     }
   });
 }
@@ -781,14 +753,8 @@ void flash_attention_backward_kernel_impl(
     const at::Tensor& value,
     const at::Tensor& out,
     const at::Tensor& logsumexp,
-    const Tensor& cum_seq_q,
-    const Tensor& cum_seq_k,
-    const int64_t max_q,
-    const int64_t max_k,
     double dropout_p,
     bool is_causal,
-    const at::Tensor& philox_seed,
-    const at::Tensor& philox_offset,
     c10::optional<Tensor> attn_mask,
     c10::optional<double> scale) {
   // make sure grad_out has no zero strides (broadcasted dimensions)
@@ -802,23 +768,17 @@ void flash_attention_backward_kernel_impl(
       cpu_flash_attention_backward<scalar_t, 256, 512>(
         grad_q, grad_k, grad_v, grad_out_contig,
         query, key, value, out, logsumexp,
-        cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
-        is_causal, philox_seed, philox_offset,
-        attn_mask, scale);
+        dropout_p, is_causal, attn_mask, scale);
     } else if (q_seq_len >= 192) {
       cpu_flash_attention_backward<scalar_t, 64, 512>(
         grad_q, grad_k, grad_v, grad_out_contig,
         query, key, value, out, logsumexp,
-        cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
-        is_causal, philox_seed, philox_offset,
-        attn_mask, scale);
+        dropout_p, is_causal, attn_mask, scale);
     } else {
       cpu_flash_attention_backward<scalar_t, 32, 512>(
         grad_q, grad_k, grad_v, grad_out_contig,
         query, key, value, out, logsumexp,
-        cum_seq_q, cum_seq_k, max_q, max_k, dropout_p,
-        is_causal, philox_seed, philox_offset,
-        attn_mask, scale);
+        dropout_p, is_causal, attn_mask, scale);
     }
   });
 }

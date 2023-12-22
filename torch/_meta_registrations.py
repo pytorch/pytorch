@@ -5053,54 +5053,24 @@ def meta_scatter_(self, dim, index, src_or_value, reduce=None):
 
 @register_meta(
     [
-        aten._scaled_dot_product_flash_attention_mask,
+        aten._scaled_dot_product_flash_attention,
     ]
 )
-def meta__scaled_dot_product_flash_mask(
+def meta__scaled_dot_product_flash(
     query: Tensor,
     key: Tensor,
     value: Tensor,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
-    attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
 ):
     batch_size = query.size(0)
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
     head_dim = query.size(3)
-
     max_seqlen_batch_k = key.size(2)
 
-    if device_hint(query) == "cpu":
-        attention = torch.empty(
-            (batch_size, max_seqlen_batch_q, num_heads, head_dim),
-            dtype=query.dtype,
-            device=query.device,
-        ).transpose(1, 2)
-        logsumexp = torch.empty(
-            (
-                batch_size,
-                max_seqlen_batch_q,
-                num_heads,
-            ),
-            dtype=torch.float,
-            device=query.device,
-        ).transpose(1, 2)
-        return (
-            attention,
-            logsumexp,
-            torch.empty((), dtype=torch.int32, device="meta"),
-            torch.empty((), dtype=torch.int32, device="meta"),
-            0,
-            0,
-            torch.empty((), dtype=torch.long, device="meta"),
-            torch.empty((), dtype=torch.long, device="meta"),
-            torch.empty((), dtype=query.dtype, device=query.device),
-        )
-
-    # Cuda Path
     query_t = query.transpose(1, 2)
     attention = torch.empty_like(query_t).transpose(1, 2)
     logsumexp = torch.empty(
@@ -5144,10 +5114,10 @@ def meta__scaled_dot_product_flash_mask(
 
 @register_meta(
     [
-        aten._scaled_dot_product_flash_attention_mask_backward,
+        aten._scaled_dot_product_flash_attention_backward,
     ]
 )
-def meta__scaled_dot_product_flash_mask_backward(
+def meta__scaled_dot_product_flash_backward(
     grad_out: Tensor,
     query: Tensor,
     key: Tensor,
@@ -5162,15 +5132,8 @@ def meta__scaled_dot_product_flash_mask_backward(
     is_causal: bool,
     philox_seed: Tensor,
     philox_offset: Tensor,
-    attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
 ):
-    if device_hint(query) != "cpu":
-        grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
-        grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
-        grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
-        return grad_q, grad_k, grad_v
-
     batch_size = query.size(0)
     num_heads = query.size(1)
     head_dim = query.size(3)
@@ -5201,63 +5164,64 @@ def meta__scaled_dot_product_flash_mask_backward(
 
 @register_meta(
     [
-        aten._scaled_dot_product_flash_attention,
+        aten._sdpa_flash_cpu,
     ]
 )
-def meta__scaled_dot_product_flash(
+def meta__sdpa_flash_cpu(
     query: Tensor,
     key: Tensor,
     value: Tensor,
     dropout_p: float = 0.0,
     is_causal: bool = False,
-    return_debug_mask: bool = False,
+    attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
 ):
-    return meta__scaled_dot_product_flash_mask(
-        query, key, value, dropout_p, is_causal, return_debug_mask, None, scale
+    batch_size = query.size(0)
+    num_heads = query.size(1)
+    max_seqlen_batch_q = query.size(2)
+    head_dim = query.size(3)
+
+    attention = torch.empty(
+        (batch_size, max_seqlen_batch_q, num_heads, head_dim),
+        dtype=query.dtype,
+        device=query.device,
+    ).transpose(1, 2)
+    logsumexp = torch.empty(
+        (
+            batch_size,
+            max_seqlen_batch_q,
+            num_heads,
+        ),
+        dtype=torch.float,
+        device=query.device,
+    ).transpose(1, 2)
+    return (
+        attention,
+        logsumexp,
     )
 
 
 @register_meta(
     [
-        aten._scaled_dot_product_flash_attention_backward,
+        aten._sdpa_flash_cpu_backward,
     ]
 )
-def meta__scaled_dot_product_flash_backward(
+def meta__sdpa_flash_cpu_backward(
     grad_out: Tensor,
     query: Tensor,
     key: Tensor,
     value: Tensor,
     out: Tensor,
     logsumexp: Tensor,
-    cum_seq_q: Tensor,
-    cum_seq_k: Tensor,
-    max_q: int,
-    max_k: int,
     dropout_p: float,
     is_causal: bool,
-    philox_seed: Tensor,
-    philox_offset: Tensor,
+    attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
 ):
-    return meta__scaled_dot_product_flash_mask_backward(
-        grad_out,
-        query,
-        key,
-        value,
-        out,
-        logsumexp,
-        cum_seq_q,
-        cum_seq_k,
-        max_q,
-        max_k,
-        dropout_p,
-        is_causal,
-        philox_seed,
-        philox_offset,
-        None,
-        scale,
-    )
+    grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
+    grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
+    grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
+    return grad_q, grad_k, grad_v
 
 
 @register_meta(
