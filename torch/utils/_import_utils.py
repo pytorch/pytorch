@@ -1,6 +1,8 @@
 import functools
-import torch
 import importlib.util
+
+import torch
+
 
 def _check_module_exists(name: str) -> bool:
     r"""Returns if a top-level module with :attr:`name` exists *without**
@@ -15,10 +17,26 @@ def _check_module_exists(name: str) -> bool:
     except ImportError:
         return False
 
-@functools.lru_cache()
+
+@functools.lru_cache
 def dill_available():
     return (
         _check_module_exists("dill")
         # dill fails to import under torchdeploy
         and not torch._running_with_deploy()
     )
+
+
+@functools.lru_cache
+def import_dill():
+    if not dill_available():
+        return None
+
+    import dill
+
+    # XXX: By default, dill writes the Pickler dispatch table to inject its
+    # own logic there. This globally affects the behavior of the standard library
+    # pickler for any user who transitively depends on this module!
+    # Undo this extension to avoid altering the behavior of the pickler globally.
+    dill.extend(use_dill=False)
+    return dill
