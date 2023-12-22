@@ -14564,6 +14564,7 @@ op_db: List[OpInfo] = [
     ),
     BinaryUfuncInfo('nextafter',
                     dtypes=floating_types_and(torch.bfloat16, torch.half),
+                    dtypesIfCUDA=floating_types_and(torch.bfloat16),
                     supports_autograd=False,
                     supports_rhs_python_scalar=False),
     OpInfo(
@@ -21115,6 +21116,14 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.nextafter",
         torch_opinfo_name="nextafter",
+        skips=(
+            # RuntimeError: undefined value cpu
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                device_type="cuda",
+            ),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.pow",
