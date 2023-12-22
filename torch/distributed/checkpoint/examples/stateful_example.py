@@ -9,12 +9,12 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 from torch.distributed._tensor.device_mesh import init_device_mesh
+from torch.distributed.checkpoint.filesystem import _FileSystemCheckpointer
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.checkpoint.filesystem import _FileSystemCheckpointer
 
 
 CHECKPOINT_DIR = f"~/{os.environ['LOGNAME']}/checkpoint"
