@@ -62,27 +62,20 @@ class verbose:
         return False
 
 
-def set_flags(_enabled=None, _allow_bf32=None):
-    orig_flags = (
-        torch._C._get_mkldnn_enabled(),
-        torch._C._get_mkldnn_bf32_matmul_enabled(),
-    )
-    if _enabled is not None:
-        torch._C._set_mkldnn_enabled(_enabled)
-    if _allow_bf32 is not None:
-        torch._C._set_mkldnn_bf32_matmul_enabled(_allow_bf32)
-    return orig_flags
+def set_flags(_enabled):
+    orig_flags = (torch._C._get_mkldnn_enabled(),)
+    torch._C._set_mkldnn_enabled(_enabled)
 
 
 @contextmanager
-def flags(enabled=False, allow_bf32=False):
+def flags(enabled=False):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(enabled, allow_bf32)
+        orig_flags = set_flags(enabled)
     try:
         yield
     finally:
         with __allow_nonbracketed_mutation():
-            set_flags(*orig_flags)
+            set_flags(orig_flags[0])
 
 
 class MkldnnModule(PropModule):
@@ -90,10 +83,6 @@ class MkldnnModule(PropModule):
         super().__init__(m, name)
 
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
-    bf32_matmul_enabled = ContextProp(
-        torch._C._get_mkldnn_bf32_matmul_enabled,
-        torch._C._set_mkldnn_bf32_matmul_enabled,
-    )
 
 
 # Cool stuff from torch/backends/cudnn/__init__.py and

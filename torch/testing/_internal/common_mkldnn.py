@@ -18,20 +18,22 @@ def bf32_is_not_fp32():
 
 @contextlib.contextmanager
 def bf32_off():
+    old_matmul_precision = torch.get_float32_matmul_precision()
     try:
-        with torch.backends.mkldnn.flags(enabled=None, allow_bf32=False):
-            yield
+        torch.set_float32_matmul_precision("highest")
+        yield
     finally:
-        pass
+        torch.set_float32_matmul_precision(old_matmul_precision)
 
 
 @contextlib.contextmanager
 def bf32_on(self, bf32_precision=1e-5):
+    old_matmul_precision = torch.get_float32_matmul_precision()
     try:
-        with torch.backends.mkldnn.flags(enabled=None, allow_bf32=True):
-            yield
+        torch.set_float32_matmul_precision("medium")
+        yield
     finally:
-        pass
+        torch.set_float32_matmul_precision(old_matmul_precision)
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
@@ -69,17 +71,3 @@ def bf32_on_and_off(bf32_precision=1e-5):
         return wrapped
 
     return wrapper
-
-
-# This is a wrapper that wraps a test to run it with bf32 turned off.
-# This wrapper is designed to be used when a test uses matmul or convolutions
-# but the purpose of that test is not testing matmul or convolutions.
-# Disabling bf32 will enforce torch.float tensors to be always computed
-# at full precision.
-def with_bf32_off(f):
-    @functools.wraps(f)
-    def wrapped(*args, **kwargs):
-        with bf32_off():
-            return f(*args, **kwargs)
-
-    return wrapped
