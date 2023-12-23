@@ -176,7 +176,8 @@ struct sherwood_v3_entry {
 };
 
 inline int8_t log2(uint64_t value) {
-  static constexpr std::array<int8_t, 64> table = {
+  // NOLINTNEXTLINE(*c-arrays*)
+  static constexpr int8_t table[64] = {
       63, 0,  58, 1,  59, 47, 53, 2,  60, 39, 48, 27, 54, 33, 42, 3,
       61, 51, 37, 40, 49, 18, 28, 20, 55, 30, 34, 11, 43, 14, 22, 4,
       62, 57, 46, 52, 38, 26, 32, 41, 50, 36, 17, 19, 29, 10, 13, 21,
