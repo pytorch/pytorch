@@ -15,6 +15,7 @@ from torch.export import (
     Dim,
     dynamic_dim,
     export,
+    unflatten,
 )
 from torch.export._trace import (
     _export_to_torch_ir,
@@ -2165,6 +2166,220 @@ def forward(self, l_x_):
             self.assertIn(k, ep.state_dict)
             self.assertEqual(v, ep.state_dict[k])
         self.assertTrue(torch.allclose(ep(test_inp), orig_eager(test_inp)))
+
+    def test_nn_module_stack(self):
+        class Leaf(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.leaf = Leaf()
+                self.register_buffer("buffer", torch.randn(4, 4))
+
+            def forward(self, x):
+                return self.buffer.sum() + self.leaf(x).sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                y = self.bar.buffer + x
+                return (self.bar(x) + y.sum(),)
+
+        inp = (torch.randn(4, 4),)
+        mod = Foo()
+        ep_strict = torch.export.export(mod, inp)
+        ep_non_strict = torch.export.export(mod, inp, strict=False)
+
+        gm_unflat_non_strict = unflatten(ep_non_strict)
+        self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
+        self.assertTrue(hasattr(gm_unflat_non_strict.bar, "buffer"))
+        self.assertTrue(hasattr(gm_unflat_non_strict.bar, "leaf"))
+
+        gm_unflat_strict = unflatten(ep_strict)
+
+        self.assertEqual(gm_unflat_non_strict(*inp), gm_unflat_strict(*inp))
+        self.assertExpectedInline(
+            str(gm_unflat_non_strict.bar.leaf.linear.graph).strip(), """\
+graph():
+    %arg3_1 : [num_users=1] = placeholder[target=arg3_1]
+    %bias : [num_users=1] = get_attr[target=bias]
+    %weight : [num_users=1] = get_attr[target=weight]
+    %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
+    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %arg3_1, %t), kwargs = {})
+    return addmm"""
+        )
+
+        gm_flat_non_strict = ep_non_strict.module()
+        gm_flat_strict = ep_strict.module()
+
+        self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
+
+    def test_nn_module_stack_shared_submodule(self):
+        class Leaf(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.leaf = Leaf()
+                self.register_buffer("buffer", torch.randn(4, 4))
+
+            def forward(self, x):
+                return self.buffer.sum() + self.leaf(x).sum()
+
+        class BarDifferent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.leaf = Leaf()
+
+            def forward(self, x):
+                a = self.leaf(x).sum()
+                b = self.leaf(x).sum()
+                return a + b
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+                self.bar_different = BarDifferent()
+
+            def forward(self, x):
+                y = self.bar.buffer + x
+                return (self.bar(x) + self.bar_different(x + 2), y.sum(),)
+
+        inp = (torch.randn(4, 4),)
+        mod = Foo()
+        ep_strict = torch.export.export(mod, inp)
+        ep_non_strict = torch.export.export(mod, inp, strict=False)
+
+        gm_unflat_non_strict = unflatten(ep_non_strict)
+        self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
+        self.assertTrue(hasattr(gm_unflat_non_strict.bar, "buffer"))
+        self.assertTrue(hasattr(gm_unflat_non_strict.bar, "leaf"))
+        self.assertTrue(hasattr(gm_unflat_non_strict.bar_different, "leaf"))
+
+        gm_unflat_strict = unflatten(ep_strict)
+
+        self.assertEqual(gm_unflat_non_strict(*inp), gm_unflat_strict(*inp))
+        self.assertExpectedInline(
+            str(gm_unflat_non_strict.bar.leaf.linear.graph).strip(), """\
+graph():
+    %arg5_1 : [num_users=1] = placeholder[target=arg5_1]
+    %bias : [num_users=1] = get_attr[target=bias]
+    %weight : [num_users=1] = get_attr[target=weight]
+    %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
+    %addmm : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %arg5_1, %t), kwargs = {})
+    return addmm"""
+        )
+        self.assertExpectedInline(
+            str(gm_unflat_non_strict.bar_different.leaf.linear.graph).strip(), """\
+graph():
+    %add_2 : [num_users=1] = placeholder[target=add_2]
+    %bias : [num_users=1] = get_attr[target=bias]
+    %weight : [num_users=1] = get_attr[target=weight]
+    %t_1 : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%weight,), kwargs = {})
+    %addmm_1 : [num_users=1] = call_function[target=torch.ops.aten.addmm.default](args = (%bias, %add_2, %t_1), kwargs = {})
+    return addmm_1"""
+        )
+
+        gm_flat_non_strict = ep_non_strict.module()
+        gm_flat_strict = ep_strict.module()
+
+        self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
+
+    def test_cond_with_module_stack_export_with(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                def true_fn(x):
+                    return self.linear(x).cos()
+                def false_fn(x):
+                    return self.linear(x).sin()
+                return torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+
+        class CondExport(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                return x.cos() + self.bar(x)
+
+        inp = (torch.randn(4, 4),)
+        ep = torch.export.export(CondExport(), inp, strict=False)
+        self.assertExpectedInline(ep.graph_module.code.strip(), """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    cos = torch.ops.aten.cos.default(arg2_1)
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg1_1, arg0_1, arg2_1]);  true_graph_0 = false_graph_0 = arg1_1 = arg0_1 = arg2_1 = None
+    getitem = conditional[0];  conditional = None
+    add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
+    return (add,)""")
+
+        cond_top_level_nn_module_stack = [
+            node.meta["nn_module_stack"]
+            for node in ep.graph.nodes
+            if node.name == "true_graph_0"
+        ][0]
+
+        self.assertTrue("test_cond_with_module_stack_export_with.<locals>.Bar" in str(cond_top_level_nn_module_stack))
+
+    # TODO: See https://github.com/pytorch/pytorch/issues/115790
+    @unittest.expectedFailure
+    def test_cond_with_module_stack_export_with_unflatten(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                def true_fn(x):
+                    return self.linear(x).cos()
+                def false_fn(x):
+                    return self.linear(x).sin()
+                return torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+
+        class CondExport(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                return x.cos() + self.bar(x)
+
+        inp = (torch.randn(4, 4),)
+        ep = torch.export.export(CondExport(), inp, strict=False)
+
+        cond_top_level_nn_module_stack = [
+            node.meta["nn_module_stack"]
+            for node in ep.graph.nodes
+            if node.name == "true_graph_0"
+        ][0]
+
+        # we can't preserve nn_module_stack for the subgraphs for now.
+        for node in ep.graph_module.true_graph_0.graph.nodes:
+            self.assertEqual(node.meta["nn_module_stack"], cond_top_level_nn_module_stack)
+
+        # this doesn't work today
+        gm_unflat_strict = unflatten(ep)
 
 
 if __name__ == '__main__':
