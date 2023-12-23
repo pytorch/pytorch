@@ -125,7 +125,7 @@ class ArrayRef final {
 
   /// Construct an ArrayRef from a C array.
   template <size_t N>
-    // NOLINTNEXTLINE(*c-arrays*)
+  // NOLINTNEXTLINE(*c-arrays*)
   /* implicit */ constexpr ArrayRef(const T (&Arr)[N]) : Data(Arr), Length(N) {}
 
   /// Construct an ArrayRef from a std::initializer_list.

@@ -2,13 +2,13 @@
 
 #pragma once
 
+#include <c10/util/Exception.h>
 #include <cstdint>
 #include <functional>
 #include <iterator>
 #include <numeric>
 #include <type_traits>
 #include <utility>
-#include <c10/util/Exception.h>
 
 namespace c10 {
 
