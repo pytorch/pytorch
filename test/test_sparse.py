@@ -952,6 +952,11 @@ class TestSparse(TestSparseBase):
             s.permute(dims=(1, 0))
         with self.assertRaisesRegex(RuntimeError, "duplicate dims"):
             s.permute(dims=(1, 1, 1))
+        # Calling permute on a sparse tensor with an empty tuple used to segfault,
+        # see https://github.com/pytorch/pytorch/issues/116325
+        x = torch.rand((), device=device, dtype=dtype).to_sparse()
+        x.permute(())
+        self.assertEqual(len(x.values()), 1)
 
         def test_shape(sparse_dims, nnz, with_size):
             ndim = len(with_size)
