@@ -9,12 +9,8 @@
 #include <cstdint>
 #include <functional>
 #include <type_traits>
-
 #include <ctime>
 
-#ifndef _WIN32
-#include <ctime>
-#endif
 #if defined(C10_IOS) && defined(C10_MOBILE)
 #include <sys/time.h> // for gettimeofday()
 #endif
