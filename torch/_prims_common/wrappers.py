@@ -206,9 +206,9 @@ def _safe_copy_out(
 
 def out_wrapper(*out_names: str, exact_dtype: bool = False):
     # The wrapped function needs to convert the output parameters to ensure
-    # compatability between the Python API (which always uses "out" as the
+    # compatibility between the Python API (which always uses "out" as the
     # parameter name and may be a tuple) and the Aten API (which may have
-    # multiple output parematers and use different parameter names such as
+    # multiple output parameters and use different parameter names such as
     # "grad_input", "indices" or "values".)
 
     default_out_names = ("out",)
