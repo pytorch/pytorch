@@ -439,7 +439,8 @@ class TestSortAndSelect(TestCase):
         compare(t, 2000, 1, False)
 
     def test_topk_quantized_scalar_input(self):
-        # This used to segfault
+        # Calling topk on a quantized scalar input used to segfault,
+        # see https://github.com/pytorch/pytorch/issues/116324
         x = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
         x.topk(1)
 
