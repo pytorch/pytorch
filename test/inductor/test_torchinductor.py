@@ -1604,6 +1604,16 @@ class CommonTemplate:
             check_lowp=False,  # a much more elaborate test is required to match finfo max's for float and half
         )
 
+    def test_one_hot(self):
+        def fn(a):
+            return torch.nn.functional.one_hot(a, 8) + 1
+
+        self.common(
+            fn,
+            (torch.arange(100).view(4, 5, 5) % 8,),
+            check_lowp=False,
+        )
+
     def test_div1(self):
         def fn(a, b):
             return (
