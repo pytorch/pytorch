@@ -74,7 +74,7 @@ SavedVariable::SavedVariable(
     // 2. If the variable is a leaf, it only has weak reference to the
     // grad_accumulator which cannot create a cycle. In those cases, we save the
     // original variable and don't need further processing.
-    if (!is_output || is_leaf_) {
+    if (true || !is_output || is_leaf_) {
       saved_original_ = true;
       data_ = variable;
       return;

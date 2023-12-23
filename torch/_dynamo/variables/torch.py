@@ -206,6 +206,115 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def __repr__(self):
         return f"TorchInGraphFunctionVariable({self.value})"
 
+    def should_decompose_torch_op(self, fn):
+        from torch._dynamo import compiled_autograd
+
+        # TODO(JackCaoG): we need a better way to tell if a torch function should we decompose
+        allowed_torch_fn = fn.__name__ != "_make_grads"
+        definanilly_not_composite_kernel = type(
+            fn
+        ) == torch._ops.OpOverload and not torch._C._dispatch_has_kernel_for_dispatch_key(
+            fn.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+        )
+
+        # only do decompoization for backward
+        in_compiled_backward = compiled_autograd.compiled_autograd_enabled
+        return (
+            config.use_single_step_graph
+            and allowed_torch_fn
+            and not definanilly_not_composite_kernel
+            and not in_compiled_backward
+        )
+
+    def decompose_and_inline_torch_op(self, tx, op, args, kwargs):
+        import inspect
+
+        from functorch import make_fx
+
+        from torch._dispatch.python import enable_python_dispatcher
+        from ..utils import get_fake_value
+        from .base import MutableLocal
+        from .builder import SourcelessBuilder
+        from .lists import BaseListVariable
+
+        # convert he arguments from VariableTracker to fake tensors + constants again
+        fake_value_args = []
+        # TODO(JackCaoG): include kwargs handling here
+        for arg in args:
+            if type(arg.as_proxy()) is torch.fx.proxy.Proxy:
+                fake_value_args.append(get_fake_value(arg.as_proxy().node, tx))
+            else:
+                # mostly handle tuple and scalar
+                fake_value_args.append(arg.as_proxy())
+
+        fake_value_kwargs = {}
+        for key, value in kwargs.items():
+            if type(value.as_proxy()) is torch.fx.proxy.Proxy:
+                fake_value_kwargs[key] = get_fake_value(value.as_proxy().node, tx)
+            else:
+                # mostly handle tuple and scalar
+                fake_value_kwargs[key] = value.as_proxy()
+
+        def get_full_args_with_default_value(func, args, kwargs):
+            try:
+                signature = inspect.signature(func)
+            except ValueError as ve:
+                # no signature found, just return an empty dict
+                return args
+
+            current_i = 0
+            res = []
+            for k, v in signature.parameters.items():
+                if v.default is inspect.Parameter.empty:
+                    # this arg does not have default value, expect user pass
+                    # it in as an arg
+                    assert current_i < len(args)
+                    res.append(args[current_i])
+                    current_i += 1
+                else:
+                    if current_i < len(args):
+                        # this arg is has a default value, first check if user pass it in
+                        # as an arg
+                        res.append(args[current_i])
+                        current_i += 1
+                    else:
+                        # now we need to check if it is being passed as a kaways
+                        if k in kwargs:
+                            res.append(kwargs.get(k))
+                        else:
+                            # use default value
+                            res.append(v.default)
+            return res
+
+        # It seems like make_fx requires caller to pass into all args including
+        # those with default value.
+        complete_fake_value_args = get_full_args_with_default_value(
+            op, fake_value_args, fake_value_kwargs
+        )
+        with enable_python_dispatcher():
+            fx_g = make_fx(op, pre_dispatch=True)(*complete_fake_value_args)
+
+        print("\nfx code")
+        print(fx_g.code)
+
+        # TODO(JackCaoG): handle kwargs
+        def dummy_user_function_to_inline_bm(gm, args):
+            return gm(*args)
+
+        # now inline this fx graph and return the output
+        # question: will there be a loop? How do I tell if op is CompositeImplicitAutograd
+        user_fn_variable = SourcelessBuilder()(tx, dummy_user_function_to_inline_bm)
+        gm_variable = SourcelessBuilder()(tx, fx_g)
+        cls = BaseListVariable.cls_for(list)
+        input_list_variable = cls(
+            args,
+            mutable_local=MutableLocal(),
+        )
+        res = tx.inline_user_function_return(
+            user_fn_variable, (gm_variable, input_list_variable), {}
+        )
+        return res
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -493,6 +602,35 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             and kwargs.get("layout", torch.strided) == torch.strided
         ):
             raise unimplemented("torch.compile does not support strided NestedTensor")
+        elif self.value == torch.ops.inductor.accumulate_grad_.default:
+            from .builder import SourcelessBuilder
+
+            def dummy_accumulate_grad_(t1, t2):
+                if t1.grad is None:
+                    t1.grad = t2
+                else:
+                    t1.grad += t2
+
+            dummy_accumulate_grad_variable = SourcelessBuilder()(
+                tx, dummy_accumulate_grad_
+            )
+            res = tx.inline_user_function_return(
+                dummy_accumulate_grad_variable,
+                args,
+                {},
+            )
+            return ConstantVariable.create(None)
+        elif config.use_single_step_graph and self.value is torch.autograd.backward:
+            from .builder import SourcelessBuilder
+
+            # inline the backward call directly
+            backward_fn_variable = SourcelessBuilder()(tx, torch.autograd.backward)
+            tx.inline_user_function_return(
+                backward_fn_variable,
+                args,
+                {},
+            )
+            return ConstantVariable.create(None)
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
@@ -551,15 +689,21 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     # have to
                     fn_ = torch._refs.tensor
 
-            tensor_variable = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-            )
+            from .builder import SourcelessBuilder
 
+            if self.should_decompose_torch_op(fn_):
+                tensor_variable = self.decompose_and_inline_torch_op(
+                    tx, fn_, args, kwargs
+                )
+            else:
+                tensor_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        fn_,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                )
             if (
                 isinstance(tensor_variable, TensorVariable)
                 and "requires_grad" in kwargs
@@ -808,4 +952,73 @@ class TorchVariable(BaseTorchVariable):
                 ),
             )
 
-        return variables.LambdaVariable(fake_cross_entropy_loss)
+        def get_fake_values_from_vt(args):
+            from ..utils import get_fake_value
+
+            fake_value_args = []
+            for arg in args:
+                if type(arg.as_proxy()) is torch.fx.proxy.Proxy:
+                    fake_value_args.append(get_fake_value(arg.as_proxy().node, tx))
+                else:
+                    # mostly handle tuple and scalar
+                    fake_value_args.append(arg.as_proxy())
+            return fake_value_args
+
+        # We need to decompose and inline the cross_entropy_loss so intermediate tensor
+        # saved can be captured by dynamo.
+        def fake_cross_entropy_loss_decompose(input, target):
+            # TODO: refactor this function
+            from functorch import make_fx
+
+            from torch._dispatch.python import enable_python_dispatcher
+            from .base import MutableLocal
+            from .builder import SourcelessBuilder
+            from .lists import BaseListVariable
+
+            fake_value_args = get_fake_values_from_vt(
+                [
+                    input,
+                    target,
+                    weight,
+                    size_average,
+                    ignore_index,
+                    reduce_arg,
+                    reduction,
+                    label_smoothing,
+                ]
+            )
+
+            with enable_python_dispatcher():
+                fx_g = make_fx(torch.nn.functional.cross_entropy, pre_dispatch=True)(
+                    *fake_value_args
+                )
+
+            def dummy_user_function_to_inline_bm(gm, args):
+                return gm(*args)
+
+            user_fn_variable = SourcelessBuilder()(tx, dummy_user_function_to_inline_bm)
+            gm_variable = SourcelessBuilder()(tx, fx_g)
+            cls = BaseListVariable.cls_for(list)
+            input_list_variable = cls(
+                [
+                    input,
+                    target,
+                    weight,
+                    size_average,
+                    ignore_index,
+                    reduce_arg,
+                    reduction,
+                    label_smoothing,
+                ],
+                mutable_local=MutableLocal(),
+            )
+
+            res_variable = tx.inline_user_function_return(
+                user_fn_variable, (gm_variable, input_list_variable), {}
+            )
+            return res_variable
+
+        if config.use_single_step_graph:
+            return variables.LambdaVariable(fake_cross_entropy_loss_decompose)
+        else:
+            return variables.LambdaVariable(fake_cross_entropy_loss)

@@ -340,6 +340,101 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             UserMethodVariable,
         )
 
+        if (
+            self.value.__str__()
+            == "<method 'run_backward' of 'torch._C._EngineBase' objects>"
+            and name == "__call__"
+        ):
+            from torch._dynamo import compiled_autograd
+            from torch.autograd.variable import Variable
+            from .tensor import map_fake_tensor_to_tensor_variable
+
+            assert len(args) == 5
+
+            # can't directly wrap gm in a UserFunctionVariable so have to wrap it in a
+            # normal python function
+            def dummy_user_function_to_inline(gm, input, hook, size):
+                # TODO: need to take the output of the gm and assign it back to the input.grad
+                return gm(input, hook, size)
+
+            def inline_fx(graph):
+                # We need to inline the graphmodule and let dynamo trace through it with inputs.
+                # inputs are a bunch of fake_tensors since the compiled_autograd is invoked with
+                # a fake tensor(`self.proxy.node.meta.get("example_value")`)
+                def actual_backward_call(input, hook, size):
+                    from .base import MutableLocal
+                    from .builder import SourcelessBuilder
+                    from .lists import BaseListVariable
+
+                    user_fn_variable = SourcelessBuilder()(
+                        tx, dummy_user_function_to_inline
+                    )
+                    # gm_variable is a UserDefinedObjectVariable
+                    gm_variable = SourcelessBuilder()(tx, graph)
+                    cls = BaseListVariable.cls_for(list)
+                    # if backward is run without argument, `aten.ones_like` will
+                    # be used to create a defualt tensor arg. That tensor will not have a
+                    # TensorVariable assoicatied with it.
+                    tensor_variables = [
+                        map_fake_tensor_to_tensor_variable(x) for x in input
+                    ]
+                    for i in range(len(input)):
+                        if tensor_variables[i] is None:
+                            print(i)
+                            print(input[i])
+                            print(id(input[i]))
+                    breakpoint()
+                    input_list_variable = cls(
+                        tensor_variables,
+                        mutable_local=MutableLocal(),
+                    )
+                    # assume hook and size to be empty for now
+                    hook_variable = cls([], mutable_local=MutableLocal())
+                    size_variable = cls([], mutable_local=MutableLocal())
+                    # output of the inline, need to find the corresponding inputs
+                    res = tx.inline_user_function_return(
+                        user_fn_variable,
+                        (
+                            gm_variable,
+                            input_list_variable,
+                            hook_variable,
+                            size_variable,
+                        ),
+                        {},
+                    )
+                    # TODO: we should avoid running the actual backward
+                    return graph(input, hook, size)
+
+                return actual_backward_call
+
+            # This is being called in the compiled_autograd's end_capture, it need to return a
+            # python function that can execute the backward.
+            def get_real_backward_fn(graph):
+                return inline_fx(graph)
+
+            # now we want to use compiled_auto_grad to get and inline the fx graph
+            tensors_example = tuple(
+                [proxy.node.meta.get("example_value") for proxy in args[0].as_proxy()]
+            )
+            grad_tensors_example = tuple(
+                proxy.node.meta.get("example_value") for proxy in args[1].as_proxy()
+            )
+            retain_graph = args[2].as_python_constant()
+            create_graph = args[3].as_python_constant()
+            # ignore the inputs for backward for now
+            inputs = ()
+            with compiled_autograd.enable(get_real_backward_fn):
+                Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+                    tensors_example,
+                    grad_tensors_example,
+                    retain_graph,
+                    create_graph,
+                    inputs,
+                    allow_unreachable=True,
+                    accumulate_grad=True,
+                )
+            return ConstantVariable.create(None)
+
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
@@ -619,6 +714,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return VariableBuilder(tx, source)(subobj)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)
+            elif (
+                type(subobj) == torch.utils._pytree.TreeSpec
+                or type(subobj) == torch.utils._pytree.LeafSpec
+                or type(value) == torch.utils._pytree.TreeSpec
+            ):
+                # TODO(Jack): these fx function we want to inline should share the same
+                # source as the origional line
+                from .builder import SourcelessBuilder
+
+                return SourcelessBuilder()(tx, subobj)
 
         if (
             name not in getattr(value, "__dict__", {})
@@ -696,6 +801,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             tx,
             ODictGetItemSource(self.source, index),
         )(collections.OrderedDict.__getitem__(self.value, key.as_python_constant()))
+
+
+class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
+    def __init__(
+        self,
+        value,
+        **kwargs,
+    ):
+        super().__init__(value, **kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
+        args = [self] + args
+        return tx.inline_user_function_return(
+            fn_variable,
+            args,
+            kwargs,
+        )
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):

@@ -155,6 +155,7 @@ from .torch import torch_special_class_types, TorchVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
+    SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )
@@ -1409,7 +1410,6 @@ def wrap_fx_proxy_cls(
             # only allow_non_graph_fake in this instance because we handle the non-fake
             # cases properly below.
             example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
-
         # Handle recursive calls here
         elif maybe_get_fake_mode(example_value) is tx.fake_mode:
             pass
@@ -1898,7 +1898,8 @@ class SourcelessBuilder:
             return SourcelessBuilder.wrap_constant_literal(value)
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
-        elif is_allowed(value):
+        # For backward we want to inline it as a UserFunctionVariable
+        elif is_allowed(value) and value is not torch.autograd.backward:
             if is_user_defined_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return TorchVariable(value)
@@ -1923,6 +1924,12 @@ class SourcelessBuilder:
             return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
+        elif isinstance(value, torch.fx.graph_module.GraphModule):
+            return SourcelessGraphModuleVariable(value)
+        elif isinstance(
+            value, (torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec)
+        ):
+            return UserDefinedObjectVariable(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod

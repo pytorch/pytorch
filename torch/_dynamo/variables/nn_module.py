@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 
 import torch.nn
 
-from .. import skipfiles, variables
+from .. import config, skipfiles, variables
 from ..allowed_functions import is_allowed
 from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
 from ..guards import GuardBuilder, install_guard
@@ -289,7 +289,13 @@ class NNModuleVariable(VariableTracker):
             # If we are tracing the higher order op, we want Dynamo to step
             # inside the module call so that Dynamo can see the underlying
             # parameters and buffers and raise them as inputs to the graph.
-            if tx.output.is_root_tracer() and is_allowed(mod.__class__):
+            # If we want to trace the the single step graph we also need dynamo
+            # to see the underlying parameters.
+            if (
+                tx.output.is_root_tracer()
+                and is_allowed(mod.__class__)
+                and not config.use_single_step_graph
+            ):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
@@ -375,6 +381,22 @@ class NNModuleVariable(VariableTracker):
             # Dynamo inlines `__call__`, includes hooks.
             return self.call_function(tx, args, kwargs)
         elif name == "forward":
+            if config.use_single_step_graph:
+                # For single step graph we want to inline the fwd function instead.
+                # Dynamo needs to see all inputs and output of each torch function
+                # in case they are saved for the backward.
+                mod = tx.output.get_submodule(self.module_key)
+                fn = mod.forward.__func__
+                fn_source = AttrSource(self.source, "__call__")
+                fn_source = AttrSource(fn_source, "__func__")
+                args = [self] + args
+                res = tx.inline_user_function_return(
+                    variables.UserFunctionVariable(fn, source=fn_source),
+                    args,
+                    kwargs,
+                )
+                return res
+
             # Example: `self.layer.forward(x)`
             # This is used for explicit calling `forward` in a forward function.
             # Dynamo puts `call_method` node in FX, doesn't trigger hooks.
@@ -784,7 +806,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     @staticmethod
     def _wrap_source(source):
         if not isinstance(source, (FSDPNNModuleSource, NotNNModuleSource)):
-            if torch._dynamo.config.skip_fsdp_guards:
+            if config.skip_fsdp_guards:
                 return FSDPNNModuleSource(source)
             else:
                 # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes

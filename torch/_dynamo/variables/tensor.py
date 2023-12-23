@@ -64,6 +64,16 @@ supported_const_comparison_ops = {
     "!=": operator.ne,
 }
 
+# maybe there are better places to put it(like tx)
+fake_tensor_to_tensor_variable_dict = {}
+
+
+def map_fake_tensor_to_tensor_variable(fake_tensor):
+    if fake_tensor in fake_tensor_to_tensor_variable_dict:
+        return fake_tensor_to_tensor_variable_dict[fake_tensor]
+    else:
+        return None
+
 
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
@@ -126,6 +136,18 @@ class TensorVariable(VariableTracker):
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.specialized_value = specialized_value
+
+        print(
+            "create tensor variable with fake tensor id "
+            + str(id(self.proxy.node.meta.get("example_value")))
+            + " size "
+            + str(self.proxy.node.meta.get("example_value").size())
+        )
+
+        print("Tensor Variable name is " + str(self.proxy.node) + "\n")
+        fake_tensor_to_tensor_variable_dict[
+            self.proxy.node.meta.get("example_value")
+        ] = self
 
     def as_proxy(self):
         return self.proxy
@@ -580,6 +602,41 @@ class TensorVariable(VariableTracker):
             tensor = self.as_proxy().node.meta["example_value"]
             out = tolist(tensor, self.as_proxy())
             return SourcelessBuilder()(tx, out)
+        elif config.use_single_step_graph and name == "backward":
+            from . import TorchInGraphFunctionVariable
+            from .builder import VariableBuilder
+
+            # assert not args
+            assert len(args) <= 1
+            assert not kwargs
+
+            """
+            def backward(
+                tensors: _TensorOrTensors,
+                grad_tensors: Optional[_TensorOrTensors] = None,
+                retain_graph: Optional[bool] = None,
+                create_graph: bool = False,
+                grad_variables: Optional[_TensorOrTensors] = None,
+                inputs: Optional[_TensorOrTensorsOrGradEdge] = None,
+            )
+            """
+            none_variable = ConstantVariable.create(None)
+            grad_tensors = none_variable if len(args) == 0 else args[0]
+            false_variable = ConstantVariable.create(False)
+            backward_variable = TorchInGraphFunctionVariable(torch.autograd.backward)
+            result = backward_variable.call_function(
+                tx,
+                [
+                    self,  # tensors
+                    grad_tensors,  # grad_tensors
+                    none_variable,  # retain_graph
+                    false_variable,  # create_graph
+                    none_variable,  # grad_variables
+                    none_variable,  # inputs
+                ],
+                {},
+            )
+            return ConstantVariable.create(None)
         elif name in ("backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
         elif name == "item" and not config.capture_scalar_outputs:
