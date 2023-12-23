@@ -26,7 +26,7 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.utils._traceback import format_traceback_short
 
 from . import config, exc
-from .allowed_functions import is_allowed, is_numpy
+from .allowed_functions import is_numpy
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
@@ -180,7 +180,9 @@ def has_tensor_in_frame(frame):
     for co_name in frame.f_code.co_names:
         if co_name in frame.f_globals:
             obj = frame.f_globals[co_name]
-            if is_allowed(obj):
+            if isinstance(obj, types.ModuleType) and (
+                obj.__name__.startswith("torch.") or obj is torch
+            ):
                 return True
             # ... or a global import of numpy.*
             if np and config.trace_numpy and (obj is np or is_numpy(obj)):
@@ -220,7 +222,7 @@ def has_tensor_in_frame(frame):
         elif istype(obj, (str, int, float, type(None), bool)):
             seen_ids[obj_id] = False
             return seen_ids[obj_id]
-        elif is_namedtuple(obj):
+        elif is_namedtuple(obj) and hasattr(obj, "_fields"):
             seen_ids[obj_id] = any(has_tensor(getattr(obj, v)) for v in obj._fields)
             return seen_ids[obj_id]
         else:

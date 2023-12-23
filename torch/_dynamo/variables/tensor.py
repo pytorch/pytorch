@@ -216,7 +216,7 @@ class TensorVariable(VariableTracker):
         return VariableBuilder(tx, attr_source)(real_value)
 
     def var_getattr(self, tx, name):
-        from . import ConstantVariable, TorchVariable
+        from . import ConstantVariable, UserDefinedClassVariable
 
         if tx.strict_checks_enabled:
             if name in self._strict_mode_banned_ops():
@@ -230,7 +230,7 @@ class TensorVariable(VariableTracker):
         elif name == "device" and self.device is not None:
             result = ConstantVariable.create(self.device)
         elif name == "layout" and self.layout is not None:
-            result = TorchVariable(self.layout)
+            result = ConstantVariable.create(self.layout)
         elif name == "is_cuda" and self.device is not None:
             result = ConstantVariable.create(self.device.type == "cuda")
         elif name == "shape" and self.size is not None:
@@ -249,7 +249,7 @@ class TensorVariable(VariableTracker):
         elif name == "data":
             result = self.call_method(tx, "detach", [], {})
         if name == "__class__":
-            return TorchVariable(self.python_type())
+            return UserDefinedClassVariable(self.python_type())
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
@@ -351,7 +351,7 @@ class TensorVariable(VariableTracker):
         if tx.strict_checks_enabled:
             if name in self._strict_mode_banned_ops():
                 unimplemented(f"Illegal method invocation {name} in strict mode")
-        from . import ConstantVariable, TorchVariable, TupleVariable
+        from . import ConstantVariable, TorchInGraphFunctionVariable, TupleVariable
         from .builder import wrap_fx_proxy
 
         kwargs = dict(kwargs)
@@ -625,7 +625,7 @@ class TensorVariable(VariableTracker):
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
         ):
-            result = TorchVariable(torch.mul).call_function(
+            result = TorchInGraphFunctionVariable(torch.mul).call_function(
                 tx, args + [kwargs["alpha"]], {}
             )
             return self.call_method(tx, "add_", [result], {})
@@ -635,8 +635,8 @@ class TensorVariable(VariableTracker):
             and len(kwargs) == 1
             and "value" in kwargs
         ):
-            result = TorchVariable(torch.div).call_function(tx, args, {})
-            result = TorchVariable(torch.mul).call_function(
+            result = TorchInGraphFunctionVariable(torch.div).call_function(tx, args, {})
+            result = TorchInGraphFunctionVariable(torch.mul).call_function(
                 tx, [result, kwargs["value"]], {}
             )
             return self.call_method(tx, "add_", [result], {})
@@ -645,8 +645,12 @@ class TensorVariable(VariableTracker):
             # without dealing with unbacked symbool. Roughly the code we translate is:
             # def __contains__(self, x):
             #     return (x == self).any().item()
-            result = TorchVariable(torch.eq).call_function(tx, [self, args[0]], {})
-            result = TorchVariable(torch.any).call_function(tx, [result], {})
+            result = TorchInGraphFunctionVariable(torch.eq).call_function(
+                tx, [self, args[0]], {}
+            )
+            result = TorchInGraphFunctionVariable(torch.any).call_function(
+                tx, [result], {}
+            )
             return result.call_method(tx, "item", [], {})
         elif name == "redistribute":
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
@@ -678,7 +682,7 @@ class TensorVariable(VariableTracker):
                 (
                     variables.functions.FunctoolsPartialVariable,
                     variables.UserFunctionVariable,
-                    variables.TorchVariable,
+                    variables.TorchInGraphFunctionVariable,
                     variables.NNModuleVariable,
                 ),
             ):

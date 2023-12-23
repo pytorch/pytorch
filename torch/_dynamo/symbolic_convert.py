@@ -25,7 +25,7 @@ import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import config, exc, logging as torchdynamo_logging, skipfiles, variables
-from .allowed_functions import is_allowed, is_builtin_constant, is_forbidden
+from .allowed_functions import is_builtin_constant, is_forbidden
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -111,7 +111,6 @@ from .variables.tensor import (
     SymNodeVariable,
     TensorVariable,
 )
-from .variables.torch import TorchVariable
 from .variables.user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -1022,9 +1021,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if config.replay_record_enabled:
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        if is_allowed(value):
-            self.push(TorchVariable(value, source=source))
-        elif istype(value, (types.ModuleType, DummyModule)):
+        if istype(value, (types.ModuleType, DummyModule)):
             self.push(PythonModuleVariable(value, source=source))
         else:
             unimplemented(f"IMPORT_NAME {typestr(value)}")

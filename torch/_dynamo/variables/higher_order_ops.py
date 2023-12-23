@@ -1203,7 +1203,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
                 "kwargs have not been implemented for torch.autograd.Function"
             )
 
-        from . import TorchVariable
+        from . import TorchInGraphFunctionVariable
 
         always_restore = self.value.__name__ == "trampoline_autograd_bwd"
         if (
@@ -1212,7 +1212,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         ):
             fn = UserFunctionVariable(self.value, source=self.source)
         else:
-            fn = TorchVariable(self.value)
+            fn = TorchInGraphFunctionVariable(self.value)
         # TODO(jansel): BUG!!! we aren't copying on the line below, so the post-pre check below is pointless
         pre_guards = tx.output.guards
         # In eager-mode PyTorch, if we only compute first-order gradients,
