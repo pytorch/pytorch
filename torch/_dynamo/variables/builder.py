@@ -571,7 +571,9 @@ class VariableBuilder:
             # handle aliased autograd function `apply` calls
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return GetAttrVariable(
-                AutogradFunctionVariable(value.__self__, source=self.source),
+                AutogradFunctionVariable(
+                    value.__self__, source=AttrSource(self.source, member="__self__")
+                ),
                 "apply",
             )
         elif np and isinstance(value, np.number):
