@@ -380,7 +380,9 @@ def _export_non_strict(
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
-    with torch.nn.utils.stateless._reparametrize_module(mod, fake_params_buffers), GradModeUnsupportedSafeguard():
+    with torch.nn.utils.stateless._reparametrize_module(
+        mod, fake_params_buffers
+    ), GradModeUnsupportedSafeguard():
         gm, graph_signature = transform(aot_export_module)(
             mod, (*fake_args, *fake_kwargs.values()), trace_joint=False
         )
