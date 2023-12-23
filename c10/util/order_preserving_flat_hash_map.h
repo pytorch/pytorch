@@ -139,10 +139,10 @@ struct KeyOrValueEquality : functor_storage<bool, key_equal> {
 static constexpr int8_t min_lookups = 4;
 template <typename T>
 struct sherwood_v3_entry {
-  sherwood_v3_entry() {}
+  sherwood_v3_entry() = default;
   sherwood_v3_entry(int8_t distance_from_desired)
       : distance_from_desired(distance_from_desired) {}
-  ~sherwood_v3_entry() {}
+  ~sherwood_v3_entry() = default;
 
   bool has_value() const {
     return distance_from_desired >= 0;
