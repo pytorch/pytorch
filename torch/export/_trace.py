@@ -513,11 +513,13 @@ def _export(
                 gm, sig = aot_export(Wrapper(mod), args, **kwargs)
 
                 def strip_root(x):
-                    return (
-                        x[len("_export_root.") :]
-                        if x.startswith("_export_root.")
-                        else x
-                    )
+                    if isinstance(x, str) and x.startswith("_export_root"):
+                        stripped = x[len("_export_root") :]
+                        return stripped[1:] if stripped.startswith(".") else stripped
+                    return x
+
+                def fixup_key(x):
+                    return "L__self__" + strip_root(x)
 
                 sig.parameters = pytree.tree_map(strip_root, sig.parameters)
                 sig.buffers = pytree.tree_map(strip_root, sig.buffers)
@@ -530,6 +532,18 @@ def _export(
                 sig.buffers_to_mutate = pytree.tree_map(
                     strip_root, sig.buffers_to_mutate
                 )
+                for node in gm.graph.nodes:
+                    if "nn_module_stack" in node.meta:
+                        nn_module_stack = node.meta["nn_module_stack"]
+                        # Delete the wrapper module reference
+                        del nn_module_stack[""]
+                        node.meta["nn_module_stack"] = {
+                            fixup_key(key): val
+                            for key, val in pytree.tree_map(
+                                strip_root, nn_module_stack
+                            ).items()
+                        }
+
                 return gm, sig
 
             return _aot_export_non_strict

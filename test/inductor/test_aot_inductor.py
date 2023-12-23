@@ -1515,6 +1515,7 @@ def fail_minimal_arrayref_interface(is_skip=False):
 CPU_TEST_FAILURES = {
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
     "test_dynamic_cat": fail_with_and_without_stack_allocation(),
     "test_dynamic_scalar": fail_with_and_without_stack_allocation(),
@@ -1523,7 +1524,6 @@ CPU_TEST_FAILURES = {
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
     #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
-    "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
@@ -1667,13 +1667,13 @@ copy_tests(
     {
         "test_addmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
         "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
+        "test_constant_folding": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
         "test_dynamic_smem_above_default_limit": TestFailure(
             ("non_abi_compatible_cpu",)
         ),
         # TODO: test_freezing_non_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
         "test_freezing": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
-        "test_constant_folding": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
     },
 )
 
