@@ -243,6 +243,7 @@ include_patterns = [
     'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
     'c10/core/**/*.h',
+    'c10/util/**/*.h',
     'torch/csrc/**/*.cpp',
 ]
 exclude_patterns = [
@@ -253,6 +254,15 @@ exclude_patterns = [
     '**/*pb.h',
     '**/*CUDA*',
     '**/cuda/*pp',
+    'c10/util/complex_math.h',
+    'c10/util/complex_utils.h',
+    'c10/util/Float8*.h',
+    'c10/util/logging*.h',
+    'c10/util/hash.h',
+    'c10/util/strong_type.h',
+    'c10/util/SmallVector.h',
+    'c10/util/win32-headers.h',
+    'c10/util/*inl.h',
     'aten/src/ATen/core/TensorImpl_test.cpp',
     'third_party/**/*',
     'torch/csrc/api/**',
