@@ -105,6 +105,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # TODO: Merge the if/else into trace_rules.lookup()
             if trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
                 return variables.TorchInGraphFunctionVariable(func, source=source)
+            elif trace_rules.lookup(func) == variables.SkipFilesVariable:
+                return variables.SkipFilesVariable(func, source=source)
             else:
                 return variables.UserFunctionVariable(func, source=source)
         elif isinstance(obj, classmethod):
@@ -724,6 +726,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # TODO: Merge if/else into trace_rules.lookup()
             if trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
                 return variables.TorchInGraphFunctionVariable(func, source=source)
+            elif trace_rules.lookup(func) == variables.SkipFilesVariable:
+                return variables.SkipFilesVariable(func, source=source)
             else:
                 return variables.UserFunctionVariable(func, source=source)
         elif isinstance(subobj, classmethod):
@@ -755,9 +759,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
-                # TODO: Merge elif/else into trace_rules.lookup()
+                # TODO: Merge if/else into trace_rules.lookup()
                 elif trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
                     return variables.TorchInGraphFunctionVariable(func, source=source)
+                elif trace_rules.lookup(func) == variables.SkipFilesVariable:
+                    return variables.SkipFilesVariable(func, source=source)
                 else:
                     return variables.UserFunctionVariable(func, source=source)
 
