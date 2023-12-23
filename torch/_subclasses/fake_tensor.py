@@ -644,7 +644,7 @@ def masked_select(fake_mode, func, self, mask):
     )
 
     if not has_free_symbols(self.numel()):
-        if self.numel() >= 2:
+        if self.numel() > 2:
             maxval = int(self.numel())
 
     _constrain_range_for_size(nnz, max=maxval)
