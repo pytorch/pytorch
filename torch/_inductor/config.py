@@ -541,7 +541,7 @@ class triton:
     spill_threshold: int = 16
 
     # Generate code containing the newer tl.make_block_ptr() API for loads/store
-    use_block_ptr = True
+    use_block_ptr = False
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
