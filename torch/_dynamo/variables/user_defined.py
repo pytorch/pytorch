@@ -102,11 +102,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
-            # TODO: Merge the if/else into trace_rules.lookup()
-            if trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
-                return variables.TorchInGraphFunctionVariable(func, source=source)
-            elif trace_rules.lookup(func) == variables.SkipFilesVariable:
-                return variables.SkipFilesVariable(func, source=source)
+            if trace_rules.lookup(func) is not None:
+                return trace_rules.lookup(func).create_with_source(func, source=source)
             else:
                 return variables.UserFunctionVariable(func, source=source)
         elif isinstance(obj, classmethod):
@@ -723,11 +720,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
             func = subobj.__get__(self.value)
-            # TODO: Merge if/else into trace_rules.lookup()
-            if trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
-                return variables.TorchInGraphFunctionVariable(func, source=source)
-            elif trace_rules.lookup(func) == variables.SkipFilesVariable:
-                return variables.SkipFilesVariable(func, source=source)
+            if trace_rules.lookup(func) is not None:
+                return trace_rules.lookup(func).create_with_source(func, source=source)
             else:
                 return variables.UserFunctionVariable(func, source=source)
         elif isinstance(subobj, classmethod):
@@ -759,11 +753,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
-                # TODO: Merge if/else into trace_rules.lookup()
-                elif trace_rules.lookup(func) == variables.TorchInGraphFunctionVariable:
-                    return variables.TorchInGraphFunctionVariable(func, source=source)
-                elif trace_rules.lookup(func) == variables.SkipFilesVariable:
-                    return variables.SkipFilesVariable(func, source=source)
+                elif trace_rules.lookup(func) is not None:
+                    return trace_rules.lookup(func).create_with_source(
+                        func, source=source
+                    )
                 else:
                     return variables.UserFunctionVariable(func, source=source)
 
