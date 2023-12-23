@@ -29,6 +29,8 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError
 
+from ._safeguard import GradModeUnsupportedSafeguard
+
 from .dynamic_shapes import _process_constraints, Constraint
 from .exported_program import (
     _disable_prexisiting_fake_mode,
@@ -45,8 +47,6 @@ from .graph_signature import (
     SymIntArgument,
     TensorArgument,
 )
-
-from .safeguard import GradModeUnsupportedSafeguard
 
 
 @dataclasses.dataclass
