@@ -5196,31 +5196,9 @@ def meta__sdpa_flash_cpu_backward(
     attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
 ):
-    batch_size = query.size(0)
-    num_heads = query.size(1)
-    head_dim = query.size(3)
-    len_q = query.size(2)
-    len_k = key.size(2)
-
-    grad_q = torch.empty_permuted(
-        (batch_size, num_heads, len_q, head_dim),
-        (0, 2, 1, 3),
-        dtype=query.dtype,
-        device=query.device,
-    )
-    grad_k = torch.empty_permuted(
-        (batch_size, num_heads, len_k, head_dim),
-        (0, 2, 1, 3),
-        dtype=key.dtype,
-        device=key.device,
-    )
-    grad_v = torch.empty_permuted(
-        (batch_size, num_heads, len_k, head_dim),
-        (0, 2, 1, 3),
-        dtype=value.dtype,
-        device=value.device,
-    )
-
+    grad_q = torch.empty_like(query).transpose(1, 2)
+    grad_k = torch.empty_like(key).transpose(1, 2)
+    grad_v = torch.empty_like(value).transpose(1, 2)
     return grad_q, grad_k, grad_v
 
 
