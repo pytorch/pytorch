@@ -218,6 +218,9 @@ def should_pad_bench_key(
 def should_pad_bench(
     mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
+    if torch._inductor.config.shape_pad_always:
+        return True
+
     do_bench = functools.partial(
         utils.do_bench,
         warmup=5,
