@@ -6,6 +6,7 @@ import unittest
 import warnings
 import operator
 from collections.abc import Iterable
+from torch.nn.utils import stateless
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db, skip, xfail, skipOps
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
@@ -1456,6 +1457,54 @@ def forward(self, a_1):
     div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
     return div""")
 
+    def test_make_fx_with_custom_tracer_preserving_nn_module_stack(self):
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                return x + self.bar(x)
+
+        gm = make_fx(Foo())(torch.randn(4, 4))
+        for node in gm.graph.nodes:
+            self.assertTrue("nn_module_stack" not in node.meta)
+
+        foo = Foo()
+
+        def functional_call(*args, **kwargs):
+            with stateless._reparametrize_module(foo, {}):
+                return foo(*args, **kwargs)
+
+        functional_call._orig_mod = foo
+
+        gm_with_stack = make_fx(functional_call, record_module_stack=True)(torch.randn(4, 4))
+        found = False
+        for node in gm_with_stack.graph.nodes:
+            if "nn_module_stack" in node.meta:
+                if len(node.meta["nn_module_stack"]) == 1:
+                    self.assertTrue("custom_tracer_preserving_nn_module_stack.<locals>.Foo" in str(node.meta["nn_module_stack"]))
+                    found = True
+                elif len(node.meta["nn_module_stack"]) == 2:
+                    self.assertTrue("preserving_nn_module_stack.<locals>.Bar" in str(node.meta["nn_module_stack"]))
+                    found = True
+                else:
+                    # there can be at most 2 level
+                    self.assertTrue(False)
+
+        self.assertTrue(found)
+
+        gm_without_stack = make_fx(functional_call)(torch.randn(4, 4))
+        for node in gm_without_stack.graph.nodes:
+            self.assertTrue("nn_module_stack" not in node.meta)
 
     def test_symint_to_tensor(self):
         def f(a):
