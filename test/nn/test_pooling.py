@@ -380,6 +380,7 @@ class TestPoolingNN(NNTestCase):
 
     def test_quantized_max_pool1d_empty_kernel(self):
         # This used to segfault when called with an empty kernel
+        # see https://github.com/pytorch/pytorch/issues/116323
         base = torch.randn(1)
         temp_tensor = torch.quantize_per_tensor(base, 0.1, 10, torch.quint2x4)
         with self.assertRaises(RuntimeError):
