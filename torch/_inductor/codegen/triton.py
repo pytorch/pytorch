@@ -1023,7 +1023,22 @@ class IterationRangesRoot(IterationRanges):
                     f"{self.name} = {line}",
                 ]
             )
-        code.writeline(f"{x}mask = {self.name} < {x}numel")
+
+        max_block = config.triton.max_block[x.upper()]
+        no_mask_threshold = int(sympy.gcd(self.numel, max_block))
+        no_mask_line = f"{x}mask = tl.full({x}index.shape, 1, tl.int1)"
+        if no_mask_threshold == max_block:
+            code.writeline(no_mask_line)
+        else:
+            code.splice(
+                f"""
+                if {x.upper()}BLOCK <= {no_mask_threshold}:
+                    {no_mask_line}
+                else:
+                    {x}mask = {self.name} < {x}numel
+                """,
+                strip=True,
+            )
 
 
 class IterationRangesEntry(IterationRanges):
