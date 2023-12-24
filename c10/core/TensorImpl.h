@@ -1,17 +1,26 @@
 #pragma once
 
+#include <c10/core/Allocator.h>
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/InferenceMode.h>
+#include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
 #include <c10/core/SymBool.h>
+#include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/SymbolicShapeMeta.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/PyObjectSlot.h>
 #include <c10/core/impl/SizesAndStrides.h>
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
@@ -24,10 +33,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrunk to a smaller size. As a result, a Tensor is always going to
@@ -43,11 +56,6 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // is larger than this flag in bytes.  This only applies to functions which
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
-
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
-#endif
 
 namespace at {
 class Tensor;
@@ -713,14 +721,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
       return dim_custom();
     }
-    return sizes_and_strides_.size();
+    return static_cast<int64_t>(sizes_and_strides_.size());
   }
 
   int64_t dim_default() const {
     if (has_symbolic_sizes_strides_) {
-      return symbolic_shape_meta().sizes_.size();
+      return static_cast<int64_t>(symbolic_shape_meta().sizes_.size());
     } else {
-      return sizes_and_strides_.size();
+      return static_cast<int64_t>(sizes_and_strides_.size());
     }
   }
 
@@ -1674,7 +1682,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_ = {};
     set_storage_access_should_throw();
     get_extra_meta().custom_data_ptr_error_msg_ = s;
-    get_extra_meta().custom_storage_error_msg_ = s;
+    get_extra_meta().custom_storage_error_msg_ = std::move(s);
   }
 
  protected:
@@ -2433,7 +2441,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   template <
       typename T,
-      typename = typename std::enable_if<std::is_integral<T>::value>::type>
+      typename = typename std::enable_if_t<std::is_integral_v<T>>>
   bool SetDimsTemplate(ArrayRef<T> src) {
     TORCH_CHECK(
         !has_symbolic_sizes_strides_,
@@ -3227,5 +3235,3 @@ static_assert(
 #undef C10_GCC_VERSION_MINOR
 
 } // namespace c10
-
-C10_CLANG_DIAGNOSTIC_POP()

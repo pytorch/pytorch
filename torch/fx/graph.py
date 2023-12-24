@@ -701,16 +701,16 @@ class _PyTreeCodeGen(CodeGen):
         if len(free_vars) > 0:  # pytree has placeholders in it
             # when kwargs is present, in_spec is tuple(args, kwargs)
             has_args_kwargs_tuple = self.pytree_info.in_spec.type == tuple and \
-                len(self.pytree_info.in_spec.children_specs) == 2 and \
+                self.pytree_info.in_spec.num_children == 2 and \
                 self.pytree_info.in_spec.children_specs[0].type == tuple and \
                 self.pytree_info.in_spec.children_specs[1].type == dict
             fn_kwargs = '{}'
             fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
             if has_args_kwargs_tuple:
-                count_args = len(self.pytree_info.in_spec.children_specs[0].children_specs)
+                count_args = self.pytree_info.in_spec.children_specs[0].num_children
                 fn_args = self.pytree_info.orig_args[:count_args]
                 fn_kwargs = '{' + ', '.join(f"'{k}':{v}" for k, v in zip(
-                                  self.pytree_info.in_spec.children_specs[1].context,
+                                  self.pytree_info.in_spec.children_specs[1].entries(),
                                   self.pytree_info.orig_args[count_args:])) + '}'
                 fn_signature = f"([{', '.join(fn_args)}], {fn_kwargs}), self._in_spec"
 
@@ -1393,13 +1393,11 @@ class Graph:
 
         seen_names : Set[str] = set()
         seen_values : Set[Node] = set()
-        for i, node in enumerate(self.nodes):
+        for node in self.nodes:
             if node.op not in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output']:
                 raise RuntimeError(f'Node {node} had unknown opcode {node.op}!')
             if node.graph is not self:
                 raise RuntimeError(f'Node \'{node}\' does not belong to this Graph!')
-            if node.op == 'output' and i != len(self.nodes) - 1:
-                raise RuntimeError("Output node must be the last node on the graph, found earlier output")
             map_arg(node.args, lambda arg: check_arg(arg, node))
             map_arg(node.kwargs, lambda arg: check_arg(arg, node))
             seen_values.add(node)
