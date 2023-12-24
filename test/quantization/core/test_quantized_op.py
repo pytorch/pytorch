@@ -6600,14 +6600,16 @@ class TestQuantizedConv(TestCase):
         )
 
         if post_op.binary_attr == "sum":
-            X2_q_cpu_tensor = X2_q.int_repr()
+            X2_cpu_tensor = (
+                X2_q.int_repr()
+                if qconv_output_dtype is None
+                else X2_q.dequantize().to(qconv_x2_dtype)
+            ).contiguous(memory_format=torch.channels_last)
             Y_q_cpu_tensor = qconv(
                 X_q_cpu_tensor,
                 X_scale,
                 X_zero_point,
-                X2_q_cpu_tensor
-                if qconv_output_dtype is None
-                else X2_q.dequantize().to(qconv_x2_dtype),
+                X2_cpu_tensor,
                 X2_scale,
                 X2_zero_point,
                 packed_weight,
@@ -7074,14 +7076,14 @@ class TestQuantizedConv(TestCase):
         W_zero_point = [-3]
         use_bias_list = [False, True]
         use_channelwise = True
-        qconv_x2_dtype_list = [torch.float32, torch.bfloat16]
         output_dtype_list = [torch.float32, torch.bfloat16]
         X2_zero_point = 0
         use_relu_list = [True, False]
         options = itertools.product(
-            use_bias_list, output_dtype_list, qconv_x2_dtype_list, use_relu_list
+            use_bias_list, output_dtype_list, use_relu_list
         )
-        for use_bias, output_dtype, qconv_x2_dtype, use_relu in options:
+        for use_bias, output_dtype, use_relu in options:
+            qconv_x2_dtype = output_dtype
             qconv = torch.ops.onednn.qconv2d_pointwise.binary
             qconv_prepack = torch.ops.onednn.qconv_prepack
             conv_op = torch.nn.Conv2d(
