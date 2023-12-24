@@ -1537,7 +1537,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     """
                 )
             else:
-                if not config.split_const_graph:
+                if not config.use_runtime_constant_folding:
                     # If we do not split the constant graph, we'll just create
                     # an empty implementation when wrapping the main module.
                     self.prefix.splice(
@@ -1861,7 +1861,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ) {
             """
         )
-        if not config.split_const_graph:
+        if not config.use_runtime_constant_folding:
             self.prefix.writeline("}\n")
             return
 

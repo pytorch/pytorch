@@ -4323,7 +4323,7 @@ class DeviceCopy(ExternKernelOut):
                 (r.name in V.graph.constants and isinstance(r, dependencies.MemoryDep))
                 for r in x.get_reads()
             )
-            and (not V.graph.aot_mode or not config.split_const_graph)
+            and (not V.graph.aot_mode or not config.use_runtime_constant_folding)
         ):
             return x.constant_to_device(device)
 

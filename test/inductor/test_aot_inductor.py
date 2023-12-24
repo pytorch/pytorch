@@ -200,7 +200,7 @@ class AOTInductorTestsTemplate:
                 return torch.matmul(x, w)
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
-        with config.patch({"split_const_graph": True}):
+        with config.patch({"use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
     @requires_cuda()
