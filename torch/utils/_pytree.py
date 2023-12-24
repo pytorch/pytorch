@@ -514,7 +514,7 @@ class TreeSpec:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def children(self) -> List["TreeSpec"]:
-        return self.children_specs.copy()
+        return self.children_specs
 
     def child(self, index: int) -> "TreeSpec":
         return self.children_specs[index]
