@@ -128,7 +128,7 @@ class PytreeThunk:
         assert self.spec is None or self.spec == spec
         self.spec = spec
         if type(self.spec) in [tuple, list] and all(
-            child.is_leaf() for child in spec.children_specs
+            child.is_leaf() for child in spec.children()
         ):
             self.is_simple = True
         if self.spec.is_leaf():  # type: ignore[union-attr]

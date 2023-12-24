@@ -513,6 +513,12 @@ class TreeSpec:
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
 
+    def children(self) -> List["TreeSpec"]:
+        return self.children_specs.copy()
+
+    def child(self, index: int) -> "TreeSpec":
+        return self.children_specs[index]
+
     def entries(self) -> List[Any]:
         if self.type in STANDARD_DICT_TYPES:
             dict_context = (
@@ -521,8 +527,8 @@ class TreeSpec:
             return dict_context  # type: ignore[no-any-return]
         return list(range(self.num_children))
 
-    def children(self) -> List["TreeSpec"]:
-        return self.children_specs.copy()
+    def entry(self, index: int) -> Any:
+        return self.entries()[index]
 
     def _flatten_up_to_helper(self, tree: PyTree, subtrees: List[PyTree]) -> None:
         if self.is_leaf():
