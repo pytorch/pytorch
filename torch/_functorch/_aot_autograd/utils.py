@@ -6,7 +6,7 @@ import dataclasses
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Iterable, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -135,14 +135,12 @@ class PytreeThunk:
         if self.spec.is_leaf():
             self.is_really_simple = True
 
-    def unflatten(self, x: Iterable[Any]) -> Any:
-        assert self.spec is not None
-        if not isinstance(x, (list, tuple)):
-            x = list(x)
+    def unflatten(self, x: List[Any]) -> Any:
         if self.is_really_simple:
             return x[0]
         if self.is_simple:
             return x
+        assert self.spec is not None
         return pytree.tree_unflatten(x, self.spec)
 
 
