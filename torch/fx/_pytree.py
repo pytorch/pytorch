@@ -62,7 +62,7 @@ def _namedtuple_flatten_spec(d: NamedTuple, spec: TreeSpec) -> List[Any]:
 
 
 def _dict_flatten_spec_exact_match(d: Dict[Any, Any], spec: TreeSpec) -> bool:
-    return len(d) == len(spec.context)
+    return len(d) == spec.num_children
 
 
 def _list_flatten_spec_exact_match(d: List[Any], spec: TreeSpec) -> bool:
