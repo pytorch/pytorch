@@ -856,7 +856,7 @@ TreeSpec(tuple, None, [*,
         roundtrip_spec = py_pytree.treespec_loads(py_pytree.treespec_dumps(spec))
         # The context in the namedtuple is different now because we recreated
         # the namedtuple type.
-        self.assertEqual(spec.context._fields, roundtrip_spec.context._fields)
+        self.assertEqual(spec._context._fields, roundtrip_spec._context._fields)
 
     @unittest.expectedFailure
     def test_pytree_custom_type_serialize_bad(self):

@@ -465,8 +465,8 @@ class _ModuleFrame:
             assert signature.in_spec.num_children == 2
             args_spec = signature.in_spec.child(0)
             kwargs_spec = signature.in_spec.child(1)
-            assert args_spec.context is None
-            assert kwargs_spec.context is not None
+            assert args_spec._context is None
+            assert kwargs_spec._context is not None
 
             with self.graph.inserting_after(None):
                 arg_nodes = []
