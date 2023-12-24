@@ -122,7 +122,6 @@ manual_torch_name_rule_map = {
     "torch._C.set_autocast_xla_enabled": SkipFilesVariable,
     "torch.resize_as_": SkipFilesVariable,
     "torch.resize_as_sparse_": SkipFilesVariable,
-    "torch._tensor._convert": SkipFilesVariable,
 }
 
 
