@@ -54,6 +54,14 @@ bool pack_vtensor_to_staging(
 void is_broadcastable(const Tensor& input1, const Tensor& input2);
 std::vector<int64_t> broadcast_size(const Tensor& t1, const Tensor& t2);
 
+// This function returns the value of the underlying texel at pos of the given
+// tensor. It is useful for debugging and unit test at which we want to verify
+// the actual tensor layout. This function is very slow as it involves a fench
+// to extract just one value.
+api::utils::vec4 extract_texel(
+    const Tensor& tensor,
+    const api::utils::ivec3& pos);
+
 } // namespace utils
 } // namespace ops
 } // namespace vulkan

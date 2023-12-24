@@ -158,7 +158,6 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
             OperatingSystem.LINUX,
             arches=["11.8", "12.1"],
             python_versions=["3.8"],
-            gen_special_an_non_special_wheel=False,
         ),
         branches="main",
     ),

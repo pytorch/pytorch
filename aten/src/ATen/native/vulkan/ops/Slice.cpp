@@ -267,7 +267,6 @@ Tensor slice(
 
   auto len = end_val - start_val;
   newSizes[dim] = (len + step - 1) / step; // round-up
-  TORCH_CHECK(len > 0, "Vulkan doesn't support zero-sized slice");
 
   // generalize into 4D tensor
   uvec4 in_tsize{1u, 1u, 1u, 1u}, out_tsize{1u, 1u, 1u, 1u};

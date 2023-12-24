@@ -115,7 +115,6 @@ for a more comprehensive overview of the tradeoffs between these quantization
 types.
 
 Operator coverage varies between dynamic and static quantization and is captured in the table below.
-Note that for FX quantization, the corresponding functionals are also supported.
 
 +---------------------------+-------------------+--------------------+
 |                           |Static             | Dynamic            |
@@ -135,7 +134,7 @@ Note that for FX quantization, the corresponding functionals are also supported.
 |nn.EmbeddingBag            | Y (activations    |                    |
 |                           | are in fp32)      | Y                  |
 +---------------------------+-------------------+--------------------+
-|nn.Embedding               | Y                 | N                  |
+|nn.Embedding               | Y                 | Y                  |
 +---------------------------+-------------------+--------------------+
 | nn.MultiheadAttention     | Y (through        | Not supported      |
 |                           | custom modules)   |                    |
@@ -557,8 +556,14 @@ API Example::
 
 Please follow these tutorials to get started on PyTorch 2 Export Quantization:
 
+Modeling Users:
+
 - `PyTorch 2 Export Post Training Quantization <https://pytorch.org/tutorials/prototype/pt2e_quant_ptq.html>`_
+- `PyTorch 2 Export Post Training Quantization with X86 Backend through Inductor <https://pytorch.org/tutorials/prototype/pt2e_quant_ptq_x86_inductor.html>`_
 - `PyTorch 2 Export Quantization Aware Training <https://pytorch.org/tutorials/prototype/pt2e_quant_qat.html>`_
+
+Backend Developers (please check out all Modeling Users docs as well):
+
 - `How to Write a Quantizer for PyTorch 2 Export Quantization <https://pytorch.org/tutorials/prototype/pt2e_quantizer.html>`_
 
 
@@ -875,7 +880,7 @@ Note that for FX Graph Mode Quantization, the corresponding functionals are also
 |nn.EmbeddingBag            | Y (activations    |                    |
 |                           | are in fp32)      | Y                  |
 +---------------------------+-------------------+--------------------+
-|nn.Embedding               | Y                 | N                  |
+|nn.Embedding               | Y                 | Y                  |
 +---------------------------+-------------------+--------------------+
 |nn.MultiheadAttention      |Not Supported      | Not supported      |
 +---------------------------+-------------------+--------------------+
@@ -1086,10 +1091,11 @@ Frequently Asked Questions
    We don't have official GPU support yet, but this is an area of active development, you can find more information
    `here <https://github.com/pytorch/pytorch/issues/87395>`_
 
-2. Where can I get ONNX support for my quantized model?:
+2. Where can I get ONNX support for my quantized model?
 
-   You can open an issue in `GitHub - onnx/onnx <https://github.com/onnx/onnx>`_  when you encounter problems with ONNX,
-   or reach out to people in this list: `PyTorch Governance | Maintainers | ONNX exporter <https://pytorch.org/docs/stable/community/persons_of_interest.html#onnx-exporter>`_
+   If you get errors exporting the model (using APIs under ``torch.onnx``), you may open an issue in the PyTorch repository. Prefix the issue title with ``[ONNX]`` and tag the issue as ``module: onnx``.
+
+   If you encounter issues with ONNX Runtime, open an issue at `GitHub - microsoft/onnxruntime <https://github.com/microsoft/onnxruntime/issues/>`_.
 
 3. How can I use quantization with LSTM's?:
 

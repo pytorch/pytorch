@@ -14,16 +14,12 @@
 #pragma once
 #include <c10/macros/Macros.h>
 #include <c10/util/llvmMathExtras.h>
+#include <array>
 #include <cassert>
 #include <climits>
-#include <cstring>
 #include <iterator>
 #include <list>
-
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
-#endif
+#include <ostream>
 
 namespace c10 {
 
@@ -54,18 +50,12 @@ struct SparseBitVectorElement {
  private:
   // Index of Element in terms of where first bit starts.
   unsigned ElementIndex;
-  BitWord Bits[BITWORDS_PER_ELEMENT];
+  std::array<BitWord, BITWORDS_PER_ELEMENT> Bits{};
 
-  SparseBitVectorElement() {
-    ElementIndex = ~0U;
-    memset(&Bits[0], 0, sizeof(BitWord) * BITWORDS_PER_ELEMENT);
-  }
+  SparseBitVectorElement() : ElementIndex(~0U) {}
 
  public:
-  explicit SparseBitVectorElement(unsigned Idx) {
-    ElementIndex = Idx;
-    memset(&Bits[0], 0, sizeof(BitWord) * BITWORDS_PER_ELEMENT);
-  }
+  explicit SparseBitVectorElement(unsigned Idx) : ElementIndex(Idx) {}
 
   // Comparison.
   bool operator==(const SparseBitVectorElement& RHS) const {
@@ -274,8 +264,10 @@ class SparseBitVector {
     // 'this' is always const in this particular function and we sort out the
     // difference in FindLowerBound and FindLowerBoundConst.
     ElementListIter Begin =
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         const_cast<SparseBitVector<ElementSize>*>(this)->Elements.begin();
     ElementListIter End =
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         const_cast<SparseBitVector<ElementSize>*>(this)->Elements.end();
 
     if (Elements.empty()) {
@@ -313,7 +305,7 @@ class SparseBitVector {
   // than it would be, in order to be efficient.
   class SparseBitVectorIterator {
    private:
-    bool AtEnd;
+    bool AtEnd{false};
 
     const SparseBitVector<ElementSize>* BitVector = nullptr;
 
@@ -321,13 +313,13 @@ class SparseBitVector {
     ElementListConstIter Iter;
 
     // Current bit number inside of our bitmap.
-    unsigned BitNumber;
+    unsigned BitNumber{0};
 
     // Current word number inside of our element.
-    unsigned WordNumber;
+    unsigned WordNumber{0};
 
     // Current bits from the element.
-    typename SparseBitVectorElement<ElementSize>::BitWord Bits;
+    typename SparseBitVectorElement<ElementSize>::BitWord Bits{0};
 
     // Move our iterator to the first non-zero bit in the bitmap.
     void AdvanceToFirstNonZero() {
@@ -392,12 +384,10 @@ class SparseBitVector {
     SparseBitVectorIterator(
         const SparseBitVector<ElementSize>* RHS,
         bool end = false)
-        : BitVector(RHS) {
-      Iter = BitVector->Elements.begin();
-      BitNumber = 0;
-      Bits = 0;
-      WordNumber = ~0;
-      AtEnd = end;
+        : AtEnd(end),
+          BitVector(RHS),
+          Iter(BitVector->Elements.begin()),
+          WordNumber(~0) {
       AdvanceToFirstNonZero();
     }
 
@@ -442,7 +432,7 @@ class SparseBitVector {
 
   SparseBitVector(const SparseBitVector& RHS)
       : Elements(RHS.Elements), CurrElementIter(Elements.begin()) {}
-  SparseBitVector(SparseBitVector&& RHS)
+  SparseBitVector(SparseBitVector&& RHS) noexcept
       : Elements(std::move(RHS.Elements)), CurrElementIter(Elements.begin()) {}
 
   // Clear.
@@ -459,7 +449,7 @@ class SparseBitVector {
     CurrElementIter = Elements.begin();
     return *this;
   }
-  SparseBitVector& operator=(SparseBitVector&& RHS) {
+  SparseBitVector& operator=(SparseBitVector&& RHS) noexcept {
     Elements = std::move(RHS.Elements);
     CurrElementIter = Elements.begin();
     return *this;
@@ -612,7 +602,7 @@ class SparseBitVector {
       if (Iter1->index() > Iter2->index()) {
         ++Iter2;
       } else if (Iter1->index() == Iter2->index()) {
-        bool BecameZero;
+        bool BecameZero = false;
         changed |= Iter1->intersectWith(*Iter2, BecameZero);
         if (BecameZero) {
           ElementListIter IterTmp = Iter1;
@@ -666,7 +656,7 @@ class SparseBitVector {
       if (Iter1->index() > Iter2->index()) {
         ++Iter2;
       } else if (Iter1->index() == Iter2->index()) {
-        bool BecameZero;
+        bool BecameZero = false;
         changed |= Iter1->intersectWithComplement(*Iter2, BecameZero);
         if (BecameZero) {
           ElementListIter IterTmp = Iter1;
@@ -900,5 +890,3 @@ std::ostream& operator<<(
 }
 
 } // end namespace c10
-
-C10_CLANG_DIAGNOSTIC_POP()

@@ -28,9 +28,7 @@ def parallel_apply(
     kwargs_tup: Optional[Sequence[Dict[str, Any]]] = None,
     devices: Optional[Sequence[Optional[Union[int, torch.device]]]] = None,
 ) -> List[Any]:
-    r"""Applies each `module` in :attr:`modules` in parallel on arguments
-    contained in :attr:`inputs` (positional) and :attr:`kwargs_tup` (keyword)
-    on each of :attr:`devices`.
+    r"""Apply each `module` in :attr:`modules` in parallel on each of :attr:`devices`.
 
     Args:
         modules (Module): modules to be parallelized

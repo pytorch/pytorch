@@ -168,6 +168,7 @@ struct python_error : public std::exception {
     other.traceback = nullptr;
   }
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~python_error() override {
     if (type || value || traceback) {
       pybind11::gil_scoped_acquire gil;

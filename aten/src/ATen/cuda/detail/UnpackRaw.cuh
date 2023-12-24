@@ -1,6 +1,6 @@
 // No "#pragma once" because this is a raw definition that can be copied by jit codegen.
 // Eager mode clients should not include this file directly, instead,
-// they should #include <ATen/cuda/CUDAGraphsUtils.cuh>, which has a #pragma once.
+// they should #include <ATen/cuda/PhiloxUtils.cuh>, which has a #pragma once.
 
 namespace at::cuda::philox {
 

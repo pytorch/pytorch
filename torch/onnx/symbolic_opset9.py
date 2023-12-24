@@ -5996,7 +5996,7 @@ def linalg_vector_norm(
     dtype: torch._C.Value,
 ):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
-    if dim is None:
+    if symbolic_helper._is_none(dim):
         self = symbolic_helper._reshape_helper(g, self, [-1])
         keepdim = False
 
@@ -6008,6 +6008,10 @@ def linalg_vector_norm(
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "linalg_vector_norm", 9, 11, "ord=0 not supported", self
         )
+    elif ord == 1:
+        result = _reduce_op_symbolic("ReduceL1")(g, self, dim=dim, keepdim=keepdim)
+    elif ord == 2:
+        result = _reduce_op_symbolic("ReduceL2")(g, self, dim=dim, keepdim=keepdim)
     else:
         ord_op = g.op("Constant", value_t=torch.tensor(ord, dtype=torch.float32))
         result = symbolic_helper._reducesum_helper(
@@ -6022,6 +6026,10 @@ def linalg_vector_norm(
                 ord_op,
             ),
         )
+
+    if not symbolic_helper._is_none(dtype):
+        dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+        result = g.op("Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type())  # type: ignore[arg-type]
     return result
 
 

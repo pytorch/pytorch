@@ -53,6 +53,7 @@ Sections start with a reference to the source file where the code related to the
   - [Interpreter](#interpreter)
   - [Graph Executor](#graph-executor)
     - [Specialization](#specialization)
+    - [Dynamic Shapes Options](#dynamic-shapes-options)
     - [Pre-derivative Optimization](#pre-derivative-optimization)
     - [Required Passes](#required-passes)
     - [Derivative Preserving Optimization](#derivative-preserving-optimization)
@@ -941,6 +942,22 @@ The executor *specializes* the `Graph` for the particular set of inputs. Special
 * defined - whether the `Tensor` exists or is a placeholder
 
 The ArgumentSpec object is used as a key into a cache that holds pre-optimized Code objects (held in an ExecutionPlan object). On a cache hit, an InterpreterState is created and the Code in the cache is run.
+
+### Dynamic Shapes Options ###
+
+In the "Specialization" section above, it is mentioned that "rank, but not size" is specialized on. This is partially true; size is sometimes specialized on because this specialization can sometimes produce more efficient code. By default, static shapes are specialized initially; if more shapes are observed then eventually the graph executor will generate a dynamic-shape version that doesn't depend on specific input shapes.
+
+To control these settings, you can use `torch._C._jit_set_fusion_strategy()`; it takes as an argument a list of tuples in the format `(type, number)` where `type` is a string in `{"DYNAMIC" ,"STATIC"}` and `number` is an integer.
+
+For example:
+```
+torch._C._jit_set_fusion_strategy([
+    ("STATIC", 2),
+    ("DYNAMIC", 20),
+])
+```
+
+This will make two attempts to generate static-shape graphs, and after that fall back to generating dynamic-shape graphs. If for some reason compilation keeps occuring (even with dynamic-shape graphs - e.g. this could happen if ranks or dtypes vary), after 20 compilation attempts the graph executor will fall back to running the graph without any attempts to compile it.
 
 ### Pre-derivative Optimization ###
 

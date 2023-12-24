@@ -239,7 +239,7 @@ class TestCostModel(DTensorOpTestBase):
                 {},
             )
             # test sharding prop
-            output_sharding = DTensor._propagator.propagate_op_sharding_non_cached(
+            output_sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding_non_cached(
                 op_schema
             )
             self.assertFalse(output_sharding.needs_redistribute)
@@ -286,7 +286,7 @@ class TestCostModel(DTensorOpTestBase):
                 {},
             )
             # test sharding prop
-            output_sharding = DTensor._propagator.propagate_op_sharding_non_cached(
+            output_sharding = DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding_non_cached(
                 op_schema
             )
             self.assertFalse(output_sharding.needs_redistribute)

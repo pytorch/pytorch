@@ -8,8 +8,6 @@
 #include <cstdint>
 #include <cstdlib>
 
-#include <ATen/cuda/CUDAContext.h>
-
 #include <cuda_fp16.h>
 
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800

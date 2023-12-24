@@ -28,15 +28,19 @@ from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
     IteratorVariable,
+    ItertoolsVariable,
     RepeatIteratorVariable,
 )
+from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
+    RestrictedListSubclassVariable,
     SliceVariable,
+    TupleIteratorVariable,
     TupleVariable,
 )
 from .misc import (
@@ -52,6 +56,7 @@ from .misc import (
     NumpyVariable,
     PythonModuleVariable,
     SkipFilesVariable,
+    StringFormatVariable,
     SuperVariable,
     UnknownVariable,
 )
@@ -63,7 +68,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchCtxManagerClassVariable, TorchVariable
+from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
@@ -75,8 +80,10 @@ __all__ = [
     "ConstantVariable",
     "ConstDictVariable",
     "ContextWrappingVariable",
-    "DataClassVariable",
+    "CountIteratorVariable",
     "CustomizedDictVariable",
+    "CycleIteratorVariable",
+    "DataClassVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
@@ -86,27 +93,29 @@ __all__ = [
     "GradModeVariable",
     "InspectSignatureVariable",
     "IteratorVariable",
-    "RepeatIteratorVariable",
-    "CountIteratorVariable",
-    "CycleIteratorVariable",
+    "ItertoolsVariable",
     "LambdaVariable",
+    "LazyVariableTracker",
     "ListIteratorVariable",
     "ListVariable",
-    "NNModuleVariable",
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "NewCellVariable",
     "NewGlobalVariable",
+    "NNModuleVariable",
     "NumpyNdarrayVariable",
     "NumpyVariable",
     "PythonModuleVariable",
     "RangeVariable",
-    "SliceVariable",
+    "RepeatIteratorVariable",
+    "RestrictedListSubclassVariable",
     "SkipFilesVariable",
+    "SliceVariable",
+    "StringFormatVariable",
     "SuperVariable",
     "TensorVariable",
     "TorchCtxManagerClassVariable",
-    "TorchVariable",
+    "TorchInGraphFunctionVariable",
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",

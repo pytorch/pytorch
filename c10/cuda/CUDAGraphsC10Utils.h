@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/cuda/CUDAStream.h>
+#include <iostream>
 #include <utility>
 
 // CUDA Graphs utils used by c10 and aten.

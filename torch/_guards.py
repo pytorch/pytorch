@@ -29,6 +29,7 @@ from typing import (
 import torch
 from torch.utils import _pytree as pytree
 from torch.utils._traceback import CapturedTraceback
+from torch.utils.weak import WeakTensorKeyDictionary
 
 log = logging.getLogger(__name__)
 
@@ -241,7 +242,13 @@ class Guard:
         return output
 
     def create(self, builder: GuardBuilderBase):
-        return self.create_fn(builder, self)
+        try:
+            return self.create_fn(builder, self)
+        except Exception:
+            log.error("Error while creating guard:\n%s", str(self).rstrip())
+            if self.stack:
+                log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
+            raise
 
     def is_nn_module(self):
         return self.source.is_nn_module()
@@ -382,7 +389,7 @@ class ModuleContextCheckpointState:
 
 class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
     def __init__(self):
-        self.nn_modules: Dict[str, torch.nn.Module] = {}
+        self.nn_modules: Dict[str, Any] = {}
 
     def copy_graphstate(self):
         return ModuleContextCheckpointState(dict(self.nn_modules))
@@ -530,7 +537,12 @@ CompileContext is a more overarching context that encompasses multiple restarts.
 
 class CompileContext:
     @staticmethod
-    def get() -> Optional[CompileContext]:
+    def get() -> CompileContext:
+        assert _TLS.compile_context is not None
+        return _TLS.compile_context
+
+    @staticmethod
+    def try_get() -> Optional[CompileContext]:
         return getattr(_TLS, "compile_context", None)
 
     def __init__(self, compile_id):
@@ -540,14 +552,14 @@ class CompileContext:
 
     @staticmethod
     def current_compile_id():
-        self = CompileContext.get()
+        self = CompileContext.try_get()
         if self is None:
             return None
         return self.compile_id
 
     @staticmethod
     def current_trace_id():
-        self = CompileContext.get()
+        self = CompileContext.try_get()
         if self is None:
             return None
         if self.compile_id is None:
@@ -564,8 +576,16 @@ class TracingContext:
     """
 
     @staticmethod
-    def get() -> Optional[TracingContext]:
+    def try_get() -> Optional[TracingContext]:
         return getattr(_TLS, "tracing_context", None)
+
+    @staticmethod
+    def get() -> TracingContext:
+        if ctx := TracingContext.try_get():
+            return ctx
+        raise RuntimeError(
+            "TracingContext.get() must be called within an ongoing trace."
+        )
 
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
@@ -599,13 +619,14 @@ class TracingContext:
         # ints that are known to be size-like and may have 0/1 entries that we
         # must not specialize on.
         self.force_unspec_int_unbacked_size_like = False
+        # See note [Tensor Fakification and Symbol Caching]
+        self.tensor_to_context = WeakTensorKeyDictionary()
 
     @staticmethod
     @contextmanager
     def patch(**kwargs):
         prior = {}
         ctx = TracingContext.get()
-        assert ctx is not None
 
         for key in kwargs.keys():
             # KeyError on invalid entry
@@ -620,7 +641,7 @@ class TracingContext:
 
     @staticmethod
     def extract_stack():
-        self = TracingContext.get()
+        self = TracingContext.try_get()
         if self is None:
             return traceback.StackSummary()
         stack = list(self.frame_summary_stack)
@@ -634,9 +655,6 @@ class TracingContext:
     @contextlib.contextmanager
     def clear_frame():
         tc = TracingContext.get()
-        assert (
-            tc is not None
-        ), "Frame context manager must be called within an ongoing trace."
         with unittest.mock.patch.object(
             tc, "frame_summary_stack", []
         ), unittest.mock.patch.object(tc, "loc_in_frame", None):
@@ -670,9 +688,6 @@ class TracingContext:
         # frame_summary can be None to solely take advantage of real_stack
         # attachment to thrown exceptions
         tc = TracingContext.get()
-        assert (
-            tc is not None
-        ), "Frame context manager must be called within an ongoing trace."
         if frame_summary is not None:
             tc.frame_summary_stack.append(frame_summary)
         old = tc.loc_in_frame
@@ -691,7 +706,7 @@ class TracingContext:
     @staticmethod
     @contextlib.contextmanager
     def report_output_strides():
-        tc = TracingContext.get()
+        tc = TracingContext.try_get()
         if tc is None:
             yield None
             return
@@ -704,11 +719,9 @@ class TracingContext:
 
     @staticmethod
     def set_current_loc(filename, lineno, frame_name):
-        tc = TracingContext.get()
-        assert (
-            tc is not None
-        ), "Loc context manager must be called within an ongoing trace."
-        tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
+        TracingContext.get().loc_in_frame = traceback.FrameSummary(
+            filename, lineno, frame_name
+        )
 
 
 @contextmanager
@@ -722,7 +735,7 @@ def compile_context(context: CompileContext):
 
 
 @contextmanager
-def tracing(context: TracingContext):
+def tracing(context: Optional[TracingContext]):
     """
     This function installs the passed in tracing context as a dynamic scoped
     global variable.
@@ -791,8 +804,7 @@ def detect_fake_mode(inputs: Any = None):
 
     fake_modes = []
 
-    context = TracingContext.get()
-    if context is not None:
+    if context := TracingContext.try_get():
         fake_mode = context.fake_mode
         if fake_mode is not None:
             fake_modes.append((fake_mode, "tracing context", 0))

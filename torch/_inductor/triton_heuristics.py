@@ -18,8 +18,8 @@ import torch
 
 import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.utils import dynamo_timed
-from torch.utils._triton import has_triton, has_triton_package
+from torch._dynamo.utils import dynamo_timed, get_first_attr
+from torch.utils._triton import has_triton_package
 
 from . import config
 from .codecache import cache_dir, CudaKernelParamCache
@@ -42,16 +42,19 @@ log = logging.getLogger(__name__)
 if has_triton_package():
     import triton
     from triton import Config
+    from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
+
+    try:
+        from triton.compiler.compiler import ASTSource
+    except ImportError:
+        ASTSource = None
 else:
     Config = object
     triton = None
     KernelInterface = object
-
-if has_triton():
-    from triton.runtime.jit import get_cuda_stream
-else:
-    get_cuda_stream = None
+    OutOfResources = object
+    ASTSource = None
 
 
 _NUM_THREADS_PER_WARP = 32
@@ -76,7 +79,7 @@ class AutotuneHint(Enum):
 
 
 def autotune_hints_to_configs(
-    hints: Set[AutotuneHint], size_hints, block_size
+    hints: Set[AutotuneHint], size_hints, block_size: int
 ) -> List[Config]:
     """
     AutotuneHints can be attached to the metadata of triton kernels for providing
@@ -87,15 +90,15 @@ def autotune_hints_to_configs(
     Based on those hints, this function will generate a list of additional autotuning
     configs to try.
     """
-    xyz_options: Tuple[Tuple[Any, ...], ...]
+    xyz_options: Tuple[Tuple[int, Optional[int], Optional[int]], ...]
     configs = []
 
     for hint in hints:
         if hint == AutotuneHint.ELEMENTS_PER_WARP_32:
             if len(size_hints) == 1:
-                xyz_options = ((block_size // 4,),)
+                xyz_options = ((block_size // 4, None, None),)
             elif len(size_hints) == 2:
-                xyz_options = ((block_size // 4, 1), (1, block_size // 4))
+                xyz_options = ((block_size // 4, 1, None), (1, block_size // 4, None))
             elif len(size_hints) == 3:
                 xyz_options = (
                     (block_size // 4, 1, 1),
@@ -104,7 +107,7 @@ def autotune_hints_to_configs(
                 )
             for xyz in xyz_options:
                 configs.append(
-                    triton_config(  # type: ignore[misc]
+                    triton_config(
                         size_hints,
                         *xyz,
                         num_elements_per_warp=32,
@@ -182,11 +185,20 @@ class CachingAutotuner(KernelInterface):
             self.launchers = []
             compiled_binaries = []
             for c in self.configs:
-                compiled_binary, launcher = self._precompile_config(
-                    c, warm_cache_only_with_cc
-                )
+                try:
+                    compiled_binary, launcher = self._precompile_config(
+                        c, warm_cache_only_with_cc
+                    )
+                except OutOfResources:
+                    # Skip the config if we run out of resource
+                    continue
                 self.launchers.append(launcher)
                 compiled_binaries.append(compiled_binary)
+
+            if len(self.launchers) == 0:
+                raise RuntimeError(
+                    "No valid triton configs. Report a fatal compilation error"
+                )
 
             seen_configs = set(self.configs)
 
@@ -198,9 +210,9 @@ class CachingAutotuner(KernelInterface):
                 config.dynamic_scale_rblock
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
-                # TODO not enable for H100 yet since we haven't got a chance to test this
-                # on H100. Will remove this check once we test on H100
-                and device_prop.major == 8
+                # Disable for AMDGPU as Triton is not ready to return n_regs for a compiled_binary.
+                and torch.version.hip is None
+                and device_prop.major >= 8
             ):
                 for triton_config, compiled_binary in zip(
                     self.configs, compiled_binaries
@@ -227,8 +239,11 @@ class CachingAutotuner(KernelInterface):
                     # from PLBartForCausalLM, latency improve from
                     # 7.795ms to 4.883ms.
                     #
-                    # Note both A100 and H100 have 65536 32-bit registers per SM.
-                    if nreg <= 65536 // device_prop.max_threads_per_multi_processor:
+                    if (
+                        nreg
+                        <= device_prop.regs_per_multiprocessor
+                        // device_prop.max_threads_per_multi_processor
+                    ):
                         continue
 
                     nreg_per_warp = nreg * 32
@@ -236,14 +251,16 @@ class CachingAutotuner(KernelInterface):
 
                     # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
                     # The formula below is a tighter upper bound since we have the assumption that
-                    #   nreg > 65536 // device_prop.max_threads_per_multi_processor
+                    #   nreg > device_prop.regs_per_multiprocessor // device_prop.max_threads_per_multi_processor
                     # due to the if condition above and:
-                    #   65536 / nreg_per_block
-                    #   = 65536 / (nreg * 32 * num_warps)
-                    #   < 65536 / ((65536 / max_threads_per_multi_processor) * 32 * num_warps)
+                    #   regs_per_multiprocessor / nreg_per_block
+                    #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
+                    #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
                     #   = max_threads_per_multi_processor / (32 * num_warps)
                     # Using a tigher upper bound can reveal more optimization opportunities.
-                    max_blocks_per_sm = max(65536 // nreg_per_block, 1)
+                    max_blocks_per_sm = max(
+                        device_prop.regs_per_multiprocessor // nreg_per_block, 1
+                    )
 
                     if (
                         total_block
@@ -276,13 +293,45 @@ class CachingAutotuner(KernelInterface):
         compile_meta["device_type"] = "cuda" if torch.version.hip is None else "hip"
 
         if warm_cache_only_with_cc:
-            return (
-                triton.compile(
+            cc = warm_cache_only_with_cc
+        else:
+            # Use device_type 'cuda' for both cuda and hip devices to retrieve
+            # the compute capability.
+            device_type = "cuda"
+            device_id = compile_meta["device"]
+            device_interface = get_interface_for_device(device_type)
+            device = torch.device(device_type, device_id)
+            cc = device_interface.get_compute_capability(device)
+
+        compile_meta["cc"] = cc
+
+        if ASTSource:
+            compile_args = (
+                ASTSource(
                     self.fn,
-                    warm_cache_only=True,
-                    cc=warm_cache_only_with_cc,
-                    **compile_meta,
+                    compile_meta["signature"],
+                    compile_meta["constants"],
+                    compile_meta["configs"][0],
                 ),
+            )
+
+            target = (compile_meta["device_type"], cc)
+            options = {
+                "num_warps": compile_meta["num_warps"],
+                "num_stages": compile_meta["num_stages"],
+                "debug": compile_meta["debug"],
+            }
+            compile_kwargs = {
+                "target": target,
+                "options": options,
+            }
+        else:
+            compile_args = (self.fn,)
+            compile_kwargs = compile_meta
+
+        if warm_cache_only_with_cc:
+            return (
+                triton.compile(*compile_args, **compile_kwargs),
                 None,
             )
 
@@ -290,10 +339,8 @@ class CachingAutotuner(KernelInterface):
         with torch.cuda.device(compile_meta["device"]):
             # need to initialize context
             torch.cuda.synchronize(torch.cuda.current_device())
-            binary = triton.compile(
-                self.fn,
-                **compile_meta,
-            )
+
+            binary = triton.compile(*compile_args, **compile_kwargs)
             binary._init_handles()
 
         call_args = [
@@ -301,9 +348,7 @@ class CachingAutotuner(KernelInterface):
             for i, arg in enumerate(self.fn.arg_names)
             if i not in self.fn.constexprs
         ]
-        def_args = list(self.fn.arg_names)
-        while def_args and def_args[-1] in cfg.kwargs:
-            def_args.pop()
+        def_args = [name for name in self.fn.arg_names if name not in cfg.kwargs]
 
         scope = {
             "grid_meta": cfg.kwargs,
@@ -312,6 +357,14 @@ class CachingAutotuner(KernelInterface):
             "set_device": torch.cuda.set_device,
             "current_device": torch.cuda.current_device,
         }
+
+        scope["runner"] = get_first_attr(binary, "run", "c_wrapper")
+        scope["function"] = get_first_attr(binary, "function", "cu_function")
+        cluster_dims = get_first_attr(binary, "cluster_dims", "clusterDims")
+        scope["cta_args"] = (
+            (binary.num_ctas, *cluster_dims) if hasattr(binary, "num_ctas") else ()
+        )
+
         exec(
             f"""
             def launcher({', '.join(def_args)}, grid, stream):
@@ -320,15 +373,10 @@ class CachingAutotuner(KernelInterface):
                 else:
                     grid_0, grid_1, grid_2 = grid
 
-                if hasattr(bin, "num_ctas"):
-                    bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps,
-                                bin.num_ctas, *bin.clusterDims, bin.shared,
-                                stream, bin.cu_function, None, None, None,
-                                {', '.join(call_args)})
-                else:
-                    bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
-                                stream, bin.cu_function, None, None, None,
-                                {', '.join(call_args)})
+                runner(grid_0, grid_1, grid_2, bin.num_warps,
+                            *cta_args, bin.shared,
+                            stream, function, None, None, None,
+                            {', '.join(call_args)})
                 return bin
             """.lstrip(),
             scope,
@@ -356,6 +404,8 @@ class CachingAutotuner(KernelInterface):
                 launcher.n_spills,
             )
             return float("inf")
+
+        from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
 
         stream = get_cuda_stream(torch.cuda.current_device())
 
@@ -449,8 +499,22 @@ class CachingAutotuner(KernelInterface):
             "num_warps": launcher.bin.num_warps,
             "shared_mem": launcher.bin.shared,
             "stream": stream,
+            # User defined triton kernels will have arbitrary kwarg names
+            "meta": launcher.config.kwargs,
         }
-        CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
+
+        if torch.version.hip is None:
+            CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
+        else:
+            # There is some divergence between CUDA and ROCm here.
+            # On ROCm's triton we only have the the path to the binary, not the binary itself.
+            # For ROCm we will copy the binary to the new location instead of writing to file
+            import pathlib
+
+            launcher.bin.asm["hsaco"] = pathlib.Path(
+                launcher.bin.asm["hsaco_path"]
+            ).read_bytes()
+            CudaKernelParamCache.set(key, params, launcher.bin.asm["hsaco"])
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """
@@ -580,11 +644,37 @@ def end_graph():
     overall_time = sum(call[0] for call in collected_calls)
     overall_gb = sum(call[1] for call in collected_calls)
     cur_file = inspect.stack()[1].filename
-    print(f"SUMMARY ({cur_file})")
-    print(
+    summary_str = (
+        f"SUMMARY ({cur_file})\n"
         f"{overall_time:.2f}ms   \t {overall_gb:.2f} GB\t {overall_gb/(overall_time/1e3):.2f}GB/s"
     )
+    print(summary_str)
     print()
+    output_file = config.profile_bandwidth_output
+    if output_file is not None:
+        # sort perf numbers in descending order, i.e. placing the
+        # most runtime-heavy kernels at the top of the list
+        sorted_calls = sorted(collected_calls, key=lambda c: float(c[0]), reverse=True)
+        try:
+            with open(output_file, "a") as file:
+                log.debug("Save profile bandwidth results to %s", output_file)
+                file.write("====================\n")
+                file.write(f"TRITON KERNELS BANDWIDTH INFO ({cur_file})\n")
+                for ms, num_gb, gb_per_s, kernel_name in sorted_calls:
+                    # also display the runtime percentage for each kernel
+                    percentage = f"{ms/overall_time*100:.2f}%"
+                    suffix = f" \t {percentage} \t {kernel_name}"
+                    bw_info_str = create_bandwidth_info_str(
+                        ms, num_gb, gb_per_s, suffix=suffix
+                    )
+                    file.write(bw_info_str + "\n")
+                file.write(f"{summary_str}\n\n")
+        except Exception as e:
+            log.warning(
+                "failed to write profile bandwidth result into %s: %s",
+                output_file,
+                e,
+            )
 
 
 class DebugAutotuner(CachingAutotuner):
@@ -595,7 +685,7 @@ class DebugAutotuner(CachingAutotuner):
 
     def run(self, *args, grid, stream):
         possible_names = _find_names(self)
-        kernel_name = f"{max(possible_names, key=lambda x: len(x))}"
+        kernel_name = f"{max(possible_names, key=len)}"
         if not re.match(self.regex_filter, kernel_name):
             return
         super().run(*args, grid=grid, stream=stream)
@@ -1065,7 +1155,7 @@ def reduction(
         contiguous_config = triton_config_reduction(
             size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
         )
-        outer_config = triton_config_reduction(size_hints, 128, 8)
+        outer_config = triton_config_reduction(size_hints, 64, 8)
         tiny_config = triton_config_reduction(
             size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
         )

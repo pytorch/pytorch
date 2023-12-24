@@ -79,7 +79,7 @@ class ExportCase:
     name: str
     extra_inputs: Optional[InputsType] = None  # For testing graph generalization.
     # Tags associated with the use case. (e.g dynamic-shape, escape-hatch)
-    tags: Set[str] = field(default_factory=lambda: set())
+    tags: Set[str] = field(default_factory=set)
     support_level: SupportLevel = SupportLevel.SUPPORTED
     dynamic_shapes: Optional[Dict[str, Any]] = None
 

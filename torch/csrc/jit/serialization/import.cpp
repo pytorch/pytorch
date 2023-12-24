@@ -1,15 +1,11 @@
 #include <ATen/core/interned_strings.h>
-#include <c10/core/CPUAllocator.h>
-#include <c10/core/impl/alloc_cpu.h>
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/in_memory_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <caffe2/serialize/istream_adapter.h>
 #include <caffe2/serialize/read_adapter_interface.h>
-#include <caffe2/serialize/versions.h>
 
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 
@@ -31,22 +27,18 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/import_source.h>
-#include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
 #include <ATen/ATen.h>
 #include <fmt/format.h>
 
-#include <fstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace torch::jit {
 
-using caffe2::serialize::FileAdapter;
-using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;

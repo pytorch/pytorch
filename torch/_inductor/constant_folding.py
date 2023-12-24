@@ -109,6 +109,13 @@ class ConstantFolder(torch.fx.Interpreter):
         ):
             return self.unknown_value
 
+        # TODO - constant folding triton kernel returns the inputs -- fix this
+        if (
+            node.op == "call_function"
+            and node.name == "triton_kernel_wrapper_functional_proxy"
+        ):
+            return self.unknown_value
+
         # skip constructors, since inductor generates optimal code for them already
         # and turning into tensor would result in an additional global memory read
         # TODO - more complicated strategy
@@ -178,7 +185,8 @@ def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] =
     erased_params = []
     for node in gm.graph.nodes:
         if node.op == "get_attr" and len(node.users) == 0:
-            delattr(gm, node.target)
+            if hasattr(gm, node.target):
+                delattr(gm, node.target)
             erased_params.append(node)
 
     for node in erased_params:

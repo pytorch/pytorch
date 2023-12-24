@@ -26,7 +26,9 @@
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/Dict.h>
+#include <ATen/core/Generator.h>
 #include <ATen/core/ivalue.h>
+#include <c10/core/Device.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
@@ -875,5 +877,9 @@ struct OperatorGeneratorArgs {
       DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_WITHOUT_INT_COMPLEX_PAIR(     \
           aten_op, op, op, op, bool),                                    \
       DEFINE_STR_CMP_OP(aten_op, op)
+
+TORCH_API at::Generator make_generator_for_device(
+    c10::Device device,
+    c10::optional<int64_t> seed = c10::nullopt);
 
 } // namespace torch::jit

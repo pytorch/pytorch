@@ -127,6 +127,13 @@ def lp_pool2d(
     stride: Union[Optional[_size], Optional[int]] = ...,
     ceil_mode: bool = ...,
 ) -> Tensor: ...
+def lp_pool3d(
+    input: Tensor,
+    norm_type: float,
+    kernel_size: _size_3_t,
+    stride: Union[Optional[_size], Optional[int]] = ...,
+    ceil_mode: bool = ...,
+) -> Tensor: ...
 def adaptive_max_pool1d_with_indices(
     input: Tensor,
     output_size: _size,

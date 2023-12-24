@@ -37,7 +37,7 @@ def group_functions_by_op_name(
         for k, group in (
             itertools.groupby(
                 eligible_ops,
-                key=lambda g: config.func_name_base_str(g),
+                key=config.func_name_base_str,
             )
         )
     ]
@@ -48,7 +48,7 @@ def group_functions_by_op_name(
 def clang_format(cpp_file_path: str) -> None:
     import subprocess
 
-    subprocess.run(["clang-format", "-i", cpp_file_path])
+    subprocess.check_call(["clang-format", "-i", cpp_file_path])
 
 
 def write_cpp(cpp_ops: Sequence[str], file_path: str) -> None:

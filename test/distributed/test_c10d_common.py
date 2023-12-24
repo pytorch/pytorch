@@ -133,11 +133,11 @@ class AbstractTimeoutTest:
 class TimeoutTest(TestCase):
     @retry_on_connect_failures
     def test_store_based_barrier(self):
-        f = tempfile.NamedTemporaryFile()
+        f = tempfile.NamedTemporaryFile(delete=False)
         port = common.find_free_port()
 
         def thread_work(timeout, init_type, world_size, rank, error_list):
-            # we need to create a seperate store just for the store barrier test
+            # we need to create a separate store just for the store barrier test
             if init_type == "file":
                 barrier_store = dist.FileStore(f.name)
             elif init_type == "tcp":
@@ -572,7 +572,7 @@ class CommonDistributedDataParallelTest:
     @parametrize("use_reentrant", [True, False])
     def test_ddp_checkpointing_twice(self, use_reentrant):
         """
-        Checkpoitning twice fails for non-static graph with reentrant checkpoint
+        Checkpointing twice fails for non-static graph with reentrant checkpoint
         implementation, succeeds with non-reentrant checkpoint implementation.
         """
         process_group = self._get_process_group()
@@ -684,7 +684,7 @@ class CommonDistributedDataParallelTest:
     def test_ddp_checkpointing_twice_weight_sharing(self):
         """
         Checkpointing should work with static graph in the case of checkpointing
-        same layer twice and having weights shared acrosss layers.
+        same layer twice and having weights shared across layers.
         """
         process_group = self._get_process_group()
         torch.cuda.set_device(self.rank)
@@ -1756,7 +1756,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             pass
 
     def test_init_process_group_optional_backend(self):
-        with tempfile.NamedTemporaryFile() as f:
+        with tempfile.NamedTemporaryFile(delete=False) as f:
             store = dist.FileStore(f.name, self.world_size)
             # creates both gloo and nccl backend
             if dist.is_gloo_available() and dist.is_nccl_available():
@@ -1785,7 +1785,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                 if not dist.is_ucc_available():
                     continue
 
-            with tempfile.NamedTemporaryFile() as f:
+            with tempfile.NamedTemporaryFile(delete=False) as f:
                 store = dist.FileStore(f.name, self.world_size)
                 dist.init_process_group(
                     backend=backend,

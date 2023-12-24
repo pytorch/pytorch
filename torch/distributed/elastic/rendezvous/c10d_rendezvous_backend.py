@@ -204,8 +204,7 @@ def _create_file_store(params: RendezvousParameters) -> FileStore:
 
 
 def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend, Store]:
-    """Creates a new :py:class:`C10dRendezvousBackend` from the specified
-    parameters.
+    """Create a new :py:class:`C10dRendezvousBackend` from the specified parameters.
 
     +--------------+-----------------------------------------------------------+
     | Parameter    | Description                                               |

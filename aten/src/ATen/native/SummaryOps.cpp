@@ -13,7 +13,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 ///////////////// bincount /////////////////
 namespace {
@@ -82,4 +82,4 @@ _bincount_cpu(const Tensor& self, const c10::optional<Tensor>& weights_opt, int6
   });
 }
 
-}} // namespace at::native
+} // namespace at::native

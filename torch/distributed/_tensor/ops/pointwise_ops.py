@@ -2,7 +2,6 @@
 from typing import List, Tuple
 
 import torch
-from torch.distributed._tensor.device_mesh import DeviceMesh
 
 from torch.distributed._tensor.op_schema import (
     _is_inplace_op,
@@ -30,6 +29,7 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.distributed.device_mesh import DeviceMesh
 
 
 aten = torch.ops.aten
@@ -520,22 +520,35 @@ for op in pointwise_ops:
 
 # TODO: add all for_each ops
 for_each_ops = [
-    aten._foreach_addcmul_.Scalar,
+    aten._foreach_addcdiv_.Scalar,
     aten._foreach_addcdiv_.ScalarList,
+    aten._foreach_addcdiv_.Tensor,
+    aten._foreach_addcmul.Scalar,
+    aten._foreach_addcmul_.Scalar,
+    aten._foreach_addcmul_.ScalarList,
+    aten._foreach_addcmul_.Tensor,
+    aten._foreach_div_.List,
     aten._foreach_div_.ScalarList,
     aten._foreach_lerp_.Scalar,
     aten._foreach_maximum_.List,
+    aten._foreach_mul.Scalar,
+    aten._foreach_mul.List,
     aten._foreach_mul_.Scalar,
-    aten._foreach_neg_.default,
+    aten._foreach_mul_.ScalarList,
+    aten._foreach_mul_.List,
     aten._foreach_neg.default,
+    aten._foreach_neg_.default,
     aten._foreach_reciprocal_.default,
     aten._foreach_sub_.Scalar,
     aten._foreach_sqrt.default,
     aten._foreach_sqrt_.default,
+    aten._foreach_zero_.default,
 ]
 
 for_each_linearity_ops = [
+    aten._foreach_add.Scalar,
     aten._foreach_add_.Scalar,
+    aten._foreach_add_.ScalarList,
     aten._foreach_add.List,
     aten._foreach_add_.List,
 ]

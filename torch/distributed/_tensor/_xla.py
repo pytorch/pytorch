@@ -6,8 +6,8 @@ from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 import torch
 
 import torch.nn as nn
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import Placement, Replicate
+from torch.distributed.device_mesh import DeviceMesh
 
 log = logging.getLogger(__name__)
 

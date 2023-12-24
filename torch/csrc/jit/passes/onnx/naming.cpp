@@ -24,7 +24,7 @@ std::string nameFromRoot(
     return out;
   }
   auto parent = scope->parent();
-  while (!parent->isRoot()) {
+  while (isCompatibleScope(parent)) {
     out = std::string((*name_func)(parent)).append(layer_separator).append(out);
     parent = parent->parent();
   }

@@ -11,8 +11,6 @@
 #include <torch/csrc/utils/tensor_types.h>
 #include <cstring>
 
-#include <torch/csrc/Exceptions.h>
-
 PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name) {
   HANDLE_TH_ERRORS
   AT_ASSERT(name.length() < DTYPE_NAME_LEN);

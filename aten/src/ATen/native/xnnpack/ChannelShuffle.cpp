@@ -79,12 +79,19 @@ Tensor channel_shuffle(
                        input_padded_contig_nhwc.size(Layout::Activation4D::height) *
                        input_padded_contig_nhwc.size(Layout::Activation4D::width);
 
-  const xnn_status setup_status = xnn_setup_channel_shuffle_nc_x32(
+  const xnn_status reshape_status = xnn_reshape_channel_shuffle_nc_x32(
       channel_shuffle_op,                                           // operator
       batch_size,                                                   // batch_size
-      input_padded_contig_nhwc.data_ptr<float>(),                   // input
-      output_padded_contig_nhwc.data_ptr<float>(),                  // output
       caffe2::pthreadpool_());                                      // threadpool
+
+  TORCH_CHECK(
+      xnn_status_success == reshape_status,
+      "xnn_reshape_channel_shuffle_nc_x32 failed!");
+
+  const xnn_status setup_status = xnn_setup_channel_shuffle_nc_x32(
+      channel_shuffle_op,                                           // operator
+      input_padded_contig_nhwc.data_ptr<float>(),                   // input
+      output_padded_contig_nhwc.data_ptr<float>());                 // output
 
   TORCH_CHECK(
       xnn_status_success == setup_status,

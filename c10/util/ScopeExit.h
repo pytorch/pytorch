@@ -45,9 +45,8 @@ class scope_exit {
 //
 // Interface is specified by p0052r2.
 template <typename Callable>
-scope_exit<typename std::decay<Callable>::type> make_scope_exit(Callable&& F) {
-  return scope_exit<typename std::decay<Callable>::type>(
-      std::forward<Callable>(F));
+scope_exit<std::decay_t<Callable>> make_scope_exit(Callable&& F) {
+  return scope_exit<std::decay_t<Callable>>(std::forward<Callable>(F));
 }
 
 } // namespace c10

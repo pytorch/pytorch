@@ -421,6 +421,9 @@ public:
       map(std::expm1)
     );
   }
+  Vectorized<float> exp_u20() const {
+    return exp();
+  }
   Vectorized<float> fmod(const Vectorized<float>& q) const {
     USE_SLEEF(
       {

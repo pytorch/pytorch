@@ -21,6 +21,7 @@ class CheckpointImpl(Enum):
 class ActivationWrapper(torch.nn.Module):
     """
     Base class for Activation Checkpoint and Activation Offload.
+
     Not meant to be instantiated directly.
     """
 
@@ -56,7 +57,8 @@ class ActivationWrapper(torch.nn.Module):
         **kwargs,
     ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
         """
-        Overrides :meth:`named_parameters()` to intercept parameter names and
+        Override :meth:`named_parameters()` to intercept parameter names.
+
         remove all occurrences of ``_CHECKPOINT_PREFIX``.
         """
         for param_name, param in super().named_parameters(*args, **kwargs):
@@ -70,12 +72,12 @@ class ActivationWrapper(torch.nn.Module):
         *args: Any,
     ) -> Dict[str, Any]:
         """
-        _post_state_dict_hook() is called after the state_dict() of this
-        FSDP module is executed. For ``checkpoint_wrapper``, it will strip
-        checkpoint-wrapped module prefix so that this module can be loaded into
-        non-checkpointed modules. It would still be able to be loaded into
-        checkpoint-wrapped modules as this class adds the prefix back before
-        loading the state_dict.
+        _post_state_dict_hook() is called after the state_dict() of this FSDP module is executed.
+
+        For ``checkpoint_wrapper``, it will strip checkpoint-wrapped module prefix,
+        so that this module can be loaded into non-checkpointed modules.
+        It would still be able to be loaded into checkpoint-wrapped modules as this class,
+        adds the prefix back before loading the state_dict.
         """
         _replace_by_prefix(state_dict, f"{prefix}{_CHECKPOINT_PREFIX}", prefix)
         return state_dict
@@ -88,8 +90,9 @@ class ActivationWrapper(torch.nn.Module):
         *args: Any,
     ) -> None:
         """
-        ``_pre_state_dict_hook` is called before ``self._load_from_state_dict()``
-        is called. For ``checkpoint_wrapper``, it will add back the module
+        ``_pre_state_dict_hook` is called before ``self._load_from_state_dict()`` is called.
+
+        For ``checkpoint_wrapper``, it will add back the module
         prefix so that non-checkpointed modules can be loaded into
         checkpoint_wrapper modules properly.
         """
@@ -107,9 +110,10 @@ class OffloadWrapper(ActivationWrapper):
 
 class CheckpointWrapper(ActivationWrapper):
     """
-    An ``nn.Module`` that wraps another ``nn.Module`` with checkpointing. Note that this
-    module is not meant to be used directly, but instead it is to be used
-    through the ``checkpoint_wrapper`` function.
+    An ``nn.Module`` that wraps another ``nn.Module`` with checkpointing.
+
+    Note that this module is not meant to be used directly but instead,
+    it is to be used through the ``checkpoint_wrapper`` function.
     """
 
     def __init__(
@@ -168,12 +172,13 @@ class CheckpointWrapper(ActivationWrapper):
 
 def offload_wrapper(module: torch.nn.Module) -> torch.nn.Module:
     """
-    A convenience wrapper for activation offloading to CPU. If the module is wrapped
-    with this function, all subsequent calls to the module will automatically
-    offload intermediate activations to the CPU. Wrappers with activation
-    offload can be composed with ones that do recomputation-based
+    Wrap a module for activation offloading to CPU.
+
+    Offloads intermediate activations to the CPU for modules wrapped with this function.
+    Wrappers with activation offload can be composed with ones that do recomputation-based
     checkpoint to trade off increased compute versus increased CPU
     memory usage and additional H2D transfers.
+
     Usage::
         offloaded_module = offload_wrapper(module)
         outputs = checkpointed_module(inputs)
@@ -194,10 +199,11 @@ def checkpoint_wrapper(
     **checkpoint_fn_kwargs,
 ) -> torch.nn.Module:
     """
-    A convenience wrapper for activation checkpointing. If the module is wrapped
-    with this function, all subsequent calls to the module will automatically
-    perform checkpointing without the user having to explicitly call ``checkpoint``
-    function.
+    Wrap a module for activation checkpointing.
+
+    If the module is wrapped with this function, all subsequent calls to the module will,
+    automatically perform checkpointing without the user having to explicitly call ``checkpoint`` function.
+
     Usage::
         checkpointed_module = checkpoint_wrapper(module)
         outputs = checkpointed_module(inputs)
@@ -244,8 +250,9 @@ def apply_activation_checkpointing(
     auto_wrap_policy: Optional[Callable[[nn.Module, bool, int], bool]] = None,
 ):
     """
-    Applies :func:`checkpoint_wrapper` to modules within `model` based on a user-defined
-    configuration. For each module within `model`, the `check_fn` is used to decide
+    Apply :func:`checkpoint_wrapper` to modules within `model` based on a user-defined configuration.
+
+    For each module within `model`, the `check_fn` is used to decide
     whether `module` should be wrapped with :func:`checkpoint_wrapper` or not.
 
     Note::

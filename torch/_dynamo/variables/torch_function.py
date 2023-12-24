@@ -5,13 +5,14 @@ import torch.utils._pytree as pytree
 
 from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
 from ..exc import unimplemented
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalSource
-from ..utils import is_tensor_base_attr_getter
+from ..utils import has_torch_function, is_tensor_base_attr_getter
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import TupleVariable
-from .tensor import TensorVariable
-from .user_defined import UserDefinedClassVariable
+from .tensor import TensorSubclassVariable, TensorVariable
+from .user_defined import UserDefinedObjectVariable
 
 
 # [Note: __torch_function__] This feature is a prototype and has some rough edges (contact mlazos with issues):
@@ -43,8 +44,17 @@ banned_attrs = [
 ]
 
 
-def is_torch_function_user_object(obj):
-    return hasattr(obj, "__torch_function__")
+def _get_subclass_type(var):
+    assert isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable))
+    return var.python_type()
+
+
+def _get_subclass_type_var(tx, var):
+    assert isinstance(var, (TensorWithTFOverrideVariable, UserDefinedObjectVariable))
+    if isinstance(var, TensorWithTFOverrideVariable):
+        return var.class_type_var()
+    elif isinstance(var, UserDefinedObjectVariable):
+        return var.var_getattr(tx, "__class__")
 
 
 def _is_attr_overidden(tx, var, name):
@@ -84,7 +94,7 @@ def build_torch_function_fn(tx, value, source):
 def can_dispatch_torch_function(tx, args, kwargs):
     if tx.output.torch_function_enabled:
         all_args = pytree.arg_tree_leaves(*args, **kwargs)
-        return any(isinstance(arg, TensorWithTFOverrideVariable) for arg in all_args)
+        return any(has_torch_function(arg) for arg in all_args)
     else:
         return False
 
@@ -94,15 +104,15 @@ def dispatch_torch_function(tx, fn, args, kwargs):
 
     all_args = pytree.arg_tree_leaves(*args, **kwargs)
     overloaded_args = _get_overloaded_args(
-        [arg for arg in all_args if isinstance(arg, TensorWithTFOverrideVariable)],
-        lambda x: x.class_type,
+        [arg for arg in all_args if has_torch_function(arg)],
+        _get_subclass_type,
     )
 
     for arg in overloaded_args:
         res = arg.call_torch_function(
             tx,
             fn,
-            TupleVariable([arg.subclass_type_var() for arg in overloaded_args]),
+            TupleVariable([_get_subclass_type_var(tx, arg) for arg in overloaded_args]),
             args,
             kwargs,
         )
@@ -133,20 +143,21 @@ class TensorWithTFOverrideVariable(TensorVariable):
             kwargs.pop("class_type") is torch.Tensor
         ), "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
         var = cls(torch_function_fn=torch_function_fn, class_type=class_type, **kwargs)
+        var.install_global(tx)
+        return var
 
+    def install_global(self, tx):
         # stash the subclass type to rewrap an output tensor if needed
         # this is needed because the actual type needs to be available
         # each time the compiled artifact is run and outputs a wrapped tensor.
-        if var.global_mangled_class_name() not in tx.output.global_scope:
-            tx.output.install_global(var.global_mangled_class_name(), class_type)
-
-        return var
+        if self.global_mangled_class_name() not in tx.output.global_scope:
+            tx.output.install_global(self.global_mangled_class_name(), self.class_type)
 
     def python_type(self):
         return self.class_type
 
-    def subclass_type_var(self):
-        return UserDefinedClassVariable(
+    def class_type_var(self):
+        return TensorSubclassVariable(
             self.class_type, source=GlobalSource(self.global_mangled_class_name())
         )
 
@@ -157,7 +168,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # [Note: __torch_function__] We currently only support attributes that are defined on
         # base tensors, custom attribute accesses will graph break.
         import torch
-        from .builder import SourcelessBuilder, VariableBuilder
+        from .builder import SourcelessBuilder
 
         if name in banned_attrs or not hasattr(torch.Tensor, name):
             unimplemented(
@@ -166,26 +177,23 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
         if _is_attr_overidden(tx, self, name):
             unimplemented(
-                f"Accessing overidden method/attribute {name} on a tensor"
+                f"Accessing overridden method/attribute {name} on a tensor"
                 " subclass with a __torch_function__ override is not supported"
             )
 
         if tx.output.torch_function_enabled:
             if self.source:
-                get_fn = VariableBuilder(
-                    tx,
-                    source=AttrSource(
-                        AttrSource(AttrSource(self.source, "__class__"), name),
-                        "__get__",
-                    ),
-                )(inspect.getattr_static(self.python_type(), name).__get__)
-            else:
-                get_fn = SourcelessBuilder()(tx, getattr(torch.Tensor, name).__get__)
+                install_guard(
+                    AttrSource(AttrSource(self.source, "__class__"), name).make_guard(
+                        GuardBuilder.FUNCTION_MATCH
+                    )
+                )
+            get_fn = SourcelessBuilder()(tx, getattr(torch.Tensor, name).__get__)
 
             return self.call_torch_function(
                 tx,
                 get_fn,
-                TupleVariable([self.subclass_type_var()]),
+                TupleVariable([self.class_type_var()]),
                 [self],
                 {},
             )
@@ -195,7 +203,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
     def call_torch_function(self, tx, fn, types, args, kwargs):
         return call_torch_function(
             tx,
-            self.subclass_type_var(),
+            self.class_type_var(),
             self.torch_function_fn,
             fn,
             types,
@@ -218,7 +226,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
             if _is_attr_overidden(tx, self, name):
                 unimplemented(
-                    f"Calling overidden method {name} on a tensor"
+                    f"Calling overridden method {name} on a tensor"
                     " subclass with a __torch_function__ override is not supported"
                 )
 
@@ -234,4 +242,4 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name))
             return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
         else:
-            return self.tensor_variable.call_method(tx, name, args, kwargs)
+            return super().call_method(tx, name, args, kwargs)

@@ -1,6 +1,4 @@
-"""
-Spectral Normalization from https://arxiv.org/abs/1802.05957
-"""
+"""Spectral Normalization from https://arxiv.org/abs/1802.05957."""
 import torch
 from torch.nn.functional import normalize
 from typing import Any, Optional, TypeVar
@@ -222,7 +220,7 @@ def spectral_norm(module: T_module,
                   n_power_iterations: int = 1,
                   eps: float = 1e-12,
                   dim: Optional[int] = None) -> T_module:
-    r"""Applies spectral normalization to a parameter in the given module.
+    r"""Apply spectral normalization to a parameter in the given module.
 
     .. math::
         \mathbf{W}_{SN} = \dfrac{\mathbf{W}}{\sigma(\mathbf{W})},
@@ -283,7 +281,7 @@ def spectral_norm(module: T_module,
 
 
 def remove_spectral_norm(module: T_module, name: str = 'weight') -> T_module:
-    r"""Removes the spectral normalization reparameterization from a module.
+    r"""Remove the spectral normalization reparameterization from a module.
 
     Args:
         module (Module): containing module

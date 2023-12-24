@@ -724,7 +724,7 @@ HeapAllocator::MPSHeapAllocatorImpl& _getAllocImpl() {
   static HeapAllocator::MPSHeapAllocatorImpl s_allocatorImpl;
   return s_allocatorImpl;
 }
-}
+} // namespace
 
 // MPS allocator struct to be registered with Pytorch
 struct TORCH_API MPSAllocator final : public IMPSAllocator {

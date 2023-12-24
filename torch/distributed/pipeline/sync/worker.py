@@ -67,7 +67,7 @@ class Task:
 
 
 def worker(in_queue: InQueue, out_queue: OutQueue, device: torch.device) -> None:
-    """The main loop of a worker thread."""
+    """Main loop of a worker thread."""
     with use_device(device):
         while True:
             task = in_queue.get()

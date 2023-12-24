@@ -1,11 +1,11 @@
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Dict, List, Optional, Sequence
+from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor._utils import try_find_mesh_from_args
 from torch.distributed._tensor.op_schema import (
     DTensorSpec,
     OpInfo,
@@ -19,8 +19,17 @@ from torch.distributed._tensor.op_schema import (
     TupleStrategy,
 )
 from torch.distributed._tensor.placement_types import TensorMeta
+from torch.distributed.device_mesh import DeviceMesh
 
 aten = torch.ops.aten
+
+
+def _length(obj) -> int:
+    if obj is None:
+        return 0
+    if not isinstance(obj, Sequence):
+        return 1
+    return len(obj)
 
 
 class ShardingPropagator:
@@ -60,11 +69,17 @@ class ShardingPropagator:
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
 
-    def _propagate_tensor_meta(self, op_schema: OpSchema) -> object:
+    def _propagate_tensor_meta(
+        self, op_schema: OpSchema
+    ) -> Union[None, TensorMeta, List[TensorMeta], Tuple[TensorMeta, ...]]:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
         """
+        if op_schema.op == aten.equal.default:
+            # data dependent ops can't be used for fake propagation
+            return None
+
         # NOTE: We must call the tracing in fake tensor mode so that it
         # avoids materializing memory
         with FakeTensorMode():
@@ -98,22 +113,45 @@ class ShardingPropagator:
             return None
 
     def _wrap_output_spec_tensor_meta(
-        self, output_spec: OutputSpecType, output_tensor_meta: object
+        self,
+        op: OpOverload,
+        output_spec: OutputSpecType,
+        output_tensor_meta: Union[
+            None, TensorMeta, List[TensorMeta], Tuple[TensorMeta, ...]
+        ],
     ) -> None:
         """
         Wrap the output_spec with the tensor metadata from the output.
         """
-        if output_spec is not None:
-            if isinstance(output_spec, DTensorSpec):
-                assert isinstance(output_tensor_meta, TensorMeta)
-                output_spec.tensor_meta = output_tensor_meta
-            elif isinstance(output_spec, (tuple, list)):
-                for i, spec in enumerate(output_spec):
-                    if isinstance(spec, DTensorSpec):
-                        assert isinstance(output_tensor_meta, (tuple, list))
-                        output_tensor_meta_i = output_tensor_meta[i]
-                        assert isinstance(output_tensor_meta_i, TensorMeta)
-                        spec.tensor_meta = output_tensor_meta_i
+
+        if isinstance(output_spec, DTensorSpec):
+            if not isinstance(output_tensor_meta, TensorMeta):
+                # Either error due to ShardingPropagator or due to incorrect OutputSpec
+                if not isinstance(output_tensor_meta, (tuple, list)):
+                    raise ValueError(
+                        "ShardingPropagator error: output does not have an associated TensorMeta"
+                    )
+                raise ValueError(
+                    f"For the op {op.name()}, `output_spec` has 1 output which does not equal the "
+                    f"number of op outputs: {len(output_tensor_meta)}."
+                )
+            output_spec.tensor_meta = output_tensor_meta
+        elif isinstance(output_spec, (tuple, list)):
+            if not isinstance(output_tensor_meta, (tuple, list)) or len(
+                output_spec
+            ) != len(output_tensor_meta):
+                raise ValueError(
+                    f"For the op {op.name()}, `output_spec` has {len(output_spec)} outputs which does not equal the "
+                    f"number of op outputs {_length(output_tensor_meta)}."
+                )
+            for i, spec in enumerate(output_spec):
+                if isinstance(spec, DTensorSpec):
+                    output_tensor_meta_i = output_tensor_meta[i]
+                    if not isinstance(output_tensor_meta_i, TensorMeta):
+                        raise ValueError(
+                            f"ShardingPropagator error: output {i} does not have an associated TensorMeta"
+                        )
+                    spec.tensor_meta = output_tensor_meta_i
 
     def propagate(self, op_info: OpInfo) -> None:
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
@@ -130,14 +168,9 @@ class ShardingPropagator:
         """
         Propagate the sharding for an operator given the op_schema.
         """
-        # special case op list, we don't need to propagate for local
+        # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
-        skip_prop_list = {
-            aten._local_scalar_dense.default,
-            aten.equal.default,
-            aten.is_same_size.default,
-        }
-        if op_schema.op in skip_prop_list:
+        if op_schema.op is aten._local_scalar_dense.default:
             return OutputSharding(None, [op_schema])
 
         out_tensor_meta = self._propagate_tensor_meta(op_schema)
@@ -145,7 +178,11 @@ class ShardingPropagator:
         def spec_to_strategy(spec: object) -> object:
             if isinstance(spec, DTensorSpec):
                 return OpStrategy([PlacementStrategy(spec)])
-            elif isinstance(spec, (list, tuple)) and isinstance(spec[0], DTensorSpec):
+            elif (
+                isinstance(spec, (list, tuple))
+                and len(spec) > 0
+                and isinstance(spec[0], DTensorSpec)
+            ):
                 # tensor list create tuple strategy
                 tuple_strategy = [spec_to_strategy(s) for s in spec]
                 tuple_strategy = cast(Sequence[StrategyType], tuple_strategy)
@@ -157,17 +194,7 @@ class ShardingPropagator:
 
         if op_schema.op in self.op_strategy_funcs:
             # generate op strategy for the op.
-            mesh = None
-            for arg in op_schema.args_schema:
-                if isinstance(arg, DTensorSpec):
-                    mesh = arg.mesh
-                    break
-                elif isinstance(arg, (list, tuple)) and isinstance(arg[0], DTensorSpec):
-                    mesh = arg[0].mesh
-                    break
-
-            assert mesh is not None, f"Cannot find mesh for op {op_schema.op}"
-
+            mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
             # swap the args spec with args strategies
             args_op_strategy = [spec_to_strategy(i) for i in op_schema.args_schema]
 
@@ -213,12 +240,20 @@ class ShardingPropagator:
                     # returned from the op strategy
                     output_spec: OutputSpecType = tuple(
                         [
-                            output_strategy.output_spec
+                            # create a new DTensorSpec with the same placement as the
+                            # output_spec in output_strategy
+                            DTensorSpec(
+                                mesh=output_strategy.output_spec.mesh,
+                                placements=output_strategy.output_spec.placements,
+                                tensor_meta=output_strategy.output_spec.tensor_meta,
+                            )
                             for _ in range(len(op_schema.op._schema.returns))
                         ]
                     )
-                else:
+                elif op_schema.return_type_tensor():
                     output_spec = output_strategy.output_spec
+                else:
+                    output_spec = None
 
                 output_sharding = OutputSharding(
                     output_spec,
@@ -274,10 +309,9 @@ class ShardingPropagator:
                 raise ValueError("Unsupported op strategy type")
 
             # associate the output sharding with the output tensor metadata
-            if out_tensor_meta is not None:
-                self._wrap_output_spec_tensor_meta(
-                    output_sharding.output_spec, out_tensor_meta
-                )
+            self._wrap_output_spec_tensor_meta(
+                op_schema.op, output_sharding.output_spec, out_tensor_meta
+            )
             return output_sharding
         elif op_schema.op in self.op_to_rules:
             # propagate the sharding with rule
@@ -322,7 +356,7 @@ class ShardingPropagator:
 
             # associate the output sharding with the output tensor metadata
             self._wrap_output_spec_tensor_meta(
-                output_sharding.output_spec, out_tensor_meta
+                op_schema.op, output_sharding.output_spec, out_tensor_meta
             )
 
             return output_sharding

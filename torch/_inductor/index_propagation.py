@@ -164,7 +164,7 @@ class IndexPropagation:
         # Construct a new constant/index_expr from the SymPy expression
         if isinstance(expr, sympy.Integer):
             return self._inner.constant(int(expr), dtype)
-        elif not expr.free_symbols:
+        elif expr.is_number:
             return self._inner.constant(float(expr), dtype)
         return self._inner.index_expr(expr, dtype)
 

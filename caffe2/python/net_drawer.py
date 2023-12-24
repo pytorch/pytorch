@@ -374,7 +374,7 @@ def main():
         content = fid.read()
         graphs = utils.GetContentFromProtoString(
             content, {
-                caffe2_pb2.PlanDef: lambda x: GetOperatorMapForPlan(x),
+                caffe2_pb2.PlanDef: GetOperatorMapForPlan,
                 caffe2_pb2.NetDef: lambda x: {x.name: x.op},
             }
         )

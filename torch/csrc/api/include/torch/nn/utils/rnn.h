@@ -274,7 +274,7 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
     int64_t batch_dim = batch_first ? 0 : 1;
     return std::make_tuple(
         padded_output.index_select(batch_dim, unsorted_indices),
-        lengths.index({unsorted_indices}));
+        lengths.index({unsorted_indices.cpu()}));
   }
   return std::make_tuple(padded_output, lengths);
 }

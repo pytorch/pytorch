@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/IndexingUtils.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 bool canUse32BitIndexMath(const TensorBase& t, int64_t max_elem) {
   auto elements = t.sym_numel();
@@ -31,4 +31,4 @@ bool canUse32BitIndexMath(const TensorBase& t, int64_t max_elem) {
   return true;
 }
 
-}} // namespace at::native
+} // namespace at::native

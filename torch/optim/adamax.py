@@ -56,7 +56,7 @@ class Adamax(Optimizer):
         )
         if not step_is_tensor:
             for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]))
+                s["step"] = torch.tensor(float(s["step"]), dtype=torch.float32)
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
         has_complex = False
@@ -73,7 +73,7 @@ class Adamax(Optimizer):
 
             # State initialization
             if len(state) == 0:
-                state["step"] = torch.tensor(0.0)
+                state["step"] = torch.tensor(0.0, dtype=torch.float32)
                 state["exp_avg"] = torch.zeros_like(
                     p, memory_format=torch.preserve_format
                 )
@@ -88,7 +88,7 @@ class Adamax(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -204,7 +204,6 @@ def adamax(
 
     See :class:`~torch.optim.Adamax` for details.
     """
-
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"

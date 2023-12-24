@@ -25,6 +25,10 @@ class EditedByPR(HeuristicInterface):
 
         return test_rankings
 
+    def get_prediction_confidence(self, tests: List[str]) -> Dict[str, float]:
+        critical_tests = _get_modified_tests()
+        return {test: 1 for test in critical_tests if test in tests}
+
 
 def _get_modified_tests() -> Set[str]:
     try:

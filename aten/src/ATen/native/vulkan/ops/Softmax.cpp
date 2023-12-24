@@ -87,12 +87,12 @@ void set_softmax_kernel_params(
 
 Tensor softmax_internal(
     const at::Tensor& input_arg,
-    const int64_t dim,
-    const bool half_to_float,
-    const bool log_softmax) {
+    const int64_t dim_arg,
+    const bool half_to_float) {
   TORCH_CHECK(
       input_arg.dim() >= 1 && input_arg.dim() <= 4,
       "Vulkan softmax expects 1,2,3 or 4-dimensional input!");
+  int64_t dim = utils::normalize(dim_arg, input_arg.dim());
   TORCH_CHECK(
       dim >= 0 && dim < input_arg.dim(),
       "Softmax dim input was ",
@@ -140,25 +140,15 @@ Tensor softmax_internal(
       0,
   };
   api::ShaderInfo shader_descriptor;
-  if (log_softmax) {
-    if (dim == 1) {
-      shader_descriptor = VK_KERNEL(log_softmax);
-    } else {
-      TORCH_CHECK(
-          dim == 1,
-          "Vulkan log_softmax expects 4-dimensional input with dim=1!");
-    }
-  } else {
-    set_softmax_kernel_params(
-        input_arg.dim(),
-        dim,
-        v_input_sizes,
-        shader_descriptor,
-        input_shader_extents,
-        early_exit,
-        input_dim_stride,
-        input_tensor_dims);
-  }
+  set_softmax_kernel_params(
+      input_arg.dim(),
+      dim,
+      v_input_sizes,
+      shader_descriptor,
+      input_shader_extents,
+      early_exit,
+      input_dim_stride,
+      input_tensor_dims);
 
   const struct Block final {
     ivec4 input_shader_extents;
@@ -197,14 +187,14 @@ Tensor softmax(
     const at::Tensor& input_arg,
     const int64_t dim,
     const bool half_to_float) {
-  return softmax_internal(input_arg, dim, half_to_float, false);
+  return softmax_internal(input_arg, dim, half_to_float);
 }
 
 Tensor log_softmax(
     const at::Tensor& input_arg,
     const int64_t dim,
     const bool half_to_float) {
-  return softmax_internal(input_arg, dim, half_to_float, true);
+  return softmax_internal(input_arg, dim, half_to_float).log();
 }
 
 #ifdef USE_VULKAN_API

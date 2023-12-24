@@ -482,6 +482,21 @@ class TestNumPyInterop(TestCase):
                 else:
                     self.assertTrue(t == a)
 
+    @onlyCPU
+    def test_empty_tensors_interop(self, device):
+        x = torch.rand((), dtype=torch.float16)
+        y = torch.tensor(np.random.rand(0), dtype=torch.float16)
+        # Same can be achieved by running
+        # y = torch.empty_strided((0,), (0,), dtype=torch.float16)
+
+        # Regression test for https://github.com/pytorch/pytorch/issues/115068
+        self.assertEqual(torch.true_divide(x, y).shape, y.shape)
+        # Regression test for https://github.com/pytorch/pytorch/issues/115066
+        self.assertEqual(torch.mul(x, y).shape, y.shape)
+        # Regression test for https://github.com/pytorch/pytorch/issues/113037
+        self.assertEqual(torch.div(x, y, rounding_mode='floor').shape, y.shape)
+
+
 instantiate_device_type_tests(TestNumPyInterop, globals())
 
 if __name__ == '__main__':

@@ -290,6 +290,7 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
 // in a Meyer singleton), it implies that you must *leak* objects when
 // putting them in the registry.  This is done by deleting the destructor
 // on DeviceGuardImplInterface.
+// NOLINTNEXTLINE(*c-arrays*)
 extern C10_API std::atomic<const DeviceGuardImplInterface*>
     device_guard_impl_registry[static_cast<size_t>(
         DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];

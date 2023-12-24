@@ -23,7 +23,7 @@ class TestFeatureMapsOps(TestCase):
         # Input 1.
         workspace.FeedBlob(
             "in1",
-            np.array([[11.1, 12.1, 13.1, 14.1], [11.2, 12.2, 13.2, 14.2]], dtype=np.float)
+            np.array([[11.1, 12.1, 13.1, 14.1], [11.2, 12.2, 13.2, 14.2]], dtype=np.float64)
         )
         workspace.FeedBlob(
             "in1_presence",
@@ -42,7 +42,7 @@ class TestFeatureMapsOps(TestCase):
         )
         np.testing.assert_array_equal(
             workspace.FetchBlob("out_values"),
-            np.array([11.1, 14.1, 12.2, 13.2], dtype=np.float)
+            np.array([11.1, 14.1, 12.2, 13.2], dtype=np.float64)
         )
 
 
@@ -62,7 +62,7 @@ class TestFeatureMapsOps(TestCase):
         # Input 1.
         workspace.FeedBlob(
             "in1",
-            np.array([11.1, 0.0], dtype=np.float)
+            np.array([11.1, 0.0], dtype=np.float64)
         )
         workspace.FeedBlob(
             "in1_presence",
@@ -71,7 +71,7 @@ class TestFeatureMapsOps(TestCase):
         # Input 2.
         workspace.FeedBlob(
             "in2",
-            np.array([12.1, 12.2], dtype=np.float)
+            np.array([12.1, 12.2], dtype=np.float64)
         )
         workspace.FeedBlob(
             "in2_presence",
@@ -90,7 +90,7 @@ class TestFeatureMapsOps(TestCase):
         )
         np.testing.assert_array_equal(
             workspace.FetchBlob("out_values"),
-            np.array([11.1, 12.1, 12.2], dtype=np.float)
+            np.array([11.1, 12.1, 12.2], dtype=np.float64)
         )
 
     def test_merge_single_scalar_feature_tensors_gradient(self):
@@ -123,22 +123,22 @@ class TestFeatureMapsOps(TestCase):
         # Input 4.
         workspace.FeedBlob(
             "out_values_grad",
-            np.array([0.1, 1.1, 1.2, 2.3], dtype=np.float)
+            np.array([0.1, 1.1, 1.2, 2.3], dtype=np.float64)
         )
 
         workspace.RunOperatorOnce(op)
 
         np.testing.assert_array_equal(
             workspace.FetchBlob("in1_grad"),
-            np.array([0.1, 0], dtype=np.float)
+            np.array([0.1, 0], dtype=np.float64)
         )
         np.testing.assert_array_equal(
             workspace.FetchBlob("in2_grad"),
-            np.array([1.1, 1.2], dtype=np.float)
+            np.array([1.1, 1.2], dtype=np.float64)
         )
         np.testing.assert_array_equal(
             workspace.FetchBlob("in3_grad"),
-            np.array([0, 2.3], dtype=np.float)
+            np.array([0, 2.3], dtype=np.float64)
         )
 
     def test_merge_single_scalar_feature_tensors_gradient_with_strings(self):
@@ -210,7 +210,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in1_values",
-            np.array([11.1, 11.2], dtype=np.float)
+            np.array([11.1, 11.2], dtype=np.float64)
         )
         workspace.FeedBlob(
             "in1_presence",
@@ -223,7 +223,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in2_values",
-            np.array([12.1, 12.2, 12.3, 12.4], dtype=np.float)
+            np.array([12.1, 12.2, 12.3, 12.4], dtype=np.float64)
         )
         workspace.FeedBlob(
             "in2_presence",
@@ -246,7 +246,7 @@ class TestFeatureMapsOps(TestCase):
         )
         np.testing.assert_array_equal(
             workspace.FetchBlob("out_values_values"),
-            np.array([11.1, 11.2, 12.1, 12.2, 12.3, 12.4], dtype=np.float)
+            np.array([11.1, 11.2, 12.1, 12.2, 12.3, 12.4], dtype=np.float64)
         )
 
     def test_merge_single_list_feature_tensors_gradient(self):
@@ -293,18 +293,18 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "out_values_values_grad",
-            np.array([11.1, 11.2, 12.1, 12.2, 12.3, 12.4], dtype=np.float)
+            np.array([11.1, 11.2, 12.1, 12.2, 12.3, 12.4], dtype=np.float64)
         )
 
         workspace.RunOperatorOnce(op)
 
         np.testing.assert_array_equal(
             workspace.FetchBlob("in1_values_grad"),
-            np.array([11.1, 11.2], dtype=np.float)
+            np.array([11.1, 11.2], dtype=np.float64)
         )
         np.testing.assert_array_equal(
             workspace.FetchBlob("in2_values_grad"),
-            np.array([12.1, 12.2, 12.3, 12.4], dtype=np.float)
+            np.array([12.1, 12.2, 12.3, 12.4], dtype=np.float64)
         )
 
     def test_merge_single_map_feature_tensors(self):
@@ -332,7 +332,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in1_values",
-            np.array([11.1, 11.2], dtype=np.float)
+            np.array([11.1, 11.2], dtype=np.float64)
         )
         workspace.FeedBlob(
             "in1_presence",
@@ -349,7 +349,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in2_values",
-            np.array([12.1, 12.2, 12.3, 12.4], dtype=np.float)
+            np.array([12.1, 12.2, 12.3, 12.4], dtype=np.float64)
         )
         workspace.FeedBlob(
             "in2_presence",
@@ -376,7 +376,7 @@ class TestFeatureMapsOps(TestCase):
         )
         np.testing.assert_array_equal(
             workspace.FetchBlob("out_values_values"),
-            np.array([11.1, 11.2, 12.1, 12.2, 12.3, 12.4], dtype=np.float)
+            np.array([11.1, 11.2, 12.1, 12.2, 12.3, 12.4], dtype=np.float64)
         )
 
     def test_merge_multi_scalar_feature_tensors(self):
@@ -402,7 +402,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in1_values",
-            np.array([11.0, 12.0, 13.0], dtype=np.float)
+            np.array([11.0, 12.0, 13.0], dtype=np.float64)
         )
         # Input 2.
         workspace.FeedBlob(
@@ -415,7 +415,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in2_values",
-            np.array([14.0, 15.0, 16.0], dtype=np.float)
+            np.array([14.0, 15.0, 16.0], dtype=np.float64)
         )
 
         workspace.RunOperatorOnce(op)
@@ -430,7 +430,7 @@ class TestFeatureMapsOps(TestCase):
         )
         np.testing.assert_array_equal(
             workspace.FetchBlob("out_values"),
-            np.array([11.0, 14.0, 15.0, 12.0, 13.0, 16.0], dtype=np.float)
+            np.array([11.0, 14.0, 15.0, 12.0, 13.0, 16.0], dtype=np.float64)
         )
 
     def test_merge_multi_scalar_feature_tensors_gradient(self):
@@ -460,18 +460,18 @@ class TestFeatureMapsOps(TestCase):
         # Grad input.
         workspace.FeedBlob(
             "out_values_grad",
-            np.array([11.0, 14.0, 15.0, 12.0, 13.0, 16.0, 17.0], dtype=np.float)
+            np.array([11.0, 14.0, 15.0, 12.0, 13.0, 16.0, 17.0], dtype=np.float64)
         )
 
         workspace.RunOperatorOnce(op)
 
         np.testing.assert_array_equal(
             workspace.FetchBlob("in1_values_grad"),
-            np.array([11.0, 12.0, 13.0], dtype=np.float)
+            np.array([11.0, 12.0, 13.0], dtype=np.float64)
         )
         np.testing.assert_array_equal(
             workspace.FetchBlob("in2_values_grad"),
-            np.array([14.0, 15.0, 16.0, 17.0], dtype=np.float)
+            np.array([14.0, 15.0, 16.0, 17.0], dtype=np.float64)
         )
 
     def test_merge_multi_list_feature_tensors(self):
@@ -504,7 +504,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in1_values_values",
-            np.array([11.1, 11.2, 12.1, 12.2, 13.1, 13.2], dtype=np.float)
+            np.array([11.1, 11.2, 12.1, 12.2, 13.1, 13.2], dtype=np.float64)
         )
         # Input 2.
         workspace.FeedBlob(
@@ -521,7 +521,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in2_values_values",
-            np.array([14.1, 14.2, 15.1, 15.2, 16.1, 16.2], dtype=np.float)
+            np.array([14.1, 14.2, 15.1, 15.2, 16.1, 16.2], dtype=np.float64)
         )
 
         workspace.RunOperatorOnce(op)
@@ -545,7 +545,7 @@ class TestFeatureMapsOps(TestCase):
                     11.1, 11.2, 14.1, 14.2, 15.1, 15.2, 12.1, 12.2, 13.1, 13.2,
                     16.1, 16.2
                 ],
-                dtype=np.float
+                dtype=np.float64
             )
         )
 
@@ -583,7 +583,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in1_values_values",
-            np.array([11.1, 11.2, 12.1, 12.2, 13.1, 13.2], dtype=np.float)
+            np.array([11.1, 11.2, 12.1, 12.2, 13.1, 13.2], dtype=np.float64)
         )
         # Input 2.
         workspace.FeedBlob(
@@ -604,7 +604,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in2_values_values",
-            np.array([14.1, 14.2, 15.1, 15.2, 16.1, 16.2], dtype=np.float)
+            np.array([14.1, 14.2, 15.1, 15.2, 16.1, 16.2], dtype=np.float64)
         )
 
         workspace.RunOperatorOnce(op)
@@ -635,7 +635,7 @@ class TestFeatureMapsOps(TestCase):
                     11.1, 11.2, 14.1, 14.2, 15.1, 15.2, 12.1, 12.2, 13.1, 13.2,
                     16.1, 16.2
                 ],
-                dtype=np.float
+                dtype=np.float64
             )
         )
 
@@ -689,7 +689,7 @@ class TestFeatureMapsOps(TestCase):
                     11.1, 11.2, 14.1, 14.2, 15.1, 15.2, 12.1, 12.2, 13.1, 13.2,
                     16.1, 16.2
                 ],
-                dtype=np.float
+                dtype=np.float64
             )
         )
 
@@ -697,9 +697,9 @@ class TestFeatureMapsOps(TestCase):
 
         np.testing.assert_array_equal(
             workspace.FetchBlob("in1_values_values_grad"),
-            np.array([11.1, 11.2, 12.1, 12.2, 13.1, 13.2], dtype=np.float)
+            np.array([11.1, 11.2, 12.1, 12.2, 13.1, 13.2], dtype=np.float64)
         )
         np.testing.assert_array_equal(
             workspace.FetchBlob("in2_values_values_grad"),
-            np.array([14.1, 14.2, 15.1, 15.2, 16.1, 16.2], dtype=np.float)
+            np.array([14.1, 14.2, 15.1, 15.2, 16.1, 16.2], dtype=np.float64)
         )

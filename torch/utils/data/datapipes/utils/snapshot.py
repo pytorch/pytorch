@@ -9,8 +9,8 @@ from torch.utils.data.graph_settings import apply_random_seed
 #      lack the option to `set_seed`.
 def _simple_graph_snapshot_restoration(datapipe: IterDataPipe, n_iterations: int, rng=None) -> None:
     r"""
-    This function will restore a snapshot by fast-forwarding the given DataPipe by ``n_iterations``,
-    and in the process, fast-forward its parent DataPipes as well at the cost of re-doing every computation.
+    Fast-forward the given DataPipe and its parents by ``n_iterations``, re-doing computations to restore a snapshot.
+
     For instance, applying this function to the final DataPipe of a graph will restore the snapshot
     (via fast-forward) every DataPipe within the graph.
 

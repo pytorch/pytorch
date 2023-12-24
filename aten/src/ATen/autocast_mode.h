@@ -64,8 +64,7 @@ inline bool is_autocast_eligible(
     case c10::DeviceType::XLA:
       return tensor.is_xla() && tensor.is_floating_point();
     case c10::DeviceType::PrivateUse1:
-      return tensor.device().type() == c10::DeviceType::PrivateUse1 &&
-          tensor.is_floating_point();
+      return tensor.is_privateuseone() && tensor.is_floating_point();
     default:
       return false;
   }

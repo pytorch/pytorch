@@ -58,7 +58,6 @@ class _ExperimentalConfig:
         profiler_measure_per_kernel: bool = ...,
         verbose: bool = ...,
         performance_events: List[str] = ...,
-        privateuse1_config: Dict = ...,
         enable_cuda_sync_events: bool = ...,
     ) -> None: ...
 

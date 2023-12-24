@@ -1,6 +1,5 @@
 #pragma once
 
-#include <assert.h>
 #include <cfloat>
 #include <limits>
 #include <stdint.h>

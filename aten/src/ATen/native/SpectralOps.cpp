@@ -63,7 +63,7 @@
 
 #include <algorithm>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -1298,4 +1298,4 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
 
 DEFINE_DISPATCH(fft_fill_with_conjugate_symmetry_stub);
 
-}} // at::native
+} // namespace at::native

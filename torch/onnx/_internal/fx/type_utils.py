@@ -192,7 +192,7 @@ _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE = {
 }
 
 SYM_VALUE_TYPE = Union[torch.SymInt, torch.SymFloat, torch.SymBool]
-META_VALUE_TYPE = Union[fake_tensor.FakeTensor, SYM_VALUE_TYPE]
+META_VALUE_TYPE = Union[fake_tensor.FakeTensor, SYM_VALUE_TYPE, int, float, bool]
 # NOTE: Belows are from torch/fx/node.py
 BaseArgumentTypes = Union[
     str,

@@ -1435,6 +1435,18 @@ class TestReductions(TestCase):
         torch.prod(x, 1, out=res2)
         self.assertEqual(res1, res2)
 
+    @onlyCPU
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_prod_lowp(self, device, dtype):
+        x = torch.rand(100, 100, dtype=dtype, device=device)
+        x_ref = x.float()
+        res1 = torch.prod(x, 1)
+        res2 = torch.prod(x_ref, 1)
+        self.assertEqual(res1, res2.to(dtype=dtype))
+        res1 = torch.prod(x, 0)
+        res2 = torch.prod(x_ref, 0)
+        self.assertEqual(res1, res2.to(dtype=dtype))
+
     def test_prod_bool(self, device):
         vals = [[True, True], [True, False], [False, False], []]
         for val in vals:

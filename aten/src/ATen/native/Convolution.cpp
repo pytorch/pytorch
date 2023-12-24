@@ -86,7 +86,7 @@
 
 constexpr int MIOPEN_DIM_MAX = 5;
 
-namespace at { namespace native {
+namespace at::native {
 
 
 static bool conv_benchmark_empty_cache = true;
@@ -338,6 +338,14 @@ struct ConvParams {
   bool is_padding_neg() const {
     bool is_non_neg = false;
     for (const auto& p : padding) {
+      is_non_neg |= (p < 0);
+    }
+    return is_non_neg;
+  }
+
+  bool is_dilation_neg() const {
+    bool is_non_neg = false;
+    for (const auto& p : dilation) {
       is_non_neg |= (p < 0);
     }
     return is_non_neg;
@@ -652,6 +660,7 @@ static void check_shape_forward(const at::Tensor& input,
   TORCH_CHECK(!params.is_padding_neg(), "negative padding is not supported");
   TORCH_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
   TORCH_CHECK(!params.is_stride_nonpos(), "non-positive stride is not supported");
+  TORCH_CHECK(!params.is_dilation_neg(), "dilation should be greater than zero");
 
   TORCH_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
@@ -908,6 +917,14 @@ at::Tensor conv1d_symint(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
+  TORCH_CHECK(
+    !bias.defined() || bias.dtype() == input_.dtype(),
+    "Input type (",
+    input_.dtype().name(),
+    ") and bias type (",
+    bias.dtype().name(),
+    ") should be the same");
+
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 1, "conv1d");
@@ -954,6 +971,14 @@ at::Tensor conv3d_symint(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
+  TORCH_CHECK(
+    !bias.defined() || bias.dtype() == input_.dtype(),
+    "Input type (",
+    input_.dtype().name(),
+    ") and bias type (",
+    bias.dtype().name(),
+    ") should be the same");
+
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 3, "conv3d");
@@ -973,6 +998,7 @@ static Tensor convolution_same(
 
   auto k = weight.dim();
   TORCH_CHECK(k > 2, "weight should have at least three dimensions");
+  TORCH_CHECK(groups > 0, "non-positive groups is not supported");
   auto dim = static_cast<size_t>(k - 2);
   auto weight_sizes = weight.sym_sizes();
   auto input_sizes = input.sym_sizes();
@@ -2279,4 +2305,4 @@ bool _cudnn_get_conv_benchmark_empty_cache() {
 
 
 
-}} // at::native
+} // namespace at::native

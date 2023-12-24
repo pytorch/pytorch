@@ -9,8 +9,7 @@ from torch.jit._serialization import validate_map_location
 
 def _load_for_lite_interpreter(f, map_location=None):
     r"""
-    Load a :class:`LiteScriptModule`
-    saved with :func:`torch.jit._save_for_lite_interpreter`
+    Load a :class:`LiteScriptModule` saved with :func:`torch.jit._save_for_lite_interpreter`.
 
     Args:
         f: a file-like object (has to implement read, readline, tell, and seek),
@@ -75,15 +74,13 @@ class LiteScriptModule:
 
 
 def _export_operator_list(module: LiteScriptModule):
-    r"""
-    return a set of root operator names (with overload name) that are used by any method
-    in this mobile module.
-    """
+    r"""Return a set of root operator names (with overload name) that are used by any method in this mobile module."""
     return torch._C._export_operator_list(module._c)
 
 
 def _get_model_bytecode_version(f_input) -> int:
-    r"""
+    r"""Take a file-like object to return an integer.
+
     Args:
         f_input: a file-like object (has to implement read, readline, tell, and seek),
             or a string containing a file name
@@ -93,7 +90,6 @@ def _get_model_bytecode_version(f_input) -> int:
             will show in the log.
 
     Example:
-
     .. testcode::
 
         from torch.jit.mobile import _get_model_bytecode_version
@@ -115,7 +111,8 @@ def _get_model_bytecode_version(f_input) -> int:
 
 
 def _get_mobile_model_contained_types(f_input) -> int:
-    r"""
+    r"""Take a file-like object and return a set of string, like ("int", "Optional").
+
     Args:
         f_input: a file-like object (has to implement read, readline, tell, and seek),
             or a string containing a file name
@@ -146,7 +143,8 @@ def _get_mobile_model_contained_types(f_input) -> int:
 
 
 def _backport_for_mobile(f_input, f_output, to_version):
-    r"""
+    r"""Take a input string containing a file name (file-like object) and a new destination to return a boolean.
+
     Args:
         f_input: a file-like object (has to implement read, readline, tell, and seek),
             or a string containing a file name
@@ -172,7 +170,8 @@ def _backport_for_mobile(f_input, f_output, to_version):
 
 
 def _backport_for_mobile_to_buffer(f_input, to_version):
-    r"""
+    r"""Take a string containing a file name (file-like object).
+
     Args:
         f_input: a file-like object (has to implement read, readline, tell, and seek),
             or a string containing a file name
@@ -193,9 +192,9 @@ def _backport_for_mobile_to_buffer(f_input, to_version):
 
 
 def _get_model_ops_and_info(f_input):
-    r"""
-    A function to retrieve the root (top level) operators of a model and their corresponding
-    compatibility info. These root operators can call other operators within them (traced ops), and
+    r"""Retrieve the root (top level) operators of a model and their corresponding compatibility info.
+
+    These root operators can call other operators within them (traced ops), and
     a root op can call many different traced ops depending on internal code paths in the root op.
     These traced ops are not returned by this function. Those operators are abstracted into the
     runtime as an implementation detail (and the traced ops themselves can also call other operators)

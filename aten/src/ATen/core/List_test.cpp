@@ -3,7 +3,7 @@
 
 using namespace c10;
 
-// NOLINTBEGIN(performance-move-const-arg)
+// NOLINTBEGIN(performance-move-const-arg, bugprone-use-after-move)
 TEST(ListTestIValueBasedList, givenEmptyList_whenCallingEmpty_thenReturnsTrue) {
     List<string> list;
     EXPECT_TRUE(list.empty());
@@ -1136,8 +1136,10 @@ TEST(ListTest, canAccessOptionalStringByReference) {
   c10::optional<std::string> str2 = list[2];
   decltype(auto) strRef1 = listRef[1];
   decltype(auto) strRef2 = listRef[2];
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ("two", str1.value());
   EXPECT_FALSE(str2.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ("two", strRef1.value().get());
   EXPECT_FALSE(strRef2.has_value());
 }
@@ -1160,4 +1162,4 @@ TEST(ListTest, toTypedList) {
   genericList = impl::toList(std::move(stringList));
   EXPECT_THROW(c10::impl::toTypedList<int64_t>(std::move(genericList)), c10::Error);
 }
-// NOLINTEND(performance-move-const-arg)
+// NOLINTEND(performance-move-const-arg, bugprone-use-after-move)

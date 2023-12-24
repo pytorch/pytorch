@@ -77,6 +77,6 @@ def tuned_uint4x2_mixed_mm(mat1, mat2, mat2_mm_shape, mat2_dtype):
             choices,
             input_nodes=(mat1, mat2),
             layout=layout,
-            **mm_options(config, k, layout, b_prologue_cast_type),
+            **mm_options(config, m, n, k, layout, b_prologue_cast_type),
         )
     return autotune_select_algorithm("uint4x2_mixed_mm", choices, [mat1, mat2], layout)

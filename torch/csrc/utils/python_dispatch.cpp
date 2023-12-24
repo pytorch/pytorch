@@ -6,7 +6,9 @@
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
+#include <ATen/core/SingletonSymNodeImpl.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <torch/library.h>
 
@@ -15,11 +17,9 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
-#include <c10/core/SingletonSymNodeImpl.h>
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
@@ -773,6 +773,10 @@ void initDispatchBindings(PyObject* module) {
 
   m.def(
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
+  m.def("_dispatch_pystub", [](const char* name, const char* overload) {
+    return c10::Dispatcher::singleton().getAbstractImplPyStub(
+        c10::OperatorName(name, overload));
+  });
 
   m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
     return at::functionalization::impl::replace_(a, b);
@@ -782,6 +786,9 @@ void initDispatchBindings(PyObject* module) {
   });
   m.def("_commit_update", [](const at::Tensor& a) {
     return at::functionalization::impl::commit_update(a);
+  });
+  m.def("_unsafe_reset_storage", [](const at::Tensor& a) {
+    return at::functionalization::impl::unsafe_reset_storage(a);
   });
 
   m.def("_dispatch_key_for_device", [](const std::string& device_type) {
@@ -809,6 +816,10 @@ void initDispatchBindings(PyObject* module) {
   m.def("_get_constant_bool_symnode", [](int64_t data) {
     return c10::SymNode(
         c10::make_intrusive<c10::ConstantSymNodeImpl<bool>>(data));
+  });
+
+  m.def("_non_sym_sizes", [](const at::Tensor& a) {
+    return a.sizes(); // NB: NOT sym_size
   });
 
   using c10::impl::TorchDispatchModeKey;

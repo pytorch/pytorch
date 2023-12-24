@@ -1,4 +1,4 @@
-"""JIT-related state
+"""JIT-related state.
 
 This module stores various pieces of Python-global state relating to the JIT.
 

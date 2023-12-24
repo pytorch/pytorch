@@ -2,7 +2,7 @@
 Collection of conversion functions for linear / conv2d structured pruning
 Also contains utilities for bias propagation
 """
-from typing import cast, Optional, Callable, Tuple
+from typing import cast, List, Optional, Callable, Tuple
 
 import torch
 from torch import nn, Tensor
@@ -13,7 +13,7 @@ from .parametrization import FakeStructuredSparsity, BiasHook
 # BIAS PROPAGATION
 def _remove_bias_handles(module: nn.Module) -> None:
     if hasattr(module, "_forward_hooks"):
-        bias_hooks = []
+        bias_hooks: List[int] = []
         for key, hook in module._forward_hooks.items():
             if isinstance(hook, BiasHook):
                 bias_hooks.append(key)

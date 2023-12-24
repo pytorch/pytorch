@@ -1,6 +1,6 @@
-"""
-torch.multiprocessing is a wrapper around the native :mod:`multiprocessing`
-module. It registers custom reducers, that use shared memory to provide shared
+"""torch.multiprocessing is a wrapper around the native :mod:`multiprocessing` module.
+
+It registers custom reducers, that use shared memory to provide shared
 views on the same data in different processes. Once the tensor/storage is moved
 to shared_memory (see :func:`~torch.Tensor.share_memory_`), it will be possible
 to send it to other processes without making any copies.
@@ -54,7 +54,7 @@ else:
 
 
 def set_sharing_strategy(new_strategy):
-    """Sets the strategy for sharing CPU tensors.
+    """Set the strategy for sharing CPU tensors.
 
     Args:
         new_strategy (str): Name of the selected strategy. Should be one of
@@ -66,12 +66,12 @@ def set_sharing_strategy(new_strategy):
 
 
 def get_sharing_strategy():
-    """Returns the current strategy for sharing CPU tensors."""
+    """Return the current strategy for sharing CPU tensors."""
     return _sharing_strategy
 
 
 def get_all_sharing_strategies():
-    """Returns a set of sharing strategies supported on a current system."""
+    """Return a set of sharing strategies supported on a current system."""
     return _all_sharing_strategies
 
 

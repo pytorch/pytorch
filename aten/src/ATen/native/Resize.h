@@ -75,7 +75,7 @@ template <>
 inline c10::SymInt maybe_convert_symint(c10::SymInt x) { return x; }
 
 template <>
-inline int64_t maybe_convert_symint(c10::SymInt x) { return x.expect_int(); }
+inline int64_t maybe_convert_symint(c10::SymInt x) { return x.guard_int(__FILE__, __LINE__); }
 
 template <typename T>
 static inline void checkInBoundsForStorage(

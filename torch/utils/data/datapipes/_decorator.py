@@ -13,9 +13,11 @@ class functional_datapipe:
 
     def __init__(self, name: str, enable_df_api_tracing=False) -> None:
         """
-            Args:
-                enable_df_api_tracing - if set, any returned DataPipe would accept
-                DataFrames API in tracing mode.
+        Define a functional datapipe.
+
+        Args:
+            enable_df_api_tracing - if set, any returned DataPipe would accept
+            DataFrames API in tracing mode.
         """
         self.name = name
         self.enable_df_api_tracing = enable_df_api_tracing

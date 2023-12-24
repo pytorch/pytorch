@@ -38,7 +38,7 @@
 #include <utility>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(pdist_forward_stub);
 DEFINE_DISPATCH(pdist_backward_stub);
@@ -330,4 +330,4 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
   return ((*x1 / x1_norm) * (*x2 / x2_norm)).sum(dim);
 }
 
-}}  // namespace at::native
+}  // namespace at::native

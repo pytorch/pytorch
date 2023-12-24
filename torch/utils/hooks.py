@@ -70,7 +70,8 @@ class RemovableHandle:
 
 def unserializable_hook(f):
     """
-    Decorator which marks a function as an unserializable hook.
+    Mark a function as an unserializable hook with this decorator.
+
     This suppresses warnings that would otherwise arise if you attempt
     to serialize a tensor that has a hook.
     """
@@ -91,6 +92,7 @@ def warn_if_has_hooks(tensor):
 class BackwardHook:
     """
     A wrapper class to implement nn.Module backward hooks.
+
     It handles:
       - Ignoring non-Tensor inputs and replacing them by None before calling the user hook
       - Generating the proper Node to capture a set of Tensor's gradients

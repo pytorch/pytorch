@@ -1452,7 +1452,10 @@ cu_library(
     # https://github.com/pytorch/pytorch/issues/79236
     # To solve it we add it into the `caffe2_cuda`,
     # this is also aligned with the CMake build.
-    srcs = [":caffe2_cu_srcs"] + ["torch/csrc/distributed/c10d/quantization/quantization_gpu.cu"],
+    srcs = [":caffe2_cu_srcs"] + [
+        "torch/csrc/distributed/c10d/intra_node_comm.cu",
+        "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
+    ],
     copts = CAFFE2_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
     deps = [
@@ -1619,6 +1622,7 @@ cc_library(
         exclude = [
             "torch/csrc/cuda/python_nccl.cpp",
             "torch/csrc/cuda/nccl.cpp",
+            "torch/csrc/distributed/c10d/intra_node_comm.cu",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
     )) + torch_sources,

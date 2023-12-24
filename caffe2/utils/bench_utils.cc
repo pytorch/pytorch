@@ -1,4 +1,4 @@
-#if !defined(__s390x__)
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #else
 #include <unistd.h>
@@ -18,7 +18,7 @@ uint32_t wipe_cache() {
   static size_t wipe_size = 0;
 
   if (wipe_buffer == nullptr) {
-#if !defined(__s390x__)
+#if !defined(__s390x__) && !defined(__powerpc__)
     CAFFE_ENFORCE(cpuinfo_initialize(), "failed to initialize cpuinfo");
     const cpuinfo_processor* processor = cpuinfo_get_processor(0);
     if (processor->cache.l4 != nullptr) {
@@ -80,7 +80,7 @@ uint32_t wipe_cache() {
         break;
     }
 #endif
-#else
+#elif defined (__s390x__)
     wipe_size = sysconf(_SC_LEVEL4_CACHE_SIZE);
     if (wipe_size <= 0)
     {
@@ -88,6 +88,18 @@ uint32_t wipe_cache() {
       * Take current max L4 cache size for s390x
       */
       wipe_size = 1024 * 1024 * 1024;
+    }
+#else
+    /* ppc64le */
+    wipe_size = sysconf(_SC_LEVEL4_CACHE_SIZE);
+    if (wipe_size <= 0) {
+      wipe_size = sysconf(_SC_LEVEL3_CACHE_SIZE);
+      if (wipe_size <= 0) {
+        wipe_size = sysconf(_SC_LEVEL2_CACHE_SIZE);
+        if(wipe_size <= 0) {
+          wipe_size = sysconf(_SC_LEVEL1D_CACHE_SIZE);
+        }
+      }
     }
 #endif
     LOG(INFO) << "Allocating cache wipe buffer of size " << wipe_size;

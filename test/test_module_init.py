@@ -83,6 +83,7 @@ def build_constructor_arg_db():
         torch.nn.L1Loss: ((), {}),
         torch.nn.LPPool1d: ((2, 3), {}),
         torch.nn.LPPool2d: ((2, 3), {}),
+        torch.nn.LPPool3d: ((2, 3), {}),
         torch.nn.LSTM: ((5, 10), {}),
         torch.nn.LSTMCell: ((5, 10), {}),
         torch.nn.LayerNorm: ((2,), {}),

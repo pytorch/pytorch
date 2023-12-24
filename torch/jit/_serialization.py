@@ -1,4 +1,4 @@
-"""Serialization
+"""Serialization.
 
 This module contains functionality for serializing TorchScript modules, notably:
     * torch.jit.save
@@ -17,8 +17,9 @@ from torch.serialization import validate_cuda_device
 
 def save(m, f, _extra_files=None):
     r"""
-    Save an offline version of this module for use in a separate process. The
-    saved module serializes all of the methods, submodules, parameters, and
+    Save an offline version of this module for use in a separate process.
+
+    The saved module serializes all of the methods, submodules, parameters, and
     attributes of this module. It can be loaded into the C++ API using
     ``torch::jit::load(filename)`` or into the Python API with
     :func:`torch.jit.load <torch.jit.load>`.
@@ -49,7 +50,6 @@ def save(m, f, _extra_files=None):
         replicate the 1.6 behavior.
 
     Example:
-
     .. testcode::
 
         import torch
@@ -85,8 +85,7 @@ def save(m, f, _extra_files=None):
 
 def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
     r"""
-    Load a :class:`ScriptModule` or :class:`ScriptFunction` previously
-    saved with :func:`torch.jit.save <torch.jit.save>`
+    Load a :class:`ScriptModule` or :class:`ScriptFunction` previously saved with :func:`torch.jit.save <torch.jit.save>`.
 
     All previously saved modules, no matter their device, are first loaded onto CPU,
     and then are moved to the devices they were saved from. If this fails (e.g.
@@ -108,7 +107,6 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
         A :class:`ScriptModule` object.
 
     Example:
-
     .. testcode::
 
         import torch
@@ -146,7 +144,6 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
         import os
         os.remove("scriptmodule.pt")
     """
-
     if isinstance(f, str):
         if not os.path.exists(f):  # type: ignore[type-var]
             raise ValueError(f"The provided filename {f} does not exist")  # type: ignore[str-bytes-safe]
@@ -194,8 +191,9 @@ def jit_module_from_flatbuffer(f):
 
 def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
     r"""
-    Save an offline version of this module for use in a separate process. The
-    saved module serializes all of the methods, submodules, parameters, and
+    Save an offline version of this module for use in a separate process.
+
+    The saved module serializes all of the methods, submodules, parameters, and
     attributes of this module. It can be loaded into the C++ API using
     ``torch::jit::load_jit_module_from_file(filename)`` or into the Python API with
     :func:`torch.jit.jit_module_from_flatbuffer<torch.jit.jit_module_from_flatbuffer>`.
@@ -215,7 +213,6 @@ def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
 
 
     Example:
-
     .. testcode::
 
         import torch
@@ -230,7 +227,6 @@ def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
         # Save to file
         torch.jit.save_jit_module_to_flatbuffer(m, 'scriptmodule.ff')
     """
-
     extra_files = _extra_files
     if extra_files is None:
         extra_files = {}
@@ -245,7 +241,6 @@ def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
 
 def get_flatbuffer_module_info(path_or_file):
     r"""Get some information regarding a model file in flatbuffer format.
-
 
     Args:
         path_or_file: Either str, Path or file like object (BytesIO OK).

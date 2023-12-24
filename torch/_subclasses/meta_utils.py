@@ -1,13 +1,18 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, List, Optional, TYPE_CHECKING
+from typing import ContextManager, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
 from torch._C._functorch import (
+    _add_batch_dim,
     _unwrap_functional_tensor,
     _wrap_functional_tensor,
     current_level,
+    get_unwrapped,
+    is_batchedtensor,
+    maybe_get_bdim,
+    maybe_get_level,
     peek_interpreter_stack,
     TransformType,
 )
@@ -23,7 +28,7 @@ from torch.utils.weak import WeakIdRef
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
-    from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
+    from torch.fx.experimental.symbolic_shapes import SymbolicContext
 
 DimList = List
 
@@ -128,7 +133,7 @@ class MetaConverter:
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
         self_weak_ref = weakref.ref(self)
-        if t.is_sparse or t.is_mkldnn:
+        if t.is_sparse or t.is_mkldnn or is_batchedtensor(t):
             weak_st = None
         else:
             weak_st = StorageWeakRef(t._typed_storage())
@@ -184,8 +189,7 @@ class MetaConverter:
         shape_env=None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
-        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
-        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
+        symbolic_context: Optional["SymbolicContext"] = None,
     ):
         if source is None:
             from torch._dynamo.source import ConstantSource
@@ -233,22 +237,37 @@ class MetaConverter:
         if shape_env is not None:
             maybe_suppress = shape_env.suppress_guards
 
-        def sym_sizes_strides_storage_offset(t, src):
+        def sym_sizes_strides_storage_offset(
+            t, src, symbolic_context=symbolic_context
+        ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
             if shape_env is not None:
-                return shape_env.create_symbolic_sizes_strides_storage_offset(
-                    t,
-                    src,
-                    # Assume that the set of dims that are dynamic are the same between
-                    # the wrapper tensor and any inner tensors.
-                    # We can revisit this if this assumption does not hold
-                    # for any important subclasses later.
-                    dynamic_dims=dynamic_dims,
-                    constraint_dims=constraint_dims,
-                )
+                fake_mode = torch._subclasses.fake_tensor.maybe_get_fake_mode(t)
+                if fake_mode is not None and fake_mode.shape_env is shape_env:
+                    # Don't reallocate the sizes; the shape envs are the same,
+                    # so reuse the old sizes/strides/etc
+                    return (t.size(), t.stride(), t.storage_offset())
+                else:
+                    return shape_env.create_symbolic_sizes_strides_storage_offset(
+                        t,
+                        src,
+                        symbolic_context=symbolic_context,
+                    )
             else:
-                assert dynamic_dims is None
-                assert constraint_dims is None
+                assert symbolic_context is None
             return (t.size(), t.stride(), t.storage_offset())
+
+        def empty_create(inner_t, inner_src, symbolic_context=symbolic_context):
+            (
+                inner_sizes,
+                inner_strides,
+                inner_storage_offset,
+            ) = sym_sizes_strides_storage_offset(inner_t, inner_src, symbolic_context)
+            return torch.empty_strided(
+                inner_sizes,
+                inner_strides,
+                dtype=inner_t.dtype,
+                device="meta",
+            )
 
         # see expired-storages
         self.check_expired_count += 1
@@ -283,6 +302,15 @@ class MetaConverter:
                         with torch.enable_grad():
                             r = r.clone()
                             r._coalesced_(t.is_coalesced())
+                elif t.is_nested and not is_traceable_wrapper_subclass(t):
+                    # TODO: Handle this better in Dynamo?
+                    # There are checks there now, but this can still be triggered by a dense
+                    # tensor graph input that is a view of a strided NT.
+                    from torch._dynamo.exc import unimplemented
+
+                    unimplemented(
+                        "strided nested tensors are not supported by meta conversion"
+                    )
                 elif t.is_mkldnn:
                     is_leaf = safe_is_leaf(t)
                     sizes, strides, _storage_offset = sym_sizes_strides_storage_offset(
@@ -299,6 +327,30 @@ class MetaConverter:
                     if t.requires_grad and not is_leaf:
                         with torch.enable_grad():
                             r = r.clone()
+                elif is_batchedtensor(t):
+                    # Wraps a BatchedTensor in a FakeTensor
+                    def _to_fake_tensor(t):
+                        if is_batchedtensor(t):
+                            ft = _to_fake_tensor(get_unwrapped(t))
+                            lvl = maybe_get_level(t)
+                            bdim = maybe_get_bdim(t)
+                            r = _add_batch_dim(ft, bdim, lvl)
+                        else:
+                            # regular tensor
+                            sizes = t.size()
+                            strides = t.stride()
+                            r = callback(
+                                lambda: torch.empty_strided(
+                                    sizes,
+                                    strides,
+                                    dtype=t.dtype,
+                                    device="meta",
+                                )
+                            )
+                        return r
+
+                    r = _to_fake_tensor(t)
+
                 elif t._is_view():
                     # Construct views in two steps: recursively meta-fy their
                     # base, and then create view(s) off that.  NB: doing it
@@ -307,18 +359,24 @@ class MetaConverter:
                     assert t._is_view()
 
                     from torch._dynamo.source import AttrSource
-                    from torch.fx.experimental.symbolic_shapes import DimDynamic
+                    from torch.fx.experimental.symbolic_shapes import (
+                        DimDynamic,
+                        StatelessSymbolicContext,
+                    )
 
-                    if shape_env and not t.is_nested:
-                        base_dynamic_dims = [DimDynamic.STATIC] * t._base.dim()
+                    if shape_env and not t.is_nested and not t._base.is_nested:
+                        base_symbolic_context = StatelessSymbolicContext(
+                            dynamic_sizes=[DimDynamic.STATIC] * t._base.dim(),
+                            constraint_sizes=[None] * t._base.dim(),
+                        )
                     else:
-                        base_dynamic_dims = None
+                        base_symbolic_context = None
                     base = self.meta_tensor(
                         t._base,
                         shape_env,
                         callback,
                         source=AttrSource(source, "_base"),
-                        dynamic_dims=base_dynamic_dims,
+                        symbolic_context=base_symbolic_context,
                     )
 
                     def is_c_of_r(complex_dtype, real_dtype):
@@ -431,87 +489,45 @@ class MetaConverter:
 
                 else:
                     is_leaf = safe_is_leaf(t)
-                    if not t.is_nested:
-                        # Nested tensor subclasses have special logic for
-                        # creating symbolic size/strides/storage_offset
-                        (
-                            sizes,
-                            strides,
-                            storage_offset,
-                        ) = sym_sizes_strides_storage_offset(t, source)
 
-                    def empty_create(inner_t, inner_src):
-                        (
-                            inner_sizes,
-                            inner_strides,
-                            inner_storage_offset,
-                        ) = sym_sizes_strides_storage_offset(inner_t, inner_src)
-                        return torch.empty_strided(
-                            inner_sizes,
-                            inner_strides,
-                            dtype=inner_t.dtype,
-                            device="meta",
-                        )
+                    from torch.fx.experimental.symbolic_shapes import (
+                        SubclassSymbolicContext,
+                    )
+
+                    (
+                        sizes,
+                        strides,
+                        storage_offset,
+                    ) = sym_sizes_strides_storage_offset(t, source, symbolic_context)
 
                     # If we have a subclass that desugars into dense tensors,
                     # perform our callback on each inner tensor.
                     if is_traceable_wrapper_subclass(t):
                         # Note: transform_subclass will use __tensor_unflatten__ to generate
-                        # a fresh subclass wrapper, which is why sizes/strides are not passed in
-                        # to the creation function here.
-                        # We assume that if the inner tensors of the subclass are given symbolic sizes,
-                        # their sizes will be used to construct the (symbolic) sizes of the wrapper tensor.
+                        # a fresh subclass wrapper. We assume that if the inner tensors of
+                        # the subclass are given symbolic sizes, their sizes will be used
+                        # to construct the (symbolic) sizes of the wrapper tensor.
                         from torch._dynamo.source import AttrSource
 
-                        if t.is_nested:
-                            # Avoid circular import
-                            from torch._dynamo.source import (
-                                TensorProperty,
-                                TensorPropertySource,
-                            )
-
-                            # For nested tensors, manually do transform_subclass
-                            # so we can insert some special processing on ctx
-                            attrs, ctx = t.__tensor_flatten__()
-                            transformed_tensors_dict = {}
-                            for attr in attrs:
-                                inner_t = getattr(t, attr)
-                                transformed_tensors_dict[attr] = callback(
-                                    lambda: empty_create(
-                                        inner_t, AttrSource(source, attr)
-                                    )
-                                )
-                            # We expect JaggedTensor to have a 'ragged_size' in
-                            # its context
-                            assert isinstance(ctx, dict) and "ragged_size" in ctx
-                            assert (
-                                isinstance(t._size[1], torch.SymInt)
-                                and t._size[1].node.singleton_int() is not None
-                            )
-                            # Replace the eager ragged size with our freshly
-                            # allocated jagged size that has a source
-                            ctx["ragged_size"] = shape_env.create_symintnode(
-                                shape_env.create_symbol(
-                                    t._size[1],
-                                    TensorPropertySource(
-                                        source, TensorProperty.SIZE, 1
+                        assert symbolic_context is None or isinstance(
+                            symbolic_context, SubclassSymbolicContext
+                        )
+                        r = transform_subclass(
+                            t,
+                            lambda attr, inner_t: callback(
+                                lambda: empty_create(
+                                    inner_t,
+                                    AttrSource(source, attr),
+                                    symbolic_context=(
+                                        None
+                                        if symbolic_context is None
+                                        else symbolic_context.inner_contexts[attr]
                                     ),
-                                ),
-                                hint=t._size[1],
-                            )
-                            r = type(t).__tensor_unflatten__(
-                                transformed_tensors_dict, ctx
-                            )
-                        else:
-                            r = transform_subclass(
-                                t,
-                                lambda attr, inner_t: callback(
-                                    lambda: empty_create(
-                                        inner_t,
-                                        AttrSource(source, attr),
-                                    )
-                                ),
-                            )
+                                )
+                            ),
+                            outer_size=sizes,
+                            outer_stride=strides,
+                        )
                     else:
                         r = callback(
                             lambda: torch.empty_strided(
@@ -533,7 +549,9 @@ class MetaConverter:
                                 r = r.clone(memory_format=torch.preserve_format)
 
                     # Graph-Break for wrapped tensors
-                    if torch._C._functorch.is_functorch_wrapped_tensor(t):
+                    if not is_batchedtensor(
+                        t
+                    ) and torch._C._functorch.is_functorch_wrapped_tensor(t):
                         return NotImplemented
 
                     s = t.untyped_storage()
@@ -596,8 +614,7 @@ class MetaConverter:
                         shape_env,
                         callback,
                         source=AttrSource(source, "grad"),
-                        dynamic_dims=dynamic_dims,
-                        constraint_dims=constraint_dims,
+                        symbolic_context=symbolic_context,
                     )
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
@@ -613,22 +630,13 @@ class MetaConverter:
         shape_env=None,
         *,
         callback=lambda t: t(),
-        ignore_subclass=False,
         source=None,
-        dynamic_dims=None,
-        constraint_dims=None,
+        symbolic_context=None,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
-        from torch._subclasses.fake_tensor import FakeTensor
 
-        if (
-            type(t) is torch.Tensor
-            or type(t) is torch.nn.Parameter
-            or (ignore_subclass and isinstance(t, torch.Tensor))
-            or is_traceable_wrapper_subclass(t)
-            or isinstance(t, FakeTensor)
-        ):
+        if isinstance(t, torch.Tensor) or is_traceable_wrapper_subclass(t):
             if t.device.type != "xla" and any(
                 [
                     t.is_sparse_csr,
@@ -668,8 +676,7 @@ class MetaConverter:
                                 shape_env=shape_env,
                                 callback=callback,
                                 source=source,
-                                dynamic_dims=dynamic_dims,
-                                constraint_dims=constraint_dims,
+                                symbolic_context=symbolic_context,
                             )
                         out = torch._to_functional_tensor(fake_t)
                         torch._mirror_autograd_meta_to(fake_t, out)
@@ -687,31 +694,20 @@ class MetaConverter:
                                 shape_env=shape_env,
                                 callback=callback,
                                 source=source,
-                                dynamic_dims=dynamic_dims,
-                                constraint_dims=constraint_dims,
+                                symbolic_context=symbolic_context,
                             )
                         return _wrap_functional_tensor(fake_t, current_level())
                 self.miss += 1
                 return NotImplemented
             else:
                 self.hit += 1
-                # When ignoring subclasses, we treat the input tensor "as if" it
-                # were a normal tensor and create a non-subclassed fake tensor
-                # that, modulo type and attributes, resembles the original tensor.
-                # This can be helpful if you're planning to simulate the subclassness
-                # by hand, e.g., as is done in Dynamo
-                ctx = contextlib.nullcontext()
-                if ignore_subclass:
-                    ctx = torch._C.DisableTorchFunctionSubclass()
-                with ctx:
-                    r = self.meta_tensor(
-                        t,
-                        shape_env=shape_env,
-                        callback=callback,
-                        source=source,
-                        dynamic_dims=dynamic_dims,
-                        constraint_dims=constraint_dims,
-                    )
+                r = self.meta_tensor(
+                    t,
+                    shape_env=shape_env,
+                    callback=callback,
+                    source=source,
+                    symbolic_context=symbolic_context,
+                )
                 if type(t) is torch.nn.Parameter:
                     # NB: Cannot directly use Parameter constructor
                     # because that would force a detach, not desirable

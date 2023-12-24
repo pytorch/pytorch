@@ -87,6 +87,7 @@ class DispatchKey(Enum):
     NestedTensor = auto()
     Dense = auto()
 
+    PreDispatch = auto()
     Python = auto()
     FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
@@ -315,7 +316,9 @@ class ScalarType(Enum):
     Bool = auto()
     BFloat16 = auto()
     Float8_e5m2 = auto()
+    Float8_e5m2fnuz = auto()
     Float8_e4m3fn = auto()
+    Float8_e4m3fnuz = auto()
 
     def __str__(self) -> str:
         return self.name

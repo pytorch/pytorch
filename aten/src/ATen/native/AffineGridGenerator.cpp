@@ -13,7 +13,7 @@
 #include <ATen/ops/tensor.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 static at::Tensor linspace_from_neg_one(const Tensor& grid, int64_t num_steps,
                                  bool align_corners) {
@@ -143,4 +143,4 @@ Tensor affine_grid_generator_backward(const Tensor& grad, IntArrayRef size, bool
   }
 }
 
-}}  // namespace at::native
+}  // namespace at::native

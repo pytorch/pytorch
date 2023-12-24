@@ -8,6 +8,7 @@ import os
 import random
 import sys
 import tempfile
+from datetime import timedelta
 from functools import reduce
 from itertools import groupby
 
@@ -862,6 +863,17 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 result[0],
                 msg=("Mismatch in iteration %d for rank %d" % (iter, root)),
             )
+
+    @requires_gloo()
+    def test_set_gloo_pg_timeout(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+        pg.allreduce(torch.rand(10))
+        self.assertEqual(pg.options._timeout, timedelta(seconds=50))
+        pg._set_default_timeout(timedelta(seconds=23))
+        self.assertEqual(pg.options._timeout, timedelta(seconds=23))
 
     @requires_gloo()
     def test_scatter_stress(self):

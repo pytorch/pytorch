@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import export
+from torch.export import export
 from torch._export.serde.serialize import GraphModuleOpUpgrader
 from torch._export.serde.upgrade import get_target_version, get_upgraders
 from torch.testing._internal.common_utils import (
@@ -117,7 +117,7 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
             return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
 
         inputs = (torch.ones([2, 3]) * 4, 2.)
-        ep = export(fn, inputs, {}, [])
+        ep = export(fn, inputs)
         compiler_opset_version = {"aten": 4}
         model_opset_version = {"aten": 3}
         upgrader = GraphModuleOpUpgrader(compiler_opset_version, model_opset_version, TEST_UPGRADERS)

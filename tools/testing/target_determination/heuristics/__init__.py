@@ -4,6 +4,9 @@ from tools.testing.target_determination.heuristics.correlated_with_historical_fa
     CorrelatedWithHistoricalFailures,
 )
 from tools.testing.target_determination.heuristics.edited_by_pr import EditedByPR
+from tools.testing.target_determination.heuristics.historical_class_failure_correlation import (
+    HistoricalClassFailurCorrelation,
+)
 from tools.testing.target_determination.heuristics.historical_edited_files import (
     HistorialEditedFiles,
 )
@@ -24,6 +27,7 @@ from tools.testing.target_determination.heuristics.profiling import Profiling
 HEURISTICS: List[HeuristicInterface] = [
     PreviouslyFailedInPR(),
     EditedByPR(),
+    HistoricalClassFailurCorrelation(trial_mode=True),
     CorrelatedWithHistoricalFailures(),
     HistorialEditedFiles(trial_mode=True),
     Profiling(trial_mode=True),

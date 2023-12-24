@@ -4,8 +4,9 @@
 #
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
-"""Autograd functions for stream-aware CUDA copy. It is used to overlap copy
-and computation on the same GPU.
+"""Autograd functions for stream-aware CUDA copy.
+
+It is used to overlap copy and computation on the same GPU.
 """
 from collections import deque
 from typing import Deque, List, Optional, Tuple, Sequence

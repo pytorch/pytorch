@@ -177,7 +177,7 @@ class C10_CUDA_API CUDAStream {
     // Note: this returns the range of priority **supported by PyTorch**, not
     // the range of priority **supported by CUDA**. The former is a subset of
     // the latter.
-    int least_priority, greatest_priority;
+    int least_priority = 0, greatest_priority = 0;
     C10_CUDA_CHECK(
         cudaDeviceGetStreamPriorityRange(&least_priority, &greatest_priority));
 #ifdef USE_ROCM

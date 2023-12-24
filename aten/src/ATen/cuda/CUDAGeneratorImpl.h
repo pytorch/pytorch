@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/Generator.h>
-#include <ATen/cuda/detail/PhiloxCudaStateRaw.cuh>
+#include <ATen/cuda/PhiloxCudaState.h>
 #include <ATen/Context.h>
 #include <limits>
 #include <atomic>

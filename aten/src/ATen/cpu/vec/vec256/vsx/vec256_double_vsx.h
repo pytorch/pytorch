@@ -249,6 +249,9 @@ class Vectorized<double> {
   Vectorized<double> expm1() const {
      return {Sleef_expm1d2_u10(_vec0), Sleef_expm1d2_u10(_vec1)};
   }
+  Vectorized<double> C10_ALWAYS_INLINE exp_u20() const {
+     return exp();
+  }
 
   Vectorized<double> lgamma() const __ubsan_ignore_undefined__ {
      return {Sleef_lgammad2_u10(_vec0), Sleef_lgammad2_u10(_vec1)};

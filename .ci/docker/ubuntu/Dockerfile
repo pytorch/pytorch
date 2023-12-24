@@ -146,6 +146,14 @@ COPY ci_commit_pins/triton.txt triton.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt
 
+ARG EXECUTORCH
+# Build and install executorch
+COPY ./common/install_executorch.sh install_executorch.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/executorch.txt executorch.txt
+RUN if [ -n "${EXECUTORCH}" ]; then bash ./install_executorch.sh; fi
+RUN rm install_executorch.sh common_utils.sh executorch.txt
+
 ARG ONNX
 # Install ONNX dependencies
 COPY ./common/install_onnx.sh ./common/common_utils.sh ./

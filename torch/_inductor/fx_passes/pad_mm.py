@@ -67,7 +67,7 @@ def should_pad_common(
     )
 
 
-def get_padded_length(x: Tensor, alignment_size) -> int:
+def get_padded_length(x: int, alignment_size) -> int:
     if alignment_size == 0 or x % alignment_size == 0:
         return 0
     return int((x // alignment_size + 1) * alignment_size) - x
@@ -94,7 +94,7 @@ def should_pad_addmm(match: Match) -> bool:
 
 
 def addmm_replace(
-    input: Tensor, mat1: Tensor, mat2: Tensor, beta=1.0, alpha=1.0
+    input: Optional[Tensor], mat1: Tensor, mat2: Tensor, beta=1.0, alpha=1.0
 ) -> Tensor:
     m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
     k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
@@ -116,7 +116,7 @@ def addmm_replace(
 
 
 def pad_addmm(
-    input: Tensor,
+    input: Optional[Tensor],
     mat1: Tensor,
     mat2: Tensor,
     m_padded_length: int,
@@ -134,13 +134,14 @@ def pad_addmm(
     elif m_padded_length != 0:
         mat1 = pad_dim(mat1, m_padded_length, 0)
 
+    # the add broadcasts, so we only pad if the dimension != 1
     if input is not None and k_padded_length == 0:
         if n_padded_length != 0:
-            if input.dim() == 2:
+            if input.dim() == 2 and input.shape[1] != 1:
                 input = pad_dim(input, n_padded_length, 1)
-            elif input.dim() == 1:
+            elif input.dim() == 1 and input.shape[0] != 1:
                 input = pad_dim(input, n_padded_length, 0)
-        elif m_padded_length != 0 and input.dim() == 2:
+        elif m_padded_length != 0 and input.dim() == 2 and input.shape[0] != 1:
             input = pad_dim(input, m_padded_length, 0)
 
     if k_padded_length != 0:

@@ -138,8 +138,7 @@ class FakeTensorUpdater:
                 # tests - add a test
                 existing_storages[get_node_storage(new_fake_tensor)] += 1
                 processed.add(updating_node)
-                for user in updating_node.users:
-                    processing.append(user)
+                processing.extend(updating_node.users)
 
                 self.processed_hashes.add(self.hash_node(updating_node))
 
@@ -148,7 +147,7 @@ def get_storage(t: torch.Tensor) -> int:
     return t.untyped_storage()._cdata
 
 
-def get_node_storage(node: torch.Tensor) -> Optional[int]:
+def get_node_storage(node: torch.fx.Node) -> Optional[int]:
     if "val" not in node.meta:
         return None
     if not isinstance(node.meta["val"], torch.Tensor):

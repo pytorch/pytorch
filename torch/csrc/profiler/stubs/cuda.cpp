@@ -42,8 +42,7 @@ struct CUDAMethods : public ProfilerStubs {
     if (device) {
       TORCH_CUDA_CHECK(c10::cuda::GetDevice(device));
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    CUevent_st* cuda_event_ptr;
+    CUevent_st* cuda_event_ptr{nullptr};
     TORCH_CUDA_CHECK(cudaEventCreate(&cuda_event_ptr));
     *event = std::shared_ptr<CUevent_st>(cuda_event_ptr, [](CUevent_st* ptr) {
       TORCH_CUDA_CHECK(cudaEventDestroy(ptr));
@@ -62,20 +61,17 @@ struct CUDAMethods : public ProfilerStubs {
     auto event2 = (const ProfilerEventStub*)(event2_);
     TORCH_CUDA_CHECK(cudaEventSynchronize(event->get()));
     TORCH_CUDA_CHECK(cudaEventSynchronize(event2->get()));
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    float ms;
+    float ms = 0;
     TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, event->get(), event2->get()));
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
     return ms * 1000.0;
   }
 
   void mark(const char* name) const override {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ::nvtxMark(name);
   }
 
   void rangePush(const char* name) const override {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ::nvtxRangePushA(name);
   }
 

@@ -462,6 +462,48 @@ static PyObject* THPVariable__is_functional_tensor(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__functionalize_was_storage_changed(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_was_storage_changed(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(self_);
+  if (wrapper->was_storage_changed()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable__functionalize_has_data_mutation(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_has_data_mutation(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(self_);
+  if (wrapper->has_data_mutation()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable__functionalize_has_metadata_mutation(
     PyObject* self,
     PyObject* args,
@@ -663,6 +705,28 @@ THPVariable__functionalize_are_all_mutations_hidden_from_autograd(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject*
+THPVariable__functionalize_are_all_mutations_under_no_grad_or_inference_mode(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_are_all_mutations_under_no_grad_or_inference_mode(Tensor t)"},
+      /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  if (at::functionalization::impl::
+          are_all_mutations_under_no_grad_or_inference_mode(self_)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
 // XXX: ops that are bound here are not exposed to the C++ api nor the JIT.
 // Any new ops added here should be accompanied with a comment why they are not
 // being registered through native_functions.yaml, and be tagged cpp / JIT
@@ -736,9 +800,23 @@ static PyMethodDef torch_functions_manual[] = {
          THPVariable__functionalize_are_all_mutations_hidden_from_autograd),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
+    {"_functionalize_are_all_mutations_under_no_grad_or_inference_mode",
+     castPyCFunctionWithKeywords(
+         THPVariable__functionalize_are_all_mutations_under_no_grad_or_inference_mode),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
     {"_functionalize_is_multi_output_view",
      castPyCFunctionWithKeywords(
          THPVariable__functionalize_is_multi_output_view),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_has_data_mutation",
+     castPyCFunctionWithKeywords(THPVariable__functionalize_has_data_mutation),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_was_storage_changed",
+     castPyCFunctionWithKeywords(
+         THPVariable__functionalize_was_storage_changed),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_functionalize_enable_reapply_views",

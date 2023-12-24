@@ -1,4 +1,5 @@
 import itertools
+import operator
 
 import numpy as np
 import torch
@@ -262,24 +263,24 @@ class BroadcastBench(benchmark.Benchmark):
 
 def register_broadcast_ops():
     binary_op_list = [
-        ["mul", lambda a, b: a * b],
-        ["add", lambda a, b: a + b],
-        ["sub", lambda a, b: a - b],
+        ["mul", operator.mul],
+        ["add", operator.add],
+        ["sub", operator.sub],
         ["div", lambda a, b: a / (b + 1e-4)],
         [
             "pow",
-            lambda a, b: torch.pow(a, b),
-            lambda a, b: np.power(a, b),
+            torch.pow,
+            np.power,
         ],  # no fuson triggered
-        ["max", lambda a, b: torch.max(a, b), lambda a, b: np.maximum(a, b)],
-        ["min", lambda a, b: torch.min(a, b), lambda a, b: np.minimum(a, b)],
+        ["max", torch.max, np.maximum],
+        ["min", torch.min, np.minimum],
     ]
 
     unary_op_list = [
-        ["erf", lambda x: torch.erf(x), lambda x: np.erf(x)],
-        ["exp", lambda x: torch.exp(x), lambda x: np.exp(x)],
-        ["sin", lambda x: torch.sin(x), lambda x: np.sin(x)],
-        ["cos", lambda x: torch.cos(x), lambda x: np.cos(x)],
+        ["erf", torch.erf, np.erf],
+        ["exp", torch.exp, np.exp],
+        ["sin", torch.sin, np.sin],
+        ["cos", torch.cos, np.cos],
     ]
 
     for split_input, binary_op in itertools.product([True, False], binary_op_list):

@@ -51,7 +51,7 @@ print(f"{'op':20s} {'eager':>10s} {'nnc':>10s} {'speedup':>10s}")
 
 for op in unary_ops:
     x = torch.rand((1024, 1024))
-    traced = torch.jit.trace(lambda x: op(x), (x))
+    traced = torch.jit.trace(op, (x))
 
     # Warmup.
     warmup_iters = 8
@@ -88,7 +88,7 @@ def test_batch_norm():
         x = torch.rand((n, c, h, w))
         y = torch.rand(c)
         z = torch.rand(c)
-        traced = torch.jit.trace(lambda x, y, z: op(x, y, z), (x, y, z))
+        traced = torch.jit.trace(op, (x, y, z))
 
         # Warmup.
         warmup_iters = 8

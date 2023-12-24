@@ -866,7 +866,7 @@ C++ level.
 
 To effectively use this feature, it is important to know how the native part of
 PyTorch is implemented. The most important component there is what we call the
-"dispatcher" (the best description can be found in this [blog post](http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/) even though it is slightly outdated). As
+"dispatcher" (the best description can be found in this `blog post <http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/>`_ even though it is slightly outdated). As
 hinted by its name, it is responsible for calling the right backend
 function for a specific call of a function. For example, when calling
 ``torch.add(a, b)``, the dispatcher will inspect both arguments, figure out which
@@ -881,14 +881,18 @@ Finally, we reach the backend kernel for CUDA which will launch the right CUDA k
 and return the final result. On the way out, autograd will attach the graph to the
 output and, finally, autocast will have a chance to do any update it needs on exit.
 
-One configuration of the dispatcher is the order in which all these feature and backend keys are called. The latest list and their order can be found in ``DispatchKey.h`` inside the ``DispatchKey`` enum. For the purpose of extending torch, the important subset of the ordering for this discussion is: vmap -> Autocast -> Autograd -> ZeroTensor -> Neg/Conj -> Functionalize -> Python -> Backends. The most important key for the purpose of this discussion is ``Python`` as every Tensor subclass with the ``__torch_dispatch__`` method defined will call into this feature. It is from there that the user-defined method is called and where the behavior can be overwritten arbitrarily. From there, calling the provided ``func`` again will perform a "redispatch".
+One configuration of the dispatcher is the order in which all these feature and backend keys are called. The latest list and their order can be found in ``DispatchKey.h`` inside the ``DispatchKey`` enum. For the purpose of extending torch, the important subset of the ordering for this discussion is:
+
+vmap -> Autocast -> Autograd -> ZeroTensor -> Neg/Conj -> Functionalize -> Python -> Backends
+
+The most important key for the purpose of this discussion is ``Python`` as every Tensor subclass with the ``__torch_dispatch__`` method defined will call into this feature. It is from there that the user-defined method is called and where the behavior can be overwritten arbitrarily. From there, calling the provided ``func`` again will perform a "redispatch".
 
 Some important implications of this implementation are:
+
 - This code runs "below all features". It is thus only responsible, like a regular backend, for generating the output value of each Tensor (and can, and should, ignore all advanced features like autograd, autocast, etc).
 - If any high level feature implements a given function without redispatching, it will never reach the ``Python`` key and so the ``__torch_dispatch__`` callback will never be triggered. This happens in particular for CompositeImplicitAutograd functions which are evaluated at the Autograd level without redispatching. This is because a CompositeImplicitAutograd function specifies its autograd formula by implicitly calling other native ops, so at the Autograd level, the function is decomposed into its native ops and those are evaluated instead.
 - When calling back to Python and when wrapping the results, the same conversions are used as the regular PyTorch Python/C++ binding. In particular, some objects cannot be represented in Python and need special handling (undefined Tensors for example become None).
 - Our native functions are lazily populated as ``torch.ops.{namespace}.{func_name}.{overload_name}`` as callable Python objects to enable easily interacting with them from Python. The ``func`` object given to ``__torch_dispatch__`` is always an entry from this namespace. This namespace can be used to directly call native ops and bypass the usual Python API and binding code.
-
 
 In a similar way where ``__torch_function__`` is able to interpose on all of torch's Python API and Tensor methods, ``__torch_dispatch__`` is able intercepting all calls into the aten native API. Note that all methods on Tensors are converted into function calls before entering the dispatcher and thus will appear as function calls here: ``torch.add(a, 2)`` and ``a + 2`` will lead to exactly the same aten call.
 Most of these functions are defined in ``native_functions.yaml`` which specifies the properties of these functions as well as their backend implementation. Their implementation alongside specified features are then automatically registered via codegen.
@@ -896,9 +900,7 @@ Some more exotic functions or features are also registered in other places in th
 
 It is also possible to add `new` native functions using :mod:`torch.library`. This Python feature allows defining and/or adding new implementations to native functions. This can be used to add missing kernels, replace existing ones or define brand new native functions.
 
-
-You can find many examples of ``__torch_dispatch__``-based subclasses in the [subclass zoo](https://github.com/albanD/subclass_zoo) repo.
-
+You can find many examples of ``__torch_dispatch__``-based subclasses in the `subclass zoo <https://github.com/albanD/subclass_zoo>`_ repo.
 
 Extending all :mod:`torch` API with Modes
 -----------------------------------------
@@ -921,12 +923,12 @@ Here is an example that shows logging modes of each type::
   class FunctionLog(TorchFunctionMode):
       def __torch_function__(self, func, types, args, kwargs=None):
           print(f"Function Log: {resolve_name(func)}(*{args}, **{kwargs})")
-          return func(*args, **kwargs or {})
+          return func(*args, **(kwargs or {}))
 
   class DispatchLog(TorchDispatchMode):
       def __torch_dispatch__(self, func, types, args, kwargs=None):
           print(f"Dispatch Log: {func}(*{args}, **{kwargs})")
-          return func(*args, **kwargs or {})
+          return func(*args, **(kwargs or {}))
 
   def f():
       a = torch.rand(10, requires_grad=True)

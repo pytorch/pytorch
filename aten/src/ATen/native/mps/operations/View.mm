@@ -738,11 +738,25 @@ static const std::string& getGatherScatterScalarType(const Tensor& t) {
       {c10::ScalarType::Char, "char"},
       {c10::ScalarType::Byte, "uchar"},
       {c10::ScalarType::Bool, "bool"},
+      {c10::ScalarType::ComplexFloat, "float2"},
+      {c10::ScalarType::ComplexHalf, "half2"},
   };
 
   auto it = scalarToMetalType.find(scalar_type);
   TORCH_CHECK(it != scalarToMetalType.end(), "Unsupported type byte size: ", scalar_type);
   return it->second;
+}
+
+static std::string genScatterGatherCvtFunc(const std::string& dtypeSrc, const std::string& dtypeDst) {
+  const bool srcComplex = dtypeSrc[dtypeSrc.size() - 1] == '2';
+  const bool dstComplex = dtypeDst[dtypeDst.size() - 1] == '2';
+  if (dstComplex) {
+    return dtypeDst + (srcComplex ? "(x.x, x.y)" : "(x,  0.0)");
+  }
+  if (srcComplex) {
+    return "x.x";
+  }
+  return "x";
 }
 
 static id<MTLLibrary> compileGatherScatterOpsLibrary(id<MTLDevice> device,
@@ -758,14 +772,13 @@ static id<MTLLibrary> compileGatherScatterOpsLibrary(id<MTLDevice> device,
   NSError* error = nil;
   MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
   [options setLanguageVersion:MTLLanguageVersion2_3];
-  auto gatherScatterLib =
-      [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(needsScatter ? SCATTER_OPS_TEMPLATE
-                                                                                           : GATHER_OPS_TEMPLATE,
-                                                                              dtypeSrc,
-                                                                              dtypeDst)
-                                                                      .c_str()]
-                           options:options
-                             error:&error];
+  const auto shaderStr = fmt::format(needsScatter ? SCATTER_OPS_TEMPLATE : GATHER_OPS_TEMPLATE,
+                                     dtypeSrc,
+                                     dtypeDst,
+                                     genScatterGatherCvtFunc(dtypeSrc, dtypeDst));
+  auto gatherScatterLib = [device newLibraryWithSource:[NSString stringWithUTF8String:shaderStr.c_str()]
+                                               options:options
+                                                 error:&error];
   TORCH_CHECK(gatherScatterLib != nil && error == nil,
               "Failed to compile gather-scatter library, error: ",
               [[error description] UTF8String]);

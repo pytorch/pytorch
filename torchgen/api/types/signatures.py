@@ -316,7 +316,8 @@ class FunctionalizationLambda:
         # We also need to read the "reapply views" TLS at the time that the functionalization kernel was executed,
         # and plumb it into the lambda.
         outer_ctx = dispatcher.arguments(self.g.view.func) + [
-            functionalization.reapply_views_binding
+            functionalization.reapply_views_binding,
+            functionalization.inverse_return_mode_binding,
         ]
         capture_bindings = functionalization.capture_arguments(
             self.g.view.func, is_reverse=self.is_reverse

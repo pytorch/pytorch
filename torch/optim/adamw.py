@@ -85,7 +85,7 @@ class AdamW(Optimizer):
         )
         if not step_is_tensor:
             for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]))
+                s["step"] = torch.tensor(float(s["step"]), dtype=torch.float32)
 
     def _init_group(
         self,
@@ -115,9 +115,9 @@ class AdamW(Optimizer):
                 # note(crcrpar): Deliberately host `step` on CPU if both capturable and fused are off.
                 # This is because kernel launches are costly on CUDA and XLA.
                 state["step"] = (
-                    torch.zeros((), dtype=torch.float, device=p.device)
+                    torch.zeros((), dtype=torch.float32, device=p.device)
                     if group["capturable"] or group["fused"]
-                    else torch.tensor(0.0)
+                    else torch.tensor(0.0, dtype=torch.float32)
                 )
                 # Exponential moving average of gradient values
                 state["exp_avg"] = torch.zeros_like(
@@ -150,7 +150,7 @@ class AdamW(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -305,7 +305,6 @@ def adamw(
 
     See :class:`~torch.optim.AdamW` for details.
     """
-
     if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"

@@ -42,7 +42,7 @@ class TwoTensor(torch.Tensor):
         return ["a", "b"], None
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors, meta):
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
         assert meta is None
         a, b = inner_tensors["a"], inner_tensors["b"]
         return TwoTensor(a, b)

@@ -41,14 +41,15 @@ class MyModel(torch.nn.Module):
 
 
 def _run_codecache_test(start_method):
-    torch._inductor.config.worker_start_method = start_method
-    torch._inductor.config.compile_threads = 16
-    AsyncCompile.warm_pool()
+    with torch._inductor.config.patch(
+        worker_start_method=start_method, compile_threads=16
+    ):
+        AsyncCompile.warm_pool()
 
-    model = MyModel().cuda()
-    model = torch.compile(model)
-    inp = torch.rand(10, 10).cuda()
-    model(inp).sum().backward()
+        model = MyModel().cuda()
+        model = torch.compile(model)
+        inp = torch.rand(10, 10).cuda()
+        model(inp).sum().backward()
 
 
 @requires_cuda()
@@ -93,6 +94,7 @@ class TestFxGraphCache(TestCase):
         cls.tmpdir.cleanup()
 
     def setUp(self):
+        super().setUp()
         counters.clear()
 
     @requires_triton()

@@ -2,8 +2,8 @@
 
 #include <c10/macros/Export.h>
 
+#include <cstdint>
 #include <memory>
-#include <string>
 
 namespace c10 {
 

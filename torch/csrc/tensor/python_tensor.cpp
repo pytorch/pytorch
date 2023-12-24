@@ -56,7 +56,7 @@ struct PyTensorType {
 };
 
 static_assert(
-    std::is_standard_layout<PyTensorType>::value,
+    std::is_standard_layout_v<PyTensorType>,
     "PyTensorType must be standard layout");
 
 static Backend default_backend = Backend::CPU;

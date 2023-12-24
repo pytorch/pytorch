@@ -159,7 +159,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
 
         @classmethod
         def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-            all_args = pytree.arg_tree_leaves(*args, **kwargs or {})
+            all_args = pytree.arg_tree_leaves(*args, **(kwargs or {}))
             modes = tuple(e.mode for e in all_args if isinstance(e, CompositeCompliantTensor))
             if not all_same_mode(modes):
                 raise RuntimeError("Multiple CompositeCompliantTensorModes NYI")
@@ -422,6 +422,7 @@ def compute_expected_grads(op, args, kwargs, output_process_fn_grad=None, gradch
         results = output_process_fn_grad(results)
 
     flat_results = pytree.tree_leaves(results)
+    flat_results = [r for r in flat_results if isinstance(r, torch.Tensor)]
     flat_diff_results = [r for r in flat_results if r.requires_grad]
     assert len(flat_diff_results) > 0
 
@@ -467,6 +468,7 @@ def check_backward_formula(op: Callable, args, kwargs,
             )
 
         flat_results = pytree.tree_leaves(results)
+        flat_results = [r for r in flat_results if isinstance(r, torch.Tensor)]
         flat_diff_results = [r for r in flat_results if r.requires_grad]
         assert len(flat_diff_results) > 0
 

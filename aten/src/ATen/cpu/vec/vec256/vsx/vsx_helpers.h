@@ -3,6 +3,22 @@
 #include <c10/macros/Macros.h>
 #include <ATen/cpu/vec/intrinsics.h>
 
+#if defined(__clang__)
+typedef __vector __bool char vbool8;
+typedef __vector __bool short vbool16;
+typedef __vector __bool int vbool32;
+typedef __vector __bool long long vbool64;
+using vint8    = __attribute__((vector_size(16))) signed char;
+using vint16   = __attribute__((vector_size(16))) signed short;
+using vint32   = __attribute__((vector_size(16))) signed int;
+using vint64   = __attribute__((vector_size(16))) signed long long;
+using vuint8   = __attribute__((vector_size(16))) unsigned char;
+using vuint16  = __attribute__((vector_size(16))) unsigned short;
+using vuint32  = __attribute__((vector_size(16))) unsigned int;
+using vuint64  = __attribute__((vector_size(16))) unsigned long long;
+using vfloat32 = __attribute__((vector_size(16))) float;
+using vfloat64 = __attribute__((vector_size(16))) double;
+#else
 using vbool8   =  __attribute__((altivec(vector__))) __attribute__((altivec(bool__))) char;
 using vbool16  =  __attribute__((altivec(vector__))) __attribute__((altivec(bool__))) short;
 using vbool32  =  __attribute__((altivec(vector__))) __attribute__((altivec(bool__))) int;
@@ -17,6 +33,7 @@ using vuint32  =  __attribute__((altivec(vector__)))  unsigned  int;
 using vuint64  =  __attribute__((altivec(vector__)))  unsigned long long;
 using vfloat32 =  __attribute__((altivec(vector__)))  float;
 using vfloat64 =  __attribute__((altivec(vector__)))  double;
+#endif
 
 #if !defined(vec_float)
 C10_ALWAYS_INLINE vfloat32 vec_float(const vint32& vec_in) {
@@ -64,8 +81,7 @@ C10_ALWAYS_INLINE vint32 vec_neg(const vint32& vec_in) {
 }
 
 C10_ALWAYS_INLINE vint64 vec_neg(const vint64& vec_in) {
-  vint64 vint0 = {0, 0};
-  return vec_vsubudm(vint0, vec_in);
+  return -vec_in;
 }
 #endif
 
@@ -84,7 +100,11 @@ vec_sldw_aux(const vfloat32& vec_in0, const vfloat32& vec_in1) {
 #endif
 
 #define vec_not(a) vec_nor(a, a)
-
+#if defined(__clang__) && !defined(vec_splats)
+C10_ALWAYS_INLINE vint64 vec_splats(const int64_t& a) {
+  return vec_splats(a);
+}
+#endif
 // Vectorized min/max which return a if any operand is nan
 template <class T>
 C10_ALWAYS_INLINE T vec_min_nan(const T& a, const T& b) {

@@ -5,8 +5,8 @@
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <stdint.h>
 #include <cstddef>
+#include <cstdint>
 
 namespace at {
 
@@ -120,6 +120,7 @@ template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPt
 class GenericPackedTensorAccessorBase {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   C10_HOST GenericPackedTensorAccessorBase(
       PtrType data_,
       const index_t* sizes_,
@@ -131,6 +132,7 @@ public:
 
   // if index_t is not int64_t, we want to have an int64_t constructor
   template <typename source_index_t, class = typename std::enable_if<std::is_same<source_index_t, int64_t>::value>::type>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   C10_HOST GenericPackedTensorAccessorBase(
       PtrType data_,
       const source_index_t* sizes_,
@@ -156,7 +158,9 @@ public:
   }
 protected:
   PtrType data_;
+  // NOLINTNEXTLINE(*c-arrays*)
   index_t sizes_[N];
+  // NOLINTNEXTLINE(*c-arrays*)
   index_t strides_[N];
   C10_HOST void bounds_check_(index_t i) const {
     TORCH_CHECK_INDEX(

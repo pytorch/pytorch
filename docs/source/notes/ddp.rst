@@ -70,9 +70,6 @@ DDP works with TorchDynamo.  When used with TorchDynamo, apply the DDP model wra
 before compiling the model, such that torchdynamo can apply ``DDPOptimizer``
 (graph-break optimizations) based on DDP bucket sizes.  (See `TorchDynamo DDPOptimizer <./ddp.html#torchdynamo-ddpoptimizer>`_ for more information.)
 
-TorchDynamo support for DDP currently requires setting `static_graph=False`, due to
-interactions between the graph tracing process and DDP's mechanism for observing operations happening on its module,
-but this should be fixed ultimately.
 
 .. code::
 

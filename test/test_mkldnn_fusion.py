@@ -205,11 +205,15 @@ class TestMkldnnFusion(JitTestCase):
                 return x
 
         for pointwise_info in self._unary_list().values():
-            options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
-            for input_shape, bias in options:
+            # Tensor with size = [1, 10] and stride = [0, 1] is contiguous tensor
+            # but it's strides is not default contiguous strides.
+            options = itertools.product([[[2, 3, 10], None], [[2, 10], None], [[1, 10], [0, 1]]], [True, False])
+            for (input_shape, input_stride), bias in options:
                 with torch.no_grad():
                     mod = M(pointwise_info.pointwise_module, input_shape[-1], 10, bias).eval()
                     v = torch.randn(input_shape)
+                    if input_stride is not None:
+                        v = v.as_strided(input_shape, input_stride)
                     ref = mod(v)
                     attr = pointwise_info.attr
                     scalars = pointwise_info.scalars

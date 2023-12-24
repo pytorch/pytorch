@@ -187,7 +187,7 @@ void MaybeOwnedTest<T>::SetUp() {
   ownCopy = getSampleValue<T>();
   ownCopy2 = getSampleValue<T>();
   borrowed = c10::MaybeOwned<T>::borrowed(borrowFrom);
-  owned = c10::MaybeOwned<T>::owned(c10::in_place, ownCopy);
+  owned = c10::MaybeOwned<T>::owned(std::in_place, ownCopy);
   owned2 = c10::MaybeOwned<T>::owned(T(ownCopy2));
 }
 
@@ -211,7 +211,7 @@ TYPED_TEST(MaybeOwnedTest, DefaultCtor) {
   this->borrowed = c10::MaybeOwned<TypeParam>();
   this->owned = c10::MaybeOwned<TypeParam>();
   borrowed = c10::MaybeOwned<TypeParam>::borrowed(this->borrowFrom);
-  owned = c10::MaybeOwned<TypeParam>::owned(c10::in_place, this->ownCopy);
+  owned = c10::MaybeOwned<TypeParam>::owned(std::in_place, this->ownCopy);
 
   assertBorrow(borrowed, this->borrowFrom);
   assertOwn(owned, this->ownCopy);
@@ -234,7 +234,7 @@ TYPED_TEST(MaybeOwnedTest, CopyConstructor) {
 
 TYPED_TEST(MaybeOwnedTest, MoveDereferencing) {
   // Need a different value.
-  this->owned = c10::MaybeOwned<TypeParam>::owned(c10::in_place, getSampleValue2<TypeParam>());
+  this->owned = c10::MaybeOwned<TypeParam>::owned(std::in_place, getSampleValue2<TypeParam>());
 
   EXPECT_TRUE(are_equal(*std::move(this->borrowed), getSampleValue<TypeParam>()));
   EXPECT_TRUE(are_equal(*std::move(this->owned), getSampleValue2<TypeParam>()));
@@ -257,9 +257,9 @@ TYPED_TEST(MaybeOwnedTest, MoveConstructor) {
 }
 
 TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoOwned) {
-  auto copiedBorrowed = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
-  auto copiedOwned = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
-  auto copiedOwned2 = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
+  auto copiedBorrowed = c10::MaybeOwned<TypeParam>::owned(std::in_place);
+  auto copiedOwned = c10::MaybeOwned<TypeParam>::owned(std::in_place);
+  auto copiedOwned2 = c10::MaybeOwned<TypeParam>::owned(std::in_place);
 
   copiedBorrowed = this->borrowed;
   copiedOwned = this->owned;
@@ -296,9 +296,9 @@ TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoBorrowed) {
 
 TYPED_TEST(MaybeOwnedTest, MoveAssignmentIntoOwned) {
 
-  auto movedBorrowed = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
-  auto movedOwned = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
-  auto movedOwned2 = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
+  auto movedBorrowed = c10::MaybeOwned<TypeParam>::owned(std::in_place);
+  auto movedOwned = c10::MaybeOwned<TypeParam>::owned(std::in_place);
+  auto movedOwned2 = c10::MaybeOwned<TypeParam>::owned(std::in_place);
 
   movedBorrowed = std::move(this->borrowed);
   movedOwned = std::move(this->owned);

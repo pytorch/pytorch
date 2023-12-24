@@ -9,8 +9,7 @@ from torch._utils import _get_device_index as _torch_get_device_index
 def _get_device_index(
     device: Any, optional: bool = False, allow_cpu: bool = False
 ) -> int:
-    r"""Gets the device index from :attr:`device`, which can be a torch.device
-    object, a Python integer, or ``None``.
+    r"""Get the device index from :attr:`device`, which can be a torch.device object, a Python integer, or ``None``.
 
     If :attr:`device` is a torch.device object, returns the device index if it
     is a CUDA device. Note that for a CUDA device without a specified index,
