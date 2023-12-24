@@ -331,9 +331,11 @@ threeOutputs linalg_lu_factor_ex_batch_rule(
 }
 
 oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim) {
-  TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) >= 2, "torch.matrix_exp: The input tensor A must have at least 2 dimensions.");
+  TORCH_CHECK(
+      rankWithoutBatchDim(self, self_bdim) >= 2,
+      "torch.linalg.matrix_exp: The input tensor A must have at least 2 dimensions.");
   const auto self_ = moveBatchDimToFront(self, self_bdim).contiguous();  // seems to be a bug
-  return std::make_tuple(at::matrix_exp(self_), 0);
+  return std::make_tuple(at::linalg_matrix_exp(self_), 0);
 }
 
 fourOutputs solve_ex_batch_rule(
@@ -585,6 +587,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(linalg_lstsq, linalg_lstsq_batch_rule);  // custom errors and sometimes empty return
   VMAP_SUPPORT(linalg_lu_factor_ex, linalg_lu_factor_ex_batch_rule);
   VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
+  VMAP_SUPPORT(matrix_exp, matrix_exp_batch_rule);
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);
