@@ -514,7 +514,7 @@ class TreeSpec:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def children(self) -> List["TreeSpec"]:
-        return self.children_specs.copy()
+        return self.children_specs
 
     def child(self, index: int) -> "TreeSpec":
         return self.children_specs[index]
@@ -572,13 +572,10 @@ class TreeSpec:
                 )
 
             if both_standard_dict:  # dictionary types are compatible with each other
-                dict_context = (
-                    self.context
-                    if self.type is not defaultdict
-                    # ignore mismatch of `default_factory` for defaultdict
-                    else self.context[1]
-                )
-                expected_keys = dict_context
+                # Only compare the keys
+                # - ignore the key ordering
+                # - ignore mismatch of `default_factory` for defaultdict
+                expected_keys = self.entries()
                 got_key_set = set(tree)
                 expected_key_set = set(expected_keys)
                 if got_key_set != expected_key_set:
