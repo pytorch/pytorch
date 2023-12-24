@@ -29,7 +29,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError
 
-from ._safeguard import GradModeUnsupportedSafeguard
+from ._safeguard import GradStateOpsFailSafeguard
 
 from .dynamic_shapes import _process_constraints, Constraint
 from .exported_program import (
@@ -382,7 +382,7 @@ def _export_non_strict(
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with torch.nn.utils.stateless._reparametrize_module(
         mod, fake_params_buffers
-    ), GradModeUnsupportedSafeguard():
+    ), GradStateOpsFailSafeguard():
         gm, graph_signature = transform(aot_export_module)(
             mod, (*fake_args, *fake_kwargs.values()), trace_joint=False
         )

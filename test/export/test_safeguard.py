@@ -31,20 +31,28 @@ class TestSafeguard(TestCase):
             export(f1, (a,))
             export(f3, (a,))
 
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(
+                RuntimeError, "Encountered autograd state manager op.*"
+            ):
                 export(f2, (a,))
 
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(
+                RuntimeError, "Encountered autograd state manager op.*"
+            ):
                 export(f4, (a,))
 
         with torch.enable_grad():
             export(f2, (a,))
             export(f4, (a,))
 
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(
+                RuntimeError, "Encountered autograd state manager op.*"
+            ):
                 export(f1, (a,))
 
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(
+                RuntimeError, "Encountered autograd state manager op.*"
+            ):
                 export(f3, (a,))
 
 
