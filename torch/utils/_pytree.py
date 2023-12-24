@@ -511,7 +511,7 @@ class TreeSpec:
         return repr_prefix + repr_suffix
 
     @property
-    def context(self):
+    def context(self) -> Context:
         warnings.warn(
             "`treespec.context` is private implementation detail. "
             "It might be changed in the future.",
@@ -520,7 +520,7 @@ class TreeSpec:
         return self._context
 
     @property
-    def children_specs(self):
+    def children_specs(self) -> List["TreeSpec"]:
         warnings.warn(
             "`treespec.children_specs` is private implementation detail. "
             "It might be changed in the future. "
@@ -656,6 +656,8 @@ class TreeSpec:
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:
         super().__init__(None, None, [])
+
+    def __post_init__(self) -> None:
         self.num_nodes = 1
         self.num_leaves = 1
         self.num_children = 0

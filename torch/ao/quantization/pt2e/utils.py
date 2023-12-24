@@ -401,7 +401,6 @@ def _replace_literals_with_new_placeholders(
                         new_args.append(ph_node)
                         args_spec.children_specs.append(LeafSpec())
                         cnt += 1
-                        new_ph_cnt += 1
                         if merge_dup:
                             literal_to_ph[arg] = ph_node
                 else:
