@@ -436,7 +436,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 torch.ops.aten.hardtanh.default,
             ]:
                 input_act = getattr(m, n.args[0].target)
-                output_act = getattr(m, list(n.users)[0].target)
+                output_act = getattr(m, next(iter(n.users)).target)
                 self.assertIs(input_act, output_act)
 
         m = convert_pt2e(m, fold_quantize=True)
@@ -817,6 +817,38 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
         }
         node_list = [
+            torch.ops.aten.mul.Tensor,
+        ]
+        self._test_quantizer(
+            M(),
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+
+    def test_add_mul_long(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.t = torch.tensor([100])
+
+            def forward(self, x):
+                x = x + self.t
+                x = x * self.t
+                return x
+
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        # not quantized
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
+        }
+        node_list = [
+            torch.ops.aten.add.Tensor,
             torch.ops.aten.mul.Tensor,
         ]
         self._test_quantizer(

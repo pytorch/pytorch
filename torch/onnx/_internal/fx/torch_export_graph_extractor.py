@@ -48,7 +48,7 @@ class TorchExport(exporter.FXGraphExtractor):
             io_adapter.FlattenInputWithTreeSpecValidationInputStep()
         )
         self.input_adapter.append_step(
-            io_adapter.PrependParamsAndBuffersAotAutogradInputStep(model)
+            io_adapter.PrependParamsBuffersConstantAotAutogradInputStep()
         )
 
         # ONNX does not support None inputs. During graph building, all None inputs
@@ -68,7 +68,9 @@ class TorchExport(exporter.FXGraphExtractor):
             io_adapter.ConvertComplexToRealRepresentationInputStep()
         )
 
-        updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)
+        updated_model_args = self.input_adapter.apply(
+            *model_args, model=model, **model_kwargs
+        )
 
         # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
         # tensor, etc), we flatten the collection and register each element as output.
@@ -80,7 +82,7 @@ class TorchExport(exporter.FXGraphExtractor):
         )
 
         options.fx_tracer.output_adapter.append_step(
-            io_adapter.PrependParamsAndBuffersAotAutogradOutputStep(model)
+            io_adapter.PrependParamsAndBuffersAotAutogradOutputStep()
         )
 
         # TODO: https://github.com/pytorch/pytorch/issues/114628

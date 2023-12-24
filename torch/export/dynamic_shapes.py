@@ -481,7 +481,7 @@ def _process_constraints(
     graph_module: torch.fx.GraphModule,
     num_lifted_params_buffers: int,
     example_inputs: List[torch.Tensor],
-) -> Tuple[Dict, List[Tuple]]:
+) -> Tuple[Dict, List[Tuple[Any, Any]]]:
     """
     Process the constraints stored in the graph module to return something more readable.
 
