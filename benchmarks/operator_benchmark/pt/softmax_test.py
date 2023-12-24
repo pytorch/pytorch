@@ -40,6 +40,7 @@ softmax_ops_list = op_bench.op_list(
 softmax_two_dims_ops_list = op_bench.op_list(
     attr_names=["op_name", "op_func"],
     attrs=[
+        ["Softmax", nn.Softmax],
         ["LogSoftmax", nn.LogSoftmax],
     ],
 )
@@ -47,7 +48,10 @@ softmax_two_dims_ops_list = op_bench.op_list(
 
 softmax_two_dims_configs = op_bench.config_list(
     attr_names=["N", "seq_len", "dim"],
-    attrs=[[700, 23258, 0], [700, 23258, 1], [1024, 23258, 1]],
+    attrs=[[700, 23258, 0], [700, 23258, 1], [1024, 23258, 1],
+           [128, 128, 1], [48, 128, 1], [16, 1024, 1], [32, 1024, 1],
+           [48, 1024, 1], [16, 512, 1], [32, 512, 1], [48, 512, 1],
+           [16, 256, 1], [32, 256, 1], [48, 256, 1]],
     cross_product_configs={
         "device": ["cpu", "cuda"],
     },
