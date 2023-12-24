@@ -48,6 +48,19 @@ inline void _vec_log_softmax_lastdim(
 
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
 
+  // if grain-size is 0, all threads might do real work
+  if (grain_size > 0) {
+    int num_threads = at::get_num_threads();
+    int divup = (outer_size + grain_size - 1) / grain_size;
+    if ((divup < outer_size) && (outer_size < num_threads)) {
+      // use fewer threads to do real work
+      grain_size = 1;
+    } else if (outer_size >= num_threads) {
+      // Use all threads. Even if grain size was already allowing this,
+      // there wouldn't be any side-effects with this change
+      grain_size = (outer_size - 1) / (num_threads - 1);
+    }
+  }
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     // MSVC requires such a declaration of dynamic arrays
     // Source: https://stackoverflow.com/a/33423538
@@ -115,6 +128,18 @@ _vec_softmax_lastdim(
     int64_t dim_size) {
   using Vec = vec::Vectorized<scalar_t>;
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
+  if (grain_size > 0) {
+    int num_threads = at::get_num_threads();
+    int divup = (outer_size + grain_size - 1) / grain_size;
+    if ((divup < outer_size) && (outer_size < num_threads)) {
+      // use fewer threads to do real work
+      grain_size = 1;
+    } else if (outer_size >= num_threads) {
+      // Use all threads. Even if grain size was already allowing this,
+      // there wouldn't be any side-effects with this change
+      grain_size = (outer_size - 1) / (num_threads - 1);
+    }
+  }
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     for (const auto i : c10::irange(begin, end)) {
       scalar_t* input_data = input_data_base + i * dim_size;
@@ -150,6 +175,18 @@ _vec_softmax_lastdim(
   using Vec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
+  if (grain_size > 0) {
+    int num_threads = at::get_num_threads();
+    int divup = (outer_size + grain_size - 1) / grain_size;
+    if ((divup < outer_size) && (outer_size < num_threads)) {
+      // use fewer threads to do real work
+      grain_size = 1;
+    } else if (outer_size >= num_threads) {
+      // Use all threads. Even if grain size was already allowing this,
+      // there wouldn't be any side-effects with this change
+      grain_size = (outer_size - 1) / (num_threads - 1);
+    }
+  }
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     // thread local temp buffer.
     auto buffer = std::make_unique<float []>(dim_size);
@@ -215,8 +252,18 @@ inline void _vec_host_softmax_backward_lastdim(
     int64_t dim_size) {
   using Vec = vec::Vectorized<at::opmath_type<scalar_t>>;
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
-  if (grain_size < 1)
-    grain_size = 1;
+  if (grain_size > 0) {
+    int num_threads = at::get_num_threads();
+    int divup = (outer_size + grain_size - 1) / grain_size;
+    if ((divup < outer_size) && (outer_size < num_threads)) {
+      // use fewer threads to do real work
+      grain_size = 1;
+    } else if (outer_size >= num_threads) {
+      // Use all threads. Even if grain size was already allowing this,
+      // there wouldn't be any side-effects with this change
+      grain_size = (outer_size - 1) / (num_threads - 1);
+    }
+  }
 
   parallel_for(
       0,
