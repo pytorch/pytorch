@@ -513,7 +513,7 @@ class TreeSpec:
     @property
     def context(self):
         warnings.warn(
-            "treespec.context is private implementation detail. "
+            "`treespec.context` is private implementation detail. "
             "It might be changed in the future.",
             stacklevel=2,
         )
@@ -522,8 +522,9 @@ class TreeSpec:
     @property
     def children_specs(self):
         warnings.warn(
-            "treespec.children_specs is private implementation detail. "
-            "It might be changed in the future.",
+            "`treespec.children_specs` is private implementation detail. "
+            "It might be changed in the future. "
+            "Please use `treespec.children()` or `treespec.child(idx)` instead.",
             stacklevel=2,
         )
         return self._children_specs
@@ -532,7 +533,7 @@ class TreeSpec:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def children(self) -> List["TreeSpec"]:
-        return self._children_specs.copy()
+        return self._children_specs
 
     def child(self, index: int) -> "TreeSpec":
         return self._children_specs[index]
@@ -590,13 +591,10 @@ class TreeSpec:
                 )
 
             if both_standard_dict:  # dictionary types are compatible with each other
-                dict_context = (
-                    self._context
-                    if self.type is not defaultdict
-                    # ignore mismatch of `default_factory` for defaultdict
-                    else self._context[1]
-                )
-                expected_keys = dict_context
+                # Only compare the keys
+                # - ignore the key ordering
+                # - ignore mismatch of `default_factory` for defaultdict
+                expected_keys = self.entries()
                 got_key_set = set(tree)
                 expected_key_set = set(expected_keys)
                 if got_key_set != expected_key_set:
