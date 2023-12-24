@@ -1780,7 +1780,9 @@ class CppVecKernel(CppKernel):
             if self._load_mask is not None and var is not None:
                 assert isinstance(self._load_mask, CppCSEVariable), self._load_mask
                 if self._load_mask.is_vec:
-                    load_mask = f"{vec_to_array(self._load_mask)}[{itervar_inner}] != 0"
+                    load_mask = (
+                        f"vector_lane_mask_check({self._load_mask}, {itervar_inner})"
+                    )
                 else:
                     load_mask = f"{self._load_mask} != 0"
             index = sympy_subs(index, replacements)

@@ -417,4 +417,13 @@ inline bool all_zero(at::vec::Vectorized<float> src) {
   return mask == 0;
 #endif
 }
+
+inline bool vector_lane_mask_check(at::vec::Vectorized<float> src, int lane) {
+#if defined(CPU_CAPABILITY_AVX2)
+  return _mm256_movemask_ps(src) & (1 << lane);
+#else
+  return _mm512_movepi32_mask(_mm512_castps_si512(src)) & (1 << lane);
+#endif  
+}
+
 #endif
