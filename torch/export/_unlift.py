@@ -4,6 +4,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._export.utils import _check_input_constraints_pre_hook
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+
 from .exported_program import ExportedProgram
 
 
@@ -181,6 +182,7 @@ def _construct_inp_pos_to_param_buffer_name(
     # TODO Fix the period in params/buffers names later
     # maybe a pass to replace graph signature with fixed names
     param_buffer_name_to_corrected_name = {}
+    constant_name_to_corrected_name = {}
 
     for name, value in state_dict.items():
         if name in graph_signature.buffers:
@@ -200,8 +202,11 @@ def _construct_inp_pos_to_param_buffer_name(
         assert hasattr(graph_signature, "lifted_tensor_constants")
         for name, value in tensor_constants.items():
             if name in graph_signature.lifted_tensor_constants:
-                new_gm.register_buffer(name, value)
-                param_buffer_name_to_corrected_name[name] = name
+                if isinstance(value, torch.Tensor):
+                    new_gm.register_buffer(name.replace(".", "_"), value)
+                else:
+                    setattr(new_gm, name.replace(".", "_"), value)
+                constant_name_to_corrected_name[name] = name.replace(".", "_")
 
     count = 0
     inp_pos_to_param_buffer_name = {}
@@ -225,9 +230,15 @@ def _construct_inp_pos_to_param_buffer_name(
                     inp_pos_to_param_buffer_name[count] = param_name
             if hasattr(graph_signature, "inputs_to_lifted_tensor_constants"):
                 if node.name in graph_signature.inputs_to_lifted_tensor_constants:
-                    inp_pos_to_param_buffer_name[
-                        count
-                    ] = graph_signature.inputs_to_lifted_tensor_constants[node.name]
+                    constant_name = graph_signature.inputs_to_lifted_tensor_constants[
+                        node.name
+                    ]
+                    if constant_name in constant_name_to_corrected_name:
+                        inp_pos_to_param_buffer_name[
+                            count
+                        ] = constant_name_to_corrected_name[constant_name]
+                    else:
+                        inp_pos_to_param_buffer_name[count] = constant_name
             count += 1
 
     return inp_pos_to_param_buffer_name
