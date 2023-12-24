@@ -1009,7 +1009,7 @@ def _broadcast_to_and_flatten(tree: PyTree, treespec: TreeSpec) -> Optional[List
 
     # Recursively flatten the children
     result: List[Any] = []
-    for child, child_spec in zip(child_pytrees, treespec.children_specs):
+    for child, child_spec in zip(child_pytrees, treespec.children()):
         flat = _broadcast_to_and_flatten(child, child_spec)
         if flat is not None:
             result += flat
@@ -1073,7 +1073,7 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
     else:
         serialized_context = serialize_node_def.to_dumpable_context(treespec.context)
 
-    child_schemas = [_treespec_to_json(child) for child in treespec.children_specs]
+    child_schemas = [_treespec_to_json(child) for child in treespec.children()]
 
     return _TreeSpecSchema(serialized_type_name, serialized_context, child_schemas)
 
