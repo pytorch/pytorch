@@ -1777,7 +1777,7 @@ class CppVecKernel(CppKernel):
                     array_var = vec_to_array(indirect_var)
                     replacements[indirect_var] = f"{array_var}[{itervar_inner}]"
             load_mask = None
-            if self._load_mask is not None:
+            if self._load_mask is not None and var is not None:
                 assert isinstance(self._load_mask, CppCSEVariable), self._load_mask
                 if self._load_mask.is_vec:
                     load_mask = f"{vec_to_array(self._load_mask)}[{itervar_inner}] != 0"
