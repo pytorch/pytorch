@@ -55,7 +55,7 @@ inline void _vec_log_softmax_lastdim(
     if ((divup < outer_size) && (outer_size < num_threads)) {
       // use fewer threads to do real work
       grain_size = 1;
-    } else if (outer_size >= num_threads) {
+    } else if ((outer_size >= num_threads) && (num_threads > 1) && (outer_size > 0)) {
       // Use all threads. Even if grain size was already allowing this,
       // there wouldn't be any side-effects with this change
       grain_size = (outer_size - 1) / (num_threads - 1);
@@ -134,7 +134,7 @@ _vec_softmax_lastdim(
     if ((divup < outer_size) && (outer_size < num_threads)) {
       // use fewer threads to do real work
       grain_size = 1;
-    } else if (outer_size >= num_threads) {
+    } else if ((outer_size >= num_threads) && (num_threads > 1) && (outer_size > 0)) {
       // Use all threads. Even if grain size was already allowing this,
       // there wouldn't be any side-effects with this change
       grain_size = (outer_size - 1) / (num_threads - 1);
@@ -181,7 +181,7 @@ _vec_softmax_lastdim(
     if ((divup < outer_size) && (outer_size < num_threads)) {
       // use fewer threads to do real work
       grain_size = 1;
-    } else if (outer_size >= num_threads) {
+    } else if ((outer_size >= num_threads) && (num_threads > 1) && (outer_size > 0)) {
       // Use all threads. Even if grain size was already allowing this,
       // there wouldn't be any side-effects with this change
       grain_size = (outer_size - 1) / (num_threads - 1);
@@ -258,7 +258,7 @@ inline void _vec_host_softmax_backward_lastdim(
     if ((divup < outer_size) && (outer_size < num_threads)) {
       // use fewer threads to do real work
       grain_size = 1;
-    } else if (outer_size >= num_threads) {
+    } else if ((outer_size >= num_threads) && (num_threads > 1) && (outer_size > 0)) {
       // Use all threads. Even if grain size was already allowing this,
       // there wouldn't be any side-effects with this change
       grain_size = (outer_size - 1) / (num_threads - 1);
