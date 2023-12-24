@@ -40,6 +40,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import TypeGuard  # Python 3.10+
 
 
 __all__ = [
@@ -510,7 +511,7 @@ class TreeSpec:
         repr_suffix: str = f"{children_specs_str}])"
         return repr_prefix + repr_suffix
 
-    def is_leaf(self) -> bool:
+    def is_leaf(self) -> TypeGuard["LeafSpec"]:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def _flatten_up_to_helper(self, tree: PyTree, subtrees: List[PyTree]) -> None:
