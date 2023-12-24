@@ -6,15 +6,13 @@ import dataclasses
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Iterable, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
-KNOWN_TYPES = tuple(
-    [torch.Tensor, int, str, float, bool, type(None)] + list(py_sym_types)
-)
+KNOWN_TYPES = tuple([torch.Tensor, int, str, float, bool, type(None)] + list(py_sym_types))
 
 original_zip = zip
 
@@ -26,9 +24,7 @@ def strict_zip(*iterables, strict=True, **kwargs):
     shortest_length = min(len(it) for it in iterables)
     for iterable in iterables:
         if len(iterable) != shortest_length:
-            raise ValueError(
-                "The iterables have different lengths and strict mode is enabled."
-            )
+            raise ValueError("The iterables have different lengths and strict mode is enabled.")
 
     return original_zip(*iterables, **kwargs)
 
@@ -47,9 +43,7 @@ def _get_symint_hints(exprs):
 
 def partial_flatten_asdict(obj: Any) -> Any:
     if dataclasses.is_dataclass(obj):
-        return {
-            field.name: getattr(obj, field.name) for field in dataclasses.fields(obj)
-        }
+        return {field.name: getattr(obj, field.name) for field in dataclasses.fields(obj)}
     elif isinstance(obj, (list, tuple)):
         return obj.__class__([partial_flatten_asdict(item) for item in obj])
     elif isinstance(obj, dict):
@@ -119,27 +113,28 @@ def call_func_at_runtime_with_args(f, args, steal_args=False, disable_amp=False)
 class PytreeThunk:
     spec: Optional[pytree.TreeSpec] = None
     # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
-    is_simple = (
-        None  # if the output spec is a tuple/list, we won't bother unflattening it.
-    )
+    is_simple = None  # if the output spec is a tuple/list, we won't bother unflattening it.
     is_really_simple = None  # if the output spec is a LeafSpec
 
-    def set(self, spec):
+    def set(self, spec: pytree.TreeSpec) -> None:
         assert self.spec is None or self.spec == spec
-        self.spec = spec
-        if type(self.spec) in [tuple, list] and all(
+        assert spec is not None
+        self.spec: pytree.TreeSpec = spec
+        if type(self.spec) in {tuple, list} and all(
             child.is_leaf() for child in spec.children_specs
         ):
             self.is_simple = True
-        if self.spec.is_leaf():  # type: ignore[union-attr]
+        if self.spec.is_leaf():
             self.is_really_simple = True
 
-    def unflatten(self, x):
+    def unflatten(self, x: Iterable[Any]) -> Any:
+        assert self.spec is not None
+        if not isinstance(x, (list, tuple)):
+            x = list(x)
         if self.is_really_simple:
             return x[0]
         if self.is_simple:
             return x
-        assert self.spec is not None
         return pytree.tree_unflatten(x, self.spec)
 
 
