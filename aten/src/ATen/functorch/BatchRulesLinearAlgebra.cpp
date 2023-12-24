@@ -333,7 +333,7 @@ threeOutputs linalg_lu_factor_ex_batch_rule(
 oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim) {
   TORCH_CHECK(
       rankWithoutBatchDim(self, self_bdim) >= 2,
-      "torch.linalg.matrix_exp: The input tensor A must have at least 2 dimensions.");
+      "torch.matrix_exp: The input tensor A must have at least 2 dimensions.");
   const auto self_ = moveBatchDimToFront(self, self_bdim).contiguous();  // seems to be a bug
   return std::make_tuple(at::linalg_matrix_exp(self_), 0);
 }
