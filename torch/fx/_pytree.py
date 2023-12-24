@@ -1,7 +1,7 @@
 from collections import namedtuple
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type
 
-from torch.utils._pytree import LeafSpec, PyTree, TreeSpec
+from torch.utils._pytree import PyTree, TreeSpec
 
 FlattenFuncSpec = Callable[[PyTree, TreeSpec], List]
 FlattenFuncExactMatchSpec = Callable[[PyTree, TreeSpec], bool]
@@ -24,7 +24,7 @@ def tree_flatten_spec(
     spec: TreeSpec,
     exact_structural_match=False,
 ) -> List[Any]:
-    if isinstance(spec, LeafSpec):
+    if spec.is_leaf():
         return [pytree]
     if spec.type not in SUPPORTED_NODES:
         raise RuntimeError(

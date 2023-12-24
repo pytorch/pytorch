@@ -128,10 +128,10 @@ class PytreeThunk:
         assert self.spec is None or self.spec == spec
         self.spec = spec
         if type(self.spec) in [tuple, list] and all(
-            isinstance(i, pytree.LeafSpec) for i in spec.children_specs
+            child.is_leaf() for child in spec.children_specs
         ):
             self.is_simple = True
-        if isinstance(self.spec, pytree.LeafSpec):
+        if self.spec.is_leaf():  # type: ignore[union-attr]
             self.is_really_simple = True
 
     def unflatten(self, x):
