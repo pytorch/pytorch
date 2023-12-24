@@ -36,7 +36,10 @@ def tree_flatten_spec(
     child_pytrees = flatten_fn_spec(pytree, spec)
     if exact_structural_match:
         flatten_fn_exact_match_spec = SUPPORTED_NODES_EXACT_MATCH[spec.type]
-        if flatten_fn_exact_match_spec and not flatten_fn_exact_match_spec(pytree, spec):
+        if flatten_fn_exact_match_spec and not flatten_fn_exact_match_spec(
+            pytree,
+            spec,
+        ):
             raise RuntimeError(f"Cannot flatten pytree {pytree}, given spec: {spec}")
     result = []
     for child, child_spec in zip(child_pytrees, spec.children()):
