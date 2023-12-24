@@ -6538,7 +6538,7 @@ class TestQuantizedConv(TestCase):
         result_ref = conv_op(X)
         X2_q = None
 
-        if post_op.binary_attr == "add":
+        if post_op.binary_attr == "sum":
             (X_value_min, X_value_max) = (0, 4)
             X2_init = torch.randint(
                 X_value_min, X_value_max, result_ref.size(), device=device
@@ -6599,7 +6599,7 @@ class TestQuantizedConv(TestCase):
             X_q_cpu_tensor.size(),
         )
 
-        if post_op.binary_attr == "add":
+        if post_op.binary_attr == "sum":
             X2_q_cpu_tensor = X2_q.int_repr()
             Y_q_cpu_tensor = qconv(
                 X_q_cpu_tensor,
@@ -6952,9 +6952,9 @@ class TestQuantizedConv(TestCase):
                 qconv_output_dtype=output_dtype,
             )
 
-    # Test qconv with post op add
+    # Test qconv with post op sum
     @skipIfNoONEDNN
-    def test_qconv2d_add_pt2e(self):
+    def test_qconv2d_sum_pt2e(self):
         groups_list = [1, 3]
         input_channels_per_group = 2
         output_channels_per_group = 2
@@ -6984,7 +6984,7 @@ class TestQuantizedConv(TestCase):
                 dilations,
                 groups,
             )
-            pointwise_post_op = PointwisePostOp(binary_attr="add")
+            pointwise_post_op = PointwisePostOp(binary_attr="sum")
             self._test_qconv_impl_cpu_tensor(
                 qconv,
                 qconv_prepack,
@@ -7007,9 +7007,9 @@ class TestQuantizedConv(TestCase):
                 qconv_x2_dtype=output_dtype,
             )
 
-    # Test qconv with post op add relu
+    # Test qconv with post op sum relu
     @skipIfNoONEDNN
-    def test_qconv2d_add_relu_pt2e(self):
+    def test_qconv2d_sum_relu_pt2e(self):
         groups_list = [1, 3]
         input_channels_per_group = 2
         output_channels_per_group = 2
@@ -7038,7 +7038,7 @@ class TestQuantizedConv(TestCase):
                 dilations,
                 groups,
             )
-            pointwise_post_op = PointwisePostOp(binary_attr="add", unary_attr="relu")
+            pointwise_post_op = PointwisePostOp(binary_attr="sum", unary_attr="relu")
             self._test_qconv_impl_cpu_tensor(
                 qconv,
                 qconv_prepack,
@@ -7059,9 +7059,9 @@ class TestQuantizedConv(TestCase):
                 X2_zero_point=X2_zero_point,
             )
 
-    # Test qconv with post op add
+    # Test qconv with post op sum
     @skipIfNoONEDNN
-    def test_qconv2d_add_relu_float_output_pt2e(self):
+    def test_qconv2d_sum_relu_float_output_pt2e(self):
         groups = 1
         input_channels_per_group = 2
         output_channels_per_group = 2
@@ -7094,9 +7094,9 @@ class TestQuantizedConv(TestCase):
                 groups,
             )
             pointwise_post_op = (
-                PointwisePostOp(binary_attr="add", unary_attr="relu")
+                PointwisePostOp(binary_attr="sum", unary_attr="relu")
                 if use_relu
-                else PointwisePostOp(binary_attr="add")
+                else PointwisePostOp(binary_attr="sum")
             )
             self._test_qconv_impl_cpu_tensor(
                 qconv,
