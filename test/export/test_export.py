@@ -15,6 +15,7 @@ from torch.export import (
     Dim,
     dynamic_dim,
     export,
+    unflatten,
 )
 from torch.export._trace import (
     _export_to_torch_ir,
@@ -1667,8 +1668,7 @@ class TestExport(TestCase):
 
         inp = (torch.randn(5, 10),)
         m = M()
-        with unittest.mock.patch("torch._export.DECOMP_TABLE", None):
-            ep = export(m, inp)
+        ep = export(m, inp)
         state_dict = ep.state_dict
 
         FileCheck().check_count(
@@ -1698,8 +1698,7 @@ class TestExport(TestCase):
 
         inp = (torch.randn(5, 10),)
         m = M()
-        with unittest.mock.patch("torch._export.DECOMP_TABLE", None):
-            ep = export(m, inp, dynamic_shapes={"x": {0: Dim("batch")}})
+        ep = export(m, inp, dynamic_shapes={"x": {0: Dim("batch")}})
 
         core_aten_ep = ep.run_decompositions()
 
@@ -2200,12 +2199,12 @@ def forward(self, l_x_):
         ep_strict = torch.export.export(mod, inp)
         ep_non_strict = torch.export.export(mod, inp, strict=False)
 
-        gm_unflat_non_strict = ep_non_strict.module(flat=False)
+        gm_unflat_non_strict = unflatten(ep_non_strict)
         self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
         self.assertTrue(hasattr(gm_unflat_non_strict.bar, "buffer"))
         self.assertTrue(hasattr(gm_unflat_non_strict.bar, "leaf"))
 
-        gm_unflat_strict = ep_strict.module(flat=False)
+        gm_unflat_strict = unflatten(ep_strict)
 
         self.assertEqual(gm_unflat_non_strict(*inp), gm_unflat_strict(*inp))
         self.assertExpectedInline(
@@ -2248,7 +2247,9 @@ graph():
                 self.leaf = Leaf()
 
             def forward(self, x):
-                return self.leaf(x).sum()
+                a = self.leaf(x).sum()
+                b = self.leaf(x).sum()
+                return a + b
 
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2265,13 +2266,13 @@ graph():
         ep_strict = torch.export.export(mod, inp)
         ep_non_strict = torch.export.export(mod, inp, strict=False)
 
-        gm_unflat_non_strict = ep_non_strict.module(flat=False)
+        gm_unflat_non_strict = unflatten(ep_non_strict)
         self.assertTrue(hasattr(gm_unflat_non_strict, "bar"))
         self.assertTrue(hasattr(gm_unflat_non_strict.bar, "buffer"))
         self.assertTrue(hasattr(gm_unflat_non_strict.bar, "leaf"))
         self.assertTrue(hasattr(gm_unflat_non_strict.bar_different, "leaf"))
 
-        gm_unflat_strict = ep_strict.module(flat=False)
+        gm_unflat_strict = unflatten(ep_strict)
 
         self.assertEqual(gm_unflat_non_strict(*inp), gm_unflat_strict(*inp))
         self.assertExpectedInline(
@@ -2378,7 +2379,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self.assertEqual(node.meta["nn_module_stack"], cond_top_level_nn_module_stack)
 
         # this doesn't work today
-        gm_unflat_strict = ep.module(flat=False)
+        gm_unflat_strict = unflatten(ep)
 
 
 if __name__ == '__main__':
