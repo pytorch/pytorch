@@ -21123,6 +21123,11 @@ python_ref_db = [
                 "TestCommon",
                 device_type="cuda",
             ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestMeta",
+                device_type="cuda",
+            ),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
