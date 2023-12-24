@@ -519,7 +519,6 @@ def is_function(value):
         value,
         (
             types.FunctionType,
-            types.MethodType,
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
@@ -909,6 +908,8 @@ def is_safe_constant(v):
             type(type),
             torch.device,
             torch.dtype,
+            torch.memory_format,
+            torch.layout,
         ),
     )
 

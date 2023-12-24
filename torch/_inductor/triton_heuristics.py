@@ -292,10 +292,12 @@ class CachingAutotuner(KernelInterface):
         # Setting device_type="hip" required on ROCm to pass down to triton
         compile_meta["device_type"] = "cuda" if torch.version.hip is None else "hip"
 
-        device_type = compile_meta["device_type"]
         if warm_cache_only_with_cc:
             cc = warm_cache_only_with_cc
         else:
+            # Use device_type 'cuda' for both cuda and hip devices to retrieve
+            # the compute capability.
+            device_type = "cuda"
             device_id = compile_meta["device"]
             device_interface = get_interface_for_device(device_type)
             device = torch.device(device_type, device_id)
@@ -313,7 +315,7 @@ class CachingAutotuner(KernelInterface):
                 ),
             )
 
-            target = (device_type, cc)
+            target = (compile_meta["device_type"], cc)
             options = {
                 "num_warps": compile_meta["num_warps"],
                 "num_stages": compile_meta["num_stages"],
