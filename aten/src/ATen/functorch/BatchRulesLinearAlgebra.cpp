@@ -580,6 +580,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(mv, mv_batch_rule);
   VMAP_SUPPORT(mm, mm_batch_rule);
   VMAP_SUPPORT(linalg_lu_solve, linalg_lu_solve_batch_rule);
+  VMAP_SUPPORT(lu_solve, linalg_lu_solve_batch_rule); // alias
   VMAP_SUPPORT(linalg_householder_product, householder_product_batch_rule);
   VMAP_SUPPORT(cholesky_solve, cholesky_solve_batch_rule);  // custom dim error
   VMAP_SUPPORT(linalg_lstsq, linalg_lstsq_batch_rule);  // custom errors and sometimes empty return

@@ -3768,7 +3768,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('jiterator_binary', device_type='cuda'),
         xfail('jiterator_4inputs_with_extra_args', device_type='cuda'),
         xfail('_segment_reduce', 'lengths'),
-        xfail('lu_solve', ''),
         xfail('special.hermite_polynomial_he'),
         xfail('nn.functional.dropout3d', ''),
         xfail('special.chebyshev_polynomial_t'),
