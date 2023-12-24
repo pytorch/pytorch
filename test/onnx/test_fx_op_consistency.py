@@ -35,6 +35,7 @@ from typing import Any, Callable, Collection, Mapping, Optional, Tuple, Type, Un
 import onnx_test_common
 
 import parameterized
+import pytorch_test_common
 
 import torch
 from onnx_test_common import skip, xfail
@@ -561,7 +562,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "arange",
         matcher=lambda sample: not isinstance(sample.input, torch.Tensor),
         reason="torch.export.export does not support non-tensor input (https://github.com/pytorch/pytorch/issues/115110)",
-        model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     ),
     skip(
         "cat",
@@ -572,7 +573,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "full",
         matcher=lambda sample: not isinstance(sample.input, torch.Tensor),
         reason="torch.export.export does not support non-tensor input (https://github.com/pytorch/pytorch/issues/115110)",
-        model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     ),
     xfail(
         "index_put",
@@ -586,7 +587,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "native_batch_norm",
         matcher=lambda sample: sample.args[-3] is True
         and any(arg is not None for arg in sample.args[2:4]),
-        model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="https://github.com/pytorch/pytorch/issues/115106",
     ),
     xfail(
@@ -625,7 +626,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.batch_norm",
         matcher=lambda sample: sample.kwargs.get("training") is True
         and any(arg is not None for arg in sample.args[2:4]),
-        model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="Flaky failure: https://github.com/pytorch/pytorch/issues/115106",
     ),
     skip(
@@ -646,7 +647,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "nn.functional.embedding",
         matcher=lambda sample: sample.kwargs.get("max_norm") is not None,
-        model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="https://github.com/pytorch/pytorch/issues/115106",
     ),
     skip_torchlib_forward_compatibility(
@@ -669,11 +670,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: len(sample.input.shape) == 0
         and sample.kwargs.get("as_tuple", False) is False,
         reason="Output 'shape' do not match: torch.Size([0, 1]) != torch.Size([0, 0]).",
-        model_type=onnx_test_common.TorchModelType.TORCH_NN_MODULE,
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
     ),
     xfail(
         "nonzero",
-        model_type=onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason=onnx_test_common.reason_onnx_script_does_not_support(
             "aten::_assert_async.msg",
             "https://github.com/pytorch/pytorch/issues/112443",
@@ -720,7 +721,7 @@ class SingleOpModel(torch.nn.Module):
 
 
 def _should_skip_xfail_test_sample(
-    op_name: str, sample, model_type: onnx_test_common.TorchModelType
+    op_name: str, sample, model_type: pytorch_test_common.TorchModelType
 ) -> Tuple[Optional[str], Optional[str]]:
     """Returns a reason if a test sample should be skipped."""
     if op_name not in OP_WITH_SKIPPED_XFAIL_SUBTESTS:
@@ -802,8 +803,8 @@ def _parameterized_class_attrs_and_values():
         itertools.product(
             (opset for opset in onnx_test_common.FX_TESTED_OPSETS),
             (
-                onnx_test_common.TorchModelType.TORCH_NN_MODULE,
-                onnx_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+                pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
+                pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
             ),
         )
     )
@@ -838,8 +839,8 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     opset_version = -1
     op_level_debug: bool = False
     dynamic_shapes: bool = False
-    model_type: onnx_test_common.TorchModelType = (
-        onnx_test_common.TorchModelType.TORCH_NN_MODULE
+    model_type: pytorch_test_common.TorchModelType = (
+        pytorch_test_common.TorchModelType.TORCH_NN_MODULE
     )
 
     fp16_low_precision_list = [
@@ -872,7 +873,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 # TODO(titaiwang): refactor this
 # https://github.com/pytorch/pytorch/issues/105338
 for opset in onnx_test_common.FX_TESTED_OPSETS:
-    for model_type in onnx_test_common.TorchModelType:
+    for model_type in pytorch_test_common.TorchModelType:
         # The name needs to match the parameterized_class name.
         test_class_name = f"TestOnnxModelOutputConsistency_opset_version_{opset}_model_type_TorchModelType.{model_type.name}"
         onnx_test_common.add_decorate_info(

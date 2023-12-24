@@ -106,7 +106,7 @@ Tensor exp(const Tensor& self_arg) {
 }
 
 Tensor& exp_(Tensor& self_arg) {
-  return unary_op_(self_arg, VK_KERNEL(exp_));
+  return unary_op_(self_arg, VK_KERNEL(exp_inplace));
 }
 
 Tensor sqrt(const Tensor& self_arg) {
@@ -114,7 +114,7 @@ Tensor sqrt(const Tensor& self_arg) {
 }
 
 Tensor& sqrt_(Tensor& self_arg) {
-  return unary_op_(self_arg, VK_KERNEL(sqrt_));
+  return unary_op_(self_arg, VK_KERNEL(sqrt_inplace));
 }
 
 Tensor log(const Tensor& self_arg) {
@@ -122,7 +122,7 @@ Tensor log(const Tensor& self_arg) {
 }
 
 Tensor& log_(Tensor& self_arg) {
-  return unary_op_(self_arg, VK_KERNEL(log_));
+  return unary_op_(self_arg, VK_KERNEL(log_inplace));
 }
 
 #ifdef USE_VULKAN_API

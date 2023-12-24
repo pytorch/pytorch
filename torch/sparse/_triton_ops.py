@@ -556,18 +556,23 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
 
 
 def bsr_dense_addmm_meta(M, K, N, Ms, Ks, beta, alpha,
-                         SPLIT_N=None, GROUP_SIZE_ROW=None, num_warps=None, num_stages=None, dtype=None, **extra):
+                         SPLIT_N=None, GROUP_SIZE_ROW=None, num_warps=None, num_stages=None, sparsity=None, dtype=None, **extra):
     if dtype is None:
         dtype = torch.float16
+    if sparsity is None:
+        sparsity = 0.5
     if {SPLIT_N, num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
         device_name = torch.cuda.get_device_name()
         key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
         meta = get_meta('bsr_dense_addmm', key,
-                        device_name, version=(0, dtype, 0.5))
+                        device_name, version=(0, dtype, sparsity))
+        if meta is None and sparsity != 0.5:
+            meta = get_meta('bsr_dense_addmm', key,
+                            device_name, version=(0, dtype, 0.5))
         if meta is not None:
             meta.update(**extra)
             return meta
-    SPLIT_N = SPLIT_N or 1
+    SPLIT_N = SPLIT_N or max(N // Ms, 1)
     GROUP_SIZE_ROW = GROUP_SIZE_ROW or 4
     num_stages = num_stages or 1
     num_warps = num_warps or 4
@@ -832,8 +837,8 @@ def bsr_dense_addmm(
         return out
 
     if meta is None:
-        meta = bsr_dense_addmm_meta(M, K, N, blocksize[0], blocksize[1], beta, alpha, dtype=out.dtype)
-
+        sparsity = round(1 - bsr._nnz() * blocksize[0] * blocksize[1] / (M * K), 2)
+        meta = bsr_dense_addmm_meta(M, K, N, blocksize[0], blocksize[1], beta, alpha, sparsity=sparsity, dtype=out.dtype)
     out_backup = out
 
     crow_indices, col_indices, values, input, dense, out = prepare_inputs(bsr, input, dense, out)

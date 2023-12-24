@@ -5396,6 +5396,7 @@ def meta__efficient_attention_forward(
     cu_seqlens_q: Optional[Tensor],
     cu_seqlens_k: Optional[Tensor],
     max_seqlen_q: Optional[int],
+    max_seqlen_k: Optional[int],
     dropout_p: float,
     custom_mask_type: int,
     compute_log_sumexp: bool = False,
