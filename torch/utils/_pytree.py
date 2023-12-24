@@ -40,6 +40,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import TypeGuard  # Python 3.10+
 
 
 __all__ = [
@@ -564,7 +565,7 @@ class TreeSpec:
         )
         return self._children_specs
 
-    def is_leaf(self) -> bool:
+    def is_leaf(self) -> TypeGuard["LeafSpec"]:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def children(self) -> List["TreeSpec"]:
