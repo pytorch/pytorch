@@ -109,7 +109,7 @@ class Library:
         _defs.add(qualname)
         return result
 
-    def impl(self, op_name, fn, dispatch_key=''):
+    def impl(self, op_name, fn, dispatch_key='', compile_mode=False):
         r'''Registers the function implementation for an operator defined in the library.
 
         Args:
@@ -165,7 +165,10 @@ class Library:
                     " for the base ops that it decomposes into.")
 
         assert self.m is not None
-        self.m.impl(name, dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd", fn)
+        impl_fn_name = "impl" if not compile_mode else "impl_t_c"
+        assert hasattr(self.m, impl_fn_name)
+        impl_fn = getattr(self.m, impl_fn_name)
+        impl_fn(name, dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd", fn)
 
         _impls.add(key)
         self._op_impls.add(key)
