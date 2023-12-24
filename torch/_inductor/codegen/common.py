@@ -99,6 +99,16 @@ def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
 
 
+def get_device_op_overrides(device: str):
+    assert isinstance(device, str)
+    if device == "cuda":
+        from .cuda.device_op_overrides import CUDADeviceOpOverrides
+
+        return CUDADeviceOpOverrides()
+
+    return DeviceOpOverrides()
+
+
 @functools.lru_cache(None)
 def boolean_ops():
     return (
@@ -385,6 +395,16 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) >= 2
         return f"min({', '.join(map(self._print, expr.args))})"
 
+    def _print_Round(self, expr):
+        assert len(expr.args) == 1
+        return f"round({self._print(expr.args[0])})"
+
+    def _print_RoundDecimal(self, expr):
+        assert len(expr.args) == 2
+        number, ndigits = expr.args
+        assert isinstance(ndigits, sympy.Integer)
+        return f"round({self._print(number)}, {ndigits})"
+
 
 class OpOverrides:
     def __init__(self, parent):
@@ -449,6 +469,20 @@ class OpOverrides:
     @staticmethod
     def load_seed(name, offset):
         return ops.load(name, sympy.Integer(offset))
+
+
+class DeviceOpOverrides:
+    def import_get_raw_stream_as(self, name):
+        raise NotImplementedError()
+
+    def set_device(self, device_idx):
+        raise NotImplementedError()
+
+    def synchronize(self):
+        raise NotImplementedError()
+
+    def device_guard(self, device_idx):
+        raise NotImplementedError()
 
 
 class DeferredLine(DeferredLineBase):
@@ -976,7 +1010,7 @@ class Kernel(CodeGen):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError()
 
-    def scan(self, dtype, scan_type, value):
+    def scan(self, dtype, combine_fn, value, init):
         raise NotImplementedError()
 
     def bucketize(
@@ -1122,8 +1156,8 @@ class Kernel(CodeGen):
                 return self.reduction(dtype, src_dtype, reduction_type, value)
 
             @staticmethod
-            def scan(dtype, scan_op, value):
-                return self.scan(dtype, scan_op, value)
+            def scan(dtype, combine_fn, value, init):
+                return self.scan(dtype, combine_fn, value, init)
 
             @staticmethod
             def bucketize(
