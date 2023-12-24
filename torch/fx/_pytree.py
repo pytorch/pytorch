@@ -46,7 +46,7 @@ def tree_flatten_spec(
 
 
 def _dict_flatten_spec(d: Dict[Any, Any], spec: TreeSpec) -> List[Any]:
-    return [d[k] for k in spec.context]
+    return [d[k] for k in spec.entries()]
 
 
 def _list_flatten_spec(d: List[Any], spec: TreeSpec) -> List[Any]:

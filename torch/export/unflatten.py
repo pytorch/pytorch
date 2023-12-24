@@ -473,7 +473,7 @@ class _ModuleFrame:
                 for idx in range(args_spec.num_children):
                     arg_nodes.append(self.graph.placeholder(f"_positional_arg_{idx}"))
                 kwarg_nodes = {}
-                for name in kwargs_spec.context:
+                for name in kwargs_spec.entries():
                     kwarg_nodes[name] = self.graph.placeholder(name)
                 flat_args = _generate_flatten(
                     self.module,
@@ -525,7 +525,7 @@ class _ModuleFrame:
                     k: self.parent.graph.call_function(
                         operator.getitem, (kwargs_node, k)
                     )
-                    for k in kwargs_spec.context
+                    for k in kwargs_spec.entries()
                 }
             assert self.parent_call_module is not None
             self.parent_call_module.args = tuple(arg_nodes)
