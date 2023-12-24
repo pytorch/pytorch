@@ -22,9 +22,9 @@ void test_aoti(const std::string& device, bool use_runtime_constant_folding) {
       (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
            .string();
   torch::jit::script::Module data_loader = torch::jit::load(data_path);
-  std::string suffix = device + use_runtime_constant_folding
-      ? ""
-      : "_use_runtime_constant_folding";
+  std::string suffix = use_runtime_constant_folding
+      ? device + "_use_runtime_constant_folding"
+      : device;
   std::string path_attr = "model_so_path_" + suffix;
   std::string inputs_attr = "inputs_" + suffix;
   std::string outputs_attr = "outputs_" + suffix;
@@ -48,9 +48,7 @@ void test_aoti(const std::string& device, bool use_runtime_constant_folding) {
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
-void test_aoti_script(
-    const std::string& device,
-    bool use_runtime_constant_folding) {
+void test_aoti_script(const std::string& device) {
   torch::NoGradGuard no_grad;
 
   std::string script_model = "script_model_" + device + ".pt";
@@ -65,11 +63,8 @@ void test_aoti_script(
            STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "script_data.pt")
            .string();
   torch::jit::script::Module sample_data = torch::jit::load(sample_data_path);
-  std::string suffix = device + use_runtime_constant_folding
-      ? ""
-      : "_use_runtime_constant_folding";
-  std::string inputs_attr = "inputs_" + suffix;
-  std::string outputs_attr = "outputs_" + suffix;
+  std::string inputs_attr = "inputs_" + device;
+  std::string outputs_attr = "outputs_" + device;
   const auto& inputs = sample_data.attr(inputs_attr.c_str()).toList().vec();
   const auto& ref_output_tensors =
       sample_data.attr(outputs_attr.c_str()).toTensorVector();
@@ -90,9 +85,9 @@ void test_aoti_constants_update(
            .string();
 
   torch::jit::script::Module data_loader = torch::jit::load(data_path);
-  std::string suffix = device + use_runtime_constant_folding
-      ? ""
-      : "_use_runtime_constant_folding";
+  std::string suffix = use_runtime_constant_folding
+      ? device + "_use_runtime_constant_folding"
+      : device;
   std::string path_attr = "model_so_path_" + suffix;
   std::string inputs_attr = "inputs_" + suffix;
   std::string outputs_attr = "outputs_" + suffix;
@@ -163,9 +158,9 @@ void test_aoti_double_buffering(
            .string();
 
   torch::jit::script::Module data_loader = torch::jit::load(data_path);
-  std::string suffix = device + use_runtime_constant_folding
-      ? ""
-      : "_use_runtime_constant_folding";
+  std::string suffix = use_runtime_constant_folding
+      ? device + "_use_runtime_constant_folding"
+      : device;
   std::string path_attr = "model_so_path_" + suffix;
   std::string inputs_attr = "inputs_" + suffix;
   std::string outputs_attr = "outputs_" + suffix;
@@ -236,7 +231,7 @@ TEST(AotInductorTest, BasicTestCpu) {
 }
 
 TEST(AotInductorTest, BasicScriptTestCpu) {
-  test_aoti_script("cpu", false);
+  test_aoti_script("cpu");
 }
 
 #ifdef USE_CUDA
@@ -245,7 +240,7 @@ TEST(AotInductorTest, BasicTestCuda) {
 }
 
 TEST(AotInductorTest, BasicScriptTestCuda) {
-  test_aoti_script("cuda", false);
+  test_aoti_script("cuda");
 }
 
 TEST(AotInductorTest, UpdateConstantsCuda) {

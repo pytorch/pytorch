@@ -558,7 +558,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       std::shared_ptr<std::vector<ConstantHandle>>,
       std::optional<std::string>);
 
-  void const_run_impl(
+  std::unordered_map<std::string, AtenTensorHandle> const_run_impl(
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor);
 

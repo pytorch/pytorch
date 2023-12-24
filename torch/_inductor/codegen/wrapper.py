@@ -1843,21 +1843,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def codegen_const_run_driver(self):
         """
         // Generated code example
-        void AOTInductorModel::const_run_impl(
-        DeviceStreamType stream,
-        AOTIProxyExecutorHandle proxy_executor
+        std::unordered_map<std::string, AtenTensorHandle> AOTInductorModel::const_run_impl(
+            DeviceStreamType stream,
+            AOTIProxyExecutorHandle proxy_executor
         ) {
-        std::vector<AtenTensorHandle> output_handles;
-        // build up output_handles over here.
-        _const_run_impl(output_handles, stream, proxy_executor);
+            std::unordered_map<std::string, AtenTensorHandle> folded_constants_map;
+            std::vector<AtenTensorHandle> output_handles;
+            // build up output_handles over here.
+            _const_run_impl(output_handles, stream, proxy_executor);
+            // build up folded_constants_map
+            return folded_constants_map;
         }
         """
 
         self.prefix.splice(
             """
-            void AOTInductorModel::const_run_impl(
-            DeviceStreamType stream,
-            AOTIProxyExecutorHandle proxy_executor
+            std::unordered_map<std::string, AtenTensorHandle> AOTInductorModel::const_run_impl(
+                DeviceStreamType stream,
+                AOTIProxyExecutorHandle proxy_executor
             ) {
             """
         )
@@ -1867,21 +1870,34 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         with self.prefix.indent():
             # This is a mapping to the index of constant folding graph's output
-            const_index_mapping = [None] * len(V.graph.const_output_index)
+            const_index_mapping: List[Optional[Tuple[int, str]]] = [None] * len(
+                V.graph.const_output_index
+            )
             for idx, (name, _) in enumerate(V.graph.constants.items()):
                 if name not in V.graph.const_output_index:
                     continue
                 else:
-                    const_index_mapping[V.graph.const_output_index[name]] = idx  # type: ignore[call-overload]
+                    const_index_mapping[V.graph.const_output_index[name]] = (idx, name)  # type: ignore[call-overload]
             assert (
                 None not in const_index_mapping
             ), "Not all constant gets mapped for constant folding graph."
 
             self.prefix.writeline(
-                f"std::vector<AtenTensorHandle> output_handles({len(const_index_mapping)});"
+                f"""
+                std::unordered_map<std::string, AtenTensorHandle> folded_constants_map;
+                folded_constants_map.reserve({len(const_index_mapping)});
+                std::vector<AtenTensorHandle> output_handles({len(const_index_mapping)});
+                """
             )
 
-            for output_idx, const_idx in enumerate(const_index_mapping):
+            self.prefix.splice(
+                """
+                // The below assignment of output_handles to constants is not used directly.
+                // It's only used to memo the correspondence of handle and constants.
+                """
+            )
+
+            for output_idx, (const_idx, _) in enumerate(const_index_mapping):  # type: ignore[misc]
                 self.prefix.writeline(
                     f"output_handles[{output_idx}] = constants_->at({const_idx});"
                 )
@@ -1889,6 +1905,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.prefix.writeline(
                 "_const_run_impl(output_handles, stream, proxy_executor);"
             )
+
+            for output_idx, (_, const_name) in enumerate(const_index_mapping):  # type: ignore[misc]
+                self.prefix.writeline(
+                    f'folded_constants_map["{const_name}"] = output_handles[{output_idx}];'
+                )
+            self.prefix.writeline("return folded_constants_map;")
 
         self.prefix.writeline("}")
 
