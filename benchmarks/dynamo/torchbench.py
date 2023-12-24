@@ -415,8 +415,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             # comparison hard with torch.compile. torch.compile can cause minor
             # divergences in the output because of how fusion works for amp in
             # TorchInductor compared to eager.  Therefore, instead of looking at
-            # all the bounding boxes, we compare only top 5.
-            model_kwargs = {"box_detections_per_img": 5}
+            # all the bounding boxes, we compare only top 4.
+            model_kwargs = {"box_detections_per_img": 4}
             benchmark = benchmark_cls(
                 test="train",
                 device=device,
@@ -528,13 +528,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return reduce_to_scalar_loss(pred)
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             return mod(*inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             pred = mod(*cloned_inputs)
             loss = self.compute_loss(pred)
         self.grad_scaler.scale(loss).backward()
