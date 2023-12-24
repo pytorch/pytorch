@@ -40,24 +40,23 @@ _DEQUANTIZE_OPS = [
 _conv1d_bn_example_inputs = (
     torch.randn(1, 1, 3),  # x
     torch.randn(1, 1, 1),  # conv_weight
-    torch.randn(1),  # conv_bias
-    torch.randn(1),  # bn_weight
-    torch.randn(1),  # bn_bias
-    torch.randn(1),  # bn_running_mean
-    torch.randn(1),  # bn_running_var
+    torch.randn(1),        # conv_bias
+    torch.randn(1),        # bn_weight
+    torch.randn(1),        # bn_bias
+    torch.randn(1),        # bn_running_mean
+    torch.randn(1),        # bn_running_var
 )
 
 # Example inputs for conv-bn2d patterns
 _conv2d_bn_example_inputs = (
     torch.randn(1, 1, 3, 3),  # x
     torch.randn(1, 1, 1, 1),  # conv_weight
-    torch.randn(1),  # conv_bias
-    torch.randn(1),  # bn_weight
-    torch.randn(1),  # bn_bias
-    torch.randn(1),  # bn_running_mean
-    torch.randn(1),  # bn_running_var
+    torch.randn(1),           # conv_bias
+    torch.randn(1),           # bn_weight
+    torch.randn(1),           # bn_bias
+    torch.randn(1),           # bn_running_mean
+    torch.randn(1),           # bn_running_var
 )
-
 
 def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
     """
@@ -69,14 +68,14 @@ def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
     quant_workflow_ops.append(torch.ops.quantized_decomposed.choose_qparams.tensor)
     while dest.target in quant_workflow_ops:
         if not isinstance(dest.args[0], torch.fx.Node):
-            raise ValueError(
-                f"expected arg[0] of quant workflow ops to be a node but found {dest.args[0]}"
-            )
+            raise ValueError(f"expected arg[0] of quant workflow ops to be a node but found {dest.args[0]}")
         dest = dest.args[0]
-    return dest == source
+    return (dest == source)
 
 
-def _find_q_dq_node_for_user(produer: torch.fx.Node, user: torch.fx.Node) -> Tuple[Any, Any]:
+def _find_q_dq_node_for_user(
+    produer: torch.fx.Node, user: torch.fx.Node
+) -> Tuple[Any, Any]:
     """
     Find q, dq pair corresponding to [producer -> q -> dq -> user]
     Utils works by finding dq arg of user and ensuring it is connected to
@@ -90,11 +89,7 @@ def _find_q_dq_node_for_user(produer: torch.fx.Node, user: torch.fx.Node) -> Tup
                 break
     if dq_node is None:
         for n in user.kwargs:
-            if (
-                isinstance(n, torch.fx.Node)
-                and n.op == "call_function"
-                and n.target in _DEQUANTIZE_OPS
-            ):
+            if isinstance(n, torch.fx.Node) and n.op == "call_function" and n.target in _DEQUANTIZE_OPS:
                 if _is_connected(produer, n):
                     dq_node = n
                     break
@@ -105,6 +100,7 @@ def _find_q_dq_node_for_user(produer: torch.fx.Node, user: torch.fx.Node) -> Tup
     if dq_node.args[0].op == "call_function" and dq_node.args[0].target in _QUANTIZE_OPS:
         q_node = dq_node.args[0]
     return (q_node, dq_node)
+
 
 
 def _is_sym_size_node(node: Node):
@@ -138,7 +134,6 @@ def _get_tensor_constant_from_node(node, m):
     assert node.op == "get_attr"
     return getattr(m, node.target)
 
-
 def _get_all_arguments(orig_args, orig_kwargs, args_schema):
     all_args = []
     for i, schema in enumerate(args_schema):
@@ -149,7 +144,6 @@ def _get_all_arguments(orig_args, orig_kwargs, args_schema):
         else:
             all_args.append(schema.default_value)
     return all_args
-
 
 def _is_supported_batch_norm_for_training(node: Node):
     """
@@ -165,7 +159,6 @@ def _is_supported_batch_norm_for_training(node: Node):
     ]
     return node.target in supported_ops
 
-
 def _is_conv(n: Node):
     """
     Return whether the node refers to an aten conv op.
@@ -174,7 +167,6 @@ def _is_conv(n: Node):
         torch.ops.aten.conv1d.default,
         torch.ops.aten.conv2d.default,
     ]
-
 
 def _is_conv_transpose(n: Node):
     """
@@ -185,13 +177,12 @@ def _is_conv_transpose(n: Node):
         torch.ops.aten.conv_transpose2d,
     ]
 
-
 def fold_bn_weights_into_conv_node(
     conv_node: Node,
     conv_weight_node: Node,
     conv_bias_node: Optional[Node],
     bn_node: Node,
-    m: GraphModule,
+    m: GraphModule
 ) -> None:
     # conv args: input, weight, bias, stride, padding, dilation, ...
     conv_w = _get_tensor_constant_from_node(conv_weight_node, m)
@@ -214,9 +205,7 @@ def fold_bn_weights_into_conv_node(
         raise ValueError("BN node target is unexpected ", bn_node.target)
     bn_eps = bn_args[eps_arg_index]
 
-    fused_weight, fused_bias = fuse_conv_bn_weights(
-        conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b, transpose=transpose
-    )
+    fused_weight, fused_bias = fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b, transpose=transpose)
 
     # update the weight and bias for conv
     conv_args = list(conv_node.args)
@@ -259,14 +248,10 @@ def fold_bn_weights_into_conv_node(
             continue
         user.replace_all_uses_with(conv_node)
 
-
 # fuse conv bn weights, inplace modification of the graph_module and graph
 def _fuse_conv_bn_(m: GraphModule) -> None:
     for n in m.graph.nodes:
-        if (
-            n.op != "call_function"
-            or n.target != torch.ops.aten._native_batch_norm_legit_no_training.default
-        ):
+        if n.op != "call_function" or n.target != torch.ops.aten._native_batch_norm_legit_no_training.default:
             continue
         bn_node = n
         n = bn_node.args[0]
@@ -280,7 +265,6 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
     m.graph.eliminate_dead_code()
     m.recompile()
 
-
 def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
     # TODO: move this information to fx node itself
     node_name_to_scope: Dict[str, Tuple[str, type]] = {}
@@ -293,7 +277,6 @@ def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
         node_name_to_scope[n.name] = current_scope
     return node_name_to_scope
 
-
 def get_aten_graph_module(
     pattern: Callable,
     example_inputs: Tuple[Any, ...],
@@ -304,9 +287,7 @@ def get_aten_graph_module(
     Convert the pattern to an FX graph with decomposed aten ops.
     """
     if is_cuda:
-        example_inputs = tuple(
-            [x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs]
-        )
+        example_inputs = tuple([x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs])
     aten_pattern = capture_pre_autograd_graph(
         pattern,
         example_inputs,
@@ -316,9 +297,8 @@ def get_aten_graph_module(
     aten_pattern.recompile()
     return aten_pattern
 
-
 def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
-    """Remove .tensor overload for quantize/dequantize ops so that we can
+    """ Remove .tensor overload for quantize/dequantize ops so that we can
     use the match_pattern that we get from torchdynamo export to match the output of convert_pt2e
     """
     _MAP = {
@@ -338,7 +318,6 @@ def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
         if n.target in _MAP:
             n.target = _MAP[n.target]
 
-
 def _is_literal(arg):
     if isinstance(arg, (int, float)):
         return True
@@ -346,9 +325,10 @@ def _is_literal(arg):
         return all(map(_is_literal, arg))
     return False
 
-
 def _replace_literals_with_new_placeholders(
-    gm: torch.fx.GraphModule, merge_dup: bool = False, exclude_literals: Optional[List[Any]] = None
+    gm: torch.fx.GraphModule,
+    merge_dup: bool = False,
+    exclude_literals: Optional[List[Any]] = None
 ):
     """Replace the literals in the graph with placeholder nodes that's created on the fly while we
     traverse the graph, so that the literal arguments in the graph can be matched and replaced
@@ -399,7 +379,6 @@ def _replace_literals_with_new_placeholders(
     """
     last_ph = None
     cnt = 0
-    new_ph_cnt = 0
     literal_to_ph: Dict[Union[float, bool, int, torch.dtype], Node] = {}
     if exclude_literals is None:
         exclude_literals = []
@@ -440,7 +419,7 @@ def _replace_literals_with_new_placeholders(
 def _replace_literals_with_existing_placeholders(
     gm: torch.fx.GraphModule,
     exclude_literals: Optional[List[Any]] = None,
-    literal_to_ph_idx: Optional[Dict[Union[float, int, bool, torch.dtype], int]] = None,
+    literal_to_ph_idx: Optional[Dict[Union[float, int, bool, torch.dtype], int]] = None
 ):
     """Replace the literals in the graph with **existing** placeholder nodes, so that the literal arguments
     in the graph can be matched and replaced
@@ -517,7 +496,6 @@ def _replace_literals_with_existing_placeholders(
         node.args = new_args
     return gm
 
-
 # TODO: Handle this in export itself and don't wrap the model in another GraphModule
 # in prepare and convert
 def _disallow_eval_train(model: GraphModule):
@@ -525,7 +503,6 @@ def _disallow_eval_train(model: GraphModule):
     Disallow calling `model.train()` or `model.eval()` on the given GraphModule.
     This is useful for exported models, where these methods don't actually behave as expected.
     """
-
     def _train(self, mode: bool = True):
         raise NotImplementedError("Calling train() is not supported yet.")
 
