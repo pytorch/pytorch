@@ -548,7 +548,7 @@ class TreeSpec:
     @property
     def context(self):
         warnings.warn(
-            "treespec.context is private implementation detail. "
+            "`treespec.context` is private implementation detail. "
             "It might be changed in the future.",
             stacklevel=2,
         )
@@ -557,8 +557,9 @@ class TreeSpec:
     @property
     def children_specs(self):
         warnings.warn(
-            "treespec.children_specs is private implementation detail. "
-            "It might be changed in the future.",
+            "`treespec.children_specs` is private implementation detail. "
+            "It might be changed in the future. "
+            "Please use `treespec.children()` or `treespec.child(idx)` instead.",
             stacklevel=2,
         )
         return self._children_specs
@@ -567,7 +568,7 @@ class TreeSpec:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def children(self) -> List["TreeSpec"]:
-        return self._children_specs.copy()
+        return self._children_specs
 
     def child(self, index: int) -> "TreeSpec":
         return self._children_specs[index]
