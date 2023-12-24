@@ -637,6 +637,8 @@ class TreeSpec:
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:
         super().__init__(None, None, [])
+
+    def __post_init__(self) -> None:
         self.num_nodes = 1
         self.num_leaves = 1
         self.num_children = 0
