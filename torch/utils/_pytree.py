@@ -601,13 +601,10 @@ class TreeSpec:
                 )
 
             if both_standard_dict:  # dictionary types are compatible with each other
-                dict_context = (
-                    self.context
-                    if self.type is not defaultdict
-                    # ignore mismatch of `default_factory` for defaultdict
-                    else self.context[1]
-                )
-                expected_keys = dict_context[0]
+                # Only compare the keys
+                # - ignore the key ordering
+                # - ignore mismatch of `default_factory` for defaultdict
+                expected_keys = self.entries()
                 got_key_set = set(tree)
                 expected_key_set = set(expected_keys)
                 if got_key_set != expected_key_set:
