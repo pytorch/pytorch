@@ -2158,7 +2158,6 @@ exclude_patterns = [
     'torch/fx/experimental/validator.py',
     'torch/fx/graph.py',
     'torch/fx/graph_module.py',
-    'torch/fx/immutable_collections.py',
     'torch/fx/interpreter.py',
     'torch/fx/node.py',
     'torch/fx/operator_schemas.py',
