@@ -701,13 +701,13 @@ class _PyTreeCodeGen(CodeGen):
         if len(free_vars) > 0:  # pytree has placeholders in it
             # when kwargs is present, in_spec is tuple(args, kwargs)
             has_args_kwargs_tuple = self.pytree_info.in_spec.type == tuple and \
-                len(self.pytree_info.in_spec.children_specs) == 2 and \
+                self.pytree_info.in_spec.num_children == 2 and \
                 self.pytree_info.in_spec.children_specs[0].type == tuple and \
                 self.pytree_info.in_spec.children_specs[1].type == dict
             fn_kwargs = '{}'
             fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
             if has_args_kwargs_tuple:
-                count_args = len(self.pytree_info.in_spec.children_specs[0].children_specs)
+                count_args = self.pytree_info.in_spec.children_specs[0].num_children
                 fn_args = self.pytree_info.orig_args[:count_args]
                 fn_kwargs = '{' + ', '.join(f"'{k}':{v}" for k, v in zip(
                                   self.pytree_info.in_spec.children_specs[1].context,

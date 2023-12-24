@@ -69,17 +69,17 @@ def _unlift(
 
     if (
         in_spec.type == tuple
-        and len(in_spec.children_specs) == 2
+        and in_spec.num_children == 2
         and in_spec.children_specs[0].type == tuple
         and in_spec.children_specs[1].type == dict
     ):
         # if in_spec contains the args (tuple) and kwargs (dict)
-
-        num_args = len(in_spec.children_specs[0].children_specs) + len(
-            in_spec.children_specs[1].children_specs
+        num_args = (
+            in_spec.children_specs[0].num_children
+            + in_spec.children_specs[1].num_children
         )
     else:
-        num_args = len(in_spec.children_specs)
+        num_args = in_spec.num_children
 
     names = [f"arg_{i}" for i in range(num_args)]
 
