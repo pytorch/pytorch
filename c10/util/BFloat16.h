@@ -67,6 +67,7 @@ inline C10_HOST_DEVICE uint16_t round_to_nearest_even(float src) {
 #endif
     return UINT16_C(0x7FC0);
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint32_t U32;
       float F32;

@@ -11,8 +11,10 @@
 #if defined(IDEEP_VERSION_MAJOR) && defined(IDEEP_VERSION_MINOR) && \
   defined(IDEEP_VERSION_PATCH) && defined(IDEEP_VERSION_REVISION)
 #define IDEEP_PREREQ(major, minor, patch, revision) \
-  (((IDEEP_VERSION_MAJOR << 32) + (IDEEP_VERSION_MINOR << 16) + (IDEEP_VERSION_PATCH << 8) + \
-  (IDEEP_VERSION_REVISION)) >= ((major << 32) + (minor << 16) + (patch << 8) + (revision)))
+  (((IDEEP_VERSION_MAJOR << 16) + (IDEEP_VERSION_MINOR << 8) + \
+   (IDEEP_VERSION_PATCH << 0)) >= \
+   ((major << 16) + (minor << 8) + (patch << 0)) && \
+   (IDEEP_VERSION_REVISION >= revision))
 #else
 #define IDEEP_PREREQ(major, minor, patch, revision) 0
 #endif

@@ -451,6 +451,9 @@ def create_aot_dispatcher_function(
                 if shape_env is not None:
                     from torch._dynamo.source import ConstantSource
                     if isinstance(x, int):
+                        # We always specialize on scalar values in export.
+                        if aot_config.is_export:
+                            return x
                         source = ConstantSource(f"sym_{idx}")
                         return shape_env.create_symintnode(
                             shape_env.create_symbol(x, source),
@@ -488,7 +491,6 @@ def create_aot_dispatcher_function(
                 return fake_mode.from_tensor(
                     x, static_shapes=False, symbolic_context=symbolic_context, source=source
                 )
-
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
         fake_flat_args = process_inputs(flat_args)
@@ -905,6 +907,7 @@ def aot_module_simplified(
 
     return forward
 
+
 def aot_export_module(
     mod: nn.Module,
     args,
@@ -947,6 +950,7 @@ def aot_export_module(
     (5) If an input is mutated, it is not allowed to alias any other inputs.
     (6) Parameters must not be duplicated.
     """
+
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     params_and_buffers = {
@@ -957,7 +961,7 @@ def aot_export_module(
     params_and_buffers_flat = tuple(params_and_buffers_flat)
     params_len = len(params_and_buffers_flat)
 
-    functional_call = create_functional_call(mod, params_spec, params_len)
+    functional_call = create_functional_call(mod, params_spec, params_len, store_orig_mod=True)
 
     num_fw_outs = None
 
@@ -1127,13 +1131,13 @@ def aot_export_joint_simple(
     if len([x for x in metadata.output_info if x.output_type != OutputType.non_alias]) != 0:
         raise RuntimeError(f"aot_export_joint_simple does not support outputs that alias inputs. {str(metadata)}")
     # No pytrees
-    if type(in_spec) == pytree.LeafSpec:
+    if in_spec.is_leaf():
         raise RuntimeError(f"aot_export_joint_simple requires inputs to be a single list/tuple. in_spec={str(in_spec)}")
-    if len([x for x in in_spec.children_specs if type(x) != pytree.LeafSpec]) != 0:
+    if not all(child.is_leaf() for child in in_spec.children_specs):
         raise RuntimeError(f"aot_export_joint_simple requires individual inputs not to be pytrees. in_spec={str(in_spec)}")
-    if type(out_spec) == pytree.LeafSpec:
+    if out_spec.is_leaf():
         raise RuntimeError(f"aot_export_joint_simple requires outputs to be a single list/tuple. out_spec={str(out_spec)}")
-    if len([x for x in out_spec.children_specs if type(x) != pytree.LeafSpec]) != 0:
+    if not all(child.is_leaf() for child in out_spec.children_specs):
         raise RuntimeError(f"aot_export_joint_simple requires individual outputs not to be pytrees. out_spec={str(out_spec)}")
     # TODO: we might have to temporarily patch config.functionalize_rng
     # so that it doesn't run when we're exporting a higher order op.

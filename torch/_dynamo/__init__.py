@@ -66,17 +66,20 @@ if torch.manual_seed is torch.random.manual_seed:
 
 def reset() -> None:
     """Clear all compile caches and restore initial state"""
-    for weak_code in convert_frame.input_codes.seen + convert_frame.output_codes.seen:
-        code = weak_code()
-        if code:
-            reset_code(code)
-    convert_frame.input_codes.clear()
-    convert_frame.output_codes.clear()
-    orig_code_map.clear()
-    guard_failures.clear()
-    graph_break_reasons.clear()
-    resume_execution.ContinueExecutionCache.cache.clear()
-    _reset_guarded_backend_cache()
-    reset_frame_count()
-    torch._C._dynamo.compiled_autograd.clear_cache()
-    code_context.clear()
+    with eval_frame.compile_lock:
+        for weak_code in (
+            convert_frame.input_codes.seen + convert_frame.output_codes.seen
+        ):
+            code = weak_code()
+            if code:
+                reset_code(code)
+        convert_frame.input_codes.clear()
+        convert_frame.output_codes.clear()
+        orig_code_map.clear()
+        guard_failures.clear()
+        graph_break_reasons.clear()
+        resume_execution.ContinueExecutionCache.cache.clear()
+        _reset_guarded_backend_cache()
+        reset_frame_count()
+        torch._C._dynamo.compiled_autograd.clear_cache()
+        code_context.clear()

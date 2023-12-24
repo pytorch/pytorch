@@ -86,7 +86,7 @@
 
 constexpr int MIOPEN_DIM_MAX = 5;
 
-namespace at { namespace native {
+namespace at::native {
 
 
 static bool conv_benchmark_empty_cache = true;
@@ -2305,4 +2305,4 @@ bool _cudnn_get_conv_benchmark_empty_cache() {
 
 
 
-}} // at::native
+} // namespace at::native

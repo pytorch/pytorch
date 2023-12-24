@@ -52,7 +52,11 @@ class TestCase(TorchTestCase):
         super().setUpClass()
         cls._exit_stack = contextlib.ExitStack()
         cls._exit_stack.enter_context(
-            config.patch(raise_on_ctx_manager_usage=True, suppress_errors=False),
+            config.patch(
+                raise_on_ctx_manager_usage=True,
+                suppress_errors=False,
+                log_compilation_metrics=False,
+            ),
         )
 
     def setUp(self):

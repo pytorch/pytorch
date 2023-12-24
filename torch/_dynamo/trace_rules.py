@@ -2,12 +2,13 @@ import functools
 import importlib
 import sys
 import types
+from typing import Any, Dict
 
 import torch
 
 from .allowed_functions import _disallowed_function_ids, is_user_defined_allowed
 
-from .utils import hashable
+from .utils import hashable, is_function
 
 from .variables import (
     SkipFilesVariable,
@@ -15,10 +16,12 @@ from .variables import (
     TorchInGraphFunctionVariable,
 )
 
+from .variables.base import VariableTracker
+
 
 """
 Map of torch objects to their tracing rules (Dynamo variables).
-* TorchVariable: The functions should be put into the FX graph or can be constant folded. E.g.,
+* TorchInGraphFunctionVariable: The functions should be put into the FX graph or can be constant folded. E.g.,
   - torch.add: should be put into the FX graph.
   - torch.is_floating_point: constant folded.
 * TorchCtxManagerClassVariable: The context manager classes are supported by Dynamo. E.g., torch.no_grad
@@ -39,7 +42,6 @@ If you are removing an existing torch level API:
 * Remove the entry represented the API from this map or test/dynamo/test_trace_rules.ignored_torch_name_rule_set
   depends on where it is.
 
-TODO: Add torch object names mapping to TorchVariable for in graph and constant fold functions.
 TODO: We would consolidate the skipfiles.check rules into trace_rules.lookup later.
 TODO: We would support explictly list objects treated as skip/inline after the skipfiles.check
 and trace_rules.lookup consolidation is done. Then the explicit listing of skip/inline objects have
@@ -90,6 +92,15 @@ manual_torch_name_rule_map = {
     "torch.nn.Parameter": SkipFilesVariable,
     "torch._nested_tensor_from_mask": SkipFilesVariable,
     "torch._nested_from_padded": SkipFilesVariable,
+    # symbol operators implemented in Python
+    "torch.sym_not": TorchInGraphFunctionVariable,
+    "torch.sym_float": TorchInGraphFunctionVariable,
+    "torch.sym_int": TorchInGraphFunctionVariable,
+    "torch.sym_max": TorchInGraphFunctionVariable,
+    "torch.sym_min": TorchInGraphFunctionVariable,
+    "torch.sym_sqrt": TorchInGraphFunctionVariable,
+    "torch.sym_ite": TorchInGraphFunctionVariable,
+    "torch.Tensor#_make_wrapper_subclass": SkipFilesVariable,
 }
 
 
@@ -1634,6 +1645,7 @@ torch_c_binding_in_graph_functions = {
         "torch.ge",
         "torch.geqrf",
         "torch.ger",
+        "torch.get_default_device",
         "torch.get_device",
         "torch.gradient",
         "torch.greater_equal",
@@ -2711,12 +2723,12 @@ torch_non_c_binding_in_graph_functions = {
 }
 
 
-torch_name_rule_map = {
-    **manual_torch_name_rule_map,
-    **torch_ctx_manager_classes,
-    **torch_c_binding_in_graph_functions,
-    **torch_non_c_binding_in_graph_functions,
-}
+torch_name_rule_map = [
+    manual_torch_name_rule_map,
+    torch_ctx_manager_classes,
+    torch_c_binding_in_graph_functions,
+    torch_non_c_binding_in_graph_functions,
+]
 
 """
 Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
@@ -2725,11 +2737,17 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 
 @functools.lru_cache(None)
 def get_torch_obj_rule_map():
-    d = dict()
-    for k, v in torch_name_rule_map.items():
-        obj = load_object(k)
-        if obj is not None:
-            d[obj] = v
+    d: Dict[Any, VariableTracker] = dict()
+    for m in torch_name_rule_map:
+        for k, v in m.items():
+            obj = load_object(k)
+            if obj is not None:
+                if obj in d and d[obj] != v:
+                    raise AssertionError(
+                        f"Duplicate torch object {obj} with different rules: {v}, {d[obj]}"
+                    )
+                else:
+                    d[obj] = v
     return d
 
 
@@ -2800,9 +2818,12 @@ def lookup(obj):
     # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
     if id(obj) in _disallowed_function_ids:
         return None
-    if is_user_defined_allowed(obj):
+    if callable(obj) and is_user_defined_allowed(obj):
         return TorchInGraphFunctionVariable
-    if hasattr(obj, "__wrapped__"):
+    # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
+    if isinstance(obj, functools._lru_cache_wrapper) or (
+        is_function(obj) and hasattr(obj, "__wrapped__")
+    ):
         # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass.
         if not (
             hasattr(obj, "__qualname__")
