@@ -417,9 +417,9 @@ _private_register_pytree_node(
     namedtuple,  # type: ignore[arg-type]
     _namedtuple_flatten,
     _namedtuple_unflatten,
+    serialized_type_name="collections.namedtuple",
     to_dumpable_context=_namedtuple_serialize,
     from_dumpable_context=_namedtuple_deserialize,
-    serialized_type_name="collections.namedtuple",
 )
 _private_register_pytree_node(
     OrderedDict,
@@ -497,10 +497,10 @@ class TreeSpec:
     def __repr__(self, indent: int = 0) -> str:
         repr_prefix: str = f"TreeSpec({self.type.__name__}, {self.context}, ["
         children_specs_str: str = ""
-        if len(self.children_specs):
+        if self.num_children > 0:
             indent += 2
             children_specs_str += self.children_specs[0].__repr__(indent)
-            children_specs_str += "," if len(self.children_specs) > 1 else ""
+            children_specs_str += "," if self.num_children > 1 else ""
             children_specs_str += ",".join(
                 [
                     "\n" + " " * indent + child.__repr__(indent)
@@ -998,7 +998,7 @@ def _broadcast_to_and_flatten(tree: PyTree, treespec: TreeSpec) -> Optional[List
     child_pytrees, ctx = flatten_fn(tree)
 
     # Check if the Node is different from the spec
-    if len(child_pytrees) != len(treespec.children_specs) or ctx != treespec.context:
+    if len(child_pytrees) != treespec.num_children or ctx != treespec.context:
         return None
 
     # Recursively flatten the children
@@ -1100,11 +1100,11 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
     else:
         context = serialize_node_def.from_dumpable_context(json_schema["context"])
 
-    children_spec = []
+    children_specs = []
     for child_string in json_schema["children_spec"]:
-        children_spec.append(_json_to_treespec(child_string))
+        children_specs.append(_json_to_treespec(child_string))
 
-    return TreeSpec(typ, context, children_spec)
+    return TreeSpec(typ, context, children_specs)
 
 
 _SUPPORTED_PROTOCOLS[1] = _ProtocolFn(_treespec_to_json, _json_to_treespec)
