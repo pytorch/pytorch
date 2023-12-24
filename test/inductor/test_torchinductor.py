@@ -91,7 +91,12 @@ from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.utils import has_torchvision_roi_align
 
 from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, skipCUDAIf
+from torch.testing._internal.inductor_utils import (
+    HAS_CPU,
+    HAS_CUDA,
+    skipCPUIf,
+    skipCUDAIf,
+)
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -1113,6 +1118,14 @@ class CommonTemplate:
 
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)))
         self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
+
+    @skipCPUIf(IS_MACOS, "fails on macos")
+    def test_multilayer_var_lowp(self):
+        def fn(a):
+            return torch.var(a)
+
+        self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
+        self.common(fn, (torch.rand((14923), dtype=torch.float16),))
 
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
