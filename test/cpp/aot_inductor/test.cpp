@@ -22,8 +22,9 @@ void test_aoti(const std::string& device, bool use_runtime_constant_folding) {
       (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
            .string();
   torch::jit::script::Module data_loader = torch::jit::load(data_path);
-  std::string suffix =
-      device + use_runtime_constant_folding ? "" : "_use_runtime_const_folding";
+  std::string suffix = device + use_runtime_constant_folding
+      ? ""
+      : "_use_runtime_constant_folding";
   std::string path_attr = "model_so_path_" + suffix;
   std::string inputs_attr = "inputs_" + suffix;
   std::string outputs_attr = "outputs_" + suffix;
@@ -64,8 +65,9 @@ void test_aoti_script(
            STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "script_data.pt")
            .string();
   torch::jit::script::Module sample_data = torch::jit::load(sample_data_path);
-  std::string suffix =
-      device + use_runtime_constant_folding ? "" : "_use_runtime_const_folding";
+  std::string suffix = device + use_runtime_constant_folding
+      ? ""
+      : "_use_runtime_constant_folding";
   std::string inputs_attr = "inputs_" + suffix;
   std::string outputs_attr = "outputs_" + suffix;
   const auto& inputs = sample_data.attr(inputs_attr.c_str()).toList().vec();
@@ -88,8 +90,9 @@ void test_aoti_constants_update(
            .string();
 
   torch::jit::script::Module data_loader = torch::jit::load(data_path);
-  std::string suffix =
-      device + use_runtime_constant_folding ? "" : "_use_runtime_const_folding";
+  std::string suffix = device + use_runtime_constant_folding
+      ? ""
+      : "_use_runtime_constant_folding";
   std::string path_attr = "model_so_path_" + suffix;
   std::string inputs_attr = "inputs_" + suffix;
   std::string outputs_attr = "outputs_" + suffix;
@@ -160,8 +163,9 @@ void test_aoti_double_buffering(
            .string();
 
   torch::jit::script::Module data_loader = torch::jit::load(data_path);
-  std::string suffix =
-      device + use_runtime_constant_folding ? "" : "_use_runtime_const_folding";
+  std::string suffix = device + use_runtime_constant_folding
+      ? ""
+      : "_use_runtime_constant_folding";
   std::string path_attr = "model_so_path_" + suffix;
   std::string inputs_attr = "inputs_" + suffix;
   std::string outputs_attr = "outputs_" + suffix;
@@ -228,28 +232,28 @@ namespace torch {
 namespace inductor {
 
 TEST(AotInductorTest, BasicTestCpu) {
-  test_aoti("cpu");
+  test_aoti("cpu", false);
 }
 
 TEST(AotInductorTest, BasicScriptTestCpu) {
-  test_aoti_script("cpu");
+  test_aoti_script("cpu", false);
 }
 
 #ifdef USE_CUDA
 TEST(AotInductorTest, BasicTestCuda) {
-  test_aoti("cuda");
+  test_aoti("cuda", false);
 }
 
 TEST(AotInductorTest, BasicScriptTestCuda) {
-  test_aoti_script("cuda");
+  test_aoti_script("cuda", false);
 }
 
 TEST(AotInductorTest, UpdateConstantsCuda) {
-  test_aoti_constants_update("cuda");
+  test_aoti_constants_update("cuda", false);
 }
 
 TEST(AotInductorTest, UpdateInactiveConstantsCuda) {
-  test_aoti_double_buffering("cuda");
+  test_aoti_double_buffering("cuda", false);
 }
 #endif
 

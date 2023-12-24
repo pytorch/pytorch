@@ -15,8 +15,8 @@ class Net(torch.nn.Module):
 data = {}
 
 for device in ["cpu", "cuda"]:
-    for use_runtime_const_folding in [True, False]:
-        if device == "cpu" and use_runtime_const_folding:
+    for use_runtime_constant_folding in [True, False]:
+        if device == "cpu" and use_runtime_constant_folding:
             continue
         model = Net().to(device=device)
         x = torch.randn((32, 64), device=device)
@@ -35,12 +35,12 @@ for device in ["cpu", "cuda"]:
                 model,
                 (x, y),
                 constraints=constraints,
-                options={"use_runtime_const_folding": use_runtime_const_folding})
+                options={"use_runtime_constant_folding": use_runtime_constant_folding})
 
         params = dict(model.named_parameters())
         suffix = f"{device}"
-        if use_runtime_const_folding:
-            suffix += "_use_runtime_const_folding"
+        if use_runtime_constant_folding:
+            suffix += "_use_runtime_constant_folding"
         data.update({
             f"model_so_path_{suffix}": model_so_path,
             f"inputs_{suffix}": [x, y],
