@@ -517,47 +517,65 @@ def _is_leaf(tree: PyTree) -> bool:
 @dataclasses.dataclass
 class TreeSpec:
     type: Any
-    context: Context
-    children_specs: List["TreeSpec"]
+    _context: Context
+    _children_specs: List["TreeSpec"]
 
     num_nodes: int = dataclasses.field(init=False)
     num_leaves: int = dataclasses.field(init=False)
     num_children: int = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
-        self.num_nodes = 1 + sum(spec.num_nodes for spec in self.children_specs)
-        self.num_leaves = sum(spec.num_leaves for spec in self.children_specs)
-        self.num_children = len(self.children_specs)
+        self.num_nodes = 1 + sum(spec.num_nodes for spec in self._children_specs)
+        self.num_leaves = sum(spec.num_leaves for spec in self._children_specs)
+        self.num_children = len(self._children_specs)
 
     def __repr__(self, indent: int = 0) -> str:
-        repr_prefix: str = f"TreeSpec({self.type.__name__}, {self.context}, ["
+        repr_prefix: str = f"TreeSpec({self.type.__name__}, {self._context}, ["
         children_specs_str: str = ""
         if self.num_children > 0:
             indent += 2
-            children_specs_str += self.children_specs[0].__repr__(indent)
+            children_specs_str += self._children_specs[0].__repr__(indent)
             children_specs_str += "," if self.num_children > 1 else ""
             children_specs_str += ",".join(
                 [
                     "\n" + " " * indent + child.__repr__(indent)
-                    for child in self.children_specs[1:]
+                    for child in self._children_specs[1:]
                 ]
             )
         repr_suffix: str = f"{children_specs_str}])"
         return repr_prefix + repr_suffix
 
+    @property
+    def context(self):
+        warnings.warn(
+            "treespec.context is private implementation detail. "
+            "It might be changed in the future.",
+            stacklevel=2,
+        )
+        return self._context
+
+    @property
+    def children_specs(self):
+        warnings.warn(
+            "treespec.children_specs is private implementation detail. "
+            "It might be changed in the future.",
+            stacklevel=2,
+        )
+        return self._children_specs
+
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
 
     def children(self) -> List["TreeSpec"]:
-        return self.children_specs.copy()
+        return self._children_specs.copy()
 
     def child(self, index: int) -> "TreeSpec":
-        return self.children_specs[index]
+        return self._children_specs[index]
 
     def entries(self) -> List[Any]:
         if self.type in STANDARD_DICT_TYPES:
             dict_context = (
-                self.context if self.type is not defaultdict else self.context[1]
+                self._context if self.type is not defaultdict else self._context[1]
             )
             return dict_context[0]  # type: ignore[no-any-return]
         return list(range(self.num_children))
@@ -585,7 +603,7 @@ class TreeSpec:
                     f"Node arity mismatch; "
                     f"expected {self.num_children}, but got {len(child_pytrees)}.",
                 )
-            if context != self.context:
+            if context != self._context:
                 raise ValueError(
                     f"Node context mismatch for custom node type {self.type!r}.",
                 )
@@ -627,15 +645,15 @@ class TreeSpec:
                 flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
                 child_pytrees, context = flatten_fn(tree)
                 if (
-                    context != self.context
+                    context != self._context
                     and self.type is not deque  # ignore mismatch of `maxlen` for deque
                 ):
                     raise ValueError(
                         f"Node context mismatch for node type {self.type!r}; "
-                        f"expected {self.context!r}, but got {context!r}.",  # namedtuple type mismatch
+                        f"expected {self._context!r}, but got {context!r}.",  # namedtuple type mismatch
                     )
 
-        for child_pytree, child_spec in zip(child_pytrees, self.children_specs):
+        for child_pytree, child_spec in zip(child_pytrees, self._children_specs):
             child_spec._flatten_up_to_helper(child_pytree, subtrees)
 
     def flatten_up_to(self, tree: PyTree) -> List[PyTree]:
@@ -661,12 +679,12 @@ class TreeSpec:
         start = 0
         end = 0
         child_pytrees = []
-        for child_spec in self.children_specs:
+        for child_spec in self._children_specs:
             end += child_spec.num_leaves
             child_pytrees.append(child_spec.unflatten(leaves[start:end]))
             start = end
 
-        return unflatten_fn(child_pytrees, self.context)
+        return unflatten_fn(child_pytrees, self._context)
 
 
 class LeafSpec(TreeSpec):
@@ -1047,12 +1065,12 @@ def _broadcast_to_and_flatten(tree: PyTree, treespec: TreeSpec) -> Optional[List
     child_pytrees, ctx = flatten_fn(tree)
 
     # Check if the Node is different from the spec
-    if len(child_pytrees) != treespec.num_children or ctx != treespec.context:
+    if len(child_pytrees) != treespec.num_children or ctx != treespec._context:
         return None
 
     # Recursively flatten the children
     result: List[Any] = []
-    for child, child_spec in zip(child_pytrees, treespec.children_specs):
+    for child, child_spec in zip(child_pytrees, treespec.children()):
         flat = _broadcast_to_and_flatten(child, child_spec)
         if flat is not None:
             result += flat
@@ -1106,7 +1124,7 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
 
     if serialize_node_def.to_dumpable_context is None:
         try:
-            serialized_context = json.dumps(treespec.context)
+            serialized_context = json.dumps(treespec._context)
         except TypeError as e:
             raise TypeError(
                 "Unable to serialize context. "
@@ -1114,9 +1132,9 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
                 "custom serializer using _register_pytree_node."
             ) from e
     else:
-        serialized_context = serialize_node_def.to_dumpable_context(treespec.context)
+        serialized_context = serialize_node_def.to_dumpable_context(treespec._context)
 
-    child_schemas = [_treespec_to_json(child) for child in treespec.children_specs]
+    child_schemas = [_treespec_to_json(child) for child in treespec.children()]
 
     return _TreeSpecSchema(serialized_type_name, serialized_context, child_schemas)
 
