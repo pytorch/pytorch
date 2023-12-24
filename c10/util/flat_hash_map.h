@@ -8,6 +8,7 @@
 // - make sherwood_v3_table::convertible_to_iterator public because GCC5 seems
 // to have issues with it otherwise
 // - fix compiler warnings in operator templated_iterator<const value_type>
+// - make use of 'if constexpr' and eliminate AssignIfTrue template
 
 //          Copyright Malte Skarupke 2017.
 // Distributed under the Boost Software License, Version 1.0.
@@ -25,11 +26,6 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
-
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
-#endif
 
 #if defined(_MSC_VER) && !defined(__clang__)
 #pragma warning(push)
@@ -2093,8 +2089,6 @@ struct power_of_two_std_hash : std::hash<T> {
 };
 
 } // end namespace ska
-
-C10_CLANG_DIAGNOSTIC_POP()
 
 #if defined(_MSC_VER) && !defined(__clang__)
 #pragma warning(pop)
