@@ -5932,6 +5932,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             accum_zp, o_inv_scale, o_zp, fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = len(inputs) == 6
+        self.idx_for_inplace_sum = 3 if self.has_bias else 2
         super().__init__(
             layout,
             inputs,
@@ -6030,6 +6031,12 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
+    def get_mutation_names(self):
+        return [self.inputs[self.idx_for_inplace_sum].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
+
     @classmethod
     def create(
         cls,
@@ -6102,16 +6109,20 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
-        if output_dtype is not None:
-            # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
-            # if output_dtype is not None, the output buf should be dtype output_dtype instead of uint8.
-            kernel_layout.dtype = output_dtype
 
-        return QConvPointWiseBinaryPT2E(
-            layout=kernel_layout,
+        assert (
+            binary_attr == "sum"
+        ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+
+        packed = QConvPointWiseBinaryPT2E(
+            layout=NoneLayout(accum.get_device()),
             inputs=inputs,
             constant_args=constant_args,
         )
+        mark_node_as_mutating(packed, accum)
+
+        # Return accum since it has been inplace changed.
+        return packed.inputs[packed.idx_for_inplace_sum]
 
 
 class QLinearPointwisePT2E(ExternKernelAlloc):
