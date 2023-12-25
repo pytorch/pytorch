@@ -374,13 +374,19 @@ def _export_non_strict(
     fake_params_buffers,
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
+    pre_dispatch=False,
+    decomp_table=None,
 ):
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with torch.nn.utils.stateless._reparametrize_module(mod, fake_params_buffers):
         gm, graph_signature = transform(aot_export_module)(
-            mod, (*fake_args, *fake_kwargs.values()), trace_joint=False
+            mod,
+            (*fake_args, *fake_kwargs.values()),
+            trace_joint=False,
+            pre_dispatch=pre_dispatch,
+            decompositions=decomp_table,
         )
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
@@ -466,6 +472,8 @@ def _export(
     *,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
+    pre_dispatch: bool = False,
+    decomp_table: Optional[Dict[str, Callable]] = None,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -702,6 +710,8 @@ def _export(
         _reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs),
         fake_params_buffers,
         transform=_process_user_inputs,
+        pre_dispatch=pre_dispatch,
+        decomp_table=decomp_table,
     )
 
     gm = ep_non_strict.gm
