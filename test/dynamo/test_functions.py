@@ -63,11 +63,19 @@ def func_with_default(a, b, some_default_arg=True):
         return a - b
 
 
-def make_test(fn):
+def make_test(fn=None, expected_frame_count=1):
+    if fn is None:
+        return lambda fn: make_test(fn, expected_frame_count=expected_frame_count)
+
     nargs = len(inspect.signature(fn).parameters)
 
     def test_fn(self):
-        return torch._dynamo.testing.standard_test(self, fn=fn, nargs=nargs)
+        return torch._dynamo.testing.standard_test(
+            self,
+            fn=fn,
+            nargs=nargs,
+            expected_frame_count=expected_frame_count,
+        )
 
     return test_fn
 
@@ -869,6 +877,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_reduce(a, b, c, d):
         return functools.reduce(operator.add, [a, b, c, d])
+
+    @make_test
+    def test_reduce_with_initial(a, b, c, d):
+        return functools.reduce(operator.add, [b, c, d], a)
+
+    @make_test(expected_frame_count=0)
+    def test_reduce_with_single(x):
+        return functools.reduce(lambda a, b: (a, b), [x])
+
+    @make_test(expected_frame_count=0)
+    def test_reduce_with_single_with_initial(x, y):
+        return functools.reduce(lambda a, b: (a, b), [y], x)
+
+    @make_test(expected_frame_count=0)
+    def test_reduce_with_none_initial(x):
+        return functools.reduce(lambda a, b: (a, b), [x], None)
 
     @make_test
     def test_tuple_contains(a, b):
