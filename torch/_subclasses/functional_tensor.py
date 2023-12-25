@@ -207,7 +207,6 @@ class FunctionalTensorMode(TorchDispatchMode):
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
         # This will be turned off later for pre-dispatch functionalization
-        self.decompose_composite_implicit_ops = True
         self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None  # type: ignore[attr-defined]
 
     # No-op if FunctionalTensorMode is already in use
@@ -249,15 +248,31 @@ class FunctionalTensorMode(TorchDispatchMode):
             )
             return NotImplemented
 
+
+        def _can_decompose(func):
+            # TODO (tmanlaibaatar)
+            # Eventually, we don't want to decompose any aten op at all
+            # except for aten ops that lie about their schemas (ops
+            # claimed to be functional but actually aren't).
+            # Since we never tested functionalization for every CompositeImplicitAutograd
+            # ops having a direct functional kernel. As a result, we can't safely
+            # turn off decomp for predispatch right now. Therefore, we do best
+            # effort by not decomposing ops that are functional in PreDispatch functionalization
+            # for now.
+            if self._dispatch_key is not None:
+                # only decompose view or inplace mutating ops
+                alias_info = len([i for i in func._schema.arguments if i.alias_info is not None])
+                return alias_info != 0 or func._schema.is_mutable
+            return True
+
         if (
             func not in FunctionalTensor.metadata_fns
-            and self.decompose_composite_implicit_ops
+            and _can_decompose(func)
             # Not all funcs from __torch_dispatch__ are actual dispatcher ops,
             # e.g. prim.device
             and torch._C._dispatch_has_kernel(func.name())
         ):
             with self:
-                # Decomposes CompositeImplicitAutograd ops
                 r = func.decompose(*args, **kwargs)
                 if r is not NotImplemented:
                     return r

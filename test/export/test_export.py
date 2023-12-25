@@ -1065,6 +1065,46 @@ class TestExport(TestCase):
         test_inp = (torch.randint(3, 5, (2, 2)), torch.randint(3, 5, (2, 3)))
         self.assertTrue(torch.allclose(ep(*test_inp), fn(*test_inp)))
 
+    def test_decomp_batch_norm_functional_predispatch(self):
+        class ConvBatchnormRelu(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 3, 1, 1)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return (x,)
+
+        mod = ConvBatchnormRelu()
+        mod.eval()
+        inp = torch.randn(1, 1, 3, 3)
+
+        gm = capture_pre_autograd_graph(mod, (inp,), _functional_pre_dispatch_IR=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg_0):
+    l_x_, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    conv_weight = self.conv_weight
+    conv_bias = self.conv_bias
+    bn_weight = self.bn_weight
+    bn_bias = self.bn_bias
+    bn_running_mean = self.bn_running_mean
+    bn_running_var = self.bn_running_var
+    conv2d = torch.ops.aten.conv2d.default(l_x_, conv_weight, conv_bias);  l_x_ = conv_weight = conv_bias = None
+    _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
+    return pytree.tree_unflatten((getitem,), self._out_spec)""")
+
+        mod.train()
+        # TODO (tmanlaibaatar) This may not matter with Andrew's work
+        # AssertionError: aot_autograd expected to have an entirely functional graph,
+        # but found %_native_batch_norm_legit = call_function[target=torch.ops.aten._native_batch_norm_legit.default]
+        with self.assertRaisesRegex(AssertionError, "functional"):
+            gm = capture_pre_autograd_graph(mod, (inp,), _functional_pre_dispatch_IR=True)
+
+
+
     @testing.expectedFailureNonStrict
     def test_constrain_value_with_symfloat(self):
         def fn(x, y):
