@@ -513,23 +513,6 @@ class TreeSpec:
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
 
-    def children(self) -> List["TreeSpec"]:
-        return self.children_specs
-
-    def child(self, index: int) -> "TreeSpec":
-        return self.children_specs[index]
-
-    def entries(self) -> List[Any]:
-        if self.type in STANDARD_DICT_TYPES:
-            dict_context = (
-                self.context if self.type is not defaultdict else self.context[1]
-            )
-            return dict_context  # type: ignore[no-any-return]
-        return list(range(self.num_children))
-
-    def entry(self, index: int) -> Any:
-        return self.entries()[index]
-
     def _flatten_up_to_helper(self, tree: PyTree, subtrees: List[PyTree]) -> None:
         if self.is_leaf():
             subtrees.append(tree)
@@ -572,10 +555,13 @@ class TreeSpec:
                 )
 
             if both_standard_dict:  # dictionary types are compatible with each other
-                # Only compare the keys
-                # - ignore the key ordering
-                # - ignore mismatch of `default_factory` for defaultdict
-                expected_keys = self.entries()
+                dict_context = (
+                    self.context
+                    if self.type is not defaultdict
+                    # ignore mismatch of `default_factory` for defaultdict
+                    else self.context[1]
+                )
+                expected_keys = dict_context
                 got_key_set = set(tree)
                 expected_key_set = set(expected_keys)
                 if got_key_set != expected_key_set:
@@ -1004,7 +990,7 @@ def _broadcast_to_and_flatten(tree: PyTree, treespec: TreeSpec) -> Optional[List
 
     if _is_leaf(tree):
         return [tree] * treespec.num_leaves
-    if treespec.is_leaf():
+    if isinstance(treespec, LeafSpec):
         return None
     node_type = _get_node_type(tree)
     if node_type != treespec.type:
@@ -1019,7 +1005,7 @@ def _broadcast_to_and_flatten(tree: PyTree, treespec: TreeSpec) -> Optional[List
 
     # Recursively flatten the children
     result: List[Any] = []
-    for child, child_spec in zip(child_pytrees, treespec.children()):
+    for child, child_spec in zip(child_pytrees, treespec.children_specs):
         flat = _broadcast_to_and_flatten(child, child_spec)
         if flat is not None:
             result += flat
@@ -1053,7 +1039,7 @@ _SUPPORTED_PROTOCOLS: Dict[int, _ProtocolFn] = {}
 
 
 def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
-    if treespec.is_leaf():
+    if isinstance(treespec, LeafSpec):
         return _TreeSpecSchema(None, None, [])
 
     if treespec.type not in SUPPORTED_SERIALIZED_TYPES:
@@ -1083,7 +1069,7 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
     else:
         serialized_context = serialize_node_def.to_dumpable_context(treespec.context)
 
-    child_schemas = [_treespec_to_json(child) for child in treespec.children()]
+    child_schemas = [_treespec_to_json(child) for child in treespec.children_specs]
 
     return _TreeSpecSchema(serialized_type_name, serialized_context, child_schemas)
 
@@ -1094,7 +1080,7 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
         and json_schema["context"] is None
         and len(json_schema["children_spec"]) == 0
     ):
-        return _LEAF_SPEC
+        return LeafSpec()
 
     if json_schema["type"] not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
         raise NotImplementedError(
