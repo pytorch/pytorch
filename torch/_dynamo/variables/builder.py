@@ -60,6 +60,7 @@ from ..source import (
 from ..utils import (
     build_checkpoint_variable,
     clone_input,
+    common_constant_types,
     get_fake_value,
     get_static_address_type,
     global_key_name,
@@ -302,24 +303,13 @@ class VariableBuilder:
                 ),
                 cls.wrap_tensor,
             ),
-            ((tuple, list, odict_values, collections.deque), cls.wrap_listlike),
+            (
+                (tuple, list, odict_values, collections.deque, torch.Size),
+                cls.wrap_listlike,
+            ),
             (tuple_iterator, cls.wrap_tuple_iterator),
             ((slice, range), cls.wrap_slice_range),
-            (
-                (
-                    int,
-                    float,
-                    bool,
-                    type(None),
-                    str,
-                    torch.Size,
-                    torch.device,
-                    torch.dtype,
-                    torch.memory_format,
-                    torch.layout,
-                ),
-                cls.wrap_literal,
-            ),
+            (tuple(common_constant_types), cls.wrap_literal),
         ]
 
         if config.trace_numpy and np:
@@ -828,6 +818,9 @@ class VariableBuilder:
         )
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
+        if config.specialize_int and type(value) is torch.Size:
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return ConstantVariable.create(value=value)
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
         self.install_guards(GuardBuilder.LIST_LENGTH)
@@ -938,15 +931,7 @@ class VariableBuilder:
 
     def wrap_literal(self, value):
         unspec = not config.specialize_int
-        if unspec and type(value) is torch.Size:
-            self.install_guards(GuardBuilder.LIST_LENGTH)
-            return SizeVariable(
-                [
-                    VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(v)
-                    for i, v in enumerate(value)
-                ]
-            )
-        elif unspec and type(value) is int:
+        if unspec and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
             if not TracingContext.get().force_unspec_int_unbacked_size_like and (

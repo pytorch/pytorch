@@ -485,6 +485,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             and kwargs.get("layout", torch.strided) == torch.strided
         ):
             raise unimplemented("torch.compile does not support strided NestedTensor")
+        elif self.value is torch.nn.functional.one_hot and (
+            len(args) + len(kwargs) == 1
+            or (
+                len(args) == 2
+                and args[1].is_python_constant()
+                and args[1].as_python_constant() == -1
+            )
+        ):
+            raise unimplemented(
+                "torch.nn.functional.one_hot with data-dependent output shape"
+            )
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
