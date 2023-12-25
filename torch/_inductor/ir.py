@@ -2706,11 +2706,44 @@ class MutationLayout(Layout):
         #         ],
         #     ).data
 
+
+        # Case 1: src.is_user_of(dst.get_name())
+        # If src depends on dst, and will also mutate dst.
+        # We need to copy src, otherwise we may read-write dst which has potential correctness issue.
+
+        # print("src.is_user_of(dst.get_name()) is: {}".format(src.is_user_of(dst.get_name())), flush=True)
+
+        if isinstance(src.data, ComputedBuffer):
+            # <TODO> If read and write has same index, can we skip the copy??
+            read_writes = src.get_read_writes()
+            # print("read_writes is: {}".format(read_writes), flush=True)
+
+        if (
+            not isinstance(src, StorageBox)
+            or src.is_user_of(dst.get_name())
+            or src.is_zero_elements()
+        ):
+            need_copy = True
+        else:
+            src.realize()
+            need_copy = not isinstance(src.get_layout(), FlexibleLayout)
+
+        if need_copy and not unsafe_alias:
+            src = Pointwise.create(
+                device=src.get_device(),
+                dtype=src.get_dtype(),
+                inner_fn=src.make_loader(),
+                ranges=[
+                    V.graph.sizevars.guard_equals(a, b)
+                    for a, b in zip(src.get_size(), dst.get_size())
+                ],
+            ).data            
+
         # TODO<leslie> fix the zero_element_mutation issue as: 
         # python -u -m pytest -s -v test_torchinductor.py -k test_zero_element_mutation
 
         src.realize()
-        # assert isinstance(src.data.layout, FlexibleLayout)
+        assert isinstance(src.data.layout, FlexibleLayout)
         src.data.layout = MutationLayout(dst)
         assert dst.get_name() not in V.graph.name_to_users_snapshot, "TODO: can we mutate src twice?"
         V.graph.name_to_users_snapshot[dst.get_name()] = V.graph.name_to_users[dst.get_name()]
