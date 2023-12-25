@@ -416,13 +416,14 @@ inline bool all_zero(at::vec::Vectorized<float> src) {
 # elif defined(CPU_CAPABILITY_AVX2)
   return _mm256_testz_ps(src, src);
 # else
-  __at_align__ float mask[at::vec::Vectorized<float>::size()];
+  __at_align__ int mask[at::vec::Vectorized<float>::size()];
   src.store(mask);
   for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
     if (mask[i] != 0) {
       return false;
     }
   }
+  return true;
 # endif
 }
 
@@ -432,7 +433,7 @@ inline bool vector_lane_mask_check(at::vec::Vectorized<float> src, int lane) {
 # elif defined(CPU_CAPABILITY_AVX2)
   return _mm256_movemask_ps(src) & (1 << lane);
 # else
-  __at_align__ float mask[at::vec::Vectorized<float>::size()];
+  __at_align__ int mask[at::vec::Vectorized<float>::size()];
   src.store(mask);
   return mask[lane] != 0;
 # endif

@@ -6,7 +6,11 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
-from torch.utils._python_dispatch import return_and_correct_aliasing, TorchDispatchMode
+from torch.utils._python_dispatch import (
+    _detect_functional_mode,
+    return_and_correct_aliasing,
+    TorchDispatchMode,
+)
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
@@ -155,7 +159,7 @@ class FunctionalTensor(torch.Tensor):
         return f"FunctionalTensor({repr(self.elem)})"
 
     @staticmethod
-    def to_functional(x, is_pre_dispatch=False):
+    def to_functional(x):
         # We will do the wrapping for the user.
         assert not torch._is_functional_tensor(x)
         # The only autograd metadata we care about on the FunctionalTensor is:
@@ -168,7 +172,11 @@ class FunctionalTensor(torch.Tensor):
         # _mirror_autograd_meta_to queries tensor sizes,
         # and otherwise the sym_size() call will go to the proxy mode before hitting
         # FunctionalTensor.__torch_dispatch__
-        with FunctionalTensorMode(is_pre_dispatch):
+
+        functional_mode = _detect_functional_mode()
+        assert functional_mode is not None
+
+        with functional_mode:
             torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
             out = FunctionalTensor(x_functional)
             torch._mirror_autograd_meta_to(x_functional, out)  # type: ignore[attr-defined]
@@ -417,16 +425,18 @@ def dispatch_functionalize(func):
         return torch._from_functional_tensor(t.elem)
 
     def inner(*args, **kwargs):
-        func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
-        func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
-
-        flattened_wrapped_args = pytree.arg_tree_leaves(*func_args)
-        flattened_wrapped_kwargs = pytree.arg_tree_leaves(**func_kwargs)
-
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
-        with disable_above, FunctionalTensorMode():
+        current_functional_mode = _detect_functional_mode()
+        functional_mode = (
+            current_functional_mode
+            if current_functional_mode
+            else FunctionalTensorMode()
+        )
+        with disable_above, functional_mode:
+            func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
+            func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
             func_outputs = func(*func_args, **func_kwargs)
             outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
 
@@ -470,10 +480,20 @@ class BaseFunctionalizeAPI(ABC):
 
 
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
+    def __init__(self, pre_dispatch: bool = False) -> None:
+        super().__init__()
+        self.pre_dispatch = pre_dispatch
+
     def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
-        return torch.utils._pytree.tree_map_only(
-            torch.Tensor, FunctionalTensor.to_functional, args
-        )
+        if self.pre_dispatch:
+            with FunctionalTensorMode(True):
+                return torch.utils._pytree.tree_map_only(
+                    torch.Tensor, FunctionalTensor.to_functional, args
+                )
+        with FunctionalTensorMode():
+            return torch.utils._pytree.tree_map_only(
+                torch.Tensor, FunctionalTensor.to_functional, args
+            )
 
     def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         return torch.utils._pytree.tree_map_only(
