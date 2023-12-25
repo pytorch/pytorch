@@ -14571,12 +14571,6 @@ op_db: List[OpInfo] = [
                         # RuntimeError: undefined value cpu
                         DecorateInfo(
                             unittest.skip("Skipped!"),
-                            "TestCommon",
-                            device_type="cuda",
-                        ),
-                        DecorateInfo(
-                            unittest.skip("Skipped!"),
-                            "TestMeta",
                             device_type="cuda",
                         ),
                     ),
@@ -21134,12 +21128,6 @@ python_ref_db = [
             # RuntimeError: undefined value cpu
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestCommon",
-                device_type="cuda",
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestMeta",
                 device_type="cuda",
             ),
         ),
