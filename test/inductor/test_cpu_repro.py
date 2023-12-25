@@ -2729,6 +2729,20 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         assert metrics.generated_cpp_vec_kernel_count == 1
 
+    def test_expr_vec_non_contiguous(self):
+        def fn(x):
+            # the pattern from sebotnet33ts_256
+            y = x.permute(0, 3, 1, 4, 2).clone(memory_format=torch.contiguous_format)
+            s = y.shape
+            y = y.view(s[0], s[1] * s[2], s[3] * s[4])
+            return y.softmax(dim=-1)
+
+        x = torch.randn(4, 32, 32, 32, 32)
+        metrics.reset()
+        self.common(fn, (x,))
+        # 4 kernels for max, exp, sum and div
+        assert metrics.generated_cpp_vec_kernel_count == 4
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
