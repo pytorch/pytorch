@@ -32,6 +32,7 @@ def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
         fx_g = make_fx(
             f,
             decomposition_table=aot_config.decompositions,
+            record_module_stack=True,
             pre_dispatch=aot_config.pre_dispatch,
         )(*args)
 
