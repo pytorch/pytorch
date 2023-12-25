@@ -2962,7 +2962,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
     conv2d = torch.ops.aten.conv2d.default(arg7_1, arg0_1, arg1_1);  arg7_1 = arg0_1 = arg1_1 = None
     add = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
     batch_norm = torch.ops.aten.batch_norm.default(conv2d, arg2_1, arg3_1, arg4_1, arg5_1, True, 0.1, 1e-05, True);  conv2d = arg2_1 = arg3_1 = None
-    return (arg4_1, arg5_1, add, batch_norm)""")
+    return (arg4_1, arg5_1, add, batch_norm)""")  # noqa: B950
 
     def test_aot_export_module_joint(self):
         class ConvBatchnormRelu(torch.nn.Module):

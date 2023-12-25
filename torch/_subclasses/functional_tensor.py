@@ -248,7 +248,6 @@ class FunctionalTensorMode(TorchDispatchMode):
             )
             return NotImplemented
 
-
         def _can_decompose(func):
             # TODO (tmanlaibaatar)
             # Eventually, we don't want to decompose any aten op at all
@@ -261,7 +260,9 @@ class FunctionalTensorMode(TorchDispatchMode):
             # for now.
             if self._dispatch_key is not None:
                 # only decompose view or inplace mutating ops
-                alias_info = len([i for i in func._schema.arguments if i.alias_info is not None])
+                alias_info = len(
+                    [i for i in func._schema.arguments if i.alias_info is not None]
+                )
                 return alias_info != 0 or func._schema.is_mutable
             return True
 
