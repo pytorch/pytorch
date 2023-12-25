@@ -909,6 +909,7 @@ def aot_module_simplified(
 
     return forward
 
+
 def aot_export_module(
     mod: nn.Module,
     args,
@@ -964,7 +965,7 @@ def aot_export_module(
     params_and_buffers_flat = tuple(params_and_buffers_flat)
     params_len = len(params_and_buffers_flat)
 
-    functional_call = create_functional_call(mod, params_spec, params_len)
+    functional_call = create_functional_call(mod, params_spec, params_len, store_orig_mod=True)
 
     num_fw_outs = None
 
