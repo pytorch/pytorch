@@ -1696,7 +1696,7 @@ class CppVecKernel(CppKernel):
         assert opt_ctx is not None
         load_mask_str = f"to_float_mask({load_mask})" if load_mask else None
         loadbuf = f"{var} + {cexpr_index(index)}" if index != 0 else var
-        if dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
+        if dtype == torch.uint8 and opt_ctx.is_load_uint8_as_float:
             line = (
                 f"masked_load({loadbuf}, {load_mask_str})"
                 if load_mask_str
@@ -1742,19 +1742,24 @@ class CppVecKernel(CppKernel):
         if buffer is None:
             buffer = self.loads
 
+        def get_result_size(dtype: torch.dtype) -> str:
+            result_size = f"{self.tiling_factor}"
+            assert dtype.itemsize <= 4
+            size_multiplier = 4 // dtype.itemsize
+            if size_multiplier > 1:
+                result_size += f" * {size_multiplier}"
+            return result_size
+
         def vec_to_array(vec_var: CppCSEVariable) -> CppCSEVariable:
             assert vec_var.is_vec
             code = BracesBuffer()
             code.writeline("[&]")
             with self.swap_buffers(code), code.indent():
-                result_size = f"{self.tiling_factor}"
-                # TODO(jgong5): handle int8?
-                if vec_var.dtype in DTYPE_LOWP_FP:
-                    result_size += " * 2"
                 vec_dtype = vec_var.dtype
-                if vec_var.dtype == torch.bool:
-                    vec_dtype = torch.float
                 assert vec_dtype is not None
+                if vec_dtype == torch.bool:
+                    vec_dtype = torch.float
+                result_size = get_result_size(vec_dtype)
                 code.writeline(
                     f"__at_align__ std::array<{DTYPE_TO_CPP[vec_dtype]}, {result_size}> tmpbuf;"
                 )
@@ -1773,9 +1778,7 @@ class CppVecKernel(CppKernel):
         code.writeline("[&]")
         with self.swap_buffers(code), code.indent():
             result_type = "float" if is_mask else f"{DTYPE_TO_CPP[dtype]}"
-            result_size = f"{self.tiling_factor}"
-            if dtype in DTYPE_LOWP_FP:  # XXX: how about int8?
-                result_size += " * 2"
+            result_size = get_result_size(dtype)
             result_declare = (
                 f"__at_align__ std::array<{result_type}, {result_size}> tmpbuf;"
             )
