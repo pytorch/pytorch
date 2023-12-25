@@ -872,11 +872,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_sum_with_start_arg(a, b, c, d):
-        return sum([a, b, c, d], 1)
+        return sum([b, c, d], a)
 
     @make_test
     def test_sum_with_start_kwarg(a, b, c, d):
-        return sum([a, b, c, d], start=1)
+        return sum([b, c, d], start=a)
 
     @make_test
     def test_reduce(a, b, c, d):
