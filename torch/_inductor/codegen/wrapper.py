@@ -1234,7 +1234,22 @@ class WrapperCodeGen(CodeGen):
 
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):
-            self.writeline(self.make_buffer_free(buffer))
+            def _check(_check_buffer, _output_buffer):
+                # Fix a failure in UT:
+                # python -u -m pytest -s -v test_torchinductor.py -k test_add_inplace_permuted
+                # since we will return InputBuffer in above example, we need prevent it from deleted
+                if (
+                    _check_buffer == _output_buffer
+                    or (
+                       isinstance(_output_buffer.layout, ir.MutationLayout)
+                       and  _check_buffer.get_name() == _output_buffer.layout.get_buffer().get_name()
+                    )
+                ):
+                    return True
+                return False
+
+            if not any(_check(buffer, output) for output in V.graph.graph_outputs):
+                self.writeline(self.make_buffer_free(buffer))
             return
 
         if not self.can_reuse(buffer):
