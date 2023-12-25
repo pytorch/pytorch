@@ -1,17 +1,12 @@
 #pragma once
 
 #include <ATen/ATen.h>
-// #include <core/MemoryFormat.h>
-// #include <core/detail/TensorInfo.h>
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_types.h>
-// #include <tensor/Context.h>
-// #include <utils/Macros.h>
 #include "Utils.h"
 
-// using namespace xpu::dpcpp;
 namespace at {
-namespace xpu {
+namespace native::xpu {
 namespace onednn{
 /* oneDNN quantization usage:
    https://oneapi-src.github.io/oneDNN/dev_guide_attributes_quantization.html#
@@ -194,17 +189,6 @@ class Attr {
 
   // append binary post op
   Attr& append_post_binary(dnnl::algorithm algo, const at::Tensor& binary) {
-    // auto binary_ = binary.is_quantized() ? at::dequantize(binary) : binary;
-    // auto ctx = DPCPPTensorContext::get_tensor_ctx(binary_);
-    // memory::desc md;
-    // if (ctx.is_plain()) {
-      // binary_ = is_smf_channels_last(binary_) ? binary_ : binary_.contiguous();
-      // md = get_onednn_md(binary_);
-    // } else {
-    //   md = ctx.meta();
-    // }
-
-    // Zhiwei modified
     auto binary_ = binary.is_quantized() ? at::dequantize(binary) : binary;
     bool binary_is_channels_last = (binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
                                       binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d);
@@ -370,36 +354,11 @@ class Attr {
             dnnl::query::exec_arg_md,
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);
 
-        // if (md != expected_md) {
-        //   ops_params_[i].expected_binary_ =
-        //       empty_opaque_tensor(expected_md, binary.options(), c10::nullopt);
-        //   binary_m = dpcpp_onednn_memory(
-        //       expected_md, engine, ops_params_[i].expected_binary_.data_ptr());
-        //   xpu::oneDNN::reorder(binary, ops_params_[i].expected_binary_);
-        // } else {
-        //   binary_m = dpcpp_onednn_memory(md, engine, binary.data_ptr());
-        // }
         args.insert(
             {DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1, binary_m});
       }
     }
   }
-
-#ifdef USE_PRIMITIVE_CACHE
-  void to_bytes(bytestring& bytes) {
-    xpu::dpcpp::to_bytes(bytes, q_scale_);
-    xpu::dpcpp::to_bytes(bytes, q_zero_point_);
-    for (int i = 0; i < ops_params_.size(); ++i) {
-      xpu::dpcpp::to_bytes(bytes, ops_params_[i].scale_);
-      xpu::dpcpp::to_bytes(bytes, ops_params_[i].alpha_);
-      xpu::dpcpp::to_bytes(bytes, ops_params_[i].beta_);
-      xpu::dpcpp::to_bytes(bytes, ops_params_[i].algo_);
-      xpu::dpcpp::to_bytes(bytes, ops_params_[i].kind_);
-      xpu::dpcpp::to_bytes(bytes, ops_params_[i].mask_);
-      xpu::dpcpp::to_bytes(bytes, ops_params_[i].meta_);
-    }
-  }
-#endif
 
   float q_scale_ = 1.0; // the scale used to quantize the fused result from fp32
                         // to int8, only works for int8 case
@@ -407,6 +366,6 @@ class Attr {
   std::vector<PostOpParam> ops_params_; // series of post ops
 }; // namespace oneDNN
 
-} // namespace oneDNN
-} // namespace xpu
+} // namespace onednn
+} // namespace native::xpu
 } // namespace at

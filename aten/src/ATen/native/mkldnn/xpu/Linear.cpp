@@ -1,8 +1,7 @@
 #include "Linear.h"
-// #include "utils/CustomOperatorRegistration.h"
 
 namespace at {
-namespace xpu {
+namespace native::xpu {
 
 using namespace impl;
 #define IPEX_LINEAR_DEFINATION(func)                                       \
@@ -14,7 +13,7 @@ using namespace impl;
         "linear_" #func, std::vector<c10::IValue>({input, weight, bias})); \
     auto linear_wrapper = LinearConverter();                               \
     auto post_op = [=]() {                                                 \
-      xpu::oneDNN::Attr attr;                                                           \
+      xpu::onednn::Attr attr;                                                           \
       attr.append_post_eltwise(                                            \
           /* scale */ 1.f,                                                 \
           /* alpha */ 0.f,                                                 \
@@ -37,7 +36,7 @@ using namespace impl;
         std::vector<c10::IValue>({input, weight, bias}));                  \
     auto linear_wrapper = LinearConverter();                               \
     auto post_op = [=]() {                                                 \
-      xpu::oneDNN::Attr attr;                                                           \
+      xpu::onednn::Attr attr;                                                           \
       attr.append_scale_binary(attr.kind_with_binary_##func, binary, 1.f); \
       return attr;                                                         \
     };                                                                     \
@@ -63,5 +62,5 @@ Tensor linear_xpu(
   return linear_wrapper.call(result, input, weight, bias, post_op);
 }
 
-} // namespace xpu
+} // namespace native::xpu
 } // namespace at

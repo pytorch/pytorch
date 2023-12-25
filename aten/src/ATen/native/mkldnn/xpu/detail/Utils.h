@@ -10,14 +10,8 @@
 
 #include <ATen/core/grad_mode.h>
 #include <c10/core/MemoryFormat.h>
-// #include <core/detail/TensorInfo.h>
-// #include <oneDNN/Runtime.h>
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_sycl.hpp>
-// #include <runtime/Utils.h>
-// #include <tensor/Context.h>
-// #include <utils/Macros.h>
-// #include <utils/Settings.h>
 
 #define DPCPP_ONEDNN_EXEC(prim, stream, ...)                           \
   {                                                                    \
@@ -29,7 +23,7 @@
   }
 
 namespace at {
-namespace xpu {
+namespace native::xpu {
 namespace onednn {
 
 static inline dnnl::memory::format_tag get_dnnl_default_format(
@@ -117,50 +111,6 @@ static bool is_supported_onednn_dtype(const at::Tensor& tensor) {
       ? false
       : true;
 }
-
-// Here this function is used to deduce the torch tensor meta dtype from the
-// kept oqaque tensor context in case of saving tensor
-// static inline c10::ScalarType opaqueTypeToScalarType(const at::Tensor& tensor) {
-//   auto is_quantized = tensor.is_quantized();
-//   auto ctx = *(static_cast<at::AtenIpexTypeXPU::DPCPPTensorContext*>(
-//       tensor.unsafeGetTensorImpl()->storage().data_ptr().get_context()));
-//   switch (ctx.dtype()) {
-//     case dnnl::memory::data_type::u8:
-//       // For quantized tensor, the meta dtype is QUInt8
-//       return (is_quantized) ? at::ScalarType::QUInt8 : at::ScalarType::Byte;
-//     case dnnl::memory::data_type::s8:
-//       // For quantized tensor, the meta dtype is QInt8
-//       return (is_quantized) ? at::ScalarType::QInt8 : at::ScalarType::Char;
-//     case dnnl::memory::data_type::f16:
-//       return at::ScalarType::Half;
-//     case dnnl::memory::data_type::f32:
-//       return at::ScalarType::Float;
-//     case dnnl::memory::data_type::bf16:
-//       return at::ScalarType::BFloat16;
-//     case dnnl::memory::data_type::f64:
-//       return at::ScalarType::Double;
-//     default:
-//       TORCH_CHECK(false, "Cannot be translated to torch dtype");
-//   };
-// }
-
-// static inline bool check_equality_for_meta_dtype_and_ctx_dtype(
-//     const at::Tensor& tensor) {
-//   auto ctx_dtype = opaqueTypeToScalarType(tensor);
-//   return bool(ctx_dtype == tensor.scalar_type());
-// }
-
-// static inline fpmath_mode get_onednn_fpmath_mode() {
-//   auto math_mode = Settings::I().get_fp32_math_mode();
-//   switch (math_mode) {
-//     case FP32_MATH_MODE::TF32:
-//       return fpmath_mode::tf32;
-//     case FP32_MATH_MODE::BF32:
-//       return fpmath_mode::bf16;
-//     default: // use FP32_MATH_MODE::FP32 as default
-//       return fpmath_mode::strict;
-//   }
-// }
 
 static inline dnnl::memory::dims get_onednn_dims(const at::Tensor& tensor) {
   dnnl::memory::dims dims;
@@ -327,103 +277,6 @@ static inline bool is_onednn_matmul_strides(
   return true;
 }
 
-// static inline std::vector<int64_t> compatible_groups_conv_strides(
-//     const at::Tensor& wgh,
-//     dnnl::memory::dims group_size) {
-//   std::vector<int64_t> strides = wgh.strides().vec();
-//   strides.insert(strides.begin(), group_size[1] * wgh.stride(0));
-//   return strides;
-// }
-// static inline std::vector<int64_t> compatible_groups_deconv_strides(
-//     const at::Tensor& wgh,
-//     dnnl::memory::dims group_size) {
-//   std::vector<int64_t> strides = wgh.strides().vec();
-//   strides[0] = wgh.strides()[1];
-//   strides[1] = wgh.strides()[0];
-//   strides.insert(strides.begin(), group_size[2] * wgh.strides()[0]);
-//   return strides;
-// }
-
-// static inline bool is_onednn_layout(const at::Tensor& tensor) {
-//   return !at::AtenIpexTypeXPU::DPCPPTensorContext::is_plain(tensor);
-// }
-
-// template <typename T>
-// static inline bool iteratable_has_onednn_layout(T container) {
-//   bool has_onednn_layout_tensor =
-//       std::any_of(container.begin(), container.end(), [](const Tensor& t) {
-//         return xpu::onednn::is_onednn_layout(t);
-//       });
-//   return has_onednn_layout_tensor;
-// }
-
-// static inline bool has_onednn_layout(const Tensor& tensor) {
-//   return is_onednn_layout(tensor);
-// }
-
-// static inline bool has_onednn_layout(const TensorList& inputs) {
-//   return iteratable_has_onednn_layout(inputs);
-// }
-
-// static inline bool has_onednn_layout(const ITensorListRef& inputs) {
-//   auto tensors = inputs.materialize();
-//   return iteratable_has_onednn_layout(tensors);
-// }
-
-// T would be Tensor, TensorList, ITensorListRef
-// template <typename T, typename... Args>
-// bool has_onednn_layout(const T& input, const Args&... rest) {
-//   if (has_onednn_layout(input)) {
-//     return true;
-//   }
-//   return false || has_onednn_layout(rest...);
-// }
-
-// static inline bool eltwise_forward_valid(const at::Tensor& tensor) {
-//   switch (tensor.scalar_type()) {
-//     // return false if scalar_type not supported
-//     case at::ScalarType::Float:
-//       break;
-//     case at::ScalarType::BFloat16:
-//       break;
-//     case at::ScalarType::Half:
-//       break;
-//     case at::ScalarType::Int:
-//       break;
-//     case at::ScalarType::Char:
-//       break;
-//     case at::ScalarType::Byte:
-//       break;
-//     default:
-//       return false;
-//   };
-//   if (tensor.dim() > 6)
-//     return false;
-//   if (!at::AtenIpexTypeXPU::DPCPPTensorContext::is_plain(tensor))
-//     return true;
-//   if (tensor.is_contiguous() || tensor.dim() == 1)
-//     return true;
-//   return false;
-// }
-
-// static inline bool eltwise_backward_valid(const at::Tensor& tensor) {
-//   switch (tensor.scalar_type()) {
-//     case at::ScalarType::Float:
-//       break;
-//     case at::ScalarType::BFloat16:
-//       break;
-//     default:
-//       return false;
-//   };
-//   if (tensor.dim() > 6)
-//     return false;
-//   if (!at::AtenIpexTypeXPU::DPCPPTensorContext::is_plain(tensor))
-//     return true;
-//   if (tensor.is_contiguous() || tensor.dim() == 1)
-//     return true;
-//   return false;
-// }
-
 static bool is_wrapped_number(const at::Tensor& t) {
   return t.unsafeGetTensorImpl()->is_wrapped_number();
 }
@@ -535,96 +388,10 @@ enum MEMORY_LAYOUT_FOR_CONV {
   Blocked = 2, // using blocked format for conv computation.
 };
 
-// static inline int get_memory_layout_for_conv(
-//     const at::Tensor& src,
-//     const at::Tensor& weight,
-//     bool is_transpose) {
-//   if (!src.defined() || src.is_sparse()) {
-//     // suggest channels_first
-//     return MEMORY_LAYOUT_FOR_CONV::ChannelsFirst;
-//   }
-
-//   if (is_transpose || src.is_quantized() || weight.is_quantized() ||
-//       (!dpcppSupportFP64())) {
-//     if (Settings::I().is_onednn_layout_enabled()) {
-//       // suggest blocked
-//       return MEMORY_LAYOUT_FOR_CONV::Blocked;
-//     }
-//   }
-
-//   auto suggest_channels_last_format =
-//       (is_smf_channels_last(src) || is_smf_channels_last(weight));
-//   if (suggest_channels_last_format) {
-//     // suggest channels_last
-//     return MEMORY_LAYOUT_FOR_CONV::ChannelsLast;
-//   }
-
-//   // inference workloads on ATSM platform, the conv will use blocked format
-//   // used double support to distinguish is atsm or not
-//   auto suggest_block_format = !dpcppSupportFP64() // on ATSM platform
-//       && (c10::InferenceMode::is_enabled() ||
-//           !at::GradMode::is_enabled()); // for inference workload
-//   if (suggest_block_format) {
-//     // suggest blocked
-//     return MEMORY_LAYOUT_FOR_CONV::Blocked;
-//   }
-
-//   // suggest channels_last
-//   return MEMORY_LAYOUT_FOR_CONV::ChannelsFirst;
-// }
-
-// static inline at::MemoryFormat get_tensor_format_for_conv(
-//     const at::Tensor& src,
-//     const at::Tensor& weight,
-//     bool is_transposed) {
-//   at::MemoryFormat mfmt;
-//   if (get_memory_layout_for_conv(src, weight, is_transposed) ==
-//       MEMORY_LAYOUT_FOR_CONV::ChannelsLast) {
-//     mfmt = get_cl_tag_by_ndim(src.ndimension());
-//   } else {
-//     mfmt = at::MemoryFormat::Contiguous;
-//   }
-//   return mfmt;
-// }
-
 // judge to use block or plain for Matmul
 static inline bool using_onednn_layout_for_matmul(const at::Tensor& src) {
-  // if (!src.defined() || src.is_sparse()) {
-  //   // suggest plain
-  //   return false;
-  // }
-
-  // if (Settings::I().is_onednn_layout_enabled()) {
-  //   // suggest block
-  //   return true;
-  // }
-
-  // auto src_ctx = at::AtenIpexTypeXPU::DPCPPTensorContext::get_tensor_ctx(src);
-  // if (!src_ctx.is_plain()) {
-  //   // suggest block
-  //   return true;
-  // }
-
-  // suggest plain
   return false;
 }
-
-// static inline bool using_channels_last_for_onednn_op(const at::Tensor& input) {
-//   const auto ndim = input.ndimension();
-//   if (ndim == 2) {
-//     return false;
-//   }
-
-//   // if input is blocked format, then pooling will use blocked instead of plain
-//   // format
-//   auto input_ctx =
-//       at::AtenIpexTypeXPU::DPCPPTensorContext::get_tensor_ctx(input);
-//   if (!input_ctx.is_plain()) {
-//     return false;
-//   }
-
-//   return is_smf_channels_last(input);
-// }
 
 static inline at::Tensor contiguous_if_needed(
     const at::Tensor& t,

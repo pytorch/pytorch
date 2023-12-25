@@ -3,19 +3,15 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/record_function.h>
 
-#include <oneDNN/oneDNN.h>
-// #include <runtime/Utils.h>
+#include <detail/oneDNN.h>
 #include <vector>
-
-// #include "comm/ATDispatch.h"
-// #include "comm/RegistrationDeclarations.h"
 
 #include <c10/util/typeid.h>
 
 // using namespace xpu::dpcpp;
 
 namespace at {
-namespace xpu {
+namespace native::xpu {
 namespace impl {
 
 static inline bool check_broadcast(

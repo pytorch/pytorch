@@ -1,7 +1,7 @@
 #include "BlasImpl.h"
 
 namespace at {
-namespace xpu {
+namespace native::xpu {
 
 struct LinearConverter {
   LinearConverter() {

@@ -3,18 +3,12 @@
 #include <ATen/ATen.h>
 
 #include <ATen/record_function.h>
-// #include <oneDNN/Runtime.h>
-// #include <runtime/Utils.h>
-// #include <tensor/Context.h>
-// #include <utils/LRUCache.h>
 #include "Utils.h"
 
 #include <oneapi/dnnl/dnnl.hpp>
 
-// using namespace xpu::dpcpp;
-
 namespace at{
-namespace xpu {
+namespace native::xpu {
 namespace onednn {
 
 struct ReorderAttr {
@@ -114,20 +108,11 @@ static inline void reorder(
   //     GpuEngineManager::Instance().get_engine({c10::kXPU, current_device()});
   // auto strm = GpuStreamManager::Instance().get_stream();
 
-  // auto src_ctx = DPCPPTensorContext::get_tensor_ctx(src);
-  // memory::desc src_md = src_ctx.is_plain()
-  //     ? check_group_and_create_plain_md(src, dst)
-  //     : src_ctx.meta();
+
   dnnl::memory::desc src_md = check_group_and_create_plain_md(src, dst);
   // auto src_mem = dpcpp_onednn_memory(src_md, engine, src.data_ptr());
 
-  // auto dst_ctx = DPCPPTensorContext::get_tensor_ctx(dst);
-  // memory::desc dst_md = dst_ctx.is_plain()
-  //     ? memory::desc(
-  //           get_onednn_dims(dst),
-  //           get_onednn_dtype_include_double(dst),
-  //           get_onednn_strides(dst))
-  //     : dst_ctx.meta();
+
   dnnl::memory::desc dst_md = dnnl::memory::desc(
             get_onednn_dims(dst),
             get_onednn_dtype_include_double(dst),

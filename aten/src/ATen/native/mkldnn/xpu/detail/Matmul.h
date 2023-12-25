@@ -4,16 +4,13 @@
 
 #include <ATen/record_function.h>
 
-// #include <oneDNN/Runtime.h>
-// #include <runtime/Utils.h>
-// #include <tensor/Tensor.h>
 #include "Attr.h"
 #include "Utils.h"
 
 #include <oneapi/dnnl/dnnl.hpp>
 
 namespace at{
-namespace xpu {
+namespace native::xpu {
 namespace onednn {
 static inline void matmul(
     at::Tensor& result,
@@ -217,21 +214,12 @@ static inline void matmul(
   dst_usr_md = dnnl::memory::desc(dst_dims, dst_usr_dt, dst_strides);
 
   // STEP4: create memory
-  // auto m1_ctx = at::AtenIpexTypeXPU::DPCPPTensorContext::get_tensor_ctx(m1);
-  // auto m1_usr_m = m1_ctx.is_plain()
-  //     ? dpcpp_onednn_memory(m1_usr_md, engine, m1.data_ptr())
-  //     : dpcpp_onednn_memory({m1_ctx.meta()}, engine, m1.data_ptr());
+  // auto m1_usr_m = dpcpp_onednn_memory(m1_usr_md, engine, m1.data_ptr())
 
 
-  // auto m2_ctx = at::AtenIpexTypeXPU::DPCPPTensorContext::get_tensor_ctx(m2);
-  // auto m2_usr_m = m2_ctx.is_plain()
-  //     ? dpcpp_onednn_memory(m2_usr_md, engine, m2.data_ptr())
-  //     : dpcpp_onednn_memory({m2_ctx.meta()}, engine, m2.data_ptr());
+  // auto m2_usr_m = dpcpp_onednn_memory(m2_usr_md, engine, m2.data_ptr())
 
-  // auto dst_ctx = at::AtenIpexTypeXPU::DPCPPTensorContext::get_tensor_ctx(dst);
-  // auto dst_usr_m = dst_ctx.is_plain()
-  //     ? dpcpp_onednn_memory(dst_usr_md, engine, dst.data_ptr())
-  //     : dpcpp_onednn_memory({dst_ctx.meta()}, engine, dst.data_ptr());
+  // auto dst_usr_m = dpcpp_onednn_memory(dst_usr_md, engine, dst.data_ptr())
 
   auto expected_m1_md = matmul_pd.src_desc();
   auto expected_m2_md = matmul_pd.weights_desc();
@@ -240,40 +228,8 @@ static inline void matmul(
   // memory m1_m = m1_usr_m, m2_m = m2_usr_m, dst_m = dst_usr_m;
   at::Tensor m1_, m2_, dst_;
 
-  // reorder cases
-  // case1: master weight support to reorder data type
-  // case2: block format support to reorder format
-  // if (m1_usr_m.get_desc() != expected_m1_md) {
-  //   // m1_ = empty_opaque_tensor(expected_m1_md, m1.options(), c10::nullopt);
-  //   // m1_m = dpcpp_onednn_memory(expected_m1_md, engine, m1_.data_ptr());
-  //   xpu::oneDNN::reorder(m1, m1_);
-  // }
+  // TODO: hanld attr.with_sum()
 
-  // if (m2_usr_m.get_desc() != expected_m2_md) {
-  //   // m2_ = empty_opaque_tensor(expected_m2_md, m2.options(), c10::nullopt);
-  //   // m2_m = dpcpp_onednn_memory(expected_m2_md, engine, m2_.data_ptr());
-  //   auto m2_onednn_matmul_shape_compatible = m2_trans ? m2 : m2.t();
-  //   xpu::oneDNN::reorder(m2_onednn_matmul_shape_compatible, m2_);
-
-  //   if (weight_cache_optimization) {
-  //     auto ctx_ =
-  //         at::AtenIpexTypeXPU::DPCPPTensorContext::release_tensor_ctx(m2_);
-  //     // assume oneDNN.matmul.weight is the permution of torch.nn.Linear.weight
-  //     ctx_.set_aten_meta(
-  //         {m2_onednn_matmul_shape_compatible.sizes().vec(),
-  //          m2_onednn_matmul_shape_compatible.strides().vec()});
-  //     at::AtenIpexTypeXPU::DPCPPTensorContext::set_tensor_ctx(
-  //         m2, std::move(ctx_));
-  //   }
-  // }
-
-  // bias add for gen12hp platform
-  // if (dst_usr_m.get_desc() != expected_dst_md) {
-  //   dst_ = empty_opaque_tensor(expected_dst_md, dst.options(), c10::nullopt);
-  //   dst_m = dpcpp_onednn_memory(expected_dst_md, engine, dst_.data_ptr());
-  //   if (attr.with_sum())
-  //     xpu::oneDNN::reorder(dst, dst_);
-  // }
   if (attr.with_binary())
     attr.construct_post_binary(matmul_pd, po, args);
 
@@ -295,14 +251,7 @@ static inline void matmul(
   }
 
   // TODO: Separate quantized path from fp32 path
-  if ((!m1.is_quantized()) && (!m2.is_quantized())) {
-    // Path1: normal path for non quantized input
-    // DPCPP_ONEDNN_EXEC(matmul_p, strm, args);
-  }
-  // if (is_onednn_layout_suggested && dst_m != dst_usr_m && dims == 2) {
-  //   auto blk_ctx = DPCPPTensorContext::release_tensor_ctx(dst_);
-  //   DPCPPTensorContext::set_tensor_ctx(dst, std::move(blk_ctx));
-  // }
+  // DPCPP_ONEDNN_EXEC(matmul_p, strm, args);
 
   if (!dst.is_same(result))
     result.copy_(dst);
