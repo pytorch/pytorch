@@ -1245,7 +1245,7 @@ class WrapperCodeGen(CodeGen):
                     _input_buffer == _output_buffer
                     or (
                        isinstance(_output_buffer.layout, ir.MutationLayout)
-                       and  _output_buffer.layout.get_buffer().get_name() = _input_buffer.get_name()
+                       and  _output_buffer.layout.get_buffer().get_name() == _input_buffer.get_name()
                     )
                 ):
                     return True
