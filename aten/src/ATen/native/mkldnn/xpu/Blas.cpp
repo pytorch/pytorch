@@ -3,7 +3,7 @@
 #include "BlasImpl.h"
 
 namespace at {
-namespace native::xpu{
+namespace native::xpu {
 
 using namespace impl;
 
@@ -57,13 +57,8 @@ Tensor& addmm_out(
 
   // complex/double case
   if (mat1.is_complex() || mat1.scalar_type() == ScalarType::Double) {
-#ifdef USE_ONEMKL
-    impl::mkl_matmul(result, self, mat1, mat2, beta, alpha);
-    return result;
-#else
     AT_ERROR(
-        "Double and complex datatype matmul is not supported. Include oneMKL library in compilation");
-#endif
+        "Double and complex datatype matmul is not supported in oneDNN");
   }
 
   // general case
@@ -138,13 +133,8 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
   }
 
   if (self.is_complex() || self.scalar_type() == ScalarType::Double) {
-#ifdef USE_ONEMKL
-    impl::mkl_matmul(result, result, self, mat2, Scalar(0), Scalar(1));
-    return result;
-#else
     AT_ERROR(
-        "Double and complex datatype matmul is not supported. Include oneMKL library in compilation");
-#endif
+        "Double and complex datatype matmul is not supported in oneDNN");
   }
 
 
@@ -188,17 +178,6 @@ Tensor& baddbmm_out(
       " but got:",
       input.sizes());
 
-  // special case
-  // if (alpha.to<float>() == 0.f || batch1.numel() == 0 || batch2.numel() == 0) {
-  //   if (input.defined() && beta.to<float>() != 0.f) {
-  //     result = at::xpu::mul_out(
-  //         input, at::native::wrapped_scalar_tensor(at::Scalar(beta)), result);
-  //   } else {
-  //     result.zero_();
-  //   }
-  //   return result;
-  // }
-
   // complex and double case
   if (batch1.is_complex() || batch2.scalar_type() == ScalarType::Double) {
     AT_ERROR(
@@ -206,7 +185,7 @@ Tensor& baddbmm_out(
   }
 
   // general case
-  onednn::Attr attr;
+  xpu::onednn::Attr attr;
   float beta_ = beta.to<float>();
   if (beta_ == 0.f) {
     if (alpha.to<float>() != 1.f) {
@@ -223,7 +202,7 @@ Tensor& baddbmm_out(
     if (beta_ != 1.f)
       attr.append_post_eltwise(1.f, beta_, 0.f, attr.kind_with_linear);
   }
-  onednn::matmul(result, batch1, batch2, at::Tensor(), true, attr);
+  xpu::onednn::matmul(result, batch1, batch2, at::Tensor(), true, attr);
   return result;
 }
 
@@ -534,5 +513,5 @@ Tensor& tensordot_out(
 }
 
 
-} // namespace xpu
+} // namespace native::xpu
 } // namespace at
