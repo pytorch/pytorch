@@ -38,7 +38,7 @@ from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
 from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
-from ..allowed_functions import is_builtin_callable, is_numpy, is_user_defined_allowed
+from ..allowed_functions import is_builtin_callable, is_callable_allowed, is_numpy
 
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
@@ -691,7 +691,7 @@ class VariableBuilder:
                 source=self.source,
             )
         elif trace_rules.lookup(value) is not None:
-            if is_user_defined_allowed(value):
+            if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
@@ -1875,7 +1875,7 @@ class SourcelessBuilder:
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
         elif trace_rules.lookup(value) is not None:
-            if is_user_defined_allowed(value):
+            if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup(value)(value)
         elif isinstance(value, types.FunctionType):
