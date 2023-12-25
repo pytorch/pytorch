@@ -2044,6 +2044,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             operator.ge,
             operator.ne,
             operator.eq,
+            operator.is_,
+            operator.is_not,
         ]:
 
             def fn(x):
