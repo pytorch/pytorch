@@ -268,6 +268,7 @@ exclude_patterns = [
     'torch/csrc/lazy/**/*',
     'torch/csrc/onnx/init.cpp',
     'torch/csrc/mps/**/*',
+    'torch/csrc/xpu/**',
 ]
 init_command = [
     'python3',

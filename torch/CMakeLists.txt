@@ -145,6 +145,13 @@ if(USE_ROCM)
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
 endif()
 
+if(USE_XPU)
+    include(${TORCH_ROOT}/cmake/public/xpu.cmake)
+    append_filelist("libtorch_python_xpu_sources" TORCH_PYTHON_SRCS)
+
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_XPU)
+endif()
+
 if(USE_EXPERIMENTAL_CUDNN_V8_API)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_EXPERIMENTAL_CUDNN_V8_API)
 endif()
