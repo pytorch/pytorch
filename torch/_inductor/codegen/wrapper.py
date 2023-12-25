@@ -1234,15 +1234,18 @@ class WrapperCodeGen(CodeGen):
 
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):
-            def _check(_check_buffer, _output_buffer):
+            def _check(_input_buffer, _output_buffer):
                 # Fix a failure in UT:
                 # python -u -m pytest -s -v test_torchinductor.py -k test_add_inplace_permuted
-                # since we will return InputBuffer in above example, we need prevent it from deleted
+                # since we will return InputBuffer in above example after fix,
+                # We need prevent it from deleted:
+                # Case 1: output_buffer is exactly same as input_buffer
+                # Case 2: _output_buffer's layout is a MutationLayout, target of which is the input buffer
                 if (
-                    _check_buffer == _output_buffer
+                    _input_buffer == _output_buffer
                     or (
                        isinstance(_output_buffer.layout, ir.MutationLayout)
-                       and  _check_buffer.get_name() == _output_buffer.layout.get_buffer().get_name()
+                       and  _output_buffer.layout.get_buffer().get_name() = _input_buffer.get_name()
                     )
                 ):
                     return True
