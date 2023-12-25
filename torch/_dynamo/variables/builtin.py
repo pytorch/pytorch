@@ -1080,8 +1080,16 @@ class BuiltinVariable(VariableTracker):
             and isinstance(x.value, (int, float))
             for x in seq.items
         ):
-            new_list = [x.value for x in seq.items]
-            return variables.ConstantVariable.create(sum(new_list))
+            if start is self._SENTINEL:
+                return variables.ConstantVariable.create(
+                    sum([x.value for x in seq.items])
+                )
+            if isinstance(start, variables.ConstantVariable) and isinstance(
+                start.value, (int, float)
+            ):
+                return variables.ConstantVariable.create(
+                    sum([x.value for x in seq.items], start=start.value)
+                )
         if seq.has_unpack_var_sequence(tx):
             if start is self._SENTINEL:
                 start = variables.ConstantVariable.create(0)
