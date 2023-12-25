@@ -409,21 +409,33 @@ inline at::vec::Vectorized<float> to_float_mask(int src) {
 }
 
 inline bool all_zero(at::vec::Vectorized<float> src) {
-#if defined(CPU_CAPABILITY_AVX2)
-  return _mm256_testz_ps(src, src);
-#else
+# if defined(CPU_CAPABILITY_AVX512)
   auto src_int = _mm512_castps_si512(src);
   __mmask16 mask = _mm512_test_epi32_mask(src_int, src_int);
   return mask == 0;
-#endif
+# elif defined(CPU_CAPABILITY_AVX2)
+  return _mm256_testz_ps(src, src);
+# else
+  __at_align__ float mask[at::vec::Vectorized<float>::size()];
+  src.store(mask);
+  for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
+    if (mask[i] != 0) {
+      return false;
+    }
+  }
+# endif
 }
 
 inline bool vector_lane_mask_check(at::vec::Vectorized<float> src, int lane) {
-#if defined(CPU_CAPABILITY_AVX2)
-  return _mm256_movemask_ps(src) & (1 << lane);
-#else
+# if defined(CPU_CAPABILITY_AVX512)
   return _mm512_movepi32_mask(_mm512_castps_si512(src)) & (1 << lane);
-#endif
+# elif defined(CPU_CAPABILITY_AVX2)
+  return _mm256_movemask_ps(src) & (1 << lane);
+# else
+  __at_align__ float mask[at::vec::Vectorized<float>::size()];
+  src.store(mask);
+  return mask[lane] != 0;
+# endif
 }
 
 #endif
