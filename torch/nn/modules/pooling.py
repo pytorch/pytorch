@@ -735,7 +735,7 @@ class FractionalMaxPool2d(Module):
 
     .. note:: Exactly one of ``output_size`` or ``output_ratio`` must be defined.
 
-    .. note:: constraint of arguments: :math:`kH + oH -1 <= H_{in}` and :math:`kW + oW -1 <= W_{in}`
+    .. note:: constraints of arguments: :math:`kH + oH -1 <= H_{in}` and :math:`kW + oW -1 <= W_{in}`
 
     Args:
         kernel_size: the size of the window to take a max over.
