@@ -867,6 +867,18 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return sum(map(lambda x: x + 1, [a, b, c, d]))
 
     @make_test
+    def test_sum(a, b, c, d):
+        return sum([a, b, c, d])
+
+    @make_test
+    def test_sum_with_start_arg(a, b, c, d):
+        return sum([b, c, d], a)
+
+    @make_test
+    def test_sum_with_start_kwarg(a, b, c, d):
+        return sum([b, c, d], start=a)
+
+    @make_test
     def test_reduce(a, b, c, d):
         return functools.reduce(operator.add, [a, b, c, d])
 
@@ -1765,6 +1777,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI,
+            FunctionalTensorMode,
             FunctorchFunctionalizeAPI,
             PythonFunctionalizeAPI,
         )
@@ -1787,8 +1800,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         t1 = torch.rand(5, device="cuda")
         t2 = torch.rand(5, device="cuda")
-
-        gm = make_fx(PythonFunctionalizeAPI().functionalize(f))(t1, t2)
+        with FunctionalTensorMode():
+            gm = make_fx(PythonFunctionalizeAPI().functionalize(f))(t1, t2)
         # Make sure t2 was not modified
         self.assertNotEqual(gm(t1, t2), t2)
 
@@ -1825,7 +1838,8 @@ def forward(self, x_1, output_1):
 
         def prep():
             x = torch.ones(4, device="cuda", requires_grad=True)
-            x_func = FunctionalTensor.to_functional(x)
+            with FunctionalTensorMode():
+                x_func = FunctionalTensor.to_functional(x)
             self.assertTrue(torch._is_functional_tensor(x_func.elem))
             return x_func
 
