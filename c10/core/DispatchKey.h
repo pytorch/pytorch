@@ -716,6 +716,7 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
 namespace torch {
 // Expose the constant, but not the TYPE (DispatchKey is an implementation
 // detail!)
+// NOLINTNEXTLINE(misc-unused-using-decls)
 using c10::kAutograd;
 } // namespace torch
 
