@@ -102,6 +102,7 @@ def capture_pre_autograd_graph(
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
+    _functional_pre_dispatch_IR: bool = False,
 ) -> torch.nn.Module:
     """
     A helper function that is intended to trace a module before any pre-autograd
@@ -132,51 +133,56 @@ def capture_pre_autograd_graph(
         torch.ops.aten.native_batch_norm.default: torch.ops.aten.native_batch_norm.default.decompose,
     }
 
-    if kwargs is None:
-        kwargs = {}
+    if _functional_pre_dispatch_IR:
+        from torch.export._trace import _export
+        module = _export(f, args, kwargs, constraints=constraints, pre_dispatch=True, decomp_table=decomp_table).module()
+    else:
+        if kwargs is None:
+            kwargs = {}
 
-    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
-        m = torch._dynamo.export(
-            f,
-            constraints=constraints,
-            assume_static_by_default=True,
-            tracing_mode="symbolic",
-            decomposition_table=decomp_table,
-            pre_dispatch=True,
-            aten_graph=True,
-        )(
-            *args,
-            **kwargs,
-        )[0]
+        with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
+            m = torch._dynamo.export(
+                f,
+                constraints=constraints,
+                assume_static_by_default=True,
+                tracing_mode="symbolic",
+                decomposition_table=decomp_table,
+                pre_dispatch=True,
+                aten_graph=True,
+            )(
+                *args,
+                **kwargs,
+            )[0]
 
-        def _train(self, mode: bool = True):
-            raise NotImplementedError("Calling train() is not supported yet.")
+            _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
 
-        def _eval(self, mode: bool = True):
-            raise NotImplementedError("Calling eval() is not supported yet.")
+            m.meta["inline_constraints"] = {
+                k: v
+                for k, v in fake_mode.shape_env.runtime_var_to_range.items()
+                if re.match(r"^[if]\d+$", str(k))
+            }
 
-        _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
+            if isinstance(f, torch.nn.Module):
+                from torch.export._trace import _restore_state_dict
+                _restore_state_dict(f, m)
 
-        m.meta["inline_constraints"] = {
-            k: v
-            for k, v in fake_mode.shape_env.runtime_var_to_range.items()
-            if re.match(r"^[if]\d+$", str(k))
-        }
+            flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
+            range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
+            module = _create_stateful_graph_module(
+                m,
+                range_constraints=range_constraints,
+                equality_constraints=equality_constraints,
+            )
 
-        if isinstance(f, torch.nn.Module):
-            from torch.export._trace import _restore_state_dict
-            _restore_state_dict(f, m)
+    def _train(self, mode: bool = True):
+        raise NotImplementedError("Calling train() is not supported yet.")
 
-        flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-        range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
-        unlifted_m = _create_stateful_graph_module(
-            m,
-            range_constraints=range_constraints,
-            equality_constraints=equality_constraints,
-        )
-        unlifted_m.train = types.MethodType(_train, m)  # type: ignore[method-assign]
-        unlifted_m.eval = types.MethodType(_eval, m)  # type: ignore[method-assign]
-        return unlifted_m
+    def _eval(self, mode: bool = True):
+        raise NotImplementedError("Calling eval() is not supported yet.")
+
+    module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
+    module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+    return module
 
 
 def export(
