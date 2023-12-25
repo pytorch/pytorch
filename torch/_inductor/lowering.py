@@ -1092,7 +1092,8 @@ def cat(inputs, dim=0):
 
         return False
 
-    # TODO enable pointwise_cat on CPU when we support vectorization on index_expr.
+    # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
+    #             We will revisit this later after enabling vectorization on index_expr.
     if (
         len(inputs) <= config.max_pointwise_cat_inputs
         and inputs[0].get_device().type != "cpu"
