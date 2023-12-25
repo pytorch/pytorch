@@ -5196,9 +5196,9 @@ def meta__sdpa_flash_cpu_backward(
     attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
 ):
-    grad_q = torch.empty_like(query).transpose(1, 2)
-    grad_k = torch.empty_like(key).transpose(1, 2)
-    grad_v = torch.empty_like(value).transpose(1, 2)
+    grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
+    grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
+    grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
     return grad_q, grad_k, grad_v
 
 
