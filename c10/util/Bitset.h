@@ -5,8 +5,7 @@
 #include <intrin.h>
 #endif
 
-namespace c10 {
-namespace utils {
+namespace c10::utils {
 
 /**
  * This is a simple bitset class with sizeof(long long int) bits.
@@ -114,5 +113,4 @@ inline bool operator!=(bitset lhs, bitset rhs) noexcept {
   return !(lhs == rhs);
 }
 
-} // namespace utils
-} // namespace c10
+} // namespace c10::utils
