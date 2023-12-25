@@ -15,6 +15,7 @@ from collections import defaultdict
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
 from torch._dispatch.python import enable_python_dispatcher, enable_pre_dispatch
 import torch.fx as fx
+from torch.fx.node import _side_effectful_need_to_be_preserved_pre_dispatch
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
 import inspect
@@ -567,16 +568,12 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        pre_dispatch_ops = [
-            torch._C._set_grad_enabled,
-            torch.amp._enter_autocast,
-            torch.amp._exit_autocast,
-        ]
-        if func in pre_dispatch_ops:
+        if func in _side_effectful_need_to_be_preserved_pre_dispatch:
             return self.tracer.create_node("call_function", func, args, {})
             # Don't actually run the function! We just want to trace the calls
             # into a graph. We don't actualy want to change global autograd state.
         return func(*args, **kwargs)
+
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
     def __init__(self, tracer, tracing_mode, pre_dispatch=False, _allow_fake_constant=False, _error_on_data_dependent_ops=True):

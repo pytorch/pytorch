@@ -392,7 +392,7 @@ def _has_potential_branch_input_alias(branch, inputs):
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
-    with ctx.redispatch_to_next():
+    with ctx.redispatch_to_next() as m:
         functional_true = ctx.functionalize(true_fn)
         functional_false = ctx.functionalize(false_fn)
         for branch in [functional_true, functional_false]:
