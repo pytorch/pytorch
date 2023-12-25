@@ -2732,12 +2732,13 @@ class CPUReproTests(TestCase):
     def test_expr_vec_non_contiguous(self):
         def fn(x):
             # the pattern from sebotnet33ts_256
-            y = x.permute(0, 3, 1, 4, 2).clone(memory_format=torch.contiguous_format)
-            s = y.shape
-            y = y.view(s[0], s[1] * s[2], s[3] * s[4])
+            y = torch.nn.functional.pad(x, (0, 31)).reshape(-1, 33, 63)
+            y = y[:, :32, 31:].reshape(4, 32, 1, 32, 32).expand(-1, -1, 32, -1, -1)
+            y = y.permute(0, 3, 1, 4, 2).clone(memory_format=torch.contiguous_format)
+            y = y.view(4, 1024, 1024)
             return y.softmax(dim=-1)
 
-        x = torch.randn(4, 32, 32, 32, 32)
+        x = torch.randn(128, 2048)
         metrics.reset()
         self.common(fn, (x,))
         # 4 kernels for max, exp, sum and div
