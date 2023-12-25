@@ -1089,13 +1089,13 @@ class BuiltinVariable(VariableTracker):
                 "start", variables.ConstantVariable.create(0)
             ).as_python_constant()
             assert not kwargs
-            items = seq.unpack_var_sequence(tx)[start:]
+            items = seq.unpack_var_sequence(tx)
             return BuiltinVariable(functools.reduce).call_function(
                 tx,
                 [
                     BuiltinVariable(operator.add),
                     variables.TupleVariable(items),
-                    variables.ConstantVariable.create(0),
+                    variables.ConstantVariable.create(start),
                 ],
                 {},
             )

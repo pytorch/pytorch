@@ -867,6 +867,18 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return sum(map(lambda x: x + 1, [a, b, c, d]))
 
     @make_test
+    def test_sum(a, b, c, d):
+        return sum([a, b, c, d])
+
+    @make_test
+    def test_sum_with_start_arg(a, b, c, d):
+        return sum([b, c, d], a)
+
+    @make_test
+    def test_sum_with_start_kwarg(a, b, c, d):
+        return sum([b, c, d], start=a)
+
+    @make_test
     def test_reduce(a, b, c, d):
         return functools.reduce(operator.add, [a, b, c, d])
 
