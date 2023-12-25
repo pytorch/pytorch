@@ -34,7 +34,8 @@ from torch._subclasses import FakeTensorMode
 from torch.export import Constraint, Dim
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests
+from torch._dynamo.test_case import TestCase
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -1515,7 +1516,7 @@ class TestExport(TestCase):
                     return x.cos()
                 return x.sin()
 
-        graph_module = capture_pre_autograd_graph(Foo(), (torch.ones(7, 5),))
+        graph_module = capture_pre_autograd_graph(Foo(), (torch.ones(7, 5),), _functional_pre_dispatch_IR=True)
         with self.assertRaisesRegex(NotImplementedError, r"Calling train\(\) is not supported yet."):
             graph_module.train()
 
@@ -1547,7 +1548,9 @@ class TestExport(TestCase):
         example_inputs = (torch.randn(1, 3, 3, 3),)
         m = CondBranchClassMethod()
         m.eval()
-        gm = capture_pre_autograd_graph(m, example_inputs)
+        # TODO (tmanlaibaatar) Setting functional IR doesn't work on aot_export yet
+        # as the branch source_fn is not captured.
+        gm = capture_pre_autograd_graph(m, example_inputs, _functional_pre_dispatch_IR=False)
 
         actual_source_fns = []
         for mod in gm.modules():
@@ -1852,20 +1855,18 @@ def forward(self, l_x_):
                 return x.sum() + self.buffer.sum()
 
         inp = torch.randn(4, 4)
-        gm = capture_pre_autograd_graph(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3])
+        gm = capture_pre_autograd_graph(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3], _functional_pre_dispatch_IR=True)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected input arg0_1.shape\[0\] to be >= 3, but got 2"):
+        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\]"):
             gm(torch.randn(2, 2))
 
-        with self.assertRaisesRegex(RuntimeError, "Expected input arg0_1.shape\[0\] to be >= 3, but got 2"):
+        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\]"):
             torch.export.export(gm, (torch.randn(2, 2),))
 
         ep = torch.export.export(gm, (torch.randn(5, 4),), dynamic_shapes=({0: torch.export.Dim("dim", min=3)},))
 
         test_inp = torch.ones(8, 4)
-        # This is actually correct because how make_fx modifies the buffer since
-        # there is no functionalization.
-        self.assertTrue(torch.allclose(ep(test_inp), Foo().forward(test_inp) + 4*4*4))
+        self.assertTrue(torch.allclose(ep(test_inp), Foo().forward(test_inp)))
 
     @testing.expectedFailureNonStrict
     def test_issue_113041(self):
@@ -2002,6 +2003,7 @@ def forward(self, l_x_):
         exported_model = capture_pre_autograd_graph(
             m,
             (tensor_cpu, mask_cpu),
+            _functional_pre_dispatch_IR=True,
         )
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
