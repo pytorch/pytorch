@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-
 #include <ATen/record_function.h>
 
 #include "Attr.h"
@@ -215,10 +214,7 @@ static inline void matmul(
 
   // STEP4: create memory
   // auto m1_usr_m = dpcpp_onednn_memory(m1_usr_md, engine, m1.data_ptr())
-
-
   // auto m2_usr_m = dpcpp_onednn_memory(m2_usr_md, engine, m2.data_ptr())
-
   // auto dst_usr_m = dpcpp_onednn_memory(dst_usr_md, engine, dst.data_ptr())
 
   auto expected_m1_md = matmul_pd.src_desc();
@@ -250,7 +246,6 @@ static inline void matmul(
     // args.insert({DNNL_ARG_BIAS, bias_m});
   }
 
-  // TODO: Separate quantized path from fp32 path
   // DPCPP_ONEDNN_EXEC(matmul_p, strm, args);
 
   if (!dst.is_same(result))

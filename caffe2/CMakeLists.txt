@@ -1582,7 +1582,6 @@ endif()
 
 if(USE_XPU)
   target_include_directories(torch_xpu PRIVATE ${Caffe2_XPU_INCLUDE})
-  # message(FATAL_ERROR "Caffe2_XPU_INCLUDE:" ${Caffe2_XPU_INCLUDE})
   target_link_libraries(torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
   target_include_directories(
     torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)

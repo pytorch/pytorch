@@ -1,7 +1,5 @@
 #pragma once
-
 #include <ATen/ATen.h>
-
 #include <ATen/record_function.h>
 #include "Utils.h"
 
@@ -108,10 +106,8 @@ static inline void reorder(
   //     GpuEngineManager::Instance().get_engine({c10::kXPU, current_device()});
   // auto strm = GpuStreamManager::Instance().get_stream();
 
-
   dnnl::memory::desc src_md = check_group_and_create_plain_md(src, dst);
   // auto src_mem = dpcpp_onednn_memory(src_md, engine, src.data_ptr());
-
 
   dnnl::memory::desc dst_md = dnnl::memory::desc(
             get_onednn_dims(dst),

@@ -340,7 +340,6 @@ class Attr {
     // [1, C, 1, 1], channel broadcast
     // [dst.shape], no broadcast and eltwise-wise binary operations on dst
 
-    // Zhiwei modified
     // auto engine =
     //     GpuEngineManager::Instance().get_engine({c10::kXPU, current_device()});
     for (size_t i = 0; i < ops_params_.size(); ++i) {
@@ -364,7 +363,7 @@ class Attr {
                         // to int8, only works for int8 case
   int64_t q_zero_point_ = 0;
   std::vector<PostOpParam> ops_params_; // series of post ops
-}; // namespace oneDNN
+};
 
 } // namespace onednn
 } // namespace native::xpu

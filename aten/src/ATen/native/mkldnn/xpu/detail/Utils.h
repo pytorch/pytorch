@@ -1,9 +1,5 @@
 #pragma once
-
-
 #include <iostream>
-
-
 #include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/core/Tensor.h>
@@ -150,11 +146,6 @@ inline bool onednn_strides_check(const at::Tensor& src) {
 
   dnnl_memory_desc_t md;
   dnnl_memory_desc_create_with_strides(&md, ndims, dims, data_type, strides);
-  // md->get_ndims() = ndims;
-  // array_copy(md->dims, dims, ndims);
-  // md->get_data_type() = data_type;
-  // array_copy(md->padded_dims, dims, ndims);
-  // md->get_format_kind() = dnnl_format_kind_t::dnnl_blocked;
   dnnl_format_kind_t md_fmt_kind;
   int md_ndims;
   int md_inner_nblks;
@@ -381,7 +372,6 @@ static inline bool binary_valid(
   return false;
 }
 
-
 enum MEMORY_LAYOUT_FOR_CONV {
   ChannelsFirst = 0, // using channels_first for conv computation.
   ChannelsLast = 1, /// using channels_last for conv computation.
@@ -402,7 +392,6 @@ static inline at::Tensor contiguous_if_needed(
   return t_;
 }
 
-
 } // namespace onednn
-} // namespace xpu
+} // namespace native::xpu
 } // namespace at

@@ -8,8 +8,6 @@
 
 #include <c10/util/typeid.h>
 
-// using namespace xpu::dpcpp;
-
 namespace at {
 namespace native::xpu {
 namespace impl {
@@ -517,6 +515,5 @@ static Tensor& matmul_fusion_variants(
 }
 
 } // namespace impl
-
-} // namespace xpu
+} // namespace native::xpu
 } // namespace at

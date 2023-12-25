@@ -243,11 +243,11 @@ if(USE_XPU)
   list(APPEND ATen_XPU_INCLUDE ${XPU_MKLDNN_INCLUDE})
 
   # TODO: Remove hand-written link
-  list(APPEND ATen_XPU_INCLUDE /home/gta/intel/oneapi/2024.0/include/)
-  list(APPEND ATen_XPU_INCLUDE /home/gta/intel/oneapi/2024.0/include/sycl/)
-  list(APPEND ATen_XPU_DEPENDENCY_LIBS /home/gta/intel/oneapi/2024.0/lib/libsycl.so.7)
-  list(APPEND ATen_XPU_DEPENDENCY_LIBS /lib/x86_64-linux-gnu/libOpenCL.so.1)
-  list(APPEND ATen_XPU_DEPENDENCY_LIBS /lib/x86_64-linux-gnu/libintlc.so)
+  list(APPEND ATen_XPU_INCLUDE /path/to/oneapi/include/)
+  list(APPEND ATen_XPU_INCLUDE /path/to/oneapi/include/sycl/)
+  list(APPEND ATen_XPU_DEPENDENCY_LIBS /path/to/oneapi/lib/libsycl.so.7)
+  list(APPEND ATen_XPU_DEPENDENCY_LIBS /path/to/libOpenCL.so.1)
+  list(APPEND ATen_XPU_DEPENDENCY_LIBS /path/to/libintlc.so) # Required by sycl
 endif()
 
 # Metal

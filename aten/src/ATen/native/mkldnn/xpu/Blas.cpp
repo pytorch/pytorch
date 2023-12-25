@@ -512,6 +512,5 @@ Tensor& tensordot_out(
   return result;
 }
 
-
 } // namespace native::xpu
 } // namespace at
