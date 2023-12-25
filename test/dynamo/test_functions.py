@@ -71,7 +71,10 @@ def make_test(fn=None, expected_frame_count=1):
 
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
-            self, fn=fn, nargs=nargs, expected_frame_count=expected_frame_count,
+            self,
+            fn=fn,
+            nargs=nargs,
+            expected_frame_count=expected_frame_count,
         )
 
     return test_fn
