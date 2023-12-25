@@ -1,7 +1,6 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/Resize.h>
 #include "BlasImpl.h"
-// #include "utils/CustomOperatorRegistration.h"
 
 namespace at {
 namespace native::xpu{
