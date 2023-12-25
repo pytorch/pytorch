@@ -2805,15 +2805,15 @@ class Buffer(IRNode):
         return False
 
     def codegen_reference(self, writer=None):
-        if isinstance(self.layout, MutationLayout):
-            # Fix a failure in UT:
-            # python -u -m pytest -s -v test_torchinductor.py -k test_add_inplace_permuted
-            # def test(x1, x2):
-            #   buf0 = x1 + x2
-            #   copy_(x1, buf0)
-            #   return buf0
-            # In this case, we found buf0 didn't generate, so return the mutation buffer (x1) instead
-            return self.layout.get_buffer().get_name()
+        # if isinstance(self.layout, MutationLayout):
+        #     # Fix a failure in UT:
+        #     # python -u -m pytest -s -v test_torchinductor.py -k test_add_inplace_permuted
+        #     # def test(x1, x2):
+        #     #   buf0 = x1 + x2
+        #     #   copy_(x1, buf0)
+        #     #   return buf0
+        #     # In this case, we found buf0 didn't generate, so return the mutation buffer (x1) instead
+        #     return self.layout.get_buffer().get_name()
         return self.get_name()
 
     def decide_layout(self):
