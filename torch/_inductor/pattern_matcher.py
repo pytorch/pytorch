@@ -378,7 +378,7 @@ class _TargetArgsExpr(_TargetExpr):
             return pytree.TreeSpec(
                 mapping.get(s.type, s.type),
                 s.context,
-                list(map(norm_spec, s.children())),
+                list(map(norm_spec, s.children_specs)),
             )
 
         flat, spec = pytree.tree_flatten([args, kwargs])

@@ -384,7 +384,7 @@ def _replace_literals_with_new_placeholders(
         exclude_literals = []
 
     in_spec = gm._in_spec
-    args_spec = in_spec.child(0)
+    args_spec = in_spec.children_specs[0]
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             last_ph = node

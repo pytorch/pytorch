@@ -463,8 +463,8 @@ class _ModuleFrame:
         signature = module_call_graph.get(self.fqn)
         if signature is not None and self.parent is not None:
             assert signature.in_spec.num_children == 2
-            args_spec = signature.in_spec.child(0)
-            kwargs_spec = signature.in_spec.child(1)
+            args_spec = signature.in_spec.children_specs[0]
+            kwargs_spec = signature.in_spec.children_specs[1]
             assert args_spec.context is None
             assert kwargs_spec.context is not None
 
@@ -473,7 +473,7 @@ class _ModuleFrame:
                 for idx in range(args_spec.num_children):
                     arg_nodes.append(self.graph.placeholder(f"_positional_arg_{idx}"))
                 kwarg_nodes = {}
-                for name in kwargs_spec.entries():
+                for name in kwargs_spec.context:
                     kwarg_nodes[name] = self.graph.placeholder(name)
                 flat_args = _generate_flatten(
                     self.module,
@@ -525,7 +525,7 @@ class _ModuleFrame:
                     k: self.parent.graph.call_function(
                         operator.getitem, (kwargs_node, k)
                     )
-                    for k in kwargs_spec.entries()
+                    for k in kwargs_spec.context
                 }
             assert self.parent_call_module is not None
             self.parent_call_module.args = tuple(arg_nodes)
