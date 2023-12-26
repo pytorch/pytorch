@@ -93,6 +93,8 @@ void test_aoti_constants_update(
   std::string outputs_attr = "outputs_" + suffix;
   std::string weights_attr = "fc_weight_" + suffix;
   std::string bias_attr = "fc_bias_" + suffix;
+  std::string const_1_attr = "const_1_" + suffix;
+  std::string const_2_attr = "const_2_" + suffix;
   const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
   auto input_tensors =
       data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
@@ -102,14 +104,22 @@ void test_aoti_constants_update(
   const auto& weight_tensors =
       data_loader.attr(weights_attr.c_str()).toTensor();
   const auto& bias_tensors = data_loader.attr(bias_attr.c_str()).toTensor();
+  const auto& const_1_tensors =
+      data_loader.attr(const_1_attr.c_str()).toTensor();
+  const auto& const_2_tensors =
+      data_loader.attr(const_2_attr.c_str()).toTensor();
 
   torch::inductor::TensorConstantMap missing_map, rand_map, real_map;
-  missing_map.emplace(
-      "L__self___fc_weight", new at::Tensor(at::randn({10, 64})));
+  missing_map.emplace("L__self___const_1", new at::Tensor(at::randn({10})));
+  missing_map.emplace("L__self___const_2", new at::Tensor(at::randn({10})));
   rand_map.emplace("L__self___fc_weight", new at::Tensor(at::randn({10, 64})));
   rand_map.emplace("L__self___fc_bias", new at::Tensor(at::randn({10})));
+  rand_map.emplace("L__self___const_1", new at::Tensor(at::randn({10})));
+  rand_map.emplace("L__self___const_2", new at::Tensor(at::randn({10})));
   real_map.emplace("L__self___fc_weight", new at::Tensor(weight_tensors));
   real_map.emplace("L__self___fc_bias", new at::Tensor(bias_tensors));
+  real_map.emplace("L__self___const_1", new at::Tensor(const_1_tensors));
+  real_map.emplace("L__self___const_2", new at::Tensor(const_2_tensors));
 
   std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
   if (device == "cuda") {
@@ -133,16 +143,31 @@ void test_aoti_constants_update(
   // Update random weight to buffer #1.
   runner->update_constant_buffer(missing_map, false, false);
   actual_output_tensors = runner->run(input_tensors);
+  if (use_runtime_constant_folding) {
+    // At this moment, this update is applied on the original weight.
+    // The weight being consumed is "folded", so will have no affect.
+    ASSERT_TRUE(
+        torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+    runner->run_const_fold(/* use_inactive = */ false);
+    actual_output_tensors = runner->run(input_tensors);
+  }
   ASSERT_FALSE(
       torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
-  // Update with real weight.
+  // Update with real map.
   runner->update_constant_buffer(real_map, false, false);
+  actual_output_tensors = runner->run(input_tensors);
+  if (use_runtime_constant_folding) {
+    runner->run_const_fold(/* use_inactive = */ false);
+  }
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
-  // Update with full random weight.
-  runner->update_constant_buffer(rand_map, false, true);
+  // Update with full random map.
+  runner->update_constant_buffer(rand_map, false, false);
+  if (use_runtime_constant_folding) {
+    runner->run_const_fold(/* use_inactive = */ false);
+  }
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_FALSE(
       torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
@@ -166,6 +191,8 @@ void test_aoti_double_buffering(
   std::string outputs_attr = "outputs_" + suffix;
   std::string weights_attr = "fc_weight_" + suffix;
   std::string bias_attr = "fc_bias_" + suffix;
+  std::string const_1_attr = "const_1_" + suffix;
+  std::string const_2_attr = "const_2_" + suffix;
   const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
   auto input_tensors =
       data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
@@ -175,12 +202,20 @@ void test_aoti_double_buffering(
   const auto& weight_tensors =
       data_loader.attr(weights_attr.c_str()).toTensor();
   const auto& bias_tensors = data_loader.attr(bias_attr.c_str()).toTensor();
+  const auto& const_1_tensors =
+      data_loader.attr(const_1_attr.c_str()).toTensor();
+  const auto& const_2_tensors =
+      data_loader.attr(const_2_attr.c_str()).toTensor();
 
   torch::inductor::TensorConstantMap rand_map, real_map;
   rand_map.emplace("L__self___fc_weight", new at::Tensor(at::randn({10, 64})));
   rand_map.emplace("L__self___fc_bias", new at::Tensor(at::randn({10})));
+  rand_map.emplace("L__self___const_1", new at::Tensor(at::randn({10})));
+  rand_map.emplace("L__self___const_2", new at::Tensor(at::randn({10})));
   real_map.emplace("L__self___fc_weight", new at::Tensor(weight_tensors));
   real_map.emplace("L__self___fc_bias", new at::Tensor(bias_tensors));
+  real_map.emplace("L__self___const_1", new at::Tensor(const_1_tensors));
+  real_map.emplace("L__self___const_2", new at::Tensor(const_2_tensors));
 
   std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
   if (device == "cuda") {
@@ -199,17 +234,23 @@ void test_aoti_double_buffering(
   // We update the weights to buffer #2 and activate it. This should still
   // produce correct result, as it's the real constant map.
   runner->update_inactive_constant_buffer(real_map);
+  if (use_runtime_constant_folding) {
+    runner->run_const_fold(/* use_inactive = */ true);
+  }
   runner->swap_constant_buffer();
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
   // We update random weights to buffer #1. But do not swap in the weight yet.
   runner->update_inactive_constant_buffer(rand_map);
+  if (use_runtime_constant_folding) {
+    runner->run_const_fold(/* use_inactive = */ true);
+  }
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
   // We swap and activate the weight to buffer #1. This is random weight and
-  // should produce in correct results.
+  // should produce incorrect results.
   runner->swap_constant_buffer();
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_FALSE(
@@ -236,6 +277,7 @@ TEST(AotInductorTest, BasicScriptTestCpu) {
 
 #ifdef USE_CUDA
 TEST(AotInductorTest, BasicTestCuda) {
+  test_aoti("cuda", true);
   test_aoti("cuda", false);
 }
 
@@ -243,8 +285,16 @@ TEST(AotInductorTest, BasicScriptTestCuda) {
   test_aoti_script("cuda");
 }
 
+TEST(AotInductorTest, RuntimeUpdateConstantsCuda) {
+  test_aoti_constants_update("cuda", true);
+}
+
 TEST(AotInductorTest, UpdateConstantsCuda) {
   test_aoti_constants_update("cuda", false);
+}
+
+TEST(AotInductorTest, RuntimeUpdateInactiveConstantsCuda) {
+  test_aoti_double_buffering("cuda", true);
 }
 
 TEST(AotInductorTest, UpdateInactiveConstantsCuda) {

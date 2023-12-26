@@ -125,7 +125,30 @@ AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
   return AOTInductorModelContainerUpdateConstantBuffer(container_handle,
           constant_map_handle,
           /*use_inactive*/ true,
-          /*validate_full_update*/ true);
+          /*validate_full_update*/ false);
+}
+
+AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
+    AOTInductorModelContainerHandle container_handle,
+    bool use_inactive,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle) {
+  FILE *fptr;
+  fptr = fopen("/tmp/torchinductor_mlee8/enter_interface.txt", "w");
+  fclose(fptr);
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  fptr = fopen("/tmp/torchinductor_mlee8/get_container.txt", "w");
+  fclose(fptr);
+  auto stream =
+      reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
+  fptr = fopen("/tmp/torchinductor_mlee8/get_stream.txt", "w");
+  fclose(fptr);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    AOTINoGradGuard guard;
+    container->run_const_fold(use_inactive, stream, proxy_executor_handle);
+  })
 }
 
 AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(

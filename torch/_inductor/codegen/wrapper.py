@@ -1800,6 +1800,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].data_size = {tensor.untyped_storage().nbytes()};"
                 )
+                from_folded = "true" if name in V.graph.folded_constants else "false"
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].from_folded = {from_folded};"
+                )
 
                 size_str = ", ".join([str(s) for s in tensor.size()])
                 self.prefix.writeline(f"constants_info_[{idx}].shape = {{{size_str}}};")
@@ -1865,7 +1869,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             """
         )
         if not config.use_runtime_constant_folding:
-            self.prefix.writeline("}\n")
+            self.prefix.splice(
+                """
+                    return {};
+                }
+                """
+            )
             return
 
         with self.prefix.indent():

@@ -28,6 +28,8 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
       reinterpret_cast<decltype(update_inactive_constant_buffer_func_)>(
           model_so_->sym(
               "AOTInductorModelContainerUpdateInactiveConstantBuffer"));
+  run_const_fold_func_ = reinterpret_cast<decltype(run_const_fold_func_)>(
+      model_so_->sym("AOTInductorModelContainerRunConstantFolding"));
   swap_constant_buffer_func_ =
       reinterpret_cast<decltype(swap_constant_buffer_func_)>(
           model_so_->sym("AOTInductorModelContainerSwapConstantBuffer"));
@@ -88,6 +90,16 @@ void AOTIModelContainerRunner::update_inactive_constant_buffer(
     const TensorConstantMap& const_map) {
   AOTI_RUNTIME_ERROR_CODE_CHECK(update_inactive_constant_buffer_func_(
       container_handle_, (AOTInductorConstantMapHandle)&const_map));
+}
+
+void AOTIModelContainerRunner::run_const_fold(
+    bool use_inactive,
+    AOTInductorStreamHandle cuda_stream_handle) {
+  AOTI_RUNTIME_ERROR_CODE_CHECK(run_const_fold_func_(
+      container_handle_,
+      use_inactive,
+      cuda_stream_handle,
+      proxy_executor_handle_));
 }
 
 void AOTIModelContainerRunner::swap_constant_buffer() {

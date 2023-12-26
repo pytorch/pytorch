@@ -24,6 +24,7 @@ class AOTInductorModelContainer {
     constants_map_ = std::make_shared<ConstantMap>();
     constants_array_ = std::make_shared<std::vector<ConstantHandle>>();
     use_secondary_ = false;
+    constant_folded_ = false;
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
@@ -80,12 +81,94 @@ class AOTInductorModelContainer {
       AOTIProxyExecutorHandle proxy_executor) {
     std::shared_lock model_lk(model_exec_mutex_);
     auto* model = get_available_model();
+
+    if (!constant_folded_) {
+      // At this point, constant is not ready yet. We need to call constant
+      // folding before we execute the model. We obtain a unique lock at this
+      // point to make sure constant is ready for all.
+      model_lk.unlock();
+      std::unique_lock constants_folding_lk(model_exec_mutex_);
+      // Double locking to make sure constant folding is only ran once.
+      if (!constant_folded_) {
+        auto folded_const_map = model->const_run_impl(stream, proxy_executor);
+        update_constant_buffer(
+            folded_const_map,
+            /* use_inactive = */ false,
+            /* validate_full_update = */ false);
+        constant_folded_ = true;
+      }
+      constants_folding_lk.unlock();
+      model_lk.lock();
+    }
+
     try {
       model->run(input_handles, output_handles, stream, proxy_executor);
     } catch (...) {
       std::lock_guard lk(models_mutex_);
       available_models_.push_back(model);
       throw;
+    }
+
+    {
+      std::lock_guard lk(models_mutex_);
+      pending_models_.push_back(model);
+    }
+    pending_models_available_.notify_one();
+  }
+
+  void run_const_fold(
+      bool inactive_buffer,
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor) {
+    std::shared_lock model_lk(model_exec_mutex_);
+    auto* model = get_available_model();
+
+    if (!inactive_buffer) {
+      // We would need to acquire a unique lock if we want to run constant
+      // folding on the active buffer.
+      model_lk.unlock();
+      std::unique_lock constants_folding_lk(model_exec_mutex_);
+      try {
+        auto folded_const_map = model->const_run_impl(stream, proxy_executor);
+        update_constant_buffer(
+            folded_const_map,
+            /* use_inactive = */ false,
+            /* validate_full_update = */ false);
+      } catch (...) {
+        std::lock_guard lk(models_mutex_);
+        available_models_.push_back(model);
+        throw;
+      }
+      constants_folding_lk.unlock();
+      model_lk.lock();
+    } else {
+      // We swap the constant mapping to the inactive buffer in the model to run
+      // const run.
+      auto constants_map = get_constants_map(/* get_inactive= */ true);
+      auto constants_array = get_constants_array(/* get_inactive= */ true);
+
+      try {
+        model->update_constants_map(
+            constants_map, /* remap_constants_array= */ false);
+        model->update_constants_array(constants_array);
+
+        auto folded_const_map = model->const_run_impl(stream, proxy_executor);
+        update_constant_buffer(
+            folded_const_map,
+            /* use_inactive = */ true,
+            /* validate_full_update = */ false);
+
+        // Swap back the model's constants mapping
+        constants_map = get_constants_map(/* get_inactive= */ false);
+        constants_array = get_constants_array(/* get_inactive= */ false);
+        model->update_constants_map(
+            constants_map, /* remap_constants_array= */ false);
+        model->update_constants_array(constants_array);
+      } catch (...) {
+        std::lock_guard lk(models_mutex_);
+        available_models_.push_back(model);
+        throw;
+      }
     }
 
     {
@@ -182,8 +265,11 @@ class AOTInductorModelContainer {
       std::shared_ptr<ConstantMap> constants_map) {
     auto num_constants = models_[0]->num_constants();
     for (size_t idx = 0; idx < num_constants; idx++) {
-      constants_array->at(idx) = ConstantHandle(
-          constants_map->find(models_[0]->constant_name(idx))->second);
+      if (constants_map->find(models_[0]->constant_name(idx)) !=
+          constants_map->end()) {
+        constants_array->at(idx) = ConstantHandle(
+            constants_map->find(models_[0]->constant_name(idx))->second);
+      }
     }
   }
 
@@ -252,6 +338,9 @@ class AOTInductorModelContainer {
   // constants_map_secondary/constant_blob_secondary/constants_array_secondary
   // is being used.
   bool use_secondary_;
+
+  // Determine whether we have ran constant folding
+  bool constant_folded_;
 
   // Holds the mapping of constants to at::Tensor.
   // The underlying data of at::Tensor is in either constant_blob_ (for CUDA).

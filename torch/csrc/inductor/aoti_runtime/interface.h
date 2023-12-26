@@ -85,6 +85,13 @@ AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle);
 
+// Run constant folding on constant buffer.
+AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
+    AOTInductorModelContainerHandle container_handle,
+    bool use_inactive,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle);
+
 // Swap the constant buffer being used to the inactive one.
 AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
     AOTInductorModelContainerHandle container_handle);

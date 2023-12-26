@@ -228,6 +228,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.const_kernels: Set[str] = (
             const_graph.wrapper_code.src_to_kernel.values() if const_graph else set()
         )
+        self.folded_constants: Set[str] = (
+            set(const_output_index.keys()) if const_output_index else set()
+        )
         self.constants: Dict[str, torch.Tensor] = (
             const_graph.constants if const_graph else {}
         )

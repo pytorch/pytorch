@@ -32,6 +32,9 @@ class TORCH_API AOTIModelContainerRunner {
       const TensorConstantMap& const_map,
       bool use_inactive,
       bool validate_full_updates);
+  void run_const_fold(
+      bool use_inactive,
+      AOTInductorStreamHandle cuda_stream_handle = nullptr);
   void swap_constant_buffer();
 
   std::vector<std::string> get_call_spec();
@@ -53,6 +56,8 @@ class TORCH_API AOTIModelContainerRunner {
       update_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerUpdateInactiveConstantBuffer)
       update_inactive_constant_buffer_func_{nullptr};
+  decltype(&AOTInductorModelContainerRunConstantFolding) run_const_fold_func_{
+      nullptr};
   decltype(&AOTInductorModelContainerSwapConstantBuffer)
       swap_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerGetCallSpec) get_call_spec_func_{nullptr};
