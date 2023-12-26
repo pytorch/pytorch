@@ -1208,7 +1208,7 @@ def aot_inductor_launcher(so_path: str, device: str):
                 return runner.run(input_tensors);
             }}
 
-            std::vector<const char*> get_call_spec() {{
+            std::vector<std::string> get_call_spec() {{
                 return runner.get_call_spec();
             }}
         """
@@ -1222,7 +1222,7 @@ def aot_inductor_launcher(so_path: str, device: str):
                 return runner.run(input_tensors);
             }}
 
-            std::vector<const char*> get_call_spec() {{
+            std::vector<std::string> get_call_spec() {{
                 return runner.get_call_spec();
             }}
         """
