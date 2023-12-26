@@ -91,7 +91,12 @@ from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.utils import has_torchvision_roi_align
 
 from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, skipCUDAIf
+from torch.testing._internal.inductor_utils import (
+    HAS_CPU,
+    HAS_CUDA,
+    skipCPUIf,
+    skipCUDAIf,
+)
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -1114,6 +1119,14 @@ class CommonTemplate:
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)))
         self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
 
+    @skipCPUIf(IS_MACOS, "fails on macos")
+    def test_multilayer_var_lowp(self):
+        def fn(a):
+            return torch.var(a)
+
+        self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
+        self.common(fn, (torch.rand((14923), dtype=torch.float16),))
+
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
             raise unittest.SkipTest("No CUDA implementation (it returns empty)")
@@ -1287,7 +1300,9 @@ class CommonTemplate:
             return torch.arange(0.1, 8.0001, 1, dtype=x.dtype, device=x.device)
 
         # Test that float arguments are truncated to int when dtype is set explicitly
-        make_arg = functools.partial(make_tensor, device="cpu", requires_grad=False)
+        make_arg = functools.partial(
+            make_tensor, device=self.device, requires_grad=False
+        )
         self.common(fn, (make_arg(1, dtype=torch.float32),))
         self.common(fn, (make_arg(1, dtype=torch.int64),))
 
@@ -1589,6 +1604,16 @@ class CommonTemplate:
             check_lowp=False,  # a much more elaborate test is required to match finfo max's for float and half
         )
 
+    def test_one_hot(self):
+        def fn(a):
+            return torch.nn.functional.one_hot(a, 8) + 1
+
+        self.common(
+            fn,
+            (torch.arange(100).view(4, 5, 5) % 8,),
+            check_lowp=False,
+        )
+
     def test_div1(self):
         def fn(a, b):
             return (
@@ -1692,6 +1717,8 @@ class CommonTemplate:
         def fn(a, b):
             return (
                 aten.div(a, b, rounding_mode=None),
+                aten.div(a * 0.5, b, rounding_mode=None),
+                aten.div(a, b * 1.0, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
                 a / b,
@@ -1720,15 +1747,15 @@ class CommonTemplate:
             self.common(
                 fn,
                 (
-                    make_tensor(10, device="cpu", dtype=dtype),
-                    make_tensor((), device="cpu", dtype=dtype, exclude_zero=True),
+                    make_tensor(10, device=self.device, dtype=dtype),
+                    make_tensor((), device=self.device, dtype=dtype, exclude_zero=True),
                 ),
             )
             self.common(
                 fn,
                 (
-                    make_tensor((), device="cpu", dtype=dtype),
-                    make_tensor(10, device="cpu", dtype=dtype, exclude_zero=True),
+                    make_tensor((), device=self.device, dtype=dtype),
+                    make_tensor(10, device=self.device, dtype=dtype, exclude_zero=True),
                 ),
             )
 
@@ -1740,8 +1767,10 @@ class CommonTemplate:
             self.common(
                 fn,
                 (
-                    make_tensor(100, device="cpu", dtype=dtype),
-                    make_tensor(100, device="cpu", dtype=dtype, exclude_zero=True),
+                    make_tensor(100, device=self.device, dtype=dtype),
+                    make_tensor(
+                        100, device=self.device, dtype=dtype, exclude_zero=True
+                    ),
                 ),
             )
 
@@ -3765,9 +3794,11 @@ class CommonTemplate:
         def fn(value, mask, source):
             return torch.masked_scatter(value, mask, source)
 
-        value = make_tensor(10, 10, dtype=torch.float32, device="cpu")
-        mask = make_tensor(10, 10, dtype=torch.bool, device="cpu")
-        source = make_tensor(mask.count_nonzero(), dtype=torch.float32, device="cpu")
+        value = make_tensor(10, 10, dtype=torch.float32, device=self.device)
+        mask = make_tensor(10, 10, dtype=torch.bool, device=self.device)
+        source = make_tensor(
+            mask.count_nonzero(), dtype=torch.float32, device=self.device
+        )
 
         self.common(fn, (value, mask, source))
 
@@ -3838,7 +3869,7 @@ class CommonTemplate:
         for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
             intmax = torch.iinfo(dtype).max
             make_arg = functools.partial(
-                make_tensor, dtype=dtype, device="cpu", requires_grad=False
+                make_tensor, dtype=dtype, device=self.device, requires_grad=False
             )
             self.common(
                 fn,
@@ -4194,15 +4225,15 @@ class CommonTemplate:
         self.common(
             fn,
             (
-                make_tensor(10, device="cpu", dtype=torch.float32),
-                make_tensor((), device="cpu", dtype=torch.float32),
+                make_tensor(10, device=self.device, dtype=torch.float32),
+                make_tensor((), device=self.device, dtype=torch.float32),
             ),
         )
         self.common(
             fn,
             (
-                make_tensor((), device="cpu", dtype=torch.float32),
-                make_tensor(10, device="cpu", dtype=torch.float32),
+                make_tensor((), device=self.device, dtype=torch.float32),
+                make_tensor(10, device=self.device, dtype=torch.float32),
             ),
         )
 
@@ -4349,7 +4380,7 @@ class CommonTemplate:
             return a + torch.full_like(a, 7.777)
 
         for dtype in all_types():
-            self.common(fn, (make_tensor(8, dtype=dtype, device="cpu"),))
+            self.common(fn, (make_tensor(8, dtype=dtype, device=self.device),))
 
     def test_index1(self):
         def fn(a, b, c):

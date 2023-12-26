@@ -2201,7 +2201,7 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
     else:
         work.wait()
 
-def _object_to_tensor(obj, device):
+def _object_to_tensor(obj, device, group):
     f = io.BytesIO()
     _pickler(f).dump(obj)
     byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
@@ -2209,11 +2209,21 @@ def _object_to_tensor(obj, device):
     # Otherwise, it will casue 100X slowdown.
     # See: https://github.com/pytorch/pytorch/issues/65696
     byte_tensor = torch.ByteTensor(byte_storage).to(device)
+    if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
+        backend = get_backend(group)
+        if backend == Backend.NCCL:
+            hash = torch._C._distributed_c10d._hash_tensors([byte_tensor])
+            logger.warning(f"_object_to_tensor size: {byte_tensor.numel()} hash value: {hash}")  # noqa: G004
     local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
     return byte_tensor, local_size
 
 
-def _tensor_to_object(tensor, tensor_size):
+def _tensor_to_object(tensor, tensor_size, group):
+    if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
+        backend = get_backend(group)
+        if backend == Backend.NCCL:
+            hash = torch._C._distributed_c10d._hash_tensors([tensor])
+            logger.warning(f"_tensor_to_object size: {tensor.numel()} hash value: {hash}")  # noqa: G004
     tensor = tensor.cpu()
     buf = tensor.numpy().tobytes()[:tensor_size]
     return _unpickler(io.BytesIO(buf)).load()
@@ -2278,7 +2288,7 @@ def all_gather_object(object_list, obj, group=None):
         return
 
     current_device = _get_pg_default_device(group)
-    input_tensor, local_size = _object_to_tensor(obj, current_device)
+    input_tensor, local_size = _object_to_tensor(obj, current_device, group)
 
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
@@ -2306,10 +2316,8 @@ def all_gather_object(object_list, obj, group=None):
     # Deserialize outputs back to object.
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
-        if tensor.device != torch.device("cpu"):
-            tensor = tensor.cpu()
         tensor_size = object_size_list[i]
-        object_list[i] = _tensor_to_object(tensor, tensor_size)
+        object_list[i] = _tensor_to_object(tensor, tensor_size, group)
 
 
 @_exception_logger
@@ -2380,7 +2388,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     my_rank = get_rank()
     _validate_output_list_for_rank(my_rank, dst, object_gather_list)
     current_device = _get_pg_default_device(group)
-    input_tensor, local_size = _object_to_tensor(obj, current_device)
+    input_tensor, local_size = _object_to_tensor(obj, current_device, group)
 
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
@@ -2420,7 +2428,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
         tensor_size = object_size_list[i]
-        object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
+        object_gather_list[i] = _tensor_to_object(tensor, tensor_size, group)
 
 
 @_exception_logger
@@ -2498,7 +2506,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     my_rank = get_rank()
     # Serialize object_list elements to tensors on src rank.
     if my_rank == src:
-        tensor_list, size_list = zip(*[_object_to_tensor(obj, current_device) for obj in object_list])
+        tensor_list, size_list = zip(*[_object_to_tensor(obj, current_device, group) for obj in object_list])
         object_sizes_tensor = torch.cat(size_list)
     else:
         object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long, device=current_device)
@@ -2528,10 +2536,8 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
             obj_view = obj_view.type(torch.uint8)
-            if obj_view.device != torch.device("cpu"):
-                obj_view = obj_view.cpu()
             offset += obj_size
-            object_list[i] = _tensor_to_object(obj_view, obj_size)
+            object_list[i] = _tensor_to_object(obj_view, obj_size, group)
 
 
 @_exception_logger
@@ -2608,7 +2614,7 @@ def scatter_object_list(
     pg_device = _get_pg_default_device(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
-            *[_object_to_tensor(obj, pg_device) for obj in scatter_object_input_list]
+            *[_object_to_tensor(obj, pg_device, group) for obj in scatter_object_input_list]
         )
         tensor_list, tensor_sizes = list(tensor_list), list(tensor_sizes)
 
@@ -2641,7 +2647,7 @@ def scatter_object_list(
     )
 
     # Deserialize back to object
-    scatter_object_output_list[0] = _tensor_to_object(output_tensor, obj_tensor_size)
+    scatter_object_output_list[0] = _tensor_to_object(output_tensor, obj_tensor_size, group)
 
 
 @_exception_logger
