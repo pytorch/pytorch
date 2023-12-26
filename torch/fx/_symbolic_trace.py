@@ -629,7 +629,7 @@ class Tracer(TracerBase):
                             out == x,
                             f"{name} has been specialized to have value {x} but got another value",
                         )
-                    elif type(x) == type(None):
+                    elif x is None:
                         args = (
                             out,
                             f"{name} has been specialized to have value None but got another value",
