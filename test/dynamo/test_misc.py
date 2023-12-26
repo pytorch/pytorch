@@ -132,6 +132,7 @@ qconfig_dict = {"object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]}
 class MiscTests(torch._dynamo.test_case.TestCase):
     def test_rrelu_compile(self):
         # This used to fail due to missing default params
+        # see https://github.com/pytorch/pytorch/issues/115811
         def f(x):
             x = torch.rrelu(x)
             return torch.nn.functional.rrelu(x)
