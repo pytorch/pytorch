@@ -22,6 +22,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex, floating_and_complex_types_and)
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
+import operator
 
 if TEST_SCIPY:
     import scipy.sparse as sp
@@ -2108,19 +2109,27 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, re.escape(str(msg))):
                     test(is_sparse=True)
 
+    @sparse_compressed_nonblock_layouts()
     @dtypes(torch.float, torch.double)
-    def test_add(self, device, dtype):
+    def test_add(self, device, layout, dtype):
         def _test_spadd_shape(nnz, shape):
             # sparse.to_dense() uses torch.add internally so if torch.add is wrong,
             # the dense tensor will be wrong but this test would still pass
             # there's a separate test that checks for the correctness of the .to_dense() call
-            x = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
+            x = self.genSparseCompressedTensor(shape, nnz,
+                                               dtype=dtype,
+                                               device=device,
+                                               index_dtype=torch.int32,
+                                               layout=layout,
+                                               blocksize=())
             y = torch.randn(*shape, dtype=dtype, device=device)
             r = random.random()
 
             res = torch.add(y, x, alpha=r)
             expected = y + r * x.to_dense()
             self.assertEqual(res, expected)
+            res_perm = torch.add(x, y, alpha=r)
+            self.assertEqual(res_perm, expected)
 
             # Non contiguous dense tensor
             s = list(shape)
@@ -2132,8 +2141,11 @@ class TestSparseCSR(TestCase):
 
             res = torch.add(y, x, alpha=r)
             expected = y + r * x.to_dense()
+            res_perm = torch.add(x, y, alpha=r)
 
             self.assertEqual(res, expected)
+            self.assertEqual(res_perm, expected)
+
 
         ns = [2, 5]
         batch_shapes = [(), (2,), (2, 3)]
@@ -3310,7 +3322,7 @@ class TestSparseCSR(TestCase):
 
             # random bool vector w/ length equal to max possible nnz for the sparse_shape
             mask_source = make_tensor(batch_mask_shape, dtype=torch.bool, device=device).flatten()
-            n_batch = functools.reduce(lambda x, y: x * y, batch_shape, 1)
+            n_batch = functools.reduce(operator.mul, batch_shape, 1)
 
             # stack random permutations of the source for each batch
             mask = torch.stack([mask_source[torch.randperm(mask_source.numel())]

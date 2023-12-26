@@ -2114,7 +2114,6 @@ exclude_patterns = [
     'torch/futures/__init__.py',
     'torch/fx/__init__.py',
     'torch/fx/_compatibility.py',
-    'torch/fx/_pytree.py',
     'torch/fx/_symbolic_trace.py',
     'torch/fx/annotate.py',
     'torch/fx/config.py',
@@ -2159,7 +2158,6 @@ exclude_patterns = [
     'torch/fx/experimental/validator.py',
     'torch/fx/graph.py',
     'torch/fx/graph_module.py',
-    'torch/fx/immutable_collections.py',
     'torch/fx/interpreter.py',
     'torch/fx/node.py',
     'torch/fx/operator_schemas.py',
@@ -2544,7 +2542,6 @@ exclude_patterns = [
     'torch/utils/data/datapipes/utils/common.py',
     'torch/utils/data/datapipes/utils/decoder.py',
     'torch/utils/data/datapipes/utils/snapshot.py',
-    'torch/utils/data/dataset.py',
     'torch/utils/data/distributed.py',
     'torch/utils/data/graph.py',
     'torch/utils/data/graph_settings.py',
@@ -2672,7 +2669,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.7',
+    'ruff==0.1.9',
 ]
 is_formatter = true
 

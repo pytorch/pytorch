@@ -44,6 +44,7 @@ import numpy as np
 import torch
 import torch.utils._pytree as pytree
 from itertools import product
+import operator
 
 test_consistency_op_db = copy.deepcopy(op_db)
 test_error_inputs_op_db = copy.deepcopy(op_db)
@@ -1388,11 +1389,11 @@ class TestAvgPool(TestCaseMPS):
         return joined_x.view(1, joined_x.numel())
 
     def _avg_pool2d(self, x, kernel_size):
-        size = reduce((lambda x, y: x * y), kernel_size)
+        size = reduce(operator.mul, kernel_size)
         return self._sum_pool2d(x, kernel_size) / size
 
     def _avg_pool3d(self, x, kernel_size):
-        size = reduce((lambda x, y: x * y), kernel_size)
+        size = reduce(operator.mul, kernel_size)
         return self._sum_pool3d(x, kernel_size) / size
 
     def test_avg_pool2d_with_zero_divisor(self):
