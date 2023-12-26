@@ -4542,7 +4542,8 @@ class FallbackKernel(ExternKernelAlloc):
         if V.graph.cpp_wrapper and hasattr(self, "args_default_value"):
             n_args = len(args)
             n_pos_args = len(self.args_default_value)
-            # Some positional args are not provided, need to use their default value in cpp wrapper
+            # For cpp wrapper, if some positional args are not provided, we need to check
+            # if they're in the kwargs or use their default value
             if n_args < n_pos_args:
                 pos_args = [
                     self.get_pos_arg_value(i, kwargs) for i in range(n_args, n_pos_args)
