@@ -302,6 +302,15 @@ class MetaConverter:
                         with torch.enable_grad():
                             r = r.clone()
                             r._coalesced_(t.is_coalesced())
+                elif t.is_nested and not is_traceable_wrapper_subclass(t):
+                    # TODO: Handle this better in Dynamo?
+                    # There are checks there now, but this can still be triggered by a dense
+                    # tensor graph input that is a view of a strided NT.
+                    from torch._dynamo.exc import unimplemented
+
+                    unimplemented(
+                        "strided nested tensors are not supported by meta conversion"
+                    )
                 elif t.is_mkldnn:
                     is_leaf = safe_is_leaf(t)
                     sizes, strides, _storage_offset = sym_sizes_strides_storage_offset(

@@ -9,11 +9,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
+from torch.fx.graph_module import _assign_attr
 from weakref import WeakKeyDictionary
 from collections import defaultdict
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
 from torch._dispatch.python import enable_python_dispatcher, enable_pre_dispatch
 import torch.fx as fx
+from torch.fx.node import _side_effectful_need_to_be_preserved_pre_dispatch
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
 import inspect
@@ -566,16 +568,12 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        pre_dispatch_ops = [
-            torch._C._set_grad_enabled,
-            torch.amp._enter_autocast,
-            torch.amp._exit_autocast,
-        ]
-        if func in pre_dispatch_ops:
+        if func in _side_effectful_need_to_be_preserved_pre_dispatch:
             return self.tracer.create_node("call_function", func, args, {})
             # Don't actually run the function! We just want to trace the calls
             # into a graph. We don't actualy want to change global autograd state.
         return func(*args, **kwargs)
+
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
     def __init__(self, tracer, tracing_mode, pre_dispatch=False, _allow_fake_constant=False, _error_on_data_dependent_ops=True):
@@ -840,8 +838,6 @@ class _ModuleStackTracer(PythonKeyTracer):
             return ""
 
         if isinstance(mod, self.proxy_type):
-            module_id = id(self.proxy_modules[mod])
-            results = self.module_id_cache[module_id]
             return self.proxy_paths[mod]
 
         return Tracer.path_of_module(self, mod)
@@ -849,7 +845,58 @@ class _ModuleStackTracer(PythonKeyTracer):
     def getattr(self, attr, attr_val, parameter_proxy_cache):
         if not isinstance(attr_val, torch.nn.Module) or isinstance(attr_val, torch.fx.GraphModule):
             return super().getattr(attr, attr_val, parameter_proxy_cache)
+        if isinstance(attr_val, self.proxy_type):
+            return attr_val
         return self.proxy_type(attr_val, attr)
+
+    def trace(self, root, concrete_args):
+        res = super().trace(root, concrete_args)
+        # Since we are making AttrProxy mimic the original
+        # submodule, when someone registers a module directly
+        # to the tracer while tracing, the proxy object gets registered
+        # first. So we need to replace the proxy modules with the real ones
+        # This can happen during HOO tracing
+        proxy_module_names_to_be_replaced = []
+        for name, module in self.root.named_modules():
+            if module in self.proxy_modules:
+                proxy_module_names_to_be_replaced.append((name, module))
+
+        def _delete_proxy_attr(obj, target):
+            # Copied from fx/graph_module.py
+            # Customized it for proxy type
+            atoms = target.split(".")
+            path, target_submod = atoms[:-1], atoms[-1]
+            assert isinstance(obj, torch.nn.Module)
+            mod = obj
+
+            # Get the parent module
+            for item in path:
+
+                if not hasattr(mod, item):
+                    return False
+
+                mod = getattr(mod, item)
+
+                if not isinstance(mod, (self.proxy_type, torch.nn.Module)):
+                    return False
+
+            if not hasattr(mod, target_submod):
+                return False
+
+            # At least the leaf module should be proxy type.
+            if not isinstance(getattr(mod, target_submod), self.proxy_type):
+                return False
+
+            delattr(mod, target_submod)
+            return True
+
+        for (proxy_module_name, proxy_module) in proxy_module_names_to_be_replaced:
+            _delete_proxy_attr(self.root, proxy_module_name)
+            actual_module = self.proxy_modules[proxy_module]
+            _assign_attr(actual_module, self.root, proxy_module_name)
+
+        return res
+
 
     def call_module(self, m, forward, args, kwargs):
         """PythonKeyTracer overrides call_module to avoid the scope handling,
@@ -865,8 +912,6 @@ class _ModuleStackTracer(PythonKeyTracer):
         # use cases don't need to work with HOO.
         if isinstance(m, (OptimizedModule, GraphModule)):
             return forward(*args, **kwargs)
-        # if "<class 'torch.fx.experimental.proxy_tensor.Bar'>" in str(type(m)):
-        #     breakpoint()
         return Tracer.call_module(self, m, forward, args, kwargs)
 
 
