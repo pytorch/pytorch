@@ -6815,6 +6815,7 @@ class TestTorch(TestCase):
     def test_sobolengine_fast_forward_scrambled(self):
         self.test_sobolengine_fast_forward(scramble=True)
 
+    @skipIfTorchDynamo("np.float64 restored as float32 after graph break.")
     def test_sobolengine_distribution(self, scramble=False):
         d = 50
         engine = torch.quasirandom.SobolEngine(d, scramble=scramble, seed=123456)
@@ -6829,6 +6830,7 @@ class TestTorch(TestCase):
             np.percentile(sample, 75, axis=0), np.repeat(0.75, d), atol=2, rtol=2
         )
 
+    @skipIfTorchDynamo("np.float64 restored as float32 after graph break.")
     def test_sobolengine_distribution_scrambled(self):
         self.test_sobolengine_distribution(scramble=True)
 
@@ -9793,10 +9795,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # Refcount values get modified by Dynamo resume frames
             0 if TEST_WITH_TORCHDYNAMO else sys.getrefcount(t),
         )
+        slotnames = copyreg._slotnames(t.__class__)
         moved = (
-            copyreg._slotnames(t.__class__),
+            slotnames,
             id(t.__dict__),
             tuple(t.__dict__.keys()),
+            [getattr(t, name, None) for name in slotnames]
         )
         return preserved, moved
 
@@ -9847,7 +9851,11 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             __slots__ = ("b", "a")
 
         class MyTwoTensor3(TwoTensor):
-            __slots__ = ("a", "b", "c")
+            __slots__ = ("a", "b", "c", "d")
+
+        class MyTwoTensor4(TwoTensor):
+            __slots__ = ("a", "c")
+
 
         t1 = torch.rand(4)
         t2 = TwoTensor(torch.rand(4), torch.rand(4))
@@ -9855,21 +9863,28 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         t4 = MyTwoTensor(torch.rand(4), torch.rand(4))
         t5 = MyTwoTensor2(torch.rand(4), torch.rand(4))
         t6 = MyTwoTensor3(torch.rand(4), torch.rand(4))
+        t7 = MyTwoTensor3(torch.rand(4), torch.rand(4))
+        t8 = MyTwoTensor4(torch.rand(4), torch.rand(4))
 
         self._checked_swap(t1, t2)
-        with self.assertRaisesRegex(TypeError, "object layout differs"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot swap t1 and t2 if they have different slots"):
             torch.utils.swap_tensors(t1, t3)
-        with self.assertRaisesRegex(TypeError, "object layout differs"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot swap t1 and t2 if they have different slots"):
             torch.utils.swap_tensors(t2, t3)
+        with self.assertRaisesRegex(RuntimeError, "Cannot swap t1 and t2 if they have different slots"):
+            torch.utils.swap_tensors(t2, t8)
         self._checked_swap(t3, t4)
         self._checked_swap(t3, t5)
-        with self.assertRaisesRegex(TypeError, "object layout differs"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot swap t1 and t2 if they have different slots"):
             torch.utils.swap_tensors(t3, t6)
         t3.c = "foo"
         t4.d = "bar"
         self._checked_swap(t3, t4)
         self.assertEqual(t4.c, "foo")
         self.assertEqual(t3.d, "bar")
+        t6.c = "cat"
+        t7.d = "dog"
+        self._checked_swap(t6, t7)
 
 
 # The following block extends TestTorch with negative dim wrapping tests
