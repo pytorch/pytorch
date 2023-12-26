@@ -394,7 +394,7 @@ Tensor add_scalar(
 
 Tensor& add_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return binary_op_scalar_(
-      self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_));
+      self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_inplace));
 }
 
 Tensor quantized_add(
@@ -446,7 +446,7 @@ Tensor& add_tensor_(
     const Tensor& other_arg,
     const Scalar& alpha) {
   return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_));
+      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_inplace));
 }
 
 Tensor sub_scalar(
@@ -465,7 +465,7 @@ Tensor& sub_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
       self,
       other,
       c10::optional<Scalar>(-1 * alpha.to<float>()),
-      VK_KERNEL(add_scalar_));
+      VK_KERNEL(add_scalar_inplace));
 }
 
 Tensor sub_tensor(
@@ -481,7 +481,7 @@ Tensor& sub_tensor_(
     const Tensor& other_arg,
     const Scalar& alpha) {
   return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_));
+      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_inplace));
 }
 
 Tensor mul_scalar(const Tensor& self_arg, const Scalar& other) {
@@ -491,7 +491,7 @@ Tensor mul_scalar(const Tensor& self_arg, const Scalar& other) {
 
 Tensor& mul_scalar_(Tensor& self, const Scalar& other) {
   return binary_op_scalar_(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar_));
+      self, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar_inplace));
 }
 
 Tensor mul_tensor(const Tensor& self_arg, const Tensor& other_arg) {
@@ -501,7 +501,7 @@ Tensor mul_tensor(const Tensor& self_arg, const Tensor& other_arg) {
 
 Tensor& mul_tensor_(Tensor& self, const Tensor& other_arg) {
   return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul_));
+      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul_inplace));
 }
 
 Tensor div_scalar(const Tensor& self_arg, const Scalar& other) {
@@ -517,7 +517,7 @@ Tensor& div_scalar_(Tensor& self, const Scalar& other) {
       self,
       1.0 / other.to<float>(),
       c10::optional<Scalar>(),
-      VK_KERNEL(mul_scalar_));
+      VK_KERNEL(mul_scalar_inplace));
 }
 
 Tensor div_tensor(const Tensor& self_arg, const Tensor& other_arg) {
@@ -527,7 +527,7 @@ Tensor div_tensor(const Tensor& self_arg, const Tensor& other_arg) {
 
 Tensor& div_tensor_(Tensor& self, const Tensor& other_arg) {
   return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(div_));
+      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(div_inplace));
 }
 
 Tensor pow(const Tensor& self, const Tensor& other) {
@@ -536,7 +536,7 @@ Tensor pow(const Tensor& self, const Tensor& other) {
 
 Tensor& pow_(Tensor& self, const Tensor& other) {
   return binary_op_tensor_(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(pow_));
+      self, other, c10::optional<Scalar>(), VK_KERNEL(pow_inplace));
 }
 
 Tensor pow_tensor_scalar(const Tensor& self, const Scalar& other) {
@@ -546,7 +546,10 @@ Tensor pow_tensor_scalar(const Tensor& self, const Scalar& other) {
 
 Tensor& pow_tensor_scalar_(Tensor& self, const Scalar& other) {
   return binary_op_scalar_(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(pow_tensor_scalar_));
+      self,
+      other,
+      c10::optional<Scalar>(),
+      VK_KERNEL(pow_tensor_scalar_inplace));
 }
 
 Tensor pow_scalar_tensor(const Scalar& self, const Tensor& other) {
@@ -571,7 +574,7 @@ Tensor& floor_divide_scalar_(Tensor& self, const Scalar& other) {
       self,
       1.0 / other.to<float>(),
       c10::optional<Scalar>(),
-      VK_KERNEL(floor_mul_scalar_));
+      VK_KERNEL(floor_mul_scalar_inplace));
 }
 
 Tensor floor_divide_tensor(const Tensor& self, const Tensor& other) {
@@ -581,7 +584,10 @@ Tensor floor_divide_tensor(const Tensor& self, const Tensor& other) {
 
 Tensor& floor_divide_tensor_(Tensor& self, const Tensor& other_arg) {
   return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(floor_divide_));
+      self,
+      other_arg,
+      c10::optional<Scalar>(),
+      VK_KERNEL(floor_divide_inplace));
 }
 
 #ifdef USE_VULKAN_API
