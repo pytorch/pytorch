@@ -1,5 +1,7 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
@@ -17,7 +19,7 @@ namespace api {
 class CommandBuffer final {
  public:
   explicit CommandBuffer(
-      const VkCommandBuffer,
+      VkCommandBuffer,
       const VkCommandBufferUsageFlags);
 
   CommandBuffer(const CommandBuffer&) = delete;
@@ -81,10 +83,10 @@ class CommandBuffer final {
   void end();
 
   void bind_pipeline(
-      const VkPipeline,
-      const VkPipelineLayout,
+      VkPipeline,
+      VkPipelineLayout,
       const utils::uvec3);
-  void bind_descriptors(const VkDescriptorSet);
+  void bind_descriptors(VkDescriptorSet);
 
   void insert_barrier(const PipelineBarrier& pipeline_barrier);
   void dispatch(const utils::uvec3&);
@@ -117,8 +119,8 @@ class CommandBuffer final {
       const api::utils::uvec3&,
       const api::utils::uvec3&);
 
-  void write_timestamp(const VkQueryPool, const uint32_t) const;
-  void reset_querypool(const VkQueryPool, const uint32_t, const uint32_t) const;
+  void write_timestamp(VkQueryPool, const uint32_t) const;
+  void reset_querypool(VkQueryPool, const uint32_t, const uint32_t) const;
 
   VkCommandBuffer get_submit_handle(const bool final_use = false);
 
@@ -135,7 +137,7 @@ struct CommandPoolConfig final {
 class CommandPool final {
  public:
   explicit CommandPool(
-      const VkDevice,
+      VkDevice,
       const uint32_t,
       const CommandPoolConfig&);
 
