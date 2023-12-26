@@ -92,7 +92,7 @@ class FakeTensorUpdater:
             if not isinstance(new, torch.Tensor):
                 assert isinstance(
                     new, (torch.SymInt, torch.SymBool, torch.SymFloat)
-                ), f"Unknown type {type(new)}"
+                ), f"Unknown type {type(new)} in {self.graph}"
                 return (
                     new.node.shape_env._maybe_evaluate_static(
                         sympy.Eq(new.node.expr, old.node.expr)
