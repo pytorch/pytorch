@@ -390,12 +390,14 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputs,
     bool desyncDebug,
-    bool enableTiming)
+    bool enableTiming,
+    DebugLevel distDebugLevel)
     : Work(rank, opType, profilingTitle, inputs),
       devices_(devices),
       workStartTime_(std::chrono::steady_clock::now()),
       seq_(seq),
-      timingEnabled_(enableTiming) {
+      timingEnabled_(enableTiming),
+      distDebugLevel_(distDebugLevel) {
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
@@ -431,7 +433,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       numelOut_(w.numelOut_),
       store_(w.store_),
       timingEnabled_(w.timingEnabled_),
-      trace_id_(w.trace_id_) {
+      trace_id_(w.trace_id_),
+      distDebugLevel_(w.distDebugLevel_) {
   exception_ = w.exception_;
 }
 
@@ -648,6 +651,12 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       static_cast<int>(devices_.size())); // worldSize
   synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
+  if (distDebugLevel_ >= DebugLevel::Detail) {
+    auto numel = getTensorsNumel(*outputs_);
+    auto hashValue = hashTensors(*outputs_);
+    PRINT_COLLECTIVE_HASH_SIGNATURE(
+        "output", opTypeToString(opType_), numel, hashValue);
+  }
   return true;
 }
 
@@ -730,6 +739,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
+  enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
@@ -2218,7 +2228,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       profilingTitle != nullptr ? c10::optional<std::vector<at::Tensor>>(inputs)
                                 : c10::nullopt,
       desyncDebug_,
-      enableTiming_.load());
+      enableTiming_.load(),
+      dist_debug_level_);
   r->trace_id_ = NCCLTraceBuffer::get()->record(
       uid_,
       seq_,
@@ -2419,6 +2430,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       decltype(i) stream_comm_i = (inputs_same_dev ? 0 : i);
       comms_.push_back((void*)ncclComms[stream_comm_i]->getNcclComm());
     }
+  }
+
+  if (enableCollecticeHashDebug_.load()) {
+    auto numel = getTensorsNumel(inputs);
+    auto hashValue = hashTensors(inputs);
+    PRINT_COLLECTIVE_HASH_SIGNATURE(
+        "input", opTypeToString(opType), numel, hashValue);
   }
 
   {

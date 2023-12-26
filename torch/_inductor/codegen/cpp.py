@@ -1742,13 +1742,9 @@ class CppVecKernel(CppKernel):
         if buffer is None:
             buffer = self.loads
 
-        def get_result_size(dtype: torch.dtype) -> str:
-            result_size = f"{self.tiling_factor}"
+        def get_result_size(dtype: torch.dtype) -> int:
             assert dtype.itemsize <= 4
-            size_multiplier = 4 // dtype.itemsize
-            if size_multiplier > 1:
-                result_size += f" * {size_multiplier}"
-            return result_size
+            return self.tiling_factor * (4 // dtype.itemsize)
 
         def vec_to_array(vec_var: CppCSEVariable) -> CppCSEVariable:
             assert vec_var.is_vec
