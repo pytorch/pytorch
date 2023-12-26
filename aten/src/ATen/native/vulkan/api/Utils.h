@@ -18,17 +18,17 @@ namespace utils {
 //
 
 template <typename Type>
-inline constexpr Type align_down(const Type number, const Type multiple) {
+inline constexpr Type align_down(const Type& number, const Type& multiple) {
   return (number / multiple) * multiple;
 }
 
 template <typename Type>
-inline constexpr Type align_up(const Type number, const Type multiple) {
+inline constexpr Type align_up(const Type& number, const Type& multiple) {
   return align_down(number + multiple - 1, multiple);
 }
 
 template <typename Type>
-inline constexpr Type div_up(const Type numerator, const Type denominator) {
+inline constexpr Type div_up(const Type& numerator, const Type& denominator) {
   return (numerator + denominator - 1) / denominator;
 }
 
@@ -39,7 +39,7 @@ inline constexpr Type div_up(const Type numerator, const Type denominator) {
 namespace detail {
 
 template <typename To, typename From>
-inline constexpr To safe_downcast(const From v) {
+inline constexpr To safe_downcast(const From& v) {
   TORCH_CHECK(!c10::overflows<To>(v), "Cast failed: out of range!");
   return static_cast<To>(v);
 }
@@ -55,7 +55,7 @@ template <
     typename To,
     typename From,
     std::enable_if_t<detail::is_signed_to_unsigned<To, From>(), bool> = true>
-inline constexpr To safe_downcast(const From v) {
+inline constexpr To safe_downcast(const From& v) {
   TORCH_CHECK(v >= From{}, "Cast failed: negative signed to unsigned!");
   return detail::safe_downcast<To, From>(v);
 }
@@ -64,7 +64,7 @@ template <
     typename To,
     typename From,
     std::enable_if_t<!detail::is_signed_to_unsigned<To, From>(), bool> = true>
-inline constexpr To safe_downcast(const From v) {
+inline constexpr To safe_downcast(const From& v) {
   return detail::safe_downcast<To, From>(v);
 }
 
@@ -76,6 +76,7 @@ namespace detail {
 
 template <typename Type, uint32_t N>
 struct vec final {
+  // NOLINTNEXTLINE
   Type data[N];
 };
 
@@ -115,7 +116,7 @@ inline std::ostream& operator<<(std::ostream& os, const uvec3& v) {
  * If the requested index is out of bounds, then 1u will be returned.
  */
 inline uint32_t val_at(int32_t index, const IntArrayRef sizes) {
-  const int32_t ndim = sizes.size();
+  const int32_t ndim = static_cast<int32_t>(sizes.size());
   if (index >= 0) {
     return index >= ndim ? 1 : safe_downcast<uint32_t>(sizes[index]);
   } else {

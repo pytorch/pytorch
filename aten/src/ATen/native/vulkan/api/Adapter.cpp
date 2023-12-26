@@ -4,27 +4,25 @@
 #include <bitset>
 #include <iomanip>
 #include <sstream>
+#include <utility>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
 
-PhysicalDevice::PhysicalDevice(const VkPhysicalDevice physical_device_handle)
+PhysicalDevice::PhysicalDevice(VkPhysicalDevice physical_device_handle)
     : handle(physical_device_handle),
       properties{},
       memory_properties{},
       queue_families{},
       num_compute_queues(0),
       has_unified_memory(false),
-      has_timestamps(false),
-      timestamp_period(0) {
+      has_timestamps(properties.limits.timestampComputeAndGraphics),
+      timestamp_period(properties.limits.timestampPeriod) {
   // Extract physical device properties
   vkGetPhysicalDeviceProperties(handle, &properties);
   vkGetPhysicalDeviceMemoryProperties(handle, &memory_properties);
-
-  has_timestamps = properties.limits.timestampComputeAndGraphics;
-  timestamp_period = properties.limits.timestampPeriod;
 
   // Check if there are any memory types have both the HOST_VISIBLE and the
   // DEVICE_LOCAL property flags
@@ -101,7 +99,7 @@ VkDevice create_logical_device(
   for (const uint32_t family_i :
        c10::irange(physical_device.queue_families.size())) {
     const VkQueueFamilyProperties& queue_properties =
-        physical_device.queue_families[family_i];
+        physical_device.queue_families.at(family_i);
     // Check if this family has compute capability
     if (queue_properties.queueFlags & VK_QUEUE_COMPUTE_BIT) {
       const uint32_t queues_to_init =
@@ -159,7 +157,7 @@ VkDevice create_logical_device(
       nullptr, // pEnabledFeatures
   };
 
-  VkDevice handle;
+  VkDevice handle = nullptr;
   VK_CHECK(vkCreateDevice(
       physical_device.handle, &device_create_info, nullptr, &handle));
 
@@ -172,7 +170,7 @@ VkDevice create_logical_device(
   for (const std::pair<uint32_t, uint32_t>& queue_idx : queues_to_get) {
     VkQueue queue_handle = VK_NULL_HANDLE;
     VkQueueFlags flags =
-        physical_device.queue_families[queue_idx.first].queueFlags;
+        physical_device.queue_families.at(queue_idx.first).queueFlags;
     vkGetDeviceQueue(handle, queue_idx.first, queue_idx.second, &queue_handle);
     queues.push_back({queue_idx.first, queue_idx.second, flags, queue_handle});
     // Initial usage value
@@ -243,7 +241,7 @@ std::string get_queue_family_properties_str(const VkQueueFlags flags) {
 // DeviceHandle
 //
 
-DeviceHandle::DeviceHandle(const VkDevice device) : handle_(device) {}
+DeviceHandle::DeviceHandle(VkDevice device) : handle_(device) {}
 
 DeviceHandle::DeviceHandle(DeviceHandle&& other) noexcept
     : handle_(other.handle_) {
@@ -262,11 +260,11 @@ DeviceHandle::~DeviceHandle() {
 //
 
 Adapter::Adapter(
-    const VkInstance instance,
-    const PhysicalDevice& physical_device,
+    VkInstance instance,
+    PhysicalDevice physical_device,
     const uint32_t num_queues)
     : queue_usage_mutex_{},
-      physical_device_(physical_device),
+      physical_device_(std::move(physical_device)),
       queues_{},
       queue_usage_{},
       queue_mutexes_{},
@@ -313,8 +311,8 @@ void Adapter::return_queue(Adapter::Queue& compute_queue) {
 
 void Adapter::submit_cmd(
     const Adapter::Queue& device_queue,
-    const VkCommandBuffer cmd,
-    const VkFence fence) {
+    VkCommandBuffer cmd,
+    VkFence fence) {
   const VkSubmitInfo submit_info{
       VK_STRUCTURE_TYPE_SUBMIT_INFO, // sType
       nullptr, // pNext
@@ -336,7 +334,7 @@ void Adapter::submit_cmd(
 void Adapter::submit_cmds(
     const Adapter::Queue& device_queue,
     const std::vector<VkCommandBuffer>& cmds,
-    const VkFence fence) {
+    VkFence fence) {
   const VkSubmitInfo submit_info{
       VK_STRUCTURE_TYPE_SUBMIT_INFO, // sType
       nullptr, // pNext

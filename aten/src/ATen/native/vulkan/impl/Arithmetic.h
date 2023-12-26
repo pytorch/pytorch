@@ -1,3 +1,7 @@
+#pragma once
+
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #include <ATen/native/vulkan/api/api.h>
 
 namespace at {

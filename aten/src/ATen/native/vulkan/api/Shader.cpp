@@ -60,7 +60,7 @@ bool operator==(const ShaderInfo& _1, const ShaderInfo& _2) {
 //
 
 ShaderLayout::ShaderLayout(
-    const VkDevice device,
+    VkDevice device,
     const ShaderLayout::Signature& signature)
     : device_(device), handle_{VK_NULL_HANDLE} {
   c10::SmallVector<VkDescriptorSetLayoutBinding, 6u> bindings;
@@ -116,7 +116,7 @@ void swap(ShaderLayout& lhs, ShaderLayout& rhs) noexcept {
 // ShaderModule
 //
 
-ShaderModule::ShaderModule(const VkDevice device, const ShaderInfo& source)
+ShaderModule::ShaderModule(VkDevice device, const ShaderInfo& source)
     : device_(device), handle_{VK_NULL_HANDLE} {
   const uint32_t* code = source.src_code.bin;
   uint32_t size = source.src_code.size;
@@ -161,13 +161,12 @@ void swap(ShaderModule& lhs, ShaderModule& rhs) noexcept {
 // ShaderLayoutCache
 //
 
-ShaderLayoutCache::ShaderLayoutCache(const VkDevice device)
+ShaderLayoutCache::ShaderLayoutCache(VkDevice device)
     : cache_mutex_{}, device_(device), cache_{} {}
 
 ShaderLayoutCache::ShaderLayoutCache(ShaderLayoutCache&& other) noexcept
-    : cache_mutex_{}, device_(other.device_) {
+    : cache_mutex_{}, device_(other.device_), cache_(std::move(other.cache_)) {
   std::lock_guard<std::mutex> lock(other.cache_mutex_);
-  cache_ = std::move(other.cache_);
 }
 
 ShaderLayoutCache::~ShaderLayoutCache() {
@@ -195,13 +194,12 @@ void ShaderLayoutCache::purge() {
 // ShaderCache
 //
 
-ShaderCache::ShaderCache(const VkDevice device)
+ShaderCache::ShaderCache(VkDevice device)
     : cache_mutex_{}, device_(device), cache_{} {}
 
 ShaderCache::ShaderCache(ShaderCache&& other) noexcept
-    : cache_mutex_{}, device_(other.device_) {
+    : cache_mutex_{}, device_(other.device_), cache_(std::move(other.cache_)) {
   std::lock_guard<std::mutex> lock(other.cache_mutex_);
-  cache_ = std::move(other.cache_);
 }
 
 ShaderCache::~ShaderCache() {

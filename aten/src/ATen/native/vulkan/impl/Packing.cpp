@@ -111,8 +111,8 @@ api::ShaderInfo get_image_to_nchw_shader(const vTensor& v_src) {
 
 struct ToFromTextureParams final {
   api::utils::ivec3 extents;
-  int32_t plane_size;
-  api::utils::ivec2 c_info;
+  int32_t planeSize;
+  api::utils::ivec2 channelInfo;
 };
 
 void record_nchw_to_image_op(
@@ -121,7 +121,7 @@ void record_nchw_to_image_op(
     api::VulkanBuffer& src_buffer,
     vTensor& v_dst,
     api::PipelineBarrier pipeline_barrier,
-    const VkFence fence_handle) {
+    VkFence fence_handle) {
   api::utils::uvec3 global_size = v_dst.extents();
   api::utils::uvec3 local_size = adaptive_work_group_size(global_size);
 
@@ -169,7 +169,7 @@ bool record_image_to_nchw_op(
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
     api::PipelineBarrier pipeline_barrier,
-    const VkFence fence_handle) {
+    VkFence fence_handle) {
   api::utils::uvec3 global_size = v_src.extents();
   api::utils::uvec3 local_size = adaptive_work_group_size(global_size);
 
@@ -233,7 +233,7 @@ void record_nchw_to_buffer_op(
     api::VulkanBuffer& src_buffer,
     vTensor& v_dst,
     api::PipelineBarrier pipeline_barrier,
-    const VkFence fence_handle) {
+    VkFence fence_handle) {
   uint32_t gpu_buf_len = api::utils::safe_downcast<uint32_t>(v_dst.gpu_numel());
 
   api::utils::uvec3 global_size = {gpu_buf_len, 1u, 1u};
@@ -268,7 +268,7 @@ bool record_buffer_to_nchw_op(
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
     api::PipelineBarrier pipeline_barrier,
-    const VkFence fence_handle) {
+    VkFence fence_handle) {
   uint32_t buf_len = api::utils::safe_downcast<uint32_t>(v_src.numel());
 
   api::utils::uvec3 global_size = {buf_len, 1u, 1u};

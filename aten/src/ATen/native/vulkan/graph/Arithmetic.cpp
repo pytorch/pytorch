@@ -46,9 +46,6 @@ ValueRef add_arithmetic_node(
   IntArrayRef t1_sizes = graph.get_val_sizes(t1);
   c10::ScalarType t1_dtype = graph.get_val_dtype(t1);
 
-  IntArrayRef t2_sizes = graph.get_val_sizes(t2);
-  c10::ScalarType t2_dtype = graph.get_val_dtype(t2);
-
   ValueRef out = graph.add_tensor(t1_sizes, t1_dtype);
   add_arithmetic_node(graph, t1, t2, out, alpha, optype);
   return out;

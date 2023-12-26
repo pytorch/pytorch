@@ -20,9 +20,9 @@ api::ShaderInfo get_shader(const OpType type) {
 }
 
 struct Params final {
-  api::utils::ivec4 output_sizes;
-  api::utils::ivec4 input1_sizes;
-  api::utils::ivec4 input2_sizes;
+  api::utils::ivec4 outputSizes;
+  api::utils::ivec4 input1Sizes;
+  api::utils::ivec4 input2Sizes;
   float alpha;
 };
 

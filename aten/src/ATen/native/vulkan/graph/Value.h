@@ -1,11 +1,14 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Context.h>
 #include <ATen/native/vulkan/api/Tensor.h>
 
 #include <ATen/native/vulkan/graph/Constant.h>
+#include <ATen/native/vulkan/graph/Exception.h>
 #include <ATen/native/vulkan/graph/Types.h>
 
 namespace at {
@@ -39,7 +42,8 @@ struct Value final {
     TensorRef as_tensorref;
 
     Payload() : u() {}
-    ~Payload() {}
+    // NOLINTNEXTLINE
+    ~Payload(){};
   };
 
  public:
@@ -98,7 +102,7 @@ struct Value final {
   // Tensor
   //
 
-  Value(vTensor&& t) : tag(TypeTag::TENSOR) {
+  explicit Value(vTensor&& t) : tag(TypeTag::TENSOR) {
     new (&payload.as_tensor) vTensor(std::move(t));
   }
 
@@ -119,7 +123,7 @@ struct Value final {
   // Staging
   //
 
-  Value(api::StorageBuffer&& t) : tag(TypeTag::STAGING) {
+  explicit Value(api::StorageBuffer&& t) : tag(TypeTag::STAGING) {
     new (&payload.as_staging) api::StorageBuffer(std::move(t));
   }
 
@@ -140,7 +144,7 @@ struct Value final {
   // TensorRef
   //
 
-  Value(TensorRef&& t) : tag(TypeTag::TENSORREF) {
+  explicit Value(TensorRef&& t) : tag(TypeTag::TENSORREF) {
     payload.as_tensorref = std::move(t);
   }
 

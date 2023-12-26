@@ -1,5 +1,7 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Context.h>
@@ -48,13 +50,13 @@ class vTensorStorage final {
 
  private:
   // Context
-  api::Context* context_;
+  api::Context* context_{};
 
   api::StorageType storage_type_;
 
   // Resource sizings
-  api::utils::uvec3 extents_;
-  int64_t buffer_length_;
+  api::utils::uvec3 extents_{};
+  int64_t buffer_length_{};
 
   // Image Texture
   mutable api::VulkanImage image_;

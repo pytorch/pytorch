@@ -1,5 +1,7 @@
 #pragma once
 
+// @lint-ignore-every CLANGTIDY facebook-hte-BadMemberName
+
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Allocator.h>
@@ -16,7 +18,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-typedef uint8_t MemoryAccessFlags;
+using MemoryAccessFlags = uint8_t;
 
 VkFormat vk_format(const at::ScalarType dtype);
 
@@ -171,7 +173,7 @@ class ImageSampler final {
     VkBorderColor border_color;
   };
 
-  explicit ImageSampler(const VkDevice, const Properties&);
+  explicit ImageSampler(VkDevice, const Properties&);
 
   ImageSampler(const ImageSampler&) = delete;
   ImageSampler& operator=(const ImageSampler&) = delete;
@@ -223,7 +225,7 @@ class VulkanImage final {
     VkFormat view_format;
   };
 
-  typedef ImageSampler::Properties SamplerProperties;
+  using SamplerProperties = ImageSampler::Properties;
 
   struct Handles final {
     VkImage image;
@@ -235,13 +237,13 @@ class VulkanImage final {
 
   explicit VulkanImage(
       const VmaAllocator,
-      const VkDevice,
+      VkDevice,
       const MemoryProperties&,
       const ImageProperties&,
       const ViewProperties&,
       const SamplerProperties&,
       const VkImageLayout layout,
-      const VkSampler);
+      VkSampler);
 
   VulkanImage(const VulkanImage&) = delete;
   VulkanImage& operator=(const VulkanImage&) = delete;
@@ -337,7 +339,7 @@ struct ImageMemoryBarrier final {
 
 class SamplerCache final {
  public:
-  explicit SamplerCache(const VkDevice device);
+  explicit SamplerCache(VkDevice device);
 
   SamplerCache(const SamplerCache&) = delete;
   SamplerCache& operator=(const SamplerCache&) = delete;
@@ -347,9 +349,9 @@ class SamplerCache final {
 
   ~SamplerCache();
 
-  typedef ImageSampler::Properties Key;
-  typedef ImageSampler Value;
-  typedef ImageSampler::Hasher Hasher;
+  using Key = ImageSampler::Properties;
+  using Value = ImageSampler;
+  using Hasher = ImageSampler::Hasher;
 
  private:
   // Multiple threads could potentially be adding entries into the cache, so use
@@ -367,9 +369,9 @@ class SamplerCache final {
 class MemoryAllocator final {
  public:
   explicit MemoryAllocator(
-      const VkInstance instance,
-      const VkPhysicalDevice physical_device,
-      const VkDevice device);
+      VkInstance instance,
+      VkPhysicalDevice physical_device,
+      VkDevice device);
 
   MemoryAllocator(const MemoryAllocator&) = delete;
   MemoryAllocator& operator=(const MemoryAllocator&) = delete;
@@ -392,7 +394,7 @@ class MemoryAllocator final {
       const VkImageType,
       const VkImageViewType,
       const VulkanImage::SamplerProperties&,
-      const VkSampler,
+      VkSampler,
       const bool allow_transfer = false);
 
   VulkanBuffer create_storage_buffer(
@@ -419,7 +421,7 @@ class VulkanFence final {
   //       It will be disabled pending future refactors.
   explicit VulkanFence();
 
-  explicit VulkanFence(const VkDevice);
+  explicit VulkanFence(VkDevice);
 
   VulkanFence(const VulkanFence&) = delete;
   VulkanFence& operator=(const VulkanFence&) = delete;
@@ -467,7 +469,7 @@ struct FencePool final {
 
   std::stack<VulkanFence> pool_;
 
-  explicit FencePool(const VkDevice device) : device_(device), pool_{} {}
+  explicit FencePool(VkDevice device) : device_(device), pool_{} {}
 
   // Returns an rvalue reference to a fence, so that it can be moved
   inline VulkanFence get_fence() {

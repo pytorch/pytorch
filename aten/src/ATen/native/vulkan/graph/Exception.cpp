@@ -17,7 +17,7 @@ Error::Error(SourceLocation location, std::string msg)
 }
 
 void Error::refresh_what() {
-  what_ = compute_what(/*include_backtrace =*/true);
+  what_ = compute_what(/*include_source =*/true);
 }
 
 std::string Error::compute_what(bool include_source) const {
