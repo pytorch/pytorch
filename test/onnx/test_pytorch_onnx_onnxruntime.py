@@ -5902,7 +5902,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 split_list: List[Tensor] = input.split(split_sizes)
 
                 for ob in split_list:
-                    out.append(ob)
+                    out.append(ob)  # noqa: PERF402
                 return torch.cat(out, dim=0)
 
         x = torch.randn(6, 4, 3)

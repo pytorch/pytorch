@@ -1466,6 +1466,7 @@ def cpp_compile_command(
         assert is_clang()
         # Use clang runtime instead of libgcc
         clang_flags += " --rtlib=compiler-rt"
+        clang_flags += " -fuse-ld=lld"
         linker_paths = "-B" + build_paths.glibc_lib()
         linker_paths += " -L" + build_paths.glibc_lib()
     else:
@@ -2340,6 +2341,8 @@ def _async_compile_initializer(orig_ppid) -> None:
     global _watchdog_thread
     _watchdog_thread = Thread(target=run, daemon=True)
     _watchdog_thread.start()
+    # Ignore Ctrl-C (i.e. SIGINT) sent to pool workers to avoid meaningless log spam.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 _watchdog_thread: Optional[Thread] = None
