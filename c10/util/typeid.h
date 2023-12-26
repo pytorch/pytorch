@@ -2,6 +2,7 @@
 
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -10,15 +11,17 @@
 #include <type_traits>
 #include <vector>
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Half.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/TypeIndex.h>
 #include <c10/util/TypeTraits.h>
+#include <c10/util/irange.h>
 #include <c10/util/string_view.h>
 
 #include <c10/core/ScalarType.h>
-#include <c10/util/irange.h>
 
 /*
  * TypeIdentifier is a small type containing an id.
