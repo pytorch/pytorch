@@ -67,12 +67,12 @@ class PlacementStrategy:
     A placement strategy describes an acceptable sharding placements of the output
     and the tensor arguments of an operation.
 
-    note: when the op return value is a single DTensor object, output_spec is
-    DTensorSpec; when the return value is a sequence of Optional[DTensor],
-    output_spec is a sequence of Optional[DTensorSpec].
+    note: when the op return value is a single DTensor object, output_specs is
+    DTensorSpec; when the return value is a tuple of Optional[DTensor],
+    output_specs is a tuple of Optional[DTensorSpec].
     """
 
-    output_spec: Union[DTensorSpec, Tuple[Optional[DTensorSpec], ...]]
+    output_specs: Union[DTensorSpec, Tuple[Optional[DTensorSpec], ...]]
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
     # redistribute costs for this op placement strategy
@@ -82,12 +82,17 @@ class PlacementStrategy:
     redistribute_cost: Optional[List[List[float]]] = None
 
     @cached_property
-    def out_spec(self) -> DTensorSpec:
-        if isinstance(self.output_spec, DTensorSpec):
-            return self.output_spec
+    def output_spec(self) -> DTensorSpec:
+        """
+        This function requires that the strategy have at least one DTensorSpec as the
+        output spec. If the output_specs is a tuple, then we will just return the first
+        element in the tuple and this element must be a DTensorSpec.
+        """
+        if isinstance(self.output_specs, DTensorSpec):
+            return self.output_specs
         else:
-            assert len(self.output_spec) > 0, "empty output_spec!"
-            spec = self.output_spec[0]
+            assert len(self.output_specs) > 0, "empty output_specs!"
+            spec = self.output_specs[0]
             assert isinstance(
                 spec, DTensorSpec
             ), "If the operator returns a tuple, PlacementStrategy requires the first"
@@ -96,7 +101,7 @@ class PlacementStrategy:
 
     def __str__(self) -> str:
         input_specs_str = _pretty_print_spec(self.input_specs)
-        output_spec_str = _pretty_print_spec(self.output_spec)
+        output_spec_str = _pretty_print_spec(self.output_specs)
         return f"{input_specs_str} -> {output_spec_str}"
 
 
@@ -127,19 +132,19 @@ class OpStrategy(StrategyType):
         """
         Returns the max number of shards across all placement strategies
         """
-        return max([strategy.out_spec.num_shards for strategy in self.strategies])
+        return max([strategy.output_spec.num_shards for strategy in self.strategies])
 
     @property
     def output_mesh_shape(self):
-        return self.strategies[0].out_spec.mesh.shape
+        return self.strategies[0].output_spec.mesh.shape
 
     @property
     def output_ndim(self):
-        return self.strategies[0].out_spec.ndim
+        return self.strategies[0].output_spec.ndim
 
     @property
     def output_shape(self):
-        return self.strategies[0].out_spec.shape
+        return self.strategies[0].output_spec.shape
 
 
 class TupleStrategy(StrategyType):
@@ -237,7 +242,7 @@ class OpSchema:
                 mesh_shape = arg.mesh.shape
             elif isinstance(arg, OpStrategy):
                 assert len(arg.strategies) == 1
-                args_sharding.append(_pretty_print_spec(arg.strategies[0].output_spec))
+                args_sharding.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 mesh_shape = arg.output_mesh_shape
             elif isinstance(arg, TupleStrategy):
                 first_op_strtgy = arg.childs[0]

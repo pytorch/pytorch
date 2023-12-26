@@ -444,7 +444,7 @@ def pointwise_strategy(
     pointwise_strategy = OpStrategy([])
 
     for placement_strategy in followed_strategy.strategies:
-        spec_to_follow = placement_strategy.out_spec
+        spec_to_follow = placement_strategy.output_spec
         out_placements: List[Placement] = []
 
         for placement in spec_to_follow.placements:
@@ -466,7 +466,7 @@ def pointwise_strategy(
         for idx, input_arg in enumerate(op_schema.args_schema):
             if isinstance(input_arg, OpStrategy):
                 # every arg follow the out_placements, but need to handle broadcasting
-                input_arg_spec = input_arg.strategies[0].out_spec
+                input_arg_spec = input_arg.strategies[0].output_spec
                 input_arg_dims_map = infer_broadcast_dims_map(
                     common_shape, input_arg_spec.shape
                 )
@@ -487,7 +487,7 @@ def pointwise_strategy(
 
         pointwise_strategy.strategies.append(
             PlacementStrategy(
-                output_spec=DTensorSpec(
+                output_specs=DTensorSpec(
                     mesh=mesh,
                     placements=tuple(out_placements),
                 ),
@@ -588,7 +588,7 @@ def foreach_list_strategy(
 
         strategies = []
         for strtgy in child_strtgy.strategies:
-            spec_to_follow = strtgy.out_spec
+            spec_to_follow = strtgy.output_spec
             if not linearity:
                 assert not is_tensor_partial(
                     spec_to_follow
@@ -604,7 +604,7 @@ def foreach_list_strategy(
                 )
             strategies.append(
                 PlacementStrategy(
-                    output_spec=spec_to_follow, redistribute_cost=redistribute_costs
+                    output_specs=spec_to_follow, redistribute_cost=redistribute_costs
                 )
             )
 
