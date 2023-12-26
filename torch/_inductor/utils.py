@@ -1228,3 +1228,10 @@ def aot_inductor_launcher(so_path: str, device: str):
         """
     else:
         raise RuntimeError(f"Unsupported device: {device}")
+
+
+def device_need_guard(device: str):
+    assert isinstance(device, str)
+    if device in ["cuda", "xpu"]:
+        return True
+    return False
