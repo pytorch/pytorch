@@ -492,7 +492,8 @@ class MetaConverter:
                                     # TODO: Fix this! the requires_grad and is_leaf statuses
                                     # are wrong after the detach()
                                     fake_input_base = fake_base.detach().requires_grad_(
-                                        base.requires_grad)
+                                        base.requires_grad
+                                    )
                                     self.set_tensor_memo(base, fake_input_base)
 
                                 # fake_base -> fake_view with correct view relationship
