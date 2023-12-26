@@ -7526,48 +7526,6 @@ def ___make_guard_fn():
         compiled_out = compiled_fn()
         self.assertTrue(same(fn_out, compiled_out))
 
-    def test_fn_hasattr__name__1(self):
-        def fn():
-            foo = lambda x: x + 1
-            return hasattr(foo, "__name__")
-
-        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-
-        fn_out = fn()
-        compiled_out = compiled_fn()
-        self.assertEqual(fn_out, compiled_out)
-        self.assertTrue(fn_out)
-
-    def test_fn_hasattr__name__2(self):
-        def bar(x):
-            return torch.sin(x)
-
-        def fn():
-            return hasattr(bar, "__name__")
-
-        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-
-        fn_out = fn()
-        compiled_out = compiled_fn()
-        self.assertEqual(fn_out, compiled_out)
-        self.assertTrue(fn_out)
-
-    def test_fn_hasattr__name__3(self):
-        def bar(x, y):
-            return torch.sin(x) + torch.cos(y)
-
-        baz = functools.partial(bar, y=4)
-
-        def fn():
-            return hasattr(baz, "__name__")
-
-        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-
-        fn_out = fn()
-        compiled_out = compiled_fn()
-        self.assertEqual(fn_out, compiled_out)
-        self.assertFalse(fn_out)
-
     def test_torch_objects_as_keys(self):
         remap = {torch.float16: torch.float32}
 
@@ -7647,6 +7605,22 @@ def ___make_guard_fn():
         self.assertEqual(comp_out, real_out)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 9)
+
+    def test_dynamic_one_hot(self):
+        def fn(x):
+            x = x + 1
+            # graph break from data-dependent output shape
+            x = torch.nn.functional.one_hot(x)
+            x = x + 1
+            return x
+
+        inp = torch.arange(20) % 4
+        counter = CompileCounter()
+        real_out = fn(inp)
+        comp_out = torch.compile(fn, backend=counter)(inp)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(counter.op_count, 2)
 
     def test_tracing_nested_py_tree_mixed_all(self):
         import torch.utils._pytree as pytree

@@ -519,7 +519,6 @@ def is_function(value):
         value,
         (
             types.FunctionType,
-            types.MethodType,
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
@@ -892,24 +891,27 @@ def rot_n_helper(n):
     return fn
 
 
+common_constant_types = {
+    int,
+    float,
+    bool,
+    str,
+    bytes,
+    type(None),
+    types.CodeType,
+    torch.device,
+    torch.dtype,
+    torch.memory_format,
+    torch.layout,
+}
+
+
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
     return isinstance(v, (enum.Enum, type)) or istype(
         v,
-        (
-            types.CodeType,
-            int,
-            float,
-            bool,
-            str,
-            bytes,
-            type(None),
-            slice,
-            type(type),
-            torch.device,
-            torch.dtype,
-        ),
+        common_constant_types | {slice},
     )
 
 
