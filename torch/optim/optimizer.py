@@ -260,6 +260,7 @@ class Optimizer:
                                "is deprecated. In the future, this will raise an error. "
                                "Please wrap your Tensor in an iterable instead."),
                               FutureWarning)
+                params = [params]
             else:
                 raise TypeError("params argument given to the optimizer should be "
                                 "an iterable of Tensors or dicts, but got " +

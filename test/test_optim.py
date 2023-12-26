@@ -26,7 +26,6 @@ class TestOptimRenewed(TestCase):
             self.assertFalse(any(f for f in global_cliquey_flags if f in optim_input.kwargs))
 
 
-    @onlyCPU
     @optims([optim for optim in optim_db if optim.optim_error_inputs_func is not None])
     def test_errors(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
@@ -36,12 +35,20 @@ class TestOptimRenewed(TestCase):
             optim_input = error_input.optimizer_error_input
             params, kwargs = optim_input.params, optim_input.kwargs
             if error_input.error_on == OptimizerErrorEnum.CONSTRUCTION_ERROR:
-                with self.assertRaisesRegex(error_input.error_type, error_input.error_regex):
-                    optim_cls(params, **kwargs)
+                if issubclass(error_input.error_type, Warning):
+                    with self.assertWarnsRegex(error_input.error_type, error_input.error_regex):
+                        optim_cls(params, **kwargs)
+                else:
+                    with self.assertRaisesRegex(error_input.error_type, error_input.error_regex):
+                        optim_cls(params, **kwargs)
             elif error_input.error_on == OptimizerErrorEnum.STEP_ERROR:
                 optim = optim_cls(params, **kwargs)
-                with self.assertRaisesRegex(error_input.error_type, error_input.error_regex):
-                    optim.step()
+                if issubclass(error_input.error_type, Warning):
+                    with self.assertWarnsRegex(error_input.error_type, error_input.error_regex):
+                        optim.step()
+                else:
+                    with self.assertRaisesRegex(error_input.error_type, error_input.error_regex):
+                        optim.step()
             else:
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
