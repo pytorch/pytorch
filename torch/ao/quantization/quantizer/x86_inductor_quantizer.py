@@ -15,10 +15,6 @@ from torch.ao.quantization.observer import (
     PlaceholderObserver,
 )
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
-from torch.ao.quantization.pt2e.utils import (
-    _conv2d_example_inputs,
-    get_aten_graph_module,
-)
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.ao.quantization.quantizer.quantizer import (
     QuantizationAnnotation,
@@ -37,14 +33,11 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     QuantizationConfig,
 )
 from torch.fx import Node
-from torch.fx.passes.utils.matcher_with_name_node_map_utils import (
-    SubgraphMatcherWithNameNodeMap,
-)
 from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
-from .utils import get_conv_unary_pattern
+from .utils import conv2d_pattern_matcher
 
 __all__ = [
     "X86InductorQuantizer",
@@ -765,16 +758,7 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        if not getattr(self, "conv2d_pattern_matcher", None):
-            pattern = get_conv_unary_pattern(torch.nn.functional.conv2d)
-            pattern = get_aten_graph_module(pattern, _conv2d_example_inputs)
-            pattern.graph.eliminate_dead_code()
-            pattern.recompile()
-            self.conv2d_pattern_matcher = SubgraphMatcherWithNameNodeMap(
-                pattern, ignore_literals=True
-            )
-
-        matches = self.conv2d_pattern_matcher.match(gm.graph)
+        matches = conv2d_pattern_matcher.match(gm.graph)
 
         for match in matches:
             name_node_map = match.name_node_map

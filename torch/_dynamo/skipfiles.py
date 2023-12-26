@@ -204,6 +204,7 @@ MOD_INLINELIST = {
     "torch._inductor.test_operators",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
+    "torch.ao.quantization.quantizer.utils",
     "torch.autograd.function",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
@@ -218,8 +219,6 @@ MOD_INLINELIST = {
     "torch.utils._foreach_utils",
     "torch.utils._pytree",
     "torch._tensor",
-    "torch.ao.quantization.quantizer.x86_inductor_quantizer",
-    "torch.ao.quantization.quantizer.utils",
 }
 
 

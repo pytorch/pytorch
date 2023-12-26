@@ -1,11 +1,19 @@
+import functools
 from typing import Any, Callable, List, Optional
 
+import torch
 import torch.nn.functional as F
 
-from torch.ao.quantization.pt2e.utils import _is_sym_size_node
-
+from torch.ao.quantization.pt2e.utils import (
+    _conv2d_example_inputs,
+    _is_sym_size_node,
+    get_aten_graph_module,
+)
 from torch.ao.quantization.quantizer.quantizer import QuantizationAnnotation
 from torch.fx import Node
+from torch.fx.passes.utils.matcher_with_name_node_map_utils import (
+    SubgraphMatcherWithNameNodeMap,
+)
 
 
 def _annotate_input_qspec_map(node: Node, input_node: Node, qspec):
@@ -83,3 +91,18 @@ def get_conv_unary_pattern(
         }
 
     return _conv_unary
+
+
+@functools.lru_cache(None)
+def _generate_conv2d_pattern_matcher():
+    # Ensure it's only be invoked once, due to the cache size limitation in
+    # https://github.com/pytorch/pytorch/blob/
+    # 4c6e842496da636123f83ef868ca1974631f1f1e/torch/_dynamo/config.py#L35-L39
+    pattern = get_conv_unary_pattern(torch.nn.functional.conv2d)
+    pattern = get_aten_graph_module(pattern, _conv2d_example_inputs)
+    pattern.graph.eliminate_dead_code()
+    pattern.recompile()
+    return SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
+
+
+conv2d_pattern_matcher = _generate_conv2d_pattern_matcher()
