@@ -2825,7 +2825,7 @@ class Buffer(IRNode):
     def get_reads(self):
         return self.get_read_writes().reads
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         """
         Returns the unbacked symbols which are defined by this IR node,
         because this is a data-dependent IR node, or item()
@@ -2867,7 +2867,7 @@ class Buffer(IRNode):
         )
         return defs - self.get_unbacked_symbol_uses()
 
-    def get_unbacked_symbol_uses(self):
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         """
         Returns the unbacked symbols which are required to be in scope in
         order to successfully perform codegen for this buffer.  For example,
@@ -3000,7 +3000,7 @@ class ComputedBuffer(Buffer):
                     self.data.get_size(),
                 )
 
-    def get_unbacked_symbol_uses(self):
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         # Ordinarily, we'd like to just peek at the arguments list,
         # but ComputedBuffers have no argument list.
         #
@@ -3871,7 +3871,7 @@ class ExternKernel(InputsKernel):
         index = sympy_subs(sympy.expand(index), replacement)
         return index, tuple(new_sizes)
 
-    def get_unbacked_symbol_uses(self):
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         # NB: It's not necessary to check regular inputs as we automatically
         # have dependencies on them
         r = set()
@@ -4026,7 +4026,7 @@ class UserDefinedTritonKernel(ExternKernel):
         # modifies input in place, do not let it get DCEd
         return True
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     def get_mutation_names(self):
@@ -4122,7 +4122,7 @@ class InplaceBernoulliFallback(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     def __init__(self, x, *constant_args):
@@ -4155,7 +4155,7 @@ class AccumulateGrad(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     def __init__(self, variable, new_grad):
@@ -4225,7 +4225,7 @@ class ScatterFallback(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     def __init__(
@@ -4295,7 +4295,7 @@ class IndexPutFallback(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     def __init__(self, x, indices, values, accumulate):
@@ -4375,7 +4375,7 @@ class DynamicScalar(ExternKernel):
             self.sym = sym.args[0]
             self.is_bool = True
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return {self.sym}
 
     def codegen(self, wrapper):
@@ -4908,7 +4908,7 @@ class MultiOutput(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.indices = indices
 
-    def get_unbacked_symbol_uses(self):
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return self.inputs[0].get_unbacked_symbol_uses()
 
     def should_allocate(self):
@@ -5317,7 +5317,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     @classmethod
@@ -6034,7 +6034,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
     def get_mutation_names(self):
         return [self.inputs[self.idx_for_inplace_sum].get_name()]
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     @classmethod
@@ -6968,7 +6968,7 @@ class Broadcast(InPlaceCollectiveKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     @classmethod
@@ -7003,7 +7003,7 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     @classmethod
@@ -7043,7 +7043,7 @@ class AllReduce(InPlaceCollectiveKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def get_unbacked_symbol_defs(self):
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
     @classmethod
@@ -7417,7 +7417,7 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
         self.output_split_sizes = output_split_sizes
         self.input_split_sizes = input_split_sizes
 
-    def get_unbacked_symbol_uses(self):
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         r = set()
         if self.output_split_sizes is not None:
             r |= free_unbacked_symbols(self.output_split_sizes)
