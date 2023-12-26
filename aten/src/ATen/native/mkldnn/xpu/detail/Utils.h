@@ -9,10 +9,10 @@
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_sycl.hpp>
 
-#define DPCPP_ONEDNN_EXEC(prim, stream, ...)                           \
+#define XPU_ONEDNN_EXEC(prim, stream, ...)                           \
   {                                                                    \
     auto q = dnnl::sycl_interop::get_queue((stream));                  \
-    DPCPP_EXT_SUBMIT(                                                  \
+    XPU_EXT_SUBMIT(                                                  \
         (q),                                                           \
         "onednn_kernel",                                               \
         dnnl::sycl_interop::execute((prim), (stream), ##__VA_ARGS__)); \
@@ -377,20 +377,6 @@ enum MEMORY_LAYOUT_FOR_CONV {
   ChannelsLast = 1, /// using channels_last for conv computation.
   Blocked = 2, // using blocked format for conv computation.
 };
-
-// judge to use block or plain for Matmul
-static inline bool using_onednn_layout_for_matmul(const at::Tensor& src) {
-  return false;
-}
-
-static inline at::Tensor contiguous_if_needed(
-    const at::Tensor& t,
-    at::MemoryFormat mfmt = at::MemoryFormat::Contiguous) {
-  // auto ctx = at::AtenIpexTypeXPU::DPCPPTensorContext::get_tensor_ctx(t);
-  // Tensor t_ = ctx.is_plain() ? t.contiguous(mfmt) : t;
-  at::Tensor t_ = t.contiguous(mfmt);
-  return t_;
-}
 
 } // namespace onednn
 } // namespace native::xpu

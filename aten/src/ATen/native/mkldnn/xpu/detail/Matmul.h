@@ -164,8 +164,6 @@ static inline void matmul(
     bias_strides = get_onednn_strides(b);
   }
 
-  auto is_onednn_layout_suggested = using_onednn_layout_for_matmul(m1);
-
   dnnl::post_ops po;
   attr.extract_post_ops(po, dst);
 
@@ -174,15 +172,9 @@ static inline void matmul(
   dnnl::matmul::primitive_desc matmul_pd;
 
   // STEP1: create memory desc
-  if (dims == 2 && is_onednn_layout_suggested) {
-    m1_md = dnnl::memory::desc(m1_dims, m1_dt, dnnl::memory::format_tag::any);
-    m2_md = dnnl::memory::desc(m2_dims, m2_dt, dnnl::memory::format_tag::any);
-    dst_md = dnnl::memory::desc(dst_dims, dst_dt, dnnl::memory::format_tag::any);
-  } else {
-    m1_md = dnnl::memory::desc(m1_dims, m1_dt, m1_strides);
-    m2_md = dnnl::memory::desc(m2_dims, m2_dt, m2_strides);
-    dst_md = dnnl::memory::desc(dst_dims, dst_dt, dst_strides);
-  }
+  m1_md = dnnl::memory::desc(m1_dims, m1_dt, m1_strides);
+  m2_md = dnnl::memory::desc(m2_dims, m2_dt, m2_strides);
+  dst_md = dnnl::memory::desc(dst_dims, dst_dt, dst_strides);
 
   // STEP2: creat attribute
   dnnl::primitive_attr pattr;
@@ -193,17 +185,17 @@ static inline void matmul(
 #endif
 
 
-  // if (m1_dt == memory::data_type::f32) {
-  //   pattr.set_fpmath_mode(xpu::oneDNN::get_onednn_fpmath_mode());
-  // }
+  if (m1_dt == memory::data_type::f32) {
+    pattr.set_fpmath_mode(dnnl::fpmath_mode::strict)
+  }
 
   // STEP3: create primitive
   if (with_bias) {
     bias_md = dnnl::memory::desc(bias_dims, bias_dt, bias_strides);
-    // matmul_pd =
-    //     matmul::primitive_desc(engine, m1_md, m2_md, bias_md, dst_md, pattr);
+    matmul_pd =
+        matmul::primitive_desc(engine, m1_md, m2_md, bias_md, dst_md, pattr);
   } else {
-    // matmul_pd = matmul::primitive_desc(engine, m1_md, m2_md, dst_md, pattr);
+    matmul_pd = matmul::primitive_desc(engine, m1_md, m2_md, dst_md, pattr);
   }
 
   matmul_p = dnnl::matmul(matmul_pd);
@@ -213,15 +205,15 @@ static inline void matmul(
   dst_usr_md = dnnl::memory::desc(dst_dims, dst_usr_dt, dst_strides);
 
   // STEP4: create memory
-  // auto m1_usr_m = dpcpp_onednn_memory(m1_usr_md, engine, m1.data_ptr())
-  // auto m2_usr_m = dpcpp_onednn_memory(m2_usr_md, engine, m2.data_ptr())
-  // auto dst_usr_m = dpcpp_onednn_memory(dst_usr_md, engine, dst.data_ptr())
+  auto m1_usr_m = xpu_onednn_memory(m1_usr_md, engine, m1.data_ptr())
+  auto m2_usr_m = xpu_onednn_memory(m2_usr_md, engine, m2.data_ptr())
+  auto dst_usr_m = xpu_onednn_memory(dst_usr_md, engine, dst.data_ptr())
 
   auto expected_m1_md = matmul_pd.src_desc();
   auto expected_m2_md = matmul_pd.weights_desc();
   auto expected_dst_md = matmul_pd.dst_desc();
 
-  // memory m1_m = m1_usr_m, m2_m = m2_usr_m, dst_m = dst_usr_m;
+  memory m1_m = m1_usr_m, m2_m = m2_usr_m, dst_m = dst_usr_m;
   at::Tensor m1_, m2_, dst_;
 
   // TODO: hanld attr.with_sum()
@@ -233,20 +225,20 @@ static inline void matmul(
   size_t scratchpad_size = matmul_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::AtenIpexTypeXPU::empty(
       {scratchpad_size}, m1.options().dtype(at::kByte), c10::nullopt);
-  // auto scratchpad_memory = dpcpp_onednn_memory(
-  //     matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
+  auto scratchpad_memory = xpu_onednn_memory(
+      matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
 #endif
 
-  // args.insert({DNNL_ARG_SRC, m1_m});
-  // args.insert({DNNL_ARG_WEIGHTS, m2_m});
-  // args.insert({DNNL_ARG_DST, dst_m});
+  args.insert({DNNL_ARG_SRC, m1_m});
+  args.insert({DNNL_ARG_WEIGHTS, m2_m});
+  args.insert({DNNL_ARG_DST, dst_m});
   if (with_bias) {
-    // auto bias_m = dpcpp_onednn_memory(bias_md, engine, b.data_ptr());
-    // args.insert({DNNL_ARG_BIAS, bias_m});
+    auto bias_m = xpu_onednn_memory(bias_md, engine, b.data_ptr());
+    args.insert({DNNL_ARG_BIAS, bias_m});
   }
 
-  // DPCPP_ONEDNN_EXEC(matmul_p, strm, args);
+  XPU_ONEDNN_EXEC(matmul_p, strm, args);
 
   if (!dst.is_same(result))
     result.copy_(dst);
