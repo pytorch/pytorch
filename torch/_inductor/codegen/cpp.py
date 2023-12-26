@@ -1490,7 +1490,7 @@ class CppKernel(Kernel):
                 if worksharing.single():
                     stack.enter_context(code.indent())
 
-            def gen_kernel(kernel, in_parallel=False):
+            def gen_kernel(kernel):
                 with contextlib.ExitStack() as stack:
                     assert kernel
                     if hasattr(kernel, "codegen_inner_loops"):
@@ -1499,7 +1499,7 @@ class CppKernel(Kernel):
                         stack.enter_context(code.indent())
                     code.splice(kernel.loads)
                     code.splice(kernel.compute)
-                    if in_parallel and kernel.parallel_reduction_stores:
+                    if worksharing.in_parallel and kernel.parallel_reduction_stores:
                         code.splice(kernel.parallel_reduction_stores)
                     else:
                         code.splice(kernel.stores)
@@ -1512,14 +1512,14 @@ class CppKernel(Kernel):
                         if is_suffix:
                             suffix = (
                                 kernel.parallel_reduction_suffix
-                                if loop.under_parallel_scope()
+                                if loop.parallel
                                 else kernel.reduction_suffix
                             )
                             return suffix
                         else:
                             prefix = (
                                 kernel.parallel_reduction_prefix
-                                if loop.under_parallel_scope()
+                                if loop.parallel
                                 else kernel.reduction_prefix
                             )
                             return prefix
@@ -1564,7 +1564,7 @@ class CppKernel(Kernel):
                     else:
                         kernels = loop.get_kernels()
                         assert len(kernels) == 1
-                        gen_kernel(kernels[0], loop.under_parallel_scope())
+                        gen_kernel(kernels[0])
 
             stack.enter_context(code.indent())
             if loop_nest.root:
