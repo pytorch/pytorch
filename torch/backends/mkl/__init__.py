@@ -45,12 +45,12 @@ class verbose:
     def __enter__(self):
         if self.enable == VERBOSE_OFF:
             return
-        st = torch._C._verbose.mkl_set_verbose(self.enable)
+        st = torch._C._verbose.mkl_set_verbose(self.enable)  # type: ignore[attr-defined]
         assert (
             st
         ), "Failed to set MKL into verbose mode. Please consider to disable this verbose scope."
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        torch._C._verbose.mkl_set_verbose(VERBOSE_OFF)
+        torch._C._verbose.mkl_set_verbose(VERBOSE_OFF)  # type: ignore[attr-defined]
         return False
