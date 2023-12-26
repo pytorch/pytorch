@@ -1512,14 +1512,14 @@ class CppKernel(Kernel):
                         if is_suffix:
                             suffix = (
                                 kernel.parallel_reduction_suffix
-                                if loop.parallel
+                                if loop.parallel or worksharing.in_parallel
                                 else kernel.reduction_suffix
                             )
                             return suffix
                         else:
                             prefix = (
                                 kernel.parallel_reduction_prefix
-                                if loop.parallel
+                                if loop.parallel or worksharing.in_parallel
                                 else kernel.reduction_prefix
                             )
                             return prefix
