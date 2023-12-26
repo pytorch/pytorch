@@ -1287,7 +1287,9 @@ class CommonTemplate:
             return torch.arange(0.1, 8.0001, 1, dtype=x.dtype, device=x.device)
 
         # Test that float arguments are truncated to int when dtype is set explicitly
-        make_arg = functools.partial(make_tensor, device="cpu", requires_grad=False)
+        make_arg = functools.partial(
+            make_tensor, device=self.device, requires_grad=False
+        )
         self.common(fn, (make_arg(1, dtype=torch.float32),))
         self.common(fn, (make_arg(1, dtype=torch.int64),))
 
@@ -1692,6 +1694,8 @@ class CommonTemplate:
         def fn(a, b):
             return (
                 aten.div(a, b, rounding_mode=None),
+                aten.div(a * 0.5, b, rounding_mode=None),
+                aten.div(a, b * 1.0, rounding_mode=None),
                 aten.div(a, b, rounding_mode="floor"),
                 aten.div(a, b, rounding_mode="trunc"),
                 a / b,
@@ -1720,15 +1724,15 @@ class CommonTemplate:
             self.common(
                 fn,
                 (
-                    make_tensor(10, device="cpu", dtype=dtype),
-                    make_tensor((), device="cpu", dtype=dtype, exclude_zero=True),
+                    make_tensor(10, device=self.device, dtype=dtype),
+                    make_tensor((), device=self.device, dtype=dtype, exclude_zero=True),
                 ),
             )
             self.common(
                 fn,
                 (
-                    make_tensor((), device="cpu", dtype=dtype),
-                    make_tensor(10, device="cpu", dtype=dtype, exclude_zero=True),
+                    make_tensor((), device=self.device, dtype=dtype),
+                    make_tensor(10, device=self.device, dtype=dtype, exclude_zero=True),
                 ),
             )
 
@@ -1740,8 +1744,10 @@ class CommonTemplate:
             self.common(
                 fn,
                 (
-                    make_tensor(100, device="cpu", dtype=dtype),
-                    make_tensor(100, device="cpu", dtype=dtype, exclude_zero=True),
+                    make_tensor(100, device=self.device, dtype=dtype),
+                    make_tensor(
+                        100, device=self.device, dtype=dtype, exclude_zero=True
+                    ),
                 ),
             )
 
@@ -3765,9 +3771,11 @@ class CommonTemplate:
         def fn(value, mask, source):
             return torch.masked_scatter(value, mask, source)
 
-        value = make_tensor(10, 10, dtype=torch.float32, device="cpu")
-        mask = make_tensor(10, 10, dtype=torch.bool, device="cpu")
-        source = make_tensor(mask.count_nonzero(), dtype=torch.float32, device="cpu")
+        value = make_tensor(10, 10, dtype=torch.float32, device=self.device)
+        mask = make_tensor(10, 10, dtype=torch.bool, device=self.device)
+        source = make_tensor(
+            mask.count_nonzero(), dtype=torch.float32, device=self.device
+        )
 
         self.common(fn, (value, mask, source))
 
@@ -3838,7 +3846,7 @@ class CommonTemplate:
         for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
             intmax = torch.iinfo(dtype).max
             make_arg = functools.partial(
-                make_tensor, dtype=dtype, device="cpu", requires_grad=False
+                make_tensor, dtype=dtype, device=self.device, requires_grad=False
             )
             self.common(
                 fn,
@@ -4194,15 +4202,15 @@ class CommonTemplate:
         self.common(
             fn,
             (
-                make_tensor(10, device="cpu", dtype=torch.float32),
-                make_tensor((), device="cpu", dtype=torch.float32),
+                make_tensor(10, device=self.device, dtype=torch.float32),
+                make_tensor((), device=self.device, dtype=torch.float32),
             ),
         )
         self.common(
             fn,
             (
-                make_tensor((), device="cpu", dtype=torch.float32),
-                make_tensor(10, device="cpu", dtype=torch.float32),
+                make_tensor((), device=self.device, dtype=torch.float32),
+                make_tensor(10, device=self.device, dtype=torch.float32),
             ),
         )
 
@@ -4349,7 +4357,7 @@ class CommonTemplate:
             return a + torch.full_like(a, 7.777)
 
         for dtype in all_types():
-            self.common(fn, (make_tensor(8, dtype=dtype, device="cpu"),))
+            self.common(fn, (make_tensor(8, dtype=dtype, device=self.device),))
 
     def test_index1(self):
         def fn(a, b, c):
@@ -7393,6 +7401,61 @@ class CommonTemplate:
             atol=0.02,
             rtol=1e4,
         )
+
+    @requires_cuda()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    @skipIfRocm
+    @config.patch(freezing=True)
+    def test_sdpa_unaligned_mask_freezing(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.arg3_1 = torch.rand(1, 1, 16, 15, device="cuda")
+
+            def forward(
+                self,
+                arg0_1: "f32[8, 8, 16, 16]",
+                arg1_1: "f32[8, 8, 15, 16]",
+                arg2_1: "f32[8, 8, 15, 16]",
+            ):
+                arg3_1 = self.arg3_1
+                constant_pad_nd: "f32[1, 1, 16, 16]" = (
+                    torch.ops.aten.constant_pad_nd.default(arg3_1, [0, 1], 0.0)
+                )
+                arg3_1 = None
+                slice_1: "f32[1, 1, 16, 15]" = torch.ops.aten.slice.Tensor(
+                    constant_pad_nd, -1, 0, 15
+                )
+                constant_pad_nd = None
+                expand: "f32[8, 8, 16, 15]" = torch.ops.aten.expand.default(
+                    slice_1, [8, 8, 16, 15]
+                )
+                slice_1 = None
+                _scaled_dot_product_efficient_attention = (
+                    torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                        arg0_1, arg1_1, arg2_1, expand, False
+                    )
+                )
+                arg0_1 = arg1_1 = arg2_1 = expand = None
+                getitem: "f32[8, 8, 16, 16]" = _scaled_dot_product_efficient_attention[
+                    0
+                ]
+                _scaled_dot_product_efficient_attention = None
+                return (getitem,)
+
+        query = torch.rand(8, 8, 16, 16, device="cuda")
+        key = torch.rand(8, 8, 15, 16, device="cuda")
+        value = torch.rand(8, 8, 15, 16, device="cuda")
+
+        mod = Mod()
+        out_eager = mod(query, key, value)
+
+        with torch.no_grad():
+            out_compiled = torch.compile(mod)(query, key, value)
+            self.assertEqual(out_eager, out_compiled, atol=0.02, rtol=1e4)
 
     def test_where_with_logical_op(self):
         def fn_and(x, y):
