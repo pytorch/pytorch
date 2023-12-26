@@ -68,7 +68,11 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+from .torch import (
+    TorchCtxManagerClassVariable,
+    TorchInGraphFunctionVariable,
+    TorchVariable,
+)
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
@@ -116,6 +120,7 @@ __all__ = [
     "TensorVariable",
     "TorchCtxManagerClassVariable",
     "TorchInGraphFunctionVariable",
+    "TorchVariable",
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",
