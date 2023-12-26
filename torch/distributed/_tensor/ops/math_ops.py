@@ -385,13 +385,13 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
 
     # output triple: (d_input, d_weight, d_bias)
     out_tuple_strategy = OpStrategy([])
-    for idx, _ in enumerate(input_strategy.strategies):
+    for idx, input_placement_strategy in enumerate(input_strategy.strategies):
+        # args for PlacementStrategy
         output_specs_list: List[Optional[DTensorSpec]] = []
         op_args_target_specs = []
         redistribute_costs = []
-        input_src_spec = input_strategy.strategies[idx].output_spec
-        assert isinstance(input_src_spec, DTensorSpec)
 
+        input_src_spec = input_placement_strategy.out_spec
         # arg: grad_out
         # TODO: change the strategy to the following rule.
         # d_input is basically a product of element-wise mul of
@@ -413,14 +413,6 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
                 generate_redistribute_costs(grad_out_strategy, grad_out_target_spec)
             )
             output_specs_list.append(grad_out_target_spec)
-            out_tuple_strategy.strategies.append(
-                # these 3 lists will be filled in later
-                PlacementStrategy(
-                    output_spec=output_specs_list,
-                    input_specs=op_args_target_specs,
-                    redistribute_cost=redistribute_costs,
-                )
-            )
         else:
             output_specs_list.append(None)
 
@@ -436,35 +428,22 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
         )
 
         # arg: mean, rstd
-        mean_target_spec = mean_strategy.strategies[idx].output_spec
-        assert isinstance(mean_target_spec, DTensorSpec)
-        op_args_target_specs.append(mean_target_spec)
-        redistribute_costs.append(
-            generate_redistribute_costs(mean_strategy, mean_target_spec)
-        )
-        rstd_target_spec = rstd_strategy.strategies[idx].output_spec
-        assert isinstance(rstd_target_spec, DTensorSpec)
-        op_args_target_specs.append(rstd_target_spec)
-        redistribute_costs.append(
-            generate_redistribute_costs(rstd_strategy, rstd_target_spec)
-        )
+        mean_src_spec = mean_strategy.strategies[idx].out_spec
+        op_args_target_specs.append(mean_src_spec)
+        redistribute_costs.append([0.0 for _ in mean_strategy.strategies])
+        rstd_src_spec = rstd_strategy.strategies[idx].out_spec
+        op_args_target_specs.append(rstd_src_spec)
+        redistribute_costs.append([0.0 for _ in rstd_strategy.strategies])
 
         # arg: weight
         # d_weight = sum(grad_out * (input - mean) / rstd, outer_dim, keepdim=False)
         if output_mask[1]:
             assert isinstance(weight_strategy, OpStrategy)
-            weight_src_spec = weight_strategy.strategies[idx].output_spec
-            assert isinstance(weight_src_spec, DTensorSpec)
-            weight_target_spec = DTensorSpec(
-                mesh=mesh,
-                placements=_replicate_dims_start_at(weight_src_spec.placements),
-                tensor_meta=weight_src_spec.tensor_meta,
-            )
-            op_args_target_specs.append(weight_target_spec)
-            redistribute_costs.append(
-                generate_redistribute_costs(weight_strategy, weight_target_spec)
-            )
-            # weight_grad_spec = weight_target_spec  # TODO
+            weight_src_spec = weight_strategy.strategies[idx].out_spec
+            # no need to redistribute weight since they should be replicated
+            # in forward pass
+            op_args_target_specs.append(weight_src_spec)
+            redistribute_costs.append([0.0 for _ in weight_strategy.strategies])
             # TODO: now d_weight spec follows input spec w/ a reduction.
             # we may need to change to a pointwise rule over grad_out and
             # input, then apply a reduction.
@@ -489,19 +468,18 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
         # d_bias = sum(grad_out, outer_dim, keepdim=False)
         if output_mask[2]:
             assert isinstance(bias_strategy, OpStrategy)
-            bias_src_spec = bias_strategy.strategies[idx].output_spec
-            assert isinstance(bias_src_spec, DTensorSpec)
-            bias_target_spec = DTensorSpec(
-                mesh=mesh,
-                placements=_replicate_dims_start_at(bias_src_spec.placements),
-                tensor_meta=bias_src_spec.tensor_meta,
-            )
-            op_args_target_specs.append(bias_target_spec)
-            redistribute_costs.append(
-                generate_redistribute_costs(bias_strategy, bias_target_spec)
-            )
+            bias_src_spec = bias_strategy.strategies[idx].out_spec
+            # no need to redistribute weight since they should be replicated
+            # in forward pass
+            op_args_target_specs.append(bias_src_spec)
+            redistribute_costs.append([0.0 for _ in bias_strategy.strategies])
+            # Currently we do not support the case where output_mask[0] is False while
+            # output_mask[1] is True. But it's easy to support that by accessing
+            # grad_out_spec via a local variable rather than the list. We just don't
+            # see the case.
             grad_out_spec = output_specs_list[0]
             assert isinstance(grad_out_spec, DTensorSpec)
+            # d_bias spec follows a reduction over grad_out
             inp_placements = _replicate_dims_start_at(grad_out_spec.placements, axis)
             reduce_dims_map = _infer_reduce_dims_map(
                 outer_dims, grad_out_spec.ndim, False
@@ -518,6 +496,14 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
             )
         else:
             output_specs_list.append(None)
+
+        out_tuple_strategy.strategies.append(
+            PlacementStrategy(
+                output_spec=tuple(output_specs_list),
+                input_specs=op_args_target_specs,
+                redistribute_cost=redistribute_costs,
+            )
+        )
 
     return out_tuple_strategy
 
