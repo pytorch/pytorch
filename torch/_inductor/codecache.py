@@ -2341,6 +2341,8 @@ def _async_compile_initializer(orig_ppid) -> None:
     global _watchdog_thread
     _watchdog_thread = Thread(target=run, daemon=True)
     _watchdog_thread.start()
+    # Ignore Ctrl-C (i.e. SIGINT) sent to pool workers to avoid meaningless log spam.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 _watchdog_thread: Optional[Thread] = None
