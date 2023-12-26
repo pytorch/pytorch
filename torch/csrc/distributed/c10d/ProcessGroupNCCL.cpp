@@ -737,10 +737,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
-  timeoutCheckInMilSec_ =
-      getCvarInt(TORCH_NCCL_TIMEOUT_CHECK_MILSEC, 200);
-  watchdogCheckInMilSec_ =
-      getCvarInt(TORCH_NCCL_WATCHDOG_CHECK_MILSEC, 500);
+  timeoutCheckInMilSec_ = getCvarInt(TORCH_NCCL_TIMEOUT_CHECK_MILSEC, 200);
+  watchdogCheckInMilSec_ = getCvarInt(TORCH_NCCL_WATCHDOG_CHECK_MILSEC, 500);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -1457,9 +1455,9 @@ void ProcessGroupNCCL::watchdogHandler() {
     // We busy-poll the work vector every watchdogCheckInMilSec_
     // milliseconds as long as the atomic is True.
     workMetaListCV_.wait_for(
-        lock,
-        std::chrono::milliseconds(watchdogCheckInMilSec_),
-        [&]() -> bool { return terminateProcessGroup_.load(); });
+        lock, std::chrono::milliseconds(watchdogCheckInMilSec_), [&]() -> bool {
+          return terminateProcessGroup_.load();
+        });
     // Bump up heart beat by one.
     heartbeat_++;
 
@@ -1469,6 +1467,11 @@ void ProcessGroupNCCL::watchdogHandler() {
     // we haven't polled for `heartbeat_timeout` seconds and there haven't
     // any work added or removed for `watchdog_timeout` seconds.
     if (dumpOnTimeout_ && uid_ == 0) {
+      if (rank_ == 0) {
+        const auto checkMsg =
+            c10::str(logPrefix(), "[Start] Rank 0 is hitting check.");
+        LOG(ERROR) << checkMsg;
+      }
       auto currentTime = std::chrono::steady_clock::now();
       auto timeSinceLastWorkListUpdate =
           std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1482,10 +1485,10 @@ void ProcessGroupNCCL::watchdogHandler() {
           timeSinceLastPollStore >= timeoutCheckInMilSec_) {
         lastTimePollStore = currentTime;
         if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
-          const auto exitMsg = c10::str(
+          const auto exitMsgPre = c10::str(
               logPrefix(),
               "[Start] Another rank reported a timeout and signaled a global abort.");
-          LOG(ERROR) << exitMsg;
+          LOG(ERROR) << exitMsgPre;
           optAsyncDebugDump = launchAsyncDebugDump();
           waitForDumpOrTimeout(*optAsyncDebugDump);
           const auto exitMsg = c10::str(
@@ -1608,9 +1611,7 @@ void ProcessGroupNCCL::runHookLoop() {
     // We busy-poll the work vector every watchdogCheckInMilSec_
     // milliseconds as long as the atomic is True.
     completedWorkListCV_.wait_for(
-        lock,
-        std::chrono::milliseconds(watchdogCheckInMilSec_),
-        [&]() -> bool {
+        lock, std::chrono::milliseconds(watchdogCheckInMilSec_), [&]() -> bool {
           return !completedWorkList_.empty() || terminateProcessGroup_.load();
         });
 
