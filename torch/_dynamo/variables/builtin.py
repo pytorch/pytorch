@@ -86,6 +86,8 @@ def _polyfill_call_impl(name):
 
 
 class BuiltinVariable(VariableTracker):
+    _SENTINEL = object()
+
     @staticmethod
     @functools.lru_cache(None)
     def _constant_fold_functions():
@@ -701,7 +703,9 @@ class BuiltinVariable(VariableTracker):
 
             # result of an item call is a scalar convert to a tensor
             if isinstance(a, FakeItemVariable):
-                a = variables.TorchVariable(torch.tensor).call_function(tx, [a], {})
+                a = variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
+                    tx, [a], {}
+                )
 
             # Dynamic input does not get resolved, rather, gets stored as call_function
             if isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
@@ -724,7 +728,7 @@ class BuiltinVariable(VariableTracker):
 
                     fn = variables.NumpyVariable(np.clip)
                 else:
-                    fn = variables.TorchVariable(torch.clamp)
+                    fn = variables.TorchInGraphFunctionVariable(torch.clamp)
                 kwargs = {"min": b} if (self.fn is max) else {"max": b}
                 result = fn.call_function(tx, [a], kwargs)
             else:
@@ -735,7 +739,7 @@ class BuiltinVariable(VariableTracker):
                     fn = variables.NumpyVariable(fn)
                 else:
                     fn = {max: torch.maximum, min: torch.minimum}[self.fn]
-                    fn = variables.TorchVariable(fn)
+                    fn = variables.TorchInGraphFunctionVariable(fn)
                 result = fn.call_function(tx, [a, b], {})
 
             # return unspec if both a, b are unspec or const
@@ -1098,13 +1102,13 @@ class BuiltinVariable(VariableTracker):
                 {},
             )
 
-    def call_reduce(self, tx, function, iterable, initializer=None):
+    def call_reduce(self, tx, function, iterable, initial=_SENTINEL):
         if iterable.has_unpack_var_sequence(tx):
             items = iterable.unpack_var_sequence(tx)
-            if initializer is None:
+            if initial is self._SENTINEL:
                 value, items = items[0], items[1:]
             else:
-                value = initializer
+                value = initial
             for element in items:
                 value = function.call_function(tx, [value, element], {})
             return value
@@ -1118,7 +1122,6 @@ class BuiltinVariable(VariableTracker):
             GetAttrVariable,
             PythonModuleVariable,
             TorchInGraphFunctionVariable,
-            TorchVariable,
             UserFunctionVariable,
         )
         from .builder import SourcelessBuilder, VariableBuilder
@@ -1231,11 +1234,19 @@ class BuiltinVariable(VariableTracker):
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchInGraphFunctionVariable):
+            # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
-            if trace_rules.lookup(member) is not None:
-                return trace_rules.lookup(member)(member, **options)
-        elif isinstance(obj, TorchVariable):
-            member = getattr(obj.value, name)
+            if trace_rules.is_aten_op_or_tensor_method(member):
+                return TorchInGraphFunctionVariable(member, **options)
+        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
+            if obj.is_torch:
+                member = getattr(obj.value, name)
+            else:
+                member = obj.value.__dict__[name]
+
+            if config.replay_record_enabled:
+                tx.exec_recorder.record_module_access(obj.value, name, member)
+
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
@@ -1245,13 +1256,6 @@ class BuiltinVariable(VariableTracker):
                 return VariableBuilder(tx, source)(member)
             else:
                 return SourcelessBuilder()(tx, member)
-        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
-            member = obj.value.__dict__[name]
-
-            if config.replay_record_enabled:
-                tx.exec_recorder.record_module_access(obj.value, name, member)
-
-            return VariableBuilder(tx, source)(member)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
