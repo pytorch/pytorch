@@ -228,7 +228,7 @@ namespace {
     return descriptors;
   }
 #else
-  auto rnn_descriptor_sequence(const Tensor& tensor, const int batch_size, IntArrayRef batch_sizes, const int seq_len, const int vector_size) { // packed case
+  auto rnn_descriptor_sequence(const Tensor& tensor, uint32_t batch_size, const IntArrayRef batch_sizes, uint32_t seq_len, uint32_t vector_size) { // packed case
     RNNDataDescriptor r;
     std::vector<int> seqLengthArray(batch_size, 1);
     // cuDNN wants the sequence lenghts for a packed batch as if they
@@ -251,12 +251,12 @@ namespace {
     return r;
   }
 
-  auto rnn_descriptor(const Tensor& tensor, const int batch_size, const int seq_len, const int vector_size) {
+  auto rnn_descriptor(const Tensor& tensor, uint32_t batch_size, uint32_t seq_len, uint32_t vector_size) {
     RNNDataDescriptor r;
     // NB: Looks like even if batch_first is true here we always want SEQ_MAJOR_UNPACKED, because the input
     // appears to be transposed if it is barch-major
     const auto layout = CUDNN_RNN_DATA_LAYOUT_SEQ_MAJOR_UNPACKED;
-    std::vector<in32_t> seqLengthArray(batch_size, seq_len);
+    std::vector<int32_t> seqLengthArray(batch_size, seq_len);
     r.set(tensor, layout, seq_len, batch_size, vector_size, seqLengthArray.data());
     return r;
   }
