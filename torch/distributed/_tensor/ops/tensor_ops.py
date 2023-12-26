@@ -80,7 +80,7 @@ def equal_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     equal_strategy = OpStrategy([])
 
     for arg_strategy in select_strategy.strategies:
-        arg_spec = arg_strategy.output_spec
+        arg_spec = arg_strategy.out_spec
         if is_tensor_partial(arg_spec):
             # if the arg_spec have partial, reshard to replicate
             # otherwise local shard tensor comparison would be invalid
@@ -128,7 +128,7 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     create_like_strategy = OpStrategy([])
     assert isinstance(select_strategy, OpStrategy)
     for arg_strategy in select_strategy.strategies:
-        arg_spec = arg_strategy.output_spec
+        arg_spec = arg_strategy.out_spec
         if is_tensor_partial(arg_spec):
             # if the arg_spec have partial, accept partial
             # in the input_specs but output replicate for
@@ -174,7 +174,7 @@ def gen_bucketize_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyTyp
     bucketize_strategy = OpStrategy([])
     assert isinstance(input_strategy, OpStrategy)
     for arg_strategy in input_strategy.strategies:
-        arg_spec = DTensorSpec(mesh, arg_strategy.output_spec.placements)
+        arg_spec = DTensorSpec(mesh, arg_strategy.out_spec.placements)
         replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
         bucketize_strategy.strategies.append(
             PlacementStrategy(
@@ -214,7 +214,7 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     slice_strategy = OpStrategy([])
 
     for arg_strategy in input_strategy.strategies:
-        arg_spec = arg_strategy.output_spec
+        arg_spec = arg_strategy.out_spec
         if not is_tensor_dim_sharded(arg_spec, dim=slice_dim) or redundant_slice:
             # only add the strategy if the slice dim is not sharded
             out_spec = DTensorSpec(mesh, arg_spec.placements)
@@ -223,7 +223,7 @@ def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         # if all strategies are filtered out, unsharding all specs on slice dim
         # of the input strategy, and use that as the op strategy
         for arg_strategy in input_strategy.strategies:
-            arg_spec = arg_strategy.output_spec
+            arg_spec = arg_strategy.out_spec
             unshard_spec = DTensorSpec(
                 mesh, unshard_tensor_dim(arg_spec.placements, dim=slice_dim)
             )
@@ -276,7 +276,7 @@ def gen_slice_scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> Strateg
     slice_scatter_strategy = OpStrategy([])
     # by default follow the input strategy for both input and src
     for arg_strategy in input_strategy.strategies:
-        arg_spec = arg_strategy.output_spec
+        arg_spec = arg_strategy.out_spec
         if not (
             is_tensor_dim_sharded(arg_spec, dim=slice_dim)
             or is_tensor_partial(arg_spec)
@@ -290,7 +290,7 @@ def gen_slice_scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> Strateg
         # if all strategies are filtered out, replicating all specs on slice_scatter dim
         # of the input strategy, and use that as the op strategy
         for arg_strategy in input_strategy.strategies:
-            arg_spec = arg_strategy.output_spec
+            arg_spec = arg_strategy.out_spec
             replicate_spec = DTensorSpec(
                 mesh, replicate_tensor_dim(arg_spec.placements, dim=slice_dim)
             )
