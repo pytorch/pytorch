@@ -218,6 +218,8 @@ MOD_INLINELIST = {
     "torch.utils._foreach_utils",
     "torch.utils._pytree",
     "torch._tensor",
+    "torch.ao.quantization.quantizer.x86_inductor_quantizer",
+    "torch.ao.quantization.quantizer.utils",
 }
 
 

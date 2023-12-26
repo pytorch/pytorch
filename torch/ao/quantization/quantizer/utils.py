@@ -1,4 +1,6 @@
-from typing import List
+from typing import Any, Callable, List, Optional
+
+import torch.nn.functional as F
 
 from torch.ao.quantization.pt2e.utils import _is_sym_size_node
 
@@ -47,3 +49,37 @@ def _node_only_used_for_sym_size(node: Node, partition_nodes: List[Node]):
         ((user not in partition_nodes) or _is_sym_size_node(user))
         for user in node.users
     )
+
+
+def get_conv_unary_pattern(
+    conv_fn: Callable,
+    has_bn: bool = False,  # Usually need for QAT pattern
+    unary_fn: Optional[Callable[[Any], Any]] = None,
+):
+    def _conv_unary(
+        x,
+        conv_weight,
+        conv_bias,
+        bn_weight=None,
+        bn_bias=None,
+        bn_rm=None,
+        bn_rv=None,
+    ):
+        conv = conv_fn(x, conv_weight, conv_bias)
+        if has_bn:
+            bn = F.batch_norm(conv, bn_rm, bn_rv, bn_weight, bn_bias, training=True)
+        else:
+            bn = conv
+        if unary_fn is not None:
+            output = unary_fn(bn)
+        else:
+            output = bn
+        return output, {
+            "input": x,
+            "conv": conv,
+            "conv_weight": conv_weight,
+            "conv_bias": conv_bias,
+            "output": output,
+        }
+
+    return _conv_unary
