@@ -363,7 +363,7 @@ def error_if_complex(func_name, args, is_input):
 
 @exposed_in("torch.func")
 def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False,
-           chunk_size: Optional[int] = None,
+           chunk_size: Optional[int] = None, randomness: str = 'error',
            _preallocate_and_copy=False):
     """
     Computes the Jacobian of ``func`` with respect to the arg(s) at index
@@ -391,6 +391,9 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             If not None, then compute the jacobian :attr:`chunk_size` rows at a time
             (equivalent to doing multiple vmap over vjp). If you run into memory issues computing
             the jacobian, please try to specify a non-None chunk_size.
+        randomness(str): Flag indicating what type of randomness to use.
+            See :func:`vmap` for more detail. Allowed: "different", "same", "error".
+            Default: "error"
 
     Returns:
         Returns a function that takes in the same inputs as ``func`` and
@@ -537,7 +540,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
                     # i.e. user shouldn't deal with the limitations of vmap.
                     chunked_result = vjp_fn(basis)
                 else:  # chunk_size is None or chunk_size != 1
-                    chunked_result = vmap(vjp_fn)(basis)
+                    chunked_result = vmap(vjp_fn, randomness=randomness)(basis)
 
                 flat_results = pytree.tree_leaves(chunked_result)
 

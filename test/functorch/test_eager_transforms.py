@@ -3680,7 +3680,7 @@ class TestMakeFunctional(TestCase):
         torch.manual_seed(0)
         models = [Foo() for _ in range(num_models)]
         _, params, buffers = combine_state_for_ensemble(models)
-        result = vmap(fmodel)(params, buffers, xs)
+        result = vmap(fmodel, randomness='same')(params, buffers, xs)
 
         torch.manual_seed(0)
         models = [Foo() for _ in range(num_models)]
