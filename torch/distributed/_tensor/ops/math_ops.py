@@ -122,20 +122,19 @@ def common_reduction_strategy(
     reduction_strategy = OpStrategy([])
 
     for strtg in input_strategy.strategies:
-        assert isinstance(strtg.output_spec, DTensorSpec)
         if not reduction_linear:
             # input placements for this strategy should clear out pending sum and sharding
             # on the reduction dimension
             input_placements = replicate_reduction_dims(
-                strtg.output_spec.placements, reduce_dims
+                strtg.out_spec.placements, reduce_dims
             )
         else:
-            input_placements = strtg.output_spec.placements
+            input_placements = strtg.out_spec.placements
 
         input_spec = DTensorSpec(
             mesh=mesh,
             placements=input_placements,
-            tensor_meta=strtg.output_spec.tensor_meta,
+            tensor_meta=strtg.out_spec.tensor_meta,
         )
 
         reduce_dims_map = _infer_reduce_dims_map(reduce_dims, input_spec.ndim, keep_dim)
@@ -289,8 +288,7 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
         op_args_target_specs = []
         redistribute_costs = []
-        input_src_spec = input_placement_strategy.output_spec
-        assert isinstance(input_src_spec, DTensorSpec)
+        input_src_spec = input_placement_strategy.out_spec
 
         # for the input tensor, we replicate it on the inner dims if necessary
         # TODO: we can avoid forcing the redistribution once we figure out
@@ -307,8 +305,7 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
 
         if weight_strategy is not None:
             assert isinstance(weight_strategy, OpStrategy)
-            weight_src_spec = weight_strategy.strategies[idx].output_spec
-            assert isinstance(weight_src_spec, DTensorSpec)
+            weight_src_spec = weight_strategy.strategies[idx].out_spec
 
             # for the weight tensor, we replicate it on all dims if necessary
             # TODO: we can avoid forcing the redistribution once we figure out
@@ -325,8 +322,7 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
 
         if bias_strategy is not None:
             assert isinstance(bias_strategy, OpStrategy)
-            bias_src_spec = bias_strategy.strategies[idx].output_spec
-            assert isinstance(bias_src_spec, DTensorSpec)
+            bias_src_spec = bias_strategy.strategies[idx].out_spec
 
             # for the bias tensor, we replicate it on all dims if necessary
             # TODO: we can avoid forcing the redistribution once we figure out
