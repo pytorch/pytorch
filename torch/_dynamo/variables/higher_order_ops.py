@@ -546,8 +546,12 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             all_diffs = []
             for i, (var1, var2) in enumerate(zip(tensor_vars1, tensor_vars2)):
                 # We check the meta data associated with meta["example_value"]
-                meta1 = _extract_tensor_metadata(var1.proxy.node.meta["example_value"])
-                meta2 = _extract_tensor_metadata(var2.proxy.node.meta["example_value"])
+                meta1 = _extract_tensor_metadata(
+                    var1.proxy.node.meta["example_value"], include_contiguity=False
+                )
+                meta2 = _extract_tensor_metadata(
+                    var2.proxy.node.meta["example_value"], include_contiguity=False
+                )
                 if meta1 != meta2:
                     all_diffs.append((f"pair{i}:", meta1, meta2))
             return all_diffs
@@ -703,12 +707,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from . import (
-            ConstantVariable,
-            NestedUserFunctionVariable,
-            TensorVariable,
-            UserFunctionVariable,
-        )
+        from . import NestedUserFunctionVariable, TensorVariable, UserFunctionVariable
+        from .builder import wrap_fx_proxy_cls
 
         if len(kwargs) > 0:
             unimplemented(
@@ -731,8 +731,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # To get the example output from map() we will need to provide at least one sample to
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
-        first_dim = args[1].call_method(
-            tx, "__getitem__", args=[ConstantVariable.create(0)], kwargs={}
+        first_dim = wrap_fx_proxy_cls(
+            target_cls=TensorVariable, tx=tx, proxy=args[1].as_proxy()[0]
         )
 
         # TODO: Support kwargs
@@ -1175,7 +1175,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
                 "kwargs have not been implemented for torch.autograd.Function"
             )
 
-        from . import TorchVariable
+        from . import TorchInGraphFunctionVariable
 
         always_restore = self.value.__name__ == "trampoline_autograd_bwd"
         if (
@@ -1184,7 +1184,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         ):
             fn = UserFunctionVariable(self.value, source=self.source)
         else:
-            fn = TorchVariable(self.value)
+            fn = TorchInGraphFunctionVariable(self.value)
         # TODO(jansel): BUG!!! we aren't copying on the line below, so the post-pre check below is pointless
         pre_guards = tx.output.guards
         # In eager-mode PyTorch, if we only compute first-order gradients,

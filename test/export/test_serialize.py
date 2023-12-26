@@ -11,7 +11,7 @@ import zipfile
 
 import torch
 import torch._dynamo as torchdynamo
-from torch.export import export, save, load
+from torch.export import export, save, load, Dim
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
@@ -470,6 +470,15 @@ class TestDeserialize(TestCase):
 
         inputs = (torch.rand(8, 8, 8), torch.rand(8, 8, 8), torch.rand(8, 8, 4))
         self.check_graph(MyModule(), inputs)
+
+    def test_sym_ite(self):
+        def f(x):
+            b = x.shape[0] == 5
+            ret = torch.sym_ite(b, x.shape[0], x.shape[1])
+            return ret
+
+        dynamic_shapes = {'x': {0: Dim("dim0"), 1: Dim("dim1")}}
+        self.check_graph(f, (torch.ones(4, 5),), dynamic_shapes=dynamic_shapes)
 
     @parametrize(
         "name,case",
