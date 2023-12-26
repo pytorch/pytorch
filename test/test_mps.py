@@ -623,6 +623,7 @@ def mps_ops_modifier(ops):
         'nn.functional.adaptive_max_pool3d': None,
         'nn.functional.interpolatearea': None,
         'nn.functional.interpolatebicubic': None,
+        'nn.functional.interpolatelinear': None,
         'nn.functional.interpolatetrilinear': None,
         # TODO: max_pool2d for integral types fails the numerical test
         'nn.functional.max_pool2d': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
