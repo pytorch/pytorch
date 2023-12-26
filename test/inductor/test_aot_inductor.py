@@ -1346,7 +1346,7 @@ class AOTInductorTestsTemplate:
         inputs = (
             torch.tensor([1, 10, 100, 1000], device=self.device, dtype=torch.int64),
             torch.tensor([0, 1, 0, 1, 2, 1], device=self.device, dtype=torch.int64),
-            torch.tensor([1, 2, 3, 4, 5, 6], device=self.device, dtype=torch.int64)
+            torch.tensor([1, 2, 3, 4, 5, 6], device=self.device, dtype=torch.int64),
         )
 
         self.check_model(Model(), inputs)
@@ -1536,7 +1536,7 @@ CPU_TEST_FAILURES = {
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
     # the test segfaults
-    "test_scatter_fallback": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
     # Minimal arrayref interface doesn't support bfloat16 yet.
     "test_sdpa": fail_minimal_arrayref_interface(is_skip=True),
