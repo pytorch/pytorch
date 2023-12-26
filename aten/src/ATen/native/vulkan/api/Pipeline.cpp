@@ -253,7 +253,6 @@ PipelineLayoutCache::PipelineLayoutCache(VkDevice device)
 PipelineLayoutCache::PipelineLayoutCache(PipelineLayoutCache&& other) noexcept
     : cache_mutex_{}, device_(other.device_), cache_(std::move(other.cache_)) {
   std::lock_guard<std::mutex> lock(other.cache_mutex_);
-
 }
 
 PipelineLayoutCache::~PipelineLayoutCache() {
@@ -302,9 +301,9 @@ ComputePipelineCache::ComputePipelineCache(
     ComputePipelineCache&& other) noexcept
     : cache_mutex_{},
       device_(other.device_),
-      pipeline_cache_(other.pipeline_cache_), cache_(std::move(other.cache_)) {
+      pipeline_cache_(other.pipeline_cache_),
+      cache_(std::move(other.cache_)) {
   std::lock_guard<std::mutex> lock(other.cache_mutex_);
-
 
   other.pipeline_cache_ = VK_NULL_HANDLE;
 }

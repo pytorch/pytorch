@@ -16,10 +16,7 @@ namespace api {
 
 class DescriptorSet final {
  public:
-  explicit DescriptorSet(
-      VkDevice,
-      VkDescriptorSet,
-      ShaderLayout::Signature );
+  explicit DescriptorSet(VkDevice, VkDescriptorSet, ShaderLayout::Signature);
 
   DescriptorSet(const DescriptorSet&) = delete;
   DescriptorSet& operator=(const DescriptorSet&) = delete;

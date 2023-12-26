@@ -28,7 +28,6 @@ CommandBuffer::CommandBuffer(CommandBuffer&& other) noexcept
       bound_(other.bound_) {
   other.handle_ = VK_NULL_HANDLE;
   other.bound_.reset();
-  
 }
 
 CommandBuffer& CommandBuffer::operator=(CommandBuffer&& other) noexcept {
@@ -317,9 +316,8 @@ void CommandBuffer::copy_buffer_to_texture(
   state_ = CommandBuffer::State::RECORDING;
 }
 
-void CommandBuffer::write_timestamp(
-    VkQueryPool querypool,
-    const uint32_t idx) const {
+void CommandBuffer::write_timestamp(VkQueryPool querypool, const uint32_t idx)
+    const {
   TORCH_CHECK(
       state_ == CommandBuffer::State::RECORDING,
       "Vulkan CommandBuffer: called write_timestamp() on a command buffer whose state "

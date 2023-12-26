@@ -24,9 +24,6 @@ PhysicalDevice::PhysicalDevice(VkPhysicalDevice physical_device_handle)
   vkGetPhysicalDeviceProperties(handle, &properties);
   vkGetPhysicalDeviceMemoryProperties(handle, &memory_properties);
 
-
-
-
   // Check if there are any memory types have both the HOST_VISIBLE and the
   // DEVICE_LOCAL property flags
   const VkMemoryPropertyFlags unified_memory_flags =
@@ -264,7 +261,7 @@ DeviceHandle::~DeviceHandle() {
 
 Adapter::Adapter(
     VkInstance instance,
-    PhysicalDevice  physical_device,
+    PhysicalDevice physical_device,
     const uint32_t num_queues)
     : queue_usage_mutex_{},
       physical_device_(std::move(physical_device)),

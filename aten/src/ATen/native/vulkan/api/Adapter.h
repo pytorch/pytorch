@@ -83,7 +83,7 @@ class Adapter final {
  public:
   explicit Adapter(
       VkInstance instance,
-      PhysicalDevice  physical_device,
+      PhysicalDevice physical_device,
       const uint32_t num_queues);
 
   Adapter(const Adapter&) = delete;

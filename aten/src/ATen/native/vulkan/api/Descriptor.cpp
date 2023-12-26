@@ -15,7 +15,7 @@ namespace api {
 DescriptorSet::DescriptorSet(
     VkDevice device,
     VkDescriptorSet handle,
-    ShaderLayout::Signature  shader_layout_signature)
+    ShaderLayout::Signature shader_layout_signature)
     : device_(device),
       handle_(handle),
       shader_layout_signature_(std::move(shader_layout_signature)),

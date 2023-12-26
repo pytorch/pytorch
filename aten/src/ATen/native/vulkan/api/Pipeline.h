@@ -124,8 +124,7 @@ class PipelineLayoutCache final {
   using Value = PipelineLayout;
 
   struct Hasher {
-    inline size_t operator()(
-        VkDescriptorSetLayout descriptor_layout) const {
+    inline size_t operator()(VkDescriptorSetLayout descriptor_layout) const {
       return c10::get_hash(descriptor_layout);
     }
   };

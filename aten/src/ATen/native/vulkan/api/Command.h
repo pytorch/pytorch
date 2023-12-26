@@ -18,9 +18,7 @@ namespace api {
 
 class CommandBuffer final {
  public:
-  explicit CommandBuffer(
-      VkCommandBuffer,
-      const VkCommandBufferUsageFlags);
+  explicit CommandBuffer(VkCommandBuffer, const VkCommandBufferUsageFlags);
 
   CommandBuffer(const CommandBuffer&) = delete;
   CommandBuffer& operator=(const CommandBuffer&) = delete;
@@ -82,10 +80,7 @@ class CommandBuffer final {
   void begin();
   void end();
 
-  void bind_pipeline(
-      VkPipeline,
-      VkPipelineLayout,
-      const utils::uvec3);
+  void bind_pipeline(VkPipeline, VkPipelineLayout, const utils::uvec3);
   void bind_descriptors(VkDescriptorSet);
 
   void insert_barrier(const PipelineBarrier& pipeline_barrier);
@@ -136,10 +131,7 @@ struct CommandPoolConfig final {
 
 class CommandPool final {
  public:
-  explicit CommandPool(
-      VkDevice,
-      const uint32_t,
-      const CommandPoolConfig&);
+  explicit CommandPool(VkDevice, const uint32_t, const CommandPoolConfig&);
 
   CommandPool(const CommandPool&) = delete;
   CommandPool& operator=(const CommandPool&) = delete;

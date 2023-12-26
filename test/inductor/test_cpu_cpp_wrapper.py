@@ -134,6 +134,7 @@ if RUN_CPU:
 
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
+        BaseTest("test_bernoulli1"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
@@ -169,6 +170,7 @@ if RUN_CPU:
         BaseTest("test_custom_op"),
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
+        BaseTest("test_index_put1"),
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),

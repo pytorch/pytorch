@@ -74,9 +74,7 @@ void Context::submit_compute_epilogue(
   command_buffer.dispatch(global_workgroup_size);
 }
 
-void Context::submit_cmd_to_gpu(
-    VkFence fence_handle,
-    const bool final_use) {
+void Context::submit_cmd_to_gpu(VkFence fence_handle, const bool final_use) {
   if (cmd_) {
     cmd_.end();
     adapter_p_->submit_cmd(

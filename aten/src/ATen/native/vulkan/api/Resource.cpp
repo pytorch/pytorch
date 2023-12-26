@@ -523,7 +523,6 @@ SamplerCache::SamplerCache(VkDevice device)
 SamplerCache::SamplerCache(SamplerCache&& other) noexcept
     : cache_mutex_{}, device_(other.device_), cache_(std::move(other.cache_)) {
   std::lock_guard<std::mutex> lock(other.cache_mutex_);
-
 }
 
 SamplerCache::~SamplerCache() {
