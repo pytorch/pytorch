@@ -344,17 +344,13 @@ class ExportedProgram:
         )
         return string
 
-    def module(self, *, flat: bool = True) -> torch.nn.Module:
+    def module(self) -> torch.nn.Module:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """
-        from torch._export.unflatten import unflatten
         from ._unlift import _unlift_exported_program_lifted_states
 
-        if flat:
-            return _unlift_exported_program_lifted_states(self)
-        else:
-            return unflatten(self)
+        return _unlift_exported_program_lifted_states(self)
 
     @_disable_prexisiting_fake_mode
     def run_decompositions(
@@ -605,4 +601,8 @@ def _get_updated_range_constraints(
         for k, v in shape_env.var_to_range.items()
         if k not in shape_env.replacements
     }
+    for k, v in shape_env.runtime_var_to_range.items():
+        if k not in shape_env.replacements:
+            range_constraints[k] = v
+
     return range_constraints
