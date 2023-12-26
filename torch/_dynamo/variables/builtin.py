@@ -1104,13 +1104,13 @@ class BuiltinVariable(VariableTracker):
                 {},
             )
 
-    def call_reduce(self, tx, function, iterable, initializer=None):
+    def call_reduce(self, tx, function, iterable, initial=_SENTINEL):
         if iterable.has_unpack_var_sequence(tx):
             items = iterable.unpack_var_sequence(tx)
-            if initializer is None:
+            if initial is self._SENTINEL:
                 value, items = items[0], items[1:]
             else:
-                value = initializer
+                value = initial
             for element in items:
                 value = function.call_function(tx, [value, element], {})
             return value
