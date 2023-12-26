@@ -14562,19 +14562,20 @@ op_db: List[OpInfo] = [
             ),
         ),
     ),
-    BinaryUfuncInfo('nextafter',
-                    dtypes=floating_types_and(torch.bfloat16, torch.half),
-                    dtypesIfCUDA=floating_types_and(torch.bfloat16),
-                    supports_autograd=False,
-                    supports_rhs_python_scalar=False,
-                    skips=(
-                        # RuntimeError: undefined value cpu
-                        DecorateInfo(
-                            unittest.skip("Skipped!"),
-                            device_type="cuda",
-                        ),
-                    ),
-                ),
+    BinaryUfuncInfo(
+        "nextafter",
+        dtypes=floating_types_and(torch.bfloat16, torch.half),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16),
+        supports_autograd=False,
+        supports_rhs_python_scalar=False,
+        skips=(
+            # RuntimeError: undefined value cpu
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                device_type="cuda",
+            ),
+        ),
+    ),
     OpInfo(
         "to",
         op=lambda x, *args, **kwargs: x.to(*args, **kwargs),
