@@ -4,8 +4,7 @@
 #include <c10/util/TypeTraits.h>
 #include <algorithm>
 
-namespace c10 {
-namespace guts {
+namespace c10::guts {
 
 template <class... T>
 struct false_t : std::false_type {};
@@ -512,5 +511,4 @@ decltype(auto) map_types_to_values(Func&& func) {
 }
 
 } // namespace typelist
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts
