@@ -841,15 +841,10 @@ _to_sparse_semi_structured(const Tensor& dense) {
       uint64_t meta_val = 0;
       for (auto k = 0; k < dense_elems_per_meta_elem / ksparse; ++k, mask_cpu_ptr += ksparse) {
         const auto mask_elems =
-            (ksparse == 4)
-            ? std::make_tuple(mask_cpu_ptr[0],
-                              mask_cpu_ptr[1],
-                              mask_cpu_ptr[2],
-                              mask_cpu_ptr[3])
-            : std::make_tuple(mask_cpu_ptr[0],
-                              mask_cpu_ptr[0],
-                              mask_cpu_ptr[1],
-                              mask_cpu_ptr[1]);
+          (ksparse == 4) ? std::make_tuple(mask_cpu_ptr[0], mask_cpu_ptr[1],
+                                           mask_cpu_ptr[2], mask_cpu_ptr[3])
+                         : std::make_tuple(mask_cpu_ptr[0], mask_cpu_ptr[0],
+                                           mask_cpu_ptr[1], mask_cpu_ptr[1]);
         auto meta_quadruple = 0;
         if (mask_elems == std::make_tuple(1, 1, 0, 0)) {
           meta_quadruple = 4; // 0100

@@ -88,48 +88,6 @@ from .wrappers import _wrap_submodules
 from torch._inductor import config
 
 
-def export__RC__(
-    f: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-    *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
-    strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
-) -> ExportedProgram:
-    """
-    API for exporting with dynamic shape specifications instead of constraints.
-    It should be considered "release candidate" (RC), meant to replace `export`.
-
-    Here, `dynamic_shapes` is expected to be a dict from
-    argument names of `f` to dynamic shape specifications OR a tuple where each element
-    corresponds to the original order of the arguments defined in the function signature
-    ,as follows:
-    - The dynamic shape of a tensor argument can be specified as:
-      - Either a dict from dynamic dimension indices to Dim types. It is not
-        required to include static dimension indices in this dict, but when
-        they are, they should be mapped to None.
-      - Or a tuple of Dim types or None. The Dim types correspond to dynamic
-        dimensions, whereas static dimensions are denoted by None.
-    - Arguments that are dicts or tuples of tensors are recursively specified
-      by using mappings or sequences of contained specifications.
-
-    See `export` for documentation of `f`, `args`, `kwargs` and return.
-    """
-    from torch.export._trace import _export
-    warnings.warn("This function is deprecated. Please use torch.export.export instead.")
-
-    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
-    return _export(
-        f,
-        args,
-        kwargs,
-        constraints=constraints,
-        strict=strict,
-        preserve_module_call_signature=preserve_module_call_signature
-    )
-
-
 @dataclasses.dataclass
 class ExportDynamoConfig:
     """
@@ -138,15 +96,13 @@ class ExportDynamoConfig:
     allow_rnn: bool = True
 
 
-DECOMP_TABLE = core_aten_decompositions()
-
-
 @compatibility(is_backward_compatible=False)
 def capture_pre_autograd_graph(
     f: Callable,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
+    _functional_pre_dispatch_IR: bool = False,
 ) -> torch.nn.Module:
     """
     A helper function that is intended to trace a module before any pre-autograd
@@ -177,51 +133,56 @@ def capture_pre_autograd_graph(
         torch.ops.aten.native_batch_norm.default: torch.ops.aten.native_batch_norm.default.decompose,
     }
 
-    if kwargs is None:
-        kwargs = {}
+    if _functional_pre_dispatch_IR:
+        from torch.export._trace import _export
+        module = _export(f, args, kwargs, constraints=constraints, pre_dispatch=True, decomp_table=decomp_table).module()
+    else:
+        if kwargs is None:
+            kwargs = {}
 
-    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
-        m = torch._dynamo.export(
-            f,
-            constraints=constraints,
-            assume_static_by_default=True,
-            tracing_mode="symbolic",
-            decomposition_table=decomp_table,
-            pre_dispatch=True,
-            aten_graph=True,
-        )(
-            *args,
-            **kwargs,
-        )[0]
+        with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
+            m = torch._dynamo.export(
+                f,
+                constraints=constraints,
+                assume_static_by_default=True,
+                tracing_mode="symbolic",
+                decomposition_table=decomp_table,
+                pre_dispatch=True,
+                aten_graph=True,
+            )(
+                *args,
+                **kwargs,
+            )[0]
 
-        def _train(self, mode: bool = True):
-            raise NotImplementedError("Calling train() is not supported yet.")
+            _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
 
-        def _eval(self, mode: bool = True):
-            raise NotImplementedError("Calling eval() is not supported yet.")
+            m.meta["inline_constraints"] = {
+                k: v
+                for k, v in fake_mode.shape_env.runtime_var_to_range.items()
+                if re.match(r"^[if]\d+$", str(k))
+            }
 
-        _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
+            if isinstance(f, torch.nn.Module):
+                from torch.export._trace import _restore_state_dict
+                _restore_state_dict(f, m)
 
-        m.meta["inline_constraints"] = {
-            k: v
-            for k, v in fake_mode.shape_env.runtime_var_to_range.items()
-            if re.match(r"^[if]\d+$", str(k))
-        }
+            flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
+            range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
+            module = _create_stateful_graph_module(
+                m,
+                range_constraints=range_constraints,
+                equality_constraints=equality_constraints,
+            )
 
-        if isinstance(f, torch.nn.Module):
-            from torch.export._trace import _restore_state_dict
-            _restore_state_dict(f, m)
+    def _train(self, mode: bool = True):
+        raise NotImplementedError("Calling train() is not supported yet.")
 
-        flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-        range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
-        unlifted_m = _create_stateful_graph_module(
-            m,
-            range_constraints=range_constraints,
-            equality_constraints=equality_constraints,
-        )
-        unlifted_m.train = types.MethodType(_train, m)  # type: ignore[method-assign]
-        unlifted_m.eval = types.MethodType(_eval, m)  # type: ignore[method-assign]
-        return unlifted_m
+    def _eval(self, mode: bool = True):
+        raise NotImplementedError("Calling eval() is not supported yet.")
+
+    module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
+    module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+    return module
 
 
 def export(
@@ -244,49 +205,6 @@ def export(
             DeprecationWarning,
             stacklevel=2,
         )
-    return _export(
-        f,
-        args,
-        kwargs,
-        constraints,
-        strict=strict,
-        preserve_module_call_signature=preserve_module_call_signature,
-    )
-
-
-@_disable_prexisiting_fake_mode
-def _export(
-    f: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
-    *,
-    strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
-) -> ExportedProgram:
-    """
-    Traces either an nn.Module's forward function or just a callable with PyTorch
-    operations inside and produce a ExportedProgram.
-
-    Args:
-        m: the `nn.Module` or callable to trace.
-
-        args: example positional inputs.
-
-        kwargs: optional example keyword inputs.
-
-        constraints: A optional list of constraints on the dynamic arguments specifying
-            their possible range of their shapes
-
-        preserve_module_call_signature: A list of submodule paths for which the original
-            calling conventions are preserved as metadata.
-
-    Returns:
-        An ExportedProgram containing the traced method.
-    """
-    from torch.export._trace import _export
-    warnings.warn("This function is deprecated. Please use torch.export.export instead.")
-
     return _export(
         f,
         args,
