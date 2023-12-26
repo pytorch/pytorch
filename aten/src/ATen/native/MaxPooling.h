@@ -7,8 +7,6 @@
 
 namespace at::native {
 
-namespace {
-
 static void check_max_pool1d(
     const Tensor& self,
     IntArrayRef kernel_size,
@@ -62,8 +60,6 @@ static void check_max_pool1d(
   const int64_t OW = pooling_output_shape(self.sym_size(-1).guard_int(__FILE__, __LINE__), kernel_size[0], padding[0], stride[0], dilation[0], ceil_mode);
   TORCH_CHECK(OW > 0, "max_pool1d() Invalid computed output size: ", OW);
 }
-
-} // anonymous namespace
 
 // TODO(Heitor) Template by dimension
 struct PoolingParams1D {
