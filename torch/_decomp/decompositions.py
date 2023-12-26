@@ -4420,6 +4420,13 @@ def _weight_norm_interface(x, y, dim):
     return x * (y / norm), norm
 
 
+@register_decomposition(aten.take)
+@out_wrapper()
+def take(self, index):
+    flattened = self.reshape(-1)
+    return flattened[index]
+
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)

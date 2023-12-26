@@ -420,6 +420,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.sum.default,
             aten.sum.out,
             aten.t,
+            aten.take,
             aten.tanh_backward,
             aten.threshold,
             aten.threshold_,

@@ -199,14 +199,10 @@ def _mark_sharding(
                     len(input_nodes) == 1
                 ), f"non-compute op only support one input now, found node: {node} with length of inputs: {len(node.args)}"
                 arg_strategy = placement_strategies[input_nodes[0]]
-                # TODO: this is for passing the lint check, not sure if this is
-                # the right logic when we need to handle backward layer norm.
-                _output_spec = arg_strategy.output_spec
-                assert isinstance(_output_spec, DTensorSpec)
                 placement_strategies[node] = _create_placement_strategy(
                     node,
                     mesh,
-                    placements=_output_spec.placements,
+                    placements=arg_strategy.out_spec.placements,
                     input_specs=_get_input_node_specs(node, placement_strategies),
                 )
                 node.meta["sharding"] = placement_strategies[node]
