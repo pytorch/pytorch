@@ -4027,7 +4027,7 @@ class UserDefinedTritonKernel(ExternKernel):
         return True
 
     def get_unbacked_symbol_defs(self):
-        return {}
+        return set()
 
     def get_mutation_names(self):
         return []
@@ -4123,7 +4123,7 @@ class InplaceBernoulliFallback(ExternKernel):
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
-        return {}
+        return set()
 
     def __init__(self, x, *constant_args):
         super().__init__(
@@ -4156,7 +4156,7 @@ class AccumulateGrad(ExternKernel):
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
-        return {}
+        return set()
 
     def __init__(self, variable, new_grad):
         super().__init__(
@@ -4226,7 +4226,7 @@ class ScatterFallback(ExternKernel):
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
-        return {}
+        return set()
 
     def __init__(
         self,
@@ -4296,7 +4296,7 @@ class IndexPutFallback(ExternKernel):
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
-        return {}
+        return set()
 
     def __init__(self, x, indices, values, accumulate):
         self.indices = indices
@@ -5318,7 +5318,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
-        return {}
+        return set()
 
     @classmethod
     def create(
@@ -6035,7 +6035,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         return [self.inputs[self.idx_for_inplace_sum].get_name()]
 
     def get_unbacked_symbol_defs(self):
-        return {}
+        return set()
 
     @classmethod
     def create(
@@ -6969,7 +6969,7 @@ class Broadcast(InPlaceCollectiveKernel):
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
-        return {}
+        return set()
 
     @classmethod
     def create(
@@ -7004,7 +7004,7 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
-        return {}
+        return set()
 
     @classmethod
     def create(
@@ -7044,7 +7044,7 @@ class AllReduce(InPlaceCollectiveKernel):
         return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
-        return {}
+        return set()
 
     @classmethod
     def create(
