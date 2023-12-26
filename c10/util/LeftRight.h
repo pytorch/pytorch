@@ -1,4 +1,5 @@
 #include <c10/macros/Macros.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Synchronized.h>
 #include <array>
 #include <atomic>
@@ -76,26 +77,26 @@ class LeftRight final {
   }
 
   template <typename F>
-  auto read(F&& readFunc) const {
+  auto read(F&& readFunc) const -> typename c10::invoke_result_t<F, const T&> {
     detail::IncrementRAII _increment_counter(
         &_counters[_foregroundCounterIndex.load()]);
 
-    return std::forward<F>(readFunc)(_data[_foregroundDataIndex.load()]);
+    return readFunc(_data[_foregroundDataIndex.load()]);
   }
 
   // Throwing an exception in writeFunc is ok but causes the state to be either
   // the old or the new state, depending on if the first or the second call to
   // writeFunc threw.
   template <typename F>
-  auto write(F&& writeFunc) {
+  auto write(F&& writeFunc) -> typename c10::invoke_result_t<F, T&> {
     std::unique_lock<std::mutex> lock(_writeMutex);
 
-    return _write(std::forward<F>(writeFunc));
+    return _write(writeFunc);
   }
 
  private:
   template <class F>
-  auto _write(const F& writeFunc) {
+  auto _write(const F& writeFunc) -> typename c10::invoke_result_t<F, T&> {
     /*
      * Assume, A is in background and B in foreground. In simplified terms, we
      * want to do the following:
@@ -163,7 +164,7 @@ class LeftRight final {
   template <class F>
   auto _callWriteFuncOnBackgroundInstance(
       const F& writeFunc,
-      uint8_t localDataIndex) {
+      uint8_t localDataIndex) -> typename c10::invoke_result_t<F, T&> {
     try {
       return writeFunc(_data[localDataIndex ^ 1]);
     } catch (...) {
@@ -203,17 +204,14 @@ class RWSafeLeftRightWrapper final {
   RWSafeLeftRightWrapper& operator=(RWSafeLeftRightWrapper&&) noexcept = delete;
 
   template <typename F>
-  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-  auto read(F&& readFunc) const {
+  auto read(F&& readFunc) const -> typename c10::invoke_result_t<F, const T&> {
     return data_.withLock(
-        [&readFunc](T const& data) { return std::forward<F>(readFunc)(data); });
+        [&readFunc](T const& data) { return readFunc(data); });
   }
 
   template <typename F>
-  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-  auto write(F&& writeFunc) {
-    return data_.withLock(
-        [&writeFunc](T& data) { return std::forward<F>(writeFunc)(data); });
+  auto write(F&& writeFunc) -> typename c10::invoke_result_t<F, T&> {
+    return data_.withLock([&writeFunc](T& data) { return writeFunc(data); });
   }
 
  private:

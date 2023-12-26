@@ -17,7 +17,10 @@ from torchgen.selective_build.selector import (
 
 
 def extract_all_operators(selective_builder: SelectiveBuilder) -> Set[str]:
-    return set(selective_builder.operators.keys())
+    ops = []
+    for op_name in selective_builder.operators.keys():
+        ops.append(op_name)
+    return set(ops)
 
 
 def extract_training_operators(selective_builder: SelectiveBuilder) -> Set[str]:

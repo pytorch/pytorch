@@ -1,12 +1,10 @@
 #pragma once
 
 #include <algorithm>
-#include <cstddef>
 #include <cstring>
 #include <functional>
 #include <iterator>
 #include <limits>
-#include <ostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -486,7 +484,6 @@ class basic_string_view final {
   }
 
   template <class Condition>
-  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   constexpr size_type find_first_if_(size_type pos, Condition&& condition)
       const noexcept {
     if (pos + 1 <= size()) {
@@ -500,7 +497,6 @@ class basic_string_view final {
   }
 
   template <class Condition>
-  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   constexpr size_type find_last_if_(size_type pos, Condition&& condition)
       const noexcept {
     // Write it iteratively. This is faster.

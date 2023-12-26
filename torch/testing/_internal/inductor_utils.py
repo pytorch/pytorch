@@ -1,7 +1,6 @@
 import torch
 import re
 import unittest
-import functools
 from subprocess import CalledProcessError
 
 from torch._inductor.codecache import CppCodeCache
@@ -53,11 +52,11 @@ def _check_has_dynamic_shape(
     self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
 
 
-def skipDeviceIf(cond, msg, *, device):
+def skipCUDAIf(cond, msg):
     if cond:
         def decorate_fn(fn):
             def inner(self, *args, **kwargs):
-                if self.device == device:
+                if self.device == "cuda":
                     raise unittest.SkipTest(msg)
                 return fn(self, *args, **kwargs)
             return inner
@@ -66,6 +65,3 @@ def skipDeviceIf(cond, msg, *, device):
             return fn
 
     return decorate_fn
-
-skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
-skipCPUIf = functools.partial(skipDeviceIf, device="cpu")

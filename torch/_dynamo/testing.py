@@ -244,14 +244,7 @@ def normalize_gm(gm_str) -> str:
     return remove_trailing_space(strip_comment(gm_str))
 
 
-def standard_test(
-    self,
-    fn,
-    nargs,
-    expected_ops=None,
-    expected_ops_dynamic=None,
-    expected_frame_count=1,
-):
+def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None):
     if not config.assume_static_by_default and expected_ops_dynamic is not None:
         expected_ops = expected_ops_dynamic
 
@@ -272,7 +265,7 @@ def standard_test(
     self.assertTrue(same(val1b, correct1))
     self.assertTrue(same(val2a, correct2))
     self.assertTrue(same(val2b, correct2))
-    self.assertEqual(actual.frame_count, expected_frame_count)
+    self.assertEqual(actual.frame_count, 1)
     if expected_ops is not None:
         self.assertEqual(actual.op_count, expected_ops)
 

@@ -8,7 +8,7 @@ from torch.distributed.checkpoint.stateful import Stateful
 from .default_planner import DefaultLoadPlanner
 from .planner import LoadPlanner
 from .storage import StorageReader
-from .utils import _all_gather_keys, _DistWrapper, _profile
+from .utils import _all_gather_keys, _DistWrapper
 
 __all__ = ["load_state_dict", "load"]
 
@@ -23,19 +23,12 @@ def load_state_dict(
 ) -> None:
     """This method is deprecated. Please switch to 'load'."""
     warnings.warn(
-        "'load_state_dict' is deprecated and will be removed in future versions. "
-        "Please use 'load' instead."
+        "'load_state_dict' is deprecated and will be removed in future versions. Please use 'load' instead."
     )
-    with _profile():
-        # TODO: test returning `load` here instead.
-        return _load_state_dict(
-            state_dict,
-            storage_reader,
-            process_group,
-            coordinator_rank,
-            no_dist,
-            planner,
-        )
+    # TODO: test returning `load` here instead.
+    return _load_state_dict(
+        state_dict, storage_reader, process_group, coordinator_rank, no_dist, planner
+    )
 
 
 def load(
@@ -115,41 +108,33 @@ def load(
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
 
-    with _profile():
-        if no_dist:
-            keys = list(state_dict.keys())
-        else:
-            keys = _all_gather_keys(state_dict)
-            if keys != sorted(state_dict.keys()):
-                warnings.warn(
-                    "Detected mismatched keys in state dict after all gather!"
-                    " This behavior is unsupported and may cause errors may cause errors."
-                )
-
-        statetful_sd = {}
-        for key in keys:
-            if key not in state_dict:
-                continue
-            elem = state_dict[key]
-            statetful_sd[key] = (
-                elem.state_dict() if isinstance(elem, Stateful) else elem
+    if no_dist:
+        keys = list(state_dict.keys())
+    else:
+        keys = _all_gather_keys(state_dict)
+        if keys != sorted(state_dict.keys()):
+            warnings.warn(
+                "Detected mismatched keys in state dict after all gather!"
+                " This behavior is unsupported and may cause errors may cause errors."
             )
 
-        _load_state_dict(
-            statetful_sd,
-            storage_reader,
-            process_group,
-            coordinator_rank,
-            no_dist,
-            planner,
-        )
-        for key in keys:
-            if key not in state_dict:
-                continue
-            elem = state_dict[key]
-            if isinstance(elem, Stateful):
-                elem.load_state_dict(statetful_sd[key])
-            state_dict[key] = elem
+    statetful_sd = {}
+    for key in keys:
+        if key not in state_dict:
+            continue
+        elem = state_dict[key]
+        statetful_sd[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
+
+    _load_state_dict(
+        statetful_sd, storage_reader, process_group, coordinator_rank, no_dist, planner
+    )
+    for key in keys:
+        if key not in state_dict:
+            continue
+        elem = state_dict[key]
+        if isinstance(elem, Stateful):
+            elem.load_state_dict(statetful_sd[key])
+        state_dict[key] = elem
 
 
 def _load_state_dict(

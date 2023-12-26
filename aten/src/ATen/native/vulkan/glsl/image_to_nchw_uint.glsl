@@ -1,7 +1,5 @@
 #version 450 core
-// clang-format off
-#define PRECISION ${PRECISION}
-// clang-format on
+#define PRECISION $precision
 
 layout(std430) buffer;
 

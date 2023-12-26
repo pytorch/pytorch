@@ -1,4 +1,3 @@
-import operator
 import warnings
 from functools import reduce
 
@@ -32,7 +31,7 @@ class Resize(Function):
     @staticmethod
     def forward(ctx, tensor, sizes):
         ctx.sizes = sizes
-        ctx.numel = reduce(operator.mul, sizes, 1)
+        ctx.numel = reduce(lambda x, y: x * y, sizes, 1)
         if tensor.numel() != ctx.numel:
             raise RuntimeError(
                 (

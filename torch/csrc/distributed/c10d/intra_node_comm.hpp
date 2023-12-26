@@ -25,8 +25,6 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       Topology topology,
       std::array<void*, kMaxDevices> p2pStates,
       std::array<void*, kMaxDevices> buffers,
-      void* p2pStatesDev,
-      void* buffersDev,
       void* topoInfo,
       size_t rank,
       size_t worldSize);
@@ -56,8 +54,6 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   Topology topology_;
   std::array<void*, kMaxDevices> p2pStates_;
   std::array<void*, kMaxDevices> buffers_;
-  void* p2pStatesDev_;
-  void* buffersDev_;
   void* topoInfo_;
   size_t rank_;
   size_t worldSize_;

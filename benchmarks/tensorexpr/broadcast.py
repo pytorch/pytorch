@@ -1,5 +1,4 @@
 import itertools
-import operator
 
 import numpy as np
 import torch
@@ -263,9 +262,9 @@ class BroadcastBench(benchmark.Benchmark):
 
 def register_broadcast_ops():
     binary_op_list = [
-        ["mul", operator.mul],
-        ["add", operator.add],
-        ["sub", operator.sub],
+        ["mul", lambda a, b: a * b],
+        ["add", lambda a, b: a + b],
+        ["sub", lambda a, b: a - b],
         ["div", lambda a, b: a / (b + 1e-4)],
         [
             "pow",

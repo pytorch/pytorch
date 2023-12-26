@@ -17,7 +17,6 @@ from typing import (
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
 from torch.utils.benchmark.utils._stubs import CallgrindModuleType
-import operator
 
 
 __all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind"]
@@ -101,7 +100,7 @@ class FunctionCounts:
         self,
         other: "FunctionCounts",
     ) -> "FunctionCounts":
-        return self._merge(other, operator.neg)
+        return self._merge(other, lambda c: -c)
 
     def __mul__(self, other: Union[int, float]) -> "FunctionCounts":
         return self._from_dict({

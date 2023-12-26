@@ -23,25 +23,12 @@ from torch.nested._internal.nested_tensor import (
     jagged_from_tensor_and_lengths,
     ViewBufferFromNested,
 )
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    subtest,
-)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
-
-
-class BaseTorchFunction(torch.Tensor):
-    @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-        return super().__torch_function__(func, types, args, kwargs)
 
 
 class MockSubclass(torch.Tensor):
@@ -152,7 +139,6 @@ GLOBAL_TEST_SUBCLASSES = {
     MockSubclass,
     DummyNDim,
     SigmoidToExpSubclass,
-    BaseTorchFunction,
 }
 
 
@@ -184,40 +170,6 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls._exit_stack.close()
-
-    def test_no_call_to_new(self):
-        class BadNewTorchFunction(torch.Tensor):
-            def __new__(cls, *args, **kwargs):
-                raise RuntimeError("Oops!")
-
-            @classmethod
-            def __torch_function__(cls, func, types, args=(), kwargs=None):
-                if kwargs is None:
-                    kwargs = {}
-                return super().__torch_function__(func, types, args, kwargs)
-
-        with torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {BadNewTorchFunction}
-        ):
-
-            @torch.compile(backend="eager", fullgraph=True)
-            def fn(x):
-                return torch.add(x, 1)
-
-            input = torch.ones(2, 2).as_subclass(BadNewTorchFunction)
-
-            res = fn(input)
-            self.assertIsInstance(res, BadNewTorchFunction)
-
-    def test_base_torch_function_tracing(self):
-        def fn(x):
-            return torch.add(x, 1)
-
-        input = torch.ones(2, 2).as_subclass(BaseTorchFunction)
-        out = fn(input)
-        out_opt = compile_full_eager(fn)(input)
-        self.assertIsInstance(out, BaseTorchFunction)
-        self.assertEqual(out, out_opt)
 
     def test_torch_function_state_graph_break(self):
         @torch.compile(backend="eager")
@@ -279,16 +231,6 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res = fn(input)
         self.assertIsInstance(res, MockSubclass)
 
-    def test_return_as_subclass(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            return torch.add(x, 1.0).as_subclass(MockSubclass)
-
-        input = torch.ones(2, 2)
-
-        res = fn(input)
-        self.assertIsInstance(res, MockSubclass)
-
     def test_return_local_subclass(self):
         class LocalSubclass(torch.Tensor):
             @classmethod
@@ -308,31 +250,16 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res = fn(input)
             self.assertIsInstance(res, LocalSubclass)
 
-    @parametrize(
-        "comparison",
-        [
-            subtest(isinstance, "isinstance"),
-            subtest(lambda instance, type_: type(instance) == type_, "equality"),
-            subtest(lambda instance, type_: type(instance) is type_, "identity"),
-        ],
-    )
-    @parametrize(
-        "input_type",
-        [
-            subtest(torch.Tensor, "tensor"),
-            subtest(DummyNDim, "subclass"),
-        ],
-    )
-    def test_type_check(self, comparison, input_type):
+    def test_isinstance_check_subclass(self):
         with torch._dynamo.config.patch("traceable_tensor_subclasses", {DummyNDim}):
 
             def fn(x):
-                if comparison(x, DummyNDim):
+                if isinstance(x, DummyNDim):
                     return torch.ones(1, 1)
                 else:
                     return torch.zeros(2, 2)
 
-            input = torch.ones(2, 2).as_subclass(input_type)
+            input = torch.ones(2, 2)
             exp_res = fn(input)
             act_res = torch.compile(backend="eager", fullgraph=True)(fn)(input)
             self.assertEqual(exp_res, act_res)
@@ -1018,9 +945,6 @@ class GraphModule(torch.nn.Module):
             return typ.__bases__
 
         self.assertEqual(f(torch.randn(1)), (Multistreamable,))
-
-
-instantiate_parametrized_tests(SubclassTests)
 
 
 class TestNestedTensor(torch._dynamo.test_case.TestCase):

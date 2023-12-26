@@ -1,7 +1,10 @@
 #pragma once
 #include <c10/macros/Macros.h>
+#include <c10/util/ArrayRef.h>
 
-#include <cstdint>
+#include <iterator>
+#include <numeric>
+#include <type_traits>
 
 // GCC has __builtin_mul_overflow from before it supported __has_builtin
 #ifdef _MSC_VER

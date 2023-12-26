@@ -50,15 +50,14 @@ class function_ref<Ret(Params...)> {
 
   template <typename Callable>
   function_ref(
-      // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       Callable&& callable,
-      std::enable_if_t<
-          !std::is_same_v<std::remove_reference_t<Callable>, function_ref>>* =
-          nullptr,
-      std::enable_if_t<std::is_convertible_v<
+      typename std::enable_if<!std::is_same<
+          typename std::remove_reference<Callable>::type,
+          function_ref>::value>::type* = nullptr,
+      typename std::enable_if<std::is_convertible<
           typename std::invoke_result_t<Callable, Params...>,
-          Ret>>* = nullptr)
-      : callback(callback_fn<std::remove_reference_t<Callable>>),
+          Ret>::value>::type* = nullptr)
+      : callback(callback_fn<typename std::remove_reference<Callable>::type>),
         callable(reinterpret_cast<intptr_t>(&callable)) {}
 
   Ret operator()(Params... params) const {

@@ -28,7 +28,7 @@ namespace at::cuda {
 
 namespace {
 
-#if defined(USE_ROCM) && ROCM_VERSION >= 50700
+#ifdef USE_ROCM
 void createCublasLtHandle(cublasLtHandle_t *handle) {
   TORCH_CUDABLAS_CHECK(cublasLtCreate(handle));
 }

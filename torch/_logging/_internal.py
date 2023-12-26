@@ -169,7 +169,6 @@ def set_logs(
     all: Optional[int] = None,
     dynamo: Optional[int] = None,
     aot: Optional[int] = None,
-    autograd: Optional[int] = None,
     dynamic: Optional[int] = None,
     inductor: Optional[int] = None,
     distributed: Optional[int] = None,
@@ -240,9 +239,6 @@ def set_logs(
 
         aot (:class:`Optional[int]`):
             The log level for the AOTAutograd component. Default: ``logging.WARN``
-
-        autograd (:class:`Optional[int]`):
-            The log level for autograd. Default: ``logging.WARN``
 
         inductor (:class:`Optional[int]`):
             The log level for the TorchInductor component. Default: ``logging.WARN``
@@ -396,7 +392,6 @@ def set_logs(
         torch=all,
         dynamo=dynamo,
         aot=aot,
-        autograd=autograd,
         inductor=inductor,
         dynamic=dynamic,
         bytecode=bytecode,

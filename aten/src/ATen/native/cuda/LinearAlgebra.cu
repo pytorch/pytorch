@@ -9,8 +9,6 @@
 #include <ATen/native/ReduceOps.h>
 #include <c10/core/Scalar.h>
 
-#include <thrust/swap.h>
-
 namespace at::native {
 
 namespace {

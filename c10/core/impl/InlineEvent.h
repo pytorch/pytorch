@@ -5,7 +5,8 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/Exception.h>
 
-namespace c10::impl {
+namespace c10 {
+namespace impl {
 
 template <typename T>
 struct InlineEvent final {
@@ -110,4 +111,5 @@ struct InlineEvent final {
   bool was_marked_for_recording_ = false;
 };
 
-} // namespace c10::impl
+} // namespace impl
+} // namespace c10

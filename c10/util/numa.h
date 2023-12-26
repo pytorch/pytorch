@@ -2,7 +2,7 @@
 
 #include <c10/macros/Export.h>
 #include <c10/util/Flags.h>
-#include <cstddef>
+#include <stddef.h>
 
 C10_DECLARE_bool(caffe2_cpu_numa_enabled);
 

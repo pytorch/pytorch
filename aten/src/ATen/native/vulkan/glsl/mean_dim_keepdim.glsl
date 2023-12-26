@@ -1,6 +1,6 @@
 #version 450 core
-#define PRECISION ${PRECISION}
-#define FORMAT ${FORMAT}
+#define PRECISION $precision
+#define FORMAT $format
 
 layout(std430) buffer;
 

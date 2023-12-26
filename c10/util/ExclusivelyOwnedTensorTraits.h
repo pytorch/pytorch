@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/core/TensorImpl.h>
-#include <c10/core/UndefinedTensorImpl.h>
 
 #include <utility>
 

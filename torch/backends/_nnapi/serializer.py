@@ -2,7 +2,6 @@ import array
 import enum
 import functools
 import logging
-import operator
 import struct
 import sys
 from typing import List, NamedTuple, Optional, Tuple
@@ -946,7 +945,9 @@ class _NnapiSerializer:
     def add_tuple_construct(self, node):
         assert node.outputsSize() == 1
         output = node.outputsAt(0)
-        values = list(node.inputs())
+        values = []
+        for inp in node.inputs():
+            values.append(inp)
         self.add_tensor_sequence(output, values)
 
     def add_unsqueeze(self, node):
@@ -1033,7 +1034,11 @@ class _NnapiSerializer:
 
         out_shape = (
             in_oper.shape[:start_dim]
-            + (functools.reduce(operator.mul, in_oper.shape[start_dim : end_dim + 1]),)
+            + (
+                functools.reduce(
+                    lambda x, y: x * y, in_oper.shape[start_dim : end_dim + 1]
+                ),
+            )
             + in_oper.shape[end_dim + 1 :]
         )
 

@@ -41,7 +41,6 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
     _uninstall_threaded_pg,
     ProcessLocalGroup,
 )
-import operator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -427,7 +426,7 @@ def simple_sparse_reduce_tests(rank: int, world_size: int, num_inputs: int = 1):
 
     def compute_sum(fn, world_size: int):
         return reduce(
-            operator.add, [fn(rank, world_size) for rank in range(world_size)]
+            lambda a, b: a + b, [fn(rank, world_size) for rank in range(world_size)]
         )
 
     return [

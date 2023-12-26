@@ -2,7 +2,6 @@ from typing import List, Optional
 
 from torchgen.api import dispatcher
 from torchgen.api.types import (
-    BaseCppType,
     BaseCType,
     Binding,
     boolT,
@@ -70,20 +69,6 @@ reapply_views_binding = Binding(
     default=None,
 )
 
-InverseReturnModeT = BaseCppType("at::functionalization", "InverseReturnMode")
-inverse_return_mode_binding = Binding(
-    name="inverse_return_mode",
-    nctype=NamedCType(name="inverse_return_mode", type=BaseCType(InverseReturnModeT)),
-    argument=Argument(
-        name="inverse_return_mode",
-        # NB: not actually a bool but it doesn't matter because this isn't used
-        type=BaseType(BaseTy.bool),
-        default=None,
-        annotation=None,
-    ),
-    default=None,
-)
-
 
 # The lambda capture itself doesn't have a name.
 # The name returned here corresponds to the name of the inner function called by the lambda.
@@ -130,11 +115,7 @@ def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding
     non_self_value_bindings = [
         dispatcher.argument(a, remove_non_owning_ref_types=True) for a in non_self_args
     ]
-
-    all_bindings = [
-        inverse_return_mode_binding if is_reverse else reapply_views_binding
-    ]
-    all_bindings.extend(non_self_value_bindings)
+    all_bindings = [reapply_views_binding] + non_self_value_bindings
     return all_bindings
 
 
@@ -184,12 +165,12 @@ def inner_arguments(func: FunctionSchema, is_reverse: bool) -> List[Binding]:
             return [
                 base_binding,
                 mutated_view_binding,
-                inverse_return_mode_binding,
+                reapply_views_binding,
                 index_binding,
             ] + non_self_bindings
         else:
             return [
                 base_binding,
                 mutated_view_binding,
-                inverse_return_mode_binding,
+                reapply_views_binding,
             ] + non_self_bindings

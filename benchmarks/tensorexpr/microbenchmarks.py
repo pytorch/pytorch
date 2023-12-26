@@ -1,5 +1,4 @@
 import argparse
-import operator
 import time
 
 import matplotlib.pyplot as plt
@@ -106,10 +105,10 @@ def gen_float_comparison_tensors(N, M):
 
 te_bool = te.Dtype.Bool
 binary_ops = [
-    ("add", operator.add, torch.add),
-    ("mul", operator.mul, torch.mul),
-    ("sub", operator.sub, torch.sub),
-    ("div", operator.truediv, torch.div),
+    ("add", (lambda a, b: a + b), torch.add),
+    ("mul", (lambda a, b: a * b), torch.mul),
+    ("sub", (lambda a, b: a - b), torch.sub),
+    ("div", (lambda a, b: a / b), torch.div),
     (
         "eq",
         (lambda a, b: te.Cast.make(te_bool, a == b)),

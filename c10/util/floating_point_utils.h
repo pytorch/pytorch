@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
 #include <cstdint>
 
 namespace c10::detail {

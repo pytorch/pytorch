@@ -1462,7 +1462,9 @@ class TestMkldnn(TestCase):
             "training": [False, True]
         }
 
-        params_list = list(params_dict.values())
+        params_list = []
+        for value in params_dict.values():
+            params_list.append(value)
         return params_list
 
     def _cast_dtype(self, input, bf16):
