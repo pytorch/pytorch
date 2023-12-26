@@ -78,10 +78,11 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
     return _impl.jvp(func, primals, tangents, strict=strict, has_aux=has_aux)
 
 def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False,
-           chunk_size: Optional[int] = None,
+           chunk_size: Optional[int] = None, randomness: str = 'error',
            _preallocate_and_copy=False):
     warn_deprecated('jacrev')
     return _impl.jacrev(func, argnums, has_aux=has_aux, chunk_size=chunk_size,
+                        randomness=randomness,
                         _preallocate_and_copy=_preallocate_and_copy)
 
 def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, randomness: str = "error"):

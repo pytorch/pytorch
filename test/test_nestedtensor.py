@@ -2643,6 +2643,7 @@ class TestNestedTensorAutograd(TestCase):
 
         assert torch.autograd.gradcheck(grad_test_func, inputs=(a, b), eps=1e-3)
 
+    @xfailIfTorchDynamo
     def test_nested_tensor_linear(self, device):
 
         a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64, device=device)
