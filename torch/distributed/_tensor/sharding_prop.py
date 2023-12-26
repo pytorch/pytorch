@@ -222,24 +222,19 @@ class ShardingPropagator:
                 # single Op strategy
                 output_strategy = self._select_strategy(op_strategy)
 
+                # check if we need to redistribute the input
                 needs_redistribute = False
-                expected_input_specs: List[DTensorSpec] = []
+                expected_input_specs = []
 
-                def _get_output_spec_from_op_strategy(
-                    os: PlacementStrategy, idx: int
-                ) -> DTensorSpec:
-                    if isinstance(os.output_spec, DTensorSpec):
-                        return os.output_spec
-                    else:
-                        output_spec = os.output_spec[idx]
-                        assert isinstance(
-                            output_spec, DTensorSpec
-                        ), f"input spec and output spec cannot both be None: OpStrategy={os}, arg spec idx={idx}"
-                        return output_spec
+                # in case where the op does not specify input_specs and output_spec
+                # is a DTensorSpec, we use output_spec as the spec for each DTensor
+                # input arg.
+                if output_strategy.input_specs is None:
+                    assert isinstance(output_strategy.output_spec, DTensorSpec)
 
                 for idx, input_spec in enumerate(op_schema.args_spec):
                     desired_spec = (
-                        _get_output_spec_from_op_strategy(output_strategy, idx)
+                        output_strategy.out_spec
                         if output_strategy.input_specs is None
                         else output_strategy.input_specs[idx]
                     )
@@ -255,25 +250,24 @@ class ShardingPropagator:
                     reshard_schema._inplace_rewrap_schema_suggestion(op_schema)
                     suggestion_schema = [reshard_schema]
 
+                # construct output spec for the op
                 if op_schema.return_type_tuple_tensors():
                     # for ops return multiple tensors, make output spec return same spec
                     # returned from the op strategy if output_spec is not a sequence
-                    output_spec_object = output_strategy.output_spec
-                    if isinstance(output_spec_object, DTensorSpec):
-                        output_spec: OutputSpecType = tuple(
+                    output_spec: OutputSpecType = output_strategy.output_spec
+                    if isinstance(output_spec, DTensorSpec):
+                        output_spec = tuple(
                             [
                                 # create a new DTensorSpec with the same placement as the
                                 # output_spec in output_strategy
                                 DTensorSpec(
-                                    mesh=output_spec_object.mesh,
-                                    placements=output_spec_object.placements,
-                                    tensor_meta=output_spec_object.tensor_meta,
+                                    mesh=output_spec.mesh,
+                                    placements=output_spec.placements,
+                                    tensor_meta=output_spec.tensor_meta,
                                 )
                                 for _ in range(len(op_schema.op._schema.returns))
                             ]
                         )
-                    else:
-                        output_spec = output_spec_object
                 elif op_schema.return_type_tensor():
                     output_spec = output_strategy.output_spec
                 else:
