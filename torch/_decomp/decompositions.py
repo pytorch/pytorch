@@ -2114,6 +2114,177 @@ def cudnn_batch_norm_backward(
     )
 
 
+def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
+    x_out = (x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1)) // stride[i]
+
+    if ceil_mode:
+        x_alt = (
+            x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1)
+        ) // stride[i]
+        if (x_alt - 1) * stride[i] - x - padding[i] >= 0:
+            # Sliding windows must start within the input or left padding
+            x_alt -= 1
+        if x_out == x_alt:
+            # ceil mode is actually a no-op
+            ceil_mode = False
+        else:
+            x_out = x_alt
+    return x_out, ceil_mode
+
+
+@register_decomposition(aten.avg_pool1d)
+@out_wrapper()
+@pw_cast_for_opmath
+def avg_pool1d(
+    x: Tensor,
+    kernel_size: Tuple[int],
+    stride: Optional[Tuple[int]],
+    padding: Tuple[int],
+    ceil_mode: bool,
+    count_include_pad: bool,
+):
+    return _avg_poolnd(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        ceil_mode,
+        count_include_pad,
+        divisor_override=None,
+        dim=1,
+    )
+
+
+@register_decomposition(aten.avg_pool2d)
+@out_wrapper()
+@pw_cast_for_opmath
+def avg_pool2d(
+    x: Tensor,
+    kernel_size: Tuple[int],
+    stride: Optional[Tuple[int]],
+    padding: Tuple[int],
+    ceil_mode: bool,
+    count_include_pad: bool,
+    divisor_override: Optional[int] = None,
+):
+    return _avg_poolnd(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        ceil_mode,
+        count_include_pad,
+        divisor_override,
+        dim=2,
+    )
+
+
+@register_decomposition(aten.avg_pool3d)
+@out_wrapper()
+@pw_cast_for_opmath
+def avg_pool3d(
+    x: Tensor,
+    kernel_size: Tuple[int],
+    stride: Optional[Tuple[int]],
+    padding: Tuple[int],
+    ceil_mode: bool,
+    count_include_pad: bool,
+    divisor_override: Optional[int] = None,
+):
+    return _avg_poolnd(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        ceil_mode,
+        count_include_pad,
+        divisor_override,
+        dim=3,
+    )
+
+
+def _avg_poolnd(
+    x: Tensor,
+    kernel_size: Tuple[int],
+    stride: Optional[Tuple[int]],
+    padding: Tuple[int],
+    ceil_mode: bool,
+    count_include_pad: bool,
+    divisor_override: Optional[int],
+    dim: int,
+):
+    if not stride:
+        stride = kernel_size
+
+    assert len(kernel_size) == dim
+    assert len(stride) == dim
+    assert len(padding) == dim
+    assert len(x.shape) in (dim + 1, dim + 2)
+
+    batch = x.shape[:-dim]
+    dhw = x.shape[-dim:]
+    h_out, ceil_modes = zip(
+        *[
+            pooling_size(dhw[i], i, kernel_size, stride, padding, ceil_mode)
+            for i in range(dim)
+        ]
+    )
+
+    had_padding = any(padding) or any(ceil_modes)
+
+    out_indices = []
+    reshape = []
+    for i in range(dim):
+        idx = torch.arange(h_out[i] * kernel_size[i], device=x.device)
+        if stride[i] != kernel_size[i]:
+            h_range = idx // kernel_size[i]
+            m_range = idx % kernel_size[i]
+            idx = h_range * stride[i] + m_range
+        idx = idx - padding[i]
+        idx = idx.reshape(idx.shape[0], *[1] * (dim - 1 - i))
+        out_indices.append(idx)
+        reshape += [h_out[i], kernel_size[i]]
+
+    window_size = functools.reduce(operator.mul, kernel_size)
+
+    if had_padding:
+        out = aten._unsafe_index(
+            x,
+            [
+                *[None] * len(batch),
+                *[out_indices[i].clamp(min=0, max=dhw[i] - 1) for i in range(dim)],
+            ],
+        )
+        conds = []
+        for i in range(dim):
+            view_shape = [1] * x.dim()
+            view_shape[len(batch) + i] = out_indices[i].shape[0]
+            idx = out_indices[i].view(view_shape)
+            conds.append(torch.logical_and(idx >= 0, idx < dhw[i]))
+        cond = functools.reduce(torch.logical_and, conds)
+        out = torch.where(cond, out, torch.zeros_like(out))
+    else:
+        out = aten._unsafe_index(x, [*[None] * len(batch), *out_indices])
+
+    out = out.reshape(*batch, *reshape)
+    out = torch.sum(out, dim=[len(batch) + 1 + 2 * i for i in range(dim)])
+
+    if not had_padding or divisor_override:
+        if divisor_override:
+            scale = 1 / divisor_override
+        else:
+            scale = 1.0 / window_size
+    else:
+        scale = 1.0 / torch.sum(
+            cond.reshape(*[1] * len(batch), *reshape)
+            .expand(*batch, *reshape)
+            .to(torch.int32),
+            dim=[len(batch) + 1 + 2 * i for i in range(dim)],
+        )
+
+    return out * scale
+
+
 @register_decomposition(aten._adaptive_avg_pool2d)
 @out_wrapper()
 @pw_cast_for_opmath
