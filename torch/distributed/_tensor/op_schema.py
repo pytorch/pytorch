@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -60,6 +61,7 @@ class PlacementStrategy:
     output_spec is a sequence of Optional[DTensorSpec].
     """
 
+    # TODO: can we unify the type with OutputSpecType?
     output_spec: Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
@@ -69,67 +71,36 @@ class PlacementStrategy:
     # this operator it might have multiple placement strategies
     redistribute_cost: Optional[List[List[float]]] = None
 
-    def mesh_shape(self) -> Tuple[int, ...]:
+    @cached_property
+    def out_spec(self) -> DTensorSpec:
         if isinstance(self.output_spec, DTensorSpec):
-            return self.output_spec.mesh.shape
+            return self.output_spec
         else:
-            if isinstance(self.output_spec[0], DTensorSpec):
-                return self.output_spec[0].mesh.shape
-            else:
-                return tuple()
-
-    def output_ndim(self) -> int:
-        if isinstance(self.output_spec, DTensorSpec):
-            return self.output_spec.ndim
-        else:
-            if isinstance(self.output_spec[0], DTensorSpec):
-                return self.output_spec[0].ndim
-            else:
-                return 0
-
-    def output_shape(self) -> torch.Size:
-        if isinstance(self.output_spec, DTensorSpec):
-            return self.output_spec.shape
-        else:
-            if isinstance(self.output_spec[0], DTensorSpec):
-                return self.output_spec[0].shape
-            else:
-                return torch.Size([])
-
-    def num_shards(self) -> int:
-        if isinstance(self.output_spec, DTensorSpec):
-            return self.output_spec.num_shards
-        else:
-            if isinstance(self.output_spec[0], DTensorSpec):
-                return self.output_spec[0].num_shards
-            else:
-                return 0
+            assert len(self.output_spec) > 0, "empty output_spec!"
+            spec = self.output_spec[0]
+            assert isinstance(
+                spec, DTensorSpec
+            ), "If the operator returns a tuple, PlacementStrategy requires the first"
+            f"element in tuple be not None but got: {spec}."
+            return spec
 
     def pretty_print_output_spec(self) -> str:
         if isinstance(self.output_spec, DTensorSpec):
-            return str(self.output_spec)
+            output_spec_str = self.pretty_print_placements(self.output_spec.placements)
         else:
-            output_spec_str = []
-            for spec in self.output_spec:
-                if spec is None:
-                    output_spec_str.append("None")
-                else:
-                    output_spec_str.append(str(spec))
-            return "(" + ", ".join(output_spec_str) + ")"
-
-    def pretty_print_output_spec_placements(self) -> str:
-        if isinstance(self.output_spec, DTensorSpec):
-            return self.pretty_print_placements(self.output_spec.placements)
-        else:
-            output_spec_str = []
-            for spec in self.output_spec:
-                if spec is None:
-                    output_spec_str.append("None")
-                else:
-                    output_spec_str.append(
+            output_spec_str = (
+                "("
+                + ", ".join(
+                    [
                         self.pretty_print_placements(spec.placements)
-                    )
-            return "(" + ", ".join(output_spec_str) + ")"
+                        if isinstance(spec, DTensorSpec)
+                        else "None"
+                        for spec in self.output_spec
+                    ]
+                )
+                + ")"
+            )
+        return output_spec_str
 
     def pretty_print_placements(self, placements) -> str:
         return "".join([str(p) for p in placements])
@@ -148,7 +119,8 @@ class PlacementStrategy:
                 )
                 + ") -> "
             )
-        output_spec_str = self.pretty_print_output_spec_placements()
+
+        output_spec_str = self.pretty_print_output_spec()
         return f"{input_specs_str}{output_spec_str}"
 
 
@@ -172,22 +144,26 @@ class OpStrategy(StrategyType):
 
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
-        mesh_shape = self.strategies[0].mesh_shape()
+        mesh_shape = self.output_mesh_shape
         return f"OpStrategy:[{strategy_list_str}] @mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
         Returns the max number of shards across all placement strategies
         """
-        return max([strategy.num_shards() for strategy in self.strategies])
+        return max([strategy.out_spec.num_shards for strategy in self.strategies])
 
     @property
-    def output_shape(self):
-        return self.strategies[0].output_shape()
+    def output_mesh_shape(self):
+        return self.strategies[0].out_spec.mesh.shape
 
     @property
     def output_ndim(self):
-        return self.strategies[0].output_ndim()
+        return self.strategies[0].out_spec.ndim
+
+    @property
+    def output_shape(self):
+        return self.strategies[0].out_spec.shape
 
 
 class TupleStrategy(StrategyType):
@@ -287,11 +263,11 @@ class OpSchema:
                 assert len(arg.strategies) == 1
                 arg_spec_str = arg.strategies[0].pretty_print_output_spec()
                 args_sharding.append(arg_spec_str)
-                mesh_shape = arg.strategies[0].mesh_shape()
+                mesh_shape = arg.output_mesh_shape
             elif isinstance(arg, TupleStrategy):
                 first_op_strtgy = arg.childs[0]
                 assert isinstance(first_op_strtgy, OpStrategy)
-                mesh_shape = first_op_strtgy.strategies[0].mesh_shape()
+                mesh_shape = first_op_strtgy.output_mesh_shape
                 args_sharding.append(str(arg))
             else:
                 args_sharding.append(str(arg))
