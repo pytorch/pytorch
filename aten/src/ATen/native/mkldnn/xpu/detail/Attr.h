@@ -242,7 +242,7 @@ class Attr {
         break;
       default:
         AT_ERROR(
-            "IPEX only supports append_bias for Conv1d, Conv2d and Conv3d.");
+            "XPU only supports append_bias for Conv1d, Conv2d and Conv3d.");
     }
     // In this case, expected_md = binary_md
     ops_params_.push_back(PostOpParam(
@@ -340,8 +340,8 @@ class Attr {
     // [1, C, 1, 1], channel broadcast
     // [dst.shape], no broadcast and eltwise-wise binary operations on dst
 
-    // auto engine =
-    //     GpuEngineManager::Instance().get_engine({c10::kXPU, current_device()});
+    auto engine =
+        GpuEngineManager::Instance().get_engine({c10::kXPU, current_device()});
     for (size_t i = 0; i < ops_params_.size(); ++i) {
       kind_t kind = ops_params_[i].kind_;
       if (kind == kind_t::binary) {
