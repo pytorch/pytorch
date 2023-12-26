@@ -95,28 +95,39 @@ class AOTInductorModelContainer {
     pending_models_available_.notify_one();
   }
 
-  // This function updates the inactive buffer for storing constants.
+  // This function updates the buffer for storing constants.
   // It will update the buffer, the mapping and the array mapping.
-  // We can later change the inactive buffer to active with corresponding
-  // function calls (swap_constant_buffer)
-  void update_inactive_constant_buffer(
-      const std::unordered_map<std::string, AtenTensorHandle>& constants_map) {
+  void update_constant_buffer(
+      const std::unordered_map<std::string, AtenTensorHandle>& constants_map,
+      bool use_inactive,
+      bool validate_full_update) {
 #ifdef USE_CUDA
     if (this->num_models() == 0) {
       throw std::runtime_error("No model available in container!");
     }
     auto num_constants = models_[0]->num_constants();
 
-    auto* constants_blob_ptr = static_cast<uint8_t*>(get_inactive_blob_ptr());
-    auto inactive_constants_map = get_inactive_map();
+    auto* constants_blob_ptr =
+        static_cast<uint8_t*>(get_constant_blob_ptr(use_inactive));
+    auto constants_map_to_update = get_constants_map(use_inactive);
+
+    if (validate_full_update) {
+      for (size_t idx = 0; idx < num_constants; idx++) {
+        auto constant_name = std::string(models_[0]->constant_name(idx));
+        auto it = constants_map.find(constant_name);
+        if (it == constants_map.end()) {
+          throw std::runtime_error(
+              std::string("Cannot find constants ") + constant_name +
+              std::string(" in constants_map!"));
+        }
+      }
+    }
 
     for (size_t idx = 0; idx < num_constants; idx++) {
       auto constant_name = std::string(models_[0]->constant_name(idx));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end()) {
-        throw std::runtime_error(
-            std::string("Cannot find constants ") + constant_name +
-            std::string(" in constants_map!"));
+        continue;
       }
 
       // Move the data to container handled blob.
@@ -157,11 +168,12 @@ class AOTInductorModelContainer {
 
       // Now place the tensor to constants_map. Note at this point the ownership
       // of the tensor_handle will be taken over.
-      inactive_constants_map->emplace(constant_name, tensor_handle);
+      constants_map_to_update->emplace(constant_name, tensor_handle);
     }
 
     // Update the inactive constant array.
-    update_array_from_map(get_inactive_array(), inactive_constants_map);
+    update_array_from_map(
+        get_constants_array(use_inactive), constants_map_to_update);
 #endif // USE_CUDA
   }
 
@@ -178,8 +190,8 @@ class AOTInductorModelContainer {
   void swap_constant_buffer() {
     std::lock_guard unique_lk(model_exec_mutex_);
 
-    auto constants_map = get_inactive_map();
-    auto constants_array = get_inactive_array();
+    auto constants_map = get_constants_map(/* get_inactive= */ true);
+    auto constants_array = get_constants_array(/* get_inactive= */ true);
 
     for (auto& model : models_) {
       model->update_constants_map(
@@ -286,8 +298,9 @@ class AOTInductorModelContainer {
   std::shared_mutex model_exec_mutex_;
 
 #ifdef USE_CUDA
-  void* get_inactive_blob_ptr() {
-    if (use_secondary_) {
+  void* get_constant_blob_ptr(bool get_inactive) {
+    if ((get_inactive && use_secondary_) ||
+        (!get_inactive && !use_secondary_)) {
       return constant_blob_.get();
     } else {
       if (!constant_blob_secondary_) {
@@ -298,8 +311,9 @@ class AOTInductorModelContainer {
   }
 #endif // USE_CUDA
 
-  std::shared_ptr<ConstantMap> get_inactive_map() {
-    if (use_secondary_) {
+  std::shared_ptr<ConstantMap> get_constants_map(bool get_inactive) {
+    if ((get_inactive && use_secondary_) ||
+        (!get_inactive && !use_secondary_)) {
       return constants_map_;
     } else {
       if (!constants_map_secondary_) {
@@ -309,8 +323,10 @@ class AOTInductorModelContainer {
     }
   }
 
-  std::shared_ptr<std::vector<ConstantHandle>> get_inactive_array() {
-    if (use_secondary_) {
+  std::shared_ptr<std::vector<ConstantHandle>> get_constants_array(
+      bool get_inactive) {
+    if ((get_inactive && use_secondary_) ||
+        (!get_inactive && !use_secondary_)) {
       return constants_array_;
     } else {
       if (!constants_array_secondary_) {
