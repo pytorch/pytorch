@@ -1227,7 +1227,7 @@ class TestTransformers(NNTestCase):
         torch.jit.script(mha)
 
     @torch.no_grad()
-    def test_disable_fastpath(self):
+    def test_disable_fastpath(self, device):
         def _test_te_fastpath_called(model, args, kwargs=None, return_value=None, is_called=True):
             if kwargs is None:
                 kwargs = {}
@@ -1244,24 +1244,24 @@ class TestTransformers(NNTestCase):
                 output = model(*args, **kwargs)
                 self.assertTrue(fastpath_mock.called == is_called)
 
-        inp = torch.tensor([[[1, 2], [3, 4], [5, 6]]], dtype=torch.float32, device='cuda')
-        aligned_key_padding_mask = torch.tensor([[0, 0, 1]], dtype=torch.bool, device='cuda')
-        src_key_padding_mask = torch.tensor([[1, 0, 1]], dtype=torch.bool, device='cuda')
-        attn_mask = torch.tensor([[1, 0, 1], [0, 1, 0], [1, 0, 1]], dtype=torch.bool, device='cuda')
+        inp = torch.tensor([[[1, 2], [3, 4], [5, 6]]], dtype=torch.float32, device=device)
+        aligned_key_padding_mask = torch.tensor([[0, 0, 1]], dtype=torch.bool, device=device)
+        src_key_padding_mask = torch.tensor([[1, 0, 1]], dtype=torch.bool, device=device)
+        attn_mask = torch.tensor([[1, 0, 1], [0, 1, 0], [1, 0, 1]], dtype=torch.bool, device=device)
         te_return_value = torch.ones((1, 3, 2), dtype=torch.float32)
 
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=2, nhead=2, dim_feedforward=8, batch_first=True)
         te = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True, mask_check=True)
-        te = te.to('cuda').eval()
+        te = te.to(device).eval()
 
-        t = torch.nn.Transformer(d_model=2, nhead=2, batch_first=True, device='cuda').eval()
-        src = torch.tensor([[[0, 1], [2, 3], [4, 5]]], dtype=torch.float32, device='cuda')
-        tgt = torch.tensor([[[0, 1], [2, 3], [4, 5], [6, 7]]], dtype=torch.float32, device='cuda')
-        t_return_value = torch.ones((1, 3, 2), dtype=torch.float32, device='cuda')
+        t = torch.nn.Transformer(d_model=2, nhead=2, batch_first=True, device=device).eval()
+        src = torch.tensor([[[0, 1], [2, 3], [4, 5]]], dtype=torch.float32, device=device)
+        tgt = torch.tensor([[[0, 1], [2, 3], [4, 5], [6, 7]]], dtype=torch.float32, device=device)
+        t_return_value = torch.ones((1, 3, 2), dtype=torch.float32, device=device)
 
-        mha = nn.MultiheadAttention(2, 2, batch_first=True, device='cuda').eval()
-        q = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.float32, device='cuda')
-        mha_return_value = torch.ones((1, 3, 2), dtype=torch.float32, device='cuda')
+        mha = nn.MultiheadAttention(2, 2, batch_first=True, device=device).eval()
+        q = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.float32, device=device)
+        mha_return_value = torch.ones((1, 3, 2), dtype=torch.float32, device=device)
 
         _test_te_fastpath_called(
             te, (inp,), kwargs={'src_key_padding_mask': src_key_padding_mask},
