@@ -56,8 +56,7 @@ class Registry {
  public:
   typedef std::function<ObjectPtrType(Args...)> Creator;
 
-  Registry(bool warning = true)
-      : registry_(), priority_(), terminate_(true), warning_(warning) {}
+  Registry(bool warning = true) : registry_(), priority_(), warning_(warning) {}
 
   void Register(
       const SrcType& key,
@@ -156,7 +155,7 @@ class Registry {
  private:
   std::unordered_map<SrcType, Creator> registry_;
   std::unordered_map<SrcType, RegistryPriority> priority_;
-  bool terminate_;
+  bool terminate_{true};
   const bool warning_;
   std::unordered_map<SrcType, std::string> help_message_;
   std::mutex register_mutex_;
