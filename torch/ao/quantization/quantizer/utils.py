@@ -59,7 +59,7 @@ def _node_only_used_for_sym_size(node: Node, partition_nodes: List[Node]):
     )
 
 
-def get_conv_unary_pattern(
+def _get_conv_unary_pattern(
     conv_fn: Callable,
     has_bn: bool = False,  # Usually need for QAT pattern
     unary_fn: Optional[Callable[[Any], Any]] = None,
@@ -93,16 +93,19 @@ def get_conv_unary_pattern(
     return _conv_unary
 
 
-@functools.lru_cache(None)
-def _generate_conv2d_pattern_matcher():
-    # Ensure it's only be invoked once, due to the cache size limitation in
-    # https://github.com/pytorch/pytorch/blob/
-    # 4c6e842496da636123f83ef868ca1974631f1f1e/torch/_dynamo/config.py#L35-L39
-    pattern = get_conv_unary_pattern(torch.nn.functional.conv2d)
-    pattern = get_aten_graph_module(pattern, _conv2d_example_inputs)
+def _generate_pattern_matcher_helper(pattern, example_inputs):
+    pattern = get_aten_graph_module(pattern, example_inputs)
     pattern.graph.eliminate_dead_code()
     pattern.recompile()
     return SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
 
 
-conv2d_pattern_matcher = _generate_conv2d_pattern_matcher()
+@functools.lru_cache(None)
+def _generate_conv2d_pattern_matcher():
+    # Ensure it's only be invoked once, due to the cache size limitation in
+    # https://github.com/pytorch/pytorch/blob/
+    # 4c6e842496da636123f83ef868ca1974631f1f1e/torch/_dynamo/config.py#L35-L39
+    return _generate_pattern_matcher_helper(
+        _get_conv_unary_pattern(torch.nn.functional.conv2d),
+        _conv2d_example_inputs,
+    )

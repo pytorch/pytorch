@@ -37,7 +37,7 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
-from .utils import conv2d_pattern_matcher
+from .utils import _generate_conv2d_pattern_matcher
 
 __all__ = [
     "X86InductorQuantizer",
@@ -758,7 +758,7 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        matches = conv2d_pattern_matcher.match(gm.graph)
+        matches = _generate_conv2d_pattern_matcher().match(gm.graph)
 
         for match in matches:
             name_node_map = match.name_node_map
