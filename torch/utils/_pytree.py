@@ -575,6 +575,8 @@ class TreeSpec:
 
     def entries(self) -> List[Any]:
         if self.type in STANDARD_DICT_TYPES:
+            if self.type is OrderedDict:
+                return self._context
             dict_context = (
                 self._context if self.type is not defaultdict else self._context[1]
             )
