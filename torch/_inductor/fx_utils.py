@@ -1,6 +1,8 @@
 from collections import defaultdict
 from typing import Any, Callable, DefaultDict, Dict, Optional, Tuple, Type
 
+import sympy
+
 import torch
 import torch.fx
 from torch.utils import _pytree as pytree
@@ -91,8 +93,11 @@ class FakeTensorUpdater:
                 assert isinstance(
                     new, (torch.SymInt, torch.SymBool, torch.SymFloat)
                 ), f"Unknown type {type(new)}"
-                return V.graph.sizevars.statically_known_equals(
-                    new.node.expr, old.node.expr
+                return (
+                    new.node.shape_env._maybe_evaluate_static(
+                        sympy.Eq(new.node.expr, old.node.expr)
+                    )
+                    == sympy.true
                 )
             if new.shape != old.shape or new.layout != old.layout:
                 return False
