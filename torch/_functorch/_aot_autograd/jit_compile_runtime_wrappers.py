@@ -141,6 +141,27 @@ def aot_dispatch_base(
     return compiled_fn
 
 
+# This checks to see if inductor generated different output strides compared to eager mode.
+# This mainly comes from inductor's layout optimzation, which can restride intermediates and outputs.
+# However, for dimensions that are size 1, it is ok to represent the corresponding stride with any value
+# (since that stride is not involved in the compute for any indexing into the tensor).
+# We don't want to report this case as "inductor diverges from eager",
+# since the divergence / layout optimization path does not support dynamic shapes
+# See https://github.com/pytorch/pytorch/issues/116433
+def strides_meaningfully_different(*, sizes, eager_strides, runtime_strides):
+    assert len(sizes) == len(eager_strides) == len(runtime_strides)
+    for size, eager_stride, runtime_stride in zip(
+        sizes, eager_strides, runtime_strides
+    ):
+        if size == 1:
+            if runtime_stride != eager_stride and runtime_stride != 0:
+                return True
+        else:
+            if runtime_stride != eager_stride:
+                return True
+    return False
+
+
 def aot_dispatch_autograd(
     flat_fn,
     flat_args: List[Any],
@@ -342,7 +363,11 @@ def aot_dispatch_autograd(
                 # Comparing ph_arg.stride() with real_stride directly may
                 # cause dynamic dimensions in ph_arg being specialized to static
                 # value. Using the hints to avoid that.
-                if _get_symint_hints(ph_arg.stride()) != real_stride:
+                if strides_meaningfully_different(
+                    sizes=_get_symint_hints(ph_arg.size()),
+                    eager_strides=_get_symint_hints(ph_arg.stride()),
+                    runtime_strides=real_stride,
+                ):
                     # Note that here we use the stride of the real tensor to
                     # restride a FakeTensor. This does not cause trouble
                     # for dynamic shape since this code path only get
