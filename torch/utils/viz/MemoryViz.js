@@ -1402,17 +1402,42 @@ function unpickle(buffer) {
       case LONG1:
         {
           const s = bytebuffer[offset++];
-          if (s > 8) {
-            throw new Error(`Unsupported number bigger than 8 bytes ${s}`);
+          if (s <= 8) {
+            for (let i = 0; i < s; i++) {
+              scratch_bytes[i] = bytebuffer[offset++];
+            }
+            const fill = scratch_bytes[s - 1] >= 128 ? 0xff : 0x0;
+            for (let i = s; i < 8; i++) {
+              scratch_bytes[i] = fill;
+            }
+            stack.push(Number(big[0]));
+          } else { // BigInt
+            let scratch_bytes_unbounded = [];
+            for (let i = 0; i < s; i++) {
+              scratch_bytes_unbounded.push(bytebuffer[offset++]);
+            }
+
+            // BigInt can only convert from unsigned hex, thus we need to
+            // convert from twos-complement if negative
+            const negative = scratch_bytes_unbounded[s - 1] >= 128;
+            if (negative) {
+              // implements scratch_bytes_unbounded = ~scratch_bytes_unbounded + 1
+              // byte-by-byte.
+              let carry = 1;
+              for (let i = 0; i < s; i++) {
+                const twos_complement = (0xff ^ scratch_bytes_unbounded[i]) + carry;
+                carry = twos_complement > 0xff ? 1 : 0;
+                scratch_bytes_unbounded[i] = 0xff & twos_complement;
+              }
+            }
+
+            const hex_str = Array.from(scratch_bytes_unbounded.reverse(), byte => {
+              return byte.toString(16).padStart(2, '0');
+            }).join('');
+
+            const big_int = negative ? -BigInt(`0x${hex_str}`) : BigInt(`0x${hex_str}`);
+            stack.push(big_int);
           }
-          for (let i = 0; i < s; i++) {
-            scratch_bytes[i] = bytebuffer[offset++];
-          }
-          const fill = scratch_bytes[s - 1] >= 128 ? 0xff : 0x0;
-          for (let i = s; i < 8; i++) {
-            scratch_bytes[i] = fill;
-          }
-          stack.push(Number(big[0]));
         }
         break;
       case LONG_BINGET:
