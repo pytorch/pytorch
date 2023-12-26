@@ -809,8 +809,7 @@ class SplitCatSimplifier:
     ):
         to_remove = [split_node]
         counters["inductor"]["scmerge_split_removed"] += 1
-        for getitem_node in split_node.users.keys():
-            to_remove.append(getitem_node)
+        to_remove.extend(split_node.users.keys())
         for next_user in next_users:
             if next_user.target not in {torch.cat, torch.stack}:
                 continue
