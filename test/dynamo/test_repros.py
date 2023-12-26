@@ -3659,6 +3659,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         make_fn(None)()
 
+    def test_call_finally_opcode_python_3_8(self):
+        def fn():
+            try:
+                return torch.zeros(4)
+            finally:
+                return torch.ones(4)  # noqa: SIM107, B012
+
+        result = torch.compile(fn, backend="aot_eager")()
+        self.assertEqual(result, torch.ones(4))
+
     def test_string_format(self):
         s = "temp{i}"
 
