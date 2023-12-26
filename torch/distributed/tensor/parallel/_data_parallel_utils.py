@@ -2,8 +2,10 @@ from functools import partial
 from typing import Optional, Tuple
 
 import torch
+import torch.distributed as dist
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
 
 def grad_layout_hook(param_placements, grad):
@@ -15,8 +17,11 @@ def grad_layout_hook(param_placements, grad):
     # and a partial gradient and DTensor was relying on optimizer
     # who really consumes the gradient to convert the layout.
     if isinstance(grad, DTensor) and grad.placements != param_placements:
-        grad = grad.redistribute(grad.device_mesh, param_placements)
+        # dist.all_reduce(grad._local_tensor, group=grad.device_mesh.get_group())
+        grad = grad.redistribute(placements=param_placements)
+
     return grad
+
 
 
 def _flatten_tensor(
@@ -37,7 +42,7 @@ def _unflatten_tensor(tensor: torch.Tensor, spec: DTensorSpec) -> torch.Tensor:
         spec.placements,
         run_check=False,
     )
-    if result.requires_grad:
-        # only register the hook if the tensor requires grad
-        result.register_hook(partial(grad_layout_hook, spec.placements))
+    # if result.requires_grad:
+    #     # only register the hook if the tensor requires grad
+    #     result.register_hook(partial(grad_layout_hook, spec.placements))
     return result

@@ -164,9 +164,9 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.prod.default: c10d.ReduceOp.PRODUCT,
     aten.prod.dim_int: c10d.ReduceOp.PRODUCT,
     aten.prod.int_out: c10d.ReduceOp.PRODUCT,
-    aten.mean.default: c10d.ReduceOp.AVG,
-    aten.mean.dim: c10d.ReduceOp.AVG,
-    aten.mean.out: c10d.ReduceOp.AVG,
+    # aten.mean.default: c10d.ReduceOp.AVG,
+    # aten.mean.dim: c10d.ReduceOp.AVG,
+    # aten.mean.out: c10d.ReduceOp.AVG,
     aten.max.default: c10d.ReduceOp.MAX,
     aten.max.dim: c10d.ReduceOp.MAX,
     aten.max.out: c10d.ReduceOp.MAX,
@@ -175,10 +175,6 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.min.out: c10d.ReduceOp.MIN,
 }
 
-
-@register_op_strategy(
-    list(LINEAR_REDUCTION_OP_MAP.keys()), schema_info=RuntimeSchemaInfo(1)
-)
 def linear_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
@@ -190,7 +186,11 @@ def linear_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     reduce_dims = list(range(input_strategy.output_ndim)) if dims is None else dims
 
     keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
-    reduction_op = LINEAR_REDUCTION_OP_MAP[op_schema.op]
+    if op_schema.op in LINEAR_REDUCTION_OP_MAP:
+        reduction_op = LINEAR_REDUCTION_OP_MAP[op_schema.op]
+    else:
+        reduction_op =  c10d.ReduceOp.AVG
+
     return common_reduction_strategy(
         mesh,
         input_strategy,
@@ -201,9 +201,24 @@ def linear_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     )
 
 
+register_op_strategy(
+    list(LINEAR_REDUCTION_OP_MAP.keys()), schema_info=RuntimeSchemaInfo(1)
+)(linear_reduction_strategy)
+
+register_op_strategy(
+    [
+        aten.mean.default,
+        aten.mean.dim,
+        aten.mean.out,
+    ],
+    schema_info=RuntimeSchemaInfo(1, static_kwargkey=['dtype'])
+)(linear_reduction_strategy)
+
+
+
 @register_op_strategy(
     [aten.var.correction, aten.var.correction_out],
-    schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
+    schema_info=RuntimeSchemaInfo(1, static_kwargkey=["keepdim"]),
 )
 def var_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
