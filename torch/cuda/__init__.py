@@ -111,7 +111,7 @@ else:
 
 
 has_half: bool = True
-has_magma: bool = getattr(torch._C, "_cuda_hasMagma", lambda: False)()
+has_magma: bool = torch._C._has_magma
 
 default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 

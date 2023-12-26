@@ -873,12 +873,6 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPModule_hasMagma(PyObject* self, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  return at::hasMAGMA() ? Py_True : Py_False;
-  END_HANDLE_TH_ERRORS
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -1521,7 +1515,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_rocm_is_backward_pass,
      METH_NOARGS,
      nullptr},
-    {"_cuda_hasMagma", THCPModule_hasMagma, METH_NOARGS, nullptr},
     {nullptr}};
 
 PyMethodDef* THCPModule_methods() {
