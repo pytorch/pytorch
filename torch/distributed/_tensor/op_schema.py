@@ -25,7 +25,7 @@ OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
 
 
 def _rebuild_tensor_from_dtensor_meta(arg) -> object:
-    """ "
+    """
     This is used to propagate tensor metadata, must be under fake mode
     """
     assert arg.tensor_meta is not None, "DTensorSpec does not contain tensor_meta."
@@ -61,8 +61,7 @@ class PlacementStrategy:
     output_spec is a sequence of Optional[DTensorSpec].
     """
 
-    # TODO: can we unify the type with OutputSpecType?
-    output_spec: Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]
+    output_spec: Union[DTensorSpec, Tuple[Optional[DTensorSpec]]]
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
     # redistribute costs for this op placement strategy
