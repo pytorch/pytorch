@@ -8,6 +8,7 @@ import torch
 
 from torch.distributed._tensor import DeviceMesh, distribute_module, distribute_tensor
 from torch.distributed._tensor.debug import CommDebugMode
+from torch.distributed._tensor.ops.utils import is_tensor_partial
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -280,7 +281,6 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(y_local, y_dist.full_tensor())
 
             # backward step
-            comm_mode = CommDebugMode()
             y_local.sum().backward()
             with comm_mode:
                 y_dist.sum().backward()
@@ -293,6 +293,19 @@ class DistMathOpsTest(DTensorTestBase):
             )
 
             if elementwise_affine:
+                # if input is sharded on any outer dimension, the gradient of weight
+                # and bias should be _Partial
+                dim_map = x_dist._spec.dim_map
+                outer_dims = range(norm_idx)
+                needs_reduction = any(dim_map[d] >= 0 for d in outer_dims)
+                self.assertEqual(
+                    is_tensor_partial(layer_norm_dist.weight.grad._spec),
+                    needs_reduction,
+                )
+                self.assertEqual(
+                    is_tensor_partial(layer_norm_dist.bias.grad._spec),
+                    needs_reduction,
+                )
                 self.assertEqual(
                     layer_norm_local.weight.grad,
                     layer_norm_dist.weight.grad.full_tensor(),
