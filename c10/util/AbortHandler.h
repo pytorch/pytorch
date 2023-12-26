@@ -1,11 +1,9 @@
-#include <c10/macros/Macros.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/env.h>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
 #include <mutex>
-#include <optional>
 
 namespace c10 {
 class AbortHandlerHelper {
@@ -51,9 +49,10 @@ class AbortHandlerHelper {
 
 namespace detail {
 C10_ALWAYS_INLINE void terminate_handler() {
-  std::cout << "Unhandled exception caught in c10/util/AbortHandler.h" << '\n';
+  std::cout << "Unhandled exception caught in c10/util/AbortHandler.h"
+            << std::endl;
   auto backtrace = get_backtrace();
-  std::cout << backtrace << '\n' << std::flush;
+  std::cout << backtrace << std::endl << std::flush;
   auto prev_handler = AbortHandlerHelper::getInstance().getPrev();
   if (prev_handler) {
     prev_handler();
@@ -71,7 +70,7 @@ C10_ALWAYS_INLINE void set_terminate_handler() {
   use_custom_terminate = true;
 #endif // _WIN32
   auto result = c10::utils::check_env("TORCH_CUSTOM_TERMINATE");
-  if (result != std::nullopt) {
+  if (result != c10::nullopt) {
     use_custom_terminate = result.value();
   }
   if (use_custom_terminate) {

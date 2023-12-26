@@ -582,5 +582,3 @@ API Reference
     .. automethod:: replace_all_uses
 
 .. py:module:: torch.export.dynamic_shapes
-
-.. automodule:: torch.export.unflatten

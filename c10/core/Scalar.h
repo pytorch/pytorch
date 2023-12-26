@@ -7,17 +7,12 @@
 
 #include <c10/core/OptionalRef.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/SymBool.h>
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymInt.h>
-#include <c10/core/SymNodeImpl.h>
-#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
-#include <c10/util/complex.h>
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10 {
@@ -319,7 +314,6 @@ class C10_API Scalar {
   enum class Tag { HAS_d, HAS_i, HAS_z, HAS_b, HAS_sd, HAS_si, HAS_sb };
 
   // NB: assumes that self has already been cleared
-  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   C10_ALWAYS_INLINE void moveFrom(Scalar&& rhs) noexcept {
     v = rhs.v;
     tag = rhs.tag;
@@ -338,7 +332,6 @@ class C10_API Scalar {
     int64_t i;
     c10::complex<double> z;
     c10::intrusive_ptr_target* p;
-    // NOLINTNEXTLINE(modernize-use-equals-default)
     v_t() {} // default constructor
   } v;
 

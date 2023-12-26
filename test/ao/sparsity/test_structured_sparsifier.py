@@ -177,7 +177,8 @@ class TestBaseStructuredSparsifier(TestCase):
         for config in pruner.groups:
             modules = []
             if type(config["module"]) is tuple:
-                modules.extend(config["module"])
+                for module in config["module"]:
+                    modules.append(module)
             else:
                 module = config["module"]
                 modules.append(module)
@@ -189,7 +190,8 @@ class TestBaseStructuredSparsifier(TestCase):
         for config in pruner.groups:
             modules = []
             if type(config["module"]) is tuple:
-                modules.extend(config["module"])
+                for module in config["module"]:
+                    modules.append(module)
             else:
                 module = config["module"]
                 modules.append(module)

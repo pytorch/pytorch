@@ -1,9 +1,11 @@
 #pragma once
 
 #include <c10/util/TypeList.h>
+#include <functional>
 #include <type_traits>
 
-namespace c10::guts {
+namespace c10 {
+namespace guts {
 
 /**
  * Access information about result type or arguments from a function type.
@@ -15,7 +17,7 @@ namespace c10::guts {
 template <class Func>
 struct function_traits {
   static_assert(
-      !std::is_same_v<Func, Func>,
+      !std::is_same<Func, Func>::value,
       "In function_traits<Func>, Func must be a plain function type.");
 };
 template <class Result, class... Args>
@@ -206,7 +208,6 @@ constexpr auto tuple_slice(Tuple t) {
 namespace detail {
 template <class Mapper, class... Args, size_t... Indices>
 auto tuple_map(
-    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     std::tuple<Args...>&& tuple,
     const Mapper& mapper,
     std::index_sequence<Indices...>) {
@@ -221,4 +222,5 @@ auto tuple_map(std::tuple<Args...>&& tuple, const Mapper& mapper) {
       std::move(tuple), mapper, std::index_sequence_for<Args...>());
 }
 
-} // namespace c10::guts
+} // namespace guts
+} // namespace c10

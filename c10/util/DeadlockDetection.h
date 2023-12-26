@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 
 /// This file provides some simple utilities for detecting common deadlocks in
@@ -16,12 +15,14 @@
 /// to directly assert on PyGILState_Check (as it avoids a vcall and also
 /// works correctly with torchdeploy.)
 
+namespace c10 {
+
 #define TORCH_ASSERT_NO_GIL_WITHOUT_PYTHON_DEP() \
   TORCH_INTERNAL_ASSERT(                         \
       !c10::impl::check_python_gil(),            \
       "Holding GIL before a blocking operation!  Please release the GIL before blocking, or see https://github.com/pytorch/pytorch/issues/56297 for how to release the GIL for destructors of objects")
 
-namespace c10::impl {
+namespace impl {
 
 C10_API bool check_python_gil();
 
@@ -45,4 +46,5 @@ struct C10_API PythonGILHooksRegisterer {
   }
 };
 
-} // namespace c10::impl
+} // namespace impl
+} // namespace c10

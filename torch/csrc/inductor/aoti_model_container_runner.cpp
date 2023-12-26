@@ -1,18 +1,18 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <ATen/DynamicLibrary.h>
 
-#include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
+#include <torch/csrc/inductor/aoti_model_container_runner.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
 namespace torch::inductor {
 
 AOTIModelContainerRunner::AOTIModelContainerRunner(
-    const std::string& model_so_path,
+    const char* model_path,
     size_t num_models,
     bool is_cpu,
-    const std::string& cubin_dir) {
-  model_so_ = std::make_unique<at::DynamicLibrary>(model_so_path.c_str());
-  TORCH_CHECK(model_so_, "Failed to load model: ", model_so_path);
+    const char* cubin_dir) {
+  model_so_ = std::make_unique<at::DynamicLibrary>(model_path);
+  TORCH_CHECK(model_so_, "Failed to load model: ", model_path);
   create_func_ = reinterpret_cast<decltype(create_func_)>(
       model_so_->sym("AOTInductorModelContainerCreate"));
   delete_func_ = reinterpret_cast<decltype(delete_func_)>(
@@ -34,11 +34,8 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
   get_call_spec_func_ = reinterpret_cast<decltype(get_call_spec_func_)>(
       model_so_->sym("AOTInductorModelContainerGetCallSpec"));
 
-  AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
-      &container_handle_,
-      num_models,
-      is_cpu,
-      cubin_dir.empty() ? nullptr : cubin_dir.c_str()));
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      create_func_(&container_handle_, num_models, is_cpu, cubin_dir));
 }
 
 AOTIModelContainerRunner::~AOTIModelContainerRunner() {
@@ -48,8 +45,9 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
 }
 
 std::vector<at::Tensor> AOTIModelContainerRunner::run(
-    std::vector<at::Tensor>& inputs,
-    AOTInductorStreamHandle cuda_stream_handle) {
+    std::vector<at::Tensor> inputs,
+    AOTInductorStreamHandle cuda_stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle) {
   auto input_handles =
       torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
 
@@ -67,7 +65,7 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run(
       output_handles.data(),
       output_handles.size(),
       cuda_stream_handle,
-      proxy_executor_handle_));
+      proxy_executor_handle));
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
       output_handles.data(), output_handles.size());
@@ -94,12 +92,13 @@ void AOTIModelContainerRunner::swap_constant_buffer() {
   AOTI_RUNTIME_ERROR_CODE_CHECK(swap_constant_buffer_func_(container_handle_));
 }
 
-std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {
+std::vector<const char*> AOTIModelContainerRunner::get_call_spec() {
   const char* in_spec;
   const char* out_spec;
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       get_call_spec_func_(container_handle_, &in_spec, &out_spec));
-  return {in_spec, out_spec};
+  std::vector<const char*> call_spec = {in_spec, out_spec};
+  return call_spec;
 }
 
 } // namespace torch::inductor

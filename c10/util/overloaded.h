@@ -1,6 +1,5 @@
 #pragma once
 
-#include <memory>
 namespace c10 {
 namespace detail {
 

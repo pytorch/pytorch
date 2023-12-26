@@ -72,22 +72,15 @@ def is_float(s: str):
     return True
 
 
-def convert_arg_type(arg: torch.Argument):
+def convert_arg_type(python_type: str):
     from .cpp import CONTAINER_PYTHON_TO_CPP, PYTHON_TO_CPP
-
-    # use x.real_type instead of x.type so that we get ScalarType instead of int
-    python_type = repr(arg.real_type)  # type: ignore[attr-defined]
 
     if python_type == "Tensor":
         # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
-        if arg.alias_info is not None and arg.alias_info.is_write:
-            return f"at::{python_type}&"
-        else:
-            return f"at::{python_type} const&"
+        return f"at::{python_type} const&"
 
     if python_type in PYTHON_TO_CPP:
-        cpp_type = PYTHON_TO_CPP[python_type]
-        return cpp_type
+        return PYTHON_TO_CPP[python_type]
 
     # Convert args of container types e.g. Optional[*]
     for py_container, cpp_container in CONTAINER_PYTHON_TO_CPP.items():
@@ -103,9 +96,8 @@ def convert_arg_type(arg: torch.Argument):
     raise AssertionError(f"unsupport python_type: {python_type}")
 
 
-def convert_return_type(ret: torch.Argument):
-    # use x.real_type instead of x.type so that we get ScalarType instead of int
-    python_type = repr(ret.real_type)  # type: ignore[attr-defined]
+def convert_return_type(python_type: str):
+    # TODO: support alias
     python_to_cpp = {
         "Tensor": "at::Tensor",
         "List[Tensor]": "std::vector<at::Tensor>",
@@ -113,17 +105,14 @@ def convert_return_type(ret: torch.Argument):
 
     cpp_type = python_to_cpp.get(python_type, None)
     assert cpp_type is not None, f"NYI return type: {python_type}"
-    # An output aliasing an input is returned by reference only when it's a
-    # Tensor, not when it's a Tensor[]. For example, aten.split.Tensor's output
-    # aliases the input tensor, but the op returns a vector by value.
-    if python_type == "Tensor" and ret.alias_info is not None:
-        cpp_type += "&"
     return cpp_type
 
 
 def get_cpp_op_schema(kernel):
-    args = kernel._schema.arguments
-    returns = kernel._schema.returns
+    # use x.real_type instead of x.type so that we get ScalarType instead of int
+    arg_types = [repr(x.real_type) for x in kernel._schema.arguments]
+    arg_names = [x.name for x in kernel._schema.arguments]
+    returns = [repr(x.real_type) for x in kernel._schema.returns]
 
     num_returns = len(returns)
     assert num_returns > 0, "must have at least one return value"
@@ -134,7 +123,10 @@ def get_cpp_op_schema(kernel):
         tuple_returns = ", ".join([convert_return_type(r) for r in returns])
         cpp_return_value = f"std::tuple<{tuple_returns}>"
 
-    cpp_arg_type = [f"{convert_arg_type(arg)} {arg.name}" for arg in args]
+    cpp_arg_type = [
+        f"{convert_arg_type(arg_type)} {arg_name}"
+        for arg_type, arg_name in zip(arg_types, arg_names)
+    ]
     return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
 
 
@@ -202,7 +194,7 @@ class MemoryPlanningState:
 
 
 @dataclasses.dataclass
-class EnterDeviceContextManagerLine:
+class EnterCudaDeviceContextManagerLine:
     device_idx: int
     last_seen_device_guard_index: Optional[int]
 
@@ -237,12 +229,14 @@ class EnterDeviceContextManagerLine:
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
-            code.writeline(f"with {V.graph.device_ops.device_guard(self.device_idx)}:")
+            code.writeline(f"with torch.cuda._DeviceGuard({self.device_idx}):")
             device_cm_stack.enter_context(code.indent())
-            code.writeline(V.graph.device_ops.set_device(self.device_idx))
+            code.writeline(
+                f"torch.cuda.set_device({self.device_idx}) # no-op to ensure context"
+            )
 
 
-class ExitDeviceContextManagerLine:
+class ExitCudaDeviceContextManagerLine:
     def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
         if not V.graph.cpp_wrapper:
             device_cm_stack.close()
@@ -447,10 +441,8 @@ class WrapperCodeGen(CodeGen):
             import triton
             import triton.language as tl
             from torch._inductor.triton_heuristics import grid, start_graph, end_graph
-            {}
-            """.format(
-                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
-            )
+            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+            """
         )
 
     def add_meta_once(self, meta):
@@ -492,7 +484,7 @@ class WrapperCodeGen(CodeGen):
         )
         with self.prefix.indent():
             if config.triton.debug_sync_graph:
-                self.prefix.writeline(V.graph.device_ops.synchronize())
+                self.prefix.writeline("torch.cuda.synchronize()")
             inp_len = len(V.graph.graph_inputs.keys())
             if inp_len != 0:
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
@@ -506,7 +498,7 @@ class WrapperCodeGen(CodeGen):
     def write_get_raw_stream(self, index):
         self.write_triton_header_once()
         name = f"stream{index}"
-        self.writeline(f"{name} = get_raw_stream({index})")
+        self.writeline(f"{name} = get_cuda_stream({index})")
         return name
 
     def next_kernel_suffix(self):
@@ -514,12 +506,14 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_device_guard_enter(self, device_idx):
         self.writeline(
-            EnterDeviceContextManagerLine(device_idx, self.last_seen_device_guard_index)
+            EnterCudaDeviceContextManagerLine(
+                device_idx, self.last_seen_device_guard_index
+            )
         )
         self.last_seen_device_guard_index = device_idx
 
     def codegen_device_guard_exit(self):
-        self.writeline(ExitDeviceContextManagerLine())
+        self.writeline(ExitCudaDeviceContextManagerLine())
 
     def generate_return(self, output_refs):
         if output_refs:
@@ -539,7 +533,7 @@ class WrapperCodeGen(CodeGen):
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         output_name = extern_kernel.get_name()
         origin_node = extern_kernel.get_origin_node()
-        kernel_name = extern_kernel.get_kernel_name()
+        kernel_name = extern_kernel.codegen_kernel_name()
         ending = self.ending
         if config.memory_planning and "view_as_complex" in kernel_name:
             # view operation fallbacks cause issues since inductor
@@ -577,7 +571,7 @@ class WrapperCodeGen(CodeGen):
         )
 
     def generate_scatter_fallback(
-        self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
+        self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
     ):
         line = f"{kernel}({','.join(map(str, inputs))}"
         if kernel == "aten.scatter_":
@@ -635,8 +629,8 @@ class WrapperCodeGen(CodeGen):
                 elif isinstance(
                     line,
                     (
-                        EnterDeviceContextManagerLine,
-                        ExitDeviceContextManagerLine,
+                        EnterCudaDeviceContextManagerLine,
+                        ExitCudaDeviceContextManagerLine,
                     ),
                 ):
                     line.codegen(self.wrapper_call, device_cm_stack)
@@ -646,7 +640,7 @@ class WrapperCodeGen(CodeGen):
             output_refs = self.get_output_refs()
             self.mark_output_type()
             if config.triton.debug_sync_graph:
-                self.wrapper_call.writeline(V.graph.device_ops.synchronize())
+                self.wrapper_call.writeline("torch.cuda.synchronize()")
 
             if config.profile_bandwidth:
                 self.generate_end_graph()
@@ -932,10 +926,6 @@ class WrapperCodeGen(CodeGen):
             """,
             strip=True,
         )
-        from .triton import TritonKernel
-
-        if TritonKernel.gen_attr_descriptor_import():
-            compile_wrapper.splice(TritonKernel.gen_attr_descriptor_import())
         compile_wrapper.newline()
 
         from .common import SizeArg, TensorArg
@@ -1433,8 +1423,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #include <torch/types.h>
-                #include <ATen/ops/bernoulli_native.h>
-
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
@@ -2032,7 +2020,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.writeline(f"AtenTensorHandle {output_handle_name};")
         output_arg = f"&{output_handle_name}"
         self.generate_c_shim_extern_kernel_call(
-            extern_kernel.get_kernel_name(), args + [output_arg]
+            extern_kernel.codegen_kernel_name(), args + [output_arg]
         )
         self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
@@ -2122,14 +2110,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
     def generate_scatter_fallback(
-        self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
+        self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
     ):
         # TODO: support other overload for cpp wrapper and remove the below assertions
         if V.graph.aot_mode and config.aot_inductor.abi_compatible:
             # call the ABI shim function instead of the ATen one
             kernel = kernel.replace("at::", "aoti_torch_")
         line = f"{kernel}({output}, {','.join(map(str, inputs))}"
-        if python_kernel_name == "aten.scatter_":
+        if fn == "aten.scatter_":
             if src_is_tensor:
                 if reduce:
                     line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"

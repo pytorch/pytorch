@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/core/Storage.h>
-#include <c10/macros/Export.h>
 #include <c10/util/UniqueVoidPtr.h>
 
 #include <atomic>

@@ -1,11 +1,5 @@
 #!/bin/bash
 
-if [ $# -ne 1 ]; then
-  echo "Usage: $0 {experiment_name}"
-  exit 1
-fi
-
-experiment_name="$1"
 benchmark_script="server.py"
 checkpoint_file="resnet18-f37072fd.pth"
 downloaded_checkpoint=false
@@ -36,7 +30,7 @@ for batch_size in "${batch_size_values[@]}"; do
         python -W ignore "$benchmark_script" --batch_size "$batch_size" --output_file "$output_file" --no-compile
       fi
     done
-    python process_metrics.py --csv "$output_file" --name "$experiment_name"
+    python process_metrics.py --csv "$output_file"
     rm "./results/$output_file"
   done
 done

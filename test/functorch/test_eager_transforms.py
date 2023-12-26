@@ -10,7 +10,7 @@ import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
     IS_FBCODE, freeze_rng_state, skipIfTorchDynamo, IS_WINDOWS, IS_MACOS, IS_ARM64,
-    markDynamoStrictTest, xfailIfTorchDynamo, TEST_WITH_TORCHDYNAMO
+    markDynamoStrictTest, xfailIfTorchDynamo
 )
 import torch
 import torch.nn as nn
@@ -1645,6 +1645,7 @@ class TestVmapOfGrad(TestCase):
         result = vmap(partial(grad(compute_loss), weights))(data, targets)
         self._compare_expected_and_result(expected, result, mechanism)
 
+    @xfailIfTorchDynamo
     def test_log_softmax(self, device):
         x = torch.randn(3, 5, device=device)
         v = torch.randn(5, device=device)
@@ -1666,10 +1667,6 @@ jacrev_and_jacfwd = parametrize("jacapi", [subtest(jacrev, name='jacrev'), subte
 
 FIXME_jacrev_only = parametrize("jacapi", [subtest(jacrev, name='jacrev')])
 
-FIXME_skip_jacrev_dynamo = parametrize("jacapi", [
-    subtest(jacrev, name='jacrev', decorators=[unittest.expectedFailure] if TEST_WITH_TORCHDYNAMO else None),
-    subtest(jacfwd, name='jacfwd')
-])
 
 @markDynamoStrictTest
 class TestJac(TestCase):
@@ -1748,7 +1745,8 @@ class TestJac(TestCase):
         expected = torch.diagflat(x)
         assert torch.allclose(z, expected)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_multiple_outputs_multiple_argnums(self, device, jacapi):
         def f(x, y):
             return 2 * x + 3 * y, 4 * x + 5 * y
@@ -1770,7 +1768,8 @@ class TestJac(TestCase):
         self.assertEqual(z[1][0], expected_out1_x)
         self.assertEqual(z[1][1], expected_out1_y)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_multiple_outputs_single_argnums(self, device, jacapi):
         def f(x, y):
             return 2 * x + 3 * y, 4 * x + 5 * y
@@ -1813,7 +1812,8 @@ class TestJac(TestCase):
         self.assertTrue(isinstance(z['right'], tuple))
         self.assertEqual(z, expected)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_multiple_inputs_pytree(self, device, jacapi):
         def f(a, b, c):
             a0, a1 = a
@@ -1838,7 +1838,8 @@ class TestJac(TestCase):
         expected = (torch.tensor(1., device=device), torch.tensor(2., device=device))
         self.assertEqual(result, expected)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_dimensionality(self, device, jacapi):
         def f(x):
             return x
@@ -1866,7 +1867,8 @@ class TestJac(TestCase):
         self.assertEqual(result, torch.eye(3, 3, device=device))
         self.assertEqual(aux, x.cos())
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_aux_pytree(self, device, jacapi):
         def f(x):
             y = x.clone()
@@ -1885,7 +1887,8 @@ class TestJac(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
                 _ = jacapi(lambda x: (x, [x, aux]), has_aux=True)(x)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_outputs_can_any_pytree(self, device, jacapi):
         x = torch.randn(2, 3, device=device)
 
@@ -1919,7 +1922,8 @@ class TestJac(TestCase):
         assert isinstance(out, list)
         assert isinstance(out[0], tuple) and isinstance(out[0][1], dict)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_multiple_inputs_outputs_pytree(self, device, jacapi):
         def f(a, b, c):
             a0, a1 = a
@@ -1968,7 +1972,8 @@ class TestJac(TestCase):
         }
         self.assertEqual(result, expected)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_unrelated_input(self, device, jacapi):
         def f(x, y):
             return x
@@ -1983,7 +1988,8 @@ class TestJac(TestCase):
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_unrelated_output(self, device, jacapi):
         y = torch.randn(2, 3, device=device)
 
@@ -1996,7 +2002,8 @@ class TestJac(TestCase):
         expected = x.new_zeros(2, 3, 2, 3)
         self.assertEqual(result, expected)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_empty_output(self, device, jacapi):
         x = torch.randn(3, device=device)
         y = torch.randn(3, device=device)
@@ -2037,7 +2044,8 @@ class TestJac(TestCase):
         assert isinstance(z, torch.Tensor)
         assert torch.allclose(z, expected0)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_argnums_defaults_to_zero(self, device, jacapi):
         def f(x, y):
             return x * 2 + y * 3
@@ -2085,6 +2093,7 @@ class TestJac(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must be int"):
             jacapi(torch.multiply, argnums=(1, 0.0))(x, x)
 
+    @xfailIfTorchDynamo
     def test_hessian_simple(self, device):
         def f(x):
             return x.sin()
@@ -2100,7 +2109,8 @@ class TestJac(TestCase):
         result = jacapi(foo)(inputs)
         self.assertEqual(result, expected)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_against_reference_simple(self, device, jacapi):
         def f(x):
             return 3 * x ** 2
@@ -2108,7 +2118,8 @@ class TestJac(TestCase):
         x = torch.randn(2, 3, 5, device=device)
         self._test_against_reference(f, (x,), jacapi)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_against_reference_multi_input(self, device, jacapi):
         def f(x, y):
             return (x.cos() * x) @ y.sin()
@@ -2117,7 +2128,8 @@ class TestJac(TestCase):
         y = torch.randn(3, 5, device=device)
         self._test_against_reference(f, (x, y), jacapi)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_against_reference_multi_input_multi_output(self, device, jacapi):
         def f(x, y):
             return (x * x) @ y, x @ (x.sum(1) * y), y.sum()
@@ -2126,7 +2138,8 @@ class TestJac(TestCase):
         y = torch.randn(3, 5, device=device)
         self._test_against_reference(f, (x, y), jacapi)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_against_reference_unrelated_outputs(self, device, jacapi):
         def f(x, y):
             return x, y, x, y
@@ -2135,7 +2148,8 @@ class TestJac(TestCase):
         y = torch.randn(3, device=device)
         self._test_against_reference(f, (x, y), jacapi)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_against_reference_zero_dim(self, device, jacapi):
         # zero-dim output
         def f(x, y):
@@ -2160,7 +2174,8 @@ class TestJac(TestCase):
         y = torch.randn(1, device=device)
         self._test_against_reference(h, (x, y), jacapi)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_against_reference_correctness_different_devices(self, device, jacapi):
         def f(x, y):
             return x * y, (x * y).to(device=device)
@@ -2169,7 +2184,8 @@ class TestJac(TestCase):
         y = torch.randn(3)
         self._test_against_reference(f, (x, y), jacapi)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_against_reference_default_arg(self, device, jacapi):
         def f(x, y, z=3.):
             return x * y * z
@@ -2178,7 +2194,8 @@ class TestJac(TestCase):
         y = torch.randn(3, device=device)
         self._test_against_reference(f, (x, y), jacapi)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_inplace(self, device, jacapi):
         def f(x, y):
             y.copy_(x)
@@ -2226,6 +2243,7 @@ class TestJac(TestCase):
         with self.assertRaisesRegex(ValueError, err_msg):
             jacrev(f, argnums=(0, ), chunk_size=-2)(x, y)
 
+    @xfailIfTorchDynamo
     @parametrize('_preallocate_and_copy', (True, False))
     def test_chunk_jacrev_composition(self, device, _preallocate_and_copy):
         x = torch.randn(10, 2, device=device)
@@ -2305,7 +2323,8 @@ class TestJac(TestCase):
         with self.assertRaisesRegex(RuntimeError, "jacfwd: Expected all outputs"):
             jacfwd(fn)(x)
 
-    @FIXME_skip_jacrev_dynamo
+    @xfailIfTorchDynamo
+    @jacrev_and_jacfwd
     def test_jac_with_non_tensor_args(self, device, jacapi):
         def f(t, int_x):
             return t + int_x
@@ -2326,6 +2345,7 @@ class TestHessian(TestCase):
         result = hessian(foo)(inputs)
         self.assertEqual(result, expected)
 
+    @xfailIfTorchDynamo
     def test_hessian_vectorize_correctness_simple(self, device):
         def f(x):
             return (3 * x ** 2).sum()
@@ -2333,6 +2353,7 @@ class TestHessian(TestCase):
         x = torch.randn(2, 3, 5, device=device)
         self._test_against_reference(f, (x,))
 
+    @xfailIfTorchDynamo
     def test_hessian_vectorize_correctness_multi_input(self, device):
         def f(x, y, z):
             return ((x.relu() * x) @ y.sin() @ z).sum()
@@ -2342,6 +2363,7 @@ class TestHessian(TestCase):
         z = torch.randn(5, 5, device=device)
         self._test_against_reference(f, (x, y, z))
 
+    @xfailIfTorchDynamo
     def test_hessian_vectorize_correctness_unrelated_outputs(self, device):
         # output unrelated to one input
         def f(x, y):
@@ -2359,6 +2381,7 @@ class TestHessian(TestCase):
         y = torch.randn(3, device=device)
         self._test_against_reference(f, (x, y))
 
+    @xfailIfTorchDynamo
     def test_jacfwd_different_levels(self, device):
         # Test case from:
         # https://github.com/pytorch/functorch/issues/597
@@ -2829,6 +2852,7 @@ class TestLinearize(TestCase):
 @markDynamoStrictTest
 class TestVmapJvpInplaceView(TestCase):
     # Case 1 in [Forward Grad View/inplace]
+    @xfailIfTorchDynamo
     def test_all_dual_no_view(self, device):
         B = 2
 
@@ -2857,6 +2881,7 @@ class TestVmapJvpInplaceView(TestCase):
         self.assertEqual(out_tangent, yt.expand(B, 3))
 
     # Case 2 in [Forward Grad View/inplace]
+    @xfailIfTorchDynamo
     def test_all_dual_base_view_inplace(self, device):
         B = 2
 
@@ -2894,6 +2919,7 @@ class TestVmapJvpInplaceView(TestCase):
         self.assertEqual(x.movedim(2, 0), expected)
 
     # Case 3 in [Forward Grad View/inplace]
+    @xfailIfTorchDynamo
     def test_all_dual_base_inplace(self, device):
         B = 2
 
@@ -2922,6 +2948,7 @@ class TestVmapJvpInplaceView(TestCase):
         self.assertEqual(out_tangent[1], yt.movedim(1, 0)[:, 0, ::2])
 
     # Case 4 in [Forward Grad View/inplace]
+    @xfailIfTorchDynamo
     def test_right_dual_view_prop(self, device):
         B = 2
 
@@ -2953,6 +2980,7 @@ class TestVmapJvpInplaceView(TestCase):
         self.assertEqual(tangents[1], expected_tangent_1)
 
     # Case 5 in [Forward Grad View/inplace]
+    @xfailIfTorchDynamo
     def test_right_dual_base_prop(self, device):
         B = 2
 
@@ -3425,6 +3453,7 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
             transform(g)(x)
 
+    @xfailIfTorchDynamo
     def test_vjp_doesnt_support_saved_tensor_hooks(self, device):
         def f(x):
             return torch.sin(x).sum()
@@ -3441,6 +3470,7 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
             vjp(g, x)
 
+    @xfailIfTorchDynamo
     def test_jvp_doesnt_support_saved_tensor_hooks(self, device):
         def f(x):
             return torch.sin(x).sum()
@@ -4126,6 +4156,7 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result, expected)
 
+    @xfailIfTorchDynamo
     @parametrize('mechanism', ["make_functional", "functional_call"])
     def test_ensemble_regression(self, device, mechanism):
         def make_spirals(n_samples, noise_std=0., rotations=1.):
@@ -4210,6 +4241,7 @@ class TestExamplesCorrectness(TestCase):
         self.assertEqual(result_loss, expected_loss)
         self.assertEqual(result_weights, expected_weights)
 
+    @xfailIfTorchDynamo
     @parametrize("dropout_layer", [
         subtest(nn.Dropout, 'Dropout'),
         subtest(nn.AlphaDropout, 'AlphaDropout'),
@@ -4356,6 +4388,7 @@ class TestFunctionalize(TestCase):
         self.assertEqual(inpt1, inpt2)
         self.assertEqual(inpt1, inpt3)
 
+    @xfailIfTorchDynamo
     def test_simple_view(self, device):
 
         def f(x: torch.Tensor) -> torch.Tensor:
@@ -4365,6 +4398,7 @@ class TestFunctionalize(TestCase):
             return x
         self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
 
+    @xfailIfTorchDynamo
     def test_multioutput_view(self, device):
 
         def f(x: torch.Tensor) -> torch.Tensor:
@@ -4454,6 +4488,7 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
         self.assertEqual(out1, out2)
         self.assertEqual(inpt1, inpt2)
 
+    @xfailIfTorchDynamo
     @unittest.skipIf(IS_FBCODE, 'fails in fbcode')
     def test_vmap_functionalize_jvp(self, device):
 
@@ -4780,6 +4815,7 @@ class TestHigherOrderOperatorInteraction(TestCase):
         ggx = grad(grad_f_sum)(x)
         self.assertEqual(ggx, -x.sin())
 
+    @xfailIfTorchDynamo
     def test_vmap_grad_sum(self, device):
         x = torch.randn(2, 3, device=device)
         gx = vmap(grad(sum_pyop), (0, None))(x, 0)

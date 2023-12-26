@@ -231,14 +231,14 @@ class intrusive_ptr final {
   // This static_assert triggers on MSVC
   //  error C2131: expression did not evaluate to a constant
   static_assert(
-      // NOLINTNEXTLINE(misc-redundant-expression)
       NullType::singleton() == NullType::singleton(),
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_base_of_v<
+      std::is_base_of<
           TTarget,
-          std::remove_pointer_t<decltype(NullType::singleton())>>,
+          typename std::remove_pointer<decltype(NullType::singleton())>::type>::
+          value,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;
@@ -341,7 +341,6 @@ class intrusive_ptr final {
   }
 
   template <class From, class FromNullType>
-  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   /* implicit */ intrusive_ptr(intrusive_ptr<From, FromNullType>&& rhs) noexcept
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
@@ -370,7 +369,6 @@ class intrusive_ptr final {
   }
 
   intrusive_ptr& operator=(intrusive_ptr&& rhs) & noexcept {
-    // NOLINTNEXTLINE(*assign*)
     return operator= <TTarget, NullType>(std::move(rhs));
   }
 
@@ -388,8 +386,6 @@ class intrusive_ptr final {
     if (this == &rhs) {
       return *this;
     }
-    // NOLINTNEXTLINE(misc-unconventional-assign-operator,
-    // cppcoreguidelines-c-copy-assignment-signature)
     return operator= <TTarget, NullType>(rhs);
   }
 
@@ -674,7 +670,7 @@ template <
 class weak_intrusive_ptr final {
  private:
   static_assert(
-      std::is_base_of_v<intrusive_ptr_target, TTarget>,
+      std::is_base_of<intrusive_ptr_target, TTarget>::value,
       "intrusive_ptr can only be used for classes that inherit from intrusive_ptr_target.");
 #ifndef _WIN32
   // This static_assert triggers on MSVC
@@ -684,9 +680,10 @@ class weak_intrusive_ptr final {
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_base_of_v<
+      std::is_base_of<
           TTarget,
-          std::remove_pointer_t<decltype(NullType::singleton())>>,
+          typename std::remove_pointer<decltype(NullType::singleton())>::type>::
+          value,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;
@@ -729,7 +726,6 @@ class weak_intrusive_ptr final {
 
   template <class From, class FromNullType>
   /* implicit */ weak_intrusive_ptr(
-      // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
       weak_intrusive_ptr<From, FromNullType>&& rhs) noexcept
       : target_(
             detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
@@ -759,7 +755,6 @@ class weak_intrusive_ptr final {
   }
 
   weak_intrusive_ptr& operator=(weak_intrusive_ptr&& rhs) & noexcept {
-    // NOLINTNEXTLINE(*assign*)
     return operator= <TTarget, NullType>(std::move(rhs));
   }
 
@@ -778,7 +773,6 @@ class weak_intrusive_ptr final {
     if (this == &rhs) {
       return *this;
     }
-    // NOLINTNEXTLINE(*assign*)
     return operator= <TTarget, NullType>(rhs);
   }
 

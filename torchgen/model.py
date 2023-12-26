@@ -87,7 +87,6 @@ class DispatchKey(Enum):
     NestedTensor = auto()
     Dense = auto()
 
-    PreDispatch = auto()
     Python = auto()
     FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()

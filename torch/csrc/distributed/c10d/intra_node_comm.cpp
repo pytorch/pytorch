@@ -53,8 +53,6 @@ at::Tensor allReduce(
     const at::Tensor& input,
     std::array<void*, kMaxDevices> p2pStates,
     std::array<void*, kMaxDevices> buffers,
-    void* p2pStatesDev,
-    void* buffersDev,
     void* topoInfo,
     size_t rank,
     size_t worldSize,
@@ -225,16 +223,12 @@ IntraNodeComm::IntraNodeComm(
     Topology topology,
     std::array<void*, kMaxDevices> p2pStates,
     std::array<void*, kMaxDevices> buffers,
-    void* p2pStatesDev,
-    void* buffersDev,
     void* topoInfo,
     size_t rank,
     size_t worldSize)
     : topology_(topology),
       p2pStates_(p2pStates),
       buffers_(buffers),
-      p2pStatesDev_(p2pStatesDev),
-      buffersDev_(buffersDev),
       topoInfo_(topoInfo),
       rank_(rank),
       worldSize_(worldSize) {}
@@ -255,8 +249,6 @@ IntraNodeComm::~IntraNodeComm() {
   if (topoInfo_ != nullptr) {
     AT_CUDA_CHECK(cudaFree(topoInfo_));
   }
-  AT_CUDA_CHECK(cudaFree(p2pStatesDev_));
-  AT_CUDA_CHECK(cudaFree(buffersDev_));
 }
 
 /**
@@ -420,29 +412,9 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
           cudaIpcMemLazyEnablePeerAccess));
     }
   }
-  void* p2pStatesDev = nullptr;
-  AT_CUDA_CHECK(cudaMalloc(&p2pStatesDev, sizeof(p2pStates)));
-  AT_CUDA_CHECK(cudaMemcpy(
-      p2pStatesDev,
-      p2pStates.data(),
-      sizeof(p2pStates),
-      cudaMemcpyHostToDevice));
-
-  void* buffersDev = nullptr;
-  AT_CUDA_CHECK(cudaMalloc(&buffersDev, sizeof(buffers)));
-  AT_CUDA_CHECK(cudaMemcpy(
-      buffersDev, buffers.data(), sizeof(buffers), cudaMemcpyHostToDevice));
-
   void* topoInfo = initTopoInfo(topology, nvlMesh, rank);
   return c10::make_intrusive<IntraNodeComm>(
-      topology,
-      p2pStates,
-      buffers,
-      p2pStatesDev,
-      buffersDev,
-      topoInfo,
-      rank,
-      worldSize);
+      topology, p2pStates, buffers, topoInfo, rank, worldSize);
 #else
   return nullptr;
 #endif
@@ -465,16 +437,7 @@ at::Tensor IntraNodeComm::allReduce(
   c10::cuda::CUDACachingAllocator::recordStream(
       input.storage().data_ptr(), stream);
   return c10d::intra_node_comm::allReduce(
-      input,
-      p2pStates_,
-      buffers_,
-      p2pStatesDev_,
-      buffersDev_,
-      topoInfo_,
-      rank_,
-      worldSize_,
-      algo,
-      stream);
+      input, p2pStates_, buffers_, topoInfo_, rank_, worldSize_, algo, stream);
 }
 
 int64_t getIntraNodeCommUsageCounter() {

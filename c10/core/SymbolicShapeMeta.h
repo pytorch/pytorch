@@ -1,14 +1,10 @@
 #pragma once
 #include <c10/core/SymBool.h>
 #include <c10/core/SymInt.h>
-#include <c10/macros/Export.h>
-#include <c10/macros/Macros.h>
 #include <c10/util/DimVector.h>
 
 #include <atomic>
-#include <cstdint>
 #include <mutex>
-#include <utility>
 
 namespace c10 {
 

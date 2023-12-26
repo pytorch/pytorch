@@ -372,7 +372,6 @@ Tensor& set_(Tensor& result, Storage source) {
   return result.set_(std::move(source), 0, new_size, {});
 }
 
-
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
 Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
   checkSetStorage(result, std::move(storage), storage_offset, size, stride);
@@ -1503,7 +1502,8 @@ Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
       }
       return old_values.permute(values_perm);
     }();
-  const auto is_coalesced = self.is_coalesced() && (dims.empty() || dims[0] == 0);
+
+  const auto is_coalesced = self.is_coalesced() && (dims[0] == 0);
   // TODO: apply `is_coalesced ||= new_values.size(0) < 2`.
   return _sparse_coo_tensor_with_dims_and_tensors(
        sparse_ndim, dense_ndim, new_sizes, new_indices, new_values, self.options(), is_coalesced);
@@ -1827,11 +1827,7 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.sym_sizes()[dim];
-  // Note: `size < -index` is not equivalent to `size <= -1 - index` if index is INT64_MIN
-  // For std::numeric_limits<int64_t>::min() result of unary minus is undefined by the standard
-  // but in practice is equal to self. On the other hand, indexing wraping is valid for all
-  // negative int64_t values, as x[INT64_MIN] is the same as x[INT64_MAX]
-  if (size <= -1 - index || size <= index) {
+  if (size < -index || size <= index) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
       TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()[dim]);

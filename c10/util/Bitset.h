@@ -1,11 +1,14 @@
 #pragma once
 
-#include <cstddef>
+#include <c10/macros/Macros.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Optional.h>
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
 
-namespace c10::utils {
+namespace c10 {
+namespace utils {
 
 /**
  * This is a simple bitset class with sizeof(long long int) bits.
@@ -113,4 +116,5 @@ inline bool operator!=(bitset lhs, bitset rhs) noexcept {
   return !(lhs == rhs);
 }
 
-} // namespace c10::utils
+} // namespace utils
+} // namespace c10

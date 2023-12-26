@@ -27,7 +27,6 @@ from .grad_mode import (
     set_multithreading_enabled,
 )
 from .gradcheck import gradcheck, gradgradcheck
-from .graph import _engine_run_backward
 
 from .variable import Variable
 
@@ -264,7 +263,7 @@ def backward(
     # The reason we repeat the same comment below is that
     # some Python versions print out the first line of a multi-line function
     # calls in the traceback and some print out the last line
-    _engine_run_backward(
+    Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
         tensors,
         grad_tensors_,
         retain_graph,
@@ -272,7 +271,7 @@ def backward(
         inputs,
         allow_unreachable=True,
         accumulate_grad=True,
-    )
+    )  # Calls into the C++ engine to run the backward pass
 
 
 def grad(
@@ -395,7 +394,7 @@ def grad(
     if is_grads_batched:
 
         def vjp(gO):
-            return _engine_run_backward(
+            return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
                 t_outputs,
                 gO,
                 retain_graph,
@@ -403,13 +402,13 @@ def grad(
                 inputs,
                 allow_unused,
                 accumulate_grad=False,
-            )
+            )  # Calls into the C++ engine to run the backward pass
 
         result = _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(
             grad_outputs_
         )
     else:
-        result = _engine_run_backward(
+        result = Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs,
             grad_outputs_,
             retain_graph,
@@ -417,7 +416,7 @@ def grad(
             inputs,
             allow_unused,
             accumulate_grad=False,
-        )
+        )  # Calls into the C++ engine to run the backward pass
     if materialize_grads:
         if any(
             result[i] is None and not is_tensor_like(inputs[i])

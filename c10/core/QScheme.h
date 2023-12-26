@@ -1,8 +1,7 @@
 #pragma once
 
+#include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
-#include <cstdint>
-#include <string>
 
 namespace c10 {
 
