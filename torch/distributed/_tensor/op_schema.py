@@ -61,7 +61,7 @@ class PlacementStrategy:
     output_spec is a sequence of Optional[DTensorSpec].
     """
 
-    output_spec: Union[DTensorSpec, Tuple[Optional[DTensorSpec]]]
+    output_spec: Union[DTensorSpec, Tuple[Optional[DTensorSpec], ...]]
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
     # redistribute costs for this op placement strategy
