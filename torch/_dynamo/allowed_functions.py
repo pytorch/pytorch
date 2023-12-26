@@ -1,4 +1,5 @@
 import builtins
+import collections
 import copy
 import dataclasses
 import functools
@@ -90,6 +91,62 @@ class FunctionIdSet:
 
     def __contains__(self, idx: int):
         return idx in self()
+
+
+@FunctionIdSet
+def _disallowed_function_ids() -> Set[int]:
+    remove: List[Any] = [
+        True,
+        False,
+        None,
+        collections.OrderedDict,
+        copy.copy,
+        copy.deepcopy,
+        inspect.signature,
+        math.__package__,
+        torch.__builtins__,
+        torch.autocast_decrement_nesting,
+        torch.autocast_increment_nesting,
+        torch.autograd.grad,
+        torch.clear_autocast_cache,
+        torch.cuda.current_device,
+        torch.cuda.set_device,
+        torch.distributions.constraints.is_dependent,
+        torch.distributions.normal.Normal,
+        torch.inference_mode,
+        torch.jit.isinstance,
+        torch.set_anomaly_enabled,
+        torch.set_autocast_cache_enabled,
+        torch.set_autocast_cpu_dtype,
+        torch.set_autocast_cpu_enabled,
+        torch.set_autocast_enabled,
+        torch.set_autocast_gpu_dtype,
+        warnings.warn,
+        torch._C._dynamo.eval_frame.unsupported,
+        torch.Tensor.__init__,
+        torch.resize_as_,
+        torch._tensor._convert,
+    ]
+
+    # extract all dtypes from torch
+    dtypes = [
+        obj for obj in torch.__dict__.values() if isinstance(obj, type(torch.float32))
+    ]
+    remove += dtypes
+    storage = [
+        obj
+        for obj in torch.__dict__.values()
+        if isinstance(obj, type(torch.FloatStorage))
+    ]
+    remove += storage
+
+    # Distributed APIs don't work well with torch.compile.
+    if torch.distributed.is_available():
+        remove.extend(
+            torch.distributed.distributed_c10d.dynamo_unsupported_distributed_c10d_ops
+        )
+
+    return {id(x) for x in remove}
 
 
 # Helper function to dump the torch name rule map generated based on
@@ -340,6 +397,10 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
         ):
             torch_object_ids[id(method)] = f"torch.Tensor.{name}"
 
+    for idx in _disallowed_function_ids():
+        if idx in torch_object_ids:
+            del torch_object_ids[idx]
+
     for extra in (is_fx_tracing, is_compiling):
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
@@ -353,13 +414,12 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
 
 
 @FunctionIdSet
-def _allowed_callable_ids() -> Dict[int, str]:
-    rv: Dict[int, str] = {}
-    return rv
+def _allowed_function_ids() -> Dict[int, str]:
+    return gen_allowed_objs_and_ids().object_ids
 
 
 @FunctionIdSet
-def _disallowed_callable_ids() -> Dict[int, str]:
+def _allowed_user_defined_function_ids() -> Dict[int, str]:
     rv: Dict[int, str] = {}
     return rv
 
@@ -446,19 +506,38 @@ def _maybe_init_lazy_module(obj: object) -> None:
             fn()
 
 
-def is_callable_allowed(obj) -> bool:
+def is_allowed(obj) -> bool:
+    """Is this safe to trace like torch.add ?"""
     _maybe_init_lazy_module(obj)
-    return id(obj) in _allowed_callable_ids
+
+    if id(obj) in _disallowed_function_ids:
+        return False
+
+    if id(obj) in _allowed_function_ids:
+        return True
+
+    # torch.ops is populated lazily so we don't necessarily have them in
+    # _allowed_function_ids.  Figure it out by testing the type instead
+    # in those cases
+    return isinstance(
+        obj,
+        (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),
+    )
 
 
-def is_callable_disallowed(obj) -> bool:
+def is_user_defined_allowed(obj) -> bool:
     _maybe_init_lazy_module(obj)
-    return id(obj) in _disallowed_callable_ids
+    return id(obj) in _allowed_user_defined_function_ids
 
 
 def is_forbidden(obj) -> bool:
     _maybe_init_lazy_module(obj)
     return getattr(obj, "_dynamo_forbidden", False)
+
+
+def torch_get_name(obj, default) -> str:
+    """Convert a torch.* function to a string"""
+    return _allowed_function_ids.get_name(id(obj), default)
 
 
 def is_builtin_callable(obj) -> bool:
