@@ -322,33 +322,8 @@ batch_norm_cpu_collect_stats_channels_last_impl(
     int64_t TILE_SIZE = 16;
     int64_t THRESHOLD = 2048;
 
-    // Method 1: parallel on C, vertical reduce
-    if (TILE_SIZE < n_channel && n_channel <= THRESHOLD) {
-      // compute mean per input
-      at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
-        for (const auto c : c10::irange(begin, end)) {
-          accscalar_t sum = 0;
-          for (const auto t : c10::irange(N)) {
-            sum += input_data[t * n_channel + c];
-          }
-          scalar_t mean = sum / N;
-          mean_data[c] = mean;
-        }
-      });
-
-      // compute variance per input
-      at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
-        for (const auto c : c10::irange(begin, end)) {
-          accscalar_t _var_sum = 0;
-          for (const auto t : c10::irange(N)) {
-            _var_sum += (input_data[t * n_channel + c] - mean_data[c]) * (input_data[t * n_channel + c] - mean_data[c]);
-          }
-          var_sum_data[c] = _var_sum;
-        }
-      });
-    }
     // Method 2: parallel on tiles of C, vectorized vertical reduce on each tile
-    else {
+    if (num_threads == 1 || (n_channel <= TILE_SIZE || n_channel > THRESHOLD)) {
       // compute mean per input
       mean.zero_();
       at::parallel_for(0, (n_channel + TILE_SIZE - 1) / TILE_SIZE, 1, [&](int64_t tile_idx_begin, int64_t tile_idx_end) {
@@ -391,6 +366,31 @@ batch_norm_cpu_collect_stats_channels_last_impl(
               mean_ptr,
               jj_end - jj_begin);
           }
+        }
+      });
+    }
+    // Method 1: parallel on C, vertical reduce
+    else {
+      // compute mean per input
+      at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+        for (const auto c : c10::irange(begin, end)) {
+          accscalar_t sum = 0;
+          for (const auto t : c10::irange(N)) {
+            sum += input_data[t * n_channel + c];
+          }
+          scalar_t mean = sum / N;
+          mean_data[c] = mean;
+        }
+      });
+
+      // compute variance per input
+      at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+        for (const auto c : c10::irange(begin, end)) {
+          accscalar_t _var_sum = 0;
+          for (const auto t : c10::irange(N)) {
+            _var_sum += (input_data[t * n_channel + c] - mean_data[c]) * (input_data[t * n_channel + c] - mean_data[c]);
+          }
+          var_sum_data[c] = _var_sum;
         }
       });
     }
