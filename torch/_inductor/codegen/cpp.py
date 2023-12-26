@@ -1319,8 +1319,7 @@ class CppVecOverrides(CppOverrides):
         assert isinstance(V.kernel, CppVecKernel)
         index = V.kernel.rename_indexing(expr)
         tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
-        if not V.kernel.index_depends_on(index, tiling_var):
-            # if index doesn't depend on tiling_var, it is fine to use a scalar index
+        if V.kernel.index_is_vector_invariant(index):
             return CppOverrides.index_expr(expr, dtype)
         if stride_at(
             tiling_var, index
@@ -1676,6 +1675,18 @@ class CppVecKernel(CppKernel):
         self.tiling_idx = tiling_idx
         metrics.generated_cpp_vec_kernel_count += 1
 
+    def index_is_vector_invariant(self, index: sympy.Expr):
+        """`index` is either independent from the tiling itervar or unchanged in the vector range"""
+        tiling_var = self.itervars[self.tiling_idx]
+        if not self.index_depends_on(index, tiling_var):
+            return True
+        if not self.index_indirect_depends_on(index, tiling_var):
+            vec_range = [
+                sympy_subs(index, {tiling_var: i}) for i in range(self.tiling_factor)
+            ]
+            return all(expr == vec_range[0] for expr in vec_range)
+        return False
+
     def _get_vec_load_line(
         self,
         var: str,
@@ -1836,7 +1847,7 @@ class CppVecKernel(CppKernel):
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
-        if not self.index_depends_on(index, tiling_var):
+        if self.index_is_vector_invariant(index):
             # load scalar and lazily broadcast it on demand
             return super().load(name, index)
         non_contiguous = stride_at(
@@ -2044,10 +2055,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             self.reduction_suffix.writelines(store_lines)
 
     def broadcast(self, scalar_var: CppCSEVariable) -> CppCSEVariable:
-        assert (
-            not scalar_var.is_vec
-            and self.itervars[self.tiling_idx] not in scalar_var.dependent_itervars
-        )
+        assert not scalar_var.is_vec
         if scalar_var.dtype == torch.bool:
             vec_var = self.cse.generate(
                 self.compute, f"to_float_mask({scalar_var.name})"
