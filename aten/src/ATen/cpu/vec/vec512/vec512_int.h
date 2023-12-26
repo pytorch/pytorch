@@ -1002,13 +1002,37 @@ Vectorized<T> inline int_elementwise_binary_512(const Vectorized<T>& a, const Ve
 template <>
 Vectorized<int8_t> inline operator*(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
   // We don't have an instruction for multiplying int8_t
+#ifndef CPU_CAPABILITY_AVX512
   return int_elementwise_binary_512(a, b, std::multiplies<int8_t>());
+#else
+  __m512i mask00FF = _mm512_set1_epi16(0x00FF);
+  __m512i a_lo = _mm512_srai_epi16(_mm512_slli_epi16(a, 8), 8);
+  __m512i b_lo = _mm512_srai_epi16(_mm512_slli_epi16(b, 8), 8);
+  __m512i a_hi = _mm512_srai_epi16(a, 8);
+  __m512i b_hi = _mm512_srai_epi16(b, 8);
+  __m512i res_lo = _mm512_and_si512(_mm512_mullo_epi16(a_lo, b_lo), mask00FF);
+  __m512i res_hi = _mm512_slli_epi16(_mm512_mullo_epi16(a_hi, b_hi), 8);
+  __m512i res = _mm512_or_si512(res_hi, res_lo);
+  return res;
+#endif
 }
 
 template <>
 Vectorized<uint8_t> inline operator*(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
   // We don't have an instruction for multiplying uint8_t
+#ifndef CPU_CAPABILITY_AVX512
   return int_elementwise_binary_512(a, b, std::multiplies<uint8_t>());
+#else
+  __m512i mask00FF = _mm512_set1_epi16(0x00FF);
+  __m512i a_lo = _mm512_and_si512 (a, mask00FF);
+  __m512i b_lo = _mm512_and_si512 (b, mask00FF);
+  __m512i a_hi = _mm512_srli_epi16(a, 8);
+  __m512i b_hi = _mm512_srli_epi16(b, 8);
+  __m512i res_lo = _mm512_and_si512(_mm512_mullo_epi16(a_lo, b_lo), mask00FF);
+  __m512i res_hi = _mm512_slli_epi16(_mm512_mullo_epi16(a_hi, b_hi), 8);
+  __m512i res = _mm512_or_si512(res_hi, res_lo);
+  return res;
+#endif
 }
 
 template <>
