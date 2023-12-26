@@ -289,7 +289,7 @@ class TestGenericPytree(TestCase):
         run_test({"a": 1})
         run_test({"abcdefg": torch.randn(2, 3)})
         run_test({1: torch.randn(2, 3)})
-        run_test({"a": 1, "b": 2, "c": torch.randn(2, 3)})
+        run_test({"a": 1, "c": torch.randn(2, 3), "b": 2})
 
     @parametrize(
         "pytree_impl,gen_expected_fn",
@@ -368,7 +368,7 @@ class TestGenericPytree(TestCase):
             expected_spec = gen_expected_fn(ddct)
             values, treespec = pytree_impl.tree_flatten(ddct)
             self.assertIsInstance(values, list)
-            self.assertEqual(values, list(ddct.values()))
+            self.assertEqual(values, [ddct[k] for k in sorted(ddct)])
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
@@ -391,7 +391,7 @@ class TestGenericPytree(TestCase):
         run_test(defaultdict(int, {"a": 1}))
         run_test(defaultdict(int, {"abcdefg": torch.randn(2, 3)}))
         run_test(defaultdict(int, {1: torch.randn(2, 3)}))
-        run_test(defaultdict(int, {"a": 1, "b": 2, "c": torch.randn(2, 3)}))
+        run_test(defaultdict(int, {"a": 1, "c": torch.randn(2, 3), "b": 2}))
 
     @parametrize(
         "pytree_impl,gen_expected_fn",
