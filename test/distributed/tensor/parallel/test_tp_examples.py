@@ -168,10 +168,11 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             # Disable dropout in the test since we cannot reproduce the same random
             # behaviors when comparing single-gpu models with multi-gpu models.
             dropout_p=0.0,
-            # TODO: Weight_tying works fine under inputs and models of small size.
-            # Test error would surpass the allowed limit when tuning up model size.
-            # Need to investigate if this is normal, e.g. due to precision issues.
-            weight_tying=False,
+            # float64 precision is needed for the computation results on the single-gpu
+            # model and the distributed model to be asserted equal, especially when
+            # model size is large and various operations (e.g., positional embedding,
+            # weight tying, etc.) are performed.
+            dtype=torch.float64,
         )
 
         # Reset random seeds to ensure two models have the same initialization.
@@ -271,7 +272,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         optim_tp = torch.optim.Adam(model_tp.parameters(), lr=LR)
 
         # Initialize input and make sure all ranks have the same input.
-        inp_size = [4, 8]  # [batch_size, seq_len]
+        inp_size = [8, 12]  # [batch_size, seq_len]
         if is_seq_parallel:
             assert inp_size[1] % self.world_size == 0
         torch.manual_seed(0)
