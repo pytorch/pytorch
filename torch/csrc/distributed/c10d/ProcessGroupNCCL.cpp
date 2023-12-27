@@ -1544,6 +1544,10 @@ void ProcessGroupNCCL::watchdogHandler() {
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
               waitForDumpOrTimeout(*optAsyncDebugDump);
+              const auto completeMsg = c10::str(
+                  logPrefix(),
+                  "Timeout dump finished in watchdog and signaled a global abort.");
+              LOG(ERROR) << completeMsg;
             }
 
           } catch (const std::exception& e) {
