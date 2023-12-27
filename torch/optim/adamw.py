@@ -81,8 +81,8 @@ class AdamW(Optimizer):
             group.setdefault("differentiable", False)
             fused = group.setdefault("fused", None)
             for p in group["params"]:
-                p_state = self.state[p]
-                if not torch.is_tensor(p_state["step"]):
+                p_state = self.state.get(p, [])
+                if len(p_state) != 0 and not torch.is_tensor(p_state['step']):
                     p_state["step"] = torch.tensor(float(p_state["step"]), dtype=_get_scalar_dtype(is_fused=fused))
 
     def _init_group(
