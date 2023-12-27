@@ -1800,6 +1800,29 @@ def validate_revert(
     return (author_login, commit_sha)
 
 
+def get_ghstack_dependent_prs(
+    repo: GitRepo, pr: GitHubPR
+) -> List[Tuple[str, GitHubPR]]:
+    assert pr.is_ghstack_pr()
+    orig_ref = f"{repo.remote}/{pr.get_ghstack_orig_ref()}"
+    rev_list = repo.revlist(f"{pr.default_branch()}..{orig_ref}")
+    for branch in repo.branches_containing_ref(orig_ref):
+        candidate = repo.revlist(f"{pr.default_branch()}..{branch}")
+        # Pick longest candidate
+        if len(candidate) > len(rev_list):
+            candidate, rev_list = rev_list, candidate
+        # Validate that candidate always ends rev-list
+        if rev_list[-len(candidate) :] != candidate:
+            raise RuntimeError("Ieee...")
+    rc: List[Tuple[str, GitHubPR]] = []
+    for pr_, sha in _revlist_to_prs(repo, pr, rev_list):
+        if not pr_.is_closed():
+            continue
+        commit_sha = get_pr_commit_sha(repo, pr_)
+        rc.append((commit_sha, pr_))
+    return rc
+
+
 def do_revert_prs(
     repo: GitRepo,
     shas_and_prs: List[Tuple[str, GitHubPR]],
@@ -1864,9 +1887,14 @@ def try_revert(
         if comment_id is not None
         else "\n"
     )
+    shas_and_prs = (
+        get_ghstack_dependent_prs(repo, pr)
+        if pr.is_ghstack_pr()
+        else [(commit_sha, pr)]
+    )
     do_revert_prs(
         repo,
-        [(commit_sha, pr)],
+        shas_and_prs,
         author_login=author_login,
         extra_msg=extra_msg,
         dry_run=dry_run,
