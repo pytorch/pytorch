@@ -153,7 +153,7 @@ class GitRepo:
             if include_remote
             else self._run_git("branch", "--contains", ref)
         )
-        return [x.strip() for x in rc.split("\n")] if len(rc) > 0 else []
+        return [x.strip() for x in rc.split("\n") if x.strip()] if len(rc) > 0 else []
 
     def current_branch(self) -> str:
         return self._run_git("symbolic-ref", "--short", "HEAD").strip()
