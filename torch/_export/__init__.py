@@ -126,19 +126,19 @@ def capture_pre_autograd_graph(
     """
     from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
 
-    decomp_table = {
-        torch.ops.aten.dropout.default: torch.ops.aten.dropout.default.decompose,
-        torch.ops.aten.batch_norm.default: torch.ops.aten.batch_norm.default.decompose,
-        torch.ops.aten._batch_norm_impl_index.default: torch.ops.aten._batch_norm_impl_index.default.decompose,
-        torch.ops.aten.native_batch_norm.default: torch.ops.aten.native_batch_norm.default.decompose,
-    }
-
     if _functional_pre_dispatch_IR:
         from torch.export._trace import _export
-        module = _export(f, args, kwargs, constraints=constraints, pre_dispatch=True, decomp_table=decomp_table).module()
+        module = _export(f, args, kwargs, constraints=constraints, pre_dispatch=True).module()
     else:
         if kwargs is None:
             kwargs = {}
+
+        decomp_table = {
+            torch.ops.aten.dropout.default: torch.ops.aten.dropout.default.decompose,
+            torch.ops.aten.batch_norm.default: torch.ops.aten.batch_norm.default.decompose,
+            torch.ops.aten._batch_norm_impl_index.default: torch.ops.aten._batch_norm_impl_index.default.decompose,
+            torch.ops.aten.native_batch_norm.default: torch.ops.aten.native_batch_norm.default.decompose,
+        }
 
         with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
             m = torch._dynamo.export(

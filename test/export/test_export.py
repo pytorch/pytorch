@@ -1066,7 +1066,7 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(ep(*test_inp), fn(*test_inp)))
 
     def test_decomp_batch_norm_functional_predispatch(self):
-        class ConvBatchnormRelu(torch.nn.Module):
+        class ConvBatchnorm(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(1, 3, 1, 1)
@@ -1077,7 +1077,7 @@ class TestExport(TestCase):
                 x = self.bn(x)
                 return (x,)
 
-        mod = ConvBatchnormRelu()
+        mod = ConvBatchnorm()
         mod.eval()
         inp = torch.randn(1, 1, 3, 3)
 
@@ -1097,11 +1097,27 @@ def forward(self, arg_0):
     return pytree.tree_unflatten((getitem,), self._out_spec)""")
 
         mod.train()
-        # TODO (tmanlaibaatar) This may not matter with Andrew's work
-        # AssertionError: aot_autograd expected to have an entirely functional graph,
-        # but found %_native_batch_norm_legit = call_function[target=torch.ops.aten._native_batch_norm_legit.default]
-        with self.assertRaisesRegex(AssertionError, "functional"):
-            gm = capture_pre_autograd_graph(mod, (inp,), _functional_pre_dispatch_IR=True)
+        gm_train = capture_pre_autograd_graph(mod, (inp,), _functional_pre_dispatch_IR=True)
+        self.assertExpectedInline(str(gm_train.code).strip(), """\
+def forward(self, arg_0):
+    l_x_, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    conv_weight = self.conv_weight
+    conv_bias = self.conv_bias
+    bn_weight = self.bn_weight
+    bn_bias = self.bn_bias
+    bn_running_mean = self.bn_running_mean
+    bn_running_var = self.bn_running_var
+    bn_num_batches_tracked = self.bn_num_batches_tracked
+    conv2d = torch.ops.aten.conv2d.default(l_x_, conv_weight, conv_bias);  l_x_ = conv_weight = conv_bias = None
+    add = torch.ops.aten.add.Tensor(bn_num_batches_tracked, 1)
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = None
+    getitem = _native_batch_norm_legit_functional[0]
+    getitem_3 = _native_batch_norm_legit_functional[3]
+    getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+    copy__default = torch.ops.aten.copy_.default(bn_running_mean, getitem_3);  bn_running_mean = getitem_3 = None
+    copy__default_1 = torch.ops.aten.copy_.default(bn_running_var, getitem_4);  bn_running_var = getitem_4 = None
+    copy__default_2 = torch.ops.aten.copy_.default(bn_num_batches_tracked, add);  bn_num_batches_tracked = add = None
+    return pytree.tree_unflatten((getitem,), self._out_spec)""")
 
 
 

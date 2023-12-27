@@ -64,6 +64,14 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.prim.device.default,  # type: ignore[has-type]
     ]
 
+    # These are ops that claim to be functional, but actually are not
+    fake_functional_ops = [
+        torch.ops.aten.dropout.default,  # type: ignore[has-type]
+        torch.ops.aten.batch_norm.default,  # type: ignore[has-type]
+        torch.ops.aten.native_batch_norm.default,  # type: ignore[has-type]
+        torch.ops.aten._batch_norm_impl_index.default,  # type: ignore[has-type]
+    ]
+
     def __new__(cls, elem):
         assert torch._is_functional_tensor(elem)
 
@@ -259,6 +267,9 @@ class FunctionalTensorMode(TorchDispatchMode):
             # effort by not decomposing ops that are functional in PreDispatch functionalization
             # for now.
             if self._dispatch_key is not None:
+                # it is unsafe to not decompose ops that claim to be functional but actually aren't
+                if func in FunctionalTensor.fake_functional_ops:
+                    return True
                 # only decompose view or inplace mutating ops
                 alias_info = len(
                     [i for i in func._schema.arguments if i.alias_info is not None]
