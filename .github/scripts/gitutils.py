@@ -145,6 +145,16 @@ class GitRepo:
         rc = self._run_git("rev-list", revision_range, "--", ".").strip()
         return rc.split("\n") if len(rc) > 0 else []
 
+    def branches_containing_ref(
+        self, ref: str, *, include_remote: bool = True
+    ) -> List[str]:
+        rc = (
+            self._run_git("branch", "--remote", "--contains", ref)
+            if include_remote
+            else self._run_git("branch", "--contains", ref)
+        )
+        return [x.strip() for x in rc.split("\n")] if len(rc) > 0 else []
+
     def current_branch(self) -> str:
         return self._run_git("symbolic-ref", "--short", "HEAD").strip()
 
