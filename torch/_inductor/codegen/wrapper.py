@@ -1238,7 +1238,8 @@ class WrapperCodeGen(CodeGen):
                 if isinstance(_output_buffer, ir.ReinterpretView):
                     return _check(_input_buffer, _output_buffer.data)
                 if (
-                    isinstance(_output_buffer.layout, ir.MutationLayout)
+                    isinstance(_output_buffer, ir.StorageBox)
+                    and isinstance(_output_buffer.layout, ir.MutationLayout)
                     and _output_buffer.layout.get_buffer().get_name()
                     == _input_buffer.get_name()
                 ):
