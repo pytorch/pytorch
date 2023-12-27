@@ -3509,6 +3509,7 @@ class TestNestedTensorSubclass(TestCase):
         with self.assertRaisesRegex(ValueError, "expected .* to be a contiguous jagged layout"):
             clone = transposed.clone()
 
+    # Note: Math fallback doesn't work with bfloat16 on CUDA
     @xfailIfTorchDynamo
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
                  SM80OrLater else [torch.float16, torch.float32])
@@ -3618,7 +3619,10 @@ class TestNestedTensorSubclass(TestCase):
 
         # Test math fallback
         with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True):
-            check_forward_backward()
+            # Math fallback doesn't work with bfloat16 on CUDA because
+            # "group_gemm_dispatch" not implemented for 'BFloat16'
+            if not (device == "cuda" and dtype == torch.bfloat16):
+                check_forward_backward()
 
 
     # This requires NT -> NT views to work in inductor, which is a TODO
