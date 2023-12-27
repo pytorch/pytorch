@@ -21,7 +21,7 @@ from enum import Enum
 import itertools
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 from torch.ao.quantization import ObserverBase
-from torch._export import capture_pre_autograd_graph
+from torch._export import capture_pre_autograd_graph, dynamic_dim
 
 class Conv2DType(Enum):
     left = 1
@@ -30,9 +30,29 @@ class Conv2DType(Enum):
 
 class TestHelperModules:
     class SingleConv2dModule(torch.nn.Module):
-        def __init__(self, with_bn=False) -> None:
+        def __init__(
+            self,
+            with_bn=False,
+            kernel_size=(2, 2),
+            stride=(1, 1),
+            padding=(1, 1),
+            dilation=(1, 1),
+            groups=1,
+            bias=True,
+            padding_mode='zeros',
+        ) -> None:
             super().__init__()
-            self.conv = nn.Conv2d(3, 6, (2, 2), stride=(1, 1), padding=(1, 1))
+            self.conv = nn.Conv2d(
+                4,
+                6,
+                kernel_size,
+                stride=stride,
+                padding=padding,
+                dilation=dilation,
+                groups=groups,
+                bias=bias,
+                padding_mode=padding_mode,
+            )
             self.bn = torch.nn.BatchNorm2d(6)
             self.with_bn = with_bn
 
@@ -40,6 +60,9 @@ class TestHelperModules:
             x = self.conv(x)
             if self.with_bn:
                 x = self.bn(x)
+            batchsize, num_channels, height, width = x.size()
+            channels_per_group = num_channels // 2
+            x = x.view(batchsize, 2, channels_per_group, height, width)
             return x
 
     class Conv2dUnaryModule(torch.nn.Module):
@@ -291,6 +314,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         expected_node_occurrence,
         expected_node_list=None,
         is_qat=False,
+        constraints=None,
     ):
         m_eager = model.train() if is_qat else model.eval()
 
@@ -299,6 +323,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         m = capture_pre_autograd_graph(
             m,
             example_inputs,
+            constraints=constraints,
         )
 
         # QAT Model failed to deepcopy
@@ -323,14 +348,33 @@ class X86InductorQuantTestCase(QuantizationTestCase):
 
 @skipIfNoDynamoSupport
 class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
-    @skipIfNoX86
-    def test_conv2d(self):
+    def _test_conv2d_helper(
+        self,
+        example_inputs,
+        with_bn=False,
+        kernel_size=(2, 2),
+        stride=(1, 1),
+        padding=(1, 1),
+        dilation=(1, 1),
+        groups=1,
+        bias=True,
+        padding_mode='zeros',
+        constraints=None,
+    ):
         """
         Test pattern of single conv2d with X86InductorQuantizer.
         """
         with override_quantized_engine("x86"), torch.no_grad():
-            m = TestHelperModules.SingleConv2dModule().eval()
-            example_inputs = (torch.randn(2, 3, 16, 16),)
+            m = TestHelperModules.SingleConv2dModule(
+                with_bn=with_bn,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+                dilation=dilation,
+                groups=groups,
+                bias=bias,
+                padding_mode=padding_mode,
+            ).eval()
             quantizer = X86InductorQuantizer().set_global(
                 xiq.get_default_x86_inductor_quantization_config()
             )
@@ -353,7 +397,53 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 quantizer,
                 node_occurrence,
                 node_list,
+                constraints=constraints,
             )
+
+    @skipIfNoX86
+    def test_conv2d(self):
+        """
+        Test pattern of single conv2d with X86InductorQuantizer.
+        """
+        example_inputs = (torch.randn(2, 4, 16, 16),)
+        self._test_conv2d_helper(example_inputs)
+
+    @skipIfNoX86
+    def test_conv2d_non_default_values(self):
+        """
+        Test pattern of single conv2d (non-default values) with X86InductorQuantizer.
+        """
+        example_inputs = (torch.randn(2, 4, 16, 16),)
+        self._test_conv2d_helper(
+            example_inputs,
+            kernel_size=(3, 3),
+            stride=2,
+            padding=2,
+            dilation=2,
+            groups=2,
+            bias=False,
+            padding_mode='replicate',
+        )
+
+    @skipIfNoX86
+    def test_conv2d_symbolic_size(self):
+        """
+        Test pattern of single conv2d for dynamic batch size with X86InductorQuantizer.
+        """
+        example_inputs = (torch.randn(2, 4, 16, 16),)
+        # Magic number 16 in constraints comes from
+        # https://github.com/pytorch/pytorch/blob/
+        # 362bc6d7cbcac57466a52701fac3ba3bfb668000/aten/src/ATen/native/Convolution.cpp#L529
+        self._test_conv2d_helper(
+            example_inputs,
+            constraints=[dynamic_dim(example_inputs[0], 0) < 16],
+        )
+
+        example_inputs2 = (torch.randn(32, 4, 16, 16),)
+        self._test_conv2d_helper(
+            example_inputs2,
+            constraints=[dynamic_dim(example_inputs2[0], 0) >= 16],
+        )
 
     @skipIfNoX86
     def test_conv2d_unary(self):
@@ -996,7 +1086,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
         with override_quantized_engine("x86"):
             m = TestHelperModules.SingleConv2dModule(with_bn=True)
-            example_inputs = (torch.randn(2, 3, 16, 16),)
+            example_inputs = (torch.randn(2, 4, 16, 16),)
             quantizer = X86InductorQuantizer().set_global(
                 xiq.get_default_x86_inductor_quantization_config(is_qat=True)
             )
