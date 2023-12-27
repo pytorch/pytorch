@@ -74,6 +74,6 @@ def pin_memory(data, device=None):
             # The sequence type may not support `__init__(iterable)` (e.g., `range`).
             return [pin_memory(sample, device) for sample in data]
     elif hasattr(data, "pin_memory"):
-        return data.pin_memory()
+        return data.pin_memory(device)
     else:
         return data
