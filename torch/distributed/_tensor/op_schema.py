@@ -50,6 +50,17 @@ def _is_out_variant_op(op: OpOverload):
     return "out" in op._schema.overload_name
 
 
+def _pretty_print_spec(spec: object) -> str:
+    if spec is None:
+        return "None"
+    elif isinstance(spec, DTensorSpec):
+        return "".join([str(p) for p in spec.placements])
+    elif isinstance(spec, Sequence):
+        return "(" + ", ".join([_pretty_print_spec(s) for s in spec]) + ")"
+    else:
+        raise RuntimeError(f"Unknown spec type to print: spec={spec}")
+
+
 @dataclass
 class PlacementStrategy:
     """
@@ -83,44 +94,10 @@ class PlacementStrategy:
             f"element in tuple be not None but got: {spec}."
             return spec
 
-    def pretty_print_output_spec(self) -> str:
-        if isinstance(self.output_spec, DTensorSpec):
-            output_spec_str = self.pretty_print_placements(self.output_spec.placements)
-        else:
-            output_spec_str = (
-                "("
-                + ", ".join(
-                    [
-                        self.pretty_print_placements(spec.placements)
-                        if isinstance(spec, DTensorSpec)
-                        else "None"
-                        for spec in self.output_spec
-                    ]
-                )
-                + ")"
-            )
-        return output_spec_str
-
-    def pretty_print_placements(self, placements) -> str:
-        return "".join([str(p) for p in placements])
-
     def __str__(self) -> str:
-        if self.input_specs is None:
-            input_specs_str = ""
-        else:
-            input_specs_str = (
-                "("
-                + ", ".join(
-                    [
-                        self.pretty_print_placements(spec.placements)
-                        for spec in self.input_specs
-                    ]
-                )
-                + ") -> "
-            )
-
-        output_spec_str = self.pretty_print_output_spec()
-        return f"{input_specs_str}{output_spec_str}"
+        input_specs_str = _pretty_print_spec(self.input_specs)
+        output_spec_str = _pretty_print_spec(self.output_spec)
+        return f"{input_specs_str} -> {output_spec_str}"
 
 
 class StrategyType:
@@ -260,8 +237,7 @@ class OpSchema:
                 mesh_shape = arg.mesh.shape
             elif isinstance(arg, OpStrategy):
                 assert len(arg.strategies) == 1
-                arg_spec_str = arg.strategies[0].pretty_print_output_spec()
-                args_sharding.append(arg_spec_str)
+                args_sharding.append(_pretty_print_spec(arg.strategies[0].output_spec))
                 mesh_shape = arg.output_mesh_shape
             elif isinstance(arg, TupleStrategy):
                 first_op_strtgy = arg.childs[0]
