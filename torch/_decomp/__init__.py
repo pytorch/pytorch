@@ -263,7 +263,6 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.aminmax,
             aten.arange.default,
             aten.arange.start,
-            aten.avg_pool1d,
             aten.avg_pool2d,
             aten.avg_pool3d,
             aten.avg_pool2d_backward,

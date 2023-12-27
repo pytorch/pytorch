@@ -2132,39 +2132,16 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
-@register_decomposition(aten.avg_pool1d)
-@out_wrapper()
-@pw_cast_for_opmath
-def avg_pool1d(
-    x: Tensor,
-    kernel_size: Tuple[int],
-    stride: Optional[Tuple[int]],
-    padding: Tuple[int],
-    ceil_mode: bool,
-    count_include_pad: bool,
-):
-    return _avg_poolnd(
-        x,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
-        divisor_override=None,
-        dim=1,
-    )
-
-
 @register_decomposition(aten.avg_pool2d)
 @out_wrapper()
 @pw_cast_for_opmath
 def avg_pool2d(
     x: Tensor,
-    kernel_size: Tuple[int],
-    stride: Optional[Tuple[int]],
-    padding: Tuple[int],
-    ceil_mode: bool,
-    count_include_pad: bool,
+    kernel_size: Union[Tuple[int, int], int],
+    stride: Optional[Union[Tuple[int, int], int]] = None,
+    padding: Union[Tuple[int, int], int] = 0,
+    ceil_mode: bool = False,
+    count_include_pad: bool = True,
     divisor_override: Optional[int] = None,
 ):
     return _avg_poolnd(
@@ -2184,11 +2161,11 @@ def avg_pool2d(
 @pw_cast_for_opmath
 def avg_pool3d(
     x: Tensor,
-    kernel_size: Tuple[int],
-    stride: Optional[Tuple[int]],
-    padding: Tuple[int],
-    ceil_mode: bool,
-    count_include_pad: bool,
+    kernel_size: Union[Tuple[int, int, int], int],
+    stride: Optional[Union[Tuple[int, int, int], int]] = None,
+    padding: Union[Tuple[int, int, int], int] = 0,
+    ceil_mode: bool = False,
+    count_include_pad: bool = True,
     divisor_override: Optional[int] = None,
 ):
     return _avg_poolnd(
@@ -2203,11 +2180,21 @@ def avg_pool3d(
     )
 
 
+def pad_listlike(l: Union[Tuple[int, ...], int], d: int) -> Tuple[int, ...]:
+    if isinstance(l, IntLike):
+        return tuple([l] * d)
+    elif len(l) == 1:
+        return l * d
+    else:
+        assert len(l) == d
+        return l
+
+
 def _avg_poolnd(
     x: Tensor,
-    kernel_size: Tuple[int],
-    stride: Optional[Tuple[int]],
-    padding: Tuple[int],
+    kernel_size: Union[Tuple[int, ...], int],
+    stride: Optional[Union[Tuple[int, ...], int]],
+    padding: Union[Tuple[int, ...], int],
     ceil_mode: bool,
     count_include_pad: bool,
     divisor_override: Optional[int],
@@ -2216,9 +2203,11 @@ def _avg_poolnd(
     if not stride:
         stride = kernel_size
 
-    assert len(kernel_size) == dim
-    assert len(stride) == dim
-    assert len(padding) == dim
+    kernel_size = pad_listlike(kernel_size, dim)
+    stride = pad_listlike(stride, dim)
+    print(padding, type(padding))
+    padding = pad_listlike(padding, dim)
+
     assert len(x.shape) in (dim + 1, dim + 2)
 
     batch = x.shape[:-dim]
@@ -2269,7 +2258,7 @@ def _avg_poolnd(
     out = out.reshape(*batch, *reshape)
     out = torch.sum(out, dim=[len(batch) + 1 + 2 * i for i in range(dim)])
 
-    if not had_padding or divisor_override:
+    if not had_padding or divisor_override or count_include_pad:
         if divisor_override:
             scale = 1 / divisor_override
         else:
