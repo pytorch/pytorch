@@ -3387,12 +3387,6 @@ class LoopLevel:
             return [line2]
         return [line1, line2]
 
-    def under_parallel_scope(self):
-        in_parallel = self.parallel
-        if self.parent is not None:
-            in_parallel = in_parallel or self.parent.parallel
-        return in_parallel
-
 
 @dataclasses.dataclass
 class LoopNestWithSplit:
