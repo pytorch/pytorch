@@ -1490,7 +1490,7 @@ class CppKernel(Kernel):
                 if worksharing.single():
                     stack.enter_context(code.indent())
 
-            def gen_kernel(kernel):
+            def gen_kernel(kernel, parallel=False):
                 with contextlib.ExitStack() as stack:
                     assert kernel
                     if hasattr(kernel, "codegen_inner_loops"):
@@ -1499,7 +1499,7 @@ class CppKernel(Kernel):
                         stack.enter_context(code.indent())
                     code.splice(kernel.loads)
                     code.splice(kernel.compute)
-                    if worksharing.in_parallel and kernel.parallel_reduction_stores:
+                    if hasattr(kernel, "parallel_prefix_suffix_used"):
                         code.splice(kernel.parallel_reduction_stores)
                     else:
                         code.splice(kernel.stores)
@@ -1509,17 +1509,20 @@ class CppKernel(Kernel):
             def get_reduction_code_buffer(loops, is_suffix=True):
                 for loop in loops:
                     for kernel in loop.get_kernels():
+                        if loop.parallel:
+                            kernel.parallel_prefix_suffix_used = True
+                    for kernel in loop.get_kernels():
                         if is_suffix:
                             suffix = (
                                 kernel.parallel_reduction_suffix
-                                if loop.parallel or worksharing.in_parallel
+                                if loop.parallel
                                 else kernel.reduction_suffix
                             )
                             return suffix
                         else:
                             prefix = (
                                 kernel.parallel_reduction_prefix
-                                if loop.parallel or worksharing.in_parallel
+                                if loop.parallel
                                 else kernel.reduction_prefix
                             )
                             return prefix
@@ -3114,6 +3117,8 @@ class KernelGroup:
 
     def finalize_kernel(self, new_kernel, nodes):
         self.scheduled_nodes += nodes
+        if self.scheduled_nodes[0].node.name == "buf336":
+            print("====")
         code = self.loops_code
         ws = self.ws
         new_kernel.codegen_loops(code, ws)
