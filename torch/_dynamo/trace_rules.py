@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 import torch
 
-from .allowed_functions import _disallowed_function_ids, is_user_defined_allowed
+from .allowed_functions import is_callable_allowed, is_callable_disallowed
 
 from .utils import hashable, is_function
 
@@ -101,6 +101,28 @@ manual_torch_name_rule_map = {
     "torch.sym_sqrt": TorchInGraphFunctionVariable,
     "torch.sym_ite": TorchInGraphFunctionVariable,
     "torch.Tensor#_make_wrapper_subclass": SkipFilesVariable,
+    "torch.Tensor#__init__": SkipFilesVariable,
+    "torch.cuda.set_device": SkipFilesVariable,
+    "torch.cuda.current_device": SkipFilesVariable,
+    "torch._C.autocast_decrement_nesting": SkipFilesVariable,
+    "torch._C.autocast_increment_nesting": SkipFilesVariable,
+    "torch.autograd.grad": SkipFilesVariable,
+    "torch._C.clear_autocast_cache": SkipFilesVariable,
+    "torch.distributions.constraints.is_dependent": SkipFilesVariable,
+    "torch.jit.isinstance": SkipFilesVariable,
+    "torch._C.set_anomaly_enabled": SkipFilesVariable,
+    "torch._C.set_autocast_cache_enabled": SkipFilesVariable,
+    "torch._C.set_autocast_cpu_dtype": SkipFilesVariable,
+    "torch._C.set_autocast_cpu_enabled": SkipFilesVariable,
+    "torch._C.set_autocast_enabled": SkipFilesVariable,
+    "torch._C.set_autocast_gpu_dtype": SkipFilesVariable,
+    "torch._C.set_autocast_ipu_dtype": SkipFilesVariable,
+    "torch._C.set_autocast_ipu_enabled": SkipFilesVariable,
+    "torch._C.set_autocast_xla_dtype": SkipFilesVariable,
+    "torch._C.set_autocast_xla_enabled": SkipFilesVariable,
+    "torch.resize_as_": SkipFilesVariable,
+    "torch.resize_as_sparse_": SkipFilesVariable,
+    "torch.get_default_device": TorchInGraphFunctionVariable,
 }
 
 
@@ -1080,9 +1102,6 @@ torch_c_binding_in_graph_functions = {
         "torch._C._warn",
         "torch._C._will_engine_execute_node",
         "torch._C._wrap_tensor_impl",
-        "torch._C.autocast_decrement_nesting",
-        "torch._C.autocast_increment_nesting",
-        "torch._C.clear_autocast_cache",
         "torch._C.fork",
         "torch._C.get_autocast_cpu_dtype",
         "torch._C.get_autocast_gpu_dtype",
@@ -1108,16 +1127,6 @@ torch_c_binding_in_graph_functions = {
         "torch._C.parse_schema",
         "torch._C.parse_type_comment",
         "torch._C.read_vitals",
-        "torch._C.set_anomaly_enabled",
-        "torch._C.set_autocast_cache_enabled",
-        "torch._C.set_autocast_cpu_dtype",
-        "torch._C.set_autocast_cpu_enabled",
-        "torch._C.set_autocast_enabled",
-        "torch._C.set_autocast_gpu_dtype",
-        "torch._C.set_autocast_ipu_dtype",
-        "torch._C.set_autocast_ipu_enabled",
-        "torch._C.set_autocast_xla_dtype",
-        "torch._C.set_autocast_xla_enabled",
         "torch._C.set_flush_denormal",
         "torch._C.set_num_interop_threads",
         "torch._C.set_num_threads",
@@ -1647,7 +1656,6 @@ torch_c_binding_in_graph_functions = {
         "torch.ge",
         "torch.geqrf",
         "torch.ger",
-        "torch.get_default_device",
         "torch.get_device",
         "torch.gradient",
         "torch.greater_equal",
@@ -1877,8 +1885,6 @@ torch_c_binding_in_graph_functions = {
         "torch.renorm",
         "torch.repeat_interleave",
         "torch.reshape",
-        "torch.resize_as_",
-        "torch.resize_as_sparse_",
         "torch.resolve_conj",
         "torch.resolve_neg",
         "torch.result_type",
@@ -2196,12 +2202,8 @@ torch_non_c_binding_in_graph_functions = {
         "torch._ops.dl_open_guard",
         "torch._ops.get_cached_ops",
         "torch._ops.key_extractor",
-        "torch._ops.mode_stack_per_key",
-        "torch._ops.pop_mode_for_key",
-        "torch._ops.push_mode_for_key",
         "torch._ops.reset_cached_ops",
         "torch._ops.resolve_key",
-        "torch._ops.temporarily_pop_mode",
         "torch._preload_cuda_deps",
         "torch._register_device_module",
         "torch._running_with_deploy",
@@ -2256,7 +2258,6 @@ torch_non_c_binding_in_graph_functions = {
         "torch.autograd.functional.vjp",
         "torch.autograd.grad_mode._enter_inference_mode",
         "torch.autograd.grad_mode._exit_inference_mode",
-        "torch.autograd.grad",
         "torch.autograd.gradcheck",
         "torch.autograd.gradgradcheck",
         "torch.autograd.graph._get_sid",
@@ -2365,7 +2366,6 @@ torch_non_c_binding_in_graph_functions = {
         "torch.cuda.clock_rate",
         "torch.cuda.cudart",
         "torch.cuda.current_blas_handle",
-        "torch.cuda.current_device",
         "torch.cuda.current_stream",
         "torch.cuda.default_stream",
         "torch.cuda.device_count",
@@ -2447,7 +2447,6 @@ torch_non_c_binding_in_graph_functions = {
         "torch.cuda.random.seed_all",
         "torch.cuda.random.seed",
         "torch.cuda.random.set_rng_state_all",
-        "torch.cuda.set_device",
         "torch.cuda.set_stream",
         "torch.cuda.set_sync_debug_mode",
         "torch.cuda.stream",
@@ -2818,9 +2817,9 @@ def lookup(obj):
     if not hashable(obj):
         return None
     # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
-    if id(obj) in _disallowed_function_ids:
-        return None
-    if callable(obj) and is_user_defined_allowed(obj):
+    if callable(obj) and is_callable_disallowed(obj):
+        return SkipFilesVariable
+    if callable(obj) and is_callable_allowed(obj):
         return TorchInGraphFunctionVariable
     # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
     if isinstance(obj, functools._lru_cache_wrapper) or (
