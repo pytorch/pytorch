@@ -2205,7 +2205,6 @@ def _avg_poolnd(
 
     kernel_size = pad_listlike(kernel_size, dim)
     stride = pad_listlike(stride, dim)
-    print(padding, type(padding))
     padding = pad_listlike(padding, dim)
 
     assert len(x.shape) in (dim + 1, dim + 2)
@@ -2236,6 +2235,17 @@ def _avg_poolnd(
 
     window_size = functools.reduce(operator.mul, kernel_size)
 
+    def get_cond(padding):
+        conds = []
+        for i in range(dim):
+            view_shape = [1] * x.dim()
+            view_shape[len(batch) + i] = out_indices[i].shape[0]
+            idx = out_indices[i].view(view_shape)
+            conds.append(
+                torch.logical_and(idx >= -padding[i], idx < dhw[i] + padding[i])
+            )
+        return functools.reduce(torch.logical_and, conds)
+
     if had_padding:
         out = aten._unsafe_index(
             x,
@@ -2244,13 +2254,7 @@ def _avg_poolnd(
                 *[out_indices[i].clamp(min=0, max=dhw[i] - 1) for i in range(dim)],
             ],
         )
-        conds = []
-        for i in range(dim):
-            view_shape = [1] * x.dim()
-            view_shape[len(batch) + i] = out_indices[i].shape[0]
-            idx = out_indices[i].view(view_shape)
-            conds.append(torch.logical_and(idx >= 0, idx < dhw[i]))
-        cond = functools.reduce(torch.logical_and, conds)
+        cond = get_cond([0] * dim)
         out = torch.where(cond, out, torch.zeros_like(out))
     else:
         out = aten._unsafe_index(x, [*[None] * len(batch), *out_indices])
@@ -2258,20 +2262,20 @@ def _avg_poolnd(
     out = out.reshape(*batch, *reshape)
     out = torch.sum(out, dim=[len(batch) + 1 + 2 * i for i in range(dim)])
 
-    if not had_padding or divisor_override or count_include_pad:
+    if not had_padding or divisor_override:
         if divisor_override:
             scale = 1 / divisor_override
         else:
             scale = 1.0 / window_size
+        return out * scale
     else:
-        scale = 1.0 / torch.sum(
+        cond = get_cond(padding if count_include_pad else [0] * dim)
+        return out / torch.sum(
             cond.reshape(*[1] * len(batch), *reshape)
             .expand(*batch, *reshape)
             .to(torch.int32),
             dim=[len(batch) + 1 + 2 * i for i in range(dim)],
         )
-
-    return out * scale
 
 
 @register_decomposition(aten._adaptive_avg_pool2d)
