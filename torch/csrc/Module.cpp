@@ -774,6 +774,23 @@ PyObject* THPModule_deterministicFillUninitializedMemory(
     Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setUserEnabledNNPACK(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_enabled_NNPACK expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setUserEnabledNNPACK(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject* THPModule_userEnabledNNPACK(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().userEnabledNNPACK())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setWarnAlways(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -1217,6 +1234,8 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      THPModule_setDeterministicFillUninitializedMemory,
      METH_O,
      nullptr},
+    {"_get_nnpack_enabled", THPModule_userEnabledNNPACK, METH_NOARGS, nullptr},
+    {"_set_nnpack_enabled", THPModule_setUserEnabledNNPACK, METH_O, nullptr},
     {"_get_warnAlways", THPModule_warnAlways, METH_NOARGS, nullptr},
     {"_set_warnAlways", THPModule_setWarnAlways, METH_O, nullptr},
     {"_warn", THPModule_warn, METH_NOARGS, nullptr},
