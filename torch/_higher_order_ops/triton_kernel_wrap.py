@@ -68,17 +68,34 @@ class MutationInfo:
 
 # Super basic mutation tracking pass that tracks which inputs are used in stores
 # It bails if any of the inputs are used in non tl.load/tl.store positions.
+# This pass will miss simple things like
+# a = in_ptr
+# tl.load(a, ...)
+# since it does not do any contextual analysis. This means that we might incorrectly
+# find extra mutations but this is safe as it would only be incorrect to miss
+# mutations.
 class MutationTracker(ast.NodeVisitor):
+    ALLOWED_READ_FNS = {
+        "load",
+        "max_constancy",
+        "max_contiguous",
+        "multiple_of",
+        "static_print",
+        "static_assert",
+        "device_print",
+        "device_assert",
+    }
+
     def __init__(self, infos) -> None:
         super().__init__()
         self.infos = infos
-        self.in_load = False
+        self.read_depth = 0
         self.in_store = False
 
     def visit_Name(self, node):
         if node.id not in self.infos:
             return
-        if self.in_load:
+        if self.read_depth:
             pass
         elif self.in_store:
             self.infos[node.id].mutated = True
@@ -86,22 +103,30 @@ class MutationTracker(ast.NodeVisitor):
             self.infos[node.id].used_in_unknown = True
 
     def visit_Call(self, node):
+        # TODO(oulgen): Here we assume that there exists a line called
+        # from triton import language as tl. This needs to be checked
+        # as if someones imports xyz as tl then we will incorrectly
+        # assume a mutation but this would be ok as it is only unsafe to
+        # miss a mutation.
         if (
             isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
             and node.func.value.id == "tl"
         ):
             if node.func.attr == "store":
+                # Do not allow for store to appear inside a read
+                # tl.load(a if tl.store(b) else z) is not useful
+                # and allowing this would complicate the analysis
+                assert self.read_depth == 0
                 assert self.in_store is False
                 self.in_store = True
                 self.generic_visit(node)
                 self.in_store = False
                 return
-            if node.func.attr == "load":
-                assert self.in_load is False
-                self.in_load = True
+            if node.func.attr in self.ALLOWED_READ_FNS:
+                self.read_depth += 1
                 self.generic_visit(node)
-                self.in_load = False
+                self.read_depth -= 1
                 return
         self.generic_visit(node)
 
