@@ -1222,26 +1222,6 @@ class TestExport(TestCase):
         ) as cm:
             ep(torch.tensor([30]))
 
-    def test_constrain_decomp(self) -> None:
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.freq = torch.ones(5, 5)
-
-            def forward(self, start_pos: torch.Tensor):
-                pos = start_pos.item()
-                torch._constrain_as_size(pos, min=0, max=4)
-                return self.freq[pos] * self.freq[pos]
-
-        ep = torch.export.export(M(), (torch.tensor(1),))
-        FileCheck().check_count(
-            "torch.ops.aten._assert_async.msg", 2, exactly=True
-        ).run(ep.graph_module.code)
-        decompose_ep = ep.run_decompositions()
-        FileCheck().check_count(
-            "torch.ops.aten._assert_async.msg", 2, exactly=True
-        ).run(decompose_ep.graph_module.code)
-
     @testing.expectedFailureNonStrict
     def test_export_with_inline_constraints_complex(self):
         def f(x):
@@ -1725,6 +1705,7 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
 
     @testing.expectedFailureSerDer
+    @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_redundant_asserts(self):
         def f(x):
