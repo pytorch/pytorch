@@ -1490,7 +1490,7 @@ class CppKernel(Kernel):
                 if worksharing.single():
                     stack.enter_context(code.indent())
 
-            def gen_kernel(kernel, parallel=False):
+            def gen_kernel(kernel):
                 with contextlib.ExitStack() as stack:
                     assert kernel
                     if hasattr(kernel, "codegen_inner_loops"):
@@ -3117,8 +3117,6 @@ class KernelGroup:
 
     def finalize_kernel(self, new_kernel, nodes):
         self.scheduled_nodes += nodes
-        if self.scheduled_nodes[0].node.name == "buf336":
-            print("====")
         code = self.loops_code
         ws = self.ws
         new_kernel.codegen_loops(code, ws)
