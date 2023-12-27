@@ -132,6 +132,11 @@ def _view_as_real(params, *state_and_grads):
             for s in state_and_grads:
                 s[i] = torch.view_as_real(s[i])
 
+def _get_scalar_dtype(is_fused=None):
+    if is_fused:
+        return torch.float32
+    return torch.float64 if torch.get_default_dtype() == torch.float64 else torch.float32
+
 # Common doc strings among optimizers
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
             is used. If unspecified by the user (so foreach is None), we will try to use

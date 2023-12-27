@@ -53,7 +53,7 @@ class TestOptimRenewed(TestCase):
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
 
-    def _test_derived_optimizers(self, device, dtype, optim_info, flag, reduced_precision=False):
+    def _test_derived_optimizers(self, device, dtype, optim_info, flag, reduced_precision=False, assert_step_dtype=None):
         """
         Given a flag 'fused' or 'foreach', test for parity of optimizer state
         and updated parameters between when the flag is set to True and False
@@ -108,6 +108,11 @@ class TestOptimRenewed(TestCase):
                         loss.backward()
 
                     optimizer.step()
+
+                if assert_step_dtype is not None:
+                    p_state = optimizer.state[params[0]]
+                    if torch.is_tensor(p_state.get("step", None)):
+                        self.assertEqual(p_state["step"].dtype, assert_step_dtype)
 
                 state.append(optimizer.state)
                 updated_params.append(model.parameters())
@@ -215,7 +220,8 @@ class TestOptimRenewed(TestCase):
     @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float64])
     def test_set_default_dtype_works_with_foreach(self, device, dtype, optim_info):
         # https://github.com/pytorch/pytorch/issues/110940
-        # We coerce step to always be float32 regardless of the default dtype
+        # We coerce step to always be float32 unless the
+        # default dtype is higher prec float64
         old_default_dtype = torch.get_default_dtype()
         for default_dtype in [torch.float64, torch.float16]:
             torch.set_default_dtype(default_dtype)
@@ -224,7 +230,8 @@ class TestOptimRenewed(TestCase):
                 dtype,
                 optim_info,
                 "foreach",
-                reduced_precision=default_dtype == torch.float16
+                reduced_precision=default_dtype == torch.float16,
+                assert_step_dtype=torch.float64 if default_dtype == torch.float64 else torch.float32,
             )
             torch.set_default_dtype(old_default_dtype)
 
