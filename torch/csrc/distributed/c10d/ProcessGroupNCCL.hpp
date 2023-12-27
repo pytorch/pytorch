@@ -76,6 +76,9 @@ static std::vector<std::string> TORCH_NCCL_TIMEOUT_CHECK_MILSEC = {
 static std::vector<std::string> TORCH_NCCL_WATCHDOG_CHECK_MILSEC = {
     "TORCH_NCCL_WATCHDOG_CHECK_MILSEC"};
 
+static std::vector<std::string> TORCH_NCCL_TIMEOUT_DUMP_EXTRA_SLEEP = {
+    "TORCH_NCCL_TIMEOUT_DUMP_EXTRA_SLEEP"};
+
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr const char* TIMEOUT_DUMP = "timeout_dump";
@@ -832,6 +835,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // We gate the heartbeat monitor thread so that we can roll it out gradually.
   std::atomic<bool> monitorThreadEnabled_;
+
+  bool timoutDumpExtraSleep_;
 
   // Monitor thread which checks the heartbeat of Watchdog thread.
   // If the monitor thread finds there is no heartbeat, it will dump debug info

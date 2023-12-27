@@ -740,6 +740,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   timeoutCheckInMilSec_ = getCvarInt(TORCH_NCCL_TIMEOUT_CHECK_MILSEC, 200);
   watchdogCheckInMilSec_ = getCvarInt(TORCH_NCCL_WATCHDOG_CHECK_MILSEC, 500);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
+  timoutDumpExtraSleep_ =
+      getCvarBool(TORCH_NCCL_TIMEOUT_DUMP_EXTRA_SLEEP, true);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
@@ -803,6 +805,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", global rank: " << globalRank()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
+            << ", TORCH_NCCL_TIMEOUT_DUMP_EXTRA_SLEEP: "
+            << timoutDumpExtraSleep_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
@@ -1066,7 +1070,10 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
   TORCH_CHECK(fut.valid(), "Expected a valid future");
 
   auto futStatus = fut.wait_for(std::chrono::seconds(timeout_sec));
-  std::this_thread::sleep_for(std::chrono::milliseconds(timeoutCheckInMilSec_));
+  if (timoutDumpExtraSleep_) {
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(timeoutCheckInMilSec_));
+  }
   if (futStatus != std::future_status::ready) {
     TORCH_CHECK(
         futStatus != std::future_status::deferred,
@@ -1211,6 +1218,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
       registerDebugInfoWriter(std::move(debugInfoWriterPtr));
     }
     debugInfoWriter_->write(ncclTrace);
+    LOG(ERROR) << logPrefix() << "ProcessGroupNCCL dump debug info success!";
     return true;
   }
   return false;
