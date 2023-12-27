@@ -16,6 +16,9 @@ from torch.fx.passes.utils.matcher_with_name_node_map_utils import (
 )
 
 
+__all__ = []  # type: ignore[var-annotated]
+
+
 def _annotate_input_qspec_map(node: Node, input_node: Node, qspec):
     quantization_annotation = node.meta.get(
         "quantization_annotation", QuantizationAnnotation()
