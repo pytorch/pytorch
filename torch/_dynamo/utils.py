@@ -908,6 +908,8 @@ def is_safe_constant(v):
             type(type),
             torch.device,
             torch.dtype,
+            torch.memory_format,
+            torch.layout,
         ),
     )
 
