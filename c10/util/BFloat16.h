@@ -6,6 +6,7 @@
 #include <c10/macros/Macros.h>
 #include <cmath>
 #include <cstring>
+#include <cstdint>
 
 #if defined(__CUDACC__) && !defined(USE_ROCM)
 #include <cuda_bf16.h>
