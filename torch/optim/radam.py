@@ -13,6 +13,7 @@ from .optimizer import (
     _get_value,
     _stack_if_compiling,
     _use_grad_for_differentiable,
+    _view_as_real,
 )
 
 __all__ = ["RAdam", "radam"]
@@ -64,7 +65,7 @@ class RAdam(Optimizer):
         )
         if not step_is_tensor:
             for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]))
+                s["step"] = torch.tensor(float(s["step"]), dtype=torch.float32)
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, state_steps):
         has_complex = False
@@ -79,7 +80,7 @@ class RAdam(Optimizer):
                 state = self.state[p]
                 # Lazy state initialization
                 if len(state) == 0:
-                    state["step"] = torch.tensor(0.0)
+                    state["step"] = torch.tensor(0.0, dtype=torch.float32)
                     # Exponential moving average of gradient values
                     state["exp_avg"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
@@ -380,13 +381,7 @@ def _multi_tensor_radam(
             torch._foreach_add_(grouped_state_steps, 1)
 
         if has_complex:
-            for i in range(len(grouped_params)):
-                if torch.is_complex(grouped_params[i]):
-                    grouped_params[i] = torch.view_as_real(grouped_params[i])
-                    grouped_grads[i] = torch.view_as_real(grouped_grads[i])
-                    grouped_exp_avgs[i] = torch.view_as_real(grouped_exp_avgs[i])
-                    grouped_exp_avg_sqs[i] = torch.view_as_real(grouped_exp_avg_sqs[i])
-
+            _view_as_real(grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_avg_sqs)
 
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1

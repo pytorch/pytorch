@@ -1,6 +1,6 @@
 #version 450 core
-#define PRECISION $precision
-#define FORMAT $format
+#define PRECISION ${PRECISION}
+#define FORMAT ${FORMAT}
 
 /*
  * TILE_SIZE = (1, 1, 1)
@@ -22,8 +22,8 @@ layout(set = 0, binding = 0, rgba8ui) uniform PRECISION restrict writeonly uimag
  * Input Textures
  */
 layout(set = 0, binding = 1) uniform PRECISION isampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION isampler3D uKernel;
-layout(set = 0, binding = 3) uniform PRECISION isampler3D uBias;
+layout(set = 0, binding = 2) uniform PRECISION sampler2D uKernel;
+layout(set = 0, binding = 3) uniform PRECISION sampler2D uBias;
 
 /*
  * Params Buffer
@@ -89,10 +89,7 @@ void main() {
   // reading the input
   const ivec2 kstart = (start - ipos) / uBlock.dilate;
 
-  vec4 sum = dequantize(
-      texelFetch(uBias, ivec3(pos.z, 0, 0), 0),
-      uBlock.scales.w,
-      uBlock.zero_points.w);
+  vec4 sum = texelFetch(uBias, ivec2(pos.z, 0), 0);
 
   const int dil_y = uBlock.dilate.y;
   const int dil_x = uBlock.dilate.x;
@@ -103,10 +100,7 @@ void main() {
       // other vertically.
       const int k_ind = kx + ky * uBlock.kernel_size.x;
 
-      const vec4 k_tex = dequantize(
-          texelFetch(uKernel, ivec3(k_ind, pos.z, 0), 0),
-          uBlock.scales.z,
-          uBlock.zero_points.z);
+      const vec4 k_tex = texelFetch(uKernel, ivec2(k_ind, pos.z), 0);
       const vec4 in_tex = dequantize(
           texelFetch(uInput, ivec3(x, y, pos.z), 0),
           uBlock.scales.y,

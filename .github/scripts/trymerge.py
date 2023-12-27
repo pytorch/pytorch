@@ -30,6 +30,7 @@ from github_utils import (
     gh_fetch_url,
     gh_post_commit_comment,
     gh_post_pr_comment,
+    gh_update_pr_state,
     GitHubComment,
 )
 
@@ -61,6 +62,7 @@ class JobCheckState(NamedTuple):
     classification: Optional[str]
     job_id: Optional[int]
     title: Optional[str]
+    summary: Optional[str]
 
 
 JobNameToStateDict = Dict[str, JobCheckState]
@@ -118,6 +120,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
           detailsUrl
           databaseId
           title
+          summary
         }
         pageInfo {
           endCursor
@@ -309,6 +312,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cs_cursor: String, $cr_c
                     detailsUrl
                     databaseId
                     title
+                    summary
                   }
                   pageInfo {
                     endCursor
@@ -433,6 +437,7 @@ MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 ROCKSET_MERGES_COLLECTION = "merges"
 ROCKSET_MERGES_WORKSPACE = "commons"
 REMOTE_MAIN_BRANCH = "origin/main"
+DRCI_CHECKRUN_NAME = "Dr.CI"
 INTERNAL_CHANGES_CHECKRUN_NAME = "Meta Internal-Only Changes Check"
 HAS_NO_CONNECTED_DIFF_TITLE = (
     "There is no internal Diff connected, this can be merged now"
@@ -546,6 +551,7 @@ def add_workflow_conclusions(
                             classification=None,
                             job_id=checkrun_node["databaseId"],
                             title=checkrun_node["title"],
+                            summary=checkrun_node["summary"],
                         )
 
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
@@ -576,6 +582,7 @@ def add_workflow_conclusions(
                 classification=None,
                 job_id=None,
                 title=None,
+                summary=None,
             )
     for job_name, job in no_workflow_obj.jobs.items():
         res[job_name] = job
@@ -901,6 +908,7 @@ class GitHubPR:
                     classification=None,
                     job_id=None,
                     title=None,
+                    summary=None,
                 )
 
         return self.conclusions
@@ -1280,6 +1288,9 @@ def find_matching_merge_rule(
         ignore_current_checks=ignore_current_checks,
     )
 
+    # This keeps the list of all approvers that could stamp the change
+    all_rule_approvers = {}
+
     # PRs can fail multiple merge rules, but it only needs to pass one rule to be approved.
     # If it fails all rules, we need to find the rule that it came closest to passing and report
     # that to the dev.
@@ -1323,24 +1334,31 @@ def find_matching_merge_rule(
             continue
 
         # Does the PR have the required approvals for this rule?
-        rule_approvers_set = set()
+        rule_approvers = set()
         for approver in rule.approved_by:
             if "/" in approver:
                 org, name = approver.split("/")
-                rule_approvers_set.update(gh_get_team_members(org, name))
+                rule_approvers.update(gh_get_team_members(org, name))
             else:
-                rule_approvers_set.add(approver)
-        approvers_intersection = approved_by.intersection(rule_approvers_set)
+                rule_approvers.add(approver)
+        approvers_intersection = approved_by.intersection(rule_approvers)
         # If rule requires approvers but they aren't the ones that reviewed PR
-        if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
-            if reject_reason_score < 10000:
+        if len(approvers_intersection) == 0 and len(rule_approvers) > 0:
+            # Less than or equal is intentionally used here to gather all potential
+            # approvers
+            if reject_reason_score <= 10000:
                 reject_reason_score = 10000
-                reject_reason = "\n".join(
-                    (
-                        "Approval needed from one of the following:",
-                        f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}",
-                    )
-                )
+
+                all_rule_approvers[rule.name] = rule.approved_by
+                # Prepare the reject reason
+                all_rule_approvers_msg = [
+                    f"- {name} ({', '.join(approved_by[:5])}{', ...' if len(approved_by) > 5 else ''})"
+                    for name, approved_by in all_rule_approvers.items()
+                ]
+
+                reject_reason = "Approvers from one of the following sets are needed:\n"
+                reject_reason += "\n".join(all_rule_approvers_msg)
+
             continue
 
         # Does the PR pass the checks required by this rule?
@@ -1615,9 +1633,26 @@ def get_classifications(
     ignore_current_checks: Optional[List[str]],
 ) -> Dict[str, JobCheckState]:
     # Get the failure classification from Dr.CI, which is the source of truth
-    # going forward
+    # going forward. It's preferable to try calling Dr.CI API directly first
+    # to get the latest results as well as update Dr.CI PR comment
     drci_classifications = get_drci_classifications(pr_num=pr_num, project=project)
-    print(f"From Dr.CI: {json.dumps(drci_classifications)}")
+    print(f"From Dr.CI API: {json.dumps(drci_classifications)}")
+
+    # NB: if the latest results from Dr.CI is not available, i.e. when calling from
+    # SandCastle, we fallback to any results we can find on Dr.CI check run summary
+    if (
+        not drci_classifications
+        and DRCI_CHECKRUN_NAME in checks
+        and checks[DRCI_CHECKRUN_NAME]
+        and checks[DRCI_CHECKRUN_NAME].summary
+    ):
+        drci_summary = checks[DRCI_CHECKRUN_NAME].summary
+        try:
+            print(f"From Dr.CI checkrun summary: {drci_summary}")
+            drci_classifications = json.loads(str(drci_summary))
+        except json.JSONDecodeError as error:
+            warn("Invalid Dr.CI checkrun summary")
+            drci_classifications = {}
 
     checks_with_classifications = checks.copy()
     for name, check in checks.items():
@@ -1632,6 +1667,7 @@ def get_classifications(
                 "UNSTABLE",
                 check.job_id,
                 check.title,
+                check.summary,
             )
             continue
 
@@ -1645,12 +1681,19 @@ def get_classifications(
                 "BROKEN_TRUNK",
                 check.job_id,
                 check.title,
+                check.summary,
             )
             continue
 
         elif is_flaky(name, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
-                check.name, check.url, check.status, "FLAKY", check.job_id, check.title
+                check.name,
+                check.url,
+                check.status,
+                "FLAKY",
+                check.job_id,
+                check.title,
+                check.summary,
             )
             continue
 
@@ -1665,6 +1708,7 @@ def get_classifications(
                 "INVALID_CANCEL",
                 check.job_id,
                 check.title,
+                check.summary,
             )
             continue
 
@@ -1676,6 +1720,7 @@ def get_classifications(
                 "IGNORE_CURRENT_CHECK",
                 check.job_id,
                 check.title,
+                check.summary,
             )
 
     return checks_with_classifications
@@ -1708,15 +1753,10 @@ def validate_revert(
             f"Will not revert as @{author_login} is not one of "
             f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
         )
-    skip_internal_checks = can_skip_internal_checks(pr, comment_id)
-
-    # Ignore associated diff it PR does not have internal changes
-    if pr.has_no_connected_diff():
-        skip_internal_checks = True
 
     # Raises exception if matching rule is not found, but ignores all status checks
     find_matching_merge_rule(
-        pr, repo, skip_mandatory_checks=True, skip_internal_checks=skip_internal_checks
+        pr, repo, skip_mandatory_checks=True, skip_internal_checks=True
     )
     commit_sha = pr.get_merge_commit()
     if commit_sha is None:
@@ -1724,13 +1764,6 @@ def validate_revert(
         if len(commits) == 0:
             raise PostCommentError("Can't find any commits resolving PR")
         commit_sha = commits[0]
-    msg = repo.commit_message(commit_sha)
-    rc = RE_DIFF_REV.search(msg)
-    if rc is not None and not skip_internal_checks:
-        raise PostCommentError(
-            f"Can't revert PR that was landed via phabricator as {rc.group(1)}.  "
-            + "Please revert by going to the internal diff and clicking Unland."
-        )
     return (author_login, commit_sha)
 
 
@@ -1749,6 +1782,7 @@ def try_revert(
         author_login, commit_sha = validate_revert(repo, pr, comment_id=comment_id)
     except PostCommentError as e:
         return post_comment(str(e))
+
     revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
     revert_msg += f" due to {reason}" if reason is not None else ""
     revert_msg += (
@@ -1763,12 +1797,23 @@ def try_revert(
     msg += revert_msg
     repo.amend_commit_message(msg)
     repo.push(pr.default_branch(), dry_run)
-    post_comment(
+
+    revert_message = (
         f"@{pr.get_pr_creator_login()} your PR has been successfully reverted."
     )
+    if (
+        pr.has_internal_changes()
+        and not pr.has_no_connected_diff()
+        and not can_skip_internal_checks(pr, comment_id)
+    ):
+        revert_message += "\n:warning: This PR might contain internal changes"
+        revert_message += "\ncc: @pytorch/pytorch-dev-infra"
+    post_comment(revert_message)
+
     if not dry_run:
         pr.add_numbered_label("reverted")
         gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
+        gh_update_pr_state(pr.org, pr.project, pr.pr_num)
 
 
 def prefix_with_github_url(suffix_str: str) -> str:
@@ -1891,7 +1936,8 @@ def merge(
     ignore_current: bool = False,
 ) -> None:
     initial_commit_sha = pr.last_commit()["oid"]
-    print(f"Attempting merge of {initial_commit_sha}")
+    pr_link = f"https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num}"
+    print(f"Attempting merge of {initial_commit_sha} ({pr_link})")
 
     if MERGE_IN_PROGRESS_LABEL not in pr.get_labels():
         gh_add_labels(pr.org, pr.project, pr.pr_num, [MERGE_IN_PROGRESS_LABEL])

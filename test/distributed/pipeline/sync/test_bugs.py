@@ -49,7 +49,7 @@ def test_python_autograd_function(setup_rpc):
 
 def test_exception_no_hang(setup_rpc):
     # In v0.0.2, once a failed partition receives a normal message
-    # (non-closing) for the next micro-batch, a hang occured. The reason was
+    # (non-closing) for the next micro-batch, a hang occurred. The reason was
     # that a failed partition didn't call in_queue.task_done() on a normal
     # message. So the former partition was blocked at out_queue.join() for the
     # next of next micro-batch.

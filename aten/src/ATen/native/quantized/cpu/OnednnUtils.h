@@ -316,13 +316,13 @@ namespace onednn_utils {
 
 static ideep::attr_t create_attr_by_post_op(
     const std::string& post_op_name,
-    const torch::List<double>& post_op_args) {
+    const torch::List<c10::optional<at::Scalar>>& post_op_args) {
   using ideep::tensor;
   PostOps post_op = POST_OP_TABLE[post_op_name];
   if (post_op == Relu) {
     return ideep::attr_t::fuse_relu();
   } else if (post_op == LeakyRelu) {
-    return ideep::attr_t::fuse_relu_v2(/*alpha=*/post_op_args[0]);
+    return ideep::attr_t::fuse_relu_v2(/*alpha=*/post_op_args[0].value().to<float>());
   } else if (post_op == Tanh) {
     return ideep::attr_t::fuse_tanh();
   }

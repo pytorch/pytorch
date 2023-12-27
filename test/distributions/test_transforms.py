@@ -6,6 +6,7 @@ from numbers import Number
 import pytest
 
 import torch
+from torch.autograd import grad
 from torch.autograd.functional import jacobian
 from torch.distributions import Dirichlet, Independent, Normal, TransformedDistribution, constraints
 from torch.distributions.transforms import (AbsTransform, AffineTransform, ComposeTransform,
@@ -25,6 +26,8 @@ def get_transforms(cache_size):
         AbsTransform(cache_size=cache_size),
         ExpTransform(cache_size=cache_size),
         PowerTransform(exponent=2,
+                       cache_size=cache_size),
+        PowerTransform(exponent=-2,
                        cache_size=cache_size),
         PowerTransform(exponent=torch.tensor(5.).normal_(),
                        cache_size=cache_size),
@@ -493,6 +496,19 @@ def test_save_load_transform():
     stream.seek(0)
     other = torch.load(stream)
     assert torch.allclose(log_prob, other.log_prob(x))
+
+
+@pytest.mark.parametrize('transform', ALL_TRANSFORMS, ids=transform_id)
+def test_transform_sign(transform: Transform):
+    try:
+        sign = transform.sign
+    except NotImplementedError:
+        pytest.skip('Not implemented.')
+
+    x = generate_data(transform).requires_grad_()
+    y = transform(x).sum()
+    derivatives, = grad(y, [x])
+    assert torch.less(torch.as_tensor(0.), derivatives * sign).all()
 
 
 if __name__ == "__main__":

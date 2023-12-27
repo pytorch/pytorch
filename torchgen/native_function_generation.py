@@ -50,6 +50,7 @@ MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
 FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_assert_async",  # no return
     "_assert_async.msg",  # no return
+    "_cslt_sparse_mm_search",  # returns an int
     "_dimI",  # returns an int
     "_dimV",  # returns an int
     "_has_same_storage_numel",  # returns a boolean
@@ -323,7 +324,9 @@ def generate_function(
             )
         }
     }
-    tags = {"generated"} | set(f.tags & {"nondeterministic_seeded", "view_copy"})
+    tags = {"generated"} | set(
+        f.tags & {"nondeterministic_seeded", "view_copy", "pt2_compliant_tag"}
+    )
 
     return (
         NativeFunction(

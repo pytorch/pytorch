@@ -1,9 +1,15 @@
 # Owner(s): ["module: dynamo"]
+# flake8: noqa
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.testing import CompileCounter
+from torch._dynamo.testing import (
+    CompileCounter,
+    CompileCounterWithBackend,
+    EagerAndRecordGraphs,
+    normalize_gm,
+)
 
 
 class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
@@ -290,22 +296,42 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
 
         eager_result = fn(x, y)
 
-        counter = CompileCounter()
+        eager_and_record = EagerAndRecordGraphs()
+
+        counter = CompileCounterWithBackend(eager_and_record)
 
         fn = torch._dynamo.optimize(counter, nopython=True)(fn)
 
         compile_result = fn(x, y)
+
+        graph = eager_and_record.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+
         self.assertEqual(compile_result, eager_result)
         self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 2)
-        # Graph for reference
-        # __compiled_fn_0 <eval_with_key>.0 opcode         name    target                   args          kwargs
-        # -------------  ------  -----------------------  ------------  --------
-        # placeholder    l_x_    L_x_                     ()            {}
-        # placeholder    l_y_    L_y_                     ()            {}
-        # call_method    detach  detach                   (l_y_,)       {}
-        # call_function  mul     <built-in function mul>  (l_x_, l_y_)  {}
-        # output         output  output                   ((mul,),)     {}
+        self.assertEqual(counter.op_count, 6)
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_y_ : torch.Tensor, L_x_ : torch.Tensor):
+        l_y_ = L_y_
+        l_x_ = L_x_
+
+        detach = l_y_.detach()
+
+        _set_grad_enabled = torch._C._set_grad_enabled(False)
+
+        set_ = torch_Tensor_set_(l_x_, detach);  detach = None
+
+        _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
+
+        _lower_version_count_by_1 = torch__dynamo_variables_builtin__lower_version_count_by_1(set_);  set_ = None
+
+        mul = l_x_ * l_y_;  l_x_ = l_y_ = None
+        return (mul,)
+""",
+        )
 
     # Note - this does not actually get captured in the graph yet.
     # The plan of record is to introduce a set_data op, entirely subsume the operation into a call_function
@@ -369,3 +395,9 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
         # call_function  add     <built-in function add>  (l_x_, l_x_)          {}
         # call_function  mul_1   <built-in function mul>  (mul, add)            {}
         # output         output  output                   ((mul_1, mul, add),)  {}
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

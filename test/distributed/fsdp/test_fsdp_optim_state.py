@@ -10,12 +10,12 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed._state_dict_utils import _gather_state_dict
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
     apply_activation_checkpointing,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullOptimStateDictConfig,

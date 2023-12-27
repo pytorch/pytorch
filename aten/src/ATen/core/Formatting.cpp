@@ -57,6 +57,7 @@ struct FormatGuard {
     out.copyfmt(saved);
   }
 private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   std::ostream & out;
   std::ios saved;
 };
@@ -65,7 +66,7 @@ std::ostream& operator<<(std::ostream & out, const DeprecatedTypeProperties& t) 
   return out << t.toString();
 }
 
-static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Tensor& self) {
+static std::tuple<double, int> __printFormat(std::ostream& stream, const Tensor& self) {
   auto size = self.numel();
   if(size == 0) {
     return std::make_tuple(1., 0);
@@ -116,13 +117,13 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
     }
   }
   double scale = 1;
-  int64_t sz = 11;
+  int sz = 11;
   if(intMode) {
     if(expMax > 9) {
       sz = 11;
       stream << std::scientific << std::setprecision(4);
     } else {
-      sz = expMax + 1;
+      sz = static_cast<int>(expMax) + 1;
       stream << defaultfloat;
     }
   } else {
@@ -141,7 +142,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
         if(expMax == 0) {
           sz = 7;
         } else {
-          sz = expMax+6;
+          sz = static_cast<int>(expMax) + 6;
         }
         stream << std::fixed << std::setprecision(4);
       }
@@ -163,9 +164,7 @@ static void printScale(std::ostream & stream, double scale) {
 }
 static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent)
 {
-  double scale = 0.0;
-  int64_t sz = 0;
-  std::tie(scale, sz) = __printFormat(stream, self);
+  auto [scale, sz] = __printFormat(stream, self);
 
   __printIndent(stream, indent);
   int64_t nColumnPerLine = (linesize-indent)/(sz+1);
@@ -284,9 +283,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       stream << "[ " << tensor_.toString() << "{}";
     } else if(tensor.ndimension() == 1) {
       if (tensor.numel() > 0) {
-        double scale = 0.0;
-        int64_t sz = 0;
-        std::tie(scale, sz) =  __printFormat(stream, tensor);
+        auto [scale, sz] = __printFormat(stream, tensor);
         if(scale != 1) {
           printScale(stream, scale);
         }

@@ -29,10 +29,11 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, tf32_on_and_off, _get_magma_version, \
+from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
+import operator
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -165,6 +166,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @skipIfTorchDynamo("flaky, needs investigation")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_lstsq(self, device, dtype):
         from torch.testing._internal.common_utils import random_well_conditioned_matrix
@@ -2413,7 +2415,7 @@ class TestLinalg(TestCase):
                 self.assertEqual(v.mT.matmul(V).det().abs(), torch.ones(batches, device=device, dtype=dtype))
 
         all_batches = [(), (1,), (3,), (2, 3)]
-        for actual_rank, size, all_batches in [
+        for actual_rank, size, all_batches in [  # noqa: B020
                 (2, (17, 4), all_batches),
                 (4, (17, 4), all_batches),
                 (4, (17, 17), all_batches),
@@ -2636,6 +2638,21 @@ class TestLinalg(TestCase):
             # Check warning occurs
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_cholesky_solve_backward(self, device, dtype):
+        b_dims = (5, 2)
+        L_dims = (5, 5)
+
+        for test_L_grad in (False, True):
+            b = torch.randn(*b_dims, dtype=dtype, device=device, requires_grad=True)
+            L = torch.randn(*L_dims, dtype=dtype, device=device, requires_grad=test_L_grad)
+            if test_L_grad:
+                torch.autograd.gradcheck(lambda b, L: torch.cholesky_solve(b, torch.tril(L), upper=False), (b, L))
+            else:
+                torch.autograd.gradcheck(lambda b: torch.cholesky_solve(b, L, upper=False), (b,))
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
@@ -4134,6 +4151,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @skipIfTorchDynamo("flaky, needs investigation")
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -4234,6 +4252,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @skipIfTorchDynamo("flaky, needs investigation")
     @dtypes(*floating_and_complex_types())
     def test_triangular_solve_batched_broadcasting(self, device, dtype):
         from scipy.linalg import solve_triangular as tri_solve
@@ -4953,9 +4972,7 @@ class TestLinalg(TestCase):
             # see https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
             # This is also a bug in cuSOLVER < 11.3
             if (dtype == torch.double
-               and singular
-               and (torch.version.cuda is None or
-                    torch.version.cuda.split('.') >= ["11", "3"])):
+               and singular):
                 A = torch.ones(batch + ms, dtype=dtype, device=device)
                 run_test(A, pivot, singular, fn)
 
@@ -5656,6 +5673,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(c, cpu_result)
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(SM90OrLater, "Expected failure on sm90")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
     @parametrize("k", [16, 32])
@@ -5696,9 +5714,10 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # NOTE: We're just exercising terrible failures here.
         version = _get_torch_cuda_version()
         SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
+        SM70 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 0)
         if version >= (11, 7):
             if not use_transpose_a and use_transpose_b:
-                if SM80OrLater:
+                if SM80OrLater or (version >= (12, 3) and SM70):
                     _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
                 else:
                     with self.assertRaisesRegex(RuntimeError,
@@ -5716,7 +5735,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                     _test(17, k, n, use_transpose_a, use_transpose_b)
 
             if not use_transpose_a and not use_transpose_b:
-                if SM80OrLater:
+                if SM80OrLater or (version >= (12, 3) and SM70):
                     _test(17, k, n, use_transpose_a, use_transpose_b)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
@@ -6806,8 +6825,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
-    @skipCUDAIf(torch.version.cuda is not None
-                and torch.version.cuda.split(".") < ["11", "3"], "There's a bug in cuSOLVER < 11.3")
     # FIXME One of the backends of lu_factor fails in windows. I haven't investigated which or why
     # https://github.com/pytorch/pytorch/issues/75225
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
@@ -6992,7 +7009,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # mat_chars denotes matrix characteristics
         # possible values are: sym, sym_psd, sym_pd, sing, non_sym
         def run_test(matsize, batchdims, mat_chars):
-            num_matrices = reduce(lambda x, y: x * y, batchdims, 1)
+            num_matrices = reduce(operator.mul, batchdims, 1)
             list_of_matrices = []
 
             for idx in range(num_matrices):
@@ -7415,7 +7432,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 self.assertEqual(s[..., :actual_rank], S[..., :actual_rank])
 
         all_batches = [(), (1,), (3,), (2, 3)]
-        for actual_rank, size, all_batches in [
+        for actual_rank, size, all_batches in [  # noqa: B020
                 (2, (17, 4), all_batches),
                 (2, (100, 4), all_batches),
                 (6, (100, 40), all_batches),
@@ -7560,6 +7577,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipCUDAIfNoCusolver
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @skipIfTorchDynamo("flaky, needs investigation")
     @dtypes(*floating_and_complex_types())
     def test_ldl_factor(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix

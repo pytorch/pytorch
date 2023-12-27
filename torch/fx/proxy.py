@@ -84,7 +84,7 @@ class ScopeContextManager:
         return
 
 
-_COPY_META_FIELDS = ["nn_module_stack", "source_fn_stack", "original_aten", "recompute", "from_node"]
+_COPY_META_FIELDS = ["nn_module_stack", "source_fn_stack", "original_aten", "recompute", "from_node", "quantization_tag"]
 
 
 @compatibility(is_backward_compatible=True)
@@ -107,7 +107,7 @@ class TracerBase:
     scope : Scope
 
     # Records the module call stack
-    module_stack: OrderedDict[str, str]
+    module_stack: OrderedDict[str, Tuple[str, Any]]
 
     # Mapping of node name to module scope
     node_name_to_scope: Dict[str, Tuple[str, type]]
@@ -408,6 +408,9 @@ class Proxy:
             return (self[i] for i in range(inst.argval))  # type: ignore[index]
 
         return self.tracer.iter(self)
+
+    def __abs__(self):
+        return self.tracer.create_proxy('call_function', operator.abs, (self,), {})
 
     def __bool__(self) -> bool:
         if self.tracer.trace_asserts:
