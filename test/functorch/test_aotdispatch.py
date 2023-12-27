@@ -2967,6 +2967,37 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
     getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
     return (getitem_3, getitem_4, add, getitem)""")  # noqa: B950
 
+    def test_aot_export_predispatch_reshape(self):
+        class Reshape(torch.nn.Module):
+            def forward(self, x):
+                y = x.reshape(4, 4)
+                return (y.sum(),)
+
+        mod = Reshape()
+        inp = torch.randn(2, 8)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1):
+    view = torch.ops.aten.view.default(arg0_1, [4, 4]);  arg0_1 = None
+    sum_1 = torch.ops.aten.sum.default(view);  view = None
+    return (sum_1,)""")  # noqa: B950
+
+    def test_aot_export_predispatch_contiguous(self):
+        class Cont(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ops.aten.contiguous.default(x)
+                return (y.sum(),)
+
+        mod = Cont()
+        inp = torch.randn(2, 8)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+    return (sum_1,)""")  # noqa: B950
+
     def test_aot_export_module_joint(self):
         class ConvBatchnormRelu(torch.nn.Module):
             def __init__(self):

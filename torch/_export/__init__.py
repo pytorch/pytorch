@@ -134,7 +134,7 @@ def capture_pre_autograd_graph(
         if kwargs is None:
             kwargs = {}
 
-        decomp_table = {op: op.decompose for op in FunctionalTensor.fake_functional_ops}
+        decomp_table = {op: op.decompose for op in FunctionalTensor.maybe_aliasing_or_mutating_ops}
         with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
             m = torch._dynamo.export(
                 f,
