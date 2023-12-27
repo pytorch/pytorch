@@ -1762,3 +1762,43 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = self._quantize(m, quantizer, example_inputs)
         # make sure it runs
         m(*example_inputs)
+
+    def test_speed(self):
+        import time
+
+        def dynamic_quantize_pt2e(model, example_inputs):
+            torch._dynamo.reset()
+            model = capture_pre_autograd_graph(model, example_inputs)
+            # Per channel quantization for weight
+            # Dynamic quantization for activation
+            # Please read a detail: https://fburl.com/code/30zds51q
+            embedding_quantizer = EmbeddingQuantizer()
+            dynamic_quantizer = XNNPACKQuantizer()
+            operator_config_dynamic = get_symmetric_quantization_config(
+                is_per_channel=True, is_dynamic=True
+            )
+            dynamic_quantizer.set_global(operator_config_dynamic)
+            composed_quantizer = ComposableQuantizer([embedding_quantizer, dynamic_quantizer])
+            model = prepare_pt2e(model, composed_quantizer)
+            # Without Calibraiton, scale/zero value will have an initialized value of 1.0
+            # Per channel quantization needs a proper scale/zero shape/value to work properly.
+            # So we need to run calibration before converting to quantized model.
+            model(*example_inputs)
+            prev = time.time()
+            model = convert_pt2e(model)
+            cur = time.time()
+            # uncomment to see the time
+            # print("convert time:", cur - prev)
+            return model
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M().eval()
+        example_inputs = (torch.randn(5, 5),)
+        _ = dynamic_quantize_pt2e(m, example_inputs)
