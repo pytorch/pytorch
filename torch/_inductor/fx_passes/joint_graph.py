@@ -156,10 +156,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
 
     # Clean up unused views.
     while True:
-        unused_views = []
-        for alias in views:
-            if not alias.users:
-                unused_views.append(alias)
+        unused_views = [alias for alias in views if not alias.users]
         if len(unused_views) == 0:
             break
         for unused in unused_views:
