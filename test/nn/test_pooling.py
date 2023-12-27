@@ -378,6 +378,14 @@ class TestPoolingNN(NNTestCase):
         with self.assertRaises(RuntimeError):
             F.max_unpool3d(x, torch.zeros(x.shape, dtype=int), [1, 1])
 
+    def test_quantized_max_pool1d_empty_kernel(self):
+        # This used to segfault when called with an empty kernel
+        # see https://github.com/pytorch/pytorch/issues/116323
+        base = torch.randn(1)
+        temp_tensor = torch.quantize_per_tensor(base, 0.1, 10, torch.quint2x4)
+        with self.assertRaises(RuntimeError):
+            torch.quantized_max_pool1d(temp_tensor, [])
+
 class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
