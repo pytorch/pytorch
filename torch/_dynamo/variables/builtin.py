@@ -703,9 +703,7 @@ class BuiltinVariable(VariableTracker):
 
             # result of an item call is a scalar convert to a tensor
             if isinstance(a, FakeItemVariable):
-                a = variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
-                    tx, [a], {}
-                )
+                a = variables.TorchVariable(torch.tensor).call_function(tx, [a], {})
 
             # Dynamic input does not get resolved, rather, gets stored as call_function
             if isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
@@ -728,7 +726,7 @@ class BuiltinVariable(VariableTracker):
 
                     fn = variables.NumpyVariable(np.clip)
                 else:
-                    fn = variables.TorchInGraphFunctionVariable(torch.clamp)
+                    fn = variables.TorchVariable(torch.clamp)
                 kwargs = {"min": b} if (self.fn is max) else {"max": b}
                 result = fn.call_function(tx, [a], kwargs)
             else:
@@ -739,7 +737,7 @@ class BuiltinVariable(VariableTracker):
                     fn = variables.NumpyVariable(fn)
                 else:
                     fn = {max: torch.maximum, min: torch.minimum}[self.fn]
-                    fn = variables.TorchInGraphFunctionVariable(fn)
+                    fn = variables.TorchVariable(fn)
                 result = fn.call_function(tx, [a, b], {})
 
             # return unspec if both a, b are unspec or const
@@ -1073,31 +1071,33 @@ class BuiltinVariable(VariableTracker):
             items = [fn.call_function(tx, [x], {}) for x in seq.unpack_var_sequence(tx)]
             return variables.TupleVariable(items)
 
-    def call_sum(self, tx, seq, **kwargs):
+    def call_sum(self, tx, seq, start=_SENTINEL):
         # Special case for sum on tuple of floats and ints
-        if (
-            isinstance(seq, (variables.ListVariable, variables.TupleVariable))
-            and all(
-                isinstance(x, variables.ConstantVariable)
-                and isinstance(x.value, (int, float))
-                for x in seq.items
-            )
-            and not kwargs
+        if isinstance(seq, (variables.ListVariable, variables.TupleVariable)) and all(
+            isinstance(x, variables.ConstantVariable)
+            and isinstance(x.value, (int, float))
+            for x in seq.items
         ):
-            new_list = [x.value for x in seq.items]
-            return variables.ConstantVariable.create(sum(new_list))
+            if start is self._SENTINEL:
+                return variables.ConstantVariable.create(
+                    sum(x.value for x in seq.items),
+                )
+            if isinstance(start, variables.ConstantVariable) and isinstance(
+                start.value, (int, float)
+            ):
+                return variables.ConstantVariable.create(
+                    sum((x.value for x in seq.items), start=start.value),
+                )
         if seq.has_unpack_var_sequence(tx):
-            start = kwargs.pop(
-                "start", variables.ConstantVariable.create(0)
-            ).as_python_constant()
-            assert not kwargs
-            items = seq.unpack_var_sequence(tx)[start:]
+            if start is self._SENTINEL:
+                start = variables.ConstantVariable.create(0)
+            items = seq.unpack_var_sequence(tx)
             return BuiltinVariable(functools.reduce).call_function(
                 tx,
                 [
                     BuiltinVariable(operator.add),
                     variables.TupleVariable(items),
-                    variables.ConstantVariable.create(0),
+                    start,
                 ],
                 {},
             )
@@ -1122,6 +1122,7 @@ class BuiltinVariable(VariableTracker):
             GetAttrVariable,
             PythonModuleVariable,
             TorchInGraphFunctionVariable,
+            TorchVariable,
             UserFunctionVariable,
         )
         from .builder import SourcelessBuilder, VariableBuilder
@@ -1234,19 +1235,11 @@ class BuiltinVariable(VariableTracker):
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchInGraphFunctionVariable):
-            # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
-            if trace_rules.is_aten_op_or_tensor_method(member):
-                return TorchInGraphFunctionVariable(member, **options)
-        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
-            if obj.is_torch:
-                member = getattr(obj.value, name)
-            else:
-                member = obj.value.__dict__[name]
-
-            if config.replay_record_enabled:
-                tx.exec_recorder.record_module_access(obj.value, name, member)
-
+            if trace_rules.lookup(member) is not None:
+                return trace_rules.lookup(member)(member, **options)
+        elif isinstance(obj, TorchVariable):
+            member = getattr(obj.value, name)
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
@@ -1256,6 +1249,13 @@ class BuiltinVariable(VariableTracker):
                 return VariableBuilder(tx, source)(member)
             else:
                 return SourcelessBuilder()(tx, member)
+        elif isinstance(obj, (PythonModuleVariable, DummyModule)):
+            member = obj.value.__dict__[name]
+
+            if config.replay_record_enabled:
+                tx.exec_recorder.record_module_access(obj.value, name, member)
+
+            return VariableBuilder(tx, source)(member)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
