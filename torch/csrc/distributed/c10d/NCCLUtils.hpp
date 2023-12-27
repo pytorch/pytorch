@@ -179,7 +179,7 @@ std::string getNcclErrorDetailStr(
 // Write NCCL debug info to local disk or any storage users define.
 class TORCH_API DebugInfoWriter {
  public:
-  DebugInfoWriter(int pgId, int rank);
+  DebugInfoWriter(int rank);
   virtual ~DebugInfoWriter();
   virtual void write(const std::string& ncclTrace);
 
