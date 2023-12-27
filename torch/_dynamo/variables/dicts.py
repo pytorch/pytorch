@@ -156,7 +156,7 @@ class ConstDictVariable(VariableTracker):
             and len(args) == 1
             and not kwargs
             and ConstDictVariable.is_valid_key(args[0])
-            and ConstDictVariable.get_key(args[0]) not in self.items
+            and ConstDictVariable.get_key(tx, args[0]) not in self.items
         ):
             return ConstantVariable(None)
         elif (

@@ -10,13 +10,17 @@ import threading
 import types
 from typing import Dict, List
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 import torch._dynamo.config
 
 import torch.nn
 from torch._guards import TracingContext
 
 from .. import variables
-from ..allowed_functions import is_allowed
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
@@ -31,6 +35,8 @@ from ..utils import (
     istype,
     namedtuple_fields,
     object_has_getattribute,
+    proxy_args_kwargs,
+    tensortype_to_dtype,
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
@@ -52,10 +58,42 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def python_type(self):
         return type(self.value)
 
+    def as_proxy(self):
+        return self.value
+
+    def __repr__(self):
+        return f"UserDefinedClassVariable({self.value})"
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _constant_fold_classes():
+        return {
+            torch.device,
+            torch.finfo,
+            torch.iinfo,
+            torch.Size,
+        }
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _in_graph_classes():
+        return set(tensortype_to_dtype.keys()) | {
+            torch.Tensor,
+            torch.cuda.Stream,
+            torch.cuda.Event,
+        }
+
+    def can_constant_fold_through(self):
+        return self.value in self._constant_fold_classes()
+
     def var_getattr(self, tx, name: str) -> "VariableTracker":
+        from .. import trace_rules
         from . import ConstantVariable
         from .builder import VariableBuilder
         from .distributed import ProcessGroupVariable
+
+        if name == "__name__":
+            return ConstantVariable.create(self.value.__name__)
 
         source = AttrSource(self.source, name) if self.source is not None else None
         try:
@@ -64,9 +102,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             obj = None
 
         if isinstance(obj, staticmethod):
-            return variables.UserFunctionVariable(
-                obj.__get__(self.value), source=source
-            )
+            func = obj.__get__(self.value)
+            if trace_rules.lookup(func) is not None:
+                return trace_rules.lookup(func).create_with_source(func, source=source)
+            else:
+                return variables.UserFunctionVariable(func, source=source)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source and inspect.ismemberdescriptor(obj):
@@ -80,13 +120,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if self.value is collections.OrderedDict and name == "fromkeys":
             return super().var_getattr(tx, name)
 
-        if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
-            obj
+        if name in getattr(self.value, "__dict__", {}) or (
+            self.value.__module__.startswith("torch.")
+            or self.value.__module__ == "torch"
         ):
             if source:
                 return VariableBuilder(tx, source)(obj)
-            elif ConstantVariable.is_literal(obj):
-                return ConstantVariable.create(obj)
+        elif ConstantVariable.is_literal(obj):
+            return ConstantVariable.create(obj)
 
         if (
             name == "WORLD"
@@ -94,6 +135,70 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return ProcessGroupVariable(self.value.WORLD)
         return super().var_getattr(tx, name)
+
+    def _call_cross_entropy_loss(self, tx, args, kwargs):
+        """
+        functional: input, target, weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
+        label_smoothing=0.0
+
+        non functional ctor: weight=None, size_average=None, ignore_index=- 100, reduce=None, reduction='mean',
+        label_smoothing=0.0
+
+        non functional loss call: input, target, optional_output
+        """
+        from . import ConstantVariable
+
+        def normalize_args(
+            weight=ConstantVariable.create(None),
+            size_average=ConstantVariable.create(None),
+            ignore_index=ConstantVariable.create(-100),
+            reduce=ConstantVariable.create(None),
+            reduction=ConstantVariable.create("mean"),
+            label_smoothing=ConstantVariable.create(0.0),
+        ):
+            return (
+                weight,
+                size_average,
+                ignore_index,
+                reduce,
+                reduction,
+                label_smoothing,
+            )
+
+        (
+            weight,
+            size_average,
+            ignore_index,
+            reduce_arg,
+            reduction,
+            label_smoothing,
+        ) = normalize_args(*args, **kwargs)
+
+        def fake_cross_entropy_loss(input, target):
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.nn.functional.cross_entropy,
+                    *proxy_args_kwargs(
+                        [
+                            input,
+                            target,
+                            weight,
+                            size_average,
+                            ignore_index,
+                            reduce_arg,
+                            reduction,
+                            label_smoothing,
+                        ],
+                        {},
+                    ),
+                ),
+            )
+
+        return variables.LambdaVariable(fake_cross_entropy_loss)
 
     def call_method(
         self,
@@ -133,10 +238,22 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
-        from .builder import SourcelessBuilder
+        from .builder import SourcelessBuilder, wrap_fx_proxy
         from .builtin import BuiltinVariable
 
-        if self.value is contextlib.nullcontext:
+        constant_args = check_constant_args(args, kwargs)
+
+        if self.can_constant_fold_through() and constant_args:
+            # constant fold
+            return variables.ConstantVariable.create(
+                self.as_python_constant()(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
+            )
+        elif self.value is torch.nn.CrossEntropyLoss:
+            return self._call_cross_entropy_loss(tx, args, kwargs)
+        elif self.value is contextlib.nullcontext:
             return NullContextVariable()
         elif self.value is collections.OrderedDict:
             return BuiltinVariable.call_custom_dict(
@@ -251,6 +368,38 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 user_cls_source=self.source,
                 mutable_local=MutableLocal(),
             )
+        elif self.value in self._in_graph_classes():
+            # torch.LongTensor cannot accept a list of FakeTensors.
+            # So we stack the list of FakeTensors instead.
+            if (
+                np
+                and self.value in tensortype_to_dtype
+                and len(args) == 1
+                and isinstance(args[0], variables.ListVariable)
+                and len(args[0].items) > 1
+                and all(isinstance(x, variables.TensorVariable) for x in args[0].items)
+            ):
+                # Stack FakeTensor
+                stacked = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        torch.stack,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                )
+                args = [stacked]
+
+            tensor_variable = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+            )
+
+            return tensor_variable
 
         return super().call_function(tx, args, kwargs)
 
@@ -487,7 +636,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).call_function(tx, [var], kwargs)
         elif (
             istype(self.value, functools.partial)
-            and is_allowed(self.value.func)
+            and trace_rules.lookup(self.value.func)
+            == variables.TorchInGraphFunctionVariable
             and all(
                 variables.ConstantVariable.is_literal(v)
                 for v in itertools.chain(self.value.args, self.value.keywords.values())
@@ -517,10 +667,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return build_checkpoint_variable().call_function(
                     tx, partial_args, partial_kwargs
                 )
-            return variables.TorchVariable(self.value.func).call_function(
-                tx, partial_args, partial_kwargs
-            )
-
+            return variables.TorchInGraphFunctionVariable(
+                self.value.func
+            ).call_function(tx, partial_args, partial_kwargs)
         elif callable(self.value):
             if self.source:
                 install_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
@@ -554,6 +703,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return subobj
 
     def var_getattr(self, tx, name):
+        from .. import trace_rules
         from . import ConstantVariable
         from .builder import VariableBuilder
 
@@ -597,9 +747,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.__get__.__func__, subobj_var, source=source
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
-            return variables.UserFunctionVariable(
-                subobj.__get__(self.value), source=source
-            )
+            func = subobj.__get__(self.value)
+            if trace_rules.lookup(func) is not None:
+                return trace_rules.lookup(func).create_with_source(func, source=source)
+            else:
+                return variables.UserFunctionVariable(func, source=source)
         elif isinstance(subobj, classmethod):
             return variables.UserMethodVariable(subobj.__func__, self, source=source)
         elif _is_dynamic_subobj(subobj):
@@ -626,9 +778,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
-                elif is_allowed(func):
-                    return variables.TorchVariable(func, source=source)
-                return variables.UserFunctionVariable(func, source=source)
+                elif trace_rules.lookup(func) is not None:
+                    return trace_rules.lookup(func).create_with_source(
+                        func, source=source
+                    )
+                else:
+                    return variables.UserFunctionVariable(func, source=source)
 
         if (
             name in getattr(value, "__dict__", {})
@@ -685,14 +840,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if name == "__class__":
             return UserDefinedClassVariable(type(self.value), **options)
 
-        if source:
-            return VariableBuilder(tx, source)(subobj)
-        if torch.distributed.is_available():
-            if (
-                subobj.__class__.__name__
-                == "torch.distributed.fsdp._flat_param.FlatParamHandle"
-            ):
-                return UserDefinedObjectVariable(subobj, **options)
         return variables.GetAttrVariable(self, name, **options)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":

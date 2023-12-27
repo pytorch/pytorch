@@ -143,8 +143,8 @@ class SuperVariable(VariableTracker):
         ):
             from .builder import VariableBuilder
 
-            # args[0] = args[0].add_guard(GuardBuilder.CONSTANT_MATCH)
-            # install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
+            args[0] = args[0].add_guard(GuardBuilder.CONSTANT_MATCH)
+            install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
             key = args[0].as_python_constant()
             return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
