@@ -1193,7 +1193,7 @@ class TritonKernel(Kernel):
         new_ranges, return_getters_groups = self._split_iteration_ranges(
             groups, lengths
         )
-        itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
+        itervars = list(itertools.chain.from_iterable(self.set_ranges(*new_ranges)))
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
     def is_indirect_indexing(self, index: sympy.Expr):
@@ -3033,11 +3033,11 @@ class TritonScheduling(BaseScheduling):
         dep_sources = [rw.reads, rw.writes]
         assert all(
             isinstance(dep, (MemoryDep, StarDep))
-            for dep in itertools.chain(*dep_sources)
+            for dep in itertools.chain.from_iterable(dep_sources)
         )
         deps = [
             dep
-            for dep in itertools.chain(*dep_sources)
+            for dep in itertools.chain.from_iterable(dep_sources)
             if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep)
         ]
         write_names = {dep.name for dep in rw.writes}

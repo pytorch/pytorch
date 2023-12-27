@@ -2132,7 +2132,7 @@ class TestCreationFuncs(TestCase):
     # Test ones, zeros, empty and full.
 
     def setUp(self):
-        # dtypes = {np.dtype(tp) for tp in itertools.chain(*np.sctypes.values())}
+        # dtypes = {np.dtype(tp) for tp in itertools.chain.from_iterable(np.sctypes.values())}
         dtypes = {np.dtype(tp) for tp in "efdFDBbhil?"}
         self.dtypes = dtypes
         self.orders = {

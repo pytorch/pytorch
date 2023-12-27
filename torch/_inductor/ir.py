@@ -6546,7 +6546,7 @@ class LoopBody:
         return self.indexing[name]
 
     def __call__(self, *indices):
-        index = list(itertools.chain(*indices))
+        index = list(itertools.chain.from_iterable(indices))
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
         assert all(v not in self.var_ranges for v in index)
         replacements = dict(zip(self.var_ranges.keys(), index))

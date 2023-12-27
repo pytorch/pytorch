@@ -363,7 +363,7 @@ def extract_read_writes(
     if normalize:
         range_vars = []  # Number of vars could differ due to normalization
     else:
-        range_vars = [*itertools.chain(*args)]
+        range_vars = list(itertools.chain.from_iterable(args))
 
     inner = rw.parent_handler.parent_handler
     return ReadWrites(

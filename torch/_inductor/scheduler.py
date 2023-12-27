@@ -1116,7 +1116,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     def get_nodes(self):
         """Returns all nodes contained in this kernel, unpacking fused nodes into their constituent scheduler nodes."""
-        return list(itertools.chain(*[x.get_nodes() for x in self.snodes]))
+        return list(itertools.chain.from_iterable(x.get_nodes() for x in self.snodes))
 
     def get_first_name(self):
         return self.snodes[0].get_first_name()
