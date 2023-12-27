@@ -227,7 +227,6 @@ class BackwardHook:
                         if res is not None and not (isinstance(res, tuple) and all(el is None for el in res)):
                             raise RuntimeError("Backward hook for Modules where no input requires "
                                                "gradient should always return None or None for all gradients.")
-                    self.grad_outputs = None
 
                 if self.grad_outputs is not None:
                     assert self.output_tensors_index is not None  # mypy
