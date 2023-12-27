@@ -122,6 +122,7 @@ manual_torch_name_rule_map = {
     "torch._C.set_autocast_xla_enabled": SkipFilesVariable,
     "torch.resize_as_": SkipFilesVariable,
     "torch.resize_as_sparse_": SkipFilesVariable,
+    "torch.get_default_device": TorchInGraphFunctionVariable,
 }
 
 
@@ -1655,7 +1656,6 @@ torch_c_binding_in_graph_functions = {
         "torch.ge",
         "torch.geqrf",
         "torch.ger",
-        "torch.get_default_device",
         "torch.get_device",
         "torch.gradient",
         "torch.greater_equal",
@@ -2202,12 +2202,8 @@ torch_non_c_binding_in_graph_functions = {
         "torch._ops.dl_open_guard",
         "torch._ops.get_cached_ops",
         "torch._ops.key_extractor",
-        "torch._ops.mode_stack_per_key",
-        "torch._ops.pop_mode_for_key",
-        "torch._ops.push_mode_for_key",
         "torch._ops.reset_cached_ops",
         "torch._ops.resolve_key",
-        "torch._ops.temporarily_pop_mode",
         "torch._preload_cuda_deps",
         "torch._register_device_module",
         "torch._running_with_deploy",
