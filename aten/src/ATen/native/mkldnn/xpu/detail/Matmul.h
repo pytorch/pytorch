@@ -28,9 +28,9 @@ static inline void matmul(
       "oneDNN input matrixes must have the same ranks");
   TORCH_CHECK(result.defined(), "oneDNN matmul result should be defined");
 
-  // at::Device curDevice = at::Device(at::kXPU, current_device());
-  // auto engine = GpuEngineManager::Instance().get_engine(curDevice);
-  // auto strm = GpuStreamManager::Instance().get_stream();
+  at::Device curDevice = at::Device(at::kXPU, current_device());
+  auto engine = GpuEngineManager::Instance().get_engine(curDevice);
+  auto strm = GpuStreamManager::Instance().get_stream();
 
   at::Tensor m1 =
       xpu::onednn::is_onednn_matmul_strides(mat1) ? mat1 : mat1.contiguous();
@@ -105,7 +105,7 @@ static inline void matmul(
 
   b = b.contiguous(); // avoid reorder 2 times
 
-  // ipex matmul support both ab/ba shape for m2 tensor, we don't check any more
+  // xpu matmul support both ab/ba shape for m2 tensor, we don't check any more
   auto m1_usr_dt = get_onednn_dtype(m1);
   auto m2_usr_dt = get_onednn_dtype(m2);
   auto dst_usr_dt = get_onednn_dtype(dst);
@@ -180,12 +180,10 @@ static inline void matmul(
   dnnl::primitive_attr pattr;
   pattr.set_post_ops(po);
 
-#ifdef USE_SCRATCHPAD_MODE
+  // scratchpad
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-#endif
 
-
-  if (m1_dt == memory::data_type::f32) {
+  if (m1_dt == dnnl::memory::data_type::f32) {
     pattr.set_fpmath_mode(dnnl::fpmath_mode::strict)
   }
 
@@ -193,9 +191,9 @@ static inline void matmul(
   if (with_bias) {
     bias_md = dnnl::memory::desc(bias_dims, bias_dt, bias_strides);
     matmul_pd =
-        matmul::primitive_desc(engine, m1_md, m2_md, bias_md, dst_md, pattr);
+        dnnl::matmul::primitive_desc(engine, m1_md, m2_md, bias_md, dst_md, pattr);
   } else {
-    matmul_pd = matmul::primitive_desc(engine, m1_md, m2_md, dst_md, pattr);
+    matmul_pd = dnnl::matmul::primitive_desc(engine, m1_md, m2_md, dst_md, pattr);
   }
 
   matmul_p = dnnl::matmul(matmul_pd);
@@ -213,7 +211,7 @@ static inline void matmul(
   auto expected_m2_md = matmul_pd.weights_desc();
   auto expected_dst_md = matmul_pd.dst_desc();
 
-  memory m1_m = m1_usr_m, m2_m = m2_usr_m, dst_m = dst_usr_m;
+  dnnl::memory m1_m = m1_usr_m, m2_m = m2_usr_m, dst_m = dst_usr_m;
   at::Tensor m1_, m2_, dst_;
 
   // TODO: hanld attr.with_sum()
@@ -221,14 +219,12 @@ static inline void matmul(
   if (attr.with_binary())
     attr.construct_post_binary(matmul_pd, po, args);
 
-#ifdef USE_SCRATCHPAD_MODE
   size_t scratchpad_size = matmul_pd.scratchpad_desc().get_size();
-  at::Tensor scratchpad_tensor = at::AtenIpexTypeXPU::empty(
+  at::Tensor scratchpad_tensor = at::empty(
       {scratchpad_size}, m1.options().dtype(at::kByte), c10::nullopt);
   auto scratchpad_memory = xpu_onednn_memory(
       matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
-#endif
 
   args.insert({DNNL_ARG_SRC, m1_m});
   args.insert({DNNL_ARG_WEIGHTS, m2_m});

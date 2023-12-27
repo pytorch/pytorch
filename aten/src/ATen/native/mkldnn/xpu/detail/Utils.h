@@ -129,12 +129,6 @@ static inline dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
       get_onednn_strides(tensor)};
 }
 
-template <typename T>
-inline void array_copy(T* dst, const T* src, size_t size) {
-  for (size_t i = 0; i < size; ++i)
-    dst[i] = src[i];
-}
-
 inline bool onednn_strides_check(const at::Tensor& src) {
   auto adims = xpu::onednn::get_onednn_dims(src);
   int ndims = (int)adims.size();
@@ -375,7 +369,6 @@ static inline bool binary_valid(
 enum MEMORY_LAYOUT_FOR_CONV {
   ChannelsFirst = 0, // using channels_first for conv computation.
   ChannelsLast = 1, /// using channels_last for conv computation.
-  Blocked = 2, // using blocked format for conv computation.
 };
 
 } // namespace onednn

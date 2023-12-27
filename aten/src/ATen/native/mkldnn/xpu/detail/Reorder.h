@@ -102,24 +102,24 @@ static inline void reorder(
   if (dst.is_same(src))
     return;
 
-  // auto engine =
-  //     GpuEngineManager::Instance().get_engine({c10::kXPU, current_device()});
-  // auto strm = GpuStreamManager::Instance().get_stream();
+  auto engine =
+      GpuEngineManager::Instance().get_engine({c10::kXPU, current_device()});
+  auto strm = GpuStreamManager::Instance().get_stream();
 
   dnnl::memory::desc src_md = check_group_and_create_plain_md(src, dst);
-  // auto src_mem = xpu_onednn_memory(src_md, engine, src.data_ptr());
+  auto src_mem = xpu_onednn_memory(src_md, engine, src.data_ptr());
 
   dnnl::memory::desc dst_md = dnnl::memory::desc(
             get_onednn_dims(dst),
             get_onednn_dtype_include_double(dst),
             get_onednn_strides(dst));
-  // auto dst_mem = xpu_onednn_memory(dst_md, engine, dst.data_ptr());
+  auto dst_mem = xpu_onednn_memory(dst_md, engine, dst.data_ptr());
 
   dnnl::primitive prim;
-  // prim = dnnl::reorder(src_mem, dst_mem);
+  prim = dnnl::reorder(src_mem, dst_mem);
 
-  // XPU_ONEDNN_EXEC(
-  //     prim, strm, {{DNNL_ARG_SRC, src_mem}, {DNNL_ARG_DST, dst_mem}});
+  XPU_ONEDNN_EXEC(
+      prim, strm, {{DNNL_ARG_SRC, src_mem}, {DNNL_ARG_DST, dst_mem}});
 }
 
 

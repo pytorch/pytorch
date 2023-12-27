@@ -232,7 +232,6 @@ static bool should_fold(const Tensor& tensor1, const int64_t dim_tensor2) {
   }
 }
 
-// Port from PyTorch _matmul_impl function
 /*
 Matrix product of two Tensors.
 The behavior depends on the dimensionality of the Tensors as follows:
@@ -247,7 +246,7 @@ dimensions of the ND argument to form a matrix, call mm or mv, reshape it
 back to ND and return it
 - Otherwise, we return bmm, after broadcasting and folding the batched
 dimensions if there's more than one
-*/
+**/
 static Tensor& matmul_fusion_variants(
     Tensor& output,
     const Tensor& tensor1,
