@@ -800,6 +800,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   std::string nccl_debug = getCvarString({"NCCL_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
             << "NCCL version: " << getNcclVersion() << ", size: " << size
+            << ", global rank: " << globalRank()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -1206,7 +1207,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     if (debugInfoWriter_ == nullptr) {
       // Dump the trace blob into local disk as a fallback.
       std::unique_ptr<DebugInfoWriter> debugInfoWriterPtr =
-          std::make_unique<DebugInfoWriter>(uid_, rank_);
+          std::make_unique<DebugInfoWriter>(globalRank());
       registerDebugInfoWriter(std::move(debugInfoWriterPtr));
     }
     debugInfoWriter_->write(ncclTrace);
@@ -1433,6 +1434,11 @@ struct DumpPipe {
 const std::string& ProcessGroupNCCL::logPrefix() const {
   static std::string prefix = c10::str("[PG ", uid_, " Rank ", rank_, "] ");
   return prefix;
+}
+
+const int& ProcessGroupNCCL::globalRank() const {
+  static int globalRank = rank_;
+  return globalRank;
 }
 
 void ProcessGroupNCCL::watchdogHandler() {
