@@ -54,10 +54,10 @@ def vector_to_parameters(vec: torch.Tensor, parameters: Iterable[torch.Tensor]) 
 
 
 def _check_param_device(param: torch.Tensor, old_param_device: Optional[int]) -> int:
-    r"""This helper function is to check if the parameters are located
-    in the same device. Currently, the conversion between model parameters
-    and single vector form is not supported for multiple allocations,
-    e.g. parameters in different GPUs/PrivateUse1s, or mixture of CPU/GPU/PrivateUse1.
+    r"""Check if the parameters are located on the same device.
+
+    Currently, the conversion between model parameters and single vector form is not supported
+    for multiple allocations, e.g. parameters in different GPUs/PrivateUse1s, or mixture of CPU/GPU/PrivateUse1.
 
     Args:
         param ([Tensor]): a Tensor of a parameter of a model
@@ -67,7 +67,6 @@ def _check_param_device(param: torch.Tensor, old_param_device: Optional[int]) ->
     Returns:
         old_param_device (int): report device for the first time
     """
-
     # Meet the first parameter
     support_device_types = ["cuda", torch._C._get_privateuse1_backend_name()]
     if old_param_device is None:

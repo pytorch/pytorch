@@ -390,7 +390,7 @@ class CudaReproTests(TestCase):
                 return CachingAutotuner(
                     # force autotune by setting save_cache_hook to False
                     fn,
-                    meta=meta,
+                    triton_meta=meta,
                     configs=configs,
                     save_cache_hook=False,
                     mutated_arg_names=["in_out_ptr0"],

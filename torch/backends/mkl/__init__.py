@@ -2,7 +2,7 @@ import torch
 
 
 def is_available():
-    r"""Returns whether PyTorch is built with MKL support."""
+    r"""Return whether PyTorch is built with MKL support."""
     return torch._C.has_mkl
 
 
@@ -12,7 +12,8 @@ VERBOSE_ON = 1
 
 class verbose:
     """
-    On-demand oneMKL verbosing functionality
+    On-demand oneMKL verbosing functionality.
+
     To make it easier to debug performance issues, oneMKL can dump verbose
     messages containing execution information like duration while executing
     the kernel. The verbosing functionality can be invoked via an environment

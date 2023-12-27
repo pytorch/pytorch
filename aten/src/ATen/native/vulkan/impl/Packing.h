@@ -16,7 +16,7 @@ void record_nchw_to_image_op(
     api::PipelineBarrier pipeline_barrier,
     const VkFence fence_handle);
 
-void record_image_to_nchw_op(
+bool record_image_to_nchw_op(
     api::Context* const context,
     api::ShaderInfo& compute_shader,
     vTensor& v_src,
@@ -31,12 +31,16 @@ void record_nchw_to_buffer_op(
     api::PipelineBarrier pipeline_barrier,
     const VkFence fence_handle);
 
-void record_buffer_to_nchw_op(
+bool record_buffer_to_nchw_op(
     api::Context* const context,
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
     api::PipelineBarrier pipeline_barrier,
     const VkFence fence_handle);
+
+vTensor convert_image_channels_packed_to_height_packed(const vTensor& v_input);
+
+vTensor convert_image_channels_packed_to_width_packed(const vTensor& v_input);
 
 } // namespace packing
 } // namespace vulkan

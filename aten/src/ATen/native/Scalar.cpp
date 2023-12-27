@@ -11,8 +11,7 @@
 #include <ATen/ops/item_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Scalar item(const Tensor& self) {
   auto numel = self.sym_numel();
@@ -29,10 +28,19 @@ Scalar item(const Tensor& self) {
 }
 
 #if !defined(C10_MOBILE)
-#define _AT_DISPATCH_SD_TYPES(TYPE, NAME, ...)                                   \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                  \
-            kComplexHalf, kHalf, kBool, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            TYPE, NAME, __VA_ARGS__)
+#define _AT_DISPATCH_SD_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND8(      \
+      kComplexHalf,                            \
+      kHalf,                                   \
+      kBool,                                   \
+      kBFloat16,                               \
+      kFloat8_e5m2,                            \
+      kFloat8_e5m2fnuz,                        \
+      kFloat8_e4m3fn,                          \
+      kFloat8_e4m3fnuz,                        \
+      TYPE,                                    \
+      NAME,                                    \
+      __VA_ARGS__)
 #else
 #define _AT_DISPATCH_SD_TYPES(TYPE, NAME, ...)     \
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(    \
@@ -49,4 +57,4 @@ Scalar _local_scalar_dense_cpu(const Tensor& self) {
   return r;
 }
 
-}} // at::native
+} // at::native

@@ -6,7 +6,7 @@ with test_export_persist_assert)
 import copy
 import functools
 import inspect
-import math
+import io
 import operator
 import unittest
 from enum import Enum
@@ -29,8 +29,10 @@ from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
     ShapeEnv,
+    StatelessSymbolicContext,
 )
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_cuda import TEST_CUDA
 
 
 class ExportTests(torch._dynamo.test_case.TestCase):
@@ -1638,7 +1640,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         for Module in [Foo, Bar, FooBar]:
             mod = Module()
-            x = torch.randn([3, 3])
+            x = torch.randn([3, 3], requires_grad=True)
             pred = torch.tensor(x[0][0].item() < 0)
             real_result = mod.forward(pred, x)
             out_graph, _ = torch._dynamo.export(mod.forward)(pred, x)
@@ -1681,16 +1683,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
                 return cond(x.shape[0] <= 2, true_fn, false_fn, [x])
 
-        mod = Module()
-        x = torch.randn(2, 2)
-        out_graph, _ = torch._dynamo.export(mod)(x)
-        test_x = torch.randn(3, 2)
-        self.assertEqual(out_graph(test_x), mod(test_x))
-
-    def test_export_with_cond_dynamic_shape_pred_tuple_operands(self):
-        from functorch.experimental.control_flow import cond
-
-        class Module(torch.nn.Module):
+        class Module2(torch.nn.Module):
             def forward(self, x):
                 def true_fn(x):
                     return x + x
@@ -1700,11 +1693,54 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
                 return cond(x.shape[0] <= 2, true_fn, false_fn, (x,))
 
-        mod = Module()
-        x = torch.randn(2, 2)
-        out_graph, _ = torch._dynamo.export(mod)(x)
-        test_x = torch.randn(3, 2)
-        self.assertEqual(out_graph(test_x), mod(test_x))
+        mods = [Module(), Module2()]
+        for mod in mods:
+            x = torch.randn(2, 2)
+            out_graph, guards = torch._dynamo.export(mod)(x)
+            self.assertExpectedInline(
+                out_graph.code.strip(),
+                """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_x_ = arg0
+    size = l_x_.size()
+    getitem = size[0];  size = None
+    le = getitem <= 2;  getitem = None
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, [l_x_]);  le = cond_true_0 = cond_false_0 = l_x_ = None
+    getitem_2 = cond[0];  cond = None
+    return pytree.tree_unflatten([getitem_2], self._out_spec)""",
+            )
+            self.assertExpectedInline(
+                out_graph.cond_true_0.code.strip(),
+                """\
+def forward(self, l_x_):
+    l_x__1 = l_x_
+    add = l_x__1 + l_x__1;  l_x__1 = None
+    return (add,)""",
+            )
+            self.assertExpectedInline(
+                out_graph.cond_false_0.code.strip(),
+                """\
+def forward(self, l_x_):
+    l_x__1 = l_x_
+    getitem = l_x__1[slice(None, 2, None)];  l_x__1 = None
+    return (getitem,)""",
+            )
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile",
+            ):
+                # True branch and false branch return tensors of different shape
+                torch._dynamo.export(mod)(torch.randn(3, 2))
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Cond doesn't work unless it is captured completely with torch.compile",
+            ):
+                # True branch and false branch return tensors of different shape
+                test_x = torch.randn(3, 2)
+                mod(test_x)
 
     def test_export_with_map_cond(self):
         from functorch.experimental.control_flow import cond, map
@@ -1790,7 +1826,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         has_sym_size = False
         for node in gm.graph.nodes:
-            if node.target is torch.ops.aten.sym_size:
+            if node.target is torch.ops.aten.sym_size.int:
                 has_sym_size = True
 
         self.assertTrue(has_sym_size)
@@ -1878,9 +1914,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    ones_like_default = torch.ops.aten.ones_like.default(arg0, pin_memory = False)
-    matmul_default = torch.ops.aten.matmul.default(arg0, ones_like_default);  arg0 = ones_like_default = None
-    return pytree.tree_unflatten([matmul_default], self._out_spec)""",
+    arg0_1 = arg0
+    ones_like = torch.ops.aten.ones_like.default(arg0_1, pin_memory = False)
+    matmul = torch.ops.aten.matmul.default(arg0_1, ones_like);  arg0_1 = ones_like = None
+    return pytree.tree_unflatten([matmul], self._out_spec)""",
         )
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
@@ -2253,6 +2290,35 @@ def forward(self, x):
         ):
             torch.export.export(qux, (torch.tensor(3), 5))
 
+    @unittest.skipIf(not TEST_CUDA, "No CUDA available.")
+    def test_export_with_parameters(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.features = torch.nn.Sequential(
+                    torch.nn.Conv2d(
+                        3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+                    ),
+                    torch.nn.ReLU(inplace=True),
+                )
+
+            def forward(self, x):
+                return self.features(x)
+
+        model = MyModule().eval().cuda()
+        random_inputs = (torch.rand([32, 3, 32, 32]).to("cuda"),)
+        dim_x = torch.export.Dim("dim_x", min=1, max=32)
+        exp_program = torch.export.export(
+            model, random_inputs, dynamic_shapes={"x": {0: dim_x}}
+        )
+        output_buffer = io.BytesIO()
+        # Tests if we can restore saved nn.Parameters when we load them again
+        torch.export.save(exp_program, output_buffer)
+        loaded_model = torch.export.load(output_buffer)
+        self.assertTrue(
+            isinstance(loaded_model.module().features_0_weight, torch.nn.Parameter)
+        )
+
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2331,8 +2397,8 @@ def forward(self, x):
         constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
 
         example_inputs = (copy(x), y)
-        ep = torch._export._export(foo, example_inputs, constraints=constraints)
-        with self.assertRaisesRegex(RuntimeError, "Input.*shape.*specialized at 2"):
+        ep = torch.export.export(foo, example_inputs, constraints=constraints)
+        with self.assertRaisesRegex(RuntimeError, "input.*shape.*to be equal to 2"):
             ep(torch.randn(3), y)
 
         dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y")
@@ -2535,8 +2601,6 @@ def forward(self, x):
         capture_scalar_outputs=True,
     )
     def test_exported_graph_serialization(self):
-        import io
-
         def f(x, y):
             b = x.item()
             torch._constrain_as_size(b)
@@ -2850,7 +2914,14 @@ def forward(self, x):
         with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
             gm(torch.randn(3, 4, 5))
 
-    def test_access_class_method_from_user_class(self):
+    @common_utils.parametrize(
+        "type_fn",
+        [
+            common_utils.subtest(type, name="builtin"),
+            common_utils.subtest(lambda obj: obj.__class__, name="attr"),
+        ],
+    )
+    def test_access_class_method_from_user_class(self, type_fn):
         class A:
             @classmethod
             def func(cls):
@@ -2858,20 +2929,10 @@ def forward(self, x):
 
         def f(x):
             a = A()
-            return x.sum() + type(a).func().sum()
+            return x.sum() + type_fn(a).func().sum()
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError, r"Can't access members of type\(obj\)"
-        ):
-            gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
-
-        def f_correct(x):
-            a = A()
-            return x.sum() + a.__class__.func().sum()
-
-        gm, _ = torch._dynamo.export(f_correct, aten_graph=True)(torch.ones(6, 4))
-
-        self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
+        gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
+        self.assertEqual(f(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
     def test_not_functionalize(self):
         class Foo(torch.nn.Module):
@@ -2902,15 +2963,9 @@ def forward(self, x):
         def f(x):
             return x[: round(x.shape[0] / 2)]
 
-        def f_correct(x):
-            return x[: math.floor(x.shape[0] / 2)]
+        gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Calling round()"):
-            gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
-
-        gm, _ = torch._dynamo.export(f_correct, aten_graph=True)(torch.ones(6, 4))
-
-        self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
+        self.assertEqual(f(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
     def test_cond_supported_pred_types(self):
         def true_fn(x):
@@ -3022,7 +3077,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             RuntimeError,
-            "Expect operands to be a tuple of Tensors, but got",
+            r"Expect operands to be a tuple of possibly nested dict/list/tuple",
         ):
             f_non_list_operands(*example_inputs)
 
@@ -3035,7 +3090,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            RuntimeError, "Expect operands to be a tuple of Tensors, but got"
+            RuntimeError,
+            r"Expect operands to be a tuple of possibly nested dict/list/tuple",
         ):
             f_non_tensor_operands(*example_inputs)
 
@@ -3099,18 +3155,17 @@ def forward(self, x):
             )(*example_inputs)
 
     def test_cond_raise_user_error_on_branch_return_multiple_tensors(self):
-        def f_branch_return_multiple_tensors(x, y):
-            return cond(x, lambda x: (x, x), lambda x: (x, x), [y])
+        def f_branch_return_multiple_tensors(pred, x, y):
+            return cond(pred, lambda x: (x, x), lambda x: (x, x), [y])
 
-        example_inputs = (torch.randn(4), torch.randn(2))
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
-        ):
-            torch._dynamo.export(
-                f_branch_return_multiple_tensors,
-                aten_graph=True,
-            )(*example_inputs)
+        example_inputs = (torch.tensor(True), torch.randn(4), torch.randn(2))
+        gm, _ = torch._dynamo.export(
+            f_branch_return_multiple_tensors,
+            aten_graph=True,
+        )(*example_inputs)
+        self.assertEqual(
+            gm(*example_inputs), f_branch_return_multiple_tensors(*example_inputs)
+        )
 
     def test_multiple_outputs_op_with_evaluator(self):
         class TopKModel(torch.nn.Module):
@@ -3153,8 +3208,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected each tensor to have same metadata but got",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile",
         ):
             torch._dynamo.export(f_return_tensor_mismatch, aten_graph=True)(
                 *example_inputs,
@@ -3189,22 +3244,23 @@ def forward(self, x):
             """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    slice_tensor = torch.ops.aten.slice.Tensor(arg0, 2, 0, 3)
-    sym_size = torch.ops.aten.sym_size(arg0, 0)
-    sub = sym_size - 1
-    slice_tensor_1 = torch.ops.aten.slice.Tensor(arg0, 0, 0, sub);  sub = None
-    sym_size_1 = torch.ops.aten.sym_size(arg0, 2)
-    slice_tensor_2 = torch.ops.aten.slice.Tensor(slice_tensor_1, 1, 1, sym_size_1);  slice_tensor_1 = None
-    slice_tensor_3 = torch.ops.aten.slice.Tensor(slice_tensor_2, 2, 1, 3);  slice_tensor_2 = None
-    sub_1 = sym_size - 2
-    slice_tensor_4 = torch.ops.aten.slice.Tensor(arg0, 0, 0, sub_1);  sub_1 = None
-    slice_tensor_5 = torch.ops.aten.slice.Tensor(slice_tensor_4, 1, 2, sym_size_1);  slice_tensor_4 = None
-    slice_tensor_6 = torch.ops.aten.slice.Tensor(slice_tensor_5, 2, 2, 3);  slice_tensor_5 = None
-    sub_2 = sym_size - 3;  sym_size = None
-    slice_tensor_7 = torch.ops.aten.slice.Tensor(arg0, 0, 0, sub_2);  arg0 = sub_2 = None
-    slice_tensor_8 = torch.ops.aten.slice.Tensor(slice_tensor_7, 1, 3, sym_size_1);  slice_tensor_7 = sym_size_1 = None
-    slice_tensor_9 = torch.ops.aten.slice.Tensor(slice_tensor_8, 2, 3, 3);  slice_tensor_8 = None
-    return pytree.tree_unflatten([slice_tensor, slice_tensor_3, slice_tensor_6, slice_tensor_9], self._out_spec)""",
+    arg0_1 = arg0
+    slice_1 = torch.ops.aten.slice.Tensor(arg0_1, 2, 0, 3)
+    sym_size_int = torch.ops.aten.sym_size.int(arg0_1, 0)
+    sub = sym_size_int - 1
+    slice_2 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub);  sub = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(arg0_1, 2)
+    slice_3 = torch.ops.aten.slice.Tensor(slice_2, 1, 1, sym_size_int_1);  slice_2 = None
+    slice_4 = torch.ops.aten.slice.Tensor(slice_3, 2, 1, 3);  slice_3 = None
+    sub_1 = sym_size_int - 2
+    slice_5 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub_1);  sub_1 = None
+    slice_6 = torch.ops.aten.slice.Tensor(slice_5, 1, 2, sym_size_int_1);  slice_5 = None
+    slice_7 = torch.ops.aten.slice.Tensor(slice_6, 2, 2, 3);  slice_6 = None
+    sub_2 = sym_size_int - 3;  sym_size_int = None
+    slice_8 = torch.ops.aten.slice.Tensor(arg0_1, 0, 0, sub_2);  arg0_1 = sub_2 = None
+    slice_9 = torch.ops.aten.slice.Tensor(slice_8, 1, 3, sym_size_int_1);  slice_8 = sym_size_int_1 = None
+    slice_10 = torch.ops.aten.slice.Tensor(slice_9, 2, 3, 3);  slice_9 = None
+    return pytree.tree_unflatten([slice_1, slice_4, slice_7, slice_10], self._out_spec)""",
         )
 
     def test_capture_symbolic_tracing_simple_within_fake_mode(self):
@@ -3247,7 +3303,10 @@ def forward(self, x):
                 shape_env=shape_env,
             ) as fake_mode:
                 fake_x = fake_mode.from_tensor(
-                    x, dynamic_dims=[DimDynamic.DYNAMIC for _ in range(x.dim())]
+                    x,
+                    symbolic_context=StatelessSymbolicContext(
+                        dynamic_sizes=[DimDynamic.DYNAMIC for _ in range(x.dim())],
+                    ),
                 )
                 for i, size in enumerate(size_tests):
                     pred = fake_x.size(0) == size
@@ -3275,18 +3334,28 @@ def forward(self, x):
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
-        sin = arg1.sin();  arg1 = None
+        arg1: "f32[s1, s2]";
+
+        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        l_x_ = arg1
+
+        sin = l_x_.sin();  l_x_ = None
         return pytree.tree_unflatten([sin], self._out_spec)
 """
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
-        cos = arg1.cos();  arg1 = None
+        arg1: "f32[s1, s2]";
+
+        arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        l_x_ = arg1
+
+        cos = l_x_.cos();  l_x_ = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
-        true_guard_code = ["cast_symbool_to_symint_guardless(L['pred']) == 1"]
+        true_guard_code = [
+            "cast_symbool_to_symint_guardless(L['pred']) == 1",
+        ]
         false_guard_code = [
             "Ne(cast_symbool_to_symint_guardless(L['pred']), 1)",
             "-9223372036854775808 <= cast_symbool_to_symint_guardless(L['pred'])",
@@ -3631,42 +3700,51 @@ G['macademia'], accessed at:
             """\
 def forward(self, pred, x):
     arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
-    ones = torch.ones(6, 4)
-    ones_1 = torch.ones(6, 4)
-    ones_2 = torch.ones(6, 4)
-    ones_3 = torch.ones(6, 4)
+    l_pred_ = arg0
+    l_x_ = arg1
+    a = torch.ones(6, 4)
+    b = torch.ones(6, 4)
+    c = torch.ones(6, 4)
+    d = torch.ones(6, 4)
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(arg0, cond_true_0, cond_false_0, [arg1, ones, ones_1, ones_3, ones, ones_1, ones_2]);  arg0 = cond_true_0 = cond_false_0 = arg1 = ones = ones_1 = ones_3 = ones_2 = None
-    return pytree.tree_unflatten([cond], self._out_spec)""",  # noqa: B950,E122
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [a, b, l_x_, d, c]);  l_pred_ = cond_true_0 = cond_false_0 = a = b = l_x_ = d = c = None
+    getitem = cond[0];  cond = None
+    return pytree.tree_unflatten([getitem], self._out_spec)""",  # noqa: B950,E122
         )
 
         self.assertExpectedInline(
             out_graph.cond_true_0.code.strip(),
             """\
-def forward(self, l_x_, a, b, d, c_false_branch, b_false_branch, a_false_branch):
-    add = l_x_ + l_x_;  l_x_ = None
-    cos = a.cos();  a = None
+def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
+    a_1 = a
+    b_1 = b
+    l_x__1 = l_x_
+    add = l_x__1 + l_x__1;  l_x__1 = None
+    cos = a_1.cos();  a_1 = None
     add_1 = add + cos;  add = cos = None
-    cos_1 = b.cos();  b = None
+    cos_1 = b_1.cos();  b_1 = None
     add_2 = add_1 + cos_1;  add_1 = cos_1 = None
-    cos_2 = d.cos();  d = None
+    cos_2 = d_true_branch.cos();  d_true_branch = None
     add_3 = add_2 + cos_2;  add_2 = cos_2 = None
-    return add_3""",
+    return (add_3,)""",
         )
 
         self.assertExpectedInline(
             out_graph.cond_false_0.code.strip(),
             """\
-def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
-    mul = l_x_ * l_x_;  l_x_ = None
-    sin = a.sin();  a = None
+def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
+    a_1 = a
+    b_1 = b
+    l_x__1 = l_x_
+    mul = l_x__1 * l_x__1;  l_x__1 = None
+    sin = a_1.sin();  a_1 = None
     add = mul + sin;  mul = sin = None
-    sin_1 = b.sin();  b = None
+    sin_1 = b_1.sin();  b_1 = None
     add_1 = add + sin_1;  add = sin_1 = None
-    sin_2 = c.sin();  c = None
+    sin_2 = c_false_branch.sin();  c_false_branch = None
     add_2 = add_1 + sin_2;  add_1 = sin_2 = None
-    return add_2""",
+    return (add_2,)""",
         )
 
     @unittest.skipIf(
@@ -3964,19 +4042,19 @@ def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
         self.assertExpectedInline(
             gm.true_graph_0.code.strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, arg0_1, arg2_1);  arg0_1 = arg2_1 = None
+def forward(self, arg0_1, arg1_1):
+    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, arg1_1, arg0_1);  arg1_1 = arg0_1 = None
     sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
-    return sum_1""",
+    return (sum_1,)""",
         )
 
         self.assertExpectedInline(
             gm.false_graph_0.code.strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mul.Tensor, torch.int32, arg0_1, arg2_1);  arg0_1 = arg2_1 = None
+def forward(self, arg0_1, arg1_1):
+    out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mul.Tensor, torch.int32, arg1_1, arg0_1);  arg1_1 = arg0_1 = None
     sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
-    return sum_1""",
+    return (sum_1,)""",
         )
 
     def test_export_nn_module_stack_patched_module(self):
@@ -4040,17 +4118,39 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         gm2, _ = torch._dynamo.export(gm_edit)(inp)
 
-        # check for source code
-        gm_code = gm.print_readable(print_output=False)
-        gm_edit_code = gm_edit.print_readable(print_output=False)
-        gm2_code = gm2.print_readable(print_output=False)
-        for code in (gm_code, gm_edit_code, gm2_code):
-            self.assertIn("x = torch.cos(x)", code)
-            self.assertIn("return torch.sin(x)", code)
-        self.assertIn("x = torch.relu(x)", gm_code)
-        self.assertNotIn("x = torch.relu(x)", gm_edit_code)
-        self.assertNotIn("x = torch.relu(x)", gm2_code)
-        self.assertIn("return torch.abs(x)", gm2_code)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_x_ = arg0
+    x = torch.cos(l_x_);  l_x_ = None
+    x_1 = torch.sin(x);  x = None
+    x_2 = torch.relu(x_1);  x_1 = None
+    return pytree.tree_unflatten([x_2], self._out_spec)""",
+        )
+
+        def _constais_op(gm, target):
+            for nd in gm.graph.nodes:
+                if nd.target == target:
+                    return True
+            return False
+
+        self.assertTrue(_constais_op(gm_edit, torch.cos))
+        self.assertTrue(_constais_op(gm_edit, torch.sin))
+        self.assertTrue(not _constais_op(gm_edit, torch.relu))
+
+        self.assertExpectedInline(
+            gm2.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_x__1 = arg0
+    x = torch.cos(l_x__1);  l_x__1 = None
+    x_1 = torch.sin(x);  x = None
+    x_2 = torch.abs(x_1);  x_1 = None
+    return pytree.tree_unflatten([x_2], self._out_spec)""",
+        )
 
         # check for other metadata
         for op in (torch.sin, torch.cos):
@@ -4075,8 +4175,24 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         gm1, _ = do_export(torch.randn(3, 3))
         gm2, _ = do_export(torch.randn(5, 3))
 
-        self.assertIn("return torch.sin(x)", gm1.print_readable(print_output=False))
-        self.assertIn("return torch.sin(x)", gm2.print_readable(print_output=False))
+        self.assertExpectedInline(
+            gm1.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_x__1 = arg0
+    sin = torch.sin(l_x__1);  l_x__1 = None
+    return pytree.tree_unflatten([sin], self._out_spec)""",
+        )
+        self.assertExpectedInline(
+            gm2.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_x__1 = arg0
+    sin = torch.sin(l_x__1);  l_x__1 = None
+    return pytree.tree_unflatten([sin], self._out_spec)""",
+        )
 
     def test_preserve_fx_node_metadata_inline(self):
         def f1(x):
@@ -4090,7 +4206,16 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         gm2, _ = torch._dynamo.export(f2)(torch.randn(3, 3))
 
-        self.assertIn("return torch.sin(x)", gm2.print_readable(print_output=False))
+        self.assertExpectedInline(
+            gm2.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_x_ = arg0
+    l_x__1 = torch.cos(l_x_);  l_x_ = None
+    sin = torch.sin(l_x__1);  l_x__1 = None
+    return pytree.tree_unflatten([sin], self._out_spec)""",
+        )
 
     def test_preserve_fx_node_metadata_graph_break(self):
         def fn(x):
@@ -4114,8 +4239,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         gm_edit.recompile()
 
         expected = [
-            "x = torch.sin(x)",
-            "return torch.cos(x)",
+            "x = torch.sin(l_x__1)",
+            "cos = torch.cos(x_1)",
         ]
 
         def test_backend(gm: torch.fx.GraphModule, example_inputs):
@@ -4142,8 +4267,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_args_0_ = arg0
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
-    add = arg0 + 1;  arg0 = None
+    add = l_args_0_ + 1;  l_args_0_ = None
     _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
     return pytree.tree_unflatten([add], self._out_spec)""",
         )
@@ -4164,8 +4290,9 @@ def forward(self, x):
             """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_args_0_ = arg0
     _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(False)
-    add = arg0 + 1;  arg0 = None
+    add = l_args_0_ + 1;  l_args_0_ = None
     _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
     return pytree.tree_unflatten([add], self._out_spec)""",
         )

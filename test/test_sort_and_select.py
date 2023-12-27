@@ -10,7 +10,7 @@ from itertools import permutations, product
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import all_types, all_types_and, floating_types_and, integral_types
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, slowTest)
+    (TestCase, run_tests, slowTest, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
      onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
@@ -366,6 +366,7 @@ class TestSortAndSelect(TestCase):
         for shape in shapes:
             test(shape)
 
+    @skipIfTorchDynamo("Fails on python 3.11")
     @dtypes(torch.float)
     def test_sort_expanded_tensor(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/91420
@@ -436,6 +437,12 @@ class TestSortAndSelect(TestCase):
         t = torch.randn((2, 10000), device=device)
         compare(t, 2000, 1, True)
         compare(t, 2000, 1, False)
+
+    def test_topk_quantized_scalar_input(self):
+        # Calling topk on a quantized scalar input used to segfault,
+        # see https://github.com/pytorch/pytorch/issues/116324
+        x = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
+        x.topk(1)
 
     def test_topk_arguments(self, device):
         q = torch.randn(10, 2, 10, device=device)
@@ -1121,6 +1128,20 @@ class TestSortAndSelect(TestCase):
         d = torch.arange(3, 30, device=device, dtype=dtype)
         with self.assertRaises(RuntimeError):
             torch.isin(c, d)
+
+    @dtypes(*integral_types())
+    def test_sort_overflow(self, device, dtype):
+        " Regression test for https://github.com/pytorch/pytorch/issues/111189 "
+        prev_num_threads = torch.get_num_threads()
+        try:
+            low = 0 if dtype == torch.uint8 else -1
+            x = torch.full((32768,), low, dtype=dtype, device=device)
+            x[:100] = torch.iinfo(x.dtype).max
+            torch.set_num_threads(1)
+            uv = x.sort().values.unique()
+            self.assertEqual(uv.size(0), 2)
+        finally:
+            torch.set_num_threads(prev_num_threads)
 
 
 instantiate_device_type_tests(TestSortAndSelect, globals())

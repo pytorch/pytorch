@@ -8,6 +8,12 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 
 from torch._C import DispatchKey
+from torch._C._functorch import (
+    _add_batch_dim,
+    get_unwrapped,
+    is_batchedtensor,
+    maybe_get_bdim,
+)
 from torch._functorch.utils import exposed_in
 
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -75,7 +81,7 @@ def cond(pred, true_fn, false_fn, operands):
           have consistent input and outputs, meaning the inputs have to be
           the same, and the outputs have to be the same type and shape.
 
-        operands (Tuple[torch.Tensor]): A tuple of inputs to the true/false functions.
+        operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the true/false functions.
 
     Example::
 
@@ -108,8 +114,6 @@ def cond(pred, true_fn, false_fn, operands):
 
         - `cond` only supports **inference** right now. Autograd will be supported in the future.
 
-        - The **operands** must be a **tuple of tensors**. Pytree of tensors will be supported in the future.
-
         - The **output** of branches must be a **single Tensor**. Pytree of tensors will be supported in the future.
 
     """
@@ -129,11 +133,12 @@ def cond(pred, true_fn, false_fn, operands):
         if not callable(true_fn) or not callable(false_fn):
             raise RuntimeError("Expect both branches to be callbale.")
 
-        if not isinstance(operands, (tuple, list)) or any(
-            not isinstance(t, torch.Tensor) for t in operands
+        if not isinstance(operands, (tuple, list)) or pytree.tree_any(
+            lambda t: not isinstance(t, torch.Tensor), operands
         ):
             raise RuntimeError(
-                f"Expect operands to be a tuple of Tensors, but got {operands}."
+                "Expect operands to be a tuple of possibly nested dict/list/tuple that only"
+                f"consists of tensor leaves, but got {operands}."
             )
 
     _validate_input(pred, true_fn, false_fn, operands)
@@ -195,8 +200,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         if node.op == "output":
             false_outs.extend(node.args)
 
-    flat_true_outs, _ = pytree.tree_flatten(true_outs)
-    flat_false_outs, _ = pytree.tree_flatten(false_outs)
+    flat_true_outs = pytree.arg_tree_leaves(*true_outs)
+    flat_false_outs = pytree.arg_tree_leaves(*false_outs)
     if len(flat_true_outs) != len(flat_false_outs):
         raise torch._dynamo.exc.CondOpArgsMismatchError(
             f"Expected to return same number of outputs but got:"
@@ -282,8 +287,8 @@ def inner(mode, pred, true_fn, false_fn, operands):
 def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     with mode:
         true_outs = true_fn(*operands)
-        flat_true_outs, _ = pytree.tree_flatten(true_outs)
-        flat_false_outs, _ = pytree.tree_flatten(false_fn(*operands))
+        flat_true_outs = pytree.tree_leaves(true_outs)
+        flat_false_outs = pytree.tree_leaves(false_fn(*operands))
     if len(flat_true_outs) != len(flat_false_outs):
         raise RuntimeError("Unmatched number of outputs from cond() branches.")
 
@@ -371,7 +376,7 @@ def _has_potential_branch_input_alias(branch, inputs):
                         return out_storage in input_storages
                     return False
 
-                if any(pytree.tree_flatten(pytree.tree_map(check_alias, node.args))[0]):
+                if any(pytree.tree_leaves(pytree.tree_map(check_alias, node.args))):
                     return True
 
         for _, module in gm.named_children():
@@ -387,7 +392,7 @@ def _has_potential_branch_input_alias(branch, inputs):
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
-    with ctx.redispatch_to_next():
+    with ctx.redispatch_to_next() as m:
         functional_true = ctx.functionalize(true_fn)
         functional_false = ctx.functionalize(false_fn)
         for branch in [functional_true, functional_false]:
@@ -405,3 +410,50 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs
         )
         return ctx.wrap_tensors(cond_return)
+
+
+@cond_op.py_impl(torch._C._functorch.TransformType.Vmap)
+def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
+    assert isinstance(
+        inputs, (list, tuple)
+    ), "Cond inputs must be a list or tuple of tensors"
+    assert all(
+        isinstance(i, torch.Tensor) for i in inputs
+    ), "Cond inputs must be a list of tensors"
+
+    pred_ = get_unwrapped(pred) if is_batchedtensor(pred) else pred
+
+    # unbatched tensors are not vmapped
+    tensors, in_dims = zip(
+        *[
+            (get_unwrapped(t), maybe_get_bdim(t)) if is_batchedtensor(t) else (t, None)
+            for t in inputs
+        ]
+    )
+
+    if is_batchedtensor(pred):
+        # prepend "pred" and vmap everything
+        tensors = (pred_,) + tensors
+        in_dims = (0,) + in_dims
+
+        def fn(p, *args):
+            t = true_fn(*args)
+            f = false_fn(*args)
+            return torch.where(p, t[0], f[0])
+
+        with interpreter.lower():
+            result = torch.vmap(fn, in_dims=in_dims)(*tensors)
+
+    else:
+        # predicate is known at this stage and it is a boolean expression or a
+        # tensor with one element.
+        true_fn = torch.vmap(true_fn, in_dims=in_dims)
+        false_fn = torch.vmap(false_fn, in_dims=in_dims)
+
+        with interpreter.lower():
+            result = cond_op(pred, true_fn, false_fn, tensors)
+
+    if not isinstance(result, tuple):
+        result = (result,)
+    lvl = interpreter.level()
+    return tuple([_add_batch_dim(r, 0, lvl) for r in result])

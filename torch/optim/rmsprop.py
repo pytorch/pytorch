@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _default_to_fused_or_foreach, _use_grad_for_differentiable,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _view_as_real)
 from typing import List, Optional
 
 __all__ = ["RMSprop", "rmsprop"]
@@ -55,9 +55,11 @@ class RMSprop(Optimizer):
             group.setdefault("differentiable", False)
 
     def _init_group(self, group, params_with_grad, grads, square_avgs, momentum_buffer_list, grad_avgs):
+        has_complex = False
         for p in group["params"]:
             if p.grad is None:
                 continue
+            has_complex |= torch.is_complex(p)
             params_with_grad.append(p)
 
             if p.grad.is_sparse:
@@ -91,6 +93,7 @@ class RMSprop(Optimizer):
                 raise RuntimeError("`step` can't be a tensor")
 
             state["step"] += 1
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -112,7 +115,7 @@ class RMSprop(Optimizer):
             grad_avgs = []
             momentum_buffer_list = []
 
-            self._init_group(group, params_with_grad, grads, square_avgs, momentum_buffer_list, grad_avgs)
+            has_complex = self._init_group(group, params_with_grad, grads, square_avgs, momentum_buffer_list, grad_avgs)
 
             rmsprop(
                 params_with_grad,
@@ -129,6 +132,7 @@ class RMSprop(Optimizer):
                 foreach=group["foreach"],
                 maximize=group["maximize"],
                 differentiable=group["differentiable"],
+                has_complex=has_complex,
             )
 
         return loss
@@ -206,6 +210,7 @@ def rmsprop(
     foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
+    has_complex: bool = False,
     *,
     lr: float,
     alpha: float,
@@ -243,6 +248,7 @@ def rmsprop(
         centered=centered,
         maximize=maximize,
         differentiable=differentiable,
+        has_complex=has_complex,
     )
 
 
@@ -261,6 +267,7 @@ def _single_tensor_rmsprop(
     centered: bool,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     for i, param in enumerate(params):
@@ -318,6 +325,7 @@ def _multi_tensor_rmsprop(
     centered: bool,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     if len(params) == 0:
@@ -339,15 +347,14 @@ def _multi_tensor_rmsprop(
                 grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
         grouped_grads = list(grouped_grads)
-        for i in range(len(grouped_params)):
-            if torch.is_complex(grouped_params[i]):
-                grouped_params[i] = torch.view_as_real(grouped_params[i])
-                grouped_grads[i] = torch.view_as_real(grouped_grads[i])
-                grouped_square_avgs[i] = torch.view_as_real(grouped_square_avgs[i])
-                if momentum > 0:
-                    grouped_momentum_buffer_list[i] = torch.view_as_real(grouped_momentum_buffer_list[i])
-                if centered:
-                    grouped_grad_avgs[i] = torch.view_as_real(grouped_grad_avgs[i])
+
+        if has_complex:
+            state_and_grads = [grouped_grads, grouped_square_avgs]
+            if momentum > 0:
+                state_and_grads.append(grouped_momentum_buffer_list)
+            if centered:
+                state_and_grads.append(grouped_grad_avgs)
+            _view_as_real(grouped_params, *state_and_grads)
 
         torch._foreach_mul_(grouped_square_avgs, alpha)
         torch._foreach_addcmul_(grouped_square_avgs, grouped_grads, grouped_grads, value=1 - alpha)

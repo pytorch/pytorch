@@ -33,7 +33,7 @@ TensorBase empty_mps(
 
     TORCH_CHECK_NOT_IMPLEMENTED(
         layout_or_default(layout_opt) == Layout::Strided,
-        "strided tensors not supported yet");
+        "only strided tensors are supported on MPS");
 
     TORCH_CHECK(size.size() <= 16, "MPS supports tensors with dimensions <= 16, but got ", size.size(), ".");
 
@@ -64,7 +64,7 @@ TensorBase empty_mps(
     auto memory_format = memory_format_opt.value_or(MemoryFormat::Contiguous);
     tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
     // See Note [Enabling Deterministic Operations]
-    if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+    if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
       at::native::fill_empty_deterministic_(tensor);
     }
     return tensor;
@@ -107,7 +107,7 @@ TensorBase empty_strided_mps(
     Tensor result = at::detail::empty_strided_generic(
         size, stride, allocator, mps_dks, dtype);
     // See Note [Enabling Deterministic Operations]
-    if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+    if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
       at::native::fill_empty_deterministic_(result);
     }
     return result;

@@ -254,6 +254,10 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
         elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)
+    elif isinstance(t, OptionalType):
+        elem = returntype_type(t.elem, mutable=mutable)
+        if str(t.elem) == "Tensor":
+            return OptionalCType(elem)
 
     raise AssertionError(f"unrecognized return type {t}")
 

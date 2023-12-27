@@ -3,7 +3,7 @@ import dataclasses
 import re
 import sys
 import types
-from typing import List
+from typing import Counter, Dict, List, Optional
 
 import torch.nn
 from . import utils
@@ -25,19 +25,15 @@ from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
-    TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
 )
+from .variables.torch_function import TensorWithTFOverrideVariable
 
 
 @dataclasses.dataclass
 class GraphOutputEntry:
     index: int
     variable: VariableTracker
-
-    def merge(self, other: VariableTracker):
-        # merge in any extra guards
-        self.variable = self.variable.add_options(other)
 
 
 class PyCodegen:
@@ -48,14 +44,14 @@ class PyCodegen:
     def __init__(
         self,
         tx=None,
-        root: torch.nn.Module = None,
-        graph_output_var: str = None,
+        root: Optional[torch.nn.Module] = None,
+        graph_output_var: Optional[str] = None,
         tempvars=None,
     ):
         self.root = root
-        self.top_of_stack = None
-        self.uses = collections.Counter()
-        self.graph_outputs = collections.OrderedDict()
+        self.top_of_stack: Optional[VariableTracker] = None
+        self.uses: Counter[VariableTracker] = collections.Counter()
+        self.graph_outputs: Dict[int, GraphOutputEntry] = {}
         self._output: List[Instruction] = []
         self.tempvars = tempvars or {}
         self.tx = tx
@@ -63,6 +59,19 @@ class PyCodegen:
         self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
+        self.mutable_side_effects_from_source = False
+        self.value_from_source: bool = True
+
+    def restore_stack(self, stack_values, *, value_from_source=True):
+        prior = self.mutable_side_effects_from_source
+        self.mutable_side_effects_from_source = True
+        prev = self.value_from_source
+        self.value_from_source &= value_from_source
+        try:
+            self.foreach(stack_values)
+        finally:
+            self.mutable_side_effects_from_source = prior
+            self.value_from_source = prev
 
     def graph_output_vars(self):
         return [x.variable for x in self.graph_outputs.values()]
@@ -74,15 +83,24 @@ class PyCodegen:
             self.clear_tos()
             return
 
-        self.tx.output.guards.update(value.guards)
-
         assert isinstance(value, VariableTracker)
         output = self._output
         graph_outputs = self.graph_outputs
 
-        if self.top_of_stack is value:
+        if self.top_of_stack is value and allow_cache:
             output.append(create_dup_top())
             return
+
+        if self.mutable_side_effects_from_source:
+            # this is needed to get aliasing relationships right
+            # value.mutable_local.source will get mutated to hold `value`
+            # mutable_side_effects_from_source=False is used to codegen the mutation
+            # mutable_side_effects_from_source=True is used to codegen a reference
+            from .side_effects import MutableSideEffects
+
+            if isinstance(value.mutable_local, MutableSideEffects):
+                self(value.mutable_local.source)
+                return
 
         if allow_cache:
             if value.mutable_local and value.mutable_local in self.tempvars:
@@ -94,20 +112,23 @@ class PyCodegen:
                 self.top_of_stack = value
                 return
 
-        if value.source is not None and allow_cache:
+        if value.source is not None and allow_cache and self.value_from_source:
             output.extend(value.source.reconstruct(self))
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()
         ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
-            tensor_variable = value.tensor_variable
-            graph_outputs_key = self.add_graph_output(tensor_variable)
-            output.append(
-                self.create_load_global(value.global_class_name(), True, add=True)
-            )
+            graph_outputs_key = self.add_graph_output(value)
+
+            self.load_import_from(utils.__name__, "to_subclass")
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
-            output.extend(create_call_function(1, True))
+            output.append(
+                self.create_load_global(
+                    value.global_mangled_class_name(), False, add=True
+                )
+            )
+            output.extend(create_call_function(2, True))
         elif isinstance(
             value,
             (
@@ -158,9 +179,6 @@ class PyCodegen:
             self.graph_outputs[graph_outputs_key] = GraphOutputEntry(
                 len(self.graph_outputs), value
             )
-        else:
-            self.graph_outputs[graph_outputs_key].merge(value)
-
         return graph_outputs_key
 
     def load_graph_output(self, index):
@@ -203,20 +221,20 @@ class PyCodegen:
         self._output.extend(insts)
         self.clear_tos()
 
-    def get_instructions(self):
+    def get_instructions(self) -> List[Instruction]:
         return self._output
 
-    def create_load(self, name):
+    def create_load(self, name) -> Instruction:
         if name in self.cell_and_freevars():
             return create_instruction("LOAD_DEREF", argval=name)
         assert name in self.code_options["co_varnames"], f"{name} missing"
         return create_instruction("LOAD_FAST", argval=name)
 
-    def create_load_closure(self, name):
+    def create_load_closure(self, name) -> Instruction:
         assert name in self.cell_and_freevars()
         return create_instruction("LOAD_CLOSURE", argval=name)
 
-    def create_store(self, name):
+    def create_store(self, name) -> Instruction:
         if name in self.cell_and_freevars():
             return create_instruction("STORE_DEREF", argval=name)
         assert name in self.code_options["co_varnames"]
@@ -228,16 +246,16 @@ class PyCodegen:
         assert name in self.code_options["co_names"], f"{name} not in co_names"
         return create_load_global(name, push_null)
 
-    def create_load_const(self, value):
+    def create_load_const(self, value) -> Instruction:
         assert is_safe_constant(value), f"unsafe constant {value}"
         return self._create_load_const(value)
 
-    def _create_load_const(self, value):
+    def _create_load_const(self, value) -> Instruction:
         return create_instruction("LOAD_CONST", argval=value)
 
     create_load_output = _create_load_const
 
-    def create_load_attr(self, name):
+    def create_load_attr(self, name) -> Instruction:
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
         return create_instruction("LOAD_ATTR", argval=name)
@@ -316,7 +334,7 @@ class PyCodegen:
             self.tx.output.install_global(mangled_name, mod)
         return self.create_load_global(mangled_name, push_null, add=True)
 
-    def make_call_generated_code(self, fn_name: str) -> List[Instruction]:
+    def make_call_generated_code(self, fn_name: str) -> None:
         """Call the generated code function stored in fn_name"""
         self.extend_output(self.load_function_name(fn_name, True))
 
@@ -336,14 +354,14 @@ class PyCodegen:
 
         self.extend_output(create_call_function(len(graphargs), False))
 
-    def load_import_from(self, module_name, object_name):
+    def load_import_from(self, module_name, object_name) -> None:
         self.extend_output(
             AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
                 self
             )
         )
 
-    def create_call_function_kw(self, nargs, kw_names, push_null):
+    def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
         if sys.version_info >= (3, 11):
             output = create_call_function(nargs, push_null)
             assert output[-2].opname == "PRECALL"

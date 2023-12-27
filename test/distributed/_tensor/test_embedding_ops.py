@@ -110,10 +110,7 @@ class TestEmbeddingOp(DTensorTestBase):
             sharded_embedding.weight,
             **kwargs,
         )
-        self.assertEqual(
-            local_output,
-            sharded_output.redistribute(device_mesh, [Replicate()]).to_local(),
-        )
+        self.assertEqual(local_output, sharded_output.full_tensor())
 
     @with_comms
     def test_sharded_embedding_colwise(self):
@@ -139,7 +136,7 @@ class TestEmbeddingOp(DTensorTestBase):
     def test_sharded_embedding_rowwise(self):
         with self.assertRaisesRegex(
             NotImplementedError,
-            "Only support ColwiseParallel when parallelizing Embedding now.",
+            "RowwiseParallel currently only support nn.Linear!",
         ):
             self._run_embedding_op_test(0, [5, 12], 16, 22)
 

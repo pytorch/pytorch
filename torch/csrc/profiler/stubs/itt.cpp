@@ -20,12 +20,10 @@ struct ITTMethods : public ProfilerStubs {
   }
 
   void mark(const char* name) const override {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     torch::profiler::itt_mark(name);
   }
 
   void rangePush(const char* name) const override {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     torch::profiler::itt_range_push(name);
   }
 
