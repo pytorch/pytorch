@@ -736,9 +736,30 @@ def jagged_scaled_dot_product_attention(
             attention.squeeze(0), output_nt_info["offsets"]
         ).transpose(1, 2)
     elif backend_choice == SDPBackend.MATH:
-        return torch._scaled_dot_product_attention_math(
+        # convert jagged layout Nested Tensor to strided layout Nested Tensor
+        # which support the math implementation of SDPA
+        def get_strided_layout_nested_tensor(jagged_layout_nt):
+            lengths = jagged_layout_nt._offsets[1:] - jagged_layout_nt._offsets[:-1]
+            transpose = torch.transpose(jagged_layout_nt, 1, 2)
+            tensor_list = buffer_from_jagged(transpose).split(list(lengths), dim=0)
+            c_nt = torch.nested.as_nested_tensor(list(tensor_list))
+            c_nt = c_nt.transpose(1, 2).contiguous()
+            return c_nt
+
+        query = get_strided_layout_nested_tensor(query)
+        key = get_strided_layout_nested_tensor(key)
+        value = get_strided_layout_nested_tensor(value)
+
+        attn_out = torch._scaled_dot_product_attention_math(
             query, key, value, attn_mask, dropout_p, is_causal, scale=scale
         )[0]
+        attn_out = attn_out.transpose(1, 2)
+        attn_out = torch.nested.as_nested_tensor(
+            list(attn_out.unbind()), layout=torch.jagged
+        )
+        attn_out = attn_out.transpose(1, 2)
+
+        return attn_out
     else:
         raise RuntimeError(
             "No viable backend for scaled_dot_product_attention was found."
