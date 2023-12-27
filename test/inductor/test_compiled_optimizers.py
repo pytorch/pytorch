@@ -48,7 +48,9 @@ KERNEL_COUNTS = {
     NAdam: KernelCounts(multitensor=2, singletensor=12),
     Rprop: KernelCounts(multitensor=1, singletensor=4),
     RMSprop: KernelCounts(multitensor=1, singletensor=4),
-    Adadelta: KernelCounts(multitensor=1, singletensor=4),
+    # Fix UT failure in python -u -m pytest -s -v test_compiled_optimizers.py -k test_adadelta_cpu
+    # Which changes the generated kernel from 4 to 8
+    Adadelta: KernelCounts(multitensor=1, singletensor=8),
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=12),
 }

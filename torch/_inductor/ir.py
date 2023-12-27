@@ -2214,7 +2214,16 @@ class ReinterpretView(BaseView):
         # - offset is added to the existing offset (rather than replacing it)
         # - view tracking is disabled similar to unsafe_view
         return V.graph.wrapper_code.codegen_reinterpret_view(
-            self.data,
+            # Fix issue: inductor/test_layout_optim.py::TestLayoutOptim::test_mutate_base - NameError: name 'buf0' is not defined
+            # After we remove mutation buffer copies
+            # We will return the MutationLayout.targer instead of the buffer itself
+            self.data.layout.get_buffer()
+            if (
+                isinstance(self.data, StorageBox)
+                and isinstance(self.data.layout, MutationLayout)
+                and isinstance(self.data.layout.get_buffer(), InputBuffer)
+            )
+            else self.data,
             self.layout.size,
             self.layout.stride,
             self.layout.offset,

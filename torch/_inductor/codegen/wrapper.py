@@ -1228,7 +1228,25 @@ class WrapperCodeGen(CodeGen):
 
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):
-            self.writeline(self.make_buffer_free(buffer))
+
+            def _check(_input_buffer, _output_buffer):
+                # Fix a failure in UT:
+                # inductor/test_layout_optim.py::TestLayoutOptim::test_mutate_base - NameError: name 'buf0' is not defined
+                # since we will return InputBuffer in above example after fix,
+                # We need prevent it from deleted:
+                # _output_buffer's layout is a MutationLayout, target of which is the input buffer
+                if isinstance(_output_buffer, ir.ReinterpretView):
+                    return _check(_input_buffer, _output_buffer.data)
+                if (
+                    isinstance(_output_buffer.layout, ir.MutationLayout)
+                    and _output_buffer.layout.get_buffer().get_name()
+                    == _input_buffer.get_name()
+                ):
+                    return True
+                return False
+
+            if not any(_check(buffer, output) for output in V.graph.graph_outputs):
+                self.writeline(self.make_buffer_free(buffer))
             return
 
         if not self.can_reuse(buffer):
