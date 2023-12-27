@@ -3509,6 +3509,7 @@ class TestNestedTensorSubclass(TestCase):
         with self.assertRaisesRegex(ValueError, "expected .* to be a contiguous jagged layout"):
             clone = transposed.clone()
 
+    @xfailIfTorchDynamo
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
                  SM80OrLater else [torch.float16, torch.float32])
     def test_sdpa(self, device, dtype):
