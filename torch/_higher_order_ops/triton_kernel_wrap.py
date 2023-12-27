@@ -1,3 +1,5 @@
+import ast
+import dataclasses
 import threading
 from typing import Any, Dict
 
@@ -52,6 +54,70 @@ class KernelSideTable:
 
 
 kernel_side_table = KernelSideTable()
+
+
+###############################################################################
+# Mutation Tracker
+
+
+@dataclasses.dataclass
+class MutationInfo:
+    mutated: bool = False
+    used_in_unknown: bool = False
+
+
+# Super basic mutation tracking pass that tracks which inputs are used in stores
+# It bails if any of the inputs are used in non tl.load/tl.store positions.
+class MutationTracker(ast.NodeVisitor):
+    def __init__(self, infos) -> None:
+        super().__init__()
+        self.infos = infos
+        self.in_load = False
+        self.in_store = False
+
+    def visit_Name(self, node):
+        if node.id not in self.infos:
+            return
+        if self.in_load:
+            pass
+        elif self.in_store:
+            self.infos[node.id].mutated = True
+        else:
+            self.infos[node.id].used_in_unknown = True
+
+    def visit_Call(self, node):
+        if (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "tl"
+        ):
+            if node.func.attr == "store":
+                assert self.in_store is False
+                self.in_store = True
+                self.generic_visit(node)
+                self.in_store = False
+                return
+            if node.func.attr == "load":
+                assert self.in_load is False
+                self.in_load = True
+                self.generic_visit(node)
+                self.in_load = False
+                return
+        self.generic_visit(node)
+
+
+def filter_non_mutated(kernel, tensors):
+    from triton.runtime.autotuner import Autotuner
+
+    if isinstance(kernel, Autotuner):
+        kernel = kernel.fn
+
+    infos = {name: MutationInfo() for name in tensors}
+    tracker = MutationTracker(infos)
+    tracker.visit(kernel.parse())
+    return [
+        name for name, info in infos.items() if info.mutated or info.used_in_unknown
+    ]
 
 
 ###############################################################################
@@ -135,11 +201,15 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
 @triton_kernel_wrapper_mutation.py_functionalize_impl
 def triton_kernel_wrapper_mutation_functionalize(ctx, kernel_idx, grid, kwargs):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
-    # TODO(oulgen): We can be smarter here and iterate through the triton kernel
-    # to find which tensors are actually being mutated
     tensors_to_clone = [
         key for key, value in unwrapped_kwargs.items() if isinstance(value, Tensor)
     ]
+    kernel = kernel_side_table.get_kernel(kernel_idx)
+    # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
+    # other, and one gets mutated in kernel, and later another gets mutated,
+    # they are no longer equal. Fix this by graph breaking on this condition
+    # earlier in dynamo.
+    tensors_to_clone = filter_non_mutated(kernel, tensors_to_clone)
     with ctx.redispatch_to_next():
         unwrapped_outputs = triton_kernel_wrapper_functional(
             kernel_idx=kernel_idx,
@@ -148,7 +218,7 @@ def triton_kernel_wrapper_mutation_functionalize(ctx, kernel_idx, grid, kwargs):
             tensors_to_clone=tensors_to_clone,
         )
 
-    assert unwrapped_outputs.keys() == kwargs.keys()
+    assert set(unwrapped_outputs.keys()).issubset(set(kwargs.keys()))
     for key, output_arg in unwrapped_outputs.items():
         if not isinstance(output_arg, Tensor):
             continue
@@ -179,7 +249,7 @@ def triton_kernel_wrapper_functional_dense(
         for key, val in kwargs.items()
     }
     triton_kernel_wrapper_mutation(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
-    return kwargs
+    return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
 
 
 @triton_kernel_wrapper_functional.py_impl(FakeTensorMode)
@@ -192,8 +262,9 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     # Requires https://github.com/pytorch/pytorch/issues/109240
     with mode:
         return {
-            key: (clone_preserve_strides(val) if key in tensors_to_clone else val)
+            key: clone_preserve_strides(val)
             for key, val in kwargs.items()
+            if key in tensors_to_clone
         }
 
 
