@@ -37,7 +37,7 @@
 
 namespace c10 {
 
-// in c++17 std::result_of has been superceded by std::invoke_result.  Since
+// in c++17 std::result_of has been superseded by std::invoke_result.  Since
 // c++20, std::result_of is removed.
 template <typename F, typename... args>
 #if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L

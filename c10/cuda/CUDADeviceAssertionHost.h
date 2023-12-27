@@ -16,8 +16,7 @@
 constexpr int C10_CUDA_DSA_ASSERTION_COUNT = 10;
 constexpr int C10_CUDA_DSA_MAX_STR_LEN = 512;
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 /// Holds information about any device-side assertions that fail.
 /// Held in managed memory and access by both the CPU and the GPU.
@@ -143,8 +142,7 @@ class C10_CUDA_API CUDAKernelLaunchRegistry {
 
 std::string c10_retrieve_device_side_assertion_info();
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda
 
 // Each kernel launched with TORCH_DSA_KERNEL_LAUNCH
 // requires the same input arguments. We introduce the following macro to
