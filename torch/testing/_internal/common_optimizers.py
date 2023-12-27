@@ -2,6 +2,7 @@ import functools
 import itertools
 import math
 import unittest
+from copy import deepcopy
 from enum import Enum
 from typing import Any, Dict, List, Tuple, Union
 
@@ -50,6 +51,9 @@ class OptimizerInput:
         self.params = params
         self.kwargs = kwargs
         self.desc = desc
+
+    def __repr__(self):
+        return f"params={self.params}, kwargs={self.kwargs}, desc={self.desc}"
 
 
 class OptimizerErrorEnum(Enum):
@@ -807,6 +811,55 @@ def optim_error_inputs_func_sparseadam(device, dtype):
     return error_inputs
 
 
+def _get_optim_inputs_including_global_cliquey_kwargs(
+    device, dtype, optim_info
+) -> List[OptimizerInput]:
+    """
+    Return a list of all configs for a given optimizer as a list of OptimizerInputs,
+    including configs that have supported global cliquey kwargs (foreach, fused,
+    differentiable) based on optim_info.supported_impls.
+
+    The configs (optim_inputs) returned by optim_info.optim_inputs_func(...)
+    intentionally do NOT include global cliquey kwargs to give flexibility to tests.
+    For example, testing correctness between toggling foreach on and off is now
+    trivial. That said, we sometimes want to test for all possible configs on an
+    optimizer including all supported flags, so this helper returns all optim inputs.
+    """
+    optim_inputs = optim_info.optim_inputs_func(device=device)
+    supported_impls = optim_info.supported_impls
+
+    # fused is currently not supported on CPU
+    if str(device) == "cpu" and "fused" in supported_impls:
+        supported_impls = (x for x in supported_impls if x != "fused")
+
+    all_optim_inputs = []
+    for optim_input in optim_inputs:
+        # Add the base config where all the flags are False
+        base_kwargs = deepcopy(optim_input.kwargs)
+        if len(optim_info.supported_impls) != 0:
+            for flag in optim_info.supported_impls:
+                base_kwargs[flag] = False
+            all_optim_inputs.append(
+                OptimizerInput(
+                    params=None,
+                    kwargs=base_kwargs,
+                    desc=optim_input.desc,
+                )
+            )
+        # Add a config for when each of the global cliquey kwargs is True
+        for flag in supported_impls:
+            new_kwargs = deepcopy(base_kwargs)
+            new_kwargs[flag] = True
+            all_optim_inputs.append(
+                OptimizerInput(
+                    params=None,
+                    kwargs=new_kwargs,
+                    desc=f"{optim_input.desc} with {flag}",
+                )
+            )
+    return all_optim_inputs
+
+
 # Database of OptimizerInfo entries in alphabetical order.
 optim_db: List[OptimizerInfo] = [
     OptimizerInfo(
@@ -986,6 +1039,16 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                toleranceOverride(
+                    {  # previously atol=1-05, rtol=1.3e-06,
+                        torch.float32: tol(atol=1.5e-5, rtol=1e-5),
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_step_is_noop_for_empty_grads",
+                active_if=TEST_WITH_TORCHDYNAMO,
             ),
         ),
     ),
