@@ -232,15 +232,7 @@ def convert_pt2e(
     torch._C._log_api_usage_once("quantization_api.quantize_pt2e.convert_pt2e")
     original_graph_meta = model.meta
     model = _convert_to_reference_decomposed_fx(model)
-
-    has_bn = False
-    for n in model.graph.nodes:
-        if _is_supported_batch_norm_for_training(n) or n.target == torch.ops.aten._native_batch_norm_legit_no_training.default:
-            has_bn = True
-            break
-
-    if has_bn:
-        model = _fold_conv_bn_qat(model)
+    model = _fold_conv_bn_qat(model)
 
     pm = PassManager([DuplicateDQPass()])
     model = pm(model).graph_module

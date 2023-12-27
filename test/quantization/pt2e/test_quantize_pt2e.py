@@ -1779,7 +1779,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             )
             dynamic_quantizer.set_global(operator_config_dynamic)
             composed_quantizer = ComposableQuantizer([embedding_quantizer, dynamic_quantizer])
-            model = prepare_pt2e(model, composed_quantizer)
+            prev = time.time()
+            model = prepare_qat_pt2e(model, composed_quantizer)
+            cur = time.time()
+            # print("prepare time:", cur - prev)
             # Without Calibraiton, scale/zero value will have an initialized value of 1.0
             # Per channel quantization needs a proper scale/zero shape/value to work properly.
             # So we need to run calibration before converting to quantized model.
