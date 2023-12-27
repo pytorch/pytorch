@@ -32,6 +32,12 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == "linux-focal-cuda12.1-py3.10-gcc9-sm86" ]]; then
+  # as per https://github.com/mozilla/sccache?tab=readme-ov-file#usage
+  echo "DOING RECACHE SCCACHE"
+  export SCCACHE_RECACHE=1
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
