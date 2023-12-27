@@ -163,6 +163,7 @@ def _save_state_dict(
         return all_local_plans
 
     central_plan = distW.reduce_scatter("plan", local_step, global_step)
+    pass
 
     def write_data():
         assert planner is not None

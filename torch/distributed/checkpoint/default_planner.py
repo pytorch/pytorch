@@ -11,7 +11,7 @@ from typing import Any, cast, Dict, List, Tuple, Union
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed._tensor import DTensor
-from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
+from torch.distributed.checkpoint._dedup_tensors import dedup_tensors, load_balance_tensors
 from torch.distributed.checkpoint._nested_dict import (
     FLATTEN_MAPPING,
     flatten_state_dict,
@@ -64,11 +64,13 @@ class DefaultSavePlanner(SavePlanner):
         self,
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
-        dedup_replicated_tensors: bool = True,
+        dedup_replicated_tensors: bool = False,
+        load_balance_tensors: bool = True,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.dedup_replicated_tensors = dedup_replicated_tensors
+        self.load_balance_tensors = load_balance_tensors
         self.mappings = {}
 
     def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
@@ -92,6 +94,9 @@ class DefaultSavePlanner(SavePlanner):
     ) -> Tuple[List[SavePlan], Metadata]:
         if self.dedup_replicated_tensors:
             all_plans = dedup_tensors(all_plans)
+
+        if self.load_balance_tensors:
+            all_plans = load_balance_tensors(all_plans)
 
         global_plan, metadata = create_default_global_save_plan(all_plans)
 

@@ -13,6 +13,7 @@ from torch.distributed.checkpoint.state_dict import (
     _patch_optimizer_state_dict,
     get_state_dict,
 )
+from torch.nn.parallel import DistributedDataParallel
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
@@ -247,6 +248,51 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         checkpointer = DCP.FileSystemCheckpointer(self.temp_dir, no_dist=True)
         checkpointer.save({})
         checkpointer.load({})
+
+def rank_0_print(msg: str) -> None:
+    if dist.get_rank() == 0:
+        print(msg)
+
+class TestDDP(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def backend(self) -> str:
+        return "cpu:gloo,cuda:nccl"
+
+    @with_comms
+    @with_temp_dir
+    def test_ddp(self):
+        class Model(torch.nn.Module):
+            def __init__(self, param_size: int, num_params: int) -> None:
+                super().__init__()
+                for i in range(num_params):
+                    self.register_parameter(
+                        f"param_{i}",
+                        torch.nn.Parameter(
+                            torch.rand(int(param_size / 4), device=torch.cuda.current_device())
+                        ),
+                    )
+
+        param_size = int(100_000_000)
+        num_params = 20
+
+        model = Model(param_size=param_size, num_params=num_params)
+        model = DistributedDataParallel(model, gradient_as_bucket_view=True)
+        _patch_model_state_dict(model)
+
+        sz = sum(t.nelement() * t.element_size() for t in model.parameters())
+        rank_0_print(f"Model size: {sz / 1_000_000_000.0} GB")
+
+        # import fbvscode
+        # fbvscode.set_trace()
+
+        DCP.FileSystemCheckpointer(self.temp_dir).save({"model": model})
+
+        dist.barrier()
+
 
 
 instantiate_parametrized_tests(TestE2ESaveAndLoad)
