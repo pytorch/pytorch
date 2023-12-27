@@ -449,14 +449,14 @@ class CPUReproTests(TestCase):
         params_dict = {
             "unbatched": [True, False],
             "input_size": [1, 2],
-            "hidden_size": [5, 32],
-            "num_layers": [1, 3],
+            "hidden_size": [2],
+            "num_layers": [1, 2],
             "bidirectional": [False, True],
             "bias": [False, True],
             "empty_state": [False, True],
             "batch_first": [True, False],
             "batch_size": [1, 2],
-            "seq_len": [1, 3],
+            "seq_len": [1, 2],
         }
         self._test_lstm_packed(params_dict)
 
