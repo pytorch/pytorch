@@ -16,6 +16,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
 from ..utils import (
     check_constant_args,
+    check_unspec_python_args,
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
@@ -833,9 +834,17 @@ class NumpyVariable(VariableTracker):
     Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
     """
 
+    constant_fold_functions = (tnp.issubdtype,)
+
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+
+    @classmethod
+    def can_constant_fold_through(cls, fn):
+        mod = fn.__module__.split(".")
+        assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
+        return fn in cls.constant_fold_functions
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -868,8 +877,21 @@ class NumpyVariable(VariableTracker):
                 msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
                 unimplemented(msg)
 
-            # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
-            #  wrapped by NumpyNdarrayVariable which is wrong!
+            constant_args = check_constant_args(args, kwargs)
+            unspec_python_args = check_unspec_python_args(args, kwargs)
+
+            if self.can_constant_fold_through(func) and (
+                constant_args or unspec_python_args
+            ):
+                # constant fold
+                return variables.ConstantVariable.create(
+                    self.as_python_constant()(
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    ),
+                )
+
+            # TODO Add all the functions that go from constants to constants to can_constant_fold_through
             proxy = tx.output.create_proxy(
                 "call_function",
                 numpy_to_tensor_wrapper(func),
@@ -898,9 +920,9 @@ class NumpyVariable(VariableTracker):
         if config.trace_numpy and isinstance(self.value, type):
             # retrieve attribute str. E.g., "float32" if given np.float32
 
-            attr = self.value.__name__
             # get tnp equivalent
-            tnp_dtype = tnp.dtype(attr)
+            tnp_dtype = getattr(tnp, self.value.__name__)
+
             # returning a string here because we are assuming all `dtype` kwargs for numpy
             # functions can take an equivalent string and the behavior of the function would
             # be the same as taking a numpy dtype.
