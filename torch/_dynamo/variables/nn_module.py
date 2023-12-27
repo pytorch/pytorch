@@ -144,7 +144,7 @@ class NNModuleVariable(VariableTracker):
             GenerationTracker.mark_class_dynamic(type(mod))
         raise UnspecializeRestartAnalysis()
 
-    def _custom_getattr_fallback(self, base, tx, name, source, options):
+    def _custom_getattr_fallback(self, base, tx, name, source):
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
             unimplemented("torch.nn.Module with a custom __getattribute__ defined")
@@ -160,7 +160,7 @@ class NNModuleVariable(VariableTracker):
             from .builder import VariableBuilder
 
             return VariableBuilder(tx, source)(getattr_fn(base, name))
-        return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
+        return variables.UserMethodVariable(getattr_fn, self, source=source).call_function(
             tx, [variables.ConstantVariable.create(name)], {}
         )
 
