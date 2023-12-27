@@ -719,6 +719,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // disambiguating logs
   const std::string& logPrefix() const;
 
+  const int& globalRank() const;
+
  protected:
   // Function that runs as part of a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
