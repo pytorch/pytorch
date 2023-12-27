@@ -390,12 +390,14 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputs,
     bool desyncDebug,
-    bool enableTiming)
+    bool enableTiming,
+    DebugLevel distDebugLevel)
     : Work(rank, opType, profilingTitle, inputs),
       devices_(devices),
       workStartTime_(std::chrono::steady_clock::now()),
       seq_(seq),
-      timingEnabled_(enableTiming) {
+      timingEnabled_(enableTiming),
+      distDebugLevel_(distDebugLevel) {
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
@@ -431,7 +433,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       numelOut_(w.numelOut_),
       store_(w.store_),
       timingEnabled_(w.timingEnabled_),
-      trace_id_(w.trace_id_) {
+      trace_id_(w.trace_id_),
+      distDebugLevel_(w.distDebugLevel_) {
   exception_ = w.exception_;
 }
 
@@ -553,13 +556,13 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
         "Some NCCL operations have failed or timed out. Due to the ",
         "asynchronous nature of CUDA kernels, subsequent GPU operations ",
         "might run on corrupted/incomplete data.");
-    LOG(ERROR) << exceptionMsg;
+    LOG(ERROR) << logPrefix() << exceptionMsg;
     C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleException");
 
     if (SHOULD_TEAR_DOWN(errorHandling)) {
       auto tearDownMsg = c10::str(
           "To avoid data inconsistency, we are taking the entire process down.");
-      LOG(ERROR) << tearDownMsg;
+      LOG(ERROR) << logPrefix() << tearDownMsg;
       std::rethrow_exception(exception_);
     }
   }
@@ -648,6 +651,12 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       static_cast<int>(devices_.size())); // worldSize
   synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
+  if (distDebugLevel_ >= DebugLevel::Detail) {
+    auto numel = getTensorsNumel(*outputs_);
+    auto hashValue = hashTensors(*outputs_);
+    PRINT_COLLECTIVE_HASH_SIGNATURE(
+        "output", opTypeToString(opType_), numel, hashValue);
+  }
   return true;
 }
 
@@ -728,8 +737,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
   heartbeatTimeoutInSec_ =
-      getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 2 /*2 Mins*/);
+      getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
+  enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       getCvarBool(TORCH_NCCL_ENABLE_TIMING, false) || desyncDebug_);
@@ -873,7 +883,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
   std::vector<at::Device> rankDevices = {device};
   const auto key = getKeyFromDevices(rankDevices);
-  LOG(INFO) << "Eagerly connecting nccl backend with device " << device;
+  LOG(INFO) << logPrefix() << "Eagerly connecting nccl backend with device "
+            << device;
   getNCCLComm(key, rankDevices, OpType::ALLREDUCE);
 }
 
@@ -884,8 +895,8 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
 #ifdef NCCL_HAS_COMM_SPLIT
   std::vector<at::Device> rankDevices = {device};
   const auto key = getKeyFromDevices(rankDevices);
-  LOG(INFO) << "Performing nocolor split on backend device " << device
-            << ", key " << key << ", i am " << this;
+  LOG(INFO) << logPrefix() << "Performing nocolor split on backend device "
+            << device << ", key " << key << ", i am " << this;
   auto comm = getNCCLComm(key, rankDevices, OpType::ALLREDUCE);
   TORCH_CHECK_WITH(
       DistBackendError,
@@ -1075,12 +1086,9 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
   }
 }
 
-void abortCommsFromMap(
+void ProcessGroupNCCL::abortCommsFromMap(
     std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
         ncclCommsMap,
-    const int rank,
-    std::unordered_map<std::string, std::vector<at::cuda::CUDAStream>>&
-        ncclStreams,
     c10::optional<std::string> abortReason) {
   // The process may control multiple devices, loop through the communicators on
   // each device
@@ -1102,14 +1110,14 @@ void abortCommsFromMap(
     // it to recover from errors.
 
     c10::StreamId streamId;
-    if (ncclStreams.find(devName) != ncclStreams.end()) {
-      auto streams = ncclStreams.at(devName);
+    if (ncclStreams_.find(devName) != ncclStreams_.end()) {
+      auto streams = ncclStreams_.at(devName);
       if (streams.size() > 0) {
         streamId = streams[0].id();
       }
     }
 
-    LOG(INFO) << "[Rank " << rank << "] Destroyed " << ncclComms.size()
+    LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
               << "communicators on CUDA device: " << devName
               << " with stream: " << streamId;
   }
@@ -1132,8 +1140,8 @@ void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   ncclCommDevIdxMapMutex.unlock();
 
   std::lock_guard<std::mutex> lock(mutex_);
-  abortCommsFromMap(devNCCLCommMap_, rank_, ncclStreams_, abortReason);
-  abortCommsFromMap(inInitializationCommMap_, rank_, ncclStreams_, abortReason);
+  abortCommsFromMap(devNCCLCommMap_, abortReason);
+  abortCommsFromMap(inInitializationCommMap_, abortReason);
 }
 
 void ProcessGroupNCCL::shutdown() {
@@ -1194,7 +1202,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
   // output file from an earlier call before a later call overwrites it.
   static std::mutex writeDebugInfoMutex;
   std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
-  LOG(ERROR) << "ProcessGroupNCCL preparing to dump debug info.";
+  LOG(ERROR) << logPrefix() << "ProcessGroupNCCL preparing to dump debug info.";
   if (ncclTraceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
@@ -1215,7 +1223,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
 void ProcessGroupNCCL::terminateProcess(std::string errMsg) {
   // Logging with `FATAL`, after errMsg printed, it calls `std::abort()`
   // to terminate the program execution.
-  LOG(FATAL) << errMsg;
+  LOG(FATAL) << logPrefix() << errMsg;
 }
 
 void ProcessGroupNCCL::heartbeatMonitor() {
@@ -1520,7 +1528,7 @@ void ProcessGroupNCCL::watchdogHandler() {
 
             if (desyncDebug_) {
               auto desyncMsg = getNCCLWatchdogDebugInfo();
-              LOG(ERROR) << desyncMsg;
+              LOG(ERROR) << logPrefix() << desyncMsg;
             }
 
             if (dumpOnTimeout_) {
@@ -1529,10 +1537,12 @@ void ProcessGroupNCCL::watchdogHandler() {
             }
 
           } catch (const std::exception& e) {
-            LOG(ERROR) << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
+            LOG(ERROR) << logPrefix()
+                       << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
                        << " Please file an issue. Error: " << e.what();
           } catch (...) {
             LOG(ERROR)
+                << logPrefix()
                 << "Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
                 << " Please file an issue.";
           }
@@ -1798,7 +1808,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   if (bound_device_id_) {
     for (const auto& device : devices) {
       if (*bound_device_id_ != device) {
-        LOG(ERROR) << "Tensor found on device " << device
+        LOG(ERROR) << logPrefix() << "Tensor found on device " << device
                    << " but backend constrained to " << *bound_device_id_;
         C10_THROW_ERROR(
             DistBackendError,
@@ -1951,7 +1961,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
   if (getRank() == 0) {
-    LOG(INFO) << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
+    LOG(INFO) << logPrefix()
+              << "NCCL_DEBUG: " << getCvarString({"NCCL_DEBUG"}, "N/A");
   }
 
   // See [Group Start/End Note]
@@ -2226,7 +2237,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       profilingTitle != nullptr ? c10::optional<std::vector<at::Tensor>>(inputs)
                                 : c10::nullopt,
       desyncDebug_,
-      enableTiming_.load());
+      enableTiming_.load(),
+      dist_debug_level_);
   r->trace_id_ = NCCLTraceBuffer::get()->record(
       uid_,
       seq_,
@@ -2427,6 +2439,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       decltype(i) stream_comm_i = (inputs_same_dev ? 0 : i);
       comms_.push_back((void*)ncclComms[stream_comm_i]->getNcclComm());
     }
+  }
+
+  if (enableCollecticeHashDebug_.load()) {
+    auto numel = getTensorsNumel(inputs);
+    auto hashValue = hashTensors(inputs);
+    PRINT_COLLECTIVE_HASH_SIGNATURE(
+        "input", opTypeToString(opType), numel, hashValue);
   }
 
   {
@@ -3550,14 +3569,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
     // ensure that each process is on a different GPU
     auto numGPUs = at::cuda::getNumGPUs();
     int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
-    LOG(INFO) << c10::str(
-        "Rank ",
-        this->getRank(),
-        " using GPU ",
-        deviceIdx,
-        " to perform barrier as devices used by this process are currently unknown. ",
-        "This can potentially cause a hang if this rank to GPU mapping is incorrect.",
-        "Specify device_ids in barrier() to force use of a particular device.");
+    LOG(INFO)
+        << logPrefix()
+        << c10::str(
+               " using GPU ",
+               deviceIdx,
+               " to perform barrier as devices used by this process are currently unknown. ",
+               "This can potentially cause a hang if this rank to GPU mapping is incorrect.",
+               "Specify device_ids in barrier() to force use of a particular device.");
     devices.emplace_back(guessDeviceForRank());
   } else {
     for (auto usedDeviceIdx : usedDeviceIdxs_) {

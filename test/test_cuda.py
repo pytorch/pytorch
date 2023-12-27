@@ -3305,6 +3305,30 @@ exit(2)
         # Exception would Corrupt Process and make other tests fail
         # self.assertTrue(throws_on_cuda_event("global"))
 
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    def test_cuda_graph_allocator_propagates_stream(self):
+        segments = torch.cuda.memory_snapshot()
+        existing_pools = {s["segment_pool_id"] for s in segments}
+        x = torch.randn(10240000, device="cuda")
+        y = torch.rand_like(x)
+        g = torch.cuda.CUDAGraph()
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        s0.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s0):
+            g.capture_begin()
+            z = x + y
+        with torch.cuda.stream(s1):
+            s1.wait_stream(s0)
+            w = z + y
+        s0.wait_stream(s1)
+        with torch.cuda.stream(s0):
+            g.capture_end()
+        segments = torch.cuda.memory_snapshot()
+        x = [s["segment_pool_id"] for s in segments if s["segment_pool_id"] not in existing_pools]
+        self.assertEqual(len(x), 2)
+        self.assertEqual(x[0], x[1])
+
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
         mean, invstd = torch.batch_norm_gather_stats(
@@ -4169,7 +4193,7 @@ class TestBlockStateAbsorption(TestCase):
             try:
                 yield
             finally:
-                torch._C._cuda_endAllocateCurrentStreamToPool(device)
+                torch._C._cuda_endAllocateCurrentStreamToPool(device, mem_pool)
                 torch._C._cuda_releasePool(device, mem_pool)
                 stream_context.__exit__(None, None, None)
 

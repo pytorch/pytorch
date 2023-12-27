@@ -130,6 +130,120 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "dlrm",
 }
 
+# These models currently fail accuracy with eager Adam optimizer
+# so we use SGD when running the full benchmarks
+# https://github.com/pytorch/pytorch/issues/115966
+BENCHMARK_USE_SGD = {
+    # TorchBench
+    "BERT_pytorch",
+    "LearningToPaint",
+    "alexnet",
+    "dcgan",
+    "demucs",
+    "densenet121",
+    "dlrm",
+    "fastNLP_Bert",
+    "mobilenet_v2",
+    "phlippe_densenet",
+    "phlippe_resnet",
+    "pytorch_stargan",
+    "resnet18",
+    "shufflenet_v2_x1_0",
+    "speech_transformer",
+    "squeezenet1_1",
+    "stable_diffusion_text_encoder",
+    "timm_efficientdet",
+    "timm_nfnet",
+    "timm_regnet",
+    "timm_vision_transformer",
+    "timm_vovnet",
+    "vgg16",
+    "hf_T5",  # Fails dynamic https://github.com/pytorch/pytorch/issues/115968
+    # HF
+    "AlbertForMaskedLM",
+    "BartForCausalLM",
+    "BartForConditionalGeneration",
+    "BlenderbotSmallForCausalLM",
+    "BlenderbotSmallForConditionalGeneration",
+    "DebertaV2ForQuestionAnswering",  # eager OOM
+    "ElectraForCausalLM",
+    "M2M100ForConditionalGeneration",
+    "MBartForCausalLM",
+    "MBartForConditionalGeneration",
+    "OPTForCausalLM",
+    "PLBartForCausalLM",
+    "PLBartForConditionalGeneration",
+    "PegasusForCausalLM",
+    "Speech2Text2ForCausalLM",
+    "TrOCRForCausalLM",
+    "XGLMForCausalLM",
+    # TIMM
+    "adv_inception_v3",
+    "botnet26t_256",
+    "cait_m36_384",  # OOM
+    "coat_lite_mini",
+    "convit_base",
+    "dpn107",
+    "fbnetv3_b",
+    "gernet_l",
+    "lcnet_050",
+    "mixnet_l",
+    "res2net101_26w_4s",
+    "res2net50_14w_8s",
+    "res2next50",
+    "resnest101e",
+    "sebotnet33ts_256",
+    "swsl_resnext101_32x16d",
+    "tf_efficientnet_b0",
+    "ghostnet_100",
+    "gmixer_24_224",
+    "tinynet_a",
+}
+
+# These models OOM in CI
+# due to the extra memory of Adam optimizer states,
+# so we fall back to SGD in CI
+CI_USE_SGD = {
+    "torchrec_dlrm",
+    "demucs",
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "hf_T5_base",
+    "hf_clip",
+    "llama_v2_7b_16h",
+    "mobilenet_v2_quantized_qat",
+    "phi_1_5 resnet50_quantized_qat",
+    "BlenderbotForCausalLM",
+    "cait_m36_384",
+    "DALLE2_pytorch",
+    "moco",
+    "timm_efficientdet",
+    "ghostnet_100",
+    "regnety_002",
+    "poolformer_m36",
+    "inception_v3",
+    "tinynet_a",
+    "selecsls42b",
+    "mobilevit_s",
+    "pytorch_CycleGAN_and_pix2pix",
+    "vision_maskrcnn",
+    "resmlp_12_224",
+    "dlrm",
+    "resnet50",
+    "dm_nfnet_f0",
+    "pit_b_224",
+    "tf_mixnet_l",
+}
+
+
 DO_NOT_CAST_INPUTS = {"stable_diffusion"}
 
 
@@ -1095,8 +1209,16 @@ class OnnxModel(abc.ABC):
 
     _COMPILER_NAME: str
 
-    def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
+    def __init__(
+        self,
+        output_directory,
+        model,
+        example_inputs,
+        dynamic_shapes: bool,
+        copy_before_export: bool = False,
+    ):
         model_name = current_name
+        self.copy_before_export = copy_before_export
         self.model_dir = self._generate_onnx_model_directory(
             output_directory, self._COMPILER_NAME, model_name
         )
@@ -1265,10 +1387,14 @@ class OnnxModelFromTorchScript(OnnxModel):
 
     _COMPILER_NAME = "torchscript"
 
-    def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
+    def __init__(
+        self, output_directory, model, example_inputs, dynamic_shapes: bool, **kwargs
+    ):
         if dynamic_shapes:
             raise NotImplementedError("NYI dynamic shapes for OnnxModelFromTorchScript")
-        super().__init__(output_directory, model, example_inputs, dynamic_shapes)
+        super().__init__(
+            output_directory, model, example_inputs, dynamic_shapes, **kwargs
+        )
         self._export(
             model,
             example_inputs,
@@ -1280,6 +1406,10 @@ class OnnxModelFromTorchScript(OnnxModel):
         self.onnx_session = self._init_ort_session(self.model_path)
 
     def _export(self, model, example_inputs, output_path: str, /, **kwargs) -> None:
+        if self.copy_before_export:
+            # Deepcopy model before export to avoid modification to baseline model.
+            model = copy.deepcopy(model)
+
         # Hack for huggingface models (kwargs only).
         if isinstance(example_inputs, dict):
 
@@ -1341,8 +1471,12 @@ class OnnxModelFromDynamo(OnnxModel):
 
     _COMPILER_NAME = "dynamo"
 
-    def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
-        super().__init__(output_directory, model, example_inputs, dynamic_shapes)
+    def __init__(
+        self, output_directory, model, example_inputs, dynamic_shapes: bool, **kwargs
+    ):
+        super().__init__(
+            output_directory, model, example_inputs, dynamic_shapes, **kwargs
+        )
         self._dynamic_shapes = dynamic_shapes
         self._onnx_program = self._export(model, example_inputs, self.model_path)
         # Clear the model proto to save memory.
@@ -1354,6 +1488,10 @@ class OnnxModelFromDynamo(OnnxModel):
     def _export(
         self, model, example_inputs, output_path: str
     ) -> torch.onnx.ONNXProgram:
+        if self.copy_before_export:
+            # Deepcopy model before export to avoid modification to baseline model.
+            model = copy.deepcopy(model)
+
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
         onnx_program = torch.onnx.dynamo_export(
@@ -1551,6 +1689,7 @@ def optimize_onnx_ctx(
     onnx_model_cls: Type[OnnxModel],
     run_n_iterations: Callable,
     dynamic_shapes: bool = False,
+    copy_before_export: bool = False,
 ) -> Callable:
     # NOTE(bowbao): This function creates and returns the onnx version of 'run_n_iterations',
     # which does the following:
@@ -1581,6 +1720,7 @@ def optimize_onnx_ctx(
                     model,
                     copy.deepcopy(inputs),
                     dynamic_shapes=dynamic_shapes,
+                    copy_before_export=copy_before_export,
                 )
             onnx_model = context.onnx_model
 
@@ -1837,7 +1977,12 @@ class BenchmarkRunner:
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
+            if (name in CI_USE_SGD and self.args.ci) or name in BENCHMARK_USE_SGD:
+                self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
+            else:
+                self.optimizer = torch.optim.Adam(
+                    params, lr=0.01, capturable=True, foreach=True
+                )
         else:
             self.optimizer = None
 
@@ -2021,6 +2166,7 @@ class BenchmarkRunner:
             self.model_iter_fn(mod, inputs, collect_outputs=False)
         return self.model_iter_fn(mod, inputs, collect_outputs=True)
 
+    @torch._disable_dynamo(recursive=True)
     def optimizer_zero_grad(self, mod):
         if self.optimizer is not None:
             self.optimizer.zero_grad(True)
@@ -2165,6 +2311,7 @@ class BenchmarkRunner:
             # Collect the fp64 reference outputs to be used later for accuracy checking.
             fp64_outputs = None
             model_fp64 = None
+            inputs_fp64 = None
             try:
                 model_fp64, inputs_fp64 = cast_to_fp64(
                     self.deepcopy_and_maybe_ddp(model),
@@ -3423,7 +3570,10 @@ def run(runner, args, original_dir=None):
         output_filename = "xla.csv"
     elif args.torchscript_onnx:
         optimize_ctx = functools.partial(
-            optimize_onnx_ctx, args.output_directory or ".", OnnxModelFromTorchScript
+            optimize_onnx_ctx,
+            args.output_directory or ".",
+            OnnxModelFromTorchScript,
+            copy_before_export=args.performance,  # Accuarcy bench already did deepcopy
         )
         experiment = speedup_experiment_onnx
         output_filename = "torchscript_onnx.csv"
@@ -3434,6 +3584,7 @@ def run(runner, args, original_dir=None):
             args.output_directory or ".",
             OnnxModelFromDynamo,
             dynamic_shapes=args.dynamic_shapes,
+            copy_before_export=args.performance,
         )
         experiment = speedup_experiment_onnx
         output_filename = "dynamo_onnx.csv"
@@ -3444,6 +3595,7 @@ def run(runner, args, original_dir=None):
             args.output_directory or ".",
             OnnxModelFromDynamoAotInline,
             dynamic_shapes=args.dynamic_shapes,
+            copy_before_export=args.performance,
         )
         experiment = speedup_experiment_onnx
         output_filename = "dynamo_onnx_aot_inline.csv"
