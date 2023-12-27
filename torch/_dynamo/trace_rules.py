@@ -21,7 +21,7 @@ from .variables.base import VariableTracker
 
 """
 Map of torch objects to their tracing rules (Dynamo variables).
-* TorchInGraphFunctionVariable: The functions should be put into the FX graph or can be constant folded. E.g.,
+* TorchVariable: The functions should be put into the FX graph or can be constant folded. E.g.,
   - torch.add: should be put into the FX graph.
   - torch.is_floating_point: constant folded.
 * TorchCtxManagerClassVariable: The context manager classes are supported by Dynamo. E.g., torch.no_grad
@@ -42,6 +42,7 @@ If you are removing an existing torch level API:
 * Remove the entry represented the API from this map or test/dynamo/test_trace_rules.ignored_torch_name_rule_set
   depends on where it is.
 
+TODO: Add torch object names mapping to TorchVariable for in graph and constant fold functions.
 TODO: We would consolidate the skipfiles.check rules into trace_rules.lookup later.
 TODO: We would support explictly list objects treated as skip/inline after the skipfiles.check
 and trace_rules.lookup consolidation is done. Then the explicit listing of skip/inline objects have
@@ -92,15 +93,6 @@ manual_torch_name_rule_map = {
     "torch.nn.Parameter": SkipFilesVariable,
     "torch._nested_tensor_from_mask": SkipFilesVariable,
     "torch._nested_from_padded": SkipFilesVariable,
-    # symbol operators implemented in Python
-    "torch.sym_not": TorchInGraphFunctionVariable,
-    "torch.sym_float": TorchInGraphFunctionVariable,
-    "torch.sym_int": TorchInGraphFunctionVariable,
-    "torch.sym_max": TorchInGraphFunctionVariable,
-    "torch.sym_min": TorchInGraphFunctionVariable,
-    "torch.sym_sqrt": TorchInGraphFunctionVariable,
-    "torch.sym_ite": TorchInGraphFunctionVariable,
-    "torch.Tensor#_make_wrapper_subclass": SkipFilesVariable,
 }
 
 
@@ -415,6 +407,7 @@ torch_c_binding_in_graph_functions = {
         "torch._C._get_model_ops_and_info_from_buffer",
         "torch._C._get_model_ops_and_info",
         "torch._C._get_module_info_from_flatbuffer",
+        "torch._C._get_nnpack_enabled",
         "torch._C._get_obj_in_tls",
         "torch._C._get_operation_overload",
         "torch._C._get_operator_version_map",
@@ -925,6 +918,7 @@ torch_c_binding_in_graph_functions = {
         "torch._C._set_mkldnn_enabled",
         "torch._C._set_multithreading_enabled",
         "torch._C._set_neg",
+        "torch._C._set_nnpack_enabled",
         "torch._C._set_print_stack_traces_on_fatal_signal",
         "torch._C._set_qengine",
         "torch._C._set_sdp_use_flash",
@@ -2818,7 +2812,7 @@ def lookup(obj):
     # Custom allow/disallow in graph takes precedence over the `torch_name_rule_map`.
     if id(obj) in _disallowed_function_ids:
         return None
-    if callable(obj) and is_user_defined_allowed(obj):
+    if is_user_defined_allowed(obj):
         return TorchInGraphFunctionVariable
     # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
     if isinstance(obj, functools._lru_cache_wrapper) or (
