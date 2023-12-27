@@ -255,9 +255,9 @@ def fold_bn_weights_into_conv_node(
 
 # fuse conv bn weights, inplace modification of the graph_module and graph
 def _fuse_conv_bn_(m: GraphModule) -> None:
-    has_bn = any([_is_bn_node(n) for n in m.graph.nodes])
+    has_bn = any(_is_bn_node(n) for n in m.graph.nodes)
     if not has_bn:
-        return m
+        return
     for n in m.graph.nodes:
         if n.op != "call_function" or n.target != torch.ops.aten._native_batch_norm_legit_no_training.default:
             continue

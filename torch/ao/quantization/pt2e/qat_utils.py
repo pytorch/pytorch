@@ -22,7 +22,6 @@ from .utils import (
     _conv2d_bn_example_inputs,
     _is_conv,
     _is_bn_node,
-    _is_supported_batch_norm_for_training,
     fold_bn_weights_into_conv_node,
     get_aten_graph_module,
 )
@@ -517,7 +516,7 @@ def _update_special_qspecs_after_replacement(
     annotation.output_qspec = _get_new_qspec(annotation.output_qspec)
 
 def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
-    has_bn = any([_is_bn_node(n) for n in m.graph.nodes])
+    has_bn = any(_is_bn_node(n) for n in m.graph.nodes)
     if not has_bn:
         return m
     m = _fuse_conv_bn_qat_helper(m, F.conv1d, _conv1d_bn_example_inputs, is_cuda=False)
@@ -696,7 +695,7 @@ def _copy_over_q_dq_args(original_node: Node, replacement_node: Node):
     )
 
 def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
-    has_bn = any([_is_bn_node(n) for n in m.graph.nodes])
+    has_bn = any(_is_bn_node(n) for n in m.graph.nodes)
     if not has_bn:
         return m
     m = _fold_conv_bn_qat_helper(m, F.conv1d, _quantized_conv1d_bn_example_inputs, is_cuda=False)
