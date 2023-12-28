@@ -420,8 +420,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
+
         if (
-            getattr(self.value, "_is_fsdp_managed_module", False)
+            not object_has_getattribute(self.value)
+            and not get_custom_getattr(self.value)
+            and getattr(self.value, "_is_fsdp_managed_module", False)
             and type(self) == UserDefinedObjectVariable
         ):
             raise RuntimeError(f"Cant make fsdp module as UDO {type(self)}")

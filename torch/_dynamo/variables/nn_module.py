@@ -160,9 +160,9 @@ class NNModuleVariable(VariableTracker):
             from .builder import VariableBuilder
 
             return VariableBuilder(tx, source)(getattr_fn(base, name))
-        return variables.UserMethodVariable(getattr_fn, self, source=source).call_function(
-            tx, [variables.ConstantVariable.create(name)], {}
-        )
+        return variables.UserMethodVariable(
+            getattr_fn, self, source=source
+        ).call_function(tx, [variables.ConstantVariable.create(name)], {})
 
     def var_getattr(self, tx, name):
         from .builder import VariableBuilder
