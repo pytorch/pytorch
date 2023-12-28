@@ -35,6 +35,7 @@ from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.export.exported_program import (
     ExportedProgram,
     ModuleCallEntry,
@@ -102,7 +103,6 @@ def capture_pre_autograd_graph(
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
-    _functional_pre_dispatch_IR: bool = False,
 ) -> torch.nn.Module:
     """
     A helper function that is intended to trace a module before any pre-autograd
@@ -126,53 +126,43 @@ def capture_pre_autograd_graph(
     """
     from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
 
-    decomp_table = {
-        torch.ops.aten.dropout.default: torch.ops.aten.dropout.default.decompose,
-        torch.ops.aten.batch_norm.default: torch.ops.aten.batch_norm.default.decompose,
-        torch.ops.aten._batch_norm_impl_index.default: torch.ops.aten._batch_norm_impl_index.default.decompose,
-        torch.ops.aten.native_batch_norm.default: torch.ops.aten.native_batch_norm.default.decompose,
-    }
+    if kwargs is None:
+        kwargs = {}
 
-    if _functional_pre_dispatch_IR:
-        from torch.export._trace import _export
-        module = _export(f, args, kwargs, constraints=constraints, pre_dispatch=True, decomp_table=decomp_table).module()
-    else:
-        if kwargs is None:
-            kwargs = {}
+    decomp_table = {op: op.decompose for op in FunctionalTensor.maybe_aliasing_or_mutating_ops}
+    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
+        m = torch._dynamo.export(
+            f,
+            constraints=constraints,
+            assume_static_by_default=True,
+            tracing_mode="symbolic",
+            decomposition_table=decomp_table,
+            pre_dispatch=True,
+            aten_graph=True,
+        )(
+            *args,
+            **kwargs,
+        )[0]
 
-        with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
-            m = torch._dynamo.export(
-                f,
-                constraints=constraints,
-                assume_static_by_default=True,
-                tracing_mode="symbolic",
-                decomposition_table=decomp_table,
-                pre_dispatch=True,
-                aten_graph=True,
-            )(
-                *args,
-                **kwargs,
-            )[0]
+        _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
 
-            _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
+        m.meta["inline_constraints"] = {
+            k: v
+            for k, v in fake_mode.shape_env.runtime_var_to_range.items()
+            if re.match(r"^[if]\d+$", str(k))
+        }
 
-            m.meta["inline_constraints"] = {
-                k: v
-                for k, v in fake_mode.shape_env.runtime_var_to_range.items()
-                if re.match(r"^[if]\d+$", str(k))
-            }
+        if isinstance(f, torch.nn.Module):
+            from torch.export._trace import _restore_state_dict
+            _restore_state_dict(f, m)
 
-            if isinstance(f, torch.nn.Module):
-                from torch.export._trace import _restore_state_dict
-                _restore_state_dict(f, m)
-
-            flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-            range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
-            module = _create_stateful_graph_module(
-                m,
-                range_constraints=range_constraints,
-                equality_constraints=equality_constraints,
-            )
+        flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
+        range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
+        module = _create_stateful_graph_module(
+            m,
+            range_constraints=range_constraints,
+            equality_constraints=equality_constraints,
+        )
 
     def _train(self, mode: bool = True):
         raise NotImplementedError("Calling train() is not supported yet.")
