@@ -898,6 +898,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -928,6 +935,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -956,6 +970,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
             ),
         ),
     ),
@@ -991,6 +1012,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_foreach_large_tensor",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1019,6 +1047,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
             ),
         ),
     ),
@@ -1058,6 +1093,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_step_is_noop_for_zero_grads",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1088,6 +1130,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
             ),
         ),
     ),
@@ -1150,6 +1199,13 @@ optim_db: List[OptimizerInfo] = [
                 "test_mixed_device_dtype",
                 active_if=TEST_WITH_TORCHDYNAMO,
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1178,6 +1234,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
             ),
         ),
     ),
@@ -1220,6 +1283,13 @@ optim_db: List[OptimizerInfo] = [
                 "test_step_is_noop_for_zero_grads",
                 device_type="cpu",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116494"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1232,6 +1302,13 @@ optim_db: List[OptimizerInfo] = [
             DecorateInfo(
                 skipIfMps,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
+            ),
+            DecorateInfo(
+                unittest.skip(
+                    "SparseAdam does not support dense gradients, see #116507"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
             ),
         ),
     ),

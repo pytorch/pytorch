@@ -1,4 +1,5 @@
 # Owner(s): ["module: optimizer"]
+import functools
 import unittest
 from copy import deepcopy
 
@@ -6,6 +7,7 @@ import torch
 from optim.test_optim import TestOptim, TestDifferentiableOptimizer  # noqa: F401
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
+from torch.nn import Parameter
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_optimizers import (
     optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs)
@@ -381,6 +383,70 @@ class TestOptimRenewed(TestCase):
                 params[0].grad = torch.zeros_like(params[0])
             optimizer.step(closure)
             self.assertEqual(old_param, params[0])
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_optimizer_can_be_printed(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
+        params = [Parameter(torch.randn(2, 3, requires_grad=True, device=device, dtype=dtype)) for _ in range(2)]
+        for optim_input in all_optim_inputs:
+            optimizer = optim_cls(params, **optim_input.kwargs)
+            optimizer.__repr__()
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_state_dict_deterministic(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+        weight = Parameter(torch.randn(2, 3, requires_grad=True, device=device, dtype=dtype))
+        bias = Parameter(torch.randn(2, requires_grad=True, device=device, dtype=dtype))
+        input = torch.randn(3, requires_grad=True, device=device, dtype=dtype)
+        params = [weight, bias]
+
+        def fwd_bwd(optim, w, b, i):
+            optim.zero_grad()
+            loss = (w.mv(i) + b).pow(2).sum()
+            loss.backward()
+            return loss
+
+        for optim_input in all_optim_inputs:
+            optimizer = optim_cls(params, **optim_input.kwargs)
+            closure = functools.partial(fwd_bwd, optimizer, weight, bias, input)
+
+            # Prime the optimizer
+            for _ in range(10):
+                optimizer.step(closure)
+
+            # Clone the weights and construct a new optimizer for them
+            with torch.no_grad():
+                weight_c = Parameter(weight.clone())
+                bias_c = Parameter(bias.clone())
+
+            optimizer_c = optim_cls([weight_c, bias_c], **optim_input.kwargs)
+            closure_c = functools.partial(fwd_bwd, optimizer_c, weight_c, bias_c, input)
+
+            # Load the state dict from the original optimizer into the new one
+            optimizer_c.load_state_dict(deepcopy(optimizer.state_dict()))
+
+            # Run both optimizers in parallel
+            for i in range(10):
+                optimizer.step(closure)
+                optimizer_c.step(closure_c)
+                self.assertEqual(weight, weight_c)
+                self.assertEqual(bias, bias_c)
+
+            # Make sure state dict is deterministic with equal (not identical) parameters
+            self.assertEqual(optimizer.state_dict(), optimizer_c.state_dict())
+
+            # Make sure repeated parameters have identical representation (see #36831)
+            optimizer_c.param_groups.extend(optimizer_c.param_groups)
+            self.assertEqual(
+                optimizer.state_dict()["param_groups"][-1],
+                optimizer_c.state_dict()["param_groups"][-1]
+            )
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
