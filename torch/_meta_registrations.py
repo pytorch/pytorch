@@ -401,6 +401,7 @@ def meta_sparse_structured_linear(
     _meta: Tensor,
     bias: Optional[Tensor] = None,
     _activation_opt: Optional[str] = None,
+    out_dtype: Optional[torch.dtype] = None,
 ):
     output_sizes = list(input.shape)
     if bias is not None:
@@ -415,9 +416,13 @@ def meta_sparse_structured_linear(
     assert len(input.shape) == 2, "we can only handle the squashed input case"
     transposed_strides = (1, input.size(0))
 
+    if out_dtype is not None:
+        assert (
+            input.dtype == torch.int8 and out_dtype == torch.int32
+        ), "out_dtype is only supported for i8i8->i32 linear operator"
     output = input.new_empty(
         output_sizes,
-        dtype=input.dtype if input.dtype != torch.int8 else torch.int32,
+        dtype=input.dtype if out_dtype is None else out_dtype,
     ).as_strided(output_sizes, transposed_strides)
 
     return output
