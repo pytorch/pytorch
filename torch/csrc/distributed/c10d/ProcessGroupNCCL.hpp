@@ -717,6 +717,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Generates a prefix that is unique to this process group and rank, for
   // disambiguating logs
+  std::string createLogPrefix() const;
+
+  // Returns the unique prefix created in createLogPrefix
   const std::string& logPrefix() const;
 
   // Returns the global rank of the device. This function assumes that users
@@ -969,6 +972,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
   size_t uid_;
+
+  std::string logPrefix_;
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
 };
