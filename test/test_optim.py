@@ -422,8 +422,8 @@ class TestOptimRenewed(TestCase):
 
             # Clone the weights and construct a new optimizer for them
             with torch.no_grad():
-                weight_c = Parameter(weight.clone().detach())
-                bias_c = Parameter(bias.clone().detach())
+                weight_c = Parameter(weight.clone())
+                bias_c = Parameter(bias.clone())
 
             optimizer_c = optim_cls([weight_c, bias_c], **optim_input.kwargs)
             closure_c = functools.partial(fwd_bwd, optimizer_c, weight_c, bias_c, input)
@@ -449,7 +449,7 @@ class TestOptimRenewed(TestCase):
             )
 
     @optims(optim_db, dtypes=[torch.float32])
-    def test_bc_for_state_dict(self, device, dtype, optim_info):
+    def test_can_load_older_state_dict(self, device, dtype, optim_info):
         new_flags = ["maximize", "foreach", "fused", "differentiable", "capturable"]
 
         optim_cls = optim_info.optim_cls
@@ -470,15 +470,15 @@ class TestOptimRenewed(TestCase):
                 loss.backward()
                 optimizer.step()
 
-            # bc_state_dict has all new flags del'd
-            bc_state_dict = deepcopy(optimizer.state_dict())
-            bc_state_dict_pg = bc_state_dict["param_groups"]
-            for group in bc_state_dict_pg:
+            # old_state_dict has all new flags del'd
+            old_state_dict = deepcopy(optimizer.state_dict())
+            old_state_dict_pg = old_state_dict["param_groups"]
+            for group in old_state_dict_pg:
                 for flag in new_flags:
-                    if flag in bc_state_dict_pg:
-                        del bc_state_dict_pg[flag]
+                    if flag in old_state_dict_pg:
+                        del old_state_dict_pg[flag]
 
-            optimizer.load_state_dict(bc_state_dict)
+            optimizer.load_state_dict(old_state_dict)
 
             # Make sure we can still step
             optimizer.zero_grad()
