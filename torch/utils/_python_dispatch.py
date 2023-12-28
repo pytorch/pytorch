@@ -80,6 +80,19 @@ def _get_current_dispatch_mode():
     return None
 
 
+def _detect_functional_mode():
+    from torch._ops import _get_dispatch_mode_pre_dispatch
+    pre_dispatch_functional_mode = _get_dispatch_mode_pre_dispatch(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+    post_dispatch_functional_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+
+    assert (pre_dispatch_functional_mode is None) or (post_dispatch_functional_mode is None)
+
+    if pre_dispatch_functional_mode is None:
+        return post_dispatch_functional_mode
+
+    return pre_dispatch_functional_mode
+
+
 def _get_current_dispatch_mode_stack():
     stack_len = _len_torch_dispatch_stack()
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
