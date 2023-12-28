@@ -34,6 +34,10 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
 )
+from torch.utils._foreach_utils import (
+    _get_foreach_kernels_supported_devices,
+    _get_fused_kernels_supported_devices,
+)
 
 
 class OptimizerInput:
@@ -831,11 +835,12 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
 
     optim_inputs = optim_info.optim_inputs_func(device=device)
 
-    # fused is currently not supported on CPU
     supported_impls = tuple(
         x
         for x in optim_info.supported_impls
-        if x not in skip and not (str(device) == "cpu" and x == "fused")
+        if x not in skip
+        and (str(device) in _get_fused_kernels_supported_devices() or x != "fused")
+        and (str(device) in _get_foreach_kernels_supported_devices() or x != "foreach")
     )
 
     all_optim_inputs = []
