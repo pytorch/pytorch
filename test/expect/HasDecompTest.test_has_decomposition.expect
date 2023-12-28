@@ -398,6 +398,7 @@ aten::_make_per_channel_quantized_tensor
 aten::_make_per_channel_quantized_tensor.out
 aten::_make_per_tensor_quantized_tensor
 aten::_make_per_tensor_quantized_tensor.out
+aten::_masked_index
 aten::_masked_scale
 aten::_masked_scale.out
 aten::_masked_softmax
