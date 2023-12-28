@@ -17,6 +17,7 @@
     - [Release Candidate health validation](#release-candidate-health-validation)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
     - [Cherry Picking Reverts](#cherry-picking-reverts)
+  - [Preparing and Creating Final Release candidate](#preparing-and-creating-final-release-candidate)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
   - [Additional Steps to prepare for release day](#additional-steps-to-prepare-for-release-day)
     - [Modify release matrix](#modify-release-matrix)
@@ -72,7 +73,8 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 0. Cutting a release branch preparations
 1. Cutting a release branch and making release branch specific changes
 2. Drafting RCs (Release Candidates), and merging cherry picks
-3. Promoting RCs to stable and performing release day tasks
+3. Preparing and Creating Final Release Candidate
+4. Promoting Final RC to stable and performing release day tasks
 
 ### Frequently Asked Questions
 
@@ -84,7 +86,7 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 
 ## Cutting a release branch preparations
 
-Following Requirements needs to be met prior to final RC Cut:
+Following Requirements needs to be met prior to cutting a release branch:
 
 * Resolve all outstanding issues in the milestones(for example [1.11.0](https://github.com/pytorch/pytorch/milestone/28))before first RC cut is completed. After RC cut is completed following script should be executed from builder repo in order to validate the presence of the fixes in the release branch :
 ``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream --branch release/1.11 --milestone-id 26 --missing-in-branch ```
@@ -218,6 +220,36 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 If PR that has been cherry-picked into release branch has been reverted, it's cherry-pick must be reverted as well.
 
 Reverts for changes that was committed into the main branch prior to the branch cut, must be propagated into release branch as well.
+
+## Preparing and Creating Final Release candidate
+
+The following requirements need to be met prior to creating final Release Candidate :
+
+* Resolve all outstanding open issues in the milestone. There should be no open issues/PRs (for example [2.1.2](https://github.com/pytorch/pytorch/milestone/39)). The issue should either be closed or de-milestoned.
+
+* Validate that all closed milestone PRs are present in the release branch. Confirm this by running:
+``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream --branch release/2.2 --milestone-id 40 --missing-in-branch ```
+
+* No outstanding cherry-picks that need to be reviewed in the issue tracker: https://github.com/pytorch/pytorch/issues/115300
+
+* Perform [Release Candidate health validation](#release-candidate-health-validation). CI should have the green signal.
+
+After the final RC is created. The following tasks should be performed :
+
+* Perform [Release Candidate health validation](#release-candidate-health-validation). CI should have the green signal.
+
+* Run and inspect the output [Validate Binaries](https://github.com/pytorch/builder/actions/workflows/validate-binaries.yml) workflow.
+
+* All the closed issues from [milestone](https://github.com/pytorch/pytorch/milestone/39) need to be validated. Confirm the validation by commenting on the issue: https://github.com/pytorch/pytorch/issues/113568#issuecomment-1851031064
+
+* Create validation issue for the release, see for example [Validations for 2.1.2 release](https://github.com/pytorch/pytorch/issues/114904) and perform required validations.
+
+* Run performance tests in [benchmark repository](https://github.com/pytorch/benchmark). Make sure there are no prerformance regressions.
+
+* Prepare and stage PyPI binaries for promotion. This is done with this script:
+[`pytorch/builder:release/pypi/promote_pypi_to_staging.sh`](https://github.com/pytorch/builder/blob/main/release/pypi/promote_pypi_to_staging.sh)
+
+* Validate staged PyPI binaries. Make sure generated packages are correct and package size does not exceeds maximum allowed PyPI package size.
 
 ## Promoting RCs to Stable
 
