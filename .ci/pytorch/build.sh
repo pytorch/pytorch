@@ -32,7 +32,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == "linux-focal-cuda12.1-py3.10-gcc9-sm86" ]]; then
+if [[ "$BUILD_ENVIRONMENT" == "linux-focal-cuda12.1-py3.10-gcc9" ]]; then
   # as per https://github.com/mozilla/sccache?tab=readme-ov-file#usage
   echo "DOING RECACHE SCCACHE"
   export SCCACHE_RECACHE=1
