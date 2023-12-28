@@ -2,6 +2,13 @@
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
 
+# In situations where several different compilation invocations should not reuse the
+# cached results from each other, one can set SCCACHE_C_CUSTOM_CACHE_BUSTER to a
+# unique value that'll be mixed into the hash. We want to separate release cache from cache
+# used by main builds
+# https://github.com/mozilla/sccache?tab=readme-ov-file#separating-caches-between-invocations
+export SCCACHE_C_CUSTOM_CACHE_BUSTER="release/2.2"
+
 if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
     # Save the absolute path in case later we chdir (as occurs in the gpu perf test)
     script_dir="$( cd "$(dirname "${BASH_SOURCE[0]}")" || exit ; pwd -P )"
