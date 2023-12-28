@@ -3,6 +3,7 @@
 #include <c10/macros/Export.h>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace c10 {

@@ -1540,9 +1540,6 @@ class TestCompositeCompliance(TestCase):
         # ensure view replay is enabled
         with torch.autograd._force_original_view_tracking(True):
             for sample in op.sample_inputs(device, dtype, requires_grad=False):
-                args = [sample.input] + list(sample.args)
-                kwargs = sample.kwargs
-
                 inp = sample.input
                 outs = op(inp, *sample.args, **sample.kwargs)
                 if not isinstance(outs, (tuple, List)):
