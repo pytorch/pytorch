@@ -475,8 +475,8 @@ class TestOptimRenewed(TestCase):
             old_state_dict_pg = old_state_dict["param_groups"]
             for group in old_state_dict_pg:
                 for flag in new_flags:
-                    if flag in old_state_dict_pg:
-                        del old_state_dict_pg[flag]
+                    if flag in group:
+                        del group[flag]
 
             optimizer.load_state_dict(old_state_dict)
 
