@@ -4399,6 +4399,21 @@ has_c_shim = {
 }
 
 
+def get_aten_cpp_kernel_name(kernel):
+    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+    # repeat_interleave(const at::Tensor & self, int64_t repeats,
+    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+    assert (
+        isinstance(kernel, torch._ops.OpOverload) and kernel.namespace == "aten"
+    ), "Invalid aten kernel"
+    return (
+        f"at::{kernel.__name__.split('.')[0]}"
+        if kernel._overloadname == "default"
+        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+    )
+
+
 class FallbackKernel(ExternKernelAlloc):
     args_default_value: List[Dict[str, Any]]
 
@@ -4655,9 +4670,8 @@ class FallbackKernel(ExternKernelAlloc):
         if kernel.namespace == "aten":
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
-            op_base_name = kernel.__name__.split(".")[0]
-
             if V.graph.cpp_wrapper:
+                assert isinstance(kernel, torch._ops.OpOverload)
                 if config.is_fbcode() and kernel not in has_c_shim:
                     log.warning(
                         "%s is missing a c-shim implementation, using proxy executor as fallback",
@@ -4670,13 +4684,8 @@ class FallbackKernel(ExternKernelAlloc):
                     # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
                     # repeat_interleave(const at::Tensor & self, int64_t repeats,
                     #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
-                    self.cpp_kernel_name = (
-                        f"at::{op_base_name}"
-                        if kernel._overloadname == "default"
-                        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
-                    )
+                    self.cpp_kernel_name = get_aten_cpp_kernel_name(kernel)
                     schema = kernel._schema
-
                     self.args_default_value = [
                         {"type": x.real_type, "value": x.default_value}
                         for x in schema.arguments
@@ -4691,7 +4700,7 @@ class FallbackKernel(ExternKernelAlloc):
                         if x.kwarg_only
                     }
             else:
-                self.python_kernel_name = f"aten.{op_base_name}"
+                self.python_kernel_name = str(kernel)
 
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
@@ -4825,6 +4834,7 @@ class ComplexView(ExternKernelAlloc):
         self,
         layout,
         python_kernel_name,
+        cpp_kernel_name,
         tensor_args,
         nontensor_args,
     ):
@@ -4838,6 +4848,7 @@ class ComplexView(ExternKernelAlloc):
         # output through the abi-compatible interface.
         self.outputs: Sequence[Any] = []
         self.python_kernel_name = python_kernel_name
+        self.cpp_kernel_name = cpp_kernel_name
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
@@ -4854,7 +4865,11 @@ class ComplexView(ExternKernelAlloc):
         assert device, "Not sure where to find device info"
 
         packed = ComplexView(
-            MultiOutputLayout(device), str(kernel), tensor_args, non_tensor_args
+            MultiOutputLayout(device),
+            str(kernel),
+            get_aten_cpp_kernel_name(kernel),
+            tensor_args,
+            non_tensor_args,
         )
 
         layout = FixedLayout(
