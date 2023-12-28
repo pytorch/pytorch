@@ -812,7 +812,7 @@ def optim_error_inputs_func_sparseadam(device, dtype):
 
 
 def _get_optim_inputs_including_global_cliquey_kwargs(
-    device, dtype, optim_info
+    device, dtype, optim_info, skip=()
 ) -> List[OptimizerInput]:
     """
     Return a list of all configs for a given optimizer as a list of OptimizerInputs,
@@ -826,25 +826,23 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
     optimizer including all supported flags, so this helper returns all optim inputs.
     """
     optim_inputs = optim_info.optim_inputs_func(device=device)
-    supported_impls = optim_info.supported_impls
 
     # fused is currently not supported on CPU
-    if str(device) == "cpu" and "fused" in supported_impls:
-        supported_impls = (x for x in supported_impls if x != "fused")
+    supported_impls = (
+        x
+        for x in optim_info.supported_impls
+        if x not in skip and not (str(device) == "cpu" and x == "fused")
+    )
 
     all_optim_inputs = []
     for optim_input in optim_inputs:
         # Add the base config where all the flags are False
         base_kwargs = deepcopy(optim_input.kwargs)
-        if len(optim_info.supported_impls) != 0:
-            for flag in optim_info.supported_impls:
+        if len(supported_impls) != 0:
+            for flag in supported_impls:
                 base_kwargs[flag] = False
             all_optim_inputs.append(
-                OptimizerInput(
-                    params=None,
-                    kwargs=base_kwargs,
-                    desc=optim_input.desc,
-                )
+                OptimizerInput(params=None, kwargs=base_kwargs, desc=optim_input.desc)
             )
         # Add a config for when each of the global cliquey kwargs is True
         for flag in supported_impls:
@@ -852,9 +850,7 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
             new_kwargs[flag] = True
             all_optim_inputs.append(
                 OptimizerInput(
-                    params=None,
-                    kwargs=new_kwargs,
-                    desc=f"{optim_input.desc} with {flag}",
+                    params=None, kwargs=new_kwargs, desc=f"{optim_input.desc} & {flag}"
                 )
             )
     return all_optim_inputs
