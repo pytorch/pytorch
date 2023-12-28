@@ -3,6 +3,7 @@
 
 #include <torch/library.h>
 #include <ATen/FunctionalInverses.h>
+#include <ATen/FunctionalTensorWrapper.h>
 
 // ${generated_comment}
 

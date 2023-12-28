@@ -175,7 +175,7 @@ std::function<at::Tensor(const at::Tensor&)> func=nullptr;
 std::function<at::Tensor(const at::Tensor&)> rev_func=nullptr;
 if (${is_view_with_metadata_change} ||
     !self.unsafeGetTensorImpl()->support_as_strided() ||
-    self.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python) ||
+    self.unsafeGetTensorImpl()->is_python_dispatch() ||
     c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
   ${replay_view_func}
   ${reverse_replay_view_func}
