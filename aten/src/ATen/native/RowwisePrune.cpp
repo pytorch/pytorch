@@ -13,8 +13,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -113,4 +112,4 @@ std::tuple<Tensor, Tensor> _rowwise_prune(const Tensor& weights,
                                         compressed_indices_dtype);
 }
 
-}} // namespace at::native
+} // namespace at::native
