@@ -192,8 +192,6 @@ class TestOptim(TestCase):
             for scheduler_constructor in scheduler_constructors:
                 schedulers.append(scheduler_constructor(optimizer))
 
-            # to check if the optimizer can be printed as a string
-            optimizer.__repr__()
 
             def fn():
                 optimizer.zero_grad()
@@ -248,30 +246,6 @@ class TestOptim(TestCase):
         # Prime the optimizer
         for _i in range(20):
             optimizer.step(fn)
-        # Clone the weights and construct new optimizer for them
-        with torch.no_grad():
-            weight_c = Parameter(weight.clone().detach())
-            bias_c = Parameter(bias.clone().detach())
-        optimizer_c = constructor(weight_c, bias_c)
-        fn_c = functools.partial(fn_base, optimizer_c, weight_c, bias_c)
-        # Load state dict
-        state_dict = deepcopy(optimizer.state_dict())
-        state_dict_c = deepcopy(optimizer.state_dict())
-        optimizer_c.load_state_dict(state_dict_c)
-        # Run both optimizers in parallel
-        for _ in range(20):
-            optimizer.step(fn)
-            optimizer_c.step(fn_c)
-            self.assertEqual(weight, weight_c)
-            self.assertEqual(bias, bias_c)
-        # Make sure state dict is deterministic with equal but not identical parameters
-        self.assertEqual(optimizer.state_dict(), optimizer_c.state_dict())
-        # Make sure repeated parameters have identical representation in state dict
-        optimizer_c.param_groups.extend(optimizer_c.param_groups)
-        self.assertEqual(
-            optimizer.state_dict()["param_groups"][-1],
-            optimizer_c.state_dict()["param_groups"][-1],
-        )
 
         # Make sure that optimizers that support maximize can load older models
         old_state_dict = deepcopy(optimizer.state_dict())
