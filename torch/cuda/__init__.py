@@ -111,8 +111,8 @@ else:
 
 
 has_half: bool = True
-# Global variables dynamically populated by native code
-has_magma: bool = False
+has_magma: bool = torch._C._has_magma
+
 default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
