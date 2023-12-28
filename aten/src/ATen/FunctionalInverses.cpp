@@ -27,11 +27,12 @@ static Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims, Inverse
 }
 
 static Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, InverseReturnMode inverse_return_mode) {
-  auto result = inverse_return_mode != InverseReturnMode::NeverView ? at::alias(self) : self;
-
+  auto result = self;
+  bool need_alias = (inverse_return_mode == InverseReturnMode::AlwaysView);
   int64_t nDims = sizes.size();
   for(const auto dim : c10::irange(nDims)) {
     if (sizes[dim] == 1) {
+      need_alias = false;
       if (inverse_return_mode != InverseReturnMode::NeverView) {
         result = at::unsqueeze(result, dim);
       } else {
@@ -39,21 +40,26 @@ static Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, 
       }
     }
   }
-  return result;
+
+  // return an alias to ensure the output is a view when necessary
+  return need_alias ? at::alias(result) : result;
 }
 
 static Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, c10::SymIntArrayRef sizes, InverseReturnMode inverse_return_mode) {
   const auto ndim = sizes.size();
   const auto mask = at::dim_list_to_bitset(dim, ndim);
+  Tensor result = self;
+  bool need_alias = (inverse_return_mode == InverseReturnMode::AlwaysView);
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
   // unsqueezing in the backward.
-  Tensor result = inverse_return_mode != InverseReturnMode::NeverView ? at::alias(self) : self;
   if (ndim == 0) {
-    return result;
+    // return an alias to ensure the output is a view when necessary
+    return need_alias ? at::alias(result) : result;
   }
 
   for (const auto d : c10::irange(ndim)) {
     if (mask.test(d) && sizes[d] == 1) {
+      need_alias = false;
       if (inverse_return_mode != InverseReturnMode::NeverView) {
         result = at::unsqueeze(result, d);
       } else {
@@ -61,7 +67,9 @@ static Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, c10::SymIn
       }
     }
   }
-  return result;
+
+  // return an alias to ensure the output is a view when necessary
+  return need_alias ? at::alias(result) : result;
 }
 
 // Note [Functionalization Pass: View Inverses].
