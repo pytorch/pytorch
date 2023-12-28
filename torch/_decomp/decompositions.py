@@ -2247,15 +2247,16 @@ def _avg_poolnd(
         return functools.reduce(torch.logical_and, conds)
 
     if had_padding:
-        out = aten._unsafe_index(
+        cond = get_cond([0] * dim)
+        out = aten._masked_index(
             x,
+            cond,
             [
                 *[None] * len(batch),
-                *[out_indices[i].clamp(min=0, max=dhw[i]-1) for i in range(dim)],
+                *[out_indices[i] for i in range(dim)],
             ],
+            0,
         )
-        cond = get_cond([0] * dim)
-        out = torch.where(cond, out, torch.zeros_like(out))
     else:
         out = aten._unsafe_index(x, [*[None] * len(batch), *out_indices])
 
