@@ -136,7 +136,8 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
       view_value.device()
     ),
     value_(view_value),
-    is_multi_output_view_(base->is_multi_output_view_ || meta.is_multi_output)
+    is_multi_output_view_(base->is_multi_output_view_ || meta.is_multi_output),
+    was_storage_changed_(base->was_storage_changed_)
 {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(value_));
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));

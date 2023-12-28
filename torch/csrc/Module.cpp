@@ -19,6 +19,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
@@ -86,7 +87,6 @@
 #include <torch/csrc/utils/verbose.h>
 
 #include <ATen/native/transformers/sdp_utils_cpp.h>
-#include <c10/util/Logging.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 #include <sstream>
 #ifdef USE_CUDA
@@ -257,6 +257,11 @@ static PyObject* THPModule_crashIfATenASAN(PyObject* module, PyObject* arg) {
   return THPUtils_packInt32(at::_crash_if_asan(THPUtils_unpackInt(arg)));
 }
 
+static PyObject* THPModule_abort(PyObject* module, PyObject* noargs) {
+  std::terminate();
+  Py_RETURN_NONE;
+}
+
 static PyObject* THPModule_crashIfDebugAssertsFail(
     PyObject* module,
     PyObject* arg) {
@@ -322,6 +327,30 @@ PyObject* THPModule_setDefaultTensorType(PyObject* _unused, PyObject* type) {
 PyObject* THPModule_setDefaultDtype(PyObject* _unused, PyObject* dtype) {
   HANDLE_TH_ERRORS
   torch::tensors::py_set_default_dtype(dtype);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* a_ = nullptr;
+  PyObject* b_ = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &a_, &b_)) {
+    return nullptr;
+  }
+
+  // Ensure we have Tensors
+  TORCH_CHECK(THPVariable_Check(a_));
+  TORCH_CHECK(THPVariable_Check(b_));
+
+  THPVariable* a = reinterpret_cast<THPVariable*>(a_);
+  THPVariable* b = reinterpret_cast<THPVariable*>(b_);
+
+  // Swap the Tensor Impl
+  c10::MaybeOwned<at::Tensor> tmp = a->cdata;
+  a->cdata = b->cdata;
+  b->cdata = tmp;
+
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -745,6 +774,23 @@ PyObject* THPModule_deterministicFillUninitializedMemory(
     Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setUserEnabledNNPACK(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_enabled_NNPACK expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setUserEnabledNNPACK(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject* THPModule_userEnabledNNPACK(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().userEnabledNNPACK())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setWarnAlways(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -1086,6 +1132,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
     {"_add_docstr", THPModule_addDocStr, METH_VARARGS, nullptr},
+    {"_swap_tensor_impl", THPModule_swap_tensor_impl, METH_VARARGS, nullptr},
     {"_init_names", THPModule_initNames, METH_O, nullptr},
     {"_has_distributed", THPModule_hasDistributed, METH_NOARGS, nullptr},
     {"_set_default_tensor_type",
@@ -1094,6 +1141,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {"_set_default_dtype", THPModule_setDefaultDtype, METH_O, nullptr},
     {"_infer_size", THPModule_inferSize, METH_VARARGS, nullptr},
+    {"_abort", THPModule_abort, METH_NOARGS, nullptr},
     {"_crash_if_csrc_asan", THPModule_crashIfCsrcASAN, METH_O, nullptr},
     {"_crash_if_csrc_ubsan", THPModule_crashIfCsrcUBSAN, METH_O, nullptr},
     {"_crash_if_vptr_ubsan", THPModule_crashIfvptrUBSAN, METH_NOARGS, nullptr},
@@ -1186,6 +1234,8 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      THPModule_setDeterministicFillUninitializedMemory,
      METH_O,
      nullptr},
+    {"_get_nnpack_enabled", THPModule_userEnabledNNPACK, METH_NOARGS, nullptr},
+    {"_set_nnpack_enabled", THPModule_setUserEnabledNNPACK, METH_O, nullptr},
     {"_get_warnAlways", THPModule_warnAlways, METH_NOARGS, nullptr},
     {"_set_warnAlways", THPModule_setWarnAlways, METH_O, nullptr},
     {"_warn", THPModule_warn, METH_NOARGS, nullptr},
@@ -1355,7 +1405,7 @@ PyObject* initModule() {
   HANDLE_TH_ERRORS
 
   c10::initLogging();
-
+  c10::set_terminate_handler();
   at::internal::lazy_init_num_threads();
 
   C10_LOG_API_USAGE_ONCE("torch.python.import");
@@ -1758,6 +1808,8 @@ Call this whenever a new thread is created in order to propagate values from
 #endif
 
   ASSERT_TRUE(set_module_attr("_has_cuda", has_cuda));
+  ASSERT_TRUE(
+      set_module_attr("_has_magma", at::hasMAGMA() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("_has_mps", has_mps));
   ASSERT_TRUE(
       set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));

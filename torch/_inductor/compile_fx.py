@@ -369,7 +369,7 @@ def compile_fx_inner(
                     len(compiled_graph.device_idxs) == 1
                     or not config.triton.cudagraph_trees
                 ),
-                "multiple device indices without cudagraph_trees",
+                "multiple device indices with cudagraph_trees",
             ),
         ]
         cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
@@ -510,7 +510,7 @@ def fx_codegen_and_compile(
         # has some issues with memory in training
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
-        post_grad_graphs_log.info("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
+        post_grad_graphs_log.debug("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
 
     with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
@@ -518,7 +518,7 @@ def fx_codegen_and_compile(
             # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
             # For the forward pass, we have the real inputs to be used as example_inputs. For the backward pass,
             # we currently use fake tensors and defake them later.
-            example_inputs=V.real_inputs if is_inference else example_inputs,
+            example_inputs=example_inputs,
             shape_env=shape_env,
             num_static_inputs=num_fixed,
             graph_id=graph_id,
@@ -549,7 +549,7 @@ def fx_codegen_and_compile(
             if V.aot_compilation is True:
                 return compiled_fn
 
-            if graph.disable_cudagraphs:
+            if cudagraphs and graph.disable_cudagraphs:
                 perf_hint_log.warning(
                     "skipping cudagraphs due to %s", V.graph.disable_cudagraphs_reason
                 )

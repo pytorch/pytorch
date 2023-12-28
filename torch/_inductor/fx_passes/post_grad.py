@@ -381,7 +381,8 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
 
     assert new_size is not None
     dtype = functools.reduce(
-        torch.promote_types, [x.get_dtype() for x in itertools.chain(*inputs)]
+        torch.promote_types,
+        [x.get_dtype() for x in itertools.chain.from_iterable(inputs)],
     )
     device = inputs[0][0].get_device()
     kernel = ir.ConcatKernel(
@@ -681,14 +682,13 @@ def reinplace_inplaceable_ops(graph):
     """
 
     copy_args_to_copy_nodes = {}
-    foreach_node_to_copy_nodes = defaultdict(list)
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
     node_order: Dict[Any, int] = {}
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
-        if node.target == aten.copy_.default:
+        if node.target == aten.copy_.default and node.args[0].op == "placeholder":
             dst = node.args[0]
             src = node.args[1]
             # If the target is a getitem and it indexes a possible clone,
@@ -704,7 +704,6 @@ def reinplace_inplaceable_ops(graph):
 
             copy_args_to_copy_nodes[(dst, src)] = node
 
-            assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):

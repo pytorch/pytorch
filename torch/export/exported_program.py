@@ -1,6 +1,7 @@
 import copy
 import dataclasses
 import functools
+import types
 from typing import (
     Any,
     Callable,
@@ -344,17 +345,23 @@ class ExportedProgram:
         )
         return string
 
-    def module(self, *, flat: bool = True) -> torch.nn.Module:
+    def module(self) -> torch.nn.Module:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """
-        from torch._export.unflatten import unflatten
         from ._unlift import _unlift_exported_program_lifted_states
 
-        if flat:
-            return _unlift_exported_program_lifted_states(self)
-        else:
-            return unflatten(self)
+        module = _unlift_exported_program_lifted_states(self)
+
+        def _train(self, mode: bool = True):
+            raise NotImplementedError("Calling train() is not supported yet.")
+
+        def _eval(self, mode: bool = True):
+            raise NotImplementedError("Calling eval() is not supported yet.")
+
+        module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
+        module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+        return module
 
     @_disable_prexisiting_fake_mode
     def run_decompositions(
@@ -464,14 +471,13 @@ class ExportedProgram:
             for inp_dim1, inp_dim2 in self.equality_constraints
         ]
 
-        state_dict = self.state_dict.copy()
         lift_constant_tensor_pass(gm, new_graph_signature)
         _replace_sym_size_ops_pass(gm)
         exported_program = ExportedProgram(
             gm,
             gm.graph,
             new_graph_signature,
-            state_dict,
+            self.state_dict,
             new_range_constraints,
             new_equality_constraints,
             copy.deepcopy(self.module_call_graph),
