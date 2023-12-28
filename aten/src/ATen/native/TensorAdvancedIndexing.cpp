@@ -657,11 +657,24 @@ Tensor _unsafe_index(const Tensor& self, const torch::List<c10::optional<Tensor>
 }
 
 Tensor _masked_index(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Scalar& other) {
-  throw std::runtime_error("_masked_index is implemented only for inductor");
-}
+  torch::List<c10::optional<Tensor>> clamped_indices;
+  clamped_indices.reserve(indices.size());
 
-Tensor _masked_index(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Tensor& other) {
-  throw std::runtime_error("_masked_index is implemented only for inductor");
+  auto sizes = self.sizes();
+  for (auto i : c10::irange(indices.size())) {
+    auto index = indices.get(i);
+    if (!index.has_value()) {
+      clamped_indices.push_back(index);
+    } else {
+      auto dtype = index->scalar_type();
+      TORCH_CHECK(dtype == kLong || dtype == kInt,
+                  "_masked_index found unexpected index type ", dtype);
+      clamped_indices.push_back(at::clamp(*index, -sizes[i], sizes[i] - 1));
+    }
+  }
+  auto result = at::index(self, clamped_indices);
+  result.masked_fill_(at::logical_not(mask), other);
+  return result;
 }
 
 Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const bool accumulate) {

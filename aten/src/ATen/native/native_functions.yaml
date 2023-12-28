@@ -3034,8 +3034,9 @@
 # Used by inductor to generate masked loads
 # Note that we don't support boolean indexing, to avoid dynamic output shapes
 - func: _masked_index(Tensor self, Tensor mask, Tensor?[] indices, Scalar fill) -> Tensor
+  variants: function
   dispatch:
-    CPU, CUDA: _masked_index
+    CompositeExplicitAutograd: _masked_index
 
 - func: index_copy.out(Tensor self, int dim, Tensor index, Tensor source, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
