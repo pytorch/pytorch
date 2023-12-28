@@ -247,16 +247,6 @@ class TestOptim(TestCase):
         for _i in range(20):
             optimizer.step(fn)
 
-        # Make sure that loading optimizers with step not wrapped in tensor can work
-        state_dict = optimizer.state_dict()
-        if "step" in state_dict["state"][0] and torch.is_tensor(
-            state_dict["state"][0]["step"]
-        ):
-            for state in state_dict["state"].values():
-                state["step"] = state["step"].item()
-            optimizer.load_state_dict(state_dict)
-            optimizer.step()
-
         # Check that state dict can be loaded even when we cast parameters
         # to a different type and move to a different device.
         if not torch.cuda.is_available():

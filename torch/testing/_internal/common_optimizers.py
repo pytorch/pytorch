@@ -1325,6 +1325,20 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_can_load_older_state_dict",
             ),
+            DecorateInfo(
+                unittest.skip(
+                    "SparseAdam does not support dense gradients, see #116507"
+                ),
+                "TestOptimRenewed",
+                "test_load_nontensor_step",
+            ),
+            DecorateInfo(
+                unittest.skip(
+                    "SparseAdam does not support dense gradients, see #116507"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_with_casted_params",
+            ),
         ),
     ),
 ]
