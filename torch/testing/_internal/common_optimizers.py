@@ -825,6 +825,10 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
     trivial. That said, we sometimes want to test for all possible configs on an
     optimizer including all supported flags, so this helper returns all optim inputs.
     """
+    assert all(
+        x in ["foreach", "fused", "differentiable"] for x in skip
+    ), "skip must be a subset of ['foreach', 'fused', 'differentiable']"
+
     optim_inputs = optim_info.optim_inputs_func(device=device)
 
     # fused is currently not supported on CPU
@@ -845,6 +849,8 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
                 OptimizerInput(params=None, kwargs=base_kwargs, desc=optim_input.desc)
             )
         # Add a config for when each of the global cliquey kwargs is True
+        # Note that in [optimizer kwarg categories], these kwargs are mutually
+        # exclusive, so we do not need to product them together.
         for flag in supported_impls:
             new_kwargs = deepcopy(base_kwargs)
             new_kwargs[flag] = True
@@ -1038,7 +1044,7 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 toleranceOverride(
-                    {  # previously atol=1-05, rtol=1.3e-06,
+                    {
                         torch.float32: tol(atol=1.5e-5, rtol=1e-5),
                     }
                 ),
