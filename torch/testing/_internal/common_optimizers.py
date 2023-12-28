@@ -853,6 +853,8 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
             all_optim_inputs.append(
                 OptimizerInput(params=None, kwargs=base_kwargs, desc=optim_input.desc)
             )
+        else:
+            all_optim_inputs.append(optim_input)
         # Add a config for when each of the global cliquey kwargs is True
         # Note that in [optimizer kwarg categories], these kwargs are mutually
         # exclusive, so we do not need to product them together.
@@ -1230,7 +1232,6 @@ optim_db: List[OptimizerInfo] = [
             DecorateInfo(
                 skipIfMps,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
-                "test_step_is_noop_for_zero_grads",
             ),
         ),
     ),
