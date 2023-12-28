@@ -834,7 +834,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
             def forward(self, x):
                 return self.fc(self.embedding(x))
 
-        model = TestModule()
+        model = TestModule().to(self.device_type)
         parallelize_plan = {
             "embedding": ColwiseParallel(),
             "fc": RowwiseParallel(),
