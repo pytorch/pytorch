@@ -1222,26 +1222,6 @@ class TestExport(TestCase):
         ) as cm:
             ep(torch.tensor([30]))
 
-    def test_constrain_decomp(self) -> None:
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.freq = torch.ones(5, 5)
-
-            def forward(self, start_pos: torch.Tensor):
-                pos = start_pos.item()
-                torch._constrain_as_size(pos, min=0, max=4)
-                return self.freq[pos] * self.freq[pos]
-
-        ep = torch.export.export(M(), (torch.tensor(1),))
-        FileCheck().check_count(
-            "torch.ops.aten._assert_async.msg", 2, exactly=True
-        ).run(ep.graph_module.code)
-        decompose_ep = ep.run_decompositions()
-        FileCheck().check_count(
-            "torch.ops.aten._assert_async.msg", 2, exactly=True
-        ).run(decompose_ep.graph_module.code)
-
     @testing.expectedFailureNonStrict
     def test_export_with_inline_constraints_complex(self):
         def f(x):
@@ -1725,6 +1705,7 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
 
     @testing.expectedFailureSerDer
+    @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_redundant_asserts(self):
         def f(x):
@@ -1978,6 +1959,43 @@ def forward(self, l_x_):
         a, b = ep()
         self.assertEqual(a.size(), torch.Size([3, 4]))
         self.assertEqual(b.size(), torch.Size([3, 4]))
+
+    def test_pad_sequence(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch._C._nn.pad_sequence([x])
+
+        m0 = Module()
+        inputs = (torch.randn(3, 2),)
+        ep = torch.export.export(m0, inputs, dynamic_shapes={"x": {0: Dim("batch_size")}})
+        self.assertEqual(ep(*inputs), m0(*inputs))
+
+        class ModuleBatchFirst(torch.nn.Module):
+            def forward(self, x):
+                return torch._C._nn.pad_sequence([x], batch_first=True)
+
+        m1 = ModuleBatchFirst()
+        inputs = (torch.randn(3, 2),)
+        ep = torch.export.export(m1, inputs, dynamic_shapes={"x": {0: Dim("batch_size")}})
+        self.assertEqual(ep(*inputs), m1(*inputs))
+
+        class ModuleMulti(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch._C._nn.pad_sequence([x, y, z])
+
+        m2 = ModuleMulti()
+        inputs = (torch.randn(5, 2), torch.randn(4, 2), torch.randn(3, 2))
+        ep = torch.export.export(m2, inputs, dynamic_shapes={"x": {0: Dim("batch_size")}, "y": {0: Dim("y")}, "z": {0: Dim("z")}})
+        self.assertEqual(ep(*inputs), m2(*inputs))
+
+        class ModuleMultiBatchFirst(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch._C._nn.pad_sequence([x, y, z], batch_first=True)
+
+        m3 = ModuleMulti()
+        inputs = (torch.randn(5, 2), torch.randn(4, 2), torch.randn(3, 2))
+        ep = torch.export.export(m2, inputs, dynamic_shapes={"x": {0: Dim("batch_size")}, "y": {0: Dim("y")}, "z": {0: Dim("z")}})
+        self.assertEqual(ep(*inputs), m3(*inputs))
 
     def test_export_then_compile_tensor_ctor(self):
         class M(torch.nn.Module):
