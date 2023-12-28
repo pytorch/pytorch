@@ -1125,6 +1125,14 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/116499"
+                ),
+                "TestOptimRenewed",
+                "test_bc_for_state_dict",
+                device_type="cuda",
+            ),
         ),
     ),
     OptimizerInfo(

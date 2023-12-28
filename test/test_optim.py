@@ -448,6 +448,44 @@ class TestOptimRenewed(TestCase):
                 optimizer_c.state_dict()["param_groups"][-1]
             )
 
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_bc_for_state_dict(self, device, dtype, optim_info):
+        new_flags = ["maximize", "foreach", "fused", "differentiable", "capturable"]
+
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+        for optim_input in all_optim_inputs:
+            torch.manual_seed(1)
+            model = torch.nn.Sequential(
+                torch.nn.Conv2d(4, 2, 1, stride=2),
+                torch.nn.BatchNorm2d(2, eps=1e-05, momentum=0.1),
+            )
+            model.to(dtype=dtype, device=device)
+            input = torch.rand(1, 4, 16, 16, device=device, dtype=dtype)
+            optimizer = optim_cls(model.parameters(), **optim_input.kwargs)
+
+            for _ in range(3):
+                optimizer.zero_grad()
+                loss = model(input).sum()
+                loss.backward()
+                optimizer.step()
+
+            # bc_state_dict has all new flags del'd
+            bc_state_dict = deepcopy(optimizer.state_dict())
+            bc_state_dict_pg = bc_state_dict["param_groups"]
+            for group in bc_state_dict_pg:
+                for flag in new_flags:
+                    if flag in bc_state_dict_pg:
+                        del bc_state_dict_pg[flag]
+
+            optimizer.load_state_dict(bc_state_dict)
+
+            # Make sure we can still step
+            optimizer.zero_grad()
+            loss = model(input).sum()
+            loss.backward()
+            optimizer.step()
+
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 
