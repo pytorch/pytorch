@@ -45,9 +45,7 @@ class ItertoolsVariable(VariableTracker):
             and all(arg.has_unpack_var_sequence(tx) for arg in args)
         ):
             seqs = [arg.unpack_var_sequence(tx) for arg in args]
-            items = []
-            for item in itertools.chain(*seqs):
-                items.append(item)
+            items = list(itertools.chain.from_iterable(seqs))
             return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif self.value is itertools.accumulate:
             from .builtin import BuiltinVariable
