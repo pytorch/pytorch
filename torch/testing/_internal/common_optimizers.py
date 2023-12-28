@@ -828,7 +828,7 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
     optim_inputs = optim_info.optim_inputs_func(device=device)
 
     # fused is currently not supported on CPU
-    supported_impls = (
+    supported_impls = tuple(
         x
         for x in optim_info.supported_impls
         if x not in skip and not (str(device) == "cpu" and x == "fused")
