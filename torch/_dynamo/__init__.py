@@ -1,5 +1,5 @@
 import torch
-from . import allowed_functions, convert_frame, eval_frame, resume_execution
+from . import convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, lookup_backend, register_backend
 from .code_context import code_context
 from .convert_frame import replay
