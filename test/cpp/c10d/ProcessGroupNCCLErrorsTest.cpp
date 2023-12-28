@@ -8,7 +8,6 @@
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
 
