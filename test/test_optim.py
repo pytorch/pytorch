@@ -422,8 +422,8 @@ class TestOptimRenewed(TestCase):
 
             # Clone the weights and construct a new optimizer for them
             with torch.no_grad():
-                weight_c = Parameter(weight.clone().detach())
-                bias_c = Parameter(bias.clone().detach())
+                weight_c = Parameter(weight.clone())
+                bias_c = Parameter(bias.clone())
 
             optimizer_c = optim_cls([weight_c, bias_c], **optim_input.kwargs)
             closure_c = functools.partial(fwd_bwd, optimizer_c, weight_c, bias_c, input)
