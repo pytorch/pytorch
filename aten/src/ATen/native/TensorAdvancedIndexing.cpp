@@ -656,6 +656,14 @@ Tensor _unsafe_index(const Tensor& self, const torch::List<c10::optional<Tensor>
   return at::index(self, indices);
 }
 
+Tensor _masked_index(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Scalar& other) {
+  throw std::runtime_error("_masked_index is implemented only for inductor");
+}
+
+Tensor _masked_index(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Tensor& other) {
+  throw std::runtime_error("_masked_index is implemented only for inductor");
+}
+
 Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const bool accumulate) {
   // See note [Writing Nondeterministic Operations]
   // Nondeterministic when index contains duplicate entries and we do not accumulate
