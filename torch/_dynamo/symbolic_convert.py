@@ -1355,7 +1355,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
             unimplemented("missing: BUILD_SET")
         items = self.popn(inst.argval)
-        new_set = SetVariable(tx, items, mutable_local=MutableLocal())
+        new_set = SetVariable(self, items, mutable_local=MutableLocal())
         self.push(new_set)
 
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
