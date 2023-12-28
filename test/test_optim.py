@@ -464,11 +464,18 @@ class TestOptimRenewed(TestCase):
             input = torch.rand(1, 4, 16, 16, device=device, dtype=dtype)
             optimizer = optim_cls(model.parameters(), **optim_input.kwargs)
 
-            for _ in range(3):
-                optimizer.zero_grad()
-                loss = model(input).sum()
+            def fwd_bwd(optim, mod, i):
+                optim.zero_grad()
+                loss = mod(input).sum()
                 loss.backward()
-                optimizer.step()
+                return loss
+
+            for _ in range(3):
+                if optim_cls.__name__ == "LBFGS":
+                    optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
+                else:
+                    fwd_bwd(optimizer, model, input)
+                    optimizer.step()
 
             # old_state_dict has all new flags del'd
             old_state_dict = deepcopy(optimizer.state_dict())
@@ -481,10 +488,11 @@ class TestOptimRenewed(TestCase):
             optimizer.load_state_dict(old_state_dict)
 
             # Make sure we can still step
-            optimizer.zero_grad()
-            loss = model(input).sum()
-            loss.backward()
-            optimizer.step()
+            if optim_cls.__name__ == "LBFGS":
+                optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
+            else:
+                fwd_bwd(optimizer, model, input)
+                optimizer.step()
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
