@@ -189,6 +189,7 @@ class UnflattenedModule(torch.nn.Module):
         self.input_placeholders = [
             node for node in self.graph.nodes if node.op == "placeholder"
         ]
+        self.check_input_constraints = True
 
     def forward(self, *args, **kwargs):
         if is_fx_tracing():
@@ -227,13 +228,14 @@ class UnflattenedModule(torch.nn.Module):
                         f"Exported module: {signature.in_spec.num_leaves}"
                     )
 
-        # Import here to avoid an unfortunate circular dependency.
-        # TODO(suo): untangle this.
-        from torch._export.utils import _check_input_constraints_for_graph
+        if self.check_input_constraints:
+            # Import here to avoid an unfortunate circular dependency.
+            # TODO(suo): untangle this.
+            from torch._export.utils import _check_input_constraints_for_graph
 
-        _check_input_constraints_for_graph(
-            self.input_placeholders, flat_args, self.range_constraints
-        )
+            _check_input_constraints_for_graph(
+                self.input_placeholders, flat_args, self.range_constraints
+            )
         tree_out = torch.fx.Interpreter(self, graph=self.graph).run(
             *flat_args, enable_io_processing=False
         )
@@ -460,7 +462,7 @@ class _ModuleFrame:
 
         signature = module_call_graph.get(self.fqn)
         if signature is not None and self.parent is not None:
-            assert len(signature.in_spec.children_specs) == 2
+            assert signature.in_spec.num_children == 2
             args_spec = signature.in_spec.children_specs[0]
             kwargs_spec = signature.in_spec.children_specs[1]
             assert args_spec.context is None
@@ -468,7 +470,7 @@ class _ModuleFrame:
 
             with self.graph.inserting_after(None):
                 arg_nodes = []
-                for idx in range(len(args_spec.children_specs)):
+                for idx in range(args_spec.num_children):
                     arg_nodes.append(self.graph.placeholder(f"_positional_arg_{idx}"))
                 kwarg_nodes = {}
                 for name in kwargs_spec.context:
@@ -517,7 +519,7 @@ class _ModuleFrame:
                 )
                 arg_nodes = [
                     self.parent.graph.call_function(operator.getitem, (args_node, i))
-                    for i in range(len(args_spec.children_specs))
+                    for i in range(args_spec.num_children)
                 ]
                 kwarg_nodes = {
                     k: self.parent.graph.call_function(
