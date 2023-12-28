@@ -229,6 +229,8 @@ def convert_pt2e(
 
     """  # flake8: noqa
     torch._C._log_api_usage_once("quantization_api.quantize_pt2e.convert_pt2e")
+    if not isinstance(use_reference_representation, bool):
+        raise ValueError(f"Unexpected argument type for `use_reference_representation`, please make sure you intend to pass argument {use_reference_representation} to convert_pt2e")
     original_graph_meta = model.meta
     model = _convert_to_reference_decomposed_fx(model)
     model = _fold_conv_bn_qat(model)

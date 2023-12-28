@@ -207,6 +207,12 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 tuple(dq_inputs),
                 {}
             )
+            remap_fn = lambda x: dequantized_node if x is node else x
+            # remap numeric_debug_handle
+            for user_node in node.users:
+                if "numeric_debug_handle" in user_node.meta:
+                    numeric_debug_handle = user_node.meta["numeric_debug_handle"]
+                    user_node.meta["numeric_debug_handle"] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
             node.replace_all_uses_with(dequantized_node)
             graph.erase_node(node)
     elif is_dynamic:
@@ -306,6 +312,12 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 tuple(dq_inputs),
                 {}
             )
+            remap_fn = lambda x: dequantized_node if x is node else x
+            # remap numeric_debug_handle
+            for user_node in node.users:
+                if "numeric_debug_handle" in user_node.meta:
+                    numeric_debug_handle = user_node.meta["numeric_debug_handle"]
+                    user_node.meta["numeric_debug_handle"] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
             node.replace_all_uses_with(dequantized_node)
             graph.erase_node(node)
     elif dtype == torch.float16:
