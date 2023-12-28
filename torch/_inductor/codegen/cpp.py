@@ -1508,9 +1508,10 @@ class CppKernel(Kernel):
 
             def get_reduction_code_buffer(loops, is_suffix=True):
                 for loop in loops:
-                    for kernel in loop.get_kernels():
-                        if loop.parallel:
+                    if loop.parallel:
+                        for kernel in loop.get_kernels():
                             kernel.parallel_prefix_suffix_used = True
+                for loop in loops:
                     for kernel in loop.get_kernels():
                         if is_suffix:
                             suffix = (
