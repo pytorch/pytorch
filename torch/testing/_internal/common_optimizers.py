@@ -1215,7 +1215,7 @@ optim_db: List[OptimizerInfo] = [
                     "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
                 ),
                 "TestOptimRenewed",
-                "test_step_is_noop_for_empty_grads",
+                "test_step_is_noop_for_zero_grads",
                 device_type="cpu",
             ),
         ),
@@ -1230,7 +1230,7 @@ optim_db: List[OptimizerInfo] = [
             DecorateInfo(
                 skipIfMps,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
-                "test_step_is_noop_for_empty_grads",
+                "test_step_is_noop_for_zero_grads",
             ),
         ),
     ),
