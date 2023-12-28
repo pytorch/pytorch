@@ -232,9 +232,10 @@ def convert_pt2e(
     original_graph_meta = model.meta
     model = _convert_to_reference_decomposed_fx(model)
     model = _fold_conv_bn_qat(model)
-    pm = PassManager([DuplicateDQPass()])
 
+    pm = PassManager([DuplicateDQPass()])
     model = pm(model).graph_module
+
     pm = PassManager([PortNodeMetaForQDQ()])
     model = pm(model).graph_module
 
