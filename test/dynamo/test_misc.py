@@ -7606,6 +7606,22 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 9)
 
+    def test_dynamic_one_hot(self):
+        def fn(x):
+            x = x + 1
+            # graph break from data-dependent output shape
+            x = torch.nn.functional.one_hot(x)
+            x = x + 1
+            return x
+
+        inp = torch.arange(20) % 4
+        counter = CompileCounter()
+        real_out = fn(inp)
+        comp_out = torch.compile(fn, backend=counter)(inp)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(counter.op_count, 2)
+
     def test_tracing_nested_py_tree_mixed_all(self):
         import torch.utils._pytree as pytree
 

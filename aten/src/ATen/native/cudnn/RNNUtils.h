@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
