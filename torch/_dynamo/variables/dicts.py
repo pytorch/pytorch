@@ -256,6 +256,7 @@ class ConstDictVariable(VariableTracker):
         from .builder import VariableBuilder
 
         if is_valid_global_ref_key(key):
+            tx.store_global_weakref(global_key_name(key), key)
             return VariableBuilder(tx, GlobalWeakRefSource(global_key_name(key)))(key)
         else:
             assert ConstantVariable.is_literal(key)
@@ -266,7 +267,7 @@ def is_valid_global_ref_key(key):
     if istensor(key):
         return True
     else:
-        return isinstance(key, (torch.nn.Module, tuple))
+        return isinstance(key, torch.nn.Module)
 
 
 class DefaultDictVariable(ConstDictVariable):
