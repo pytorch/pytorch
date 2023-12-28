@@ -2251,7 +2251,7 @@ def _avg_poolnd(
             x,
             [
                 *[None] * len(batch),
-                *[out_indices[i] for i in range(dim)],
+                *[out_indices[i].clamp(min=0, max=dhw[i]-1) for i in range(dim)],
             ],
         )
         cond = get_cond([0] * dim)
