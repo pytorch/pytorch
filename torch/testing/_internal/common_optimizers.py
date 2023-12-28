@@ -190,6 +190,43 @@ class optims(_TestParametrizer):
                 raise ex
 
 
+# Helper function for generating error inputs for all optimizers, used below.
+def get_error_inputs_for_all_optims(device, dtype):
+    if str(device) == "cpu":
+        sample_param = Parameter(torch.randn(1, device=device, dtype=dtype))
+        return [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=sample_param,
+                    kwargs={},
+                    desc="invalid param type",
+                ),
+                error_type=TypeError,
+                error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[sample_param, sample_param],
+                    kwargs={},
+                    desc="a param group cannot have duplicate parameters",
+                ),
+                error_type=UserWarning,
+                error_regex=".*a parameter group with duplicate parameters.*",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[{"params": sample_param}, {"params": sample_param}],
+                    kwargs={},
+                    desc="duplicate parameters should not occur across param groups either",
+                ),
+                error_type=ValueError,
+                error_regex="some parameters appear in more than one parameter group",
+            ),
+        ]
+    else:
+        return []
+
+
 # ------------------------------------------------------------------------------------------
 # NOTE: [optimizer kwarg categories]
 # We categorize optimizer kwargs as 3 types:
@@ -237,26 +274,20 @@ def optim_inputs_func_adadelta(device=None):
 
 
 def optim_error_inputs_func_adadelta(device, dtype):
-    return [
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, rho=1.1),
-                desc="rho should be between 0 and 1",
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if str(device) == "cpu":
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, rho=1.1),
+                    desc="rho should be between 0 and 1",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid rho value: 1.1",
             ),
-            error_type=ValueError,
-            error_regex="Invalid rho value: 1.1",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=Parameter(torch.randn(1, device=device, dtype=dtype)),
-                kwargs={},
-                desc="invalid param type",
-            ),
-            error_type=TypeError,
-            error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
+        ]
+    return error_inputs
 
 
 def optim_inputs_func_adagrad(device=None):
@@ -284,26 +315,20 @@ def optim_inputs_func_adagrad(device=None):
 
 
 def optim_error_inputs_func_adagrad(device, dtype):
-    return [
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, lr_decay=-0.5),
-                desc="lr_decay must be bigger than 0",
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if str(device) == "cpu":
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, lr_decay=-0.5),
+                    desc="lr_decay must be bigger than 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid lr_decay value: -0.5",
             ),
-            error_type=ValueError,
-            error_regex="Invalid lr_decay value: -0.5",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=Parameter(torch.randn(1, device=device, dtype=dtype)),
-                kwargs={},
-                desc="invalid param type",
-            ),
-            error_type=TypeError,
-            error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
+        ]
+    return error_inputs
 
 
 # TODO: consider tensor LR! See multi_tensor_optimizer_configs in test_optim.py --> tensor LR should work
@@ -341,44 +366,60 @@ def optim_inputs_func_adam(device=None):
 
 
 def optim_error_inputs_func_adam(device, dtype):
-    return [
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, betas=(1.0, 0.0)),
-                desc="beta1 should be between 0 and 1",
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if str(device) == "cpu":
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, betas=(1.0, 0.0)),
+                    desc="beta1 should be between 0 and 1",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid beta parameter at index 0: 1.0",
             ),
-            error_type=ValueError,
-            error_regex="Invalid beta parameter at index 0: 1.0",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, weight_decay=-1),
-                desc="weight_decay should > 0",
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, weight_decay=-1),
+                    desc="weight_decay should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid weight_decay value: -1",
             ),
-            error_type=ValueError,
-            error_regex="Invalid weight_decay value: -1",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=torch.tensor(0.001), foreach=True),
-                desc="lr as Tensor doesn't work with foreach & not capturable",
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=torch.tensor(0.001), foreach=True),
+                    desc="lr as Tensor doesn't work with foreach & not capturable",
+                ),
+                error_type=ValueError,
+                error_regex="lr as a Tensor is not supported for capturable=False and foreach=True",
             ),
-            error_type=ValueError,
-            error_regex="lr as a Tensor is not supported for capturable=False and foreach=True",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=Parameter(torch.randn(1, device=device, dtype=dtype)),
-                kwargs={},
-                desc="invalid param type",
+        ]
+    if str(device) == "cuda":
+        sample_tensor = torch.empty((), device=device, dtype=dtype)
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[sample_tensor],
+                    kwargs={"foreach": True, "fused": True},
+                    desc="`fused` and `foreach` cannot be `True` together",
+                ),
+                error_type=RuntimeError,
+                error_regex="`fused` and `foreach` cannot be `True` together",
             ),
-            error_type=TypeError,
-            error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[sample_tensor],
+                    kwargs={"fused": True, "differentiable": True},
+                    desc="`fused` does not support `differentiable`",
+                ),
+                error_type=RuntimeError,
+                error_regex="`fused` does not support `differentiable`",
+            ),
+        ]
+    return error_inputs
 
 
 def optim_inputs_func_adamax(device=None):
@@ -397,26 +438,20 @@ def optim_inputs_func_adamax(device=None):
 
 
 def optim_error_inputs_func_adamax(device, dtype):
-    return [
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, betas=(0.0, 1.0)),
-                desc="beta2 should be between 0 and 1",
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if str(device) == "cpu":
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, betas=(0.0, 1.0)),
+                    desc="beta2 should be between 0 and 1",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid beta parameter at index 1: 1.0",
             ),
-            error_type=ValueError,
-            error_regex="Invalid beta parameter at index 1: 1.0",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=Parameter(torch.randn(1, device=device, dtype=dtype)),
-                kwargs={},
-                desc="invalid param type",
-            ),
-            error_type=TypeError,
-            error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
+        ]
+    return error_inputs
 
 
 def optim_inputs_func_adamw(device=None):
@@ -444,26 +479,20 @@ def optim_inputs_func_asgd(device=None):
 
 
 def optim_error_inputs_func_asgd(device, dtype):
-    return [
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, weight_decay=-0.5),
-                desc="weight_decay should > 0",
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if str(device) == "cpu":
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, weight_decay=-0.5),
+                    desc="weight_decay should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid weight_decay value: -0.5",
             ),
-            error_type=ValueError,
-            error_regex="Invalid weight_decay value: -0.5",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=Parameter(torch.randn(1, device=device, dtype=dtype)),
-                kwargs={},
-                desc="invalid param type",
-            ),
-            error_type=TypeError,
-            error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
+        ]
+    return error_inputs
 
 
 def optim_inputs_func_lbfgs(device=None):
@@ -482,17 +511,7 @@ def optim_inputs_func_lbfgs(device=None):
 
 
 def optim_error_inputs_func_lbfgs(device, dtype):
-    return [
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=Parameter(torch.randn(1, device=device, dtype=dtype)),
-                kwargs={},
-                desc="invalid param type",
-            ),
-            error_type=TypeError,
-            error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
+    return get_error_inputs_for_all_optims(device, dtype)
 
 
 # Weird story bro, NAdam and RAdam do not have maximize.
@@ -526,35 +545,29 @@ def optim_inputs_func_nadam(device=None):
 
 
 def optim_error_inputs_func_nadam(device, dtype):
-    return [
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, betas=(1.0, 0.0)),
-                desc="beta1 should be between 0 and 1",
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if str(device) == "cpu":
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, betas=(1.0, 0.0)),
+                    desc="beta1 should be between 0 and 1",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid beta parameter at index 0: 1.0",
             ),
-            error_type=ValueError,
-            error_regex="Invalid beta parameter at index 0: 1.0",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, momentum_decay=-0.2),
-                desc="momentum_decay should > 0",
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, momentum_decay=-0.2),
+                    desc="momentum_decay should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid momentum_decay value: -0.2",
             ),
-            error_type=ValueError,
-            error_regex="Invalid momentum_decay value: -0.2",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=Parameter(torch.randn(1, device=device, dtype=dtype)),
-                kwargs={},
-                desc="invalid param type",
-            ),
-            error_type=TypeError,
-            error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
+        ]
+    return error_inputs
 
 
 # Weird story bro, NAdam and RAdam do not have maximize.
@@ -575,35 +588,29 @@ def optim_inputs_func_radam(device=None):
 
 
 def optim_error_inputs_func_radam(device, dtype):
-    return [
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, betas=(1.0, 0.0)),
-                desc="beta1 should be between 0 and 1",
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if str(device) == "cpu":
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, betas=(1.0, 0.0)),
+                    desc="beta1 should be between 0 and 1",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid beta parameter at index 0: 1.0",
             ),
-            error_type=ValueError,
-            error_regex="Invalid beta parameter at index 0: 1.0",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, weight_decay=-1),
-                desc="weight_decay should > 0",
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, weight_decay=-1),
+                    desc="weight_decay should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid weight_decay value: -1",
             ),
-            error_type=ValueError,
-            error_regex="Invalid weight_decay value: -1",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=Parameter(torch.randn(1, device=device, dtype=dtype)),
-                kwargs={},
-                desc="invalid param type",
-            ),
-            error_type=TypeError,
-            error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
+        ]
+    return error_inputs
 
 
 def optim_inputs_func_rmsprop(device=None):
@@ -637,26 +644,20 @@ def optim_inputs_func_rmsprop(device=None):
 
 
 def optim_error_inputs_func_rmsprop(device, dtype):
-    return [
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, momentum=-1.0),
-                desc="momentum should be between 0 and 1",
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if str(device) == "cpu":
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, momentum=-1.0),
+                    desc="momentum should be between 0 and 1",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid momentum value: -1.0",
             ),
-            error_type=ValueError,
-            error_regex="Invalid momentum value: -1.0",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=Parameter(torch.randn(1, device=device, dtype=dtype)),
-                kwargs={},
-                desc="invalid param type",
-            ),
-            error_type=TypeError,
-            error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
+        ]
+    return error_inputs
 
 
 def optim_inputs_func_rprop(device=None):
@@ -676,26 +677,20 @@ def optim_inputs_func_rprop(device=None):
 
 
 def optim_error_inputs_func_rprop(device, dtype):
-    return [
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, etas=(1.0, 0.5)),
-                desc="0 < eta1 < 1 < eta2",
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if str(device) == "cpu":
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, etas=(1.0, 0.5)),
+                    desc="0 < eta1 < 1 < eta2",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid eta values: 1.0, 0.5",
             ),
-            error_type=ValueError,
-            error_regex="Invalid eta values: 1.0, 0.5",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=Parameter(torch.randn(1, device=device, dtype=dtype)),
-                kwargs={},
-                desc="invalid param type",
-            ),
-            error_type=TypeError,
-            error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
+        ]
+    return error_inputs
 
 
 def optim_inputs_func_sgd(device=None):
@@ -728,26 +723,20 @@ def optim_inputs_func_sgd(device=None):
 
 
 def optim_error_inputs_func_sgd(device, dtype):
-    return [
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, momentum=-0.5),
-                desc="momentum should be between 0 and 1",
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if str(device) == "cpu":
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, momentum=-0.5),
+                    desc="momentum should be between 0 and 1",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid momentum value: -0.5",
             ),
-            error_type=ValueError,
-            error_regex="Invalid momentum value: -0.5",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=Parameter(torch.randn(1, device=device, dtype=dtype)),
-                kwargs={},
-                desc="invalid param type",
-            ),
-            error_type=TypeError,
-            error_regex="params argument given to the optimizer should be an iterable of Tensors or dicts",
-        ),
-    ]
+        ]
+    return error_inputs
 
 
 def optim_inputs_func_sparseadam(device=None):
@@ -761,45 +750,61 @@ def optim_inputs_func_sparseadam(device=None):
 
 
 def optim_error_inputs_func_sparseadam(device, dtype):
-    return [
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=None,
-                kwargs=dict(lr=1e-2, betas=(1.0, 0.0)),
-                desc="beta1 should be between 0 and 1",
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+
+    if str(device) == "cpu":
+        # SparseAdam raises a warning and not an error for the first entry. We
+        # update it here:
+        error_inputs[0].error_type = FutureWarning
+        error_inputs[
+            0
+        ].error_regex = "Passing in a raw Tensor as ``params`` to SparseAdam"
+
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, betas=(1.0, 0.0)),
+                    desc="beta1 should be between 0 and 1",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid beta parameter at index 0: 1.0",
             ),
-            error_type=ValueError,
-            error_regex="Invalid beta parameter at index 0: 1.0",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=[
-                    torch.zeros(3, layout=torch.sparse_coo, device=device, dtype=dtype)
-                ],
-                kwargs={},
-                desc="dense params required",
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[
+                        torch.zeros(
+                            3, layout=torch.sparse_coo, device=device, dtype=dtype
+                        )
+                    ],
+                    kwargs={},
+                    desc="dense params required",
+                ),
+                error_type=ValueError,
+                error_regex="SparseAdam requires dense parameter tensors",
             ),
-            error_type=ValueError,
-            error_regex="SparseAdam requires dense parameter tensors",
-        ),
-        ErrorOptimizerInput(
-            OptimizerInput(
-                params=[
-                    {
-                        "params": [
-                            torch.zeros(
-                                3, layout=torch.sparse_coo, device=device, dtype=dtype
-                            )
-                        ]
-                    }
-                ],
-                kwargs={},
-                desc="dense params required in param_groups",
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=[
+                        {
+                            "params": [
+                                torch.zeros(
+                                    3,
+                                    layout=torch.sparse_coo,
+                                    device=device,
+                                    dtype=dtype,
+                                )
+                            ]
+                        }
+                    ],
+                    kwargs={},
+                    desc="dense params required in param_groups",
+                ),
+                error_type=ValueError,
+                error_regex="SparseAdam requires dense parameter tensors",
             ),
-            error_type=ValueError,
-            error_regex="SparseAdam requires dense parameter tensors",
-        ),
-    ]
+        ]
+    return error_inputs
 
 
 # Database of OptimizerInfo entries in alphabetical order.
