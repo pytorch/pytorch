@@ -475,7 +475,6 @@ static Tensor _fw_primal(
     func = [=](const at::Tensor& input_base) {
       return input_base.view(size_vec);
     };
-    // TODO: Is this correct?
     rev_func = [=](const at::Tensor& input_view) {
       return input_view.view(size_vec);
     };
@@ -509,7 +508,6 @@ static Tensor _make_dual(
     func = [=](const at::Tensor& input_base) {
       return input_base.view(size_vec);
     };
-    // TODO: Is this correct?
     rev_func = [=](const at::Tensor& input_view) {
       return input_view.view(size_vec);
     };
