@@ -78,6 +78,21 @@ ignored_c_binding_in_graph_function_names = {
     "torch._C._swap_tensor_impl",
     "torch._C._unsafe_reset_storage",
     "torch._dynamo.eval_frame.reset_code",
+    "torch._C.autocast_decrement_nesting",
+    "torch._C.autocast_increment_nesting",
+    "torch._C.clear_autocast_cache",
+    "torch._C.set_anomaly_enabled",
+    "torch._C.set_autocast_cache_enabled",
+    "torch._C.set_autocast_cpu_dtype",
+    "torch._C.set_autocast_cpu_enabled",
+    "torch._C.set_autocast_enabled",
+    "torch._C.set_autocast_gpu_dtype",
+    "torch._C.set_autocast_ipu_dtype",
+    "torch._C.set_autocast_ipu_enabled",
+    "torch._C.set_autocast_xla_dtype",
+    "torch._C.set_autocast_xla_enabled",
+    "torch.resize_as_",
+    "torch.resize_as_sparse_",
 }
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {
