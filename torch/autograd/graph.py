@@ -659,7 +659,7 @@ def _register_logging_hooks_on_whole_graph(t_outputs: List[torch.Tensor]):
 
     def prehook(grad_output):
         node = torch._C._current_autograd_node()
-        log_str = f"Executing: {node} with grad_output: {grad_output}"
+        log_str = f"Executing: {node}"
         log.info(log_str)
 
     handles = []
