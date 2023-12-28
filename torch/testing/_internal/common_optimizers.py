@@ -2,6 +2,7 @@ import functools
 import itertools
 import math
 import unittest
+from copy import deepcopy
 from enum import Enum
 from typing import Any, Dict, List, Tuple, Union
 
@@ -33,6 +34,10 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
 )
+from torch.utils._foreach_utils import (
+    _get_foreach_kernels_supported_devices,
+    _get_fused_kernels_supported_devices,
+)
 
 
 class OptimizerInput:
@@ -50,6 +55,9 @@ class OptimizerInput:
         self.params = params
         self.kwargs = kwargs
         self.desc = desc
+
+    def __repr__(self):
+        return f"params={self.params}, kwargs={self.kwargs}, desc={self.desc}"
 
 
 class OptimizerErrorEnum(Enum):
@@ -807,6 +815,60 @@ def optim_error_inputs_func_sparseadam(device, dtype):
     return error_inputs
 
 
+def _get_optim_inputs_including_global_cliquey_kwargs(
+    device, dtype, optim_info, skip=()
+) -> List[OptimizerInput]:
+    """
+    Return a list of all configs for a given optimizer as a list of OptimizerInputs,
+    including configs that have supported global cliquey kwargs (foreach, fused,
+    differentiable) based on optim_info.supported_impls.
+
+    The configs (optim_inputs) returned by optim_info.optim_inputs_func(...)
+    intentionally do NOT include global cliquey kwargs to give flexibility to tests.
+    For example, testing correctness between toggling foreach on and off is now
+    trivial. That said, we sometimes want to test for all possible configs on an
+    optimizer including all supported flags, so this helper returns all optim inputs.
+    """
+    assert all(
+        x in ["foreach", "fused", "differentiable"] for x in skip
+    ), "skip must be a subset of ['foreach', 'fused', 'differentiable']"
+
+    optim_inputs = optim_info.optim_inputs_func(device=device)
+
+    supported_impls = tuple(
+        x
+        for x in optim_info.supported_impls
+        if x not in skip
+        and (str(device) in _get_fused_kernels_supported_devices() or x != "fused")
+        and (str(device) in _get_foreach_kernels_supported_devices() or x != "foreach")
+    )
+
+    all_optim_inputs = []
+    for optim_input in optim_inputs:
+        # Add the base config where all the flags are False
+        base_kwargs = deepcopy(optim_input.kwargs)
+        if len(supported_impls) != 0:
+            for flag in supported_impls:
+                base_kwargs[flag] = False
+            all_optim_inputs.append(
+                OptimizerInput(params=None, kwargs=base_kwargs, desc=optim_input.desc)
+            )
+        else:
+            all_optim_inputs.append(optim_input)
+        # Add a config for when each of the global cliquey kwargs is True
+        # Note that in [optimizer kwarg categories], these kwargs are mutually
+        # exclusive, so we do not need to product them together.
+        for flag in supported_impls:
+            new_kwargs = deepcopy(base_kwargs)
+            new_kwargs[flag] = True
+            all_optim_inputs.append(
+                OptimizerInput(
+                    params=None, kwargs=new_kwargs, desc=f"{optim_input.desc} & {flag}"
+                )
+            )
+    return all_optim_inputs
+
+
 # Database of OptimizerInfo entries in alphabetical order.
 optim_db: List[OptimizerInfo] = [
     OptimizerInfo(
@@ -987,6 +1049,15 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=1.5e-5, rtol=1e-5),
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_step_is_noop_for_zero_grads",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1146,7 +1217,7 @@ optim_db: List[OptimizerInfo] = [
                     "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
                 ),
                 "TestOptimRenewed",
-                "test_step_is_noop_for_empty_grads",
+                "test_step_is_noop_for_zero_grads",
                 device_type="cpu",
             ),
         ),
@@ -1161,7 +1232,6 @@ optim_db: List[OptimizerInfo] = [
             DecorateInfo(
                 skipIfMps,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
-                "test_step_is_noop_for_empty_grads",
             ),
         ),
     ),
