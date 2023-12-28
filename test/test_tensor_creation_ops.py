@@ -1460,7 +1460,7 @@ class TestTensorCreation(TestCase):
 
         # test single input
         prod = torch.cartesian_prod(b)
-        self.assertEqual(b, prod)
+        self.assertEqual(b.unsqueeze(-1), prod)
 
     def test_combinations(self, device):
         a = torch.tensor([1, 2, 3], device=device)
