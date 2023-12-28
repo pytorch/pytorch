@@ -11,6 +11,8 @@ import torch
 from . import MP_STATUS_CHECK_INTERVAL
 from torch._utils import ExceptionWrapper
 
+from inspect import signature
+
 
 def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
     # This setting is thread local, and prevents the copy in pin_memory from
@@ -74,6 +76,9 @@ def pin_memory(data, device=None):
             # The sequence type may not support `__init__(iterable)` (e.g., `range`).
             return [pin_memory(sample, device) for sample in data]
     elif hasattr(data, "pin_memory"):
-        return data.pin_memory(device)
+        params = signature(data.pin_memory).parameters
+        if len(params)>0 and "device" in params:
+            return data.pin_memory(device)
+        return data.pin_memory()
     else:
         return data
