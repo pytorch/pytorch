@@ -403,7 +403,7 @@ class TestOptimRenewed(TestCase):
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
         weight = Parameter(torch.randn(2, 3, requires_grad=True, device=device, dtype=dtype))
         bias = Parameter(torch.randn(2, requires_grad=True, device=device, dtype=dtype))
-        input = Parameter(torch.randn(3, requires_grad=True, device=device, dtype=dtype))
+        input = torch.randn(3, requires_grad=True, device=device, dtype=dtype)
         params = [weight, bias]
 
         def fwd_bwd(optim, w, b, i):

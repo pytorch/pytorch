@@ -892,13 +892,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
             ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
-            ),
         ),
     ),
     OptimizerInfo(
