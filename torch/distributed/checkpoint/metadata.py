@@ -12,19 +12,23 @@ __all__ = [
     "Metadata",
     "MetadataIndex",
     "MEM_FORMAT_ENCODING",
-    "TensorProperties"
+    "TensorProperties",
 ]
 
 
 @dataclass
 class ChunkStorageMetadata:
-    """Each chunk is expected to have the same properties of the TensorStorageMetadata that includes it."""
+    """
+    Each chunk is expected to have the same properties of the TensorStorageMetadata
+    that includes it.
+    """
 
     offsets: torch.Size
     sizes: torch.Size
 
 
 class MEM_FORMAT_ENCODING(Enum):
+    """Describe the memory format of a tensor"""
     TORCH_CONTIGUOUS_FORMAT = 0
     TORCH_CHANNELS_LAST = 1
     TORCH_PRESERVE_FORMAT = 2
@@ -35,7 +39,7 @@ class TensorProperties:
     """Properties used to create :class:`Tensor`"""
 
     # Regular tensor fields
-    dtype: torch.dtype = field(default=torch.get_default_dtype())
+    dtype: torch.dtype = field(default_factory=torch.get_default_dtype)
     layout: torch.layout = field(default=torch.strided)
     requires_grad: bool = False
     memory_format: torch.memory_format = field(default=torch.contiguous_format)
