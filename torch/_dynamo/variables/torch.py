@@ -20,7 +20,6 @@ import torch.nn
 import torch.onnx.operators
 
 from .. import config, polyfill, variables
-from ..allowed_functions import torch_get_name
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -105,9 +104,12 @@ class BaseTorchVariable(VariableTracker):
         self.value = value
 
     def reconstruct(self, codegen):
-        name = torch_get_name(value, f"allowed_fn_{id(value)}")
+        try:
+            name = f"{self.value.__module__}.{self.value.__name__}"
+        except Exception:
+            name = f"torch_obj_{id(self.value)}"
         unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
-        return codegen.setup_globally_cached(unique_var_name, value, False)
+        return codegen.setup_globally_cached(unique_var_name, self.value, False)
 
     def as_proxy(self):
         return self.value
@@ -485,6 +487,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             and kwargs.get("layout", torch.strided) == torch.strided
         ):
             raise unimplemented("torch.compile does not support strided NestedTensor")
+        elif self.value is torch.nn.functional.one_hot and (
+            len(args) + len(kwargs) == 1
+            or (
+                len(args) == 2
+                and args[1].is_python_constant()
+                and args[1].as_python_constant() == -1
+            )
+        ):
+            raise unimplemented(
+                "torch.nn.functional.one_hot with data-dependent output shape"
+            )
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(

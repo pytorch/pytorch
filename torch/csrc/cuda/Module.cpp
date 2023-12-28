@@ -1285,8 +1285,6 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
     }
   };
 
-  set_module_attr("has_magma", at::hasMAGMA() ? Py_True : Py_False);
-
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for (const auto i : c10::irange(num_gpus)) {

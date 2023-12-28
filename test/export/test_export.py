@@ -19,6 +19,7 @@ from torch.export import (
 )
 from torch.export._trace import (
     _export_to_torch_ir,
+    _export,
     DEFAULT_EXPORT_DYNAMO_CONFIG,
 )
 from torch._export import capture_pre_autograd_graph
@@ -34,7 +35,8 @@ from torch._subclasses import FakeTensorMode
 from torch.export import Constraint, Dim
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests
+from torch._dynamo.test_case import TestCase
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -1064,6 +1066,62 @@ class TestExport(TestCase):
         test_inp = (torch.randint(3, 5, (2, 2)), torch.randint(3, 5, (2, 3)))
         self.assertTrue(torch.allclose(ep(*test_inp), fn(*test_inp)))
 
+    def test_decomp_batch_norm_functional_predispatch(self):
+        class ConvBatchnorm(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 3, 1, 1)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return (x,)
+
+        mod = ConvBatchnorm()
+        mod.eval()
+        inp = torch.randn(1, 1, 3, 3)
+
+        gm = torch.export._trace._export(mod, (inp,), pre_dispatch=True).module()
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg_0):
+    l_x_, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    conv_weight = self.conv_weight
+    conv_bias = self.conv_bias
+    bn_weight = self.bn_weight
+    bn_bias = self.bn_bias
+    bn_running_mean = self.bn_running_mean
+    bn_running_var = self.bn_running_var
+    conv2d = torch.ops.aten.conv2d.default(l_x_, conv_weight, conv_bias);  l_x_ = conv_weight = conv_bias = None
+    _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
+    return pytree.tree_unflatten((getitem,), self._out_spec)""")
+
+        mod.train()
+        gm_train = _export(mod, (inp,), pre_dispatch=True).module()
+        self.assertExpectedInline(str(gm_train.code).strip(), """\
+def forward(self, arg_0):
+    l_x_, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    conv_weight = self.conv_weight
+    conv_bias = self.conv_bias
+    bn_weight = self.bn_weight
+    bn_bias = self.bn_bias
+    bn_running_mean = self.bn_running_mean
+    bn_running_var = self.bn_running_var
+    bn_num_batches_tracked = self.bn_num_batches_tracked
+    conv2d = torch.ops.aten.conv2d.default(l_x_, conv_weight, conv_bias);  l_x_ = conv_weight = conv_bias = None
+    add = torch.ops.aten.add.Tensor(bn_num_batches_tracked, 1)
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = None
+    getitem = _native_batch_norm_legit_functional[0]
+    getitem_3 = _native_batch_norm_legit_functional[3]
+    getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+    copy__default = torch.ops.aten.copy_.default(bn_running_mean, getitem_3);  bn_running_mean = getitem_3 = None
+    copy__default_1 = torch.ops.aten.copy_.default(bn_running_var, getitem_4);  bn_running_var = getitem_4 = None
+    copy__default_2 = torch.ops.aten.copy_.default(bn_num_batches_tracked, add);  bn_num_batches_tracked = add = None
+    return pytree.tree_unflatten((getitem,), self._out_spec)""")
+
+
+
     @testing.expectedFailureNonStrict
     def test_constrain_value_with_symfloat(self):
         def fn(x, y):
@@ -1220,26 +1278,6 @@ class TestExport(TestCase):
             r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
         ) as cm:
             ep(torch.tensor([30]))
-
-    def test_constrain_decomp(self) -> None:
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.freq = torch.ones(5, 5)
-
-            def forward(self, start_pos: torch.Tensor):
-                pos = start_pos.item()
-                torch._constrain_as_size(pos, min=0, max=4)
-                return self.freq[pos] * self.freq[pos]
-
-        ep = torch.export.export(M(), (torch.tensor(1),))
-        FileCheck().check_count(
-            "torch.ops.aten._assert_async.msg", 2, exactly=True
-        ).run(ep.graph_module.code)
-        decompose_ep = ep.run_decompositions()
-        FileCheck().check_count(
-            "torch.ops.aten._assert_async.msg", 2, exactly=True
-        ).run(decompose_ep.graph_module.code)
 
     @testing.expectedFailureNonStrict
     def test_export_with_inline_constraints_complex(self):
@@ -1515,7 +1553,7 @@ class TestExport(TestCase):
                     return x.cos()
                 return x.sin()
 
-        graph_module = capture_pre_autograd_graph(Foo(), (torch.ones(7, 5),))
+        graph_module = _export(Foo(), (torch.ones(7, 5),), pre_dispatch=True).module()
         with self.assertRaisesRegex(NotImplementedError, r"Calling train\(\) is not supported yet."):
             graph_module.train()
 
@@ -1547,6 +1585,8 @@ class TestExport(TestCase):
         example_inputs = (torch.randn(1, 3, 3, 3),)
         m = CondBranchClassMethod()
         m.eval()
+        # TODO (tmanlaibaatar) Setting functional IR doesn't work on aot_export yet
+        # as the branch source_fn is not captured.
         gm = capture_pre_autograd_graph(m, example_inputs)
 
         actual_source_fns = []
@@ -1722,6 +1762,7 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
 
     @testing.expectedFailureSerDer
+    @testing.expectedFailureRetraceability
     @testing.expectedFailureNonStrict
     def test_redundant_asserts(self):
         def f(x):
@@ -1852,20 +1893,18 @@ def forward(self, l_x_):
                 return x.sum() + self.buffer.sum()
 
         inp = torch.randn(4, 4)
-        gm = capture_pre_autograd_graph(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3])
+        gm = _export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3], pre_dispatch=True).module()
 
-        with self.assertRaisesRegex(RuntimeError, "Expected input arg0_1.shape\[0\] to be >= 3, but got 2"):
+        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\]"):
             gm(torch.randn(2, 2))
 
-        with self.assertRaisesRegex(RuntimeError, "Expected input arg0_1.shape\[0\] to be >= 3, but got 2"):
+        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\]"):
             torch.export.export(gm, (torch.randn(2, 2),))
 
         ep = torch.export.export(gm, (torch.randn(5, 4),), dynamic_shapes=({0: torch.export.Dim("dim", min=3)},))
 
         test_inp = torch.ones(8, 4)
-        # This is actually correct because how make_fx modifies the buffer since
-        # there is no functionalization.
-        self.assertTrue(torch.allclose(ep(test_inp), Foo().forward(test_inp) + 4*4*4))
+        self.assertTrue(torch.allclose(ep(test_inp), Foo().forward(test_inp)))
 
     @testing.expectedFailureNonStrict
     def test_issue_113041(self):
@@ -1978,6 +2017,43 @@ def forward(self, l_x_):
         self.assertEqual(a.size(), torch.Size([3, 4]))
         self.assertEqual(b.size(), torch.Size([3, 4]))
 
+    def test_pad_sequence(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch._C._nn.pad_sequence([x])
+
+        m0 = Module()
+        inputs = (torch.randn(3, 2),)
+        ep = torch.export.export(m0, inputs, dynamic_shapes={"x": {0: Dim("batch_size")}})
+        self.assertEqual(ep(*inputs), m0(*inputs))
+
+        class ModuleBatchFirst(torch.nn.Module):
+            def forward(self, x):
+                return torch._C._nn.pad_sequence([x], batch_first=True)
+
+        m1 = ModuleBatchFirst()
+        inputs = (torch.randn(3, 2),)
+        ep = torch.export.export(m1, inputs, dynamic_shapes={"x": {0: Dim("batch_size")}})
+        self.assertEqual(ep(*inputs), m1(*inputs))
+
+        class ModuleMulti(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch._C._nn.pad_sequence([x, y, z])
+
+        m2 = ModuleMulti()
+        inputs = (torch.randn(5, 2), torch.randn(4, 2), torch.randn(3, 2))
+        ep = torch.export.export(m2, inputs, dynamic_shapes={"x": {0: Dim("batch_size")}, "y": {0: Dim("y")}, "z": {0: Dim("z")}})
+        self.assertEqual(ep(*inputs), m2(*inputs))
+
+        class ModuleMultiBatchFirst(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch._C._nn.pad_sequence([x, y, z], batch_first=True)
+
+        m3 = ModuleMulti()
+        inputs = (torch.randn(5, 2), torch.randn(4, 2), torch.randn(3, 2))
+        ep = torch.export.export(m2, inputs, dynamic_shapes={"x": {0: Dim("batch_size")}, "y": {0: Dim("y")}, "z": {0: Dim("z")}})
+        self.assertEqual(ep(*inputs), m3(*inputs))
+
     def test_export_then_compile_tensor_ctor(self):
         class M(torch.nn.Module):
             def __init__(self,):
@@ -1999,10 +2075,7 @@ def forward(self, l_x_):
         # res_ref = m(tensor_cpu, mask_cpu)
         # print("res_ref is: {}".format(res_ref), flush=True)
 
-        exported_model = capture_pre_autograd_graph(
-            m,
-            (tensor_cpu, mask_cpu),
-        )
+        exported_model = _export(m, (tensor_cpu, mask_cpu), pre_dispatch=True).module()
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 

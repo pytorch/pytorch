@@ -165,6 +165,7 @@ if RUN_CUDA:
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_index_tensor"),
+        BaseTest("test_layer_norm"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         BaseTest("test_mm_views"),
