@@ -383,6 +383,8 @@ def _replace_literals_with_new_placeholders(
     if exclude_literals is None:
         exclude_literals = []
 
+    in_spec = gm._in_spec
+    args_spec = in_spec.children_specs[0]
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             last_ph = node
@@ -397,7 +399,7 @@ def _replace_literals_with_new_placeholders(
                     else:
                         ph_node = gm.graph.placeholder("arg" + str(cnt))
                         new_args.append(ph_node)
-                        gm._in_spec.children_specs[0].children_specs.append(LeafSpec())
+                        args_spec.children_specs.append(LeafSpec())
                         cnt += 1
                         if merge_dup:
                             literal_to_ph[arg] = ph_node
@@ -406,6 +408,10 @@ def _replace_literals_with_new_placeholders(
             new_args = tuple(new_args)
 
         node.args = new_args
+
+    # Update `num_nodes`, `num_leaves`, `num_children`.
+    args_spec.__post_init__()
+    in_spec.__post_init__()
     return gm
 
 
