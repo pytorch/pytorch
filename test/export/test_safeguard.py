@@ -5,7 +5,9 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestSafeguard(TestCase):
-    def test_grad_mode_unsupported(self):
+    # If the autograd state doesn't change, dynamo eliminates autograd state manager op and later export can succeed.
+    # Otherwise, autograd can be preserved in the produced gragh, and export will fail.
+    def test_global_autograd(self):
         def f1(a):
             with torch.no_grad():
                 b = a + a
@@ -54,6 +56,35 @@ class TestSafeguard(TestCase):
                 RuntimeError, "Encountered autograd state manager op.*"
             ):
                 export(f3, (a,))
+
+    def test_tensor_autograd(self):
+        # dynamo errors when Tensor.requires_grad_ change the autograd state
+        def f1(a):
+            a.requires_grad_(True)
+            b = a + a
+            return b
+
+        # dynamo errors when Tensor.requires_grad_ change the autograd state
+        def f2(a):
+            a.requires_grad_(False)
+            b = a + a
+            return b
+
+        # dynamo always errors on Tensor.requires_grad
+        def f3(a):
+            a.requires_grad = False
+            b = a + a
+            return b
+
+        export(f1, (torch.randn(10, requires_grad=True),))
+        export(f2, (torch.randn(10, requires_grad=False),))
+
+        with self.assertRaises(RuntimeError):
+            export(f1, (torch.randn(10, requires_grad=False),))
+        with self.assertRaises(RuntimeError):
+            export(f2, (torch.randn(10, requires_grad=True),))
+        with self.assertRaises(RuntimeError):
+            export(f3, (torch.randn(10, requires_grad=False),))
 
 
 if __name__ == "__main__":
