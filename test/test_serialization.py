@@ -3898,9 +3898,10 @@ class TestSerialization(TestCase, SerializationMixin):
         finally:
             set_default_load_endianness(current_load_endian)
 
+    @parametrize('path_type', (str, pathlib.Path))
     @parametrize('weights_only', (True, False))
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
-    def test_serialization_mmap_loading(self, weights_only):
+    def test_serialization_mmap_loading(self, weights_only, path_type):
         class DummyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3911,6 +3912,7 @@ class TestSerialization(TestCase, SerializationMixin):
                 return self.fc2(self.fc1(input))
 
         with TemporaryFileName() as f:
+            f = path_type(f)
             state_dict = DummyModel().state_dict()
             torch.save(state_dict, f)
             result = torch.load(f, mmap=True, weights_only=weights_only)
