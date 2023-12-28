@@ -1,6 +1,7 @@
 import copy
 import dataclasses
 import functools
+import types
 from typing import (
     Any,
     Callable,
@@ -350,7 +351,17 @@ class ExportedProgram:
         """
         from ._unlift import _unlift_exported_program_lifted_states
 
-        return _unlift_exported_program_lifted_states(self)
+        module = _unlift_exported_program_lifted_states(self)
+
+        def _train(self, mode: bool = True):
+            raise NotImplementedError("Calling train() is not supported yet.")
+
+        def _eval(self, mode: bool = True):
+            raise NotImplementedError("Calling eval() is not supported yet.")
+
+        module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
+        module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+        return module
 
     @_disable_prexisiting_fake_mode
     def run_decompositions(

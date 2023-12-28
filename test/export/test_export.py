@@ -19,6 +19,7 @@ from torch.export import (
 )
 from torch.export._trace import (
     _export_to_torch_ir,
+    _export,
     DEFAULT_EXPORT_DYNAMO_CONFIG,
 )
 from torch._export import capture_pre_autograd_graph
@@ -1081,7 +1082,7 @@ class TestExport(TestCase):
         mod.eval()
         inp = torch.randn(1, 1, 3, 3)
 
-        gm = capture_pre_autograd_graph(mod, (inp,), _functional_pre_dispatch_IR=True)
+        gm = torch.export._trace._export(mod, (inp,), pre_dispatch=True).module()
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg_0):
     l_x_, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
@@ -1097,7 +1098,7 @@ def forward(self, arg_0):
     return pytree.tree_unflatten((getitem,), self._out_spec)""")
 
         mod.train()
-        gm_train = capture_pre_autograd_graph(mod, (inp,), _functional_pre_dispatch_IR=True)
+        gm_train = _export(mod, (inp,), pre_dispatch=True).module()
         self.assertExpectedInline(str(gm_train.code).strip(), """\
 def forward(self, arg_0):
     l_x_, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
@@ -1572,7 +1573,7 @@ def forward(self, arg_0):
                     return x.cos()
                 return x.sin()
 
-        graph_module = capture_pre_autograd_graph(Foo(), (torch.ones(7, 5),), _functional_pre_dispatch_IR=True)
+        graph_module = _export(Foo(), (torch.ones(7, 5),), pre_dispatch=True).module()
         with self.assertRaisesRegex(NotImplementedError, r"Calling train\(\) is not supported yet."):
             graph_module.train()
 
@@ -1606,7 +1607,7 @@ def forward(self, arg_0):
         m.eval()
         # TODO (tmanlaibaatar) Setting functional IR doesn't work on aot_export yet
         # as the branch source_fn is not captured.
-        gm = capture_pre_autograd_graph(m, example_inputs, _functional_pre_dispatch_IR=False)
+        gm = capture_pre_autograd_graph(m, example_inputs)
 
         actual_source_fns = []
         for mod in gm.modules():
@@ -1911,7 +1912,7 @@ def forward(self, l_x_):
                 return x.sum() + self.buffer.sum()
 
         inp = torch.randn(4, 4)
-        gm = capture_pre_autograd_graph(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3], _functional_pre_dispatch_IR=True)
+        gm = _export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3], pre_dispatch=True).module()
 
         with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\]"):
             gm(torch.randn(2, 2))
@@ -2056,11 +2057,7 @@ def forward(self, l_x_):
         # res_ref = m(tensor_cpu, mask_cpu)
         # print("res_ref is: {}".format(res_ref), flush=True)
 
-        exported_model = capture_pre_autograd_graph(
-            m,
-            (tensor_cpu, mask_cpu),
-            _functional_pre_dispatch_IR=True,
-        )
+        exported_model = _export(m, (tensor_cpu, mask_cpu), pre_dispatch=True).module()
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 
