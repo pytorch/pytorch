@@ -4671,7 +4671,6 @@ class FallbackKernel(ExternKernelAlloc):
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
-                assert isinstance(kernel, torch._ops.OpOverload)
                 if config.is_fbcode() and kernel not in has_c_shim:
                     log.warning(
                         "%s is missing a c-shim implementation, using proxy executor as fallback",
