@@ -187,6 +187,8 @@ class ExtensionBackendTests(TestCase):
         res = fn(x, y, z)
         self.assertEqual(ref, res.to(device="cpu"))
 
+        del torch_compile_op_lib_impl
+
     def test_open_device_registration(self):
         self.assertTrue(
             get_scheduling_for_device("extension_device") == ExtensionScheduling
