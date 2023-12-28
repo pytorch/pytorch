@@ -2,7 +2,7 @@ import threading
 import torch
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, cast
 from ..modules import Module
-from torch.cuda._utils import _get_device_index
+from torch._utils import _get_device_index
 from torch.cuda.amp import autocast
 from torch._utils import ExceptionWrapper
 

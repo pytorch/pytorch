@@ -705,6 +705,7 @@ class ExceptionWrapper:
         raise exception
 
 
+@functools.lru_cache(None)
 def _get_available_device_type():
     if torch.cuda.is_available():
         return "cuda"
@@ -733,6 +734,12 @@ def _get_device_attr(get_member):
 def _get_current_device_index():
     # current device index
     return _get_device_attr(lambda m: m.current_device())
+
+
+@functools.lru_cache(None)
+def _get_module_device():
+    # available module's device, a class, like torch.cuda.device, torch.xpu.device
+    return _get_device_attr(lambda m: getattr(m, "device", None))
 
 
 def _get_all_device_indices():
@@ -774,31 +781,48 @@ def _get_device_index(
     device of the supported runtime platform if :attr:`optional` is ``True``.
     i.e., the current default CUDA device will be returned if CUDA runtime is supported.
     """
+    if isinstance(device, int):
+        return device
     if isinstance(device, str):
         device = torch.device(device)
-    device_idx: Optional[int] = None
     if isinstance(device, torch.device):
+        if allow_cpu and device.type == "cpu":
+            return -1
+        if torch.jit.is_scripting():
+            if device.type != "cuda":
+                raise ValueError(
+                    f"Expected a cuda{' or cpu' if allow_cpu else ''} device, but got: {device}"
+                )
+        else:
+            # _get_available_device_type is an eager API which is not scriptable.
+            available_device_type = _get_available_device_type()
+            if available_device_type and device.type != available_device_type:
+                raise ValueError(
+                    f"Expected a {available_device_type}{' or cpu' if allow_cpu else ''} device, but got: {device}"
+                )
         if not allow_cpu and device.type == "cpu":
             raise ValueError(f"Expected a non cpu device, but got: {device}")
-        device_idx = -1 if device.type == "cpu" else device.index
-    if isinstance(device, int):
-        device_idx = device
-    if device_idx is None:
-        if optional:
-            # The eager API _get_current_device_index uses `lambda` functions which are
-            # not supported in JIT and hence not scriptable. The JIT equivalent API to get
-            # the current device index is `get_current_device_index()` which can
-            # be scripted. We use is_scripting to check the mode we are in and call the
-            # appropriate API.
-            if torch.jit.is_scripting():
-                device_idx = get_current_device_index()
-            else:
-                device_idx = _get_current_device_index()
+        # Syntax to support JIT mode.
+        device_idx: Optional[int] = device.index
+        if device_idx is not None:
+            return device_idx
+    if not torch.jit.is_scripting() and _get_module_device():
+        if isinstance(device, _get_module_device()):
+            return device.idx
+    if optional:
+        # The eager API _get_current_device_index uses `lambda` functions which are
+        # not supported in JIT and hence not scriptable. The JIT equivalent API to get
+        # the current device index is `get_current_device_index()` which can
+        # be scripted. We use is_scripting to check the mode we are in and call the
+        # appropriate API.
+        if torch.jit.is_scripting():
+            return get_current_device_index()
         else:
-            raise ValueError(
-                f"Expected a torch.device with a specified index or an integer, but got:{device}"
-            )
-    return device_idx
+            return _get_current_device_index()
+    else:
+        raise ValueError(
+            f"Expected a torch.device with a specified index or an integer or string or module device, but got:{device}"
+        )
 
 
 def _handle_complex(tensor):
@@ -891,3 +915,19 @@ def _get_device_module(device_type: str):
             f"Device '{device_type}' does not have a corresponding module registered as 'torch.{device_type}'."
         )
     return device_module
+
+
+def _dummy_type(name: str) -> type:
+    def get_err_fn(is_init: bool):
+        def err_fn(obj, *args, **kwargs):
+            if is_init:
+                class_name = obj.__class__.__name__
+            else:
+                class_name = obj.__name__
+            raise RuntimeError(f"Tried to instantiate dummy base class {class_name}")
+
+        return err_fn
+
+    return type(
+        name, (object,), {"__init__": get_err_fn(True), "__new__": get_err_fn(False)}
+    )

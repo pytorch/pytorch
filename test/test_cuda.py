@@ -462,7 +462,7 @@ class TestCuda(TestCase):
                 os.remove(fname)
 
     def test_get_device_index(self):
-        from torch.cuda._utils import _get_device_index
+        from torch._utils import _get_device_index
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             _get_device_index('cuda0', optional=True)
 

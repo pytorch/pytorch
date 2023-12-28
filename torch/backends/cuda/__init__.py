@@ -94,7 +94,7 @@ class cuFFTPlanCacheManager:
         self.__initialized = True
 
     def __getitem__(self, device):
-        index = torch.cuda._utils._get_device_index(device)
+        index = torch._utils._get_device_index(device)
         if index < 0 or index >= torch.cuda.device_count():
             raise RuntimeError(
                 f"cufft_plan_cache: expected 0 <= device index < {torch.cuda.device_count()}, but got "

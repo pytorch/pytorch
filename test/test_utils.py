@@ -10,6 +10,7 @@ import tempfile
 import traceback
 import textwrap
 import unittest
+from unittest.mock import patch
 from typing import Any, List, Dict
 import torch
 import torch.nn as nn
@@ -853,8 +854,9 @@ class TestExtensionUtils(TestCase):
         with torch.autocast(device_type=custom_backend_name):
             pass
 
-        self.assertEqual(torch._utils._get_device_index('foo:1'), 1)
-        self.assertEqual(torch._utils._get_device_index(torch.device("foo:2")), 2)
+        with patch("torch._utils._get_available_device_type", lambda: 'foo'):
+            self.assertEqual(torch._utils._get_device_index('foo:1'), 1)
+            self.assertEqual(torch._utils._get_device_index(torch.device("foo:2")), 2)
 
 class TestRenderUtils(TestCase):
     def test_basic(self):
