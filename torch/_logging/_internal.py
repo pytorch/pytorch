@@ -173,6 +173,9 @@ def set_logs(
     dynamic: Optional[int] = None,
     inductor: Optional[int] = None,
     distributed: Optional[int] = None,
+    dist_c10d: Optional[int] = None,
+    dist_ddp: Optional[int] = None,
+    dist_fsdp: Optional[int] = None,
     onnx: Optional[int] = None,
     bytecode: bool = False,
     aot_graphs: bool = False,
@@ -251,7 +254,19 @@ def set_logs(
             The log level for dynamic shapes. Default: ``logging.WARN``
 
         distributed (:class:`Optional[int]`):
-            Whether to log communication operations and other debug info from pytorch distributed components.
+            Whether to log communication operations and other debug info from PyTorch Distributed components.
+            Default: ``logging.WARN``
+
+        dist_c10d (:class:`Optional[int]`):
+            Whether to log communication operations related debug info in PyTorch Distributed components.
+            Default: ``logging.WARN``
+
+        dist_ddp (:class:`Optional[int]`):
+            Whether to log debug info related to ``DistributedDataParallel``(DDP) from PyTorch Distributed components.
+            Default: ``logging.WARN``
+
+        dist_fsdp (:class:`Optional[int]`):
+            Whether to log debug info related to ``FullyShardedDataParallel``(FSDP) in PyTorch Distributed components.
             Default: ``logging.WARN``
 
         onnx (:class:`Optional[int]`):
@@ -404,6 +419,9 @@ def set_logs(
         aot_joint_graph=aot_joint_graph,
         ddp_graphs=ddp_graphs,
         distributed=distributed,
+        dist_c10d=dist_c10d,
+        dist_ddp=dist_ddp,
+        dist_fsdp=dist_fsdp,
         graph=graph,
         graph_code=graph_code,
         graph_breaks=graph_breaks,
