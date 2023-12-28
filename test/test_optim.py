@@ -343,7 +343,7 @@ class TestOptimRenewed(TestCase):
 
 
     @optims(optim_db, dtypes=[torch.float32])
-    def test_step_is_noop_for_empty_grads(self, device, dtype, optim_info):
+    def test_step_is_noop_for_zero_grads(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
         param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)

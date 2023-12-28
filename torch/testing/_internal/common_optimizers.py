@@ -1047,8 +1047,7 @@ optim_db: List[OptimizerInfo] = [
                     }
                 ),
                 "TestOptimRenewed",
-                "test_step_is_noop_for_empty_grads",
-                active_if=TEST_WITH_TORCHDYNAMO,
+                "test_step_is_noop_for_zero_grads",
             ),
         ),
     ),
