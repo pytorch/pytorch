@@ -19,6 +19,7 @@ from torch.export import (
 )
 from torch.export._trace import (
     _export_to_torch_ir,
+    _export,
     DEFAULT_EXPORT_DYNAMO_CONFIG,
 )
 from torch._export import capture_pre_autograd_graph
@@ -1065,6 +1066,62 @@ class TestExport(TestCase):
         test_inp = (torch.randint(3, 5, (2, 2)), torch.randint(3, 5, (2, 3)))
         self.assertTrue(torch.allclose(ep(*test_inp), fn(*test_inp)))
 
+    def test_decomp_batch_norm_functional_predispatch(self):
+        class ConvBatchnorm(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 3, 1, 1)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return (x,)
+
+        mod = ConvBatchnorm()
+        mod.eval()
+        inp = torch.randn(1, 1, 3, 3)
+
+        gm = torch.export._trace._export(mod, (inp,), pre_dispatch=True).module()
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg_0):
+    l_x_, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    conv_weight = self.conv_weight
+    conv_bias = self.conv_bias
+    bn_weight = self.bn_weight
+    bn_bias = self.bn_bias
+    bn_running_mean = self.bn_running_mean
+    bn_running_var = self.bn_running_var
+    conv2d = torch.ops.aten.conv2d.default(l_x_, conv_weight, conv_bias);  l_x_ = conv_weight = conv_bias = None
+    _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
+    return pytree.tree_unflatten((getitem,), self._out_spec)""")
+
+        mod.train()
+        gm_train = _export(mod, (inp,), pre_dispatch=True).module()
+        self.assertExpectedInline(str(gm_train.code).strip(), """\
+def forward(self, arg_0):
+    l_x_, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    conv_weight = self.conv_weight
+    conv_bias = self.conv_bias
+    bn_weight = self.bn_weight
+    bn_bias = self.bn_bias
+    bn_running_mean = self.bn_running_mean
+    bn_running_var = self.bn_running_var
+    bn_num_batches_tracked = self.bn_num_batches_tracked
+    conv2d = torch.ops.aten.conv2d.default(l_x_, conv_weight, conv_bias);  l_x_ = conv_weight = conv_bias = None
+    add = torch.ops.aten.add.Tensor(bn_num_batches_tracked, 1)
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = None
+    getitem = _native_batch_norm_legit_functional[0]
+    getitem_3 = _native_batch_norm_legit_functional[3]
+    getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+    copy__default = torch.ops.aten.copy_.default(bn_running_mean, getitem_3);  bn_running_mean = getitem_3 = None
+    copy__default_1 = torch.ops.aten.copy_.default(bn_running_var, getitem_4);  bn_running_var = getitem_4 = None
+    copy__default_2 = torch.ops.aten.copy_.default(bn_num_batches_tracked, add);  bn_num_batches_tracked = add = None
+    return pytree.tree_unflatten((getitem,), self._out_spec)""")
+
+
+
     @testing.expectedFailureNonStrict
     def test_constrain_value_with_symfloat(self):
         def fn(x, y):
@@ -1496,7 +1553,7 @@ class TestExport(TestCase):
                     return x.cos()
                 return x.sin()
 
-        graph_module = capture_pre_autograd_graph(Foo(), (torch.ones(7, 5),), _functional_pre_dispatch_IR=True)
+        graph_module = _export(Foo(), (torch.ones(7, 5),), pre_dispatch=True).module()
         with self.assertRaisesRegex(NotImplementedError, r"Calling train\(\) is not supported yet."):
             graph_module.train()
 
@@ -1530,7 +1587,7 @@ class TestExport(TestCase):
         m.eval()
         # TODO (tmanlaibaatar) Setting functional IR doesn't work on aot_export yet
         # as the branch source_fn is not captured.
-        gm = capture_pre_autograd_graph(m, example_inputs, _functional_pre_dispatch_IR=False)
+        gm = capture_pre_autograd_graph(m, example_inputs)
 
         actual_source_fns = []
         for mod in gm.modules():
@@ -1836,7 +1893,7 @@ def forward(self, l_x_):
                 return x.sum() + self.buffer.sum()
 
         inp = torch.randn(4, 4)
-        gm = capture_pre_autograd_graph(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3], _functional_pre_dispatch_IR=True)
+        gm = _export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3], pre_dispatch=True).module()
 
         with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\]"):
             gm(torch.randn(2, 2))
@@ -2018,11 +2075,7 @@ def forward(self, l_x_):
         # res_ref = m(tensor_cpu, mask_cpu)
         # print("res_ref is: {}".format(res_ref), flush=True)
 
-        exported_model = capture_pre_autograd_graph(
-            m,
-            (tensor_cpu, mask_cpu),
-            _functional_pre_dispatch_IR=True,
-        )
+        exported_model = _export(m, (tensor_cpu, mask_cpu), pre_dispatch=True).module()
         optimized_model = torch.compile(exported_model)
         optimized_model(tensor_cpu, mask_cpu)
 
