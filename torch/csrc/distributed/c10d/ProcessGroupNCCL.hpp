@@ -73,6 +73,9 @@ static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
 static std::vector<std::string> TORCH_NCCL_TIMEOUT_CHECK_MILSEC = {
     "TORCH_NCCL_TIMEOUT_CHECK_MILSEC"};
 
+static std::vector<std::string> TORCH_NCCL_EXTRA_SLEEP_MILSEC = {
+    "TORCH_NCCL_EXTRA_SLEEP_MILSEC"};
+
 static std::vector<std::string> TORCH_NCCL_WATCHDOG_CHECK_MILSEC = {
     "TORCH_NCCL_WATCHDOG_CHECK_MILSEC"};
 
@@ -726,8 +729,15 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Generates a prefix that is unique to this process group and rank, for
   // disambiguating logs
+  std::string createLogPrefix() const;
+
+  // Returns the unique prefix created in createLogPrefix
   const std::string& logPrefix() const;
 
+  // Returns the global rank of the device. This function assumes that users
+  // always create a default global process group(PG) which includes all
+  // devices. It is called in the constructor of ProcessGroupNCCL, so it always
+  // return the rank_ of the the very first PG created, aka, default global PG.
   const int& globalRank() const;
 
  protected:
@@ -827,6 +837,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   int heartbeatTimeoutInSec_;
 
   int timeoutCheckInMilSec_;
+
+  int extraSleepInMilSec_;
 
   int watchdogCheckInMilSec_;
 
@@ -980,6 +992,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
   size_t uid_;
+
+  std::string logPrefix_;
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
 };

@@ -726,6 +726,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+  logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
@@ -738,6 +739,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
   timeoutCheckInMilSec_ = getCvarInt(TORCH_NCCL_TIMEOUT_CHECK_MILSEC, 200);
+  extraSleepInMilSec_ = getCvarInt(TORCH_NCCL_EXTRA_SLEEP_MILSEC, 1200);
   watchdogCheckInMilSec_ = getCvarInt(TORCH_NCCL_WATCHDOG_CHECK_MILSEC, 500);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   timoutDumpExtraSleep_ =
@@ -825,6 +827,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", TORCH_NCCL_TIMEOUT_CHECK_MILSEC: " << timeoutCheckInMilSec_
+            << ", TORCH_NCCL_EXTRA_SLEEP_MILSEC: " << extraSleepInMilSec_
             << ", TORCH_NCCL_WATCHDOG_CHECK_MILSEC: " << watchdogCheckInMilSec_
             << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
 
@@ -1071,8 +1074,7 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
 
   auto futStatus = fut.wait_for(std::chrono::seconds(timeout_sec));
   if (timoutDumpExtraSleep_) {
-    std::this_thread::sleep_for(
-        std::chrono::milliseconds(timeoutCheckInMilSec_));
+    std::this_thread::sleep_for(std::chrono::milliseconds(extraSleepInMilSec_));
   }
   if (futStatus != std::future_status::ready) {
     TORCH_CHECK(
@@ -1439,9 +1441,12 @@ struct DumpPipe {
 };
 #endif
 
+std::string ProcessGroupNCCL::createLogPrefix() const {
+  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+}
+
 const std::string& ProcessGroupNCCL::logPrefix() const {
-  static std::string prefix = c10::str("[PG ", uid_, " Rank ", rank_, "] ");
-  return prefix;
+  return logPrefix_;
 }
 
 const int& ProcessGroupNCCL::globalRank() const {
@@ -1481,11 +1486,6 @@ void ProcessGroupNCCL::watchdogHandler() {
     // we haven't polled for `heartbeat_timeout` seconds and there haven't
     // any work added or removed for `watchdog_timeout` seconds.
     if (dumpOnTimeout_ && uid_ == 0) {
-      if (rank_ == 0) {
-        const auto checkMsg =
-            c10::str(logPrefix(), "[Start] Rank 0 is hitting check.");
-        LOG(ERROR) << checkMsg;
-      }
       auto currentTime = std::chrono::steady_clock::now();
       auto timeSinceLastWorkListUpdate =
           std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1495,14 +1495,19 @@ void ProcessGroupNCCL::watchdogHandler() {
           std::chrono::duration_cast<std::chrono::milliseconds>(
               (currentTime - lastTimePollStore))
               .count();
+      const auto checkMsg = c10::str(
+          logPrefix(),
+          "Before checking TCPStore in watchdog for PG 0: ",
+          optAsyncDebugDump.has_value());
+      LOG(ERROR) << checkMsg;
       if (timeSinceLastWorkListUpdate >= watchdogCheckInMilSec_ &&
           timeSinceLastPollStore >= timeoutCheckInMilSec_) {
         lastTimePollStore = currentTime;
         if (store_->check({std::string(TIMEOUT_DUMP)}) && !optAsyncDebugDump) {
-          const auto exitMsgPre = c10::str(
+          const auto startCheckMsg = c10::str(
               logPrefix(),
               "[Start] Another rank reported a timeout and signaled a global abort.");
-          LOG(ERROR) << exitMsgPre;
+          LOG(ERROR) << startCheckMsg;
           optAsyncDebugDump = launchAsyncDebugDump();
           waitForDumpOrTimeout(*optAsyncDebugDump);
           const auto exitMsg = c10::str(
