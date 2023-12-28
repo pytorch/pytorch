@@ -1498,6 +1498,10 @@ void ProcessGroupNCCL::watchdogHandler() {
       const auto checkMsg = c10::str(
           logPrefix(),
           "Before checking TCPStore in watchdog for PG 0: ",
+          timeSinceLastWorkListUpdate >= watchdogCheckInMilSec_,
+          " ",
+          timeSinceLastPollStore >= timeoutCheckInMilSec_,
+          " ",
           optAsyncDebugDump.has_value());
       LOG(ERROR) << checkMsg;
       if (timeSinceLastWorkListUpdate >= watchdogCheckInMilSec_ &&
