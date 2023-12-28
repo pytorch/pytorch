@@ -1303,6 +1303,13 @@ optim_db: List[OptimizerInfo] = [
                 skipIfMps,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
             ),
+            DecorateInfo(
+                unittest.skip(
+                    "SparseAdam does not support dense gradients, see #116507"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_deterministic",
+            ),
         ),
     ),
 ]
