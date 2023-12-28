@@ -742,7 +742,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """90""")
+        self.assertExpectedInline(count_numel(f, *inp), """80""")
 
     @requires_cuda()
     @skipIfRocm
@@ -772,7 +772,7 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """90""")
+        self.assertExpectedInline(count_numel(f, *inp), """80""")
 
     @requires_cuda()
     @skipIfRocm
@@ -786,7 +786,7 @@ class InplacingTests(TestCase):
 
         t = T(10)
         inp = (t, t.view(-1))
-        self.assertExpectedInline(count_numel(f, *inp), """150""")
+        self.assertExpectedInline(count_numel(f, *inp), """40""")
 
     def test_inplace_randperm_scatter(self):
         def scaled_index_add(x, y, scale_y):
