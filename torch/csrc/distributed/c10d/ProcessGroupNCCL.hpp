@@ -70,17 +70,14 @@ static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
     "TORCH_NCCL_TRACE_BUFFER_SIZE"};
 
+static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_SLEEP_MILSEC = {
+    "TORCH_NCCL_WAIT_TIMEOUT_DUMP_SLEEP_MILSEC"};
+
 static std::vector<std::string> TORCH_NCCL_TIMEOUT_CHECK_MILSEC = {
     "TORCH_NCCL_TIMEOUT_CHECK_MILSEC"};
 
-static std::vector<std::string> TORCH_NCCL_EXTRA_SLEEP_MILSEC = {
-    "TORCH_NCCL_EXTRA_SLEEP_MILSEC"};
-
 static std::vector<std::string> TORCH_NCCL_WATCHDOG_CHECK_MILSEC = {
     "TORCH_NCCL_WATCHDOG_CHECK_MILSEC"};
-
-static std::vector<std::string> TORCH_NCCL_TIMEOUT_DUMP_EXTRA_SLEEP = {
-    "TORCH_NCCL_TIMEOUT_DUMP_EXTRA_SLEEP"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
@@ -836,14 +833,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
 
-  int timeoutCheckInMilSec_;
+  int waitTimeoutDumpSleepInMilSec_;
 
-  int extraSleepInMilSec_;
+  int timeoutCheckInMilSec_;
 
   int watchdogCheckInMilSec_;
 
   // Size of ring buffer where we store NCCL Traces for debugging.
-  int ncclTraceBufferSize_;
 
   // We gate the heartbeat monitor thread so that we can roll it out gradually.
   std::atomic<bool> monitorThreadEnabled_;

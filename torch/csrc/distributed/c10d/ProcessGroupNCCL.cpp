@@ -738,12 +738,11 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
+  waitTimeoutDumpSleepInMilSec_ =
+      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_SLEEP_MILSEC, 1200);
   timeoutCheckInMilSec_ = getCvarInt(TORCH_NCCL_TIMEOUT_CHECK_MILSEC, 200);
-  extraSleepInMilSec_ = getCvarInt(TORCH_NCCL_EXTRA_SLEEP_MILSEC, 1200);
   watchdogCheckInMilSec_ = getCvarInt(TORCH_NCCL_WATCHDOG_CHECK_MILSEC, 500);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
-  timoutDumpExtraSleep_ =
-      getCvarBool(TORCH_NCCL_TIMEOUT_DUMP_EXTRA_SLEEP, true);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
@@ -807,8 +806,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", global rank: " << globalRank()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
-            << ", TORCH_NCCL_TIMEOUT_DUMP_EXTRA_SLEEP: "
-            << timoutDumpExtraSleep_
+            << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_SLEEP_MILSEC: "
+            << waitTimeoutDumpSleepInMilSec_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
@@ -827,7 +826,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", TORCH_NCCL_TIMEOUT_CHECK_MILSEC: " << timeoutCheckInMilSec_
-            << ", TORCH_NCCL_EXTRA_SLEEP_MILSEC: " << extraSleepInMilSec_
             << ", TORCH_NCCL_WATCHDOG_CHECK_MILSEC: " << watchdogCheckInMilSec_
             << ", NCCL_DEBUG: " << nccl_debug << ", ID=" << this->getID();
 
@@ -1073,9 +1071,10 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
   TORCH_CHECK(fut.valid(), "Expected a valid future");
 
   auto futStatus = fut.wait_for(std::chrono::seconds(timeout_sec));
-  if (timoutDumpExtraSleep_) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(extraSleepInMilSec_));
-  }
+  // This extra sleep is needed to ensure all ranks get enough time to dump
+  // debug info when timeout.
+  std::this_thread::sleep_for(
+      std::chrono::milliseconds(waitTimeoutDumpSleepInMilSec_));
   if (futStatus != std::future_status::ready) {
     TORCH_CHECK(
         futStatus != std::future_status::deferred,
