@@ -723,7 +723,10 @@ class TensorVariable(VariableTracker):
                 mutable_local=variables.base.MutableLocal(),
             )
 
-            if not self.source or name == "register_post_accumulate_grad_hook":
+            if not self.source or (
+                name == "register_post_accumulate_grad_hook"
+                and config.trace_distributed
+            ):
                 # Intermediary
                 src = fn_var.source
                 if (

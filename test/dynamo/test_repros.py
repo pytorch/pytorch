@@ -3762,6 +3762,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
         self.assertTrue(same(out, compile_out))
 
+    @torch._dynamo.config.patch(trace_distributed=False)
     def test_setattr_requires_grad_graph_breaks(self):
         def fn(x):
             z = x + 4
