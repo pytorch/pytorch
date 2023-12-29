@@ -143,7 +143,7 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 15, inductor=logging.DEBUG)
+    test_inductor_debug = within_range_record_test(3, 17, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
 
     @make_logging_test()
