@@ -270,6 +270,9 @@ class intrusive_ptr final {
   }
 
   void reset_() noexcept {
+    if(target_ == NULL) {
+      return;
+    }
     if (target_ != NullType::singleton() &&
         detail::atomic_refcount_decrement(target_->refcount_) == 0) {
       // See comment above about weakcount. As long as refcount>0,
@@ -705,6 +708,9 @@ class weak_intrusive_ptr final {
   }
 
   void reset_() noexcept {
+    if(target_ == NULL) {
+      return;
+    }
     if (target_ != NullType::singleton() &&
         detail::atomic_weakcount_decrement(target_->weakcount_) == 0) {
       // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
