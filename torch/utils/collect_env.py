@@ -151,7 +151,7 @@ def get_gpu_info(run_lambda):
             if torch.version.hip is not None:
                 prop = torch.cuda.get_device_properties(0)
                 if hasattr(prop, "gcnArchName"):
-                    gcnArch = f" (prop.gcnArchName)"
+                    gcnArch = " ({})".format(prop.gcnArchName)
                 else:
                     gcnArch = "NoGCNArchNameOnOldPyTorch"
             else:
