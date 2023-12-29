@@ -1145,8 +1145,8 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
         ((2, 3), (2, 2), (2, 3), False)
     ]
     tests_with_lhs_broadcasting = [
-        ((1,), (2, 2), (2, 3), True),
-        ((), (2, 2), (2, 3), True)
+        ((1,), (2, 2), (2, 2), True),
+        ((), (2, 2), (2, 3), True),
     ]
     test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[operator]
 
