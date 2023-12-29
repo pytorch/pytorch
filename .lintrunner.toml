@@ -256,6 +256,7 @@ exclude_patterns = [
     '**/cuda/*pp',
     'c10/util/complex_math.h',
     'c10/util/complex_utils.h',
+    'c10/util/flat_hash_map.h',
     'c10/util/Float8*.h',
     'c10/util/logging*.h',
     'c10/util/hash.h',
