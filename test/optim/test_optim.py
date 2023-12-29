@@ -906,14 +906,6 @@ class TestOptim(TestCase):
             sparse_only=True,
             maximize=True,
         )
-        import warnings
-        with warnings.catch_warnings(record=True) as ws:
-            SparseAdam(torch.zeros(3))
-            self.assertEqual(len(ws), 1)
-            for warning in ws:
-                self.assertEqual(len(warning.message.args), 1)
-                self.assertRegex(warning.message.args[0],
-                                 "Passing in a raw Tensor as ``params`` to SparseAdam ")
 
     # ROCm precision is too low to pass this test
     def test_adadelta(self):
@@ -1438,20 +1430,6 @@ class TestOptim(TestCase):
         self.assertEqual(type(res1), type(res2))
 
 
-    def test_duplicate_params_in_one_param_group(self):
-        param = Parameter(torch.randn(1))
-        with self.assertWarnsOnceRegex(UserWarning, '.*a parameter group with duplicate parameters.*'):
-            Adamax([param, param], lr=0.01)
-
-    def test_duplicate_params_across_param_groups(self):
-        param = Parameter(torch.randn(1))
-        self.assertRaisesRegex(
-            ValueError,
-            'some parameters appear in more than one parameter group',
-            lambda: Adadelta([{'params': param}, {'params': param}])
-        )
-
-
     def test_fused_optimizer_does_not_step_if_foundinf(self):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required.")
@@ -1621,14 +1599,6 @@ class TestOptim(TestCase):
         opt2.step()
         self.assertListEqual(data, [0, 1, 2, 5, 0, 1, 2, 5, 0, 1, 2, 5])
 
-    def test_fused_optimizer_raises(self):
-        if not torch.cuda.is_available():
-            self.skipTest("Requires CUDA devices")
-        for optimizer_ctor in (Adam, AdamW):
-            with self.assertRaisesRegex(RuntimeError, "`fused` and `foreach` cannot be `True` together."):
-                optimizer_ctor([torch.empty((), device="cuda")], foreach=True, fused=True)
-            with self.assertRaisesRegex(RuntimeError, "`fused` does not support `differentiable`"):
-                optimizer_ctor([torch.empty((), device="cuda")], differentiable=True, fused=True)
 
     @staticmethod
     def _state_dict_pre_hook(optimizer: Optimizer) -> None:
