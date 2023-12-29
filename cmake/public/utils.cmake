@@ -492,61 +492,6 @@ function(torch_compile_options libname)
 endfunction()
 
 ##############################################################################
-# Add standard compile options.
-# Usage:
-#   torch_compile_options_list(opts_list)
-function(torch_compile_options_list private_compile_options)
-  set(private_compile_options "")
-
-  # ---[ Check if warnings should be errors.
-  if(WERROR)
-    list(APPEND private_compile_options -Werror)
-  endif()
-
-  # until they can be unified, keep these lists synced with setup.py
-  list(APPEND private_compile_options
-    -std=c++17
-    -Wall
-    -Wextra
-    -Wdeprecated
-    -Wno-unused-parameter
-    -Wno-unused-function
-    -Wno-missing-field-initializers
-    -Wno-unknown-pragmas
-    -Wno-type-limits
-    -Wno-array-bounds
-    -Wno-unknown-pragmas
-    -Wno-strict-overflow
-    -Wno-strict-aliasing
-    )
-  if(NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    list(APPEND private_compile_options
-      # Considered to be flaky.  See the discussion at
-      # https://github.com/pytorch/pytorch/pull/9608
-      -Wno-maybe-uninitialized)
-  endif()
-
-  if(WERROR)
-    list(APPEND private_compile_options -Wno-strict-overflow)
-  endif()
-
-  if(NOT WIN32 AND NOT USE_ASAN)
-    # Enable hidden visibility by default to make it easier to debug issues with
-    # TORCH_API annotations. Hidden visibility with selective default visibility
-    # behaves close enough to Windows' dllimport/dllexport.
-    #
-    # Unfortunately, hidden visibility messes up some ubsan warnings because
-    # templated classes crossing library boundary get duplicated (but identical)
-    # definitions. It's easier to just disable it.
-    list(APPEND private_compile_options -fvisibility=hidden)
-  endif()
-
-  # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
-  list(APPEND private_compile_options -O2)
-
-endfunction()
-
-##############################################################################
 # Set old-style FindCuda.cmake compile flags from modern CMake cuda flags.
 # Usage:
 #   torch_update_find_cuda_flags()
