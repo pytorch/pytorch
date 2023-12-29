@@ -1327,7 +1327,8 @@ endif()
 # ---[ XPU
 if(USE_XPU)
   include(${CMAKE_CURRENT_LIST_DIR}/public/xpu.cmake)
-  if(PYTORCH_FOUND_XPU)
+  # Support GCC only in the moment.
+  if(PYTORCH_FOUND_XPU AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # # -- Host flags (SYCL_CXX_FLAGS)
     # Combine with torch_compile_options
     list(APPEND SYCL_HOST_FLAGS -fPIC)
