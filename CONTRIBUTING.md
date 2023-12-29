@@ -41,6 +41,8 @@ aspects of contributing to PyTorch.
     - [Use a faster linker](#use-a-faster-linker)
     - [Use pre-compiled headers](#use-pre-compiled-headers)
     - [Workaround for header dependency bug in nvcc](#workaround-for-header-dependency-bug-in-nvcc)
+  - [Rebuild few files with debug information](#rebuild-few-files-wit
+h-debug-information)
   - [C++ frontend development tips](#c-frontend-development-tips)
   - [GDB integration](#gdb-integration)
   - [C++ stacktraces](#c-stacktraces)
