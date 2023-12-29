@@ -15,7 +15,8 @@ set(SYCL_cmake_included true)
 # SYCL compiler and runtime setup
 include(${CMAKE_CURRENT_LIST_DIR}/../Modules/FindSYCLToolkit.cmake)
 if(NOT SYCL_FOUND)
-  message(FATAL_ERROR "Cannot find SYCL compiler tool kit!")
+  message("Cannot find SYCL compiler tool kit!")
+  return()
 endif()
 
 # Try to find Intel SYCL compiler version.hpp header
@@ -30,7 +31,8 @@ find_file(SYCL_VERSION
     NO_DEFAULT_PATH)
 
 if(NOT SYCL_VERSION)
-  message(FATAL_ERROR "Can NOT find SYCL version file!")
+  message("Can NOT find SYCL version file!")
+  return()
 endif()
 
 find_library(PYTORCH_SYCL_LIBRARIES sycl HINTS ${SYCL_LIBRARY_DIR})

@@ -47,6 +47,7 @@ This will define the following variables:
 
 #]=======================================================================]
 
+set(SYCL_FOUND False)
 include(${CMAKE_ROOT}/Modules/FindPackageHandleStandardArgs.cmake)
 
 find_package(PkgConfig QUIET)
@@ -60,7 +61,8 @@ if(NOT SYCL_ROOT)
 endif()
 
 if (NOT SYCL_ROOT)
-  message(FATAL_ERROR "Please setup Intel SYCL compiler Tool kit enviroment before building!!")
+  message("Please setup Intel SYCL compiler Tool kit enviroment before building!!")
+  return()
 endif()
 
 set(SYCL_COMPILER ${SYCL_ROOT}/bin/icpx)
