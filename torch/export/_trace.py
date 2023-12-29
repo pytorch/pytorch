@@ -29,7 +29,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError
 
-from ._safeguard import GradStateOpsFailSafeguard
+from ._safeguard import AutogradStateOpsFailSafeguard
 
 from .dynamic_shapes import _process_constraints, Constraint
 from .exported_program import (
@@ -376,15 +376,19 @@ def _export_non_strict(
     fake_params_buffers,
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
+    pre_dispatch=False,
 ):
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with torch.nn.utils.stateless._reparametrize_module(
         mod, fake_params_buffers
-    ), GradStateOpsFailSafeguard():
+    ), AutogradStateOpsFailSafeguard():
         gm, graph_signature = transform(aot_export_module)(
-            mod, (*fake_args, *fake_kwargs.values()), trace_joint=False
+            mod,
+            (*fake_args, *fake_kwargs.values()),
+            trace_joint=False,
+            pre_dispatch=pre_dispatch,
         )
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
@@ -470,6 +474,7 @@ def _export(
     *,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
+    pre_dispatch: bool = False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -517,11 +522,13 @@ def _export(
                 gm, sig = aot_export(Wrapper(mod), args, **kwargs)
 
                 def strip_root(x):
-                    return (
-                        x[len("_export_root.") :]
-                        if x.startswith("_export_root.")
-                        else x
-                    )
+                    if isinstance(x, str) and x.startswith("_export_root"):
+                        stripped = x[len("_export_root") :]
+                        return stripped[1:] if stripped.startswith(".") else stripped
+                    return x
+
+                def fixup_key(x):
+                    return "L__self__" + strip_root(x)
 
                 sig.parameters = pytree.tree_map(strip_root, sig.parameters)
                 sig.buffers = pytree.tree_map(strip_root, sig.buffers)
@@ -534,6 +541,18 @@ def _export(
                 sig.buffers_to_mutate = pytree.tree_map(
                     strip_root, sig.buffers_to_mutate
                 )
+                for node in gm.graph.nodes:
+                    if "nn_module_stack" in node.meta:
+                        nn_module_stack = node.meta["nn_module_stack"]
+                        # Delete the wrapper module reference
+                        del nn_module_stack[""]
+                        node.meta["nn_module_stack"] = {
+                            fixup_key(key): val
+                            for key, val in pytree.tree_map(
+                                strip_root, nn_module_stack
+                            ).items()
+                        }
+
                 return gm, sig
 
             return _aot_export_non_strict
@@ -692,6 +711,7 @@ def _export(
         _reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs),
         fake_params_buffers,
         transform=_process_user_inputs,
+        pre_dispatch=pre_dispatch,
     )
 
     gm = ep_non_strict.gm

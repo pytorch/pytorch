@@ -3,7 +3,7 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.overrides import TorchFunctionMode
 
 
-class GradStateOpsFailSafeguard(TorchFunctionMode):
+class AutogradStateOpsFailSafeguard(TorchFunctionMode):
     """
     Detect grad state ops during exporting the graph and fail the process by
     raising an error, to avoid unexpected behavior. Those grad mode ops could be:
