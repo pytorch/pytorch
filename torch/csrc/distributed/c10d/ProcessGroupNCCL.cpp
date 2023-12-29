@@ -1109,8 +1109,17 @@ void ProcessGroupNCCL::abortCommsFromMap(
     // their responsibility to destroy the process group and recreate
     // it to recover from errors.
 
+    c10::StreamId streamId = -1;
+    if (ncclStreams_.find(devName) != ncclStreams_.end()) {
+      auto streams = ncclStreams_.at(devName);
+      if (streams.size() > 0) {
+        streamId = streams[0].id();
+      }
+    }
+
     LOG(INFO) << logPrefix() << "] Destroyed " << ncclComms.size()
-              << "communicators on CUDA device " << devName;
+              << "communicators on CUDA device: " << devName
+              << " with stream: " << streamId;
   }
 }
 
