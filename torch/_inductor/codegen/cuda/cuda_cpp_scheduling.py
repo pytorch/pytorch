@@ -42,12 +42,14 @@ class CUDACPPScheduling(BaseScheduling):
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
-    def is_cuda_cpp_template(self, node: BaseSchedulerNode) -> bool:
+    @staticmethod
+    def is_cuda_cpp_template(node: BaseSchedulerNode) -> bool:
         return isinstance(node, SchedulerNode) and isinstance(
             node.node, CUDATemplateBuffer
         )
 
-    def is_cuda_cpp_fused_template(self, node: BaseSchedulerNode) -> bool:
+    @staticmethod
+    def is_cuda_cpp_fused_template(node: BaseSchedulerNode) -> bool:
         return isinstance(node, FusedSchedulerNode) and self.is_cuda_cpp_template(
             node.get_template_node()
         )

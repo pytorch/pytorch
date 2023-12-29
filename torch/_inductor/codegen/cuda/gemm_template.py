@@ -18,7 +18,10 @@ from .cutlass_epilogue_gen import (
     EVT_EXTRA_HEADER,
 )
 
-from .pointwise_stride_utils import extract_pointwise_load_strides
+from .pointwise_stride_utils import (
+    extract_epilogue_storage_layout,
+    extract_pointwise_load_strides,
+)
 
 log = logging.getLogger(__name__)
 
@@ -831,7 +834,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         a_layout = X.get_layout()
         b_layout = W.get_layout()
         c_layout = Bias.get_layout() if Bias is not None else None
-        d_layout = Y.get_layout()
+
+        d_layout = copy.deepcopy(Y.get_layout())
+
         all_match = all(
             CUTLASSGemmTemplate.layout_match(buf.get_layout(), op_layout)
             for buf, op_layout in zip(
@@ -1176,7 +1181,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
         if epilogue_nodes is not None and len(epilogue_nodes) > 0:
-            self.output_node = cast(Buffer, epilogue_nodes[-1])
+            self.update_output_node_given_epilogue(epilogue_nodes, template_buffer_node)
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
@@ -1217,7 +1222,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout
         # we need to adapt, which might lead to suboptimal performance.
         # Also there might be a Bias / additional input node which was not present during autotuning
-        # @TODO kadeng: Find a way to solve this better
+
         op = self.fix_op_layout(op, X, W, Bias, Y)
         epilogue_template: Optional[str] = None
         should_swap_xw: bool = False
@@ -1291,6 +1296,25 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             ).render(**options)
             res += "\n\n" + test_runner_code
         return res
+
+    def update_output_node_given_epilogue(self, epilogue_nodes, template_buffer_node):
+        assert (
+            template_buffer_node is not None
+        ), "If epilogue nodes are passed, template_buffer_node is required"
+        # We need to match dimensions of the target buffer to the output of the matmul
+        result_strides, result_sizes = extract_epilogue_storage_layout(
+            epilogue_nodes[-1], template_buffer_node
+        )
+        outbuf = cast(Buffer, epilogue_nodes[-1])
+        outbuf.freeze_layout()
+        out_layout = FixedLayout(
+            outbuf.layout.device,
+            outbuf.layout.dtype,
+            result_sizes,
+            result_strides,
+            outbuf.layout.offset,
+        )
+        self.output_node = ir.ReinterpretView(data=outbuf, layout=out_layout)
 
     def determine_additional_inputs(
         self,

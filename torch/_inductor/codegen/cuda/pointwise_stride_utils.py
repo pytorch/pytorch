@@ -277,3 +277,52 @@ def extract_pointwise_load_strides(
             ]  # we take the size from the reference layout, all broadcasted dimensions set to 1
         result[name] = (buffer_strides, buffer_offset, buffer_sizes)
     return result
+
+
+@staticmethod
+def extract_epilogue_storage_layout(
+    epilogue_node: ir.IRNode, gemm_node: ir.Buffer
+) -> Dict[str, Tuple[List[int], int, List[int]]]:
+    if isinstance(epilogue_node, ir.ComputedBuffer):
+        pointwise_node = epilogue_node.data
+    target_layout = epilogue_node.get_layout()
+    reference_layout = gemm_node.get_layout()
+    assert isinstance(
+        reference_layout, ir.FixedLayout
+    ), f"Expected FixedLayout from reference_buffer.get_layout(), got {reference_layout}"
+    assert isinstance(
+        pointwise_node, ir.Pointwise
+    ), f"Expected a ComputedBuffer wrapping a Pointwise node, got {pointwise_node}"
+    extractor = _IndexExtractor()
+    with virtualized.V.set_ops_handler(extractor), patch.object(  # type: ignore[call-arg]
+        ir.FlexibleLayout, "allow_indexing", True
+    ):
+        index = pointwise_node._index(pointwise_node.ranges)
+        # Call the inner_fn, which will call back into the extractor using the V.ops_handler mechanism
+        # populating extrqctor.name_index_expr_map
+        pointwise_node.inner_fn(index)
+
+    name_index_expr_map = extractor.name_index_expr_map
+    reference_index_expr: Optional[sympy.Expr] = name_index_expr_map.get(
+        gemm_node.name, None
+    )
+    if reference_index_expr is None:
+        raise RuntimeError("Reference buffer not loaded by pointwise op")
+    reference_strides = index_to_stride_dict(reference_index_expr)
+    gemm_output_strides = [0] * len(reference_layout.stride)
+    gemm_output_sizes = list(reference_layout.size)
+    for name, stride in reference_strides.items():
+        if name == "offset":
+            continue
+        target_dim = int(name[1:])
+        reference_dim = reference_layout.stride.index(stride)
+        assert (
+            reference_layout.size[reference_dim] == target_layout.size[target_dim]
+        ), f"Size mismatch between reference and target layouts for {target_dim=}, {reference_dim=}"
+        if reference_layout.stride[reference_dim] == 1:
+            assert (
+                target_layout.stride[target_dim] == 1
+            ), f"Contiguous dimension mismatch between reference and target layouts. In GEMM, dimension {reference_dim} is contiguous, while corresponding dimension {target_dim} is not."
+
+        gemm_output_strides[reference_dim] = target_layout.stride[target_dim]
+    return gemm_output_strides, gemm_output_sizes
