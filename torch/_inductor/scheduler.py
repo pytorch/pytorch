@@ -12,11 +12,13 @@ from typing import (
     Counter,
     DefaultDict,
     Dict,
+    Generic,
     List,
     Optional,
     Sequence,
     Set,
     Tuple,
+    TypeVar,
     Union,
 )
 
@@ -367,7 +369,9 @@ class BaseSchedulerNode:
                             ),
                         )
                         and not (
-                            isinstance(input_node.node, ir.FallbackKernel)
+                            isinstance(
+                                input_node.node, (ir.FallbackKernel, ir.MultiOutput)
+                            )
                             and len(input_node.node.get_alias_names()) > 0
                         )
                         and buffer_reuse_key(input_node.node)
@@ -421,6 +425,9 @@ class BaseSchedulerNode:
             V.graph.wrapper_code.codegen_allocation(self.node)
 
     def can_free(self):
+        # There's no real allocated buffer, no need to free it
+        if isinstance(self.node.layout, ir.NoneLayout):
+            return False
         for use in self.users:
             if isinstance(use.node, OutputNode):
                 return False
@@ -582,7 +589,9 @@ class BaseSchedulerNode:
 
         if isinstance(self, ExternKernelSchedulerNode):
             assert isinstance(self.node, ir.ExternKernel), f"{type(self.node)=}"
-            op = kernel_name_to_op.get(getattr(self.node, "kernel", ""), None)
+            op = kernel_name_to_op.get(
+                getattr(self.node, "python_kernel_name", ""), None
+            )
 
             # if there is a resolved op, dry-run using fake mode and record flop count
             if op is not None:
@@ -632,7 +641,7 @@ class BaseSchedulerNode:
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
     def debug_str_extra(self) -> str:
-        return f"{self.get_name()}.node.kernel = {getattr(self.node, 'kernel', None)}"
+        return f"{self.get_name()}.node.kernel = {getattr(self.node, 'python_kernel_name', None)}"
 
     def is_extern(self):
         return True
@@ -1107,7 +1116,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     def get_nodes(self):
         """Returns all nodes contained in this kernel, unpacking fused nodes into their constituent scheduler nodes."""
-        return list(itertools.chain(*[x.get_nodes() for x in self.snodes]))
+        return list(itertools.chain.from_iterable(x.get_nodes() for x in self.snodes))
 
     def get_first_name(self):
         return self.snodes[0].get_first_name()
@@ -1165,6 +1174,16 @@ class NodeUser:
     # A weak user must be scheduled after a given node, but doesn't actually
     # use the result
     is_weak: bool = False
+
+    def __hash__(self):
+        return hash((self.node.get_name(), self.can_inplace, self.is_weak))
+
+    def __eq__(self, other):
+        return (
+            self.get_name() == other.get_name()
+            and self.can_inplace == other.can_inplace
+            and self.is_weak == other.is_weak
+        )
 
     def get_name(self):
         return self.node.get_name()
@@ -1328,7 +1347,39 @@ class Scheduler:
         Create dependency edges between nodes, handling aliasing and
         mutation properly.
         """
-        name_to_users: DefaultDict[str, List[NodeUser]] = collections.defaultdict(list)
+
+        T = TypeVar("T")
+
+        class DedupList(Generic[T]):
+            """
+            This data structure behaves like a list except it makes sure the
+            elements remain unique.
+            Normally one could use a set/dict for this purpose however
+            the list in question gets elements appended as it is being
+            iterated over which means that we need to keep the list
+            semantics.
+            """
+
+            def __init__(self, items=None, membership=None):
+                self.items = items or list()
+                self.membership = membership or set()
+
+            def append(self, node_user: T) -> None:
+                if node_user in self.membership:
+                    return
+                self.items.append(node_user)
+                self.membership.add(node_user)
+
+            def __add__(self, other: "DedupList[T]") -> "DedupList[T]":
+                new_membership = set.union(self.membership, other.membership)
+                new_items = self.items + [
+                    x for x in other.items if x not in self.membership
+                ]
+                return DedupList(new_items, new_membership)
+
+        name_to_users: DefaultDict[str, DedupList[NodeUser]] = collections.defaultdict(
+            DedupList
+        )
 
         # handle aliasing by using python aliasing in name_to_users
         # if foo aliases bar then we will make name_to_users["foo"] point
@@ -1381,7 +1432,10 @@ class Scheduler:
 
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
-            for s in node.node.get_unbacked_symbol_defs():
+            unbacked_symbol_defs = sorted(
+                node.node.get_unbacked_symbol_defs(), key=lambda x: x.name
+            )
+            for s in unbacked_symbol_defs:
                 assert isinstance(s, sympy.Symbol)
                 # Pick the first definer as canonical.  There may be multiple
                 # because if a MultiOutputLayout buffer propagates an unbacked
@@ -1389,8 +1443,11 @@ class Scheduler:
                 if s not in unbacked_symbol_to_origin_node:
                     unbacked_symbol_to_origin_node[s] = node
 
+            unbacked_symbol_uses = sorted(
+                node.node.get_unbacked_symbol_uses(), key=lambda x: x.name
+            )
             # if a kernel takes unbacked symints, register dependencies
-            for s in node.node.get_unbacked_symbol_uses():
+            for s in unbacked_symbol_uses:
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node}"
@@ -1403,7 +1460,7 @@ class Scheduler:
                 # this node must run after the prior writer
                 add_user(alt_name, node)
                 node.add_mutation_dep(StarDep(alt_name))
-                for other_node in name_to_users[alt_name]:
+                for other_node in name_to_users[alt_name].items:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
                     known_dep_node_names = dep_closure(node.get_name())
@@ -1461,7 +1518,7 @@ class Scheduler:
 
         # copy users information onto the nodes
         for node in self.nodes:
-            node.set_users(name_to_users[node.get_name()])
+            node.set_users(name_to_users[node.get_name()].items)
 
         # populate inverse_users
         for node in self.nodes:
@@ -1639,24 +1696,20 @@ class Scheduler:
 
         from triton.compiler.errors import CompilationError
 
+        why = WhyNoFuse(node1, node2)
+
         try:
             ms1, path1 = self.benchmark_fused_nodes(node_list_1)
             if math.isinf(ms1):
-                fusion_log.debug(
-                    "cannot fuse (benchmark): register spilling of the first kernel"
-                )
+                why("register spilling of the first kernel")
                 return False
             ms2, path2 = self.benchmark_fused_nodes(node_list_2)
             if math.isinf(ms2):
-                fusion_log.debug(
-                    "cannot fuse (benchmark): register spilling of the second kernel"
-                )
+                why("register spilling of the second kernel")
                 return False
             ms_fused, path_fused = self.benchmark_fused_nodes(node_list_fused)
             if math.isinf(ms_fused):
-                fusion_log.debug(
-                    "cannot fuse (benchmark): register spilling of the fused kernel"
-                )
+                why("register spilling of the fused kernel")
                 return False
         except CompilationError as e:
             # workaround triton issue: https://github.com/openai/triton/issues/2151
@@ -1705,7 +1758,7 @@ class Scheduler:
         Mutates self.nodes to combine nodes into FusedSchedulerNodes.
 
         This relies on two key functions to control the logic:
-            - self.can_fuses(): checks if a fusion is legal
+            - self.can_fuse(): checks if a fusion is legal
             - self.score_fusion(): assigns priority to a given fusion
         """
         fused_nodes = set(self.nodes)
@@ -1717,6 +1770,9 @@ class Scheduler:
             ):
                 if not self.speedup_by_fusion(node1, node2):
                     continue
+                fusion_log.debug(
+                    "fusing %s with %s", node1.get_name(), node2.get_name()
+                )
                 node3 = fuse(node1, node2)
                 fused_nodes.remove(node1)
                 fused_nodes.remove(node2)
@@ -1772,11 +1828,7 @@ class Scheduler:
                 check_all_pairs(node_grouping)
 
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
-        if fusion_log.isEnabledFor(logging.DEBUG):
-            fusion_log.debug("\nfound %d possible fusions:", len(possible_fusions))
-            for fusion in possible_fusions:
-                fusion_log.debug("%s", fusion)
-            fusion_log.debug("")
+        fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
 
     def will_fusion_create_cycle(self, node1, node2):
@@ -2130,8 +2182,7 @@ class Scheduler:
         assert (
             device.type != "cuda" or device.index is not None
         ), f"{device} should have been normalized in lowering"
-        V.graph.device_types.add(device.type)
-        V.graph.add_device_idx(device.index)
+        V.graph.add_device_info(device)
 
         device_scheduling = get_scheduling_for_device(device.type)
         if device_scheduling is None:
