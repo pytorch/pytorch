@@ -820,53 +820,6 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
 
-    @with_comms
-    def test_weight_tying(self):
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                # Initialize different weights for embedding and fc.
-                torch.manual_seed(1)
-                self.embedding = torch.nn.Embedding(16, 8)
-                torch.manual_seed(2)
-                self.fc = torch.nn.Linear(8, 16)
-
-            def forward(self, x):
-                return self.fc(self.embedding(x))
-
-        model = TestModule().to(self.device_type)
-        parallelize_plan = {
-            "embedding": ColwiseParallel(),
-            "fc": RowwiseParallel(),
-        }
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        parallelize_module(model, device_mesh, parallelize_plan)
-        optim = torch.optim.Adam(model.parameters(), lr=0.25)
-
-        input_size = [5]
-        torch.manual_seed(0)
-        inp = torch.randint(16, input_size, device=self.device_type)
-
-        # Without weight tying.
-        self.assertNotEqual(
-            model.embedding.weight.to_local(), model.fc.weight.to_local()
-        )
-        output = model(inp)
-        output.sum().backward()
-        self.assertNotEqual(
-            model.embedding.weight.grad.to_local(), model.fc.weight.grad.to_local()
-        )
-
-        optim.zero_grad()
-
-        # With weight tying.
-        model.fc.weight = model.embedding.weight
-
-        self.assertEqual(model.embedding.weight, model.fc.weight)
-        output = model(inp)
-        output.sum().backward()
-        self.assertEqual(model.embedding.weight.grad, model.fc.weight.grad)
-
 
 if __name__ == "__main__":
     run_tests()

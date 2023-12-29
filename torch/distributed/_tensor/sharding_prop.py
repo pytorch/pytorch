@@ -1,6 +1,6 @@
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, cast, Dict, List, Optional, Sequence, Union
 
 import torch
 from torch._ops import OpOverload
@@ -71,7 +71,7 @@ class ShardingPropagator:
 
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> Union[None, TensorMeta, List[TensorMeta], Tuple[TensorMeta, ...]]:
+    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
@@ -93,7 +93,7 @@ class ShardingPropagator:
             )
 
         elif isinstance(fake_out, (tuple, list)):
-            tensor_meta_list = []
+            tensor_meta_list: List[Optional[TensorMeta]] = []
             for fake_out_item in fake_out:
                 if isinstance(fake_out_item, torch.Tensor):
                     tensor_meta_list.append(
@@ -103,6 +103,8 @@ class ShardingPropagator:
                             dtype=fake_out_item.dtype,
                         )
                     )
+                else:
+                    tensor_meta_list.append(None)
             return (
                 tuple(tensor_meta_list)
                 if isinstance(fake_out, tuple)
@@ -116,9 +118,7 @@ class ShardingPropagator:
         self,
         op: OpOverload,
         output_spec: OutputSpecType,
-        output_tensor_meta: Union[
-            None, TensorMeta, List[TensorMeta], Tuple[TensorMeta, ...]
-        ],
+        output_tensor_meta: Union[None, TensorMeta, Sequence[Optional[TensorMeta]]],
     ) -> None:
         """
         Wrap the output_spec with the tensor metadata from the output.
