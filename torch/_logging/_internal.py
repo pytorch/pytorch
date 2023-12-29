@@ -254,11 +254,11 @@ def set_logs(
             The log level for dynamic shapes. Default: ``logging.WARN``
 
         distributed (:class:`Optional[int]`):
-            Whether to log communication operations and other debug info from PyTorch Distributed components.
+            Whether to log c10d communication operations and other debug info from PyTorch Distributed components.
             Default: ``logging.WARN``
 
         dist_c10d (:class:`Optional[int]`):
-            Whether to log communication operations related debug info in PyTorch Distributed components.
+            Whether to log c10d communication operations related debug info in PyTorch Distributed components.
             Default: ``logging.WARN``
 
         dist_ddp (:class:`Optional[int]`):
