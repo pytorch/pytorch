@@ -2,6 +2,7 @@ import contextlib
 import functools
 import itertools
 import logging
+import types
 
 from typing import Dict, List, Optional
 
@@ -26,7 +27,7 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
+from ..source import AttrSource, FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
 from .lists import ListVariable, TupleVariable
@@ -63,13 +64,17 @@ def dynamo_enable_grad(tx, enable=True):
         GradModeVariable.create(tx, org_value, initialized=True)
 
 
-def only_consist_of(var, types):
+def only_consist_of(var, types, allow_none=False):
     if isinstance(var, types):
         return True
+    if allow_none and var.is_python_constant() and var.as_python_constant() is None:
+        return True
     if isinstance(var, (TupleVariable, ListVariable)):
-        return all(only_consist_of(item, types) for item in var.items)
+        return all(only_consist_of(item, types, allow_none) for item in var.items)
     if isinstance(var, ConstDictVariable):
-        return all(only_consist_of(item, types) for item in var.items.values())
+        return all(
+            only_consist_of(item, types, allow_none) for item in var.items.values()
+        )
     return False
 
 
@@ -279,7 +284,7 @@ def speculate_subgraph(
             else:
                 from . import TensorVariable
 
-                if not only_consist_of(output, TensorVariable):
+                if not only_consist_of(output, TensorVariable, allow_none=True):
                     unimplemented(
                         "HigherOrderOperator body's output must consist of tensors only"
                     )
@@ -376,14 +381,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return FunctorchGradHigherOrderVariable(value, source, **kwargs)
         elif value is torch._functorch.vmap.vmap_impl:
             return FunctorchVmapHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ in (
-            "trampoline_autograd_fwd",
-            "trampoline_autograd_bwd",
-            "trampoline_autograd_apply",
-        ):
-            return AutogradFunctionMethodHigherOrderVariable(
-                value=value, source=source, **kwargs
-            )
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
@@ -1152,107 +1149,6 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    def __init__(
-        self, value, fwd_bwd_tracer=None, source: Optional[Source] = None, **kwargs
-    ):
-        super().__init__(value, source, **kwargs)
-        # The fwd_bwd_tracer is owned by AutogradFunctionVariable and passed
-        # in for speculation. It allows us to share tracing information about proxies
-        # across fwd bwd, such as when users stash tensors on a context.
-        self.fwd_bwd_tracer = fwd_bwd_tracer
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        from . import UserFunctionVariable
-        from .builder import wrap_fx_proxy
-
-        tracer = self.fwd_bwd_tracer
-
-        if len(kwargs) > 0:
-            unimplemented(
-                "kwargs have not been implemented for torch.autograd.Function"
-            )
-
-        from . import TorchInGraphFunctionVariable
-
-        always_restore = self.value.__name__ == "trampoline_autograd_bwd"
-        if (
-            self.value.__name__ == "trampoline_autograd_bwd"
-            or self.value.__name__ == "trampoline_autograd_fwd"
-        ):
-            fn = UserFunctionVariable(self.value, source=self.source)
-        else:
-            fn = TorchInGraphFunctionVariable(self.value)
-        # TODO(jansel): BUG!!! we aren't copying on the line below, so the post-pre check below is pointless
-        pre_guards = tx.output.guards
-        # In eager-mode PyTorch, if we only compute first-order gradients,
-        # then the grad_mode is False during the backward pass.
-        # torch.compile assumes that we only compute first-order gradients,
-        # so we want to speculate the backward pass with the grad mode disabled.
-        enable_grad = (
-            False if self.value.__name__ == "trampoline_autograd_bwd" else None
-        )
-
-        # TODO: Support kwargs
-        (
-            (body_r, _),
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            fn,
-            [
-                *args,
-            ],
-            {},
-            "the user-defined autograd.Function",
-            source_target=self.value,
-            # Backwards should never, ever be stored!
-            always_restore=always_restore,
-            restore_side_effects=False,
-            tracer=tracer,
-            enable_grad=enable_grad,
-        )
-        post_guards = tx.output.guards
-        if body_lifted_freevars:
-            unimplemented("NYI - freevars in autograd function.")
-
-        if always_restore:
-            if post_guards - pre_guards:
-                unimplemented("NYI - New guards discovered in a restoring state")
-            # Nothing left to do here
-            return None
-
-        # don't add call module to parent graph if speculating forward
-        # return the result directly
-        if self.value.__name__ == "trampoline_autograd_fwd":
-            return body_r
-
-        p_args = (
-            *(arg.as_proxy() for arg in args),
-            *(arg for arg in body_lifted_freevars.keys()),
-        )
-        example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
-        )
-
-        # Store the invocation as a call
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                self.value,
-                args=tuple(p_args),
-                kwargs={},
-            ),
-            example_value=example_value,
-        )
-
-
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def create_wrapped_node(self, tx, args, kwargs, description):
         # See NOTE [HigherOrderOperator tracing design] for more details
@@ -1429,3 +1325,205 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
         assert isinstance(grad, TensorVariable)
 
         return fn.call_function(tx, args, {})
+
+
+class AutogradFunctionApplyVariable(VariableTracker):
+    def __init__(self, fwd_graph, bwd_graph, parent_source, **kwargs):
+        super().__init__(**kwargs)
+        self.fwd_graph = fwd_graph
+        self.bwd_graph = bwd_graph
+        self.parent_source = parent_source
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from . import (
+            AutogradFunctionContextVariable,
+            UserDefinedClassVariable,
+            UserFunctionVariable,
+            UserMethodVariable,
+        )
+        from .builder import wrap_fx_proxy
+
+        """
+        Consider the following:
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin()
+            @staticmethod
+            def backward(ctx, grad):
+                x, = ctx.saved_tensors
+                return grad * x.cos()
+        We want the resulting graphs to look like:
+        def fwd(ctx, x):
+            # (output, saved tensors / attrs)
+            return (x.sin(), [x])
+        # bwd(ctx, grad0, grad1, ..., gradn, *saved_tensors_or_attrs)
+        def bwd(ctx, grad, x):
+            return grad * x.cos()
+        To accomplish this, we're going to:
+        1. Construct a ctx object
+        2. (fwd_out, _), fwd_graph, fwd_freevars = speculate_subgraph on MySin.forward (manually_set_inputs=True)
+        3. (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph on MySin.backward, while manually setting
+        the ctx and grad inputs.
+        4. Manually rewriting the fwd graph's output to be (output, stuff_that_gets_used in bwd_graph)
+        Getting from 3 to 4 is pretty elegant: stuff_that_gets_used in bwd graph is
+        just the bwd_freevars returned from speculate_subgraph, assuming MySin.backward
+        doesn't capture any arguments.
+        All these steps work if MySin.backward doesn't capture any values. This is a
+        limitation in general that we should check for.
+        """
+
+        prev_side_effects = tx.output.side_effects.clone()
+        fwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
+            tx.output,
+            parent=tx.output.current_tracer,
+            source_target="autograd.Function",
+        )
+
+        fwd_src = AttrSource(self.parent_source, member="forward")
+        ctx = AutogradFunctionContextVariable.create(tx)
+        if isinstance(self.fwd_graph, types.FunctionType):
+            fwd_fn = UserFunctionVariable(self.fwd_graph, source=fwd_src)
+            fwd_args = [ctx, *args]
+        elif isinstance(self.fwd_graph, types.MethodType):
+            fwd_fn = UserMethodVariable(
+                self.fwd_graph.__func__,
+                UserDefinedClassVariable(self.fwd_graph.__class__),
+                source=fwd_src,
+            )
+            fwd_args = [fwd_fn.obj, ctx, *args]
+        else:
+            unimplemented("non-function or method")
+
+        # Speculate subgraph on the fwd
+        (fwd_out, _), fwd_graph, fwd_freevars = speculate_subgraph(
+            tx,
+            fwd_fn,
+            fwd_args,
+            kwargs,
+            "autograd.Function",
+            enable_grad=False,
+            restore_side_effects=False,
+            tracer=fwd_tracer,
+        )
+
+        if fwd_freevars:
+            unimplemented("NYI")
+
+        if ctx.mutable_local in tx.output.side_effects.store_attr_mutations:
+            if (
+                "_materialize_non_diff_grads"
+                in tx.output.side_effects.store_attr_mutations[ctx.mutable_local]
+            ):
+                unimplemented("NYI")
+
+        bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
+            tx.output,
+            parent=fwd_tracer,
+            source_target="autograd.Function",
+        )
+
+        # Speculate subgraph on the backward. We make the
+        # bwd tracer a child of the fwd tracer, because backward may rely on
+        # tensors/attrs created in the fwd tracer.
+
+        from .lists import BaseListVariable
+
+        if isinstance(fwd_out, BaseListVariable):
+            bwd_args = [ctx, *fwd_out.items]
+        else:
+            bwd_args = [ctx, fwd_out]
+
+        bwd_src = AttrSource(self.parent_source, member="backward")
+        if isinstance(self.bwd_graph, types.FunctionType):
+            bwd_fn = UserFunctionVariable(self.bwd_graph, source=bwd_src)
+        elif isinstance(self.bwd_graph, types.MethodType):
+            bwd_fn = UserMethodVariable(
+                self.bwd_graph.__func__,
+                UserDefinedClassVariable(self.bwd_graph.__class__),
+                source=bwd_src,
+            )
+            bwd_args = [bwd_fn.obj, *bwd_args]
+        else:
+            unimplemented("non-function or method")
+
+        with tx.output.subtracer(fwd_fn, fwd_tracer):
+            (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
+                tx,
+                bwd_fn,
+                bwd_args,
+                kwargs,
+                "autograd.Function",
+                enable_grad=False,
+                restore_side_effects=False,
+                tracer=bwd_tracer,
+                manually_set_subgraph_inputs=True,
+            )
+
+        # TODO: assert that bwd_graph didn't capture values that were
+        # not created inside fwd_graph.
+
+        # TODO(oulgen): Ideally, we would not do a linear search for output
+        # node but as things currently are there could be nodes after the
+        # output node
+        # This is bug prone as if there's code after the output node, then
+        # graph.output will append the output at the very end
+        # This might be a behavior difference
+
+        # Rewrite the output of fwd_graph to (output, stuff_necessary_for_bwd)
+        for node in fwd_graph.nodes:
+            if node.op == "output":
+                fwd_graph.erase_node(node)
+                break
+
+        new_fwd_graph_outputs = (fwd_out.as_proxy(), list(bwd_freevars.keys()))
+        new_fwd_graph_outputs = pytree.tree_map(lambda x: x.node, new_fwd_graph_outputs)
+        fwd_graph.output(new_fwd_graph_outputs)
+
+        # Store fwd_body
+        fwd_nn_modules = tx.copy_graphstate().output.nn_modules
+        fwd_name = add_subgraph(
+            tx,
+            fwd_src,
+            "fwd_body",
+            torch.fx.GraphModule(fwd_nn_modules.nn_modules, fwd_graph),
+        )
+
+        fwd_node = make_attr(tx, fwd_name)
+
+        # Store bwd_body
+        bwd_nn_modules = tx.copy_graphstate().output.nn_modules
+        bwd_name = add_subgraph(
+            tx,
+            bwd_src,
+            "bwd_body",
+            torch.fx.GraphModule(bwd_nn_modules.nn_modules, bwd_graph),
+        )
+
+        bwd_node = make_attr(tx, bwd_name)
+
+        tx.output.side_effects = prev_side_effects
+
+        p_args = (fwd_node, bwd_node, *(arg.as_proxy() for arg in args))
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            fwd_out.as_proxy(),
+        )
+
+        # Store the invocation as a call
+        from torch._functorch.autograd_function import autograd_function_apply
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                autograd_function_apply,
+                args=p_args,
+                kwargs={},
+            ),
+            example_value=example_value,
+        )

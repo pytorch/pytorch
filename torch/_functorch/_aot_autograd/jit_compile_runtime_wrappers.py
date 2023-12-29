@@ -527,7 +527,7 @@ def aot_dispatch_autograd(
             # and we filter them out here before passing the remaining grad_outputs into the compiled backward.
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_graph_handled_inputs = (
-                CompiledFunction.metadata.num_mutated_graph_handled_indices
+                CompiledFunction.metadata.num_mutated_graph_handled_indices_seen_by_autograd
             )
             num_mutated_runtime_inps = (
                 CompiledFunction.metadata.num_mutated_inp_runtime_indices

@@ -8,6 +8,12 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
+from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
+
+if HAS_CUDA:
+    import triton
+    from torch.testing._internal.triton_utils import add_kernel
 
 
 class CustomFunc1(torch.autograd.Function):
@@ -275,7 +281,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Illegal getattr invocation stride in strict mod",
+            ".*HigherOrderOperator body's output must consist of tensors only",
         ):
             opt_model(x)
 
@@ -835,6 +841,74 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         foo(torch.randn(2, requires_grad=True))
         self.assertEqual(cnts.frame_count, 1)
+
+    @requires_cuda()
+    @skipIfRocm
+    def test_triton_kernel_basic(self):
+        class Add(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x, y)
+                output = torch.zeros_like(x)
+                n_elements = output.numel()
+                grid = lambda meta: (  # noqa: E731
+                    triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+                )
+                add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+                return output
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, y = ctx.saved_tensors
+                return x * grad_output, y * grad_output
+
+        @torch.compile(fullgraph=True, backend="inductor")
+        def f(x, y):
+            z = Add.apply(x, y)
+            return z
+
+        x = torch.randn(10, device="cuda", requires_grad=True)
+        y = torch.randn(10, device="cuda", requires_grad=True)
+        z = f(x, y)
+        loss = z.sum()
+        loss.backward()
+        self.assertEqual(x + y, z)
+
+    @requires_cuda()
+    @skipIfRocm
+    def test_triton_kernel_multiple_out(self):
+        class Add(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x, y)
+                ctx.t1 = x
+                ctx.t2 = y
+                output = torch.zeros_like(x)
+                n_elements = output.numel()
+                grid = lambda meta: (  # noqa: E731
+                    triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+                )
+                add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+                return output, x
+
+            @staticmethod
+            def backward(ctx, grad_output, old_x):
+                x, y = ctx.saved_tensors
+                x1 = ctx.t1
+                y1 = ctx.t2
+                return old_x * x * x1 * grad_output, y * y1 * grad_output
+
+        @torch.compile(fullgraph=True, backend="inductor")
+        def f(x, y):
+            z = Add.apply(x, y)
+            return z
+
+        x = torch.randn(10, device="cuda", requires_grad=True)
+        y = torch.randn(10, device="cuda", requires_grad=True)
+        z, _ = f(x, y)
+        loss = z.sum()
+        loss.backward()
+        self.assertEqual(x + y, z)
 
 
 if __name__ == "__main__":
