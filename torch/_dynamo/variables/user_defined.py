@@ -722,12 +722,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(subobj, types.FunctionType):
                 return True
             if isinstance(subobj, types.MethodType):
-                if torch.distributed.is_available() and isinstance(
-                    self.value, torch.distributed.fsdp._flat_param.FlatParamHandle
-                ):
-                    return True
                 if isinstance(self.value, torch.nn.Module):
                     return True
+                try:
+                    if torch.distributed.is_available() and isinstance(
+                        self.value, torch.distributed.fsdp._flat_param.FlatParamHandle
+                    ):
+                        return True
+                except:
+                    # module 'torch.distributed' has no attribute 'fsdp'
+                    # is not protected by torch.distributed.is_available() for some reason?
+                    return False
             return False
 
         try:
