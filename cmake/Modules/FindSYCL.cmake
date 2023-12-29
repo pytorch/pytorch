@@ -434,10 +434,6 @@ macro(SYCL_ADD_LIBRARY sycl_target)
     _cmake_options
     ${ARGN})
 
-  if(_cmake_options MATCHES STATIC)
-    message(FATAL_ERROR "SYCL_ADD_LIBRARY doesn't support STATIC keyword ...")
-  endif()
-
   # Compile sycl sources
   SYCL_WRAP_SRCS(
     ${sycl_target}
