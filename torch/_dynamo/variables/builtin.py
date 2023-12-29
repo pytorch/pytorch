@@ -86,6 +86,8 @@ def _polyfill_call_impl(name):
 
 
 class BuiltinVariable(VariableTracker):
+    _SENTINEL = object()
+
     @staticmethod
     @functools.lru_cache(None)
     def _constant_fold_functions():
@@ -1071,42 +1073,44 @@ class BuiltinVariable(VariableTracker):
             items = [fn.call_function(tx, [x], {}) for x in seq.unpack_var_sequence(tx)]
             return variables.TupleVariable(items)
 
-    def call_sum(self, tx, seq, **kwargs):
+    def call_sum(self, tx, seq, start=_SENTINEL):
         # Special case for sum on tuple of floats and ints
-        if (
-            isinstance(seq, (variables.ListVariable, variables.TupleVariable))
-            and all(
-                isinstance(x, variables.ConstantVariable)
-                and isinstance(x.value, (int, float))
-                for x in seq.items
-            )
-            and not kwargs
+        if isinstance(seq, (variables.ListVariable, variables.TupleVariable)) and all(
+            isinstance(x, variables.ConstantVariable)
+            and isinstance(x.value, (int, float))
+            for x in seq.items
         ):
-            new_list = [x.value for x in seq.items]
-            return variables.ConstantVariable.create(sum(new_list))
+            if start is self._SENTINEL:
+                return variables.ConstantVariable.create(
+                    sum(x.value for x in seq.items),
+                )
+            if isinstance(start, variables.ConstantVariable) and isinstance(
+                start.value, (int, float)
+            ):
+                return variables.ConstantVariable.create(
+                    sum((x.value for x in seq.items), start=start.value),
+                )
         if seq.has_unpack_var_sequence(tx):
-            start = kwargs.pop(
-                "start", variables.ConstantVariable.create(0)
-            ).as_python_constant()
-            assert not kwargs
-            items = seq.unpack_var_sequence(tx)[start:]
+            if start is self._SENTINEL:
+                start = variables.ConstantVariable.create(0)
+            items = seq.unpack_var_sequence(tx)
             return BuiltinVariable(functools.reduce).call_function(
                 tx,
                 [
                     BuiltinVariable(operator.add),
                     variables.TupleVariable(items),
-                    variables.ConstantVariable.create(0),
+                    start,
                 ],
                 {},
             )
 
-    def call_reduce(self, tx, function, iterable, initializer=None):
+    def call_reduce(self, tx, function, iterable, initial=_SENTINEL):
         if iterable.has_unpack_var_sequence(tx):
             items = iterable.unpack_var_sequence(tx)
-            if initializer is None:
+            if initial is self._SENTINEL:
                 value, items = items[0], items[1:]
             else:
-                value = initializer
+                value = initial
             for element in items:
                 value = function.call_function(tx, [value, element], {})
             return value

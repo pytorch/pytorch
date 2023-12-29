@@ -120,9 +120,7 @@ class ExtensionBackendTests(TestCase):
             self.dynamic_shape = dynamic_shape
 
         def __call__(self, *args: Any, **kwargs: Any) -> Any:
-            with torch._C._SetExcludeDispatchKeyGuard(
-                torch._C.DispatchKey.Python, False
-            ):
+            with torch._C._EnablePythonDispatcher():
                 opt_fn = torch.compile(
                     getattr(torch.ops.aten, self.op_name), dynamic=self.dynamic_shape
                 )
