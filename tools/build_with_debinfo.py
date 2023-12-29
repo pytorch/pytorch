@@ -5,25 +5,25 @@
 # - ninja -j1 -v -n torch_python | sed -e 's/-O[23]/-g/g' -e 's#\[[0-9]\+\/[0-9]\+\] \+##' |sh
 # - Copy libs from build/lib to torch/lib folder
 
-import sys
 import subprocess
-import shlex
+import sys
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
-PYTORCH_ROOTDIR = Path(__file__).parent.parent
+PYTORCH_ROOTDIR = Path(__file__).resolve().parent.parent
 TORCH_DIR = PYTORCH_ROOTDIR / "torch"
 TORCH_LIB_DIR = TORCH_DIR / "lib"
 BUILD_DIR = PYTORCH_ROOTDIR / "build"
 BUILD_LIB_DIR = BUILD_DIR / "lib"
 
 
-def check_output(*args, **kwargs) -> str:
-    return subprocess.check_output(*args, **kwargs).decode("utf-8")
+def check_output(args: List[str], cwd: Optional[str] = None) -> str:
+    return subprocess.check_output(args, cwd=cwd).decode("utf-8")
 
 
 def parse_args() -> Any:
     from argparse import ArgumentParser
+
     parser = ArgumentParser(description="Incremental build PyTorch with debinfo")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("files", nargs="?", action="append")
@@ -39,7 +39,7 @@ def get_lib_extension() -> str:
 
 
 def create_symlinks() -> None:
-    """ Creates symlinks from build/lib to torch/lib """
+    """Creates symlinks from build/lib to torch/lib"""
     if not TORCH_LIB_DIR.exists():
         raise RuntimeError(f"Can't create symlinks as {TORCH_LIB_DIR} does not exist")
     if not BUILD_LIB_DIR.exists():
@@ -64,26 +64,30 @@ def is_devel_setup() -> bool:
 
 
 def create_build_plan() -> List[Tuple[str, str]]:
-    output = check_output(["ninja", "-j1", "-v", "-n", "torch_python"], cwd=str(BUILD_DIR))
+    output = check_output(
+        ["ninja", "-j1", "-v", "-n", "torch_python"], cwd=str(BUILD_DIR)
+    )
     rc = []
     for line in output.split("\n"):
         if not line.startswith("["):
             continue
-        line = line.split("]",1)[1].strip()
+        line = line.split("]", 1)[1].strip()
         if line.startswith(": &&") and line.endswith("&& :"):
             line = line[4:-4]
         line = line.replace("-O2", "-g").replace("-O3", "-g")
         name = line.split("-o ", 1)[1].split(" ")[0]
-        rc.append([name, line])
+        rc.append((name, line))
     return rc
 
 
-def main():
+def main() -> None:
     if sys.platform == "win32":
         print("Not supported on Windows yet")
         sys.exit(-95)
     if not is_devel_setup():
-        print("Not a devel setup of PyTorch, please run `python3 setup.py develop --user` first")
+        print(
+            "Not a devel setup of PyTorch, please run `python3 setup.py develop --user` first"
+        )
         sys.exit(-1)
     if not has_build_ninja():
         print("Only ninja build system is supported at the moment")
@@ -95,7 +99,7 @@ def main():
         Path(file).touch()
     build_plan = create_build_plan()
     if len(build_plan) == 0:
-        return "Nothing to do"
+        return print("Nothing to do")
     if len(build_plan) > 100:
         print("More than 100 items needs to be rebuild, run `ninja torch_python` first")
         sys.exit(-1)
@@ -103,7 +107,7 @@ def main():
         print(f"[{idx + 1 } / {len(build_plan)}] Building {name}")
         if args.verbose:
             print(cmd)
-        subprocess.check_call(shlex.split(cmd), cwd=BUILD_DIR)
+        subprocess.check_call(["sh", "-c", cmd], cwd=BUILD_DIR)
     create_symlinks()
 
 
