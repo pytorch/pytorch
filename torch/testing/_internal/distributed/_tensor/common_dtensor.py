@@ -69,14 +69,13 @@ class MLPModule(nn.Module):
 @dataclass
 class ModelArgs:
     n_layers: int = 2
-    vocab_size: int = 28
-    max_seq_len: int = 32
-    dim: int = 16
+    vocab_size: int = 16
+    max_seq_len: int = 16
+    dim: int = 8
     n_heads: int = 4
     dropout_p: float = 0.1
     use_attn_mask: bool = True
     weight_tying: bool = True
-    dtype: torch.dtype = None
 
 class Attention(nn.Module):
     def __init__(self, args: ModelArgs):
@@ -87,12 +86,11 @@ class Attention(nn.Module):
         self.dropout_p = args.dropout_p
         self.resid_dropout = nn.Dropout(args.dropout_p)
         self.use_attn_mask = args.use_attn_mask
-        self.dtype = args.dtype
 
-        self.wq = nn.Linear(args.dim, args.dim, bias=False, dtype=args.dtype)
-        self.wk = nn.Linear(args.dim, args.dim, bias=False, dtype=args.dtype)
-        self.wv = nn.Linear(args.dim, args.dim, bias=False, dtype=args.dtype)
-        self.wo = nn.Linear(args.dim, args.dim, bias=False, dtype=args.dtype)
+        self.wq = nn.Linear(args.dim, args.dim, bias=False)
+        self.wk = nn.Linear(args.dim, args.dim, bias=False)
+        self.wv = nn.Linear(args.dim, args.dim, bias=False)
+        self.wo = nn.Linear(args.dim, args.dim, bias=False)
 
     def forward(self, x):
         bsz, seq_len, _ = x.size()
@@ -105,22 +103,21 @@ class Attention(nn.Module):
         keys = keys.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
         values = values.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
 
-        mask = None
-        if self.use_attn_mask and seq_len > 1:
-            mask = torch.full((seq_len, seq_len), float("-inf"), device=x.device, dtype=self.dtype)
-            mask = torch.triu(mask, diagonal=1)
-        output = F.scaled_dot_product_attention(queries, keys, values, mask, self.dropout_p if self.training else 0)
+        output = F.scaled_dot_product_attention(
+            queries, keys, values, None,
+            self.dropout_p if self.training else 0,
+            self.use_attn_mask,
+        )
         output = output.transpose(1, 2).contiguous().view(bsz, seq_len, -1)
         return self.resid_dropout(self.wo(output))
 
 class FeedForward(nn.Module):
-    def __init__(self, args: ModelArgs):
+    def __init__(self, dim, hidden_dim, dropout_p):
         super().__init__()
-        hidden_dim = 4 * args.dim
-        self.w1 = nn.Linear(args.dim, hidden_dim, dtype=args.dtype)
+        self.w1 = nn.Linear(dim, hidden_dim)
         self.gelu = nn.GELU()
-        self.w2 = nn.Linear(hidden_dim, args.dim, dtype=args.dtype)
-        self.resid_dropout = nn.Dropout(args.dropout_p)
+        self.w2 = nn.Linear(hidden_dim, dim)
+        self.resid_dropout = nn.Dropout(dropout_p)
 
     def forward(self, x):
         return self.resid_dropout(self.w2(self.gelu(self.w1(x))))
@@ -128,10 +125,10 @@ class FeedForward(nn.Module):
 class TransformerBlock(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
-        self.attention_norm = nn.LayerNorm(args.dim, dtype=args.dtype)
+        self.attention_norm = nn.LayerNorm(args.dim)
         self.attention = Attention(args)
-        self.ffn_norm = nn.LayerNorm(args.dim, dtype=args.dtype)
-        self.feed_forward = FeedForward(args)
+        self.ffn_norm = nn.LayerNorm(args.dim)
+        self.feed_forward = FeedForward(args.dim, hidden_dim=4 * args.dim, dropout_p=args.dropout_p)
 
     def forward(self, x):
         h = x + self.attention(self.attention_norm(x))
@@ -146,14 +143,14 @@ class Transformer(nn.Module):
         assert args.vocab_size is not None
         assert args.max_seq_len is not None
         self.max_seq_len = args.max_seq_len
-        self.tok_embeddings = nn.Embedding(args.vocab_size, args.dim, dtype=args.dtype)
-        self.pos_embeddings = nn.Embedding(args.max_seq_len, args.dim, dtype=args.dtype)
+        self.tok_embeddings = nn.Embedding(args.vocab_size, args.dim)
+        self.pos_embeddings = nn.Embedding(args.max_seq_len, args.dim)
         self.dropout = nn.Dropout(args.dropout_p)
         self.layers = nn.ModuleList()
         for _ in range(args.n_layers):
             self.layers.append(TransformerBlock(args))
-        self.norm = nn.LayerNorm(args.dim, dtype=args.dtype)
-        self.output = nn.Linear(args.dim, args.vocab_size, bias=False, dtype=args.dtype)
+        self.norm = nn.LayerNorm(args.dim)
+        self.output = nn.Linear(args.dim, args.vocab_size, bias=False)
         if args.weight_tying:
             self.output.weight = self.tok_embeddings.weight
 
@@ -195,7 +192,7 @@ class DTensorTestBase(MultiProcessTestCase):
         return PG_BACKEND
 
     def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(DEVICE_TYPE, list(range(NUM_DEVICES)))
+        return DeviceMesh(DEVICE_TYPE, list(range(self.world_size)))
 
     def init_pg(self) -> None:
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:

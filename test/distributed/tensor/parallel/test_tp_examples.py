@@ -164,20 +164,15 @@ class DistTensorParallelExampleTest(DTensorTestBase):
     def test_transformer_training(self, is_seq_parallel=False):
         # Step 1: Initialize single-gpu models and optimizers.
 
-        model_args = ModelArgs(
-            # Disable dropout in the test since we cannot reproduce the same random
-            # behaviors when comparing single-gpu models with multi-gpu models.
-            dropout_p=0.0,
-            # float64 precision is needed for the computation results on the single-gpu
-            # model and the distributed model to be asserted equal, especially when
-            # model size is large and various operations (e.g., positional embedding,
-            # weight tying, etc.) are performed.
-            dtype=torch.float64,
-        )
+        # Disable dropout in the test since we cannot reproduce the same random
+        # behaviors when comparing single-gpu models with multi-gpu models.
+        model_args = ModelArgs(dropout_p=0.0)
 
-        # Reset random seeds to ensure two models have the same initialization.
-        torch.manual_seed(5)
-        model = Transformer(model_args).to(self.device_type)
+        # float64 precision is needed for the computation results on the single-gpu
+        # model and the distributed model to be asserted equal, especially when
+        # model size is large and various operations (e.g., positional embedding,
+        # weight tying, etc.) are performed.
+        model = Transformer(model_args).to(device=self.device_type, dtype=torch.float64)
         model_tp = deepcopy(model)
         self._check_module(model, model_tp)
 
