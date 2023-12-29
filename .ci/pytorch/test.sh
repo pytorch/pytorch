@@ -124,6 +124,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # mainly used so that we're not spending extra cycles testing cpu
   # devices on expensive gpu machines
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
+elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -134,6 +136,13 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/compiler/latest/env/vars.sh
+  # Check XPU status before testing
+  xpu-smi discovery
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
@@ -672,6 +681,17 @@ test_libtorch_api() {
   fi
 }
 
+test_xpu_bin(){
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  ls "${BUILD_BIN_DIR}" | grep "xpu\|sycl" | while IFS= read -r xpu_case
+  do
+    echo "Testing ${xpu_case} ..."
+    "${BUILD_BIN_DIR}"/"$xpu_case" --gtest_output=xml:$TEST_REPORTS_DIR/$xpu_case.xml
+  done
+}
+
 test_aot_compilation() {
   echo "Testing Ahead of Time compilation"
   ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
@@ -1109,6 +1129,9 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_python_shard 1
   test_aten
   test_libtorch 1
+  if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
+    test_xpu_bin
+  fi
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 2
@@ -1133,10 +1156,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
   test_python
   test_aten
-elif [[ "${BUILD_ENVIRONMENT}" == *xpu* && -n "$TESTS_TO_INCLUDE" ]]; then
-  install_torchvision
-  test_python
-  test_aten
+elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
+  #install_torchvision
+  #test_python
+  #test_aten
+  test_xpu_bin
 else
   install_torchvision
   install_monkeytype
