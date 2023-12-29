@@ -2771,13 +2771,45 @@ def forward(self, arg0_1, arg1_1):
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1, arg1_1):
     _set_grad_enabled = torch._C._set_grad_enabled(True)
-    mm = torch.ops.aten.mm.default(arg1_1, arg1_1)
+    matmul = torch.ops.aten.matmul.default(arg1_1, arg1_1)
     _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
-    add = torch.ops.aten.add.Tensor(mm, 2);  mm = None
+    add = torch.ops.aten.add.Tensor(matmul, 2);  matmul = None
     sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
     sum_2 = torch.ops.aten.sum.default(add);  add = None
     add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
     return (add_1,)""")
+
+    def test_aot_export_predispatch_composite_implicit_inplace(self):
+        def fn(x, p):
+            return (torch.ops.aten.absolute_.default(x.clone()),)
+
+        mod = TestMod(fn)
+        inp = torch.randn(2, 2)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    abs_1 = torch.ops.aten.abs.default(clone);  clone = None
+    return (abs_1,)""")
+
+    def test_aot_export_predispatch_composite_implicit_linear(self):
+        class MM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return (self.linear(x),)
+
+        mod = MM()
+        inp = torch.randn(2, 2)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    linear = torch.ops.aten.linear.default(arg2_1, arg0_1, arg1_1);  arg2_1 = arg0_1 = arg1_1 = None
+    return (linear,)""")
 
     @unittest.expectedFailure
     def test_aot_export_predispatch_outdtype(self):
@@ -2821,8 +2853,8 @@ def forward(self, arg0_1, arg1_1):
         gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1, arg1_1):
-    mm = torch.ops.aten.mm.default(arg1_1, arg1_1)
-    add = torch.ops.aten.add.Tensor(mm, 2);  mm = None
+    matmul = torch.ops.aten.matmul.default(arg1_1, arg1_1)
+    add = torch.ops.aten.add.Tensor(matmul, 2);  matmul = None
     sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
     view_1 = torch.ops.aten.view.default(add, [1, 4]);  add = None
     sum_2 = torch.ops.aten.sum.default(view_1);  view_1 = None
@@ -2908,6 +2940,63 @@ def forward(self, arg0_1, arg1_1):
         inp = torch.randn(2, 2)
         gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
 
+    def test_aot_export_predispatch_conv_and_bn(self):
+        class ConvBatchnorm(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 3, 1, 1)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return (x,)
+
+        mod = ConvBatchnorm()
+        mod.train()
+        inp = torch.randn(1, 1, 3, 3)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1):
+    conv2d = torch.ops.aten.conv2d.default(arg7_1, arg0_1, arg1_1);  arg7_1 = arg0_1 = arg1_1 = None
+    add = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(conv2d, arg2_1, arg3_1, arg4_1, arg5_1, True, 0.1, 1e-05);  conv2d = arg2_1 = arg3_1 = arg4_1 = arg5_1 = None
+    getitem = _native_batch_norm_legit_functional[0]
+    getitem_3 = _native_batch_norm_legit_functional[3]
+    getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+    return (getitem_3, getitem_4, add, getitem)""")  # noqa: B950
+
+    def test_aot_export_predispatch_reshape(self):
+        class Reshape(torch.nn.Module):
+            def forward(self, x):
+                y = x.reshape(4, 4)
+                return (y.sum(),)
+
+        mod = Reshape()
+        inp = torch.randn(2, 8)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1):
+    view = torch.ops.aten.view.default(arg0_1, [4, 4]);  arg0_1 = None
+    sum_1 = torch.ops.aten.sum.default(view);  view = None
+    return (sum_1,)""")  # noqa: B950
+
+    def test_aot_export_predispatch_contiguous(self):
+        class Cont(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ops.aten.contiguous.default(x)
+                return (y.sum(),)
+
+        mod = Cont()
+        inp = torch.randn(2, 8)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+    return (sum_1,)""")  # noqa: B950
 
     def test_aot_export_module_joint(self):
         class ConvBatchnormRelu(torch.nn.Module):

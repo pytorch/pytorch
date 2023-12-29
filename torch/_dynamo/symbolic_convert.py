@@ -25,7 +25,6 @@ import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import config, exc, logging as torchdynamo_logging, skipfiles, variables
-from .allowed_functions import is_builtin_constant, is_forbidden
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -58,6 +57,7 @@ from .source import (
     LocalSource,
     Source,
 )
+from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     counters,
     get_fake_value,
@@ -1082,15 +1082,32 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.popn(2)
         self.push(None)
 
+    def CALL_FINALLY(self, inst):
+        """
+        pushes the address of the next instruction onto the stack and increments
+        bytecode counter by delta
+        """
+        # Python 3.8 only
+        assert self.next_instruction is not None
+        addr = self.indexof[self.next_instruction]
+        self.push(ConstantVariable.create(addr))
+        self.instruction_pointer = self.indexof[inst.target]
+
     def END_FINALLY(self, inst):
+        # Python 3.8 only
+        # https://docs.python.org/3.8/library/dis.html#opcode-END_FINALLY
         tos = self.pop()
-        assert tos is None
+        if isinstance(tos, ConstantVariable):
+            self.instruction_pointer = tos.as_python_constant()
+        else:
+            pass
 
     def POP_FINALLY(self, inst):
+        # Python 3.8 only
         preserve_tos = inst.argval
         if preserve_tos:
             tos = self.pop()
-        assert self.pop() is None
+        _ = self.pop()
         if preserve_tos:
             self.push(tos)
 
