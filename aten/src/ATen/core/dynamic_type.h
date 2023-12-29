@@ -1,8 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <type_traits>
-#include <cstdint>
 
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
