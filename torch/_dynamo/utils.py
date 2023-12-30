@@ -362,8 +362,7 @@ def reset_graph_break_dup_checker():
 
 def add_file_handler():
     log_path = os.path.join(get_debug_dir(), "torchdynamo")
-    if not os.path.exists(log_path):
-        os.makedirs(log_path)
+    os.makedirs(log_path, exist_ok=True)
 
     log_file_handler = logging.FileHandler(os.path.join(log_path, "debug.log"))
     logger = logging.getLogger("torch._dynamo")

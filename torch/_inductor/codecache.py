@@ -1938,8 +1938,7 @@ class CppWrapperCodeCache:
     def load(cls, source_code: str, func_name: str, key: str, cuda: bool) -> CDLL:
         name = f"inline_extension_{key}"
         cpp_wrapper_dir = cpp_wrapper_cache_dir(name)
-        if not os.path.exists(cpp_wrapper_dir):
-            os.makedirs(cpp_wrapper_dir)
+        os.makedirs(cpp_wrapper_dir, exist_ok=True)
 
         ext = "so"
         filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
