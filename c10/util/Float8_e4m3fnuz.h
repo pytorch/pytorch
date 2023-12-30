@@ -19,9 +19,8 @@
 /// Implementation based on the paper https://arxiv.org/pdf/2206.02915.pdf and
 /// the existing Float8_e4m3fn implementation.
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
-#include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/floating_point_utils.h>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)

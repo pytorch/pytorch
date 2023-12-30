@@ -1,13 +1,7 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
-#include <cstring>
 #include <limits>
-
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
-#endif
 
 #define EXP_WIDTH_FP8 5
 #define MAN_WIDTH_FP8 2
@@ -279,5 +273,3 @@ class numeric_limits<c10::Float8_e5m2> {
 };
 
 } // namespace std
-
-C10_CLANG_DIAGNOSTIC_POP()

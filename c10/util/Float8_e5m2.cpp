@@ -4,7 +4,7 @@
 namespace c10 {
 
 static_assert(
-    std::is_standard_layout<Float8_e5m2>::value,
+    std::is_standard_layout_v<Float8_e5m2>,
     "c10::Float8_e5m2 must be standard layout.");
 
 std::ostream& operator<<(std::ostream& out, const Float8_e5m2& value) {
