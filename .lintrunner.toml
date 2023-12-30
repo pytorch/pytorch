@@ -244,6 +244,7 @@ include_patterns = [
     'c10/**/*.cpp',
     'c10/core/**/*.h',
     'c10/util/**/*.h',
+    'torch/csrc/*.h',
     'torch/csrc/**/*.cpp',
 ]
 exclude_patterns = [
