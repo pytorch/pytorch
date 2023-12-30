@@ -260,7 +260,7 @@ class TestGenericPytree(TestCase):
                     py_pytree,
                     lambda dct: py_pytree.TreeSpec(
                         dict,
-                        [list(dct), dict.fromkeys(dct)],
+                        [sorted(dct), dict.fromkeys(dct)],
                         [py_pytree.LeafSpec() for _ in dct.values()],
                     ),
                 ),
@@ -280,7 +280,7 @@ class TestGenericPytree(TestCase):
             expected_spec = gen_expected_fn(dct)
             values, treespec = pytree_impl.tree_flatten(dct)
             self.assertIsInstance(values, list)
-            self.assertEqual(values, [dct[k] for k in list(dct)])
+            self.assertEqual(values, [dct[k] for k in sorted(dct)])
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
@@ -290,16 +290,16 @@ class TestGenericPytree(TestCase):
             self.assertEqual(list(unflattened.values()), list(dct.values()))
             self.assertEqual(list(unflattened.items()), list(dct.items()))
 
-            # reordered_dct = {k: dct[k] for k in reversed(dct)}
-            # reordered_values, reordered_spec = pytree_impl.tree_flatten(reordered_dct)
-            # self.assertEqual(reordered_values, values)
-            # self.assertEqual(reordered_spec, treespec)
+            reordered_dct = {k: dct[k] for k in reversed(dct)}
+            reordered_values, reordered_spec = pytree_impl.tree_flatten(reordered_dct)
+            self.assertEqual(reordered_values, values)
+            self.assertEqual(reordered_spec, treespec)
 
         run_test({})
         run_test({"a": 1})
         run_test({"abcdefg": torch.randn(2, 3)})
         run_test({1: torch.randn(2, 3)})
-        run_test({"a": 1, "b": 2, "c": torch.randn(2, 3)})
+        run_test({"a": 1, "c": torch.randn(2, 3), "b": 2})
 
     @parametrize(
         "pytree_impl,gen_expected_fn",
@@ -356,7 +356,7 @@ class TestGenericPytree(TestCase):
                     py_pytree,
                     lambda ddct: py_pytree.TreeSpec(
                         defaultdict,
-                        [ddct.default_factory, [list(ddct), dict.fromkeys(ddct)]],
+                        [ddct.default_factory, [sorted(ddct), dict.fromkeys(ddct)]],
                         [py_pytree.LeafSpec() for _ in ddct.values()],
                     ),
                 ),
@@ -378,7 +378,7 @@ class TestGenericPytree(TestCase):
             expected_spec = gen_expected_fn(ddct)
             values, treespec = pytree_impl.tree_flatten(ddct)
             self.assertIsInstance(values, list)
-            self.assertEqual(values, [ddct[k] for k in list(ddct)])
+            self.assertEqual(values, [ddct[k] for k in sorted(ddct)])
             self.assertEqual(treespec, expected_spec)
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
@@ -389,19 +389,19 @@ class TestGenericPytree(TestCase):
             self.assertEqual(list(unflattened.values()), list(ddct.values()))
             self.assertEqual(list(unflattened.items()), list(ddct.items()))
 
-            # reordered_ddct = defaultdict(
-            #     ddct.default_factory,
-            #     {k: ddct[k] for k in reversed(ddct)},
-            # )
-            # reordered_values, reordered_spec = pytree_impl.tree_flatten(reordered_ddct)
-            # self.assertEqual(reordered_values, values)
-            # self.assertEqual(reordered_spec, treespec)
+            reordered_ddct = defaultdict(
+                ddct.default_factory,
+                {k: ddct[k] for k in reversed(ddct)},
+            )
+            reordered_values, reordered_spec = pytree_impl.tree_flatten(reordered_ddct)
+            self.assertEqual(reordered_values, values)
+            self.assertEqual(reordered_spec, treespec)
 
         run_test(defaultdict(list, {}))
         run_test(defaultdict(int, {"a": 1}))
         run_test(defaultdict(int, {"abcdefg": torch.randn(2, 3)}))
         run_test(defaultdict(int, {1: torch.randn(2, 3)}))
-        run_test(defaultdict(int, {"a": 1, "b": 2, "c": torch.randn(2, 3)}))
+        run_test(defaultdict(int, {"a": 1, "c": torch.randn(2, 3), "b": 2}))
 
     @parametrize(
         "pytree_impl,gen_expected_fn",
