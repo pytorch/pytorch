@@ -3813,7 +3813,7 @@ class TestQuantizedLinear(TestCase):
         post_op = 'none'
         cases = itertools.product(batch_size_list, input_channels_list, output_channels_list,
                                   use_bias_list, use_multi_dim_input_list, use_channelwise_list)
-        for batch_size, input_channels, output_channels, use_bias,\
+        for batch_size, input_channels, output_channels, use_bias, \
                 use_multi_dim_input, use_channelwise in cases:
             self._test_qlinear_impl(batch_size, input_channels, output_channels,
                                     use_bias, post_op, use_multi_dim_input, use_channelwise)
@@ -3830,7 +3830,7 @@ class TestQuantizedLinear(TestCase):
         post_op = 'relu'
         cases = itertools.product(batch_size_list, input_channels_list, output_channels_list,
                                   use_bias_list, use_multi_dim_input_list, use_channelwise_list)
-        for batch_size, input_channels, output_channels, use_bias,\
+        for batch_size, input_channels, output_channels, use_bias, \
                 use_multi_dim_input, use_channelwise in cases:
             self._test_qlinear_impl(batch_size, input_channels, output_channels,
                                     use_bias, post_op, use_multi_dim_input, use_channelwise)
@@ -4140,7 +4140,7 @@ class TestQuantizedLinear(TestCase):
             cases = itertools.product(batch_size_list, input_channels_list, output_channels_list,
                                       use_bias_list, use_multi_dim_input_list,
                                       use_channelwise_list, negative_slopes_list)
-            for batch_size, input_channels, output_channels, use_bias,\
+            for batch_size, input_channels, output_channels, use_bias, \
                     use_multi_dim_input, use_channelwise, neg_slope in cases:
                 self._test_qlinear_impl(batch_size, input_channels, output_channels,
                                         use_bias, post_op, use_multi_dim_input,
@@ -4159,7 +4159,7 @@ class TestQuantizedLinear(TestCase):
             cases = itertools.product(batch_size_list, input_channels_list,
                                       output_channels_list, use_bias_list,
                                       use_multi_dim_input_list, use_channelwise_list)
-            for batch_size, input_channels, output_channels, use_bias,\
+            for batch_size, input_channels, output_channels, use_bias, \
                     use_multi_dim_input, use_channelwise in cases:
                 self._test_qlinear_impl(batch_size, input_channels, output_channels,
                                         use_bias, post_op, use_multi_dim_input,

@@ -31,10 +31,15 @@ ignore =
     TOR102,
 per-file-ignores =
     __init__.py: F401
+<<<<<<< HEAD
     test/**: F821
     test/**/__init__.py: F401,F821
+=======
+    test/**.py': F841
+>>>>>>> 796933d6c60 (Improve lint)
     torch/utils/cpp_extension.py: B950
-    torch/testing/**: F841
+    torch/testing/_internal/**.py: F841
+    torch/testing/_internal/**/__init__.py: F401
     torchgen/api/types/__init__.py: F401,F403
     torchgen/executorch/api/types/__init__.py: F401,F403
 optional-ascii-coding = True
