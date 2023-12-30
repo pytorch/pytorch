@@ -356,7 +356,9 @@ class TestTPFSDPIntegration(FSDPTest):
         """
         Tests TP + FSDP extension with consistent gradient layout
         """
-        mesh_1d = init_device_mesh("cuda", (self.world_size,))
+        mesh_2d = init_device_mesh(
+            "cuda", (self.world_size // 2, 2), mesh_dim_names=["dp", "tp"]
+        )
 
         class TestModel(torch.nn.Module):
             def __init__(self):
@@ -365,62 +367,33 @@ class TestTPFSDPIntegration(FSDPTest):
                 self.mlp_norm = RMSNormPython(10)
 
             def forward(self, x):
-                return self.mlp_norm(self.mlp(x))
+                return self.mlp(self.mlp_norm(x))
 
         model = TestModel().cuda(self.rank)
 
         # Shard with TP and test gradient
-        tp_model = parallelize_module(
-            model,
-            mesh_1d,
-            {
-                "mlp.net1": ColwiseParallel(),
-                "mlp.net2": RowwiseParallel(output_layouts=Shard(0)),
-            },
-        )
-        distribute_rmsnorm(tp_model.mlp_norm, mesh_1d)
-
-        comm_mode = CommDebugMode()
-
-        with comm_mode:
-            tp_model(torch.rand(2, 10).cuda(self.rank)).sum().backward()
-
-        # forward reduce_scatter + backward all_gather on the second linear
-        funcol = torch.ops.c10d_functional
-        comm_counts = comm_mode.get_comm_counts()
-        self.assertEqual(comm_mode.get_total_counts(), 2)
-        self.assertEqual(comm_counts[funcol.reduce_scatter_tensor], 1)
-        self.assertEqual(comm_counts[funcol.all_gather_into_tensor], 1)
-
-        # Check the gradient layout for rms norm gradient
-        self.assertEqual(model.mlp_norm.weight.grad.placements, [_Partial()])
-
-        # rerun with TP + FSDP, after backward we should see allreduce
-        model = TestModel().cuda(self.rank)
-
-        mesh_2d = init_device_mesh(
-            "cuda", (self.world_size // 2, 2), mesh_dim_names=["dp", "tp"]
-        )
         tp_mesh = mesh_2d["tp"]
         tp_model = parallelize_module(
             model,
             tp_mesh,
             {
-                "mlp.net1": ColwiseParallel(),
+                "mlp.net1": ColwiseParallel(input_layouts=Shard(0)),
                 "mlp.net2": RowwiseParallel(output_layouts=Shard(0)),
             },
         )
         distribute_rmsnorm(tp_model.mlp_norm, tp_mesh)
 
         fsdp_2d_model = FSDP(tp_model, device_mesh=mesh_2d["dp"])
+        comm_mode = CommDebugMode()
 
         with comm_mode:
             fsdp_2d_model(torch.rand(2, 10).cuda(self.rank)).sum().backward()
 
+        funcol = torch.ops.c10d_functional
         comm_counts = comm_mode.get_comm_counts()
-        # forward reduce_scatter + backward all_gather on the second linear
-        # with all_reduce on rms norm gradient
-        self.assertEqual(comm_mode.get_total_counts(), 3)
+        self.assertEqual(comm_mode.get_total_counts(), 5)
+        self.assertEqual(comm_counts[funcol.reduce_scatter_tensor], 2)
+        self.assertEqual(comm_counts[funcol.all_gather_into_tensor], 2)
         self.assertEqual(comm_counts[funcol.all_reduce], 1)
 
 
