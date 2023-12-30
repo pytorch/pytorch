@@ -173,10 +173,11 @@ class CachingAutotuner(KernelInterface):
         )
 
         # pre-create the profiler context manager to reduce latency
+        prof_msg_str = self.inductor_meta.get("kernel_name", "triton kernel")
+        if config.profiler_mark_wrapper_call:
+            prof_msg_str += ", OriginOps: " + str(self.inductor_meta.get("origin_ops", {}))
         self.record_function_ctx = torch._C._profiler._RecordFunctionFast(
-            self.inductor_meta.get("kernel_name", "triton kernel")
-            + ", OriginOps: "
-            + str(self.inductor_meta.get("origin_ops", {}))
+            prof_msg_str
         )
 
     def precompile(self, warm_cache_only_with_cc=None):

@@ -1956,8 +1956,10 @@ class TritonKernel(Kernel):
             "autotune_hints": set(self.autotune_hints),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
-            "origin_ops": str(Placeholder.ORIGIN_INFO),
         }
+
+        if config.profiler_mark_wrapper_call:
+            inductor_meta["origin_ops"] = str(Placeholder.ORIGIN_INFO)
 
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
