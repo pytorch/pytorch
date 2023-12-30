@@ -1143,7 +1143,7 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     beta_val = kwargs.get('beta', 1 + 2j if dtype.is_complex else 0.2)
     tests_list = [
         ((2, 3), (2, 2), (2, 3), False),
-        ((2, 2), (2, 2), (2, 2), False),
+        ((3, 3), (3, 3), (3, 3), False),
     ]
     tests_with_lhs_broadcasting = [
         ((1,), (2, 2), (2, 3), True),
