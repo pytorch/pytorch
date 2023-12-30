@@ -6,8 +6,7 @@
 #include <torch/csrc/autograd/utils/warnings.h>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 using edge_list = std::vector<Edge>;
 struct ReadyQueue;
@@ -239,5 +238,4 @@ TORCH_API std::vector<Node*> get_current_graph_task_execution_order();
 TORCH_API int get_current_graph_task_id();
 void add_node_to_current_graph_task_exec_info(Node* fn);
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
