@@ -685,10 +685,13 @@ test_xpu_bin(){
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  ls "${BUILD_BIN_DIR}" | grep "xpu\|sycl" | while IFS= read -r xpu_case
+  for xpu_case in "${BUILD_BIN_DIR}"/*{xpu,sycl}*
   do
-    echo "Testing ${xpu_case} ..."
-    "${BUILD_BIN_DIR}"/"$xpu_case" --gtest_output=xml:$TEST_REPORTS_DIR/$xpu_case.xml
+    if [[ "$xpu_case" != *"*"* ]]; then
+      case_name=$(basename "$xpu_case")
+      echo "Testing ${case_name} ..."
+      "$xpu_case" --gtest_output=xml:"$TEST_REPORTS_DIR"/"$case_name".xml
+    fi
   done
 }
 
