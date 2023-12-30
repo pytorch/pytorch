@@ -6,6 +6,7 @@
 #include <system_error>
 
 #include <ATen/detail/FunctionTraits.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <pybind11/pybind11.h>
@@ -370,6 +371,7 @@ using Arg = typename invoke_traits<Func>::template arg<i>::type;
 
 template <typename Func, size_t... Is>
 auto wrap_pybind_function_impl_(
+    // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
     Func&& f,
     std::index_sequence<Is...>,
     bool release_gil) {
