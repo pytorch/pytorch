@@ -2,18 +2,21 @@ import functools
 import importlib
 import sys
 import types
+from typing import Any, Dict
 
 import torch
 
 from .allowed_functions import _disallowed_function_ids, is_user_defined_allowed
 
-from .utils import hashable
+from .utils import hashable, is_function
 
 from .variables import (
     SkipFilesVariable,
     TorchCtxManagerClassVariable,
     TorchInGraphFunctionVariable,
 )
+
+from .variables.base import VariableTracker
 
 
 """
@@ -1634,6 +1637,7 @@ torch_c_binding_in_graph_functions = {
         "torch.ge",
         "torch.geqrf",
         "torch.ger",
+        "torch.get_default_device",
         "torch.get_device",
         "torch.gradient",
         "torch.greater_equal",
@@ -2711,12 +2715,12 @@ torch_non_c_binding_in_graph_functions = {
 }
 
 
-torch_name_rule_map = {
-    **manual_torch_name_rule_map,
-    **torch_ctx_manager_classes,
-    **torch_c_binding_in_graph_functions,
-    **torch_non_c_binding_in_graph_functions,
-}
+torch_name_rule_map = [
+    manual_torch_name_rule_map,
+    torch_ctx_manager_classes,
+    torch_c_binding_in_graph_functions,
+    torch_non_c_binding_in_graph_functions,
+]
 
 """
 Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
@@ -2725,11 +2729,17 @@ Generate the torch object - Dynamo tracing rule (the wrapping variable) map.
 
 @functools.lru_cache(None)
 def get_torch_obj_rule_map():
-    d = dict()
-    for k, v in torch_name_rule_map.items():
-        obj = load_object(k)
-        if obj is not None:
-            d[obj] = v
+    d: Dict[Any, VariableTracker] = dict()
+    for m in torch_name_rule_map:
+        for k, v in m.items():
+            obj = load_object(k)
+            if obj is not None:
+                if obj in d and d[obj] != v:
+                    raise AssertionError(
+                        f"Duplicate torch object {obj} with different rules: {v}, {d[obj]}"
+                    )
+                else:
+                    d[obj] = v
     return d
 
 
@@ -2802,7 +2812,10 @@ def lookup(obj):
         return None
     if is_user_defined_allowed(obj):
         return TorchInGraphFunctionVariable
-    if hasattr(obj, "__wrapped__"):
+    # Unwrap if the function is wrapped by functools.lru_cache or functools.wraps.
+    if isinstance(obj, functools._lru_cache_wrapper) or (
+        is_function(obj) and hasattr(obj, "__wrapped__")
+    ):
         # TODO: Weird case, should not unwrap if it's wrapped as _VariableFunctionsClass.
         if not (
             hasattr(obj, "__qualname__")

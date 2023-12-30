@@ -399,6 +399,21 @@ class CppPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"std::abs({self._print(expr.args[0])})"
 
+    def _print_Round(self, expr):
+        assert len(expr.args) == 1
+        return f"std::lrint({self._print(expr.args[0])})"
+
+    def _print_RoundDecimal(self, expr):
+        assert len(expr.args) == 2
+        number, ndigits = expr.args
+        if number.is_integer:
+            # ndigits < 0 should have been filtered by the sympy function
+            assert ndigits < 0
+            raise ValueError(
+                f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
+            )
+        return f"static_cast<double>(std::nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits})"
+
 
 # A function to print, useful for printing sympy symbols.
 cexpr = CppPrinter().doprint
@@ -519,9 +534,20 @@ class CppOverrides(OpOverrides):
         return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
-    def to_dtype_bitcast(x, dtype):
+    def to_dtype_bitcast(x, dtype, src_dtype):
         assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
-        return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
+        if src_dtype in (torch.float16, torch.bfloat16):
+            # c10::bit_cast requires the source and target have the bitwidth.
+            # Because the input tensor's dtype could be promoted, e.g. from float16 to
+            # float, we have to cast the tensor to its original source dtype before
+            # invoking bit_cast. We also need to convert the bit-casted tensor
+            # back to float to make sure we keep using higher precision values
+            # for the rest of the computation.
+            cast_x = f"c10::convert<{DTYPE_TO_CPP[src_dtype]}>({x})"
+            cast_x = f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({cast_x})"
+            return f"c10::convert<{DTYPE_TO_CPP[torch.float32]}>({cast_x})"
+        else:
+            return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
     def abs(x):
@@ -2587,6 +2613,9 @@ class CppKernelProxy(CppKernel):
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
                 if is_lowp_fp_load(_node):
+                    # No need to promote to float if all users are direct stores
+                    if all(user.target == "store" for user in _node.users):
+                        continue
                     ops = _node.args[0]
                     with sub_graph.inserting_after(_node):
                         to_type_node = sub_graph.call_method(
@@ -2598,6 +2627,11 @@ class CppKernelProxy(CppKernel):
                         metrics.cpp_to_dtype_count += 1
                 elif is_lowp_fp_store(_node):
                     ops, name, _, value_var, _ = _node.args
+                    # No need to promote to float if it is a user of a load which are all directly stored
+                    if value_var.target == "load" and all(
+                        user.target == "store" for user in value_var.users
+                    ):
+                        continue
                     dtype = V.graph.get_dtype(name)
                     with sub_graph.inserting_before(_node):
                         to_type_node = sub_graph.call_method(

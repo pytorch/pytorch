@@ -24,6 +24,20 @@ api::ShaderInfo get_nchw_to_image_shader(const vTensor& v_dst) {
                 "Vulkan quantization currently not supported for dtype ",
                 v_dst.dtype());
         }
+      case api::StorageType::TEXTURE_2D:
+        switch (v_dst.dtype()) {
+          case c10::ScalarType::QUInt8:
+            return VK_KERNEL(nchw_to_image2d_uint8);
+          case c10::ScalarType::QInt8:
+            return VK_KERNEL(nchw_to_image2d_int8);
+          case c10::ScalarType::QInt32:
+            return VK_KERNEL(nchw_to_image2d_int32);
+          default:
+            TORCH_CHECK(
+                false,
+                "Vulkan quantization currently not supported for dtype ",
+                v_dst.dtype());
+        }
       default:
         TORCH_CHECK(false, "No kernel available!");
       case api::StorageType::BUFFER:

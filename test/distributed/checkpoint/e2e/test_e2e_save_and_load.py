@@ -1,17 +1,21 @@
 # Owner(s): ["oncall: distributed"]
 
+import time
 from enum import auto, Enum
 
 import torch
+import torch.distributed as dist
 import torch.distributed.checkpoint as DCP
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._tensor.device_mesh import init_device_mesh
+from torch.distributed.checkpoint.filesystem import _FileSystemCheckpointer
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
     get_state_dict,
 )
+from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.tensor.parallel import (
@@ -19,12 +23,12 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
 )
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -88,8 +92,12 @@ def _train(model, optim, train_steps=1):
     return loss
 
 
-class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
-    def _create_model(self, compile, model_type, train_steps=2):
+class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
+    @property
+    def backend(self):
+        return "cpu:gloo,cuda:nccl"
+
+    def _create_model(self, compile, model_type, state_dict_options=None):
         dummy_model = TestDummyModel().cuda()
 
         assert model_type in ModelType, f"{model_type} is not supported."
@@ -130,8 +138,10 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
 
         optim = self._optim(model)
         if model_type is not ModelType.NONE:
-            _patch_model_state_dict(model)
-            _patch_optimizer_state_dict(model, optimizers=optim)
+            _patch_model_state_dict(model, options=state_dict_options)
+            _patch_optimizer_state_dict(
+                model, optimizers=optim, options=state_dict_options
+            )
 
         return model, optim
 
@@ -147,6 +157,15 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
     # @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.FSDP_TP])
     @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP])
     def test_e2e(self, compile, model_type):
+        self._run_e2e_test(compile, model_type)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    def test_e2e_async(self):
+        self._run_e2e_test(compile=False, model_type=ModelType.FSDP, async_op=True)
+
+    def _run_e2e_test(self, compile, model_type, async_op=False):
         model, optim = self._create_model(compile, ModelType.NONE)
         _train(model, optim, train_steps=2)
 
@@ -154,24 +173,36 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
         _train(dist_model, dist_optim, train_steps=2)
 
         original_stateful_obj = TestStatefulObj()  # tests arbitrary saving/loading
-        DCP.save(
-            state_dict={
-                "model": dist_model,
-                "optimizer": dist_optim,
-                "s": original_stateful_obj,
-            },
-            storage_writer=DCP.FileSystemWriter(self.temp_dir),
-        )
+        sd = {
+            "model": dist_model,
+            "optimizer": dist_optim,
+            "s": original_stateful_obj,
+        }
+
+        checkpointer = _FileSystemCheckpointer(self.temp_dir)
+        if async_op:
+            f = checkpointer.async_save(state_dict=sd)
+            t = time.monotonic()
+            while not f.done():
+                time.sleep(1)
+                print(f"still waiting... {time.monotonic() - t}")
+
+            f.result()
+        else:
+            checkpointer.save(state_dict=sd)
 
         loaded_stateful_obj = TestStatefulObj()
         dist_model, dist_optim = self._create_model(compile, model_type)
-        DCP.load(
+
+        loaded_stateful_obj = TestStatefulObj()
+        dist_model, dist_optim = self._create_model(compile, model_type)
+
+        checkpointer.load(
             state_dict={
                 "model": dist_model,
                 "optimizer": dist_optim,
                 "s": loaded_stateful_obj,
-            },
-            storage_reader=DCP.FileSystemReader(self.temp_dir),
+            }
         )
 
         self.assertEqual(original_stateful_obj, loaded_stateful_obj)
@@ -187,7 +218,65 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
         self._verify_msd(model_sd, dist_msd)
         self._verify_osd_by_load(model, optim, self._optim(model), dist_osd)
 
+    @with_comms
+    @with_temp_dir
+    @skip_if_lt_x_gpu(4)
+    def test_different_ordered_state_dict_keys(self):
+        """Tests that the order of keys in the state dict does not matter when loading
+        If order was not accounted for, the following test would cause a deadlock.
+        """
 
-instantiate_parametrized_tests(TestE2ELoadAndSave)
+        world_size = self.world_size
+
+        class Foo:
+            def state_dict(self):
+                return {}
+
+            def load_state_dict(self, state_dict):
+                tl = [
+                    torch.ones(2, dtype=torch.int64, device="cuda")
+                    for _ in range(world_size)
+                ]
+                t = (
+                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    + 1
+                    + 2 * dist.get_rank()
+                )
+                dist.all_gather(tl, t, async_op=False)
+
+        class Bar:
+            def state_dict(self):
+                return {}
+
+            def load_state_dict(self, state_dict):
+                tensor = (
+                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    + 1
+                    + 2 * dist.get_rank()
+                )
+                dist.all_reduce(tensor, op=ReduceOp.SUM)
+
+        if self.rank == 0:
+            sd = {
+                "A": Foo(),
+                "B": Bar(),
+            }
+        else:
+            sd = {
+                "B": Bar(),
+                "A": Foo(),
+            }
+
+        DCP.save(sd, DCP.FileSystemWriter(self.temp_dir))
+        DCP.load(sd, DCP.FileSystemReader(self.temp_dir))
+
+    @with_temp_dir
+    def test_no_dist(self):
+        checkpointer = _FileSystemCheckpointer(self.temp_dir, no_dist=True)
+        checkpointer.save({})
+        checkpointer.load({})
+
+
+instantiate_parametrized_tests(TestE2ESaveAndLoad)
 if __name__ == "__main__":
     run_tests()

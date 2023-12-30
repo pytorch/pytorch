@@ -217,6 +217,17 @@ class PHWithMeta(PHBase):
         self.ph_key = ph_key
 
 
+def _transfer_attrs(fr, to):
+    for attr_name in dir(fr):
+        attr_val = getattr(fr, attr_name)
+        if (
+            not callable(attr_val)
+            and not attr_name.startswith("__")
+            and not hasattr(to, attr_name)
+        ):
+            setattr(to, attr_name, attr_val)
+
+
 @compatibility(is_backward_compatible=True)
 class Tracer(TracerBase):
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -597,16 +608,6 @@ class Tracer(TracerBase):
                         "placeholder", f"{name}_{str(cnt)}", default, {}
                     )
                     if isinstance(x, PHBase):
-                        def transfer_attrs(fr, to):
-                            for attr_name in dir(fr):
-                                attr_val = getattr(fr, attr_name)
-                                if (
-                                    not callable(attr_val)
-                                    and not attr_name.startswith("__")
-                                    and not hasattr(to, attr_name)
-                                ):
-                                    setattr(to, attr_name, attr_val)
-
                         if x != PH:
                             # Transfer attrs in the case where you're using a placeholder other
                             # than the singleton PH (PH has no attributes to transfer).
@@ -615,7 +616,7 @@ class Tracer(TracerBase):
                             # attributes set by the user) from the placeholder to the
                             # underlying nodes (the proxy is unwrapped by the user, but
                             # the metadata should hold).
-                            transfer_attrs(fr=x, to=out.node)
+                            _transfer_attrs(fr=x, to=out.node)
 
                         return out
                     # Union[int, bool] == bool in Python <= 3.6
@@ -656,6 +657,30 @@ class Tracer(TracerBase):
                 {},
                 type_expr=fn_for_analysis.__annotations__.get(name, None)
             )
+
+        # This covers the very specific case where we are passing in flat
+        # concrete_args as a tuple, but our traced fn takes (*args, **kwargs).
+        # In this case, just take the concrete_args and pass them through.
+        name_idx = 0
+        if isinstance(concrete_args, tuple) and \
+                len(concrete_args) > 0 and \
+                (co.co_flags & HAS_VARSTUFF) and \
+                total_args == 1:
+            for concrete_arg in concrete_args:
+                out = self.create_proxy("placeholder", f"input_{name_idx}", (), {})
+                if isinstance(concrete_arg, PHBase):
+                    if concrete_arg != PH:
+                        # Transfer attrs in the case where you're using a placeholder other
+                        # than the singleton PH (PH has no attributes to transfer).
+                        # Proxies were created out of the placeholders.
+                        # Transfer any metadata (put on the placeholders in the form of
+                        # attributes set by the user) from the placeholder to the
+                        # underlying nodes (the proxy is unwrapped by the user, but
+                        # the metadata should hold).
+                        _transfer_attrs(fr=concrete_arg, to=out.node)
+                args.append(out)
+                name_idx += 1
+            return root_fn, args
 
         arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
         if isinstance(concrete_args, tuple):

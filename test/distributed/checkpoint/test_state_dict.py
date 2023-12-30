@@ -3,10 +3,11 @@
 import copy
 import sys
 from itertools import chain
-from typing import Callable
+from typing import Callable, Tuple
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 from torch.distributed._composable import fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
@@ -133,7 +134,12 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self._verify_osd(model, optim, osd, dist_osd)
 
     def _test_fsdp(
-        self, use_orig_params: bool, use_composable: bool, use_dtensor: bool
+        self,
+        *,
+        use_orig_params: bool,
+        use_composable: bool,
+        use_dtensor: bool,
+        wrapping: Tuple[nn.Module] = (),
     ) -> None:
         if not use_orig_params and use_composable:
             return
@@ -149,23 +155,27 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
             copy_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
+            if wrapping:
+                strategy = set(wrapping)
+            else:
+                strategy = {UnitModule}
             if use_composable:
                 dist_model = fully_shard(
-                    copy.deepcopy(orig_model), policy=ModuleWrapPolicy({UnitModule})
+                    copy.deepcopy(orig_model), policy=ModuleWrapPolicy(strategy)
                 )
             else:
                 if use_dtensor:
                     device_mesh = init_device_mesh("cuda", (self.world_size,))
                     dist_model = FSDP(
                         copy.deepcopy(orig_model),
-                        auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
+                        auto_wrap_policy=ModuleWrapPolicy(strategy),
                         use_orig_params=use_orig_params,
                         device_mesh=device_mesh,
                     )
                 else:
                     dist_model = FSDP(
                         copy.deepcopy(orig_model),
-                        auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
+                        auto_wrap_policy=ModuleWrapPolicy(strategy),
                         use_orig_params=use_orig_params,
                     )
 
@@ -182,6 +192,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 "use_orig_params": [True, False],
                 "use_composable": [True, False],
                 "use_dtensor": [True, False],
+                "wrapping": [tuple(), (nn.Linear, UnitModule)],
             },
             self._test_fsdp,
         )
