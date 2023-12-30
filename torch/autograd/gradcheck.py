@@ -1225,7 +1225,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
     inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
     all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=True)
 
-    tensor_inputs = tuple(i for i in inputs if is_tensor_like(i) and i.requires_grad)
+    tuple(i for i in inputs if is_tensor_like(i) and i.requires_grad)
 
     with fwAD.dual_level():
         fw_grads = []
@@ -2042,7 +2042,7 @@ def gradcheck(
     if not raise_exception:
         try:
             return _gradcheck_helper(**args)
-        except GradcheckError as e:
+        except GradcheckError:
             return False
     else:
         return _gradcheck_helper(**args)

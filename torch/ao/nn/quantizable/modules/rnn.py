@@ -304,7 +304,6 @@ class LSTM(torch.nn.Module):
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.training = False  # We don't want to train using this module
-        num_directions = 2 if bidirectional else 1
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
                 isinstance(dropout, bool):

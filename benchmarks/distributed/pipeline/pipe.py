@@ -157,7 +157,7 @@ def train(lm_dataloader, model, criterion, optimizer, vocab_size, args):
         f"Number of parameters for model: {sum(p.numel() for p in model.parameters())}"
     )
     for i, batch in enumerate(lm_dataloader):
-        bi = batch["input"]
+        batch["input"]
         if args.max_batch and i > args.max_batch:
             break
         optimizer.zero_grad()
@@ -253,7 +253,7 @@ def bench_single_process(args):
     num_devices = min(args.num_devices, num_devices)
     assert num_devices > 0
     init_random_seed(0)
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     blob = make_model_and_data(args, None)
     model = blob["model"]

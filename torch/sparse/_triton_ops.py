@@ -728,8 +728,8 @@ def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compr
     """
     assert bsr.dense_dim() == 0
     assert bsr.ndim == 2  # no batch dims
-    crow_indices = bsr.crow_indices()
-    col_indices = bsr.col_indices()
+    bsr.crow_indices()
+    bsr.col_indices()
     blocksize = bsr.values().shape[-2:]
     M, K = bsr.shape
     Ms, Ks = blocksize
@@ -1252,8 +1252,8 @@ if has_triton():
             return out
 
         blocksize = out.values().shape[-2:]
-        m = mat1.size(-2)
-        n = mat2.size(-1)
+        mat1.size(-2)
+        mat2.size(-1)
         k = mat1.size(-1)
 
         # NOTE: (m, 0) @ (0, n) == zeros(m, n)
@@ -1536,7 +1536,7 @@ if has_triton():
             allow_tf32: tl.constexpr):
 
         Ms = M // TILE_M
-        Ns = N // TILE_N
+        N // TILE_N
 
         pid_t = tl.program_id(axis=0)
 

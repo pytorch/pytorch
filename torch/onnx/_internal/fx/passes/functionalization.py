@@ -91,7 +91,7 @@ class Functionalize(_pass.Transform):
             for inpt, input_functional in zip(flat_inputs, flat_inputs_functional):
                 if isinstance(input_functional, torch.Tensor):
                     torch._sync(input_functional)
-                    inpt_new = torch._from_functional_tensor(input_functional)
+                    torch._from_functional_tensor(input_functional)
             pytree.tree_map(torch._sync, out)
             out_unwrapped = pytree.tree_map(torch._from_functional_tensor, out)
             return out_unwrapped

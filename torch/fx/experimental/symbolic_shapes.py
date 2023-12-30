@@ -2303,7 +2303,7 @@ class ShapeEnv:
             hint: Optional[int],
             source: Optional[Source] = None,
     ):
-        source_name = source.name() if source else None
+        source.name() if source else None
 
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
@@ -3639,7 +3639,6 @@ class ShapeEnv:
         # If an error is raised before the end of this function, we remove the FX node
         # inserted, and re-raise the error.
         guard = None
-        tb = None
 
         try:
             if orig_expr.is_number:

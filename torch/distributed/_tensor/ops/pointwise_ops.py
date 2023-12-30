@@ -434,9 +434,7 @@ def pointwise_strategy(
 
         followed_strategy = op_schema.args_schema[max_shards_strategy_index]
         assert isinstance(followed_strategy, OpStrategy)
-        follow_operand_dims_map = infer_broadcast_dims_map(
-            common_shape, followed_strategy.output_shape
-        )
+        infer_broadcast_dims_map(common_shape, followed_strategy.output_shape)
 
     assert isinstance(
         followed_strategy, OpStrategy

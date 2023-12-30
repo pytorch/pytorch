@@ -50,8 +50,8 @@ class SparseAdam(Optimizer):
             exp_avgs = []
             exp_avg_sqs = []
             state_steps = []
-            eps = group['eps']
-            lr = group['lr']
+            group['eps']
+            group['lr']
             beta1, beta2 = group['betas']
             maximize = group.get('maximize', False)
 

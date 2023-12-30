@@ -1315,7 +1315,6 @@ def _linalg_solve_ex(
         device=B.device,
     )
     shape = A.shape
-    ndim = A.ndim
     LU_ = torch.empty_strided(
         size=shape,
         stride=make_contiguous_strides_for(shape, False),
@@ -1718,18 +1717,17 @@ def meta_pad2d_backward(grad_output, self, padding):
     dim_w = 2
     dim_h = 1
     dim_plane = 0
-    nbatch = 1
 
     self_shape = self.shape
     if self.dim() == 4:
-        nbatch = self_shape[0]
+        self_shape[0]
         dim_w += 1
         dim_h += 1
         dim_plane += 1
 
     pad_l, pad_r, pad_t, pad_b = padding
 
-    nplane = self_shape[dim_plane]
+    self_shape[dim_plane]
     input_h = self_shape[dim_h]
     input_w = self_shape[dim_w]
     output_h = input_h + pad_t + pad_b
@@ -5213,9 +5211,9 @@ def meta__scaled_dot_product_efficient(
 
     B = query.size(0)
     M = query.size(1)
-    N = key.size(1)
+    key.size(1)
     num_heads = query.size(-2)
-    K = query.size(-1)
+    query.size(-1)
     Kv = value.size(-1)
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
@@ -5408,7 +5406,7 @@ def meta__efficient_attention_forward(
     M = query.size(1)
     N = key.size(1)
     num_heads = query.size(-2)
-    K = query.size(-1)
+    query.size(-1)
     Kv = value.size(-1)
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)

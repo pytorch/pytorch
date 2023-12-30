@@ -338,8 +338,8 @@ def layernorm_pytorch_lstm_creator(**kwargs):
         seq_len = len(input.unbind(0))
         hy, cy = new_hidden
         for i in range(seq_len):
-            ln_i_output = ln_i(ln_input1)
-            ln_h_output = ln_h(ln_input1)
+            ln_i(ln_input1)
+            ln_h(ln_input1)
             cy = ln_c(cy)
 
         return out, (hy, cy)

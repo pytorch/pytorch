@@ -294,7 +294,6 @@ def _parse_stack_trace(stack_trace: str):
     # stacktrace should have innermost frame last, so we
     # iterate backwards to find the first line that starts
     # with 'File '
-    summary_str = ""
     for idx in range(len(lines) - 2, -1, -1):
         line = lines[idx].strip()
         matches = pattern.match(line)

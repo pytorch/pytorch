@@ -15,7 +15,7 @@ try:
         HistoricalClassFailurCorrelation,
     )
 
-except ModuleNotFoundError as e:
+except ModuleNotFoundError:
     print("Can't import required modules, exiting")
     sys.exit(1)
 

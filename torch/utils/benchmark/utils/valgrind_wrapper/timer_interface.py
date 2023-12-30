@@ -178,7 +178,6 @@ class CallgrindStats:
     stmt_callgrind_out: Optional[str]
 
     def __repr__(self) -> str:
-        newline = "\n"  # `\` cannot appear in fstring code section.
         base_stats = self.baseline_exclusive_stats
         output = f"""
 {super().__repr__()}

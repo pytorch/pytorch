@@ -213,7 +213,7 @@ def main():
     else:
         generator = None
 
-    augmentations = [
+    [
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
     ]

@@ -349,7 +349,7 @@ def minimize(
             minimizer_key = (
                 initial_key if initial_key in minimizer_keys else min(minimizer_keys)
             )
-            minimizer_target = all_values[minimizer_key]
+            all_values[minimizer_key]
             parameters = from_key(minimizer_key, parameters)
             speedup_incr = (1 - minimal_target / reference_target) * 100
             if speedup_incr < 0:
@@ -728,7 +728,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                     raise NotImplementedError(op)
         except KeyboardInterrupt:
             break
-        except Exception as msg:
+        except Exception:
             dump()
             raise
     dump()

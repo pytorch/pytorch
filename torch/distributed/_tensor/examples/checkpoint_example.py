@@ -171,7 +171,7 @@ def run_checkpoint_example(rank, world_size):
 
     # checkpoint the model
     # TODO: fully implement checkpoint save/load example
-    model = checkpoint(model_2d, mesh)
+    checkpoint(model_2d, mesh)
 
     # shutting down world pg
     dist.destroy_process_group()

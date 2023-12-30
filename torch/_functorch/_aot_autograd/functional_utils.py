@@ -324,7 +324,6 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
             if n.target is torch.ops.aten.copy_.default:
-                suffix = True
                 # Can only copy_ into an input, and can only do so once
                 assert n.args[0] in placeholders
                 placeholders.remove(n.args[0])

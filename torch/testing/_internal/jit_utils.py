@@ -501,7 +501,7 @@ class JitTestCase(JitCommonTestCase):
                 if capture_output:
                     with self.capture_stdout() as script_stdout:
                         script_outputs = scripted_fn(*recording_inputs)
-                    with self.capture_stdout() as opt_script_stdout:
+                    with self.capture_stdout():
                         opt_script_outputs = scripted_fn(*recording_inputs)
                     with self.capture_stdout() as _python_stdout:
                         python_outputs = python_fn(*inputs)

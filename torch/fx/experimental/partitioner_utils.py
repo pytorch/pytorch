@@ -281,7 +281,6 @@ def get_latency_of_partitioned_graph(
         latency_so_far_sec += partition_to_latency_mapping[
             partition
         ].overall_latency_sec
-        children = partition.children
         if partition.children:
             max_latency_sec = 0.0
             for child in partition.children:

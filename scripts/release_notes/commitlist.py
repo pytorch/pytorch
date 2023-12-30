@@ -462,7 +462,7 @@ def to_markdown(commit_list: CommitList, category):
         if commit.merge_into:
             merge_mapping[commit.merge_into].append(commit)
 
-    cdc = get_commit_data_cache()
+    get_commit_data_cache()
     lines = [f"\n## {category}\n"]
     for topic in topics:
         lines.append(f"### {topic}\n")

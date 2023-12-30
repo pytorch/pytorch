@@ -6,7 +6,6 @@ from collections import Counter, namedtuple
 from typing import (
     Any,
     Callable,
-    Dict,
     Iterable,
     Iterator,
     List,
@@ -107,7 +106,7 @@ def parse_native_functions_keys(
     backend_yaml_path: str,
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
 ) -> Tuple[List[OperatorName], List[Any], List[OperatorName]]:
-    native_functions_map: Dict[OperatorName, NativeFunction] = {
+    {
         f.func.name: f
         for f in concatMap(
             lambda f: [f] if isinstance(f, NativeFunction) else list(f.functions()),
@@ -143,9 +142,7 @@ def validate_shape_inference_header(
         ) from e
 
     shape_infr_regex = r"compute_shape_(\w+)"
-    actual_shape_infr_name_counts = Counter(
-        re.findall(shape_infr_regex, shape_infr_decls)
-    )
+    Counter(re.findall(shape_infr_regex, shape_infr_decls))
     # TODO(whc) add a check for shape inference functions that have meta kernels implement and should be retired.
 
     missing_decls = [

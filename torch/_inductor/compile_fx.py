@@ -1187,7 +1187,6 @@ def get_patched_config_dict(config_patches=None):
 
 
 def _shape_env_from_inputs(inputs: List[torch.Tensor]):
-    shape_env = None
     fake_mode = detect_fake_mode(inputs)
 
     # TODO(voz): It would be nice to enable this assert, but there are lots of tests that

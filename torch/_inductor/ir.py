@@ -1515,7 +1515,7 @@ class WelfordReduction(Reduction):
         for i in intermediates:
             i.realize()
 
-        i_loaders = [i.make_loader() for i in intermediates]
+        [i.make_loader() for i in intermediates]
 
         def intermediate_loader_fn(index, reduction_index, loader):
             return loader([*index, *reduction_index])
@@ -3056,7 +3056,7 @@ class ComputedBuffer(Buffer):
                 self.data.get_pointwise_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
-            reads_bufs = [
+            [
                 V.graph.name_to_buffer[r.name]
                 if r.name in V.graph.name_to_buffer.keys()
                 else None
@@ -5694,8 +5694,6 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         hy_shape = hx.get_size()
         cy_shape = cx.get_size()
 
-        res: List[IRNode] = []
-
         inputs = [x, w0, w1, w2, w3, hx, cx]
         constant_args = [
             reverse,
@@ -7159,7 +7157,7 @@ class AllGatherIntoTensorCoalesced(OutOfPlaceCollectiveKernel):
 
         layout = MultiOutputLayout(inputs[0].get_device())
 
-        packed = AllGatherIntoTensorCoalesced(
+        AllGatherIntoTensorCoalesced(
             layout=layout,
             inputs=inputs,
             outputs=outputs,

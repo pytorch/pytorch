@@ -1058,7 +1058,7 @@ cdll.LoadLibrary("__lib_path__")
                     stderr=subprocess.DEVNULL,
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
-            except Exception as e:
+            except Exception:
                 return False
 
             return True

@@ -26,7 +26,6 @@ def must_recompute(node):
     return node.meta.get("recompute", False)
 
 def has_recomputable_ops(fx_g):
-    found = False
     for node in fx_g.graph.nodes:
         if must_recompute(node):
             return True

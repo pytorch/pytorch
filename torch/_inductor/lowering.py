@@ -1975,7 +1975,7 @@ def bucketize(
     # we call boundaries.realize().
     boundaries.realize()
     boundaries_size = boundaries.get_size()[0]
-    boundaries_loader = boundaries.make_loader()
+    boundaries.make_loader()
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -4570,7 +4570,7 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
 def _make_scan_inner(x, *, axis, dtype):
     if dtype is not None:
         x = to_dtype(x, dtype)
-    size = x.get_size()
+    x.get_size()
     axis = _validate_reduction_axis(x, axis)[0]
 
     return dict(

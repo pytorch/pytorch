@@ -133,7 +133,7 @@ class DistOptimizerTest(RpcAgentTestFixture):
         remote_param2 = remote_method(MyModule.get_w, remote_module2)
 
         with self.assertRaisesRegex(Exception, "Error creating optimizer."):
-            dist_optim = DistributedOptimizer(
+            DistributedOptimizer(
                 OptimizerFailingOnConstructor, [remote_param1, remote_param2]
             )
 
@@ -167,7 +167,7 @@ class DistOptimizerTest(RpcAgentTestFixture):
         remote_param1 = remote_method(MyModule.get_w, remote_module1)
         remote_param2 = remote_method(MyModule.get_w, remote_module2)
 
-        old_w1_remote = remote_param1.to_here()
+        remote_param1.to_here()
 
         # sanity check: local and remote initial weights should match
         self.assertEqual(old_w1, remote_param1.to_here())

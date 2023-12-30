@@ -3256,7 +3256,7 @@ def stft(
         input = aten.pad(input.view(extended_shape), [pad_amount, pad_amount], pad_mode)
         input = input.view(input.size()[extra_dims:])
 
-    batch = input.size(0)
+    input.size(0)
     length = input.size(1)
     torch._check(
         0 < n_fft <= length,

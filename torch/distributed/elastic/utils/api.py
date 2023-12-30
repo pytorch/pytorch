@@ -38,7 +38,7 @@ def get_socket_with_port() -> socket.socket:
             s.bind(("localhost", 0))
             s.listen(0)
             return s
-        except OSError as e:
+        except OSError:
             s.close()
     raise RuntimeError("Failed to create a socket")
 

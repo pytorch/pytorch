@@ -178,13 +178,6 @@ def _sleep(cycles):
 
 
 def _check_capability():
-    incorrect_binary_warn = """
-    Found GPU%d %s which requires CUDA_VERSION >= %d to
-     work properly, but your PyTorch was compiled
-     with CUDA_VERSION %d. Please install the correct PyTorch binary
-     using instructions from https://pytorch.org
-    """
-
     old_gpu_warn = """
     Found GPU%d %s which is of cuda capability %d.%d.
     PyTorch no longer supports this GPU because it is too old.
@@ -192,7 +185,7 @@ def _check_capability():
     """
 
     if torch.version.cuda is not None:  # on ROCm we don't want this check
-        CUDA_VERSION = torch._C._cuda_getCompiledVersion()
+        torch._C._cuda_getCompiledVersion()
         for d in range(device_count()):
             capability = get_device_capability(d)
             major = capability[0]

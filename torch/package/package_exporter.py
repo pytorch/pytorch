@@ -427,7 +427,7 @@ class PackageExporter:
     def _import_module(self, module_name: str):
         try:
             return self.importer.import_module(module_name)
-        except ModuleNotFoundError as e:
+        except ModuleNotFoundError:
             if not is_mangled(module_name):
                 raise
             msg = (

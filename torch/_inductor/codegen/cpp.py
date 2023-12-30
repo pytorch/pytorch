@@ -1842,7 +1842,7 @@ class CppVecKernel(CppKernel):
         return csevar
 
     def load(self, name: str, index: sympy.Expr):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+        get_current_node_opt_ctx()
         var = self.args.input(name)
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
@@ -1913,7 +1913,7 @@ class CppVecKernel(CppKernel):
         if not value.is_vec:
             # this happens when we store a scalar into a vectorized buffer like "fill"
             value = self.broadcast(value)
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+        get_current_node_opt_ctx()
         var = self.args.output(name)
         index = self.rename_indexing(index)
         self.stores.writeline(
@@ -2179,7 +2179,7 @@ class CppTile2DKernel(CppVecKernel):
         return tile_var
 
     def load(self, name: str, index: sympy.Expr):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+        get_current_node_opt_ctx()
         var = self.args.input(name)
         index = self.rename_indexing(index)
 
@@ -2203,7 +2203,7 @@ class CppTile2DKernel(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+        get_current_node_opt_ctx()
         var = self.args.output(name)
 
         inner = self.inner_itervar()

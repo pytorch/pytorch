@@ -317,7 +317,7 @@ def module_inputs_torch_nn_KLDivLoss(module_info, device, dtype, requires_grad, 
         )
 
         scalar_input = make_input(()).log()
-        scalar_target = make_input(()) if kwargs.get('log_target', False) else make_input(()).log()
+        make_input(()) if kwargs.get('log_target', False) else make_input(()).log()
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
                         forward_input=FunctionInput(scalar_input, scalar_input),

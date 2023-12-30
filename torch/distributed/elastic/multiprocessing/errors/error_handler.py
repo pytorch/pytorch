@@ -149,7 +149,7 @@ class ErrorHandler:
                         " Original contents:\n%s",
                         my_error_file, original
                     )
-                except json.decoder.JSONDecodeError as err:
+                except json.decoder.JSONDecodeError:
                     log.warning(
                         "%s already exists"
                         " and will be overwritten."

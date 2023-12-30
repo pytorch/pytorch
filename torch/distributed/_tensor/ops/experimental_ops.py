@@ -55,7 +55,6 @@ def nll_loss_forward_rules(op_schema: OpSchema) -> OutputSharding:
     result_stride: List[int] = []
     result_dim = 0
     total_weight_shape: List[int] = []
-    total_weight_stride: List[int] = []
     total_weight_dim = 0
 
     result_tensor_meta = TensorMeta(

@@ -418,9 +418,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         self.all_weights = []
         for layer in range(self.num_layers):
             for direction in range(num_directions):
-                layer_input_size = (
-                    self.input_size if layer == 0 else self.hidden_size * num_directions
-                )
+                (self.input_size if layer == 0 else self.hidden_size * num_directions)
 
                 suffix = "_reverse" if direction == 1 else ""
 

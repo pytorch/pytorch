@@ -104,7 +104,6 @@ class Pipeline:
 
         """
         partitions = self.partitions
-        devices = self.devices
         skip_layout = self.skip_layout
 
         m = len(batches)

@@ -153,7 +153,7 @@ def aot_dispatch_autograd(
     )
 
     # Copied from aot_dispatch_autograd_graph.
-    traced_tangents = pytree.tree_map(
+    pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
         fw_metadata.traced_tangents,
     )
@@ -413,8 +413,6 @@ def aot_dispatch_autograd(
 
             num_outputs = CompiledFunction.metadata.num_outputs
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
-            num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
-            num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
             num_mutated_runtime_inps = (
                 CompiledFunction.metadata.num_mutated_inp_runtime_indices
             )

@@ -836,7 +836,7 @@ def convert_custom_module(
         it later.
     """
     observed_custom_module = modules[str(node.target)]
-    maybe_obs = _maybe_get_observer_for_node(node, modules)
+    _maybe_get_observer_for_node(node, modules)
     qconfig = observed_custom_module.qconfig
     if activation_is_statically_quantized(qconfig):
         statically_quantized_custom_module_nodes.add(node)

@@ -154,7 +154,7 @@ def main() -> None:
                 result = r["run"]["result"]
                 break
 
-            waiting_time = datetime.datetime.now() - start_time
+            datetime.datetime.now() - start_time
             print(
                 f"Run {unique_prefix} in state {state} after {datetime.datetime.now() - start_time}"
             )

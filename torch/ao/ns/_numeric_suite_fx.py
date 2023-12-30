@@ -390,8 +390,7 @@ def extract_weights(
     if base_name_to_sets_of_related_ops is None:
         base_name_to_sets_of_related_ops = \
             get_base_name_to_sets_of_related_ops()
-    type_a_related_to_b = \
-        get_type_a_related_to_b(base_name_to_sets_of_related_ops)
+    get_type_a_related_to_b(base_name_to_sets_of_related_ops)
 
     # TODO(future PR): expose these
     skipped_module_names: List[str] = []

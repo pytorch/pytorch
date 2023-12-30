@@ -168,7 +168,6 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock:
     """
     # We choose 5 to prevent some accidents that cause infinite loop. But
     # with functional collective, the distance is 1.
-    MAX_WAIT_DISTANCE = 5
     node_list = []
     wait_nodes = []
     inputs = pytree.arg_tree_leaves(*comm_node.args, **comm_node.kwargs)
@@ -281,7 +280,6 @@ def _call_function(
     if meta_val is None:
         flat_args, spec = tree_flatten((args, kwargs))
         new_flat_args = []
-        memory_format = None
         for arg in flat_args:
             if not isinstance(arg, fx.Node):
                 new_flat_args.append(arg)
@@ -313,7 +311,6 @@ def _scatter_wait_result(
             node_indices.get(node, last_wait_node_idx), last_wait_node_idx
         )
 
-    fused_comm_node = fused_comm_block.comm_node
     fused_wait_node = fused_comm_block.wait_nodes[0]
 
     with gm.graph.inserting_after(fused_wait_node):

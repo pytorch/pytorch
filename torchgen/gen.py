@@ -276,7 +276,6 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             and str(f.func.name) != "resize_as_"
         ):
             base_name = f.func.name.name
-            overload_name = f.func.name.overload_name
             assert base_name.inplace, (
                 f"{f.func.name} is marked with tag: inplace_view, but it doesn't follow the naming "
                 "convention for inplace ops - the codegen expects the base name to have a trailing underscore. "

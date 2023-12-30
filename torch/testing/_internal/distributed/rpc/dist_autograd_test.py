@@ -341,7 +341,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
             else:
                 t1 = torch.ones(3, 3, requires_grad=True)
                 t2 = torch.zeros(3, 3, requires_grad=True)
-            nest_dst_rank = (dst_rank + 1) % self.world_size
+            (dst_rank + 1) % self.world_size
             if ExecMode.RPC_SYNC == exec_mode:
                 ret = rpc.rpc_sync(
                     worker_name(dst_rank),
@@ -497,11 +497,11 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                 t1 = torch.ones(3, 3, requires_grad=False)
                 t2 = torch.zeros(3, 3, requires_grad=False)
             if ExecMode.RPC_SYNC == exec_mode:
-                ret = rpc.rpc_sync(
+                rpc.rpc_sync(
                     worker_name(dst_rank), torch.add, args=(t1, t2)
                 )
             elif ExecMode.REMOTE == exec_mode:
-                ret = rpc.remote(
+                rpc.remote(
                     worker_name(dst_rank), torch.add, args=(t1, t2)
                 ).to_here()
             else:
@@ -529,7 +529,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
             dist.barrier()
 
     def _test_rpc_complex_args(self, exec_mode, sparse):
-        with dist_autograd.context() as context_id:
+        with dist_autograd.context():
             num_tensors = 10
             tensors = []
             for i in range(num_tensors):
@@ -554,7 +554,6 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
 
             # Verify appropriate tensors have been attached the autograd graph.
             next_funcs = next(iter(dist_autograd._current_context()._send_functions().values())).next_functions
-            idx = 0
             for i in range(len(next_funcs)):
                 self.assertEqual(
                     "torch::autograd::AccumulateGrad", next_funcs[i][0].name()
@@ -729,7 +728,6 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
             self._check_rpc_done(rank_diff)
 
         # trainers are done and holding the context for verification
-        accumulate_grad_func = None
         for rank_diff in rank_diffs:
             # make sure grads are accumulated for the same tensors and values
             # are all correct
@@ -1296,12 +1294,12 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_nested_context(self):
-        with dist_autograd.context() as context_id:
+        with dist_autograd.context():
             # Nested contexts not supported.
             with self.assertRaisesRegex(
                 RuntimeError, "Already have an autograd context id for this thread"
             ):
-                with dist_autograd.context() as context_id:
+                with dist_autograd.context():
                     pass
 
     @dist_init
@@ -1436,7 +1434,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             t1.requires_grad = True
             t2.requires_grad = True
             for dst_rank in dst_ranks:
-                ret = rpc.rpc_sync(
+                rpc.rpc_sync(
                     worker_name(dst_rank), torch.add, args=(t1, t2)
                 )
                 rpc.rpc_sync(
@@ -1473,7 +1471,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_error_in_context(self):
-        with dist_autograd.context() as context_id:
+        with dist_autograd.context():
             t1 = torch.rand(3, 3, requires_grad=True)
             t2 = torch.rand(6, 6, requires_grad=True)
 
@@ -1649,7 +1647,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
             # We don't use the result of an RPC function, as a result the
             # backward pass would hang in the "FAST" mode.
-            res = rpc.rpc_sync(
+            rpc.rpc_sync(
                 worker_name(self._next_rank()), torch.add, args=(t1, t2)
             )
 
@@ -1755,7 +1753,6 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_backward_without_rpc(self):
-        dst_rank = self.rank
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)

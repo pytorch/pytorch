@@ -463,7 +463,7 @@ class Partitioner:
                             if len(self.partitions) == len(self.devices):
                                 # No device is left
                                 # Put the previous partitions into a list (non_single_node_partitions)
-                                non_single_node_partitions = self.partitions[:]
+                                self.partitions[:]
                                 # Create the first single node partition for the current node
                                 self.create_single_node_partition(node)
                                 continue

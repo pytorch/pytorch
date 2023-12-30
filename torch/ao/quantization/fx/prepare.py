@@ -575,8 +575,6 @@ def _get_target_activation_dtype_for_node(
         # with the output activation being in fp32.
         # In the future this may change as we add more fields
         # to the `QConfig` object.
-        output_act_dtype = act_dtype \
-            if (not input_act_is_dynamic) else torch.float
 
         bias_dtype = torch.float16 \
             if (

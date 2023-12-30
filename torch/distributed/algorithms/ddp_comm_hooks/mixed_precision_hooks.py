@@ -28,7 +28,7 @@ def _reducer_allreduce_and_upcast_hook(
     """
     ddp_weakref = hook_state.ddp_weakref
     reducer, process_group = ddp_weakref().reducer, ddp_weakref().process_group
-    gradient_is_bucket_view = ddp_weakref().gradient_as_bucket_view
+    ddp_weakref().gradient_as_bucket_view
     # Cast bucket if different than param_dtype.
     if (
         ddp_weakref().mixed_precision.param_dtype != ddp_weakref().mixed_precision.reduce_dtype

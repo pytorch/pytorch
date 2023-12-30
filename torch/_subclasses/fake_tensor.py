@@ -709,7 +709,7 @@ def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     try:
         with in_kernel_invocation_manager(fake_mode):
             out_meta = func(*args, **kwargs)
-    except NotImplementedError as not_implemented_error:
+    except NotImplementedError:
         return NotImplemented
 
     if not out_meta:
@@ -771,7 +771,7 @@ def multi_device_op_default(fake_mode, func, *args, **kwargs):
 @register_op_impl(aten.slice_scatter.out)
 def multi_device_op_out(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
-        out = func(*args, **kwargs)
+        func(*args, **kwargs)
 
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -955,15 +955,13 @@ def make_fast_binary_impl(slow_ref):
         operands = args
 
         # compute_shape
-        has_scalars = False
-        has_tensors = False
         final_shape = None
         for op in operands:
             shape = op.shape if isinstance(op, torch.Tensor) else ()
             if len(shape) == 0:
-                has_scalars = True
+                pass
             else:
-                has_tensors = True
+                pass
             if final_shape is None:
                 final_shape = shape
             # TODO: Minor optimization: track if the shapes
@@ -984,7 +982,6 @@ def make_fast_binary_impl(slow_ref):
         cpu = torch.device("cpu")
         common_device = cpu
         common_dtype = None
-        output_dtype = None
         has_different_input_dtypes = False
         for op in operands:
             if not isinstance(op, torch.Tensor):
@@ -1497,7 +1494,7 @@ class FakeTensorMode(TorchDispatchMode):
     def __exit__(self, a, b, c):
         live, maybe_prev_fake_mode = self.enter_stack.pop()
         if live:
-            out = super().__exit__(a, b, c)
+            super().__exit__(a, b, c)
             # Re-enable the previous fake mode, if there was one.
             if maybe_prev_fake_mode is not None:
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
@@ -1514,7 +1511,7 @@ class FakeTensorMode(TorchDispatchMode):
                 "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
             )
             # NOTE: incr is intentionally unused for a RAII pattern
-            incr = IncrementRecursionCount()
+            IncrementRecursionCount()
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]
@@ -1983,7 +1980,6 @@ def run_fallback_kernel(
 
         r = func(*args, **kwargs)
 
-    tensor_impls = set()
     storages = set()
 
     for e in flat_args:

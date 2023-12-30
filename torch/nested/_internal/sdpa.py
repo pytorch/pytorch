@@ -322,7 +322,7 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, in
         cumulative_seqlen = (
             qkv.lengths().cumsum(0).to(dtype=torch.int32, device=qkv.device)
         )
-        batch_size = qkv.size(0)
+        qkv.size(0)
         max_seqlen = qkv._max_seqlen
         # TODO: Explore performance impact when compiling
         n_elem = int(cumulative_seqlen[-1].item())

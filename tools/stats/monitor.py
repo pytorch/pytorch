@@ -22,7 +22,7 @@ try:
         rsmi_process_info_t,
         rsmi_status_t,
     )
-except ImportError as e:
+except ImportError:
     pass
 
 
@@ -59,7 +59,7 @@ def get_per_process_cpu_info() -> List[Dict[str, Any]]:
                 # only availiable in linux
                 info["pss_memory"] = memory_full_info.pss
 
-        except psutil.AccessDenied as e:
+        except psutil.AccessDenied:
             # It's ok to skip this
             pass
 
