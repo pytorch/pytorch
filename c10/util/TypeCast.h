@@ -6,16 +6,9 @@
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/Half.h>
+#include <c10/util/complex.h>
 
 #include <type_traits>
-
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
-#endif
-#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
-#endif
 
 namespace c10 {
 
@@ -162,7 +155,5 @@ To checked_convert(From f, const char* name) {
 }
 
 } // namespace c10
-
-C10_CLANG_DIAGNOSTIC_POP()
 
 // Trigger tests for D25440771. TODO: Remove this line any time you want.
