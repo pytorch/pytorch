@@ -148,8 +148,15 @@ def get_nvidia_driver_version(run_lambda):
 def get_gpu_info(run_lambda):
     if get_platform() == 'darwin' or (TORCH_AVAILABLE and hasattr(torch.version, 'hip') and torch.version.hip is not None):
         if TORCH_AVAILABLE and torch.cuda.is_available():
-            return torch.cuda.get_device_name(None) + \
-                (" ({})".format(torch.cuda.get_device_properties(0).gcnArchName) if torch.version.hip is not None else "")
+            if torch.version.hip is not None:
+                prop = torch.cuda.get_device_properties(0)
+                if hasattr(prop, "gcnArchName"):
+                    gcnArch = " ({})".format(prop.gcnArchName)
+                else:
+                    gcnArch = "NoGCNArchNameOnOldPyTorch"
+            else:
+                gcnArch = ""
+            return torch.cuda.get_device_name(None) + gcnArch
         return None
     smi = get_nvidia_smi()
     uuid_regex = re.compile(r' \(UUID: .+?\)')
