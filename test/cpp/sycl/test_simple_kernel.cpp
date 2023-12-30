@@ -1,5 +1,5 @@
-#include <stdlib.h>
 #include <gtest/gtest.h>
+#include <stdlib.h>
 #include "simple_kernel.hpp"
 
 TEST(SYCLBuildingSysTest, SimpleKernelExecution) {

@@ -3,7 +3,10 @@
 class SimpleKer {
  public:
   SimpleKer(float* a) : a_(a) {}
-  void operator()(sycl::item<1> item) const { a_[item] = item; }
+  void operator()(sycl::item<1> item) const {
+    a_[item] = item;
+  }
+
  private:
   float* a_;
 };
