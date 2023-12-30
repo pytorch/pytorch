@@ -1,4 +1,4 @@
-import hashlib
+import itertools
 import logging
 import operator
 import os
@@ -24,6 +24,8 @@ from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
 from .codegen.common import (
+    DeviceOpOverrides,
+    get_device_op_overrides,
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
     register_backend_for_device,
@@ -63,6 +65,14 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
+if config.is_fbcode():
+    from torch._inductor.fb.utils import log_module_code
+else:
+
+    def log_module_code(*args, **kwargs):
+        pass
+
+
 def supported_dtype_of_cpp_wrapper(dtype, cuda):
     supported_dtype = {
         torch.float32,
@@ -75,10 +85,9 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.bool,
         torch.bfloat16,
         torch.complex64,
-        # torch.float16, # TODO: implement this
+        torch.float16,
     }
     if cuda:
-        supported_dtype.add(torch.float16)
         supported_dtype.add(torch.float8_e4m3fn)
         supported_dtype.add(torch.float8_e5m2)
 
@@ -213,6 +222,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_buffers: Set[str] = set()
         self.never_reuse_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
+        self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
         self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
@@ -472,9 +482,10 @@ class GraphLowering(torch.fx.Interpreter):
             self._warned_fallback.add(name)
             perf_hint_log.info("Using FallbackKernel: %s", name)
 
-    def add_device_idx(self, idx: Optional[int]):
-        if idx is not None:
-            self.device_idxs.add(idx)
+    def add_device_info(self, device: torch.device):
+        self.device_types.add(device.type)
+        if device.index is not None:
+            self.device_idxs.add(device.index)
 
     @property
     def fake_mode(self):
@@ -521,6 +532,9 @@ class GraphLowering(torch.fx.Interpreter):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
+        # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
+        if not isinstance(buffer, ir.ComputedBuffer) or not buffer.is_zero_elements():
+            self.add_device_info(buffer.get_device())
         return name
 
     def register_list(self, buffer_names: List[str]):
@@ -589,9 +603,11 @@ class GraphLowering(torch.fx.Interpreter):
                 name = f"{prefix}_{cnt}"
                 cnt += 1
             self.constants[name] = data
-            self.constant_reprs[name] = hashlib.sha256(
-                repr(data).encode("utf-8")
-            ).hexdigest()
+            self.constant_reprs[name] = (
+                f"{data.device!r} {data.dtype!r} "
+                f"{tuple(data.size())!r} {tuple(data.stride())!r} "
+                f"{hash(data):x}"
+            )
             return name
 
         name = allocate(name)
@@ -645,8 +661,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
-        self.device_types.add(example.device.type)
-        self.add_device_idx(example.device.index)
+        self.add_device_info(example.device)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -837,6 +852,14 @@ class GraphLowering(torch.fx.Interpreter):
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
+            if (
+                is_output
+                and isinstance(result, TensorBox)
+                and isinstance(result.data, ir.BaseView)
+            ):
+                # Realize so that outputs are correctly aliased
+                result.realize()
+
             if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):
@@ -979,10 +1002,6 @@ class GraphLowering(torch.fx.Interpreter):
             return
 
         device_types = self.device_types.copy()
-        # In terms of some operations that don't have input tensors, we need to
-        # check the device of the buffers.
-        for buffer in self.buffers:
-            device_types.add(buffer.get_device().type)
         device_types.discard("cpu")
         # TODO(Eikan): Only support mixing cpu and other device now.
         assert len(device_types) <= 1, "Does not support mixing {}".format(
@@ -990,6 +1009,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         only_cpu = len(device_types) == 0
         device_type = "cpu" if only_cpu else device_types.pop()
+
+        self.device_ops = get_device_op_overrides(device_type)
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
         assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
@@ -1015,12 +1036,26 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     assert isinstance(
                         x, torch.Tensor
-                    ), "Unknown type when creating real inputs"
+                    ), "Unknown type when creating real inputs" + str(type(x))
                     return x
+
+            if tracing_context := torch._guards.TracingContext.try_get():
+                if tracing_context.output_strides:
+                    tracing_context.output_strides.clear()
+
+                params_flat = [
+                    param
+                    for param in tracing_context.params_flat  # type: ignore[union-attr]
+                    if param is not None
+                ]
+                real_inputs = [
+                    materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
+                ]
+            else:
+                real_inputs = [materialize(x) for x in V.real_inputs]
 
             with torch.utils._python_dispatch._disable_current_modes():
                 assert self.example_inputs is not None
-                real_inputs = [materialize(x) for x in self.example_inputs]
                 compiled(real_inputs)
             del real_inputs
 
@@ -1078,6 +1113,8 @@ class GraphLowering(torch.fx.Interpreter):
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature
         assert mod.__file__ is not None
+
+        log_module_code(mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
         output_code_log.info("Output code written to: %s", mod.__file__)
