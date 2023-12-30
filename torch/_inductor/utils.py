@@ -486,9 +486,11 @@ def get_origin_op_info(node_schedule, descriptive_names):
     if descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         for origin in all_origins:
-            if origin.op == "call_function"
+            if (
+                origin.op == "call_function"
                 and "original_aten" in origin.meta
-                and origin.meta["original_aten"] is not None:
+                and origin.meta["original_aten"] is not None
+            ):
                 op_name = origin.meta["original_aten"]._overloadpacket.__name__
                 mod_name, torch_op = get_module_name_from_meta(origin.meta)
                 seq_nr = origin.meta.get("seq_nr", -1)
