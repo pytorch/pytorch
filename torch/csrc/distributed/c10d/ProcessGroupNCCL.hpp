@@ -840,11 +840,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   int watchdogCheckInMilSec_;
 
   // Size of ring buffer where we store NCCL Traces for debugging.
+  int ncclTraceBufferSize_;
 
   // We gate the heartbeat monitor thread so that we can roll it out gradually.
   std::atomic<bool> monitorThreadEnabled_;
-
-  bool timoutDumpExtraSleep_;
 
   // Monitor thread which checks the heartbeat of Watchdog thread.
   // If the monitor thread finds there is no heartbeat, it will dump debug info
