@@ -1,6 +1,10 @@
+#include <c10/macros/Macros.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <array>
+#include <cstdint>
 #include <iostream>
+#include <limits>
+#include <type_traits>
 
 namespace c10 {
 
