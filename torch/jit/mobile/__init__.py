@@ -44,7 +44,7 @@ def _load_for_lite_interpreter(f, map_location=None):
     map_location = validate_map_location(map_location)
 
     if isinstance(f, (str, os.PathLike)):
-        cpp_module = torch._C._load_for_lite_interpreter(f, map_location)
+        cpp_module = torch._C._load_for_lite_interpreter(os.fspath(f), map_location)
     else:
         cpp_module = torch._C._load_for_lite_interpreter_from_buffer(
             f.read(), map_location
