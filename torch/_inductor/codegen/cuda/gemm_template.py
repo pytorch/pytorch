@@ -57,6 +57,7 @@ extern "C" {
     return 0;
   }
   // check for null pointers after workspace size, since querying workspace size doesn't require valid data pointers
+#ifndef CUTLASS_BACKEND_DISABLE_CHECKS
   {{kernel.check_not_null(X)}}
   {{kernel.check_not_null(W)}}
   {{kernel.check_not_null(Bias)}}
@@ -68,6 +69,7 @@ extern "C" {
     auto status = gemm_op.can_implement(arguments);
     CUTLASS_CHECK(status);
   }
+#endif
 #ifdef CUTLASS_DEBUG_TRACE_LEVEL
 #if CUTLASS_DEBUG_TRACE_LEVEL == 1
   {
@@ -422,6 +424,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         non_fuseable = non_fuseable and (
             not inductor_cuda_config.cutlass_prefer_evt_capable_ops
         )
+        no_evt_fallback = False
         if fuseable:
             cutlass_template_evt = CUTLASSGemmTemplate(
                 input_nodes,
@@ -431,13 +434,25 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 input_reorder=input_reorder,
                 can_fuse_epilogue=True,
             )
+            if "epilogue_nodes" in extra_kwargs:
+                no_evt_fallback = True
+                epilogue_nodes = extra_kwargs["epilogue_nodes"]
+                template_buffer_node = extra_kwargs.get("template_buffer_node", None)
+                assert (
+                    template_buffer_node is not None
+                ), "Passing epilogue_nodes requires template_buffer_node to be also passed"
+                # This change of output node can change the output layout, which affects which ops
+                # are available
+                cutlass_template_evt.update_output_node_given_epilogue(
+                    epilogue_nodes, template_buffer_node
+                )
             # This will list only ops capable of EVT fusion
             ops_evt = cutlass_template_evt.gen_ops()
             for op in ops_evt:
                 cutlass_template_evt.maybe_append_choice(choices, op=op, **extra_kwargs)
         else:
             ops_evt = []
-        if non_fuseable or len(ops_evt) == 0:
+        if non_fuseable or (len(ops_evt) == 0 and not no_evt_fallback):
             if fuseable:
                 # list both fuseable and non-fuseable ops, and treat them all as non-fuseable
                 can_fuse_epilogue = False
@@ -836,19 +851,19 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         c_layout = Bias.get_layout() if Bias is not None else None
 
         d_layout = copy.deepcopy(Y.get_layout())
-
-        all_match = all(
+        match_list = [
             CUTLASSGemmTemplate.layout_match(buf.get_layout(), op_layout)
             for buf, op_layout in zip(
                 (X, W, Bias, Y),
                 (op.A.layout, op.B.layout, op.C.layout, op.D.layout),
             )
             if buf is not None
-        )
+        ]
+        all_match = all(match_list)
         if all_match:
             return op
-        log.debug(
-            f"Cutlass GEMM Layout change: Input and/or output layouts have changed between autotuning and call to render on {self}. Applying workaround. This can lead to suboptimal performance."  # noqa: G004, B950
+        log.warning(
+            f"Cutlass GEMM Layout change: Input and/or output layouts have changed between autotuning/retuning and call to render on {self}. Applying workaround. This can lead to suboptimal performance. Match List: {match_list}"  # noqa: G004, B950
         )
         new_op = copy.deepcopy(op)
 
@@ -1302,6 +1317,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             template_buffer_node is not None
         ), "If epilogue nodes are passed, template_buffer_node is required"
         # We need to match dimensions of the target buffer to the output of the matmul
+        if epilogue_nodes is None or len(epilogue_nodes) == 0:
+            self.output_node = template_buffer_node
+            return
         result_strides, result_sizes = extract_epilogue_storage_layout(
             epilogue_nodes[-1], template_buffer_node
         )

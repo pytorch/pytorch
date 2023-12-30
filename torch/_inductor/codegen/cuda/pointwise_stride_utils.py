@@ -282,7 +282,7 @@ def extract_pointwise_load_strides(
 @staticmethod
 def extract_epilogue_storage_layout(
     epilogue_node: ir.IRNode, gemm_node: ir.Buffer
-) -> Dict[str, Tuple[List[int], int, List[int]]]:
+) -> Tuple[List[int], List[int]]:
     if isinstance(epilogue_node, ir.ComputedBuffer):
         pointwise_node = epilogue_node.data
     target_layout = epilogue_node.get_layout()
@@ -319,10 +319,5 @@ def extract_epilogue_storage_layout(
         assert (
             reference_layout.size[reference_dim] == target_layout.size[target_dim]
         ), f"Size mismatch between reference and target layouts for {target_dim=}, {reference_dim=}"
-        if reference_layout.stride[reference_dim] == 1:
-            assert (
-                target_layout.stride[target_dim] == 1
-            ), f"Contiguous dimension mismatch between reference and target layouts. In GEMM, dimension {reference_dim} is contiguous, while corresponding dimension {target_dim} is not."
-
         gemm_output_strides[reference_dim] = target_layout.stride[target_dim]
     return gemm_output_strides, gemm_output_sizes

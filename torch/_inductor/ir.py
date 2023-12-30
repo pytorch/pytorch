@@ -3444,6 +3444,19 @@ class CUDATemplateBuffer(TemplateBuffer):
                 self._tuned_for_epilogue = list(
                     epilogue_nodes
                 )  # To prevent repeated retuning on same epilogue
+                return True
+        return False
+
+    def should_allocate(self):
+        output_node = self.template.output_node
+        while isinstance(output_node, BaseView):
+            output_node = output_node.data
+        if not isinstance(output_node, Buffer):
+            return True
+        res = output_node.get_name() == self.get_name()
+        if res == False:
+            log.warning(f"Not allocating {self.get_name()}")
+        return res
 
 
 @dataclasses.dataclass
