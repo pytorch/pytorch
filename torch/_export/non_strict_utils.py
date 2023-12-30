@@ -62,6 +62,18 @@ def fake_tree(mode, arg, t_constraints, source, sources):
             k: fake_tree(mode, arg, t_constraints, GetItemSource(source, k), sources)
             for k, arg in arg.items()
         }
+    elif isinstance(arg, tuple):
+        if hasattr(arg, "_fields"):
+            # it's a namedtuple
+            return arg._make(
+                fake_tree(mode, arg, t_constraints, GetItemSource(source, i), sources)
+                for i, arg in enumerate(arg)
+            )
+        else:
+            return tuple(
+                fake_tree(mode, arg, t_constraints, GetItemSource(source, i), sources)
+                for i, arg in enumerate(arg)
+            )
     # TODO(avik): data classes
     else:
         return fakify(mode, arg, t_constraints, source, sources)

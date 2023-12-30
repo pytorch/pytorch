@@ -5,6 +5,7 @@ import dataclasses
 import unittest
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Tuple, NamedTuple
 
 import torch
 import torch._dynamo as torchdynamo
@@ -2381,6 +2382,34 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
 
+    def test_tuple_input(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: Tuple[torch.Tensor, torch.Tensor]):
+                return x[0] + x[1]
+
+        inp = ((torch.randn(3, 4), torch.randn(3, 4)),)
+        ep = export(TestModule(), inp)
+        self.assertEqual(ep(*inp), ep.module()(*inp))
+
+    @testing.expectedFailureRetraceability
+    def test_namedtuple_input(self):
+        class Foo(NamedTuple):
+            a: torch.Tensor
+            b: torch.Tensor
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: Foo):
+                return x.a + x.b
+
+        inp = (Foo(torch.randn(3, 4), torch.randn(3, 4)),)
+        ep = export(TestModule(), inp)
+        self.assertEqual(ep(*inp), ep.module()(*inp))
 
 if __name__ == '__main__':
     run_tests()
