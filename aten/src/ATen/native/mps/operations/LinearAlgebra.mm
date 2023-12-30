@@ -247,9 +247,6 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 
   if (&output != &self) {
     output.resize_(bias_sizes);
-    if (beta.toComplexDouble() != 0.0) {
-      output.copy_(*bias_);
-    }
   }
   IntArrayRef output_sizes = output.sizes();
   if ((output_sizes[0] == 0) || (output_sizes[1] == 0)) {
@@ -282,18 +279,18 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
                                                                       secondaryTensor:otherTensor
                                                                                  name:@"MM/(mat1@mat2)"];
 
-      // Intermediates for beta and alpha
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
-                                                       dataType:getMPSScalarType((*bias_).scalar_type())];
-      MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble()
-                                                        dataType:getMPSScalarType(self.scalar_type())];
+      auto productTimesAlphaTensor = productTensor;
+      if (alpha.toDouble() != 1.0) {
+        auto alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble() dataType:getMPSScalarType(self.scalar_type())];
 
-      // Intermediates for multiplying by beta and alpha
-      MPSGraphTensor* productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:productTensor
-                                                                          secondaryTensor:alphaTensor
-                                                                                     name:@"MM/alpha*(mat1@mat2)"];
-      MPSGraphTensor* biasTimesBetaTensor = biasTensor;
-      if (is_beta_non_zero) {
+        productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:productTensor
+                                                            secondaryTensor:alphaTensor
+                                                                       name:@"MM/alpha*(mat1@mat2)"];
+      }
+      auto biasTimesBetaTensor = biasTensor;
+      if (is_beta_non_zero && beta.toDouble() != 1.0) {
+        auto betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
+                                              dataType:getMPSScalarType((*bias_).scalar_type())];
         biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:biasTensor
                                                         secondaryTensor:betaTensor
                                                                    name:@"MM/beta*input"];
