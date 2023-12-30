@@ -1979,7 +1979,7 @@ graph(%Ra, %Rb):
             self.assertEqual(_zero_rate(grad[0]), _zero_rate(grad_ref[0]), rtol=1e-3, atol=1e-4)
 
     def test_torch_ops_overloaded(self):
-        with self.assertRaisesRegex(RuntimeError, "failed to many any schema"):
+        with self.assertRaisesRegex(RuntimeError, "failed to match any schema"):
             torch.ops.aten.add("a", 1)
         self.assertEqual("ab", torch.ops.aten.add("a", "b"))
         a, b = torch.rand(3, 4), torch.rand(3, 4)
@@ -15775,7 +15775,7 @@ dedent """
             # type: (Dict[str, int]) -> List[int]
             out = [1]
             for i in range(d["hi"] if "hi" in d else 6):
-                out.append(i)
+                out.append(i)  # noqa: PERF402
             return out
 
         self.checkScript(fn, ({'hi': 2, 'bye': 3},))

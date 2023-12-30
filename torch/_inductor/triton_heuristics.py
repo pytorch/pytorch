@@ -18,8 +18,8 @@ import torch
 
 import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.utils import dynamo_timed
-from torch.utils._triton import has_triton, has_triton_package
+from torch._dynamo.utils import dynamo_timed, get_first_attr
+from torch.utils._triton import has_triton_package
 
 from . import config
 from .codecache import cache_dir, CudaKernelParamCache
@@ -44,16 +44,17 @@ if has_triton_package():
     from triton import Config
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
+
+    try:
+        from triton.compiler.compiler import ASTSource
+    except ImportError:
+        ASTSource = None
 else:
     Config = object
     triton = None
     KernelInterface = object
     OutOfResources = object
-
-if has_triton():
-    from triton.runtime.jit import get_cuda_stream
-else:
-    get_cuda_stream = None
+    ASTSource = None
 
 
 _NUM_THREADS_PER_WARP = 32
@@ -209,9 +210,9 @@ class CachingAutotuner(KernelInterface):
                 config.dynamic_scale_rblock
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
-                # TODO not enable for H100 yet since we haven't got a chance to test this
-                # on H100. Will remove this check once we test on H100
-                and device_prop.major == 8
+                # Disable for AMDGPU as Triton is not ready to return n_regs for a compiled_binary.
+                and torch.version.hip is None
+                and device_prop.major >= 8
             ):
                 for triton_config, compiled_binary in zip(
                     self.configs, compiled_binaries
@@ -238,8 +239,11 @@ class CachingAutotuner(KernelInterface):
                     # from PLBartForCausalLM, latency improve from
                     # 7.795ms to 4.883ms.
                     #
-                    # Note both A100 and H100 have 65536 32-bit registers per SM.
-                    if nreg <= 65536 // device_prop.max_threads_per_multi_processor:
+                    if (
+                        nreg
+                        <= device_prop.regs_per_multiprocessor
+                        // device_prop.max_threads_per_multi_processor
+                    ):
                         continue
 
                     nreg_per_warp = nreg * 32
@@ -247,14 +251,16 @@ class CachingAutotuner(KernelInterface):
 
                     # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
                     # The formula below is a tighter upper bound since we have the assumption that
-                    #   nreg > 65536 // device_prop.max_threads_per_multi_processor
+                    #   nreg > device_prop.regs_per_multiprocessor // device_prop.max_threads_per_multi_processor
                     # due to the if condition above and:
-                    #   65536 / nreg_per_block
-                    #   = 65536 / (nreg * 32 * num_warps)
-                    #   < 65536 / ((65536 / max_threads_per_multi_processor) * 32 * num_warps)
+                    #   regs_per_multiprocessor / nreg_per_block
+                    #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
+                    #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
                     #   = max_threads_per_multi_processor / (32 * num_warps)
                     # Using a tigher upper bound can reveal more optimization opportunities.
-                    max_blocks_per_sm = max(65536 // nreg_per_block, 1)
+                    max_blocks_per_sm = max(
+                        device_prop.regs_per_multiprocessor // nreg_per_block, 1
+                    )
 
                     if (
                         total_block
@@ -287,13 +293,45 @@ class CachingAutotuner(KernelInterface):
         compile_meta["device_type"] = "cuda" if torch.version.hip is None else "hip"
 
         if warm_cache_only_with_cc:
-            return (
-                triton.compile(
+            cc = warm_cache_only_with_cc
+        else:
+            # Use device_type 'cuda' for both cuda and hip devices to retrieve
+            # the compute capability.
+            device_type = "cuda"
+            device_id = compile_meta["device"]
+            device_interface = get_interface_for_device(device_type)
+            device = torch.device(device_type, device_id)
+            cc = device_interface.get_compute_capability(device)
+
+        compile_meta["cc"] = cc
+
+        if ASTSource:
+            compile_args = (
+                ASTSource(
                     self.fn,
-                    warm_cache_only=True,
-                    cc=warm_cache_only_with_cc,
-                    **compile_meta,
+                    compile_meta["signature"],
+                    compile_meta["constants"],
+                    compile_meta["configs"][0],
                 ),
+            )
+
+            target = (compile_meta["device_type"], cc)
+            options = {
+                "num_warps": compile_meta["num_warps"],
+                "num_stages": compile_meta["num_stages"],
+                "debug": compile_meta["debug"],
+            }
+            compile_kwargs = {
+                "target": target,
+                "options": options,
+            }
+        else:
+            compile_args = (self.fn,)
+            compile_kwargs = compile_meta
+
+        if warm_cache_only_with_cc:
+            return (
+                triton.compile(*compile_args, **compile_kwargs),
                 None,
             )
 
@@ -301,10 +339,8 @@ class CachingAutotuner(KernelInterface):
         with torch.cuda.device(compile_meta["device"]):
             # need to initialize context
             torch.cuda.synchronize(torch.cuda.current_device())
-            binary = triton.compile(
-                self.fn,
-                **compile_meta,
-            )
+
+            binary = triton.compile(*compile_args, **compile_kwargs)
             binary._init_handles()
 
         call_args = [
@@ -321,6 +357,14 @@ class CachingAutotuner(KernelInterface):
             "set_device": torch.cuda.set_device,
             "current_device": torch.cuda.current_device,
         }
+
+        scope["runner"] = get_first_attr(binary, "run", "c_wrapper")
+        scope["function"] = get_first_attr(binary, "function", "cu_function")
+        cluster_dims = get_first_attr(binary, "cluster_dims", "clusterDims")
+        scope["cta_args"] = (
+            (binary.num_ctas, *cluster_dims) if hasattr(binary, "num_ctas") else ()
+        )
+
         exec(
             f"""
             def launcher({', '.join(def_args)}, grid, stream):
@@ -329,15 +373,10 @@ class CachingAutotuner(KernelInterface):
                 else:
                     grid_0, grid_1, grid_2 = grid
 
-                if hasattr(bin, "num_ctas"):
-                    bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps,
-                                bin.num_ctas, *bin.clusterDims, bin.shared,
-                                stream, bin.cu_function, None, None, None,
-                                {', '.join(call_args)})
-                else:
-                    bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
-                                stream, bin.cu_function, None, None, None,
-                                {', '.join(call_args)})
+                runner(grid_0, grid_1, grid_2, bin.num_warps,
+                            *cta_args, bin.shared,
+                            stream, function, None, None, None,
+                            {', '.join(call_args)})
                 return bin
             """.lstrip(),
             scope,
@@ -365,6 +404,8 @@ class CachingAutotuner(KernelInterface):
                 launcher.n_spills,
             )
             return float("inf")
+
+        from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
 
         stream = get_cuda_stream(torch.cuda.current_device())
 

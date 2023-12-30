@@ -689,6 +689,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_dict_ops(a, b):
         tmp = {"a": a + 1, "b": b + 2}
+        assert tmp.get("zzz") is None
         v = tmp.pop("b") + tmp.get("a") + tmp.get("missing", 3) + tmp.pop("missing", 4)
         tmp.update({"d": 3})
         tmp["c"] = v + tmp["d"]
@@ -745,6 +746,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             dd["a"] = x + 1
             dd[param] = 123
             dd["c"] = x * 2
+            dd.update({"b": x * 3})
+            dd.update([["d", x - 2], ("e", x + 2)])
+            dd.update(zip("ab", [x + 3, x + 4]))
             return dd["b"], dd
 
         x = torch.randn(10, 10)
@@ -754,7 +758,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref[0], res[0]))
         self.assertTrue(same(ref[1]["a"], res[1]["a"]))
+        self.assertTrue(same(ref[1]["b"], res[1]["b"]))
         self.assertTrue(same(ref[1]["c"], res[1]["c"]))
+        self.assertTrue(same(ref[1]["d"], res[1]["d"]))
+        self.assertTrue(same(ref[1]["e"], res[1]["e"]))
         self.assertTrue(same(ref[1][param], res[1][param]))
 
     @make_test
@@ -801,6 +808,42 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         d2 = collections.OrderedDict(my_list)
         d2["c"] = x + 20
         return d1["a"] + d2["c"] + 1
+
+    @make_test
+    def test_dict_fromkeys(x, y):
+        lst = ["a", "b"]
+        d = dict.fromkeys(lst)
+        d1 = dict.fromkeys(d, x + 1)
+        d2 = collections.defaultdict.fromkeys(iter(d1), x - 2)
+        d3 = collections.OrderedDict.fromkeys(tuple(lst), value=y)
+        return d1["a"] * d2["b"] + d2["a"] + d1["b"] + d3["a"] + d3["b"] + 1
+
+    @make_test
+    def test_dict_copy(x):
+        my_list = [("a", x), ("b", x + 1), ("c", x + 2)]
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = d1.copy()
+        d2["a"] = x - 5
+        d2["b"] = x + 3
+        d3 = collections.OrderedDict(my_list)
+        d3["c"] = x + 20
+        d4 = d3.copy()
+        d4["c"] = x - 10
+        return d1["a"] * d2["a"] + d2["b"] + d3["c"] * d4["c"] + 1
+
+    @make_test
+    def test_dict_update(x, y, z):
+        d = {"a": x, "b": y}
+        d.update({"a": y - 1})
+        d.update([("b", z + 1), ["c", z]])
+        d.update(zip("ab", [z + 3, y + 2]))
+
+        od = collections.OrderedDict(a=x * 3, b=y + 2)
+        od.update({"a": y + 5})
+        od.update([["b", z + 6], ("c", z - 7)])
+        od.update(zip("ab", [z - 3, x + 2]))
+        return d["a"] * od["a"] + od["c"] + d["b"] + od["b"] * d["c"]
 
     @make_test
     def test_min_max(a, b):
@@ -1928,7 +1971,9 @@ def forward(self, x_1, output_1):
 
             tmp = torch.add(x, 1)
             grid = (x.numel(),)
-            add_kernel.run(x, y, output, n_elements, grid=grid, BLOCK_SIZE=16)
+            add_kernel.run(
+                x, y, output, n_elements, warmup=False, grid=grid, BLOCK_SIZE=16
+            )
 
             return output, tmp
 
@@ -2348,6 +2393,90 @@ def forward(self, x_1, output_1):
         o6 = torch.zeros_like(t1, requires_grad=grad)
         self.assertEqual(compiled_func(t1, t2, o6, 2, 200), torch_add)
 
+    @requires_cuda()
+    def test_triton_kernel_mutation_not_mark_dirty(self):
+        @torch.compile
+        def f(x):
+            n_elements = x.numel()
+            add_kernel[(n_elements,)](x, x, x, n_elements, 16)
+            return x
+
+        x = torch.randn(5, device="cuda", requires_grad=True)
+        x_cloned = x.clone()
+        out = x_cloned.sin()
+        f(x_cloned)
+        out.sum().backward()
+
+    @requires_cuda()
+    def test_triton_kernel_matmul_tracking(self):
+        @triton.jit
+        def ones_kernel(x_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = 1.0
+            tl.store(x_ptr + offsets, x, mask=mask)
+
+        @torch.compile
+        def f(x):
+            out = torch.zeros_like(x)
+            ones_kernel[(4,)](out, 16, BLOCK_SIZE=16)
+            return torch.mm(out, x) + 10
+
+        x = torch.randn(4, 4, device="cuda")
+        torch_out = f(x)
+        python_out = torch.mm(torch.ones(4, 4, device="cuda"), x) + 10
+        self.assertEqual(torch_out, python_out)
+
+    @requires_cuda()
+    def test_triton_kernel_strided_input(self):
+        def f(inp):
+            # left has strides [256, 1]
+            left, right = torch.split(inp, [128, 128], dim=1)
+            out = torch.empty_like(left)
+            X_BLOCK_SIZE, Y_BLOCK_SIZE = 32, 16
+            grid = (left.size(1) // X_BLOCK_SIZE, left.size(0) // Y_BLOCK_SIZE)
+            double_strided_kernel[grid](
+                in_ptr=left,
+                out_ptr=out,
+                in_y_stride=left.stride(0),
+                out_y_stride=out.stride(0),
+                X_BLOCK_SIZE=X_BLOCK_SIZE,
+                Y_BLOCK_SIZE=Y_BLOCK_SIZE,
+            )
+            return out
+
+        inp = torch.randn(64, 256, device="cuda")
+
+        eager_out = f(inp)
+        compiled_out = torch.compile(f)(inp)
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda()
+    def test_triton_kernel_strided_input_nonzero_offset(self):
+        def f(inp):
+            # right has strides [256, 1] and storage offset 128
+            left, right = torch.split(inp, [128, 128], dim=1)
+            out = torch.empty_like(right)
+            X_BLOCK_SIZE, Y_BLOCK_SIZE = 32, 16
+            grid = (right.size(1) // X_BLOCK_SIZE, right.size(0) // Y_BLOCK_SIZE)
+            double_strided_kernel[grid](
+                in_ptr=right,
+                out_ptr=out,
+                in_y_stride=right.stride(0),
+                out_y_stride=out.stride(0),
+                X_BLOCK_SIZE=X_BLOCK_SIZE,
+                Y_BLOCK_SIZE=Y_BLOCK_SIZE,
+            )
+            return out
+
+        inp = torch.randn(64, 256, device="cuda")
+
+        eager_out = f(inp)
+        compiled_out = torch.compile(f)(inp)
+        self.assertEqual(compiled_out, eager_out)
+
     def test_dataclass_factory(self):
         @dataclass
         class Output:
@@ -2537,6 +2666,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor(self):
         def fn(z):
             x = z.clone()
@@ -2550,6 +2680,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_vmapped_mutated_tensor_tensor(self):
         def fn(x):
             y = torch.vmap(torch.Tensor.acos_)(x)
@@ -2561,6 +2692,7 @@ def forward(self, x_1, output_1):
 
         self.assertEqual(fn(z), fn_opt(z))
 
+    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_is_init_in_compile_vmapped_mutated_tensor_tensor_multi_arg(self):
         def fn(y, z):
             a = y.clone()

@@ -100,17 +100,13 @@ CLOSURE_VARS = {
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend
     ),
     "___lookup_backend": (
-        lambda backend_obj_id: torch._dynamo.eval_frame.guarded_backend_cache.cached_backends[
-            backend_obj_id
-        ]
+        lambda backend_obj_id: torch._dynamo.eval_frame.cached_backends.get(
+            backend_obj_id, None
+        )
     ),
     "___skip_backend_check": (
         lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
     ),
-    "___compile_config_hash": (
-        lambda: torch._dynamo.eval_frame.get_saved_else_current_config_hash().hex()
-    ),
-    "___needs_nopython": (lambda: torch._dynamo.eval_frame.config_cache.nopython),
     "___odict_getitem": collections.OrderedDict.__getitem__,
     "___dict_param_key_ids": dict_param_key_ids,
     "___dict_const_keys": dict_const_keys,
@@ -246,7 +242,6 @@ class GuardBuilder(GuardBuilderBase):
         # info is stored alongside optimized_code and check_fn and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
-        self.config_hash: Optional[bytes] = None
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -603,22 +598,6 @@ class GuardBuilder(GuardBuilderBase):
         ]
         self._produce_guard_code(guard, code)
 
-    def CONFIG_HASH_MATCH(self, guard: Guard):
-        """Guard on the hash of the compiled function's dynamo config"""
-
-        config_hash = torch._dynamo.eval_frame.get_saved_else_current_config_hash()
-        assert guard.source is GuardSource.GLOBAL
-        code = [f"___compile_config_hash() == '{config_hash.hex()}'"]
-        self.config_hash = config_hash
-        self._produce_guard_code(guard, code)
-
-    def HAS_GRAPH_BREAK(self, guard: Guard):
-        # If this compiled entry has a graph break / is not a single graph, it is a cache miss
-        # if the compiled object needs nopython. We only need to install this guard if
-        # there is a graph break.
-        code = ["not ___needs_nopython()"]
-        self._produce_guard_code(guard, code)
-
     def SHAPE_ENV(self, guard: Guard):
         # Let's handle ShapeEnv guards.  To do this, we will resolve
         # shape variables to sources from tracked_fakes.  This must happen after
@@ -627,7 +606,7 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
-        constraint_inputs = [a.constraint_dims for a in fs]
+        input_contexts = [a.symbolic_context for a in fs]
 
         def get_sources(t_id, dim):
             # Looks up base sources mapped to a tensor id and uses them to create
@@ -670,7 +649,7 @@ class GuardBuilder(GuardBuilderBase):
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
-            constraint_inputs=constraint_inputs,
+            input_contexts=input_contexts,
             equalities_inputs=equalities_inputs,
             source_ref=self.source_ref,
             # Export keeps static.
@@ -1020,7 +999,6 @@ class CheckFunctionManager:
         # queryable data structure such that this information is already present
         # in some form.
         self.check_fn.id_matched_objs = builder.id_matched_objs
-        self.check_fn.config_hash = builder.config_hash
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c

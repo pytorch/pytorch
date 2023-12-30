@@ -29,6 +29,7 @@ torch::nn::FractionalMaxPool2d|Yes|No
 torch::nn::FractionalMaxPool3d|Yes|No
 torch::nn::LPPool1d|Yes|No
 torch::nn::LPPool2d|Yes|No
+torch::nn::LPPool3d|Yes|No
 torch::nn::AdaptiveMaxPool1d|Yes|No
 torch::nn::AdaptiveMaxPool2d|Yes|No
 torch::nn::AdaptiveMaxPool3d|Yes|No
@@ -173,6 +174,7 @@ F::max_unpool2d|Yes|No
 F::max_unpool3d|Yes|No
 F::lp_pool1d|Yes|No
 F::lp_pool2d|Yes|No
+F::lp_pool3d|Yes|No
 F::adaptive_max_pool1d|Yes|No
 F::adaptive_max_pool2d|Yes|No
 F::adaptive_max_pool3d|Yes|No
