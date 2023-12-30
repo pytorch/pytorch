@@ -615,7 +615,7 @@ class cuda:
     version = None
 
     # Optimization level for the host compiler.
-    compile_opt_level = "-O1"
+    compile_opt_level = os.environ.get("INDUCTOR_CUDA_COMPILE_OPT_LEVEL", "-O1")
 
     # Whether to enable device LTO (link-time-optimization).
     enable_cuda_lto = False
@@ -627,7 +627,7 @@ class cuda:
     enable_debug_info = False
 
     # Whether to use fast math.
-    use_fast_math = False
+    use_fast_math = os.environ.get("INDUCTOR_CUDA_USE_FAST_MATH", "0") == "1"
 
     # Path to the CUTLASS repo root directory.
     # The default path only works under PyTorch local development environment.
