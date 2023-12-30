@@ -2,13 +2,10 @@
 
 #include <exception>
 #include <memory>
-#include <mutex>
-#include <queue>
 #include <string>
 #include <system_error>
 
 #include <ATen/detail/FunctionTraits.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <pybind11/pybind11.h>
@@ -145,7 +142,7 @@ extern PyObject *THPException_FatalError, *THPException_LinAlgError,
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
 struct python_error : public std::exception {
-  python_error() {}
+  python_error() = default;
 
   python_error(const python_error& other)
       : type(other.type),
