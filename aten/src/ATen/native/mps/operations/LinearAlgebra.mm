@@ -281,8 +281,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 
       auto productTimesAlphaTensor = productTensor;
       if (alpha.toDouble() != 1.0) {
-        auto alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble()
-                                               dataType:getMPSScalarType(self.scalar_type())];
+        auto alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble() dataType:getMPSScalarType(self.scalar_type())];
 
         productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:productTensor
                                                             secondaryTensor:alphaTensor
