@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import unittest
+from typing import Any, Dict
 
 import torch
 import torch._export as export
@@ -253,7 +254,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                 MinMaxObserver
             )
 
-            extra_args: Dict[str, Any] = {"eps": 2**-12}  # noqa: F821
+            extra_args: Dict[str, Any] = {"eps": 2**-12}
             weight_quantization_spec = QuantizationSpec(
                 dtype=torch.uint8,
                 quant_min=0,
