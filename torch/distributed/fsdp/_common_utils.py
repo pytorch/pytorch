@@ -20,6 +20,7 @@ from typing import (
     Set,
     Tuple,
     Type,
+    TYPE_CHECKING,
 )
 
 import torch
@@ -34,7 +35,6 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.utils import _apply_to_tensors
 from torch.utils._mode_utils import no_dispatch
-from ._flat_param import FlatParamHandle
 
 from .api import (
     FullOptimStateDictConfig,
@@ -44,6 +44,9 @@ from .api import (
     StateDictConfig,
     StateDictType,
 )
+
+if TYPE_CHECKING:
+    from ._flat_param import FlatParamHandle
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."

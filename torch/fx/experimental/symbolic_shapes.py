@@ -15,7 +15,21 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
-from typing import Any, cast, Callable, Dict, List, Optional, Sequence, Set, Tuple, Type, Union, Iterable
+from typing import (
+    Any, 
+    cast, 
+    Callable, 
+    Dict, 
+    Iterable, 
+    List, 
+    Optional, 
+    Sequence, 
+    Set, 
+    Tuple, 
+    Type, 
+    Union, 
+    TYPE_CHECKING
+)
 
 import torch
 import torch.fx
@@ -33,7 +47,6 @@ from torch.fx.experimental.sym_node import SymNode, SymTypes
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
-from torch._dynamo.source import TensorPropertySource
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import FloorDiv, Mod, IsNonOverlappingAndDenseIndicator
@@ -44,6 +57,9 @@ from torch.utils._traceback import format_frame, CapturedTraceback
 from torch._utils_internal import signpost_event
 
 from torch._logging import LazyString
+
+if TYPE_CHECKING:
+    from torch._dynamo.source import TensorPropertySource
 
 InputList = List
 DimList = List
@@ -868,7 +884,7 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     # cause it to fail with unknown symbols, as the symbols cached here will skip creation, and never
     # get recorded in var_to_val, etc.
     # TODO(voz): consider a weakref to the shape_env here
-    shape_env_to_source_to_symbol_cache : Dict[int, Dict[TensorPropertySource, "sympy.Expr"]] = None
+    shape_env_to_source_to_symbol_cache : Dict[int, Dict["TensorPropertySource", "sympy.Expr"]] = None
 
     def __post_init__(self):
         # The None default is annoying, but required because of dataclass limitations

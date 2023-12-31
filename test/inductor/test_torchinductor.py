@@ -118,6 +118,7 @@ libfoo = None
 
 f32 = torch.float32
 
+
 def run_fw_bw_and_get_code(fn):
     def run_with_backward():
         result = fn()
