@@ -13,6 +13,7 @@ from . import DimList
 
 _vmap_levels = []
 
+
 @dataclass
 class LevelInfo:
     level: int
@@ -31,7 +32,8 @@ class Dim:
         if self._vmap_level is not None:
             _vmap_active_levels[self._vmap_stack].alive = False  # noqa: F821
             while (
-                not _vmap_levels[-1].alive and current_level() == _vmap_levels[-1].level  # noqa: F821
+                not _vmap_levels[-1].alive
+                and current_level() == _vmap_levels[-1].level  # noqa: F821
             ):
                 _vmap_decrement_nesting()  # noqa: F821
                 _vmap_levels.pop()
@@ -44,6 +46,7 @@ class Dim:
     @size.setter
     def size(self, size: int):
         from . import DimensionBindError
+
         if self._size is None:
             self._size = size
             self._vmap_level = _vmap_increment_nesting(size, "same")  # noqa: F821

@@ -9,8 +9,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
-from .exported_program import ExportedProgram
 from ..fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+from .exported_program import ExportedProgram
 
 
 __all__ = ["Constraint", "Dim", "dims", "dynamic_dim"]

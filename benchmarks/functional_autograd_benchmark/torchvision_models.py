@@ -786,7 +786,9 @@ class SetCriterion(nn.Module):
         target_masks = target_masks[tgt_idx].flatten(1)
 
         losses = {
-            "loss_mask": sigmoid_focal_loss(src_masks, target_masks, num_boxes),  # noqa: F821
+            "loss_mask": sigmoid_focal_loss(
+                src_masks, target_masks, num_boxes
+            ),  # noqa: F821
             "loss_dice": dice_loss(src_masks, target_masks, num_boxes),  # noqa: F821
         }
         return losses
