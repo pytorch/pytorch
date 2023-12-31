@@ -118,7 +118,7 @@ select = [
 "__init__.py" = [
     "F401",
 ]
-"test/**" = [
+"test/typing/reveal/**" = [
     "F821",
 ]
 "test/jit/**" = [

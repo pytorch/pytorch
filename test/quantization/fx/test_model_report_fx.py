@@ -1875,9 +1875,9 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
             # these two together should be the same as the generated report info in terms of keys
             tensor_info_modules = {row[1] for row in tensor_table}
             channel_info_modules = {row[1] for row in channel_table}
-            combined_modules: Set = tensor_info_modules.union(channel_info_modules)
+            combined_modules: Set = tensor_info_modules.union(channel_info_modules)  # noqa: F821
 
-            generated_report_keys: Set = set(mod_rep_visualizer.generated_reports.keys())
+            generated_report_keys: Set = set(mod_rep_visualizer.generated_reports.keys())  # noqa: F821
             self.assertEqual(combined_modules, generated_report_keys)
 
     @skipIfNoFBGEMM
@@ -1902,7 +1902,7 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
 
             tensor_info_modules = {row[1] for row in tensor_table}
             channel_info_modules = {row[1] for row in channel_table}
-            combined_modules: Set = tensor_info_modules.union(channel_info_modules)
+            combined_modules: Set = tensor_info_modules.union(channel_info_modules)  # noqa: F821
             self.assertEqual(len(combined_modules), 0)  # should be no matching modules
 
     @skipIfNoFBGEMM

@@ -227,8 +227,8 @@ class TestRavelUnravelIndex(TestCase):
 @instantiate_parametrized_tests
 class TestGrid(TestCase):
     def test_basic(self):
-        a = mgrid[-1:1:10j]
-        b = mgrid[-1:1:0.1]
+        a = mgrid[-1:1:10j]  # noqa: F821
+        b = mgrid[-1:1:0.1]  # noqa: F821
         assert_(a.shape == (10,))
         assert_(b.shape == (20,))
         assert_(a[0] == -1)
@@ -242,11 +242,11 @@ class TestGrid(TestCase):
     def test_linspace_equivalence(self):
         y, st = np.linspace(2, 10, retstep=True)
         assert_almost_equal(st, 8 / 49.0)
-        assert_array_almost_equal(y, mgrid[2:10:50j], 13)
+        assert_array_almost_equal(y, mgrid[2:10:50j], 13)  # noqa: F821
 
     def test_nd(self):
-        c = mgrid[-1:1:10j, -2:2:10j]
-        d = mgrid[-1:1:0.1, -2:2:0.2]
+        c = mgrid[-1:1:10j, -2:2:10j]  # noqa: F821
+        d = mgrid[-1:1:0.1, -2:2:0.2]  # noqa: F821
         assert_(c.shape == (2, 10, 10))
         assert_(d.shape == (2, 20, 20))
         assert_array_equal(c[0][0, :], -np.ones(10, "d"))
@@ -257,8 +257,8 @@ class TestGrid(TestCase):
         assert_array_almost_equal(d[1, :, 1] - d[1, :, 0], 0.2 * np.ones(20, "d"), 11)
 
     def test_sparse(self):
-        grid_full = mgrid[-1:1:10j, -2:2:10j]
-        grid_sparse = ogrid[-1:1:10j, -2:2:10j]
+        grid_full = mgrid[-1:1:10j, -2:2:10j]  # noqa: F821
+        grid_sparse = ogrid[-1:1:10j, -2:2:10j]  # noqa: F821
 
         # sparse grids can be made dense by broadcasting
         grid_broadcast = np.broadcast_arrays(*grid_sparse)
@@ -277,43 +277,51 @@ class TestGrid(TestCase):
         # start and step values used by mgrid;
         # internally, this aims to cover previously
         # unexplored code paths in nd_grid()
-        grid = mgrid[start:stop:step, start:stop:step]
+        grid = mgrid[start:stop:step, start:stop:step]  # noqa: F821
         # need a smaller grid to explore one of the
         # untested code paths
-        grid_small = mgrid[start:stop:step]
+        grid_small = mgrid[start:stop:step]  # noqa: F821
         assert_equal(grid.size, expected[0])
         assert_equal(grid_small.size, expected[1])
 
     @xfail  # (reason="mgrid not implementd")
     def test_accepts_npfloating(self):
         # regression test for #16466
-        grid64 = mgrid[0.1:0.33:0.1,]
-        grid32 = mgrid[np.float32(0.1) : np.float32(0.33) : np.float32(0.1),]
+        grid64 = mgrid[0.1:0.33:0.1,]  # noqa: F821
+        grid32 = mgrid[
+            np.float32(0.1) : np.float32(0.33) : np.float32(0.1),
+        ]  # noqa: F821
         assert_(grid32.dtype == np.float64)
         assert_array_almost_equal(grid64, grid32)
 
         # different code path for single slice
-        grid64 = mgrid[0.1:0.33:0.1]
-        grid32 = mgrid[np.float32(0.1) : np.float32(0.33) : np.float32(0.1)]
+        grid64 = mgrid[0.1:0.33:0.1]  # noqa: F821
+        grid32 = mgrid[
+            np.float32(0.1) : np.float32(0.33) : np.float32(0.1)
+        ]  # noqa: F821
         assert_(grid32.dtype == np.float64)
         assert_array_almost_equal(grid64, grid32)
 
     @skip(reason="longdouble")
     def test_accepts_longdouble(self):
         # regression tests for #16945
-        grid64 = mgrid[0.1:0.33:0.1,]
-        grid128 = mgrid[np.longdouble(0.1) : np.longdouble(0.33) : np.longdouble(0.1),]
+        grid64 = mgrid[0.1:0.33:0.1,]  # noqa: F821
+        grid128 = mgrid[
+            np.longdouble(0.1) : np.longdouble(0.33) : np.longdouble(0.1),
+        ]  # noqa: F821
         assert_(grid128.dtype == np.longdouble)
         assert_array_almost_equal(grid64, grid128)
 
-        grid128c_a = mgrid[0 : np.longdouble(1) : 3.4j]
-        grid128c_b = mgrid[0 : np.longdouble(1) : 3.4j,]
+        grid128c_a = mgrid[0 : np.longdouble(1) : 3.4j]  # noqa: F821
+        grid128c_b = mgrid[0 : np.longdouble(1) : 3.4j,]  # noqa: F821
         assert_(grid128c_a.dtype == grid128c_b.dtype == np.longdouble)
         assert_array_equal(grid128c_a, grid128c_b[0])
 
         # different code path for single slice
-        grid64 = mgrid[0.1:0.33:0.1]
-        grid128 = mgrid[np.longdouble(0.1) : np.longdouble(0.33) : np.longdouble(0.1)]
+        grid64 = mgrid[0.1:0.33:0.1]  # noqa: F821
+        grid128 = mgrid[
+            np.longdouble(0.1) : np.longdouble(0.33) : np.longdouble(0.1)
+        ]  # noqa: F821
         assert_(grid128.dtype == np.longdouble)
         assert_array_almost_equal(grid64, grid128)
 
@@ -321,22 +329,22 @@ class TestGrid(TestCase):
     def test_accepts_npcomplexfloating(self):
         # Related to #16466
         assert_array_almost_equal(
-            mgrid[0.1:0.3:3j,], mgrid[0.1 : 0.3 : np.complex64(3j),]
+            mgrid[0.1:0.3:3j,], mgrid[0.1 : 0.3 : np.complex64(3j),]  # noqa: F821
         )
 
         # different code path for single slice
         assert_array_almost_equal(
-            mgrid[0.1:0.3:3j], mgrid[0.1 : 0.3 : np.complex64(3j)]
+            mgrid[0.1:0.3:3j], mgrid[0.1 : 0.3 : np.complex64(3j)]  # noqa: F821
         )
 
         # Related to #16945
-        grid64_a = mgrid[0.1:0.3:3.3j]
-        grid64_b = mgrid[0.1:0.3:3.3j,][0]
+        grid64_a = mgrid[0.1:0.3:3.3j]  # noqa: F821
+        grid64_b = mgrid[0.1:0.3:3.3j,][0]  # noqa: F821
         assert_(grid64_a.dtype == grid64_b.dtype == np.float64)
         assert_array_equal(grid64_a, grid64_b)
 
-        grid128_a = mgrid[0.1 : 0.3 : np.clongdouble(3.3j)]
-        grid128_b = mgrid[0.1 : 0.3 : np.clongdouble(3.3j),][0]
+        grid128_a = mgrid[0.1 : 0.3 : np.clongdouble(3.3j)]  # noqa: F821
+        grid128_b = mgrid[0.1 : 0.3 : np.clongdouble(3.3j),][0]  # noqa: F821
         assert_(grid128_a.dtype == grid128_b.dtype == np.longdouble)
         assert_array_equal(grid64_a, grid64_b)
 
@@ -344,44 +352,46 @@ class TestGrid(TestCase):
 @xfail  # (reason="r_ not implemented")
 class TestConcatenator(TestCase):
     def test_1d(self):
-        assert_array_equal(r_[1, 2, 3, 4, 5, 6], np.array([1, 2, 3, 4, 5, 6]))
+        assert_array_equal(
+            r_[1, 2, 3, 4, 5, 6], np.array([1, 2, 3, 4, 5, 6])
+        )  # noqa: F821
         b = np.ones(5)
-        c = r_[b, 0, 0, b]
+        c = r_[b, 0, 0, b]  # noqa: F821
         assert_array_equal(c, [1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1])
 
     def test_mixed_type(self):
-        g = r_[10.1, 1:10]
+        g = r_[10.1, 1:10]  # noqa: F821
         assert_(g.dtype == "f8")
 
     def test_more_mixed_type(self):
-        g = r_[-10.1, np.array([1]), np.array([2, 3, 4]), 10.0]
+        g = r_[-10.1, np.array([1]), np.array([2, 3, 4]), 10.0]  # noqa: F821
         assert_(g.dtype == "f8")
 
     def test_complex_step(self):
         # Regression test for #12262
-        g = r_[0:36:100j]
+        g = r_[0:36:100j]  # noqa: F821
         assert_(g.shape == (100,))
 
         # Related to #16466
-        g = r_[0 : 36 : np.complex64(100j)]
+        g = r_[0 : 36 : np.complex64(100j)]  # noqa: F821
         assert_(g.shape == (100,))
 
     def test_2d(self):
         b = np.random.rand(5, 5)
         c = np.random.rand(5, 5)
-        d = r_["1", b, c]  # append columns
+        d = r_["1", b, c]  # append columns  # noqa: F821
         assert_(d.shape == (5, 10))
         assert_array_equal(d[:, :5], b)
         assert_array_equal(d[:, 5:], c)
-        d = r_[b, c]
+        d = r_[b, c]  # noqa: F821
         assert_(d.shape == (10, 5))
         assert_array_equal(d[:5, :], b)
         assert_array_equal(d[5:, :], c)
 
     def test_0d(self):
-        assert_equal(r_[0, np.array(1), 2], [0, 1, 2])
-        assert_equal(r_[[0, 1, 2], np.array(3)], [0, 1, 2, 3])
-        assert_equal(r_[np.array(0), [1, 2, 3]], [0, 1, 2, 3])
+        assert_equal(r_[0, np.array(1), 2], [0, 1, 2])  # noqa: F821
+        assert_equal(r_[[0, 1, 2], np.array(3)], [0, 1, 2, 3])  # noqa: F821
+        assert_equal(r_[np.array(0), [1, 2, 3]], [0, 1, 2, 3])  # noqa: F821
 
 
 @xfail  # (reason="ndenumerate not implemented")
@@ -389,7 +399,8 @@ class TestNdenumerate(TestCase):
     def test_basic(self):
         a = np.array([[1, 2], [3, 4]])
         assert_equal(
-            list(ndenumerate(a)), [((0, 0), 1), ((0, 1), 2), ((1, 0), 3), ((1, 1), 4)]
+            list(ndenumerate(a)),
+            [((0, 0), 1), ((0, 1), 2), ((1, 0), 3), ((1, 1), 4)],  # noqa: F821
         )
 
 
@@ -411,21 +422,21 @@ class TestIndexExpression(TestCase):
 class TestIx_(TestCase):
     def test_regression_1(self):
         # Test empty untyped inputs create outputs of indexing type, gh-5804
-        (a,) = ix_(range(0))
+        (a,) = ix_(range(0))  # noqa: F821
         assert_equal(a.dtype, np.intp)
 
-        (a,) = ix_([])
+        (a,) = ix_([])  # noqa: F821
         assert_equal(a.dtype, np.intp)
 
         # but if the type is specified, don't change it
-        (a,) = ix_(np.array([], dtype=np.float32))
+        (a,) = ix_(np.array([], dtype=np.float32))  # noqa: F821
         assert_equal(a.dtype, np.float32)
 
     def test_shape_and_dtype(self):
         sizes = (4, 5, 3, 2)
         # Test both lists and arrays
         for func in (range, np.arange):
-            arrays = ix_(*[func(sz) for sz in sizes])
+            arrays = ix_(*[func(sz) for sz in sizes])  # noqa: F821
             for k, (a, sz) in enumerate(zip(arrays, sizes)):
                 assert_equal(a.shape[k], sz)
                 assert_(all(sh == 1 for j, sh in enumerate(a.shape) if j != k))
@@ -434,16 +445,16 @@ class TestIx_(TestCase):
     def test_bool(self):
         bool_a = [True, False, True, True]
         (int_a,) = np.nonzero(bool_a)
-        assert_equal(ix_(bool_a)[0], int_a)
+        assert_equal(ix_(bool_a)[0], int_a)  # noqa: F821
 
     def test_1d_only(self):
         idx2d = [[1, 2, 3], [4, 5, 6]]
-        assert_raises(ValueError, ix_, idx2d)
+        assert_raises(ValueError, ix_, idx2d)  # noqa: F821
 
     def test_repeated_input(self):
         length_of_vector = 5
         x = np.arange(length_of_vector)
-        out = ix_(x, x)
+        out = ix_(x, x)  # noqa: F821
         assert_equal(out[0].shape, (length_of_vector, 1))
         assert_equal(out[1].shape, (1, length_of_vector))
         # check that input shape is not modified
@@ -581,26 +592,26 @@ class TestDiagIndicesFrom(TestCase):
 class TestNdIndex(TestCase):
     @xfail  # (reason="ndindex not implemented")
     def test_ndindex(self):
-        x = list(ndindex(1, 2, 3))
-        expected = [ix for ix, e in ndenumerate(np.zeros((1, 2, 3)))]
+        x = list(ndindex(1, 2, 3))  # noqa: F821
+        expected = [ix for ix, e in ndenumerate(np.zeros((1, 2, 3)))]  # noqa: F821
         assert_array_equal(x, expected)
 
-        x = list(ndindex((1, 2, 3)))
+        x = list(ndindex((1, 2, 3)))  # noqa: F821
         assert_array_equal(x, expected)
 
         # Test use of scalars and tuples
-        x = list(ndindex((3,)))
-        assert_array_equal(x, list(ndindex(3)))
+        x = list(ndindex((3,)))  # noqa: F821
+        assert_array_equal(x, list(ndindex(3)))  # noqa: F821
 
         # Make sure size argument is optional
-        x = list(ndindex())
+        x = list(ndindex())  # noqa: F821
         assert_equal(x, [()])
 
-        x = list(ndindex(()))
+        x = list(ndindex(()))  # noqa: F821
         assert_equal(x, [()])
 
         # Make sure 0-sized ndindex works correctly
-        x = list(ndindex(*[0]))
+        x = list(ndindex(*[0]))  # noqa: F821
         assert_equal(x, [])
 
 

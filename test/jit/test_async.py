@@ -47,10 +47,10 @@ class TestAsync(JitTestCase):
 
         @torch.jit.script
         def bar(x):
-            futures = torch.jit.annotate(List[Future[List[Tensor]]], [])
+            futures = torch.jit.annotate(List[Future[List[Tensor]]], [])  # noqa: F821
             for _ in range(3):
                 future = torch.jit.annotate(
-                    Future[List[Tensor]],
+                    Future[List[Tensor]],  # noqa: F821
                     torch.jit.fork(foo, x)
                 )
                 futures.append(future)
@@ -426,7 +426,7 @@ class TestAsync(JitTestCase):
                 for i in range(3):
                     input_list.append(input)
 
-                fut_list: List[Future[torch.Tensor]] = []
+                fut_list: List[Future[torch.Tensor]] = []  # noqa: F821
                 for input_tensor in input_list:
                     fut_list.append(torch.jit._fork(add_one, input_tensor))
                 # return list[future[tensor]] here to ensure tracing

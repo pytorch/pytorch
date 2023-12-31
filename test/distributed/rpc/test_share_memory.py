@@ -4,13 +4,14 @@
 import torch
 import torch.distributed as dist
 
-if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
-
+import contextlib
 import copyreg
 import os
-import contextlib
+import sys
+
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)  # noqa: F821
+    sys.exit(0)  # noqa: F821
 
 from torch import multiprocessing
 import torch.multiprocessing.reductions as TorchMpReductions

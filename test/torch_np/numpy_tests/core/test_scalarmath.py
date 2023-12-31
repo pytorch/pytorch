@@ -632,10 +632,12 @@ class TestMultiply(TestCase):
             for numpy_type in deprecated_types:
                 i = np.dtype(numpy_type).type()
                 assert_equal(
-                    assert_warns(DeprecationWarning, operator.mul, seq, i), seq * int(i)
+                    assert_warns(DeprecationWarning, operator.mul, seq, i),
+                    seq * int(i),  # noqa: F821
                 )
                 assert_equal(
-                    assert_warns(DeprecationWarning, operator.mul, i, seq), int(i) * seq
+                    assert_warns(DeprecationWarning, operator.mul, i, seq),
+                    int(i) * seq,  # noqa: F821
                 )
 
             for numpy_type in forbidden_types:
@@ -656,10 +658,14 @@ class TestMultiply(TestCase):
 
         # Test for simple ArrayLike above and memoryviews (original report)
         for arr_like in (ArrayLike(np.ones(3)), memoryview(np.ones(3))):
-            assert_array_equal(arr_like * np.float32(3.0), np.full(3, 3.0))
-            assert_array_equal(np.float32(3.0) * arr_like, np.full(3, 3.0))
-            assert_array_equal(arr_like * np.int_(3), np.full(3, 3))
-            assert_array_equal(np.int_(3) * arr_like, np.full(3, 3))
+            assert_array_equal(
+                arr_like * np.float32(3.0), np.full(3, 3.0)
+            )  # noqa: F821
+            assert_array_equal(
+                np.float32(3.0) * arr_like, np.full(3, 3.0)
+            )  # noqa: F821
+            assert_array_equal(arr_like * np.int_(3), np.full(3, 3))  # noqa: F821
+            assert_array_equal(np.int_(3) * arr_like, np.full(3, 3))  # noqa: F821
 
 
 class TestNegative(TestCase):

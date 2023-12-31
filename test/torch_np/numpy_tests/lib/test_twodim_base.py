@@ -395,11 +395,11 @@ class TestTri(TestCase):
     @xfail  # (reason="TODO: implement mask_indices")
     def test_mask_indices(self):
         # simple test without offset
-        iu = mask_indices(3, np.triu)
+        iu = mask_indices(3, np.triu)  # noqa: F821
         a = np.arange(9).reshape(3, 3)
         assert_array_equal(a[iu], array([0, 1, 2, 4, 5, 8]))
         # Now with an offset
-        iu1 = mask_indices(3, np.triu, 1)
+        iu1 = mask_indices(3, np.triu, 1)  # noqa: F821
         assert_array_equal(a[iu1], array([1, 2, 5]))
 
     @xfail  # (reason="np.tril_indices == our tuple(tril_indices)")

@@ -298,7 +298,7 @@ class TestApplyAlongAxis(TestCase):
 class TestApplyOverAxes(TestCase):
     def test_simple(self):
         a = np.arange(24).reshape(2, 3, 4)
-        aoa_a = apply_over_axes(np.sum, a, [0, 2])
+        aoa_a = apply_over_axes(np.sum, a, [0, 2])  # noqa: F821
         assert_array_equal(aoa_a, np.array([[[60], [92], [124]]]))
 
 

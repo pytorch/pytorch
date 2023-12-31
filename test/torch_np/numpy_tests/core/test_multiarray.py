@@ -103,7 +103,7 @@ def temppath(*args, **kwargs):
     can be opened again.
 
     """
-    fd, path = mkstemp(*args, **kwargs)
+    fd, path = mkstemp(*args, **kwargs)  # noqa: F821
     os.close(fd)
     try:
         yield path
@@ -2559,7 +2559,7 @@ class TestMethods(TestCase):
     def test_arr_mult_2(self, func):
         # syrk - different shape, stride, and view validations
         for et in [np.float32, np.float64, np.complex64, np.complex128]:
-            edf = d.astype(et)
+            edf = d.astype(et)  # noqa: F821
             assert_equal(
                 func(edf[::-1, :], edf.T), func(edf[::-1, :].copy(), edf.T.copy())
             )
@@ -6376,7 +6376,7 @@ class TestConversion(TestCase):
         assert_raises(NotImplementedError, bool, np.array(NotConvertible()))
         assert_raises(NotImplementedError, bool, np.array([NotConvertible()]))
         if IS_PYSTON:
-            raise SkipTest("Pyston disables recursion checking")
+            raise SkipTest("Pyston disables recursion checking")  # noqa: F821
 
         self_containing = np.array([None])
         self_containing[0] = self_containing

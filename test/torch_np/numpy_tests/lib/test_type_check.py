@@ -72,50 +72,50 @@ class TestCommonType(TestCase):
 class TestMintypecode(TestCase):
     def test_default_1(self):
         for itype in "1bcsuwil":
-            assert_equal(mintypecode(itype), "d")
-        assert_equal(mintypecode("f"), "f")
-        assert_equal(mintypecode("d"), "d")
-        assert_equal(mintypecode("F"), "F")
-        assert_equal(mintypecode("D"), "D")
+            assert_equal(mintypecode(itype), "d")  # noqa: F821
+        assert_equal(mintypecode("f"), "f")  # noqa: F821
+        assert_equal(mintypecode("d"), "d")  # noqa: F821
+        assert_equal(mintypecode("F"), "F")  # noqa: F821
+        assert_equal(mintypecode("D"), "D")  # noqa: F821
 
     def test_default_2(self):
         for itype in "1bcsuwil":
-            assert_equal(mintypecode(itype + "f"), "f")
-            assert_equal(mintypecode(itype + "d"), "d")
-            assert_equal(mintypecode(itype + "F"), "F")
-            assert_equal(mintypecode(itype + "D"), "D")
-        assert_equal(mintypecode("ff"), "f")
-        assert_equal(mintypecode("fd"), "d")
-        assert_equal(mintypecode("fF"), "F")
-        assert_equal(mintypecode("fD"), "D")
-        assert_equal(mintypecode("df"), "d")
-        assert_equal(mintypecode("dd"), "d")
+            assert_equal(mintypecode(itype + "f"), "f")  # noqa: F821
+            assert_equal(mintypecode(itype + "d"), "d")  # noqa: F821
+            assert_equal(mintypecode(itype + "F"), "F")  # noqa: F821
+            assert_equal(mintypecode(itype + "D"), "D")  # noqa: F821
+        assert_equal(mintypecode("ff"), "f")  # noqa: F821
+        assert_equal(mintypecode("fd"), "d")  # noqa: F821
+        assert_equal(mintypecode("fF"), "F")  # noqa: F821
+        assert_equal(mintypecode("fD"), "D")  # noqa: F821
+        assert_equal(mintypecode("df"), "d")  # noqa: F821
+        assert_equal(mintypecode("dd"), "d")  # noqa: F821
         # assert_equal(mintypecode('dF',savespace=1),'F')
-        assert_equal(mintypecode("dF"), "D")
-        assert_equal(mintypecode("dD"), "D")
-        assert_equal(mintypecode("Ff"), "F")
+        assert_equal(mintypecode("dF"), "D")  # noqa: F821
+        assert_equal(mintypecode("dD"), "D")  # noqa: F821
+        assert_equal(mintypecode("Ff"), "F")  # noqa: F821
         # assert_equal(mintypecode('Fd',savespace=1),'F')
-        assert_equal(mintypecode("Fd"), "D")
-        assert_equal(mintypecode("FF"), "F")
-        assert_equal(mintypecode("FD"), "D")
-        assert_equal(mintypecode("Df"), "D")
-        assert_equal(mintypecode("Dd"), "D")
-        assert_equal(mintypecode("DF"), "D")
-        assert_equal(mintypecode("DD"), "D")
+        assert_equal(mintypecode("Fd"), "D")  # noqa: F821
+        assert_equal(mintypecode("FF"), "F")  # noqa: F821
+        assert_equal(mintypecode("FD"), "D")  # noqa: F821
+        assert_equal(mintypecode("Df"), "D")  # noqa: F821
+        assert_equal(mintypecode("Dd"), "D")  # noqa: F821
+        assert_equal(mintypecode("DF"), "D")  # noqa: F821
+        assert_equal(mintypecode("DD"), "D")  # noqa: F821
 
     def test_default_3(self):
-        assert_equal(mintypecode("fdF"), "D")
+        assert_equal(mintypecode("fdF"), "D")  # noqa: F821
         # assert_equal(mintypecode('fdF',savespace=1),'F')
-        assert_equal(mintypecode("fdD"), "D")
-        assert_equal(mintypecode("fFD"), "D")
-        assert_equal(mintypecode("dFD"), "D")
+        assert_equal(mintypecode("fdD"), "D")  # noqa: F821
+        assert_equal(mintypecode("fFD"), "D")  # noqa: F821
+        assert_equal(mintypecode("dFD"), "D")  # noqa: F821
 
-        assert_equal(mintypecode("ifd"), "d")
-        assert_equal(mintypecode("ifF"), "F")
-        assert_equal(mintypecode("ifD"), "D")
-        assert_equal(mintypecode("idF"), "D")
+        assert_equal(mintypecode("ifd"), "d")  # noqa: F821
+        assert_equal(mintypecode("ifF"), "F")  # noqa: F821
+        assert_equal(mintypecode("ifD"), "D")  # noqa: F821
+        assert_equal(mintypecode("idF"), "D")  # noqa: F821
         # assert_equal(mintypecode('idF',savespace=1),'F')
-        assert_equal(mintypecode("idD"), "D")
+        assert_equal(mintypecode("idD"), "D")  # noqa: F821
 
 
 @xpassIfTorchDynamo  # (reason="TODO: decide on if [1] is a scalar or not")
@@ -451,13 +451,15 @@ class TestRealIfClose(TestCase):
 @xfail  # (reason="not implemented")
 class TestArrayConversion(TestCase):
     def test_asfarray(self):
-        a = asfarray(np.array([1, 2, 3]))
+        a = asfarray(np.array([1, 2, 3]))  # noqa: F821
         assert_equal(a.__class__, np.ndarray)
         assert_(np.issubdtype(a.dtype, np.floating))
 
         # previously this would infer dtypes from arrays, unlike every single
         # other numpy function
-        assert_raises(TypeError, asfarray, np.array([1, 2, 3]), dtype=np.array(1.0))
+        assert_raises(
+            TypeError, asfarray, np.array([1, 2, 3]), dtype=np.array(1.0)
+        )  # noqa: F821
 
 
 if __name__ == "__main__":

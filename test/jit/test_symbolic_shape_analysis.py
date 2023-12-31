@@ -585,7 +585,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
 
         @torch.jit.script
         def wrong_output_types(x: List[int], y: List[int]):
-            x: List[Tensor] = []
+            x: List[Tensor] = []  # noqa: F821
             return x
 
         with self.assertRaisesRegex(RuntimeError, "but got graph_type"):

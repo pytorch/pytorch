@@ -249,11 +249,11 @@ class TestDuplicateDQPass(QuantizationTestCase):
                     eps=2**-12
                 ),
             )
-            weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
+            weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (  # noqa: F821
                 MinMaxObserver
             )
 
-            extra_args: Dict[str, Any] = {"eps": 2**-12}
+            extra_args: Dict[str, Any] = {"eps": 2**-12}  # noqa: F821
             weight_quantization_spec = QuantizationSpec(
                 dtype=torch.uint8,
                 quant_min=0,
@@ -266,7 +266,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
                 ),
             )
 
-            bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
+            bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (  # noqa: F821
                 PlaceholderObserver
             )
             bias_quantization_spec = QuantizationSpec(

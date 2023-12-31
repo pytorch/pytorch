@@ -219,7 +219,7 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
-        output_node : Optional[Node] = None
+        output_node : Optional[Node] = None  # noqa: F821
         for node in self.graph.nodes:
             if node.op == 'placeholder':
                 result = next(args_iter)
@@ -263,7 +263,7 @@ class Quantizer:
 
         def copy_recursive(node):
             def load_or_emit(n):
-                if n.name in env or e.name in quant_env:
+                if n.name in env or e.name in quant_env:  # noqa: F821
                     return load_arg(n, quantized=False)
                 else:
                     return copy_recursive(n)

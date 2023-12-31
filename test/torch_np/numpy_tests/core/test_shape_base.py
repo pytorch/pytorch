@@ -587,19 +587,19 @@ class TestBlock(TestCase):
         # Ultimately, this should be removed if a single algorithm is found
         # to be faster for both small and large arrays.
         def _block_force_concatenate(arrays):
-            arrays, list_ndim, result_ndim, _ = _block_setup(arrays)
-            return _block_concatenate(arrays, list_ndim, result_ndim)
+            arrays, list_ndim, result_ndim, _ = _block_setup(arrays)  # noqa: F821
+            return _block_concatenate(arrays, list_ndim, result_ndim)  # noqa: F821
 
         def _block_force_slicing(arrays):
-            arrays, list_ndim, result_ndim, _ = _block_setup(arrays)
-            return _block_slicing(arrays, list_ndim, result_ndim)
+            arrays, list_ndim, result_ndim, _ = _block_setup(arrays)  # noqa: F821
+            return _block_slicing(arrays, list_ndim, result_ndim)  # noqa: F821
 
         if request.param == "force_concatenate":
             return _block_force_concatenate
         elif request.param == "force_slicing":
             return _block_force_slicing
         elif request.param == "block":
-            return block
+            return block  # noqa: F821
         else:
             raise ValueError("Unknown blocking request. There is a typo in the tests.")
 
@@ -610,19 +610,19 @@ class TestBlock(TestCase):
         assert b[0, 0] != a[0, 0]
 
     def test_block_total_size_estimate(self, block):
-        _, _, _, total_size = _block_setup([1])
+        _, _, _, total_size = _block_setup([1])  # noqa: F821
         assert total_size == 1
 
-        _, _, _, total_size = _block_setup([[1]])
+        _, _, _, total_size = _block_setup([[1]])  # noqa: F821
         assert total_size == 1
 
-        _, _, _, total_size = _block_setup([[1, 1]])
+        _, _, _, total_size = _block_setup([[1, 1]])  # noqa: F821
         assert total_size == 2
 
-        _, _, _, total_size = _block_setup([[1], [1]])
+        _, _, _, total_size = _block_setup([[1], [1]])  # noqa: F821
         assert total_size == 2
 
-        _, _, _, total_size = _block_setup([[1, 2], [3, 4]])
+        _, _, _, total_size = _block_setup([[1, 2], [3, 4]])  # noqa: F821
         assert total_size == 4
 
     def test_block_simple_row_wise(self, block):
@@ -803,22 +803,22 @@ class TestBlock(TestCase):
 
     def test_invalid_nesting(self, block):
         msg = "depths are mismatched"
-        assert_raises_regex(ValueError, msg, block, [1, [2]])
-        assert_raises_regex(ValueError, msg, block, [1, []])
-        assert_raises_regex(ValueError, msg, block, [[1], 2])
-        assert_raises_regex(ValueError, msg, block, [[], 2])
-        assert_raises_regex(
+        assert_raises_regex(ValueError, msg, block, [1, [2]])  # noqa: F821
+        assert_raises_regex(ValueError, msg, block, [1, []])  # noqa: F821
+        assert_raises_regex(ValueError, msg, block, [[1], 2])  # noqa: F821
+        assert_raises_regex(ValueError, msg, block, [[], 2])  # noqa: F821
+        assert_raises_regex(  # noqa: F821
             ValueError, msg, block, [[[1], [2]], [[3, 4]], [5]]  # missing brackets
         )
 
     def test_empty_lists(self, block):
-        assert_raises_regex(ValueError, "empty", block, [])
-        assert_raises_regex(ValueError, "empty", block, [[]])
-        assert_raises_regex(ValueError, "empty", block, [[1], []])
+        assert_raises_regex(ValueError, "empty", block, [])  # noqa: F821
+        assert_raises_regex(ValueError, "empty", block, [[]])  # noqa: F821
+        assert_raises_regex(ValueError, "empty", block, [[1], []])  # noqa: F821
 
     def test_tuple(self, block):
-        assert_raises_regex(TypeError, "tuple", block, ([1, 2], [3, 4]))
-        assert_raises_regex(TypeError, "tuple", block, [(1, 2), (3, 4)])
+        assert_raises_regex(TypeError, "tuple", block, ([1, 2], [3, 4]))  # noqa: F821
+        assert_raises_regex(TypeError, "tuple", block, [(1, 2), (3, 4)])  # noqa: F821
 
     def test_different_ndims(self, block):
         a = 1.0
