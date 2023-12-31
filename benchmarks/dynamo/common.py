@@ -54,6 +54,7 @@ import torch.distributed
 import torch.fx._pytree as fx_pytree
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
     dummy_fx_compile,

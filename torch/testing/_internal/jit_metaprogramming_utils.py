@@ -44,7 +44,7 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
             if not non_contiguous or tensor.numel() < 2:
                 return tensor.clone()
 
-            return noncontiguous_like(tensor)
+            return noncontiguous_like(tensor)  # noqa: F821
 
         def conjugate(tensor):
             return tensor.conj()

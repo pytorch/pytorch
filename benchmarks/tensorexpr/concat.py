@@ -28,7 +28,7 @@ class Concat2D2InputBench(benchmark.Benchmark):
 
     def reference(self):
         return np.concatenate(
-            (self.numpy(self.input1), self.numpy(self.input2)), axis=concat_dim
+            (self.numpy(self.input1), self.numpy(self.input2)), axis=concat_dim  # noqa: F821
         )
 
     def config(self):
@@ -97,7 +97,7 @@ class ConcatGraphOptBench(benchmark.Benchmark):
 
     def reference(self):
         return np.concatenate(
-            (self.numpy(self.input1), self.numpy(self.input2)), axis=concat_dim
+            (self.numpy(self.input1), self.numpy(self.input2)), axis=concat_dim  # noqa: F821
         )
 
     def config(self):
