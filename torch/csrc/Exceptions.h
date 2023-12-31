@@ -384,9 +384,11 @@ auto wrap_pybind_function_impl_(
     HANDLE_TH_ERRORS
     if (release_gil) {
       py::gil_scoped_release no_gil;
-      return c10::guts::invoke(std::move(f), std::forward<Arg<Func, Is>>(args)...);
+      return c10::guts::invoke(
+          std::move(f), std::forward<Arg<Func, Is>>(args)...);
     } else {
-      return c10::guts::invoke(std::move(f), std::forward<Arg<Func, Is>>(args)...);
+      return c10::guts::invoke(
+          std::move(f), std::forward<Arg<Func, Is>>(args)...);
     }
     END_HANDLE_TH_ERRORS_PYBIND
   };
