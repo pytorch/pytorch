@@ -32,7 +32,8 @@ TD_HEURISTIC_HISTORICAL_EDITED_FILES = "td_heuristic_historical_edited_files.jso
 TD_HEURISTIC_PREVIOUSLY_FAILED = "previous_failures.json"
 TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL = "previous_failures_additional.json"
 
-FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
+#increse the cache time to 6 months
+FILE_CACHE_LIFESPAN_SECONDS = 6 * 30 * 24 * 3600
 
 
 def fetch_and_cache(
