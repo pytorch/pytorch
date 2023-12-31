@@ -17,8 +17,9 @@ import warnings
 import weakref
 from contextlib import contextmanager
 from decimal import Decimal
+from tempfile import mkstemp
 
-from unittest import expectedFailure as xfail, skipIf as skipif
+from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import numpy
 import pytest
@@ -103,7 +104,7 @@ def temppath(*args, **kwargs):
     can be opened again.
 
     """
-    fd, path = mkstemp(*args, **kwargs)  # noqa: F821
+    fd, path = mkstemp(*args, **kwargs)
     os.close(fd)
     try:
         yield path
@@ -2559,7 +2560,7 @@ class TestMethods(TestCase):
     def test_arr_mult_2(self, func):
         # syrk - different shape, stride, and view validations
         for et in [np.float32, np.float64, np.complex64, np.complex128]:
-            edf = d.astype(et)  # noqa: F821
+            edf = d.astype(et)
             assert_equal(
                 func(edf[::-1, :], edf.T), func(edf[::-1, :].copy(), edf.T.copy())
             )
@@ -6376,7 +6377,7 @@ class TestConversion(TestCase):
         assert_raises(NotImplementedError, bool, np.array(NotConvertible()))
         assert_raises(NotImplementedError, bool, np.array([NotConvertible()]))
         if IS_PYSTON:
-            raise SkipTest("Pyston disables recursion checking")  # noqa: F821
+            raise SkipTest("Pyston disables recursion checking")
 
         self_containing = np.array([None])
         self_containing[0] = self_containing

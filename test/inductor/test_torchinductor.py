@@ -116,6 +116,8 @@ vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libfoo = None
 
+f32 = torch.float32
+
 
 def run_fw_bw_and_get_code(fn):
     def run_with_backward():
