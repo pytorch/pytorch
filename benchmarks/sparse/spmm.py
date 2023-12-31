@@ -2,7 +2,7 @@ import argparse
 import sys
 
 import torch
-from utils import Event, gen_sparse_coo, gen_sparse_csr
+from utils import Event, gen_sparse_coo, gen_sparse_coo_and_csr, gen_sparse_csr
 
 
 def test_sparse_csr(m, n, k, nnz, test_count):
@@ -43,7 +43,7 @@ def test_sparse_coo_and_csr(m, n, k, nnz, test_count):
     start = Event(enable_timing=True)
     stop = Event(enable_timing=True)
 
-    coo, csr = gen_sparse_coo_and_csr((m, k), nnz)  # noqa: F821
+    coo, csr = gen_sparse_coo_and_csr((m, k), nnz)
     mat = torch.randn((k, n), dtype=torch.double)
 
     times = []

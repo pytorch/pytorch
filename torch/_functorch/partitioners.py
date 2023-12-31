@@ -325,7 +325,7 @@ def _size_of(node: fx.Node) -> int:
     # Only needed since we don't always trace with fake tensors.
     if 'tensor_meta' in node.meta:
         metadata = node.meta['tensor_meta']
-        # Where did to_size_hint go and what function was it suppose to be?
+        #TODO: What is to_size_hint suppose to be?
         numel = _prod(map(to_size_hint, metadata.shape))  # noqa: F821
         dtype = metadata.dtype
     else:

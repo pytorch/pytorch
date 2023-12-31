@@ -119,7 +119,7 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     """
 
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
-    constraint_range: "StrictMinMaxConstraint"  # type: ignore[name-defined]  # noqa: F821
+    constraint_range: StrictMinMaxConstraint
     # Represent that `constraint_range` is shared with another _ConstraintTarget, which
     # typically arises because of a specified equality with another dynamic dimension.
     shared: Optional[_ConstraintTarget] = None

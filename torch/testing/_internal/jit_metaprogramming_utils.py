@@ -7,7 +7,7 @@ import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.testing._internal.common_utils import is_iterable_of_tensors
+from torch.testing._internal.common_utils import is_iterable_of_tensors, noncontiguous_like
 
 import collections
 from copy import deepcopy
@@ -44,7 +44,7 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
             if not non_contiguous or tensor.numel() < 2:
                 return tensor.clone()
 
-            return noncontiguous_like(tensor)  # noqa: F821
+            return noncontiguous_like(tensor)
 
         def conjugate(tensor):
             return tensor.conj()
