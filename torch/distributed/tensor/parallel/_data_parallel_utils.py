@@ -1,8 +1,15 @@
 from typing import Optional, Tuple
 
 import torch
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor.placement_types import DTensorSpec
+
+
+def sync_grad_hook(grad):
+    if isinstance(grad, AsyncCollectiveTensor):
+        grad.wait()
+    return grad
 
 
 def _flatten_tensor(
@@ -22,4 +29,6 @@ def _unflatten_tensor(tensor: torch.Tensor, spec: DTensorSpec) -> torch.Tensor:
         spec.placements,
         run_check=False,
     )
+    if tensor.requires_grad:
+        tensor.register_hook(sync_grad_hook)
     return result
