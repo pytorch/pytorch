@@ -338,5 +338,4 @@ static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
   [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
 }
 
-
 } // namespace at::native::mps

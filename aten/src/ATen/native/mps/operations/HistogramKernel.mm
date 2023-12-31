@@ -247,10 +247,6 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   TORCH_INTERNAL_ASSERT(thread_histograms.is_contiguous());
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
-  id<MTLBuffer> outputBuffer = getMTLBufferStorage(thread_histograms);
-  id<MTLBuffer> weightBuffer =
-      has_weight ? getMTLBufferStorage(weight.value()) : [[device newBufferWithLength:0 options:0] autorelease];
-  size_t weightOffset = has_weight ? weight.value().storage_offset() * weight.value().element_size() : 0;
   MPSStream* mpsStream = getCurrentMPSStream();
   const uint32_t nDim = input.sizes().size();
 
@@ -292,10 +288,10 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
       [computeEncoder setComputePipelineState:histogramPSO];
       mtl_setBuffer(computeEncoder, input, 0);
-      [computeEncoder setBuffer:weightBuffer offset:weightOffset atIndex:1];
-      [computeEncoder setBuffer:outputBuffer
-                         offset:thread_histograms.storage_offset() * thread_histograms.element_size()
-                        atIndex:2];
+      if (has_weight) {
+        mtl_setBuffer(computeEncoder, weight.value(), 1);
+      }
+      mtl_setBuffer(computeEncoder, thread_histograms, 2);
       [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:3];
       [computeEncoder setBytes:&D length:sizeof(int64_t) atIndex:4];
       [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset atIndex:5];
