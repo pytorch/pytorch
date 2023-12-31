@@ -2,7 +2,7 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Dict, List, Optional, Union, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
