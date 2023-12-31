@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
 from .exported_program import ExportedProgram
+from ..fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
 
 __all__ = ["Constraint", "Dim", "dims", "dynamic_dim"]
@@ -118,7 +119,7 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     """
 
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
-    constraint_range: "StrictMinMaxConstraint"  # type: ignore[name-defined]
+    constraint_range: "StrictMinMaxConstraint"  # type: ignore[name-defined]  # noqa: F821
     # Represent that `constraint_range` is shared with another _ConstraintTarget, which
     # typically arises because of a specified equality with another dynamic dimension.
     shared: Optional[_ConstraintTarget] = None

@@ -10,6 +10,7 @@ from typing import Any, Callable, Mapping, Optional, Sequence, Union
 import torch._dynamo
 import torch.fx
 import torch.onnx
+from torch.export.exported_program import ExportedProgram
 from torch.onnx._internal import _beartype, exporter, io_adapter
 from torch.onnx._internal.diagnostics import infra
 
@@ -31,7 +32,7 @@ class TorchExport(exporter.FXGraphExtractor):
     def generate_fx(
         self,
         options: exporter.ResolvedExportOptions,
-        model: "ExportedProgram",  # type: ignore[name-defined]
+        model: "ExportedProgram",
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:

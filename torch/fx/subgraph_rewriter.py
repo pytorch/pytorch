@@ -3,6 +3,7 @@ from .graph import Graph
 from .node import Node
 from ._symbolic_trace import symbolic_trace
 from ._compatibility import compatibility
+from .passes.utils.matcher_with_name_node_map_utils import InternalMatch
 
 import copy
 from dataclasses import dataclass
@@ -202,7 +203,7 @@ def replace_pattern_with_filters(
     gm: GraphModule,
     pattern: Union[Callable, Graph, GraphModule],
     replacement: Union[Callable, Graph, GraphModule],
-    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,  # type: ignore[name-defined]
+    match_filters: Optional[List[Callable[[InternalMatch, Graph, Graph], bool]]] = None,  # type: ignore[name-defined]  # noqa: F821
     ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
     """
@@ -222,7 +223,7 @@ def _replace_pattern(
     gm: GraphModule,
     pattern: Union[Callable, Graph, GraphModule],
     replacement: Union[Callable, Graph, GraphModule],
-    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,  # type: ignore[name-defined]
+    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,  # type: ignore[name-defined]  # noqa: F821
     ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
 

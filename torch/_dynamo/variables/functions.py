@@ -2,9 +2,10 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Dict, List
+from typing import Dict, List, Optional, Union
 
 import torch
+from torch._guards import Source
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n

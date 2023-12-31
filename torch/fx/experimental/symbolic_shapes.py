@@ -33,6 +33,7 @@ from torch.fx.experimental.sym_node import SymNode, SymTypes
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
+from torch._dynamo.source import TensorPropertySource
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import FloorDiv, Mod, IsNonOverlappingAndDenseIndicator
@@ -867,7 +868,7 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     # cause it to fail with unknown symbols, as the symbols cached here will skip creation, and never
     # get recorded in var_to_val, etc.
     # TODO(voz): consider a weakref to the shape_env here
-    shape_env_to_source_to_symbol_cache : Dict[int, Dict["TensorPropertySource", "sympy.Expr"]] = None
+    shape_env_to_source_to_symbol_cache : Dict[int, Dict[TensorPropertySource, "sympy.Expr"]] = None
 
     def __post_init__(self):
         # The None default is annoying, but required because of dataclass limitations
@@ -2066,7 +2067,7 @@ class ShapeEnv:
                            source: Source,
                            symbolic_context: SymbolicContext
                            ) -> List[sympy.Expr]:
-        return self._produce_dyn_sizes_from_int_tuple(tuple(ex.size()), source, symbolic_context)
+        return self._produce_dyn_sizes_from_int_tuple(tuple(ex.size()), source, symbolic_context)  # noqa: F821
 
     def _produce_dyn_sizes_from_int_tuple(self,
                                           tensor_size: Tuple[int],

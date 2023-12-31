@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Tuple
 
 import torch
 from torch.fx import Graph, GraphModule, Node
+from torch.fx.passes.utils.matcher_with_name_node_map_utils import InternalMatch
 from torch.fx.subgraph_rewriter import (
     replace_pattern_with_filters,
     ReplacedPatterns,
@@ -259,7 +260,7 @@ def _get_folded_quantized_qat_conv_bn_pattern(
     return _folded_quantized_qat_conv_bn_pattern
 
 def _has_conv_bias_filter(
-    match: "InternalMatch",  # type: ignore[name-defined]
+    match: InternalMatch,
     original_graph: Graph,
     pattern_graph: Graph,
 ) -> bool:
@@ -273,7 +274,7 @@ def _has_conv_bias_filter(
     raise ValueError("Could not find conv node in matched conv + bn pattern")
 
 def _no_conv_bias_filter(
-    match: "InternalMatch",  # type: ignore[name-defined]
+    match: InternalMatch,
     original_graph: Graph,
     pattern_graph: Graph,
 ) -> bool:

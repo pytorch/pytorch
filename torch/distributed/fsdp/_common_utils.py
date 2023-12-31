@@ -43,6 +43,7 @@ from .api import (
     StateDictConfig,
     StateDictType,
 )
+from ._flat_param import FlatParamHandle
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."

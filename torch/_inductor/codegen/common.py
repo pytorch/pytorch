@@ -28,6 +28,7 @@ import torch.fx
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import config, metrics
+from ..ir import TensorBox
 from ..utils import (
     DeferredLineBase,
     do_bench,
@@ -1288,7 +1289,7 @@ class ChoiceCaller:
     def hash_key(self) -> str:
         raise NotImplementedError()
 
-    def output_node(self) -> "TensorBox":  # type: ignore[name-defined]
+    def output_node(self) -> TensorBox:
         raise NotImplementedError()
 
 
