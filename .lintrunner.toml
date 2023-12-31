@@ -242,6 +242,8 @@ code = 'CLANGTIDY'
 include_patterns = [
     'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
+    'c10/core/**/*.h',
+    'c10/util/**/*.h',
     'torch/csrc/**/*.cpp',
 ]
 exclude_patterns = [
@@ -252,6 +254,16 @@ exclude_patterns = [
     '**/*pb.h',
     '**/*CUDA*',
     '**/cuda/*pp',
+    'c10/util/complex_math.h',
+    'c10/util/complex_utils.h',
+    'c10/util/flat_hash_map.h',
+    'c10/util/Float8*.h',
+    'c10/util/logging*.h',
+    'c10/util/hash.h',
+    'c10/util/strong_type.h',
+    'c10/util/SmallVector.h',
+    'c10/util/win32-headers.h',
+    'c10/util/*inl.h',
     'aten/src/ATen/core/TensorImpl_test.cpp',
     'third_party/**/*',
     'torch/csrc/api/**',
@@ -2113,7 +2125,6 @@ exclude_patterns = [
     'torch/futures/__init__.py',
     'torch/fx/__init__.py',
     'torch/fx/_compatibility.py',
-    'torch/fx/_pytree.py',
     'torch/fx/_symbolic_trace.py',
     'torch/fx/annotate.py',
     'torch/fx/config.py',
@@ -2158,7 +2169,6 @@ exclude_patterns = [
     'torch/fx/experimental/validator.py',
     'torch/fx/graph.py',
     'torch/fx/graph_module.py',
-    'torch/fx/immutable_collections.py',
     'torch/fx/interpreter.py',
     'torch/fx/node.py',
     'torch/fx/operator_schemas.py',
@@ -2543,7 +2553,6 @@ exclude_patterns = [
     'torch/utils/data/datapipes/utils/common.py',
     'torch/utils/data/datapipes/utils/decoder.py',
     'torch/utils/data/datapipes/utils/snapshot.py',
-    'torch/utils/data/dataset.py',
     'torch/utils/data/distributed.py',
     'torch/utils/data/graph.py',
     'torch/utils/data/graph_settings.py',
@@ -2671,7 +2680,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.7',
+    'ruff==0.1.9',
 ]
 is_formatter = true
 

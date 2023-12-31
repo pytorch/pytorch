@@ -13,6 +13,7 @@
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -94,6 +95,10 @@ enum ErrorHandlingMode {
 
 #define SHOULD_TEAR_DOWN(a) (a != NoHandling && a != CleanUpOnly)
 
+#define PRINT_COLLECTIVE_HASH_SIGNATURE(phase, opType, numel, hashValue)      \
+  LOG(WARNING) << logPrefix() << "Hash of " << phase << " to NCCL " << opType \
+               << " with size " << numel << " is " << hashValue;
+
 // If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
 // caching allocator safety for tensors used on both user-facing and
 // internal comm streams.
@@ -160,7 +165,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt,
         bool desyncDebug = false,
-        bool enableTiming = false);
+        bool enableTiming = false,
+        DebugLevel distDebugLevel = DebugLevel::Off);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -312,6 +318,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // unique id used to tell the trace buffer that this
     // work has completed
     c10::optional<uint64_t> trace_id_;
+    DebugLevel distDebugLevel_;
     friend class ProcessGroupNCCL;
   };
 
@@ -552,6 +559,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
           ncclCommsMap,
       c10::optional<std::string> abortReason);
 
+  c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
+
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
   void abort(c10::optional<std::string> abortReason = c10::nullopt);
@@ -709,6 +718,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Generates a prefix that is unique to this process group and rank, for
   // disambiguating logs
   const std::string& logPrefix() const;
+
+  // Returns the global rank of the device. This function assumes that users
+  // always create a default global process group(PG) which includes all
+  // devices. It is called in the constructor of ProcessGroupNCCL, so it always
+  // return the rank_ of the the very first PG created, aka, default global PG.
+  const int& globalRank() const;
 
  protected:
   // Function that runs as part of a separate thread aside from watchdog
@@ -927,6 +942,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // is set to true.
   std::atomic<bool> enableTiming_;
 
+  // Flag to enable the print of hash value of input/output of collectives for
+  // verification.
+  std::atomic<bool> enableCollecticeHashDebug_;
+
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
 
@@ -950,6 +969,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unique_ptr<DebugInfoWriter> debugInfoWriter_ = nullptr;
 
   size_t uid_;
+
+  c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
 };
 
 TORCH_API std::string dump_nccl_trace();

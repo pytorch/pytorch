@@ -259,6 +259,7 @@ test_dynamo_shard() {
     --exclude-jit-executor \
     --exclude-distributed-tests \
     --exclude \
+      test_ao_sparsity \
       test_autograd \
       test_jit \
       test_proxy_tensor \
@@ -1122,6 +1123,10 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
+  install_torchvision
+  test_python
+  test_aten
+elif [[ "${BUILD_ENVIRONMENT}" == *xpu* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
   test_python
   test_aten

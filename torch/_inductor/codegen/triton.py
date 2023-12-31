@@ -10,6 +10,7 @@ import math
 import operator
 import os
 import textwrap
+from functools import lru_cache
 from typing import (
     Any,
     Callable,
@@ -31,6 +32,7 @@ import torch._logging
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._triton import has_triton_package
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
@@ -91,6 +93,30 @@ class TritonPrinter(PythonPrinter):
         q = self.doprint(expr.args[2])
         return f"tl.where({c}, {p}, {q})"
 
+    @staticmethod
+    @lru_cache(None)
+    def _propagate_nan_arg():
+        """
+        Newer triton version added propagate_nan as required argument for
+        tl.math.{min, max}. This method make inductor work with both old
+        and new version of triton.
+        """
+
+        if not has_triton_package():
+            # some tests run under environment without triton installed want to
+            # check that the generated code is as expected.
+            return ""
+        import inspect
+
+        import triton.language as tl
+
+        if "propagate_nan" in inspect.signature(tl.math.min).parameters:
+            # tl.PropagateNan.NONE is the default
+            propagate_nan_arg = ", tl.PropagateNan.NONE"
+        else:
+            propagate_nan_arg = ""
+        return propagate_nan_arg
+
     def _print_Min(self, expr):
         nargs = len(expr.args)
         if len(expr.args) == 1:
@@ -99,7 +125,7 @@ class TritonPrinter(PythonPrinter):
         mid = len(expr.args) // 2
         a = self._print(sympy.Min(*expr.args[:mid]))
         b = self._print(sympy.Min(*expr.args[mid:]))
-        return f"tl.math.min({a}, {b})"
+        return f"tl.math.min({a}, {b}{TritonPrinter._propagate_nan_arg()})"
 
     def _print_Max(self, expr):
         nargs = len(expr.args)
@@ -109,7 +135,8 @@ class TritonPrinter(PythonPrinter):
         mid = len(expr.args) // 2
         a = self._print(sympy.Max(*expr.args[:mid]))
         b = self._print(sympy.Max(*expr.args[mid:]))
-        return f"tl.math.max({a}, {b})"
+
+        return f"tl.math.max({a}, {b}{TritonPrinter._propagate_nan_arg()})"
 
     def _print_Abs(self, expr):
         assert len(expr.args) == 1
@@ -1166,7 +1193,7 @@ class TritonKernel(Kernel):
         new_ranges, return_getters_groups = self._split_iteration_ranges(
             groups, lengths
         )
-        itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
+        itervars = list(itertools.chain.from_iterable(self.set_ranges(*new_ranges)))
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
     def is_indirect_indexing(self, index: sympy.Expr):
@@ -1648,15 +1675,11 @@ class TritonKernel(Kernel):
 
         if self.persistent_reduction:
             default = ir.Reduction.default_value(reduction_type, src_dtype)
+            default = self._map_tuple_or_scalar(triton_constant, default)
 
             def _mask_value(value, default):
-                # TODO: int1 seems to be broken on triton-rocm
-                mask_dtype = torch.int8 if src_dtype == torch.bool else src_dtype
-                other = self.cse.generate(
-                    self.compute, TritonKernelOverrides.constant(default, mask_dtype)
-                )
                 return self.cse.generate(
-                    self.compute, TritonKernelOverrides.where(cond, value, other)
+                    self.compute, f"tl.where({cond}, {value}, {default})"
                 )
 
             if isinstance(value, tuple):
@@ -2009,10 +2032,10 @@ class TritonKernel(Kernel):
         extra_args_str = None
         index = V.graph.scheduler.current_device.index
         with result.indent():
-            result.writeline(f"with torch.cuda._DeviceGuard({index}):")
+            result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
             with result.indent():
                 result.writeline(
-                    f"torch.cuda.set_device({index})"
+                    V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
                 for tree in self.range_trees:
                     expr = pexpr(V.graph.sizevars.size_hint(tree.numel))
@@ -2022,7 +2045,7 @@ class TritonKernel(Kernel):
                         grid.append(expr)
 
                 stream_name = f"stream{index}"
-                result.writeline(f"{stream_name} = get_cuda_stream({index})")
+                result.writeline(f"{stream_name} = get_raw_stream({index})")
 
                 if self.need_numel_args():
                     extra_args_str = ", ".join(map(str, extra_args)) + ", "
@@ -2036,10 +2059,10 @@ class TritonKernel(Kernel):
         # benchmark all configs
         result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
         with result.indent():
-            result.writeline(f"with torch.cuda._DeviceGuard({index}):")
+            result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
             with result.indent():
                 result.writeline(
-                    f"torch.cuda.set_device({index})"
+                    V.graph.device_ops.set_device(index)
                 )  # no-op to ensure context
                 result.writeline(
                     f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"  # noqa: B950 line too long
@@ -2070,11 +2093,27 @@ class TritonKernel(Kernel):
         return textwrap.dedent(
             """
             from torch._dynamo.testing import rand_strided
-            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+            {}
             import torch
             from torch._inductor.triton_heuristics import grid
-        """
+        """.format(
+                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+            )
         )
+
+    @staticmethod
+    @lru_cache(None)
+    def gen_attr_descriptor_import():
+        """
+        import AttrsDescriptor if the triton version is new enough to have this
+        class defined.
+        """
+        import triton.compiler.compiler
+
+        if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
+            return "from triton.compiler.compiler import AttrsDescriptor"
+        else:
+            return ""
 
     def codegen_kernel(self, name=None):
         from triton import next_power_of_2
@@ -2121,6 +2160,9 @@ class TritonKernel(Kernel):
                     from torch._inductor import triton_helpers
                 """
             )
+            if self.gen_attr_descriptor_import():
+                code.splice(self.gen_attr_descriptor_import())
+
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
 
@@ -2931,7 +2973,7 @@ class TritonScheduling(BaseScheduling):
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
-        V.graph.wrapper_code.writeline("torch.cuda.synchronize()")
+        V.graph.wrapper_code.writeline(V.graph.device_ops.synchronize())
 
     def codegen_foreach(self, foreach_node):
         from .triton_foreach import ForeachKernel
@@ -2991,11 +3033,11 @@ class TritonScheduling(BaseScheduling):
         dep_sources = [rw.reads, rw.writes]
         assert all(
             isinstance(dep, (MemoryDep, StarDep))
-            for dep in itertools.chain(*dep_sources)
+            for dep in itertools.chain.from_iterable(dep_sources)
         )
         deps = [
             dep
-            for dep in itertools.chain(*dep_sources)
+            for dep in itertools.chain.from_iterable(dep_sources)
             if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep)
         ]
         write_names = {dep.name for dep in rw.writes}

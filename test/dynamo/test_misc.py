@@ -3978,6 +3978,22 @@ def fn():
         self.assertIsNone(mod_ref(), None)
         self.assertIsNone(mod_weight_ref(), None)
 
+    def test_release_scope_memory(self):
+        def inner(y):
+            y
+
+        inner = torch._dynamo.optimize("eager")(inner)
+
+        p_ref = None
+
+        x = torch.randn((10, 10))
+        inner(x)
+
+        p_ref = weakref.ref(x)
+        self.assertTrue(p_ref() is not None)
+        del x
+        self.assertTrue(p_ref() is None)
+
     def test_update_locals_and_stack_uses_shared_cache(self):
         def fn(x):
             perm = [0, 3, 5]
@@ -5889,7 +5905,7 @@ def fn():
         import builtins
 
         # Cache the original builtin function ids
-        torch._dynamo.allowed_functions._builtin_function_ids()
+        torch._dynamo.trace_rules._builtin_function_ids()
 
         class MyClass:
             pass
@@ -7573,6 +7589,22 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 9)
 
+    def test_dynamic_one_hot(self):
+        def fn(x):
+            x = x + 1
+            # graph break from data-dependent output shape
+            x = torch.nn.functional.one_hot(x)
+            x = x + 1
+            return x
+
+        inp = torch.arange(20) % 4
+        counter = CompileCounter()
+        real_out = fn(inp)
+        comp_out = torch.compile(fn, backend=counter)(inp)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(counter.op_count, 2)
+
     def test_tracing_nested_py_tree_mixed_all(self):
         import torch.utils._pytree as pytree
 
@@ -7635,7 +7667,7 @@ def ___make_guard_fn():
 
         # use checkpoint to trigger a "sourceless" tensor subclass
         def checkpoint_fn(xs):
-            return checkpoint(fn, xs)
+            return checkpoint(fn, xs, use_reentrant=True)
 
         xs = TwoTensor(torch.ones(2, 2), torch.ones(2, 2))
 
