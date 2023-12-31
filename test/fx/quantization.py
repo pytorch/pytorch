@@ -2,13 +2,14 @@ r'''
 **This file is EXPERIMENTAL and is mostly used for testing purposes! Do not
 rely on it for anything!**
 '''
-from torch.fx import Graph, GraphModule
+from torch.fx import Graph, GraphModule, Node
 from torch.fx.graph import map_arg
 from torch.fx.proxy import Proxy
 import sys
 import torch
 from torch.nn.utils import fuse_conv_bn_weights
 import operator
+from typing import Optional
 
 # can be a
 #  module type, a builtin function, or a string to match target
@@ -219,7 +220,7 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
-        output_node : Optional[Node] = None  # noqa: F821
+        output_node : Optional[Node] = None
         for node in self.graph.nodes:
             if node.op == 'placeholder':
                 result = next(args_iter)
