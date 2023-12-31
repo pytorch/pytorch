@@ -14,6 +14,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, _inline_everything
 from typing import List
 from torch import Tensor
+from torch.jit import Future
 
 class TestAsync(JitTestCase):
     def test_async_python(self):
@@ -47,10 +48,10 @@ class TestAsync(JitTestCase):
 
         @torch.jit.script
         def bar(x):
-            futures = torch.jit.annotate(List[Future[List[Tensor]]], [])  # noqa: F821
+            futures = torch.jit.annotate(List[Future[List[Tensor]]], [])
             for _ in range(3):
                 future = torch.jit.annotate(
-                    Future[List[Tensor]],  # noqa: F821
+                    Future[List[Tensor]],
                     torch.jit.fork(foo, x)
                 )
                 futures.append(future)
