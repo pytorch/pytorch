@@ -8,6 +8,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <functional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 
@@ -193,7 +194,8 @@ struct NestedNode {
   // NestedNode(NestedNode&) = delete;
   // NestedNode(const NestedNode&) = delete;
   // NestedNode& operator=(NestedNode) = delete;
-  explicit NestedNode(T payload) : _is_leaf(true), _payload(std::move(payload)) {}
+  explicit NestedNode(T payload)
+      : _is_leaf(true), _payload(std::move(payload)) {}
   inline bool is_leaf() const {
     return _is_leaf;
   }
@@ -274,7 +276,7 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
             TORCH_CHECK(a.degree() > 0, "Internal assert.");
             return a.children(i);
           });
-      c10::guts::apply(
+      std::apply(
           [&result, &fn](Args... filtered) {
             result.emplace_back(function_one(std::forward<F>(fn), filtered...));
           },
@@ -366,7 +368,8 @@ inline Tensor wrap_tensor_node(
                   // for a certain tensor
                   if (tensor_node.children(i).numel() > 0) {
                     memcpy(
-                        nt_buffer.mutable_data_ptr<scalar_t>() + start_offsets[i],
+                        nt_buffer.mutable_data_ptr<scalar_t>() +
+                            start_offsets[i],
                         tensor_node.children(i).data_ptr<scalar_t>(),
                         tensor_node.children(i).numel() * sizeof(scalar_t));
                   }
