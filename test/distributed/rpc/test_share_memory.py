@@ -10,8 +10,8 @@ import os
 import sys
 
 if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)  # noqa: F821
-    sys.exit(0)  # noqa: F821
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
 
 from torch import multiprocessing
 import torch.multiprocessing.reductions as TorchMpReductions
