@@ -1896,7 +1896,8 @@ def load_test_times_from_file(file: str) -> Dict[str, Any]:
 
     with open(path) as f:
         test_times_file = cast(Dict[str, Any], json.load(f))
-    build_environment = os.environ.get("BUILD_ENVIRONMENT")
+    # build_environment hard coded to value from upstream when branch is created
+    build_environment = "linux-focal-rocm6.0-py3.8"
     test_config = os.environ.get("TEST_CONFIG")
     if test_config in test_times_file.get(build_environment, {}):
         print_to_stderr("Found test times from artifacts")
