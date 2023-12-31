@@ -18,7 +18,7 @@ from torch.distributed._shard.sharding_spec.chunk_sharding_spec import ChunkShar
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
 from torch.distributed.device_mesh import _mesh_resources
 
-from torch.distributed.fsdp._common_utils import _set_fsdp_flattened, _FSDPState
+from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 from torch.distributed.remote_device import _remote_device
@@ -331,6 +331,7 @@ class DTensorExtensions(FSDPExtensions):
     ) -> Tuple[torch.Tensor, Optional[Any]]:
         return _flatten_tensor(tensor)
 
+    @torch._dynamo.disable
     def post_unflatten_transform(
         self, tensor: torch.Tensor, param_extension: Any
     ) -> torch.Tensor:
@@ -341,13 +342,23 @@ class DTensorExtensions(FSDPExtensions):
             # TODO: this is a short term fix and we should make the get_unflat_views
             # directly happen in the compute stream.
             with self.device_handle.stream(self.compute_stream):
-                result = _unflatten_tensor(tensor, param_extension)
+                result = _unflatten_tensor(
+                    tensor,
+                    param_extension,
+                    device_handle=self.device_handle,
+                    compute_stream=self.compute_stream
+                )
                 _set_fsdp_flattened(result)
                 return result
         else:
             # this would only happen in the FSDP initialization, where we
             # don't have the compute stream yet.
-            result = _unflatten_tensor(tensor, param_extension)
+            result = _unflatten_tensor(
+                tensor,
+                param_extension,
+                device_handle=self.device_handle,
+                compute_stream=self.compute_stream
+            )
             _set_fsdp_flattened(result)
             return result
 
