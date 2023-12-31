@@ -121,6 +121,9 @@ select = [
 "test/typing/reveal/**" = [
     "F821",
 ]
+"test/torch_np/numpy_tests/**" = [
+    "F821",
+]
 "test/jit/**" = [
     "PLR0133", # tests require this for JIT
     "PYI",

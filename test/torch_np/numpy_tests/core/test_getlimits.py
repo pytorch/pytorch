@@ -166,25 +166,25 @@ class TestMisc(TestCase):
     def test_known_types(self):
         # Test we are correctly compiling parameters for known types
         for ftype, ma_like in (
-            (np.float16, _float_ma[16]),  # noqa: F821
-            (np.float32, _float_ma[32]),  # noqa: F821
-            (np.float64, _float_ma[64]),  # noqa: F821
+            (np.float16, _float_ma[16]),
+            (np.float32, _float_ma[32]),
+            (np.float64, _float_ma[64]),
         ):
-            assert_ma_equal(_discovered_machar(ftype), ma_like)  # noqa: F821
+            assert_ma_equal(_discovered_machar(ftype), ma_like)
         # Suppress warning for broken discovery of double double on PPC
-        ld_ma = _discovered_machar(np.longdouble)  # noqa: F821
+        ld_ma = _discovered_machar(np.longdouble)
         bytes = np.dtype(np.longdouble).itemsize
         if (ld_ma.it, ld_ma.maxexp) == (63, 16384) and bytes in (12, 16):
             # 80-bit extended precision
-            assert_ma_equal(ld_ma, _float_ma[80])  # noqa: F821
+            assert_ma_equal(ld_ma, _float_ma[80])
         elif (ld_ma.it, ld_ma.maxexp) == (112, 16384) and bytes == 16:
             # IEE 754 128-bit
-            assert_ma_equal(ld_ma, _float_ma[128])  # noqa: F821
+            assert_ma_equal(ld_ma, _float_ma[128])
 
     @skip(reason="MachAr no implemented (does it need to be)?")
     def test_subnormal_warning(self):
         """Test that the subnormal is zero warning is not being raised."""
-        ld_ma = _discovered_machar(np.longdouble)  # noqa: F821
+        ld_ma = _discovered_machar(np.longdouble)
         bytes = np.dtype(np.longdouble).itemsize
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")

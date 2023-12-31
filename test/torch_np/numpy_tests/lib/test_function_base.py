@@ -481,7 +481,7 @@ class TestSelect(TestCase):
         choices = self.choices
         conditions = self.conditions
         assert_array_equal(
-            select(conditions, choices, default=15),  # noqa: F821
+            select(conditions, choices, default=15),
             self._select(conditions, choices, default=15),
         )
 
@@ -491,41 +491,39 @@ class TestSelect(TestCase):
     def test_broadcasting(self):
         conditions = [np.array(True), np.array([False, True, False])]
         choices = [1, np.arange(12).reshape(4, 3)]
-        assert_array_equal(select(conditions, choices), np.ones((4, 3)))  # noqa: F821
+        assert_array_equal(select(conditions, choices), np.ones((4, 3)))
         # default can broadcast too:
-        assert_equal(select([True], [0], default=[0]).shape, (1,))  # noqa: F821
+        assert_equal(select([True], [0], default=[0]).shape, (1,))
 
     def test_return_dtype(self):
-        assert_equal(
-            select(self.conditions, self.choices, 1j).dtype, np.complex_
-        )  # noqa: F821
+        assert_equal(select(self.conditions, self.choices, 1j).dtype, np.complex_)
         # But the conditions need to be stronger then the scalar default
         # if it is scalar.
         choices = [choice.astype(np.int8) for choice in self.choices]
-        assert_equal(select(self.conditions, choices).dtype, np.int8)  # noqa: F821
+        assert_equal(select(self.conditions, choices).dtype, np.int8)
 
         d = np.array([1, 2, 3, np.nan, 5, 7])
         m = np.isnan(d)
-        assert_equal(select([m], [d]), [0, 0, 0, np.nan, 0, 0])  # noqa: F821
+        assert_equal(select([m], [d]), [0, 0, 0, np.nan, 0, 0])
 
     def test_deprecated_empty(self):
-        assert_raises(ValueError, select, [], [], 3j)  # noqa: F821
-        assert_raises(ValueError, select, [], [])  # noqa: F821
+        assert_raises(ValueError, select, [], [], 3j)
+        assert_raises(ValueError, select, [], [])
 
     def test_non_bool_deprecation(self):
         choices = self.choices
         conditions = self.conditions[:]
         conditions[0] = conditions[0].astype(np.int_)
-        assert_raises(TypeError, select, conditions, choices)  # noqa: F821
+        assert_raises(TypeError, select, conditions, choices)
         conditions[0] = conditions[0].astype(np.uint8)
-        assert_raises(TypeError, select, conditions, choices)  # noqa: F821
-        assert_raises(TypeError, select, conditions, choices)  # noqa: F821
+        assert_raises(TypeError, select, conditions, choices)
+        assert_raises(TypeError, select, conditions, choices)
 
     def test_many_arguments(self):
         # This used to be limited by NPY_MAXARGS == 32
         conditions = [np.array([False])] * 100
         choices = [np.array([1])] * 100
-        select(conditions, choices)  # noqa: F821
+        select(conditions, choices)
 
 
 @xpassIfTorchDynamo  # (reason="TODO: implement")
@@ -2391,32 +2389,32 @@ class TestMeshgrid(TestCase):
 class TestPiecewise(TestCase):
     def test_simple(self):
         # Condition is single bool list
-        x = piecewise([0, 0], [True, False], [1])  # noqa: F821
+        x = piecewise([0, 0], [True, False], [1])
         assert_array_equal(x, [1, 0])
 
         # List of conditions: single bool list
-        x = piecewise([0, 0], [[True, False]], [1])  # noqa: F821
+        x = piecewise([0, 0], [[True, False]], [1])
         assert_array_equal(x, [1, 0])
 
         # Conditions is single bool array
-        x = piecewise([0, 0], np.array([True, False]), [1])  # noqa: F821
+        x = piecewise([0, 0], np.array([True, False]), [1])
         assert_array_equal(x, [1, 0])
 
         # Condition is single int array
-        x = piecewise([0, 0], np.array([1, 0]), [1])  # noqa: F821
+        x = piecewise([0, 0], np.array([1, 0]), [1])
         assert_array_equal(x, [1, 0])
 
         # List of conditions: int array
-        x = piecewise([0, 0], [np.array([1, 0])], [1])  # noqa: F821
+        x = piecewise([0, 0], [np.array([1, 0])], [1])
         assert_array_equal(x, [1, 0])
 
-        x = piecewise([0, 0], [[False, True]], [lambda x: -1])  # noqa: F821
+        x = piecewise([0, 0], [[False, True]], [lambda x: -1])
         assert_array_equal(x, [0, -1])
 
         assert_raises_regex(
             ValueError,
             "1 or 2 functions are expected",
-            piecewise,  # noqa: F821
+            piecewise,
             [0, 0],
             [[False, True]],
             [],
@@ -2424,58 +2422,58 @@ class TestPiecewise(TestCase):
         assert_raises_regex(
             ValueError,
             "1 or 2 functions are expected",
-            piecewise,  # noqa: F821
+            piecewise,
             [0, 0],
             [[False, True]],
             [1, 2, 3],
         )
 
     def test_two_conditions(self):
-        x = piecewise([1, 2], [[True, False], [False, True]], [3, 4])  # noqa: F821
+        x = piecewise([1, 2], [[True, False], [False, True]], [3, 4])
         assert_array_equal(x, [3, 4])
 
     def test_scalar_domains_three_conditions(self):
-        x = piecewise(3, [True, False, False], [4, 2, 0])  # noqa: F821
+        x = piecewise(3, [True, False, False], [4, 2, 0])
         assert_equal(x, 4)
 
     def test_default(self):
         # No value specified for x[1], should be 0
-        x = piecewise([1, 2], [True, False], [2])  # noqa: F821
+        x = piecewise([1, 2], [True, False], [2])
         assert_array_equal(x, [2, 0])
 
         # Should set x[1] to 3
-        x = piecewise([1, 2], [True, False], [2, 3])  # noqa: F821
+        x = piecewise([1, 2], [True, False], [2, 3])
         assert_array_equal(x, [2, 3])
 
     def test_0d(self):
         x = np.array(3)
-        y = piecewise(x, x > 3, [4, 0])  # noqa: F821
+        y = piecewise(x, x > 3, [4, 0])
         assert_(y.ndim == 0)
         assert_(y == 0)
 
         x = 5
-        y = piecewise(x, [True, False], [1, 0])  # noqa: F821
+        y = piecewise(x, [True, False], [1, 0])
         assert_(y.ndim == 0)
         assert_(y == 1)
 
         # With 3 ranges (It was failing, before)
-        y = piecewise(x, [False, False, True], [1, 2, 3])  # noqa: F821
+        y = piecewise(x, [False, False, True], [1, 2, 3])
         assert_array_equal(y, 3)
 
     def test_0d_comparison(self):
         x = 3
-        y = piecewise(x, [x <= 3, x > 3], [4, 0])  # Should succeed.  # noqa: F821
+        y = piecewise(x, [x <= 3, x > 3], [4, 0])  # Should succeed.
         assert_equal(y, 4)
 
         # With 3 ranges (It was failing, before)
         x = 4
-        y = piecewise(x, [x <= 3, (x > 3) * (x <= 5), x > 5], [1, 2, 3])  # noqa: F821
+        y = piecewise(x, [x <= 3, (x > 3) * (x <= 5), x > 5], [1, 2, 3])
         assert_array_equal(y, 2)
 
         assert_raises_regex(
             ValueError,
             "2 or 3 functions are expected",
-            piecewise,  # noqa: F821
+            piecewise,
             x,
             [x <= 3, x > 3],
             [1],
@@ -2483,7 +2481,7 @@ class TestPiecewise(TestCase):
         assert_raises_regex(
             ValueError,
             "2 or 3 functions are expected",
-            piecewise,  # noqa: F821
+            piecewise,
             x,
             [x <= 3, x > 3],
             [1, 1, 1, 1],
@@ -2492,12 +2490,12 @@ class TestPiecewise(TestCase):
     def test_0d_0d_condition(self):
         x = np.array(3)
         c = np.array(x > 3)
-        y = piecewise(x, [c], [1, 2])  # noqa: F821
+        y = piecewise(x, [c], [1, 2])
         assert_equal(y, 2)
 
     def test_multidimensional_extrafunc(self):
         x = np.array([[-2.5, -1.5, -0.5], [0.5, 1.5, 2.5]])
-        y = piecewise(x, [x < 0, x >= 2], [-1, 1, 3])  # noqa: F821
+        y = piecewise(x, [x < 0, x >= 2], [-1, 1, 3])
         assert_array_equal(y, np.array([[-1.0, -1.0, -1.0], [3.0, 3.0, 1.0]]))
 
 
@@ -3040,12 +3038,12 @@ class TestPercentile(TestCase):
         assert_equal(out, 5)
         out = np.empty(4, dtype=x.dtype)
         c = np.percentile(x, 50, method="lower", axis=0, out=out)
-        assert_equal(c, r0)  # noqa: F821
-        assert_equal(out, r0)  # noqa: F821
+        assert_equal(c, r0)
+        assert_equal(out, r0)
         out = np.empty(3, dtype=x.dtype)
         c = np.percentile(x, 50, method="lower", axis=1, out=out)
-        assert_equal(c, r1)  # noqa: F821
-        assert_equal(out, r1)  # noqa: F821
+        assert_equal(c, r1)
+        assert_equal(out, r1)
 
     @skip(reason="NP_VER: fails on CI; no method=")
     def test_exception(self):
@@ -3232,32 +3230,25 @@ class TestPercentile(TestCase):
     @xfail  # (reason="pytorch percentile does not support tuple axes.")
     def test_keepdims_2(self):
         assert_equal(
-            np.percentile(d, 7, axis=(0, 1), keepdims=True).shape,
-            (1, 1, 7, 11),  # noqa: F821
+            np.percentile(d, 7, axis=(0, 1), keepdims=True).shape, (1, 1, 7, 11)
         )
         assert_equal(
-            np.percentile(d, 7, axis=(0, 3), keepdims=True).shape,
-            (1, 5, 7, 1),  # noqa: F821
+            np.percentile(d, 7, axis=(0, 3), keepdims=True).shape, (1, 5, 7, 1)
+        )
+        assert_equal(np.percentile(d, 7, axis=(1,), keepdims=True).shape, (3, 1, 7, 11))
+        assert_equal(
+            np.percentile(d, 7, (0, 1, 2, 3), keepdims=True).shape, (1, 1, 1, 1)
         )
         assert_equal(
-            np.percentile(d, 7, axis=(1,), keepdims=True).shape, (3, 1, 7, 11)
-        )  # noqa: F821
-        assert_equal(
-            np.percentile(d, 7, (0, 1, 2, 3), keepdims=True).shape,
-            (1, 1, 1, 1),  # noqa: F821
-        )
-        assert_equal(
-            np.percentile(d, 7, axis=(0, 1, 3), keepdims=True).shape,
-            (1, 1, 7, 1),  # noqa: F821
+            np.percentile(d, 7, axis=(0, 1, 3), keepdims=True).shape, (1, 1, 7, 1)
         )
 
         assert_equal(
-            np.percentile(d, [1, 7], axis=(0, 1, 3), keepdims=True).shape,  # noqa: F821
+            np.percentile(d, [1, 7], axis=(0, 1, 3), keepdims=True).shape,
             (2, 1, 1, 7, 1),
         )
         assert_equal(
-            np.percentile(d, [1, 7], axis=(0, 3), keepdims=True).shape,
-            (2, 1, 5, 7, 1),  # noqa: F821
+            np.percentile(d, [1, 7], axis=(0, 3), keepdims=True).shape, (2, 1, 5, 7, 1)
         )
 
     @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
