@@ -30,15 +30,15 @@ ${tensor}_offset += ${tensor}_dimIndex${d} ${times_stride};
 )");
 
 static std::string valueName(const Value* n) {
-  return "n" + c10::to_string(n->unique());
+  return "n" + std::to_string(n->unique());
 }
 
 static std::string scalarValue(const int64_t v) {
-  return c10::to_string(v);
+  return std::to_string(v);
 }
 
 static std::string scalarValue(const bool v) {
-  return c10::to_string(v);
+  return std::to_string(v);
 }
 
 // Note: The NAN, NEG_INFINITY and POS_INFINITY strings map to device-specific
@@ -274,10 +274,10 @@ static std::string encodeRHS(const Node* n) {
       // PyTorch converts (scalar) argument types to result before applying the
       // operator e.g. 1.4-torch.tensor(3) = -2
       env.s(
-          c10::to_string(i),
+          std::to_string(i),
           typeCastedValueName(*in->type(), *outtype, valueName(in)));
       // Uncasted operands only used for comparison operators
-      env.s(c10::to_string(i) + "_nocast", valueName(in));
+      env.s(std::to_string(i) + "_nocast", valueName(in));
       i++;
     }
 
@@ -391,7 +391,7 @@ std::string generateKernel(
             1); // + 1 because the first argument is the linearIndex
     std::string tensor =
         "t" +
-        c10::to_string(
+        std::to_string(
             formals.size()); // can't be unique() because Param may be an output
     const auto nDim = desc.nDim();
     emitCheckFor(tensorChecks, tensor, nDim, desc);
@@ -413,7 +413,7 @@ std::string generateKernel(
             1); // + 1 because the first argument is the linearIndex
     std::string scalar =
         "s" +
-        c10::to_string(
+        std::to_string(
             formals.size()); // can't be unique() because Param may be an output
     env.d(
         "formal_index",
