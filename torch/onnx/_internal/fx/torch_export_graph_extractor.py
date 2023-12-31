@@ -34,7 +34,7 @@ class TorchExport(exporter.FXGraphExtractor):
     def generate_fx(
         self,
         options: exporter.ResolvedExportOptions,
-        model: "ExportedProgram",
+        model: "ExportedProgram", # type: ignore[override]
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:
