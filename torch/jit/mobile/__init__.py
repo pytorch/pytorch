@@ -35,7 +35,7 @@ def _load_for_lite_interpreter(f, map_location=None):
         # Load all tensors to the original device
         torch.jit.mobile._load_for_lite_interpreter(buffer)
     """
-    if isinstance(f, str):
+    if isinstance(f, (str, os.PathLike)):
         if not os.path.exists(f):
             raise ValueError(f"The provided filename {f} does not exist")
         if os.path.isdir(f):
@@ -96,7 +96,7 @@ def _get_model_bytecode_version(f_input) -> int:
         version = _get_model_bytecode_version("path/to/model.ptl")
 
     """
-    if isinstance(f_input, str):
+    if isinstance(f_input, (str, os.PathLike)):
         if not os.path.exists(f_input):
             raise ValueError(f"The provided filename {f_input} does not exist")
         if os.path.isdir(f_input):
@@ -128,7 +128,7 @@ def _get_mobile_model_contained_types(f_input) -> int:
         type_list = _get_mobile_model_contained_types("path/to/model.ptl")
 
     """
-    if isinstance(f_input, str):
+    if isinstance(f_input, (str, os.PathLike)):
         if not os.path.exists(f_input):
             raise ValueError(f"The provided filename {f_input} does not exist")
         if os.path.isdir(f_input):
@@ -151,7 +151,7 @@ def _backport_for_mobile(f_input, f_output, to_version):
     Returns:
         success: A boolean. If backport success, return true, otherwise false
     """
-    if isinstance(f_input, str):
+    if isinstance(f_input, (str, os.PathLike)):
         if not os.path.exists(f_input):
             raise ValueError(f"The provided filename {f_input} does not exist")
         if os.path.isdir(f_input):
@@ -177,7 +177,7 @@ def _backport_for_mobile_to_buffer(f_input, to_version):
             or a string containing a file name
 
     """
-    if isinstance(f_input, str):
+    if isinstance(f_input, (str, os.PathLike)):
         if not os.path.exists(f_input):
             raise ValueError(f"The provided filename {f_input} does not exist")
         if os.path.isdir(f_input):
@@ -220,7 +220,7 @@ def _get_model_ops_and_info(f_input):
         ops_and_info = _get_model_ops_and_info("path/to/model.ptl")
 
     """
-    if isinstance(f_input, str):
+    if isinstance(f_input, (str, os.PathLike)):
         if not os.path.exists(f_input):
             raise ValueError(f"The provided filename {f_input} does not exist")
         if os.path.isdir(f_input):
