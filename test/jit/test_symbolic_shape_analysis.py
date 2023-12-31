@@ -5,7 +5,7 @@ import unittest
 from textwrap import dedent
 
 import torch
-from torch import nn
+from torch import nn, Tensor
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import sample_inputs_cat_concat
 from torch.testing._internal.common_utils import make_tensor
@@ -585,7 +585,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
 
         @torch.jit.script
         def wrong_output_types(x: List[int], y: List[int]):
-            x: List[Tensor] = []  # noqa: F821
+            x: List[Tensor] = []
             return x
 
         with self.assertRaisesRegex(RuntimeError, "but got graph_type"):
