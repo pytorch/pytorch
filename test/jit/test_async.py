@@ -427,7 +427,7 @@ class TestAsync(JitTestCase):
                 for i in range(3):
                     input_list.append(input)
 
-                fut_list: List[Future[torch.Tensor]] = []  # noqa: F821
+                fut_list: List[Future[torch.Tensor]] = []
                 for input_tensor in input_list:
                     fut_list.append(torch.jit._fork(add_one, input_tensor))
                 # return list[future[tensor]] here to ensure tracing

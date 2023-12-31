@@ -118,7 +118,6 @@ libfoo = None
 
 f32 = torch.float32
 
-
 def run_fw_bw_and_get_code(fn):
     def run_with_backward():
         result = fn()
@@ -7392,20 +7391,20 @@ class CommonTemplate:
     @skipIfRocm
     def test_sdpa_unaligned_mask(self):
         def foo(
-            arg0_1: "f32[8, 8, 16, 16]",  # noqa: F821
-            arg1_1: "f32[8, 8, 15, 16]",  # noqa: F821
-            arg2_1: "f32[8, 8, 15, 16]",  # noqa: F821
-            arg3_1: "f32[1, 1, 16, 15]",  # noqa: F821
+            arg0_1: "f32[8, 8, 16, 16]",
+            arg1_1: "f32[8, 8, 15, 16]",
+            arg2_1: "f32[8, 8, 15, 16]",
+            arg3_1: "f32[1, 1, 16, 15]",
         ):
-            constant_pad_nd: "f32[1, 1, 16, 16]" = (  # noqa: F821
+            constant_pad_nd: "f32[1, 1, 16, 16]" = (
                 torch.ops.aten.constant_pad_nd.default(arg3_1, [0, 1], 0.0)
             )
             arg3_1 = None
-            slice_1: "f32[1, 1, 16, 15]" = torch.ops.aten.slice.Tensor(  # noqa: F821
+            slice_1: "f32[1, 1, 16, 15]" = torch.ops.aten.slice.Tensor(
                 constant_pad_nd, -1, 0, 15
             )
             constant_pad_nd = None
-            expand: "f32[8, 8, 16, 15]" = torch.ops.aten.expand.default(  # noqa: F821
+            expand: "f32[8, 8, 16, 15]" = torch.ops.aten.expand.default(
                 slice_1, [8, 8, 16, 15]
             )
             slice_1 = None
@@ -7415,9 +7414,7 @@ class CommonTemplate:
                 )
             )
             arg0_1 = arg1_1 = arg2_1 = expand = None
-            getitem: "f32[8, 8, 16, 16]" = _scaled_dot_product_efficient_attention[
-                0
-            ]  # noqa: F821
+            getitem: "f32[8, 8, 16, 16]" = _scaled_dot_product_efficient_attention[0]
             _scaled_dot_product_efficient_attention = None
             return (getitem,)
 
@@ -7447,24 +7444,22 @@ class CommonTemplate:
 
             def forward(
                 self,
-                arg0_1: "f32[8, 8, 16, 16]",  # noqa: F821
-                arg1_1: "f32[8, 8, 15, 16]",  # noqa: F821
-                arg2_1: "f32[8, 8, 15, 16]",  # noqa: F821
+                arg0_1: "f32[8, 8, 16, 16]",
+                arg1_1: "f32[8, 8, 15, 16]",
+                arg2_1: "f32[8, 8, 15, 16]",
             ):
                 arg3_1 = self.arg3_1
-                constant_pad_nd: "f32[1, 1, 16, 16]" = (  # noqa: F821
+                constant_pad_nd: "f32[1, 1, 16, 16]" = (
                     torch.ops.aten.constant_pad_nd.default(arg3_1, [0, 1], 0.0)
                 )
                 arg3_1 = None
-                slice_1: "f32[1, 1, 16, 15]" = (
-                    torch.ops.aten.slice.Tensor(  # noqa: F821
-                        constant_pad_nd, -1, 0, 15
-                    )
+                slice_1: "f32[1, 1, 16, 15]" = torch.ops.aten.slice.Tensor(
+                    constant_pad_nd, -1, 0, 15
                 )
                 constant_pad_nd = None
                 expand: "f32[8, 8, 16, 15]" = torch.ops.aten.expand.default(
                     slice_1, [8, 8, 16, 15]
-                )  # noqa: F821
+                )
                 slice_1 = None
                 _scaled_dot_product_efficient_attention = (
                     torch.ops.aten._scaled_dot_product_efficient_attention.default(
@@ -7474,7 +7469,7 @@ class CommonTemplate:
                 arg0_1 = arg1_1 = arg2_1 = expand = None
                 getitem: "f32[8, 8, 16, 16]" = _scaled_dot_product_efficient_attention[
                     0
-                ]  # noqa: F821
+                ]
                 _scaled_dot_product_efficient_attention = None
                 return (getitem,)
 
