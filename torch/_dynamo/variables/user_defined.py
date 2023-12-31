@@ -89,7 +89,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from .. import trace_rules
         from . import ConstantVariable
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
         from .distributed import ProcessGroupVariable
 
         if name == "__name__":
@@ -111,6 +111,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source and inspect.ismemberdescriptor(obj):
             return VariableBuilder(tx, source)(obj.__get__(self.value))
+        elif source and obj:
+            return VariableBuilder(tx, source)(obj)
+        elif obj:
+            return SourcelessBuilder()(tx, obj)
 
         # Special handling of collections.OrderedDict.fromkeys()
         # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
