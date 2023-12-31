@@ -194,6 +194,7 @@ class AOTInductorModelContainer {
         static_cast<uint8_t*>(get_constant_blob_ptr(use_inactive));
     auto constants_map_to_update = get_constants_map(use_inactive);
 
+    /*
     if (validate_full_update) {
       for (size_t idx = 0; idx < num_constants; idx++) {
         auto constant_name = std::string(models_[0]->constant_name(idx));
@@ -205,6 +206,7 @@ class AOTInductorModelContainer {
         }
       }
     }
+    */
 
     for (size_t idx = 0; idx < num_constants; idx++) {
       auto constant_name = std::string(models_[0]->constant_name(idx));

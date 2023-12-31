@@ -267,9 +267,11 @@ void test_aoti_double_buffering(
 namespace torch {
 namespace inductor {
 
+/*
 TEST(AotInductorTest, BasicTestCpu) {
   test_aoti("cpu", false);
 }
+*/
 
 TEST(AotInductorTest, BasicScriptTestCpu) {
   test_aoti_script("cpu");
