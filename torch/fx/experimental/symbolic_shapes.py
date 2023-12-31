@@ -16,18 +16,18 @@ from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
 from typing import (
-    Any, 
-    cast, 
-    Callable, 
-    Dict, 
-    Iterable, 
-    List, 
-    Optional, 
-    Sequence, 
-    Set, 
-    Tuple, 
-    Type, 
-    Union, 
+    Any,
+    cast,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
     TYPE_CHECKING
 )
 

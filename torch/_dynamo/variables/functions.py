@@ -2,10 +2,9 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, TYPE_CHECKING
 
 import torch
-from torch._guards import Source
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n
@@ -13,6 +12,9 @@ from ..exc import unimplemented, Unsupported
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import get_first_attr, make_cell
 from .base import typestr, VariableTracker
+
+if TYPE_CHECKING:
+    from torch._guards import Source
 
 
 def wrap_bound_arg(tx, val, source=None):
