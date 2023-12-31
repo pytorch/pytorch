@@ -12,7 +12,6 @@ import torch
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 
-from torch._dynamo.allowed_functions import gen_allowed_objs_and_ids
 from torch.testing._internal.common_utils import skipIfTorchDynamo
 import torch._functorch.deprecated as deprecated_func
 
