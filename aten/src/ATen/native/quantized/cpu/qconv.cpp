@@ -1564,6 +1564,7 @@ static at::Tensor _quantized_convolution_onednn(
     TORCH_CHECK(
         bias_val_float.size(0) == output_channels,
         fmt::format("bias should have K elements: {}", output_channels));
+    auto bias_desc = ideep::tensor::desc(bias_val_float.sizes().vec(), dnnl::memory::data_type::f32);
     onednn_bias.init(bias_desc, bias_val_float.data_ptr());
   }
 
