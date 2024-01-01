@@ -631,7 +631,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
             @staticmethod
             def jvp(ctx, x_t):
-                if jvp_err:
+                if jvp_err:  # noqa: F821
                     return x_t
                 else:
                     return x_t.mul_(2)
@@ -647,7 +647,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
             @staticmethod
             def jvp(ctx, x_t, y_t):
-                return x_t + y_t, fn(x_t)
+                return x_t + y_t, fn(x_t)  # noqa: F821
 
         class MyFn3(torch.autograd.Function):
             @staticmethod

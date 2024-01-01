@@ -180,7 +180,7 @@ def gen_ops() -> List[Any]:
 
 def dtype_match(
     torch_dtype: Optional[torch.dtype],
-    cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]
+    cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]  # noqa: F821
 ) -> bool:
     # Import cutlass python scripts.
     assert try_import_cutlass()

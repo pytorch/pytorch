@@ -646,7 +646,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
         with self.assertRaisesRegex(AttributeError, "TestModule (.*) does not have a field with name '_forward'"):
-            mf._forward(x)
+            mf._forward(x)  # noqa: F821
 
     def test_freeze_module_with_inplace_mutable(self):
         class FreezeMe(torch.jit.ScriptModule):

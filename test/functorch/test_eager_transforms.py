@@ -1216,7 +1216,7 @@ class TestAutogradFunction(TestCase):
         grad_y = torch.randn_like(x)
 
         def h(x, grad_y):
-            _, vjp_fn = vjp(f, x)
+            _, vjp_fn = vjp(f, x)  # noqa: F821
             gx, = vjp_fn(grad_y)
             return gx
 
@@ -1255,7 +1255,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         class NumpyCube(torch.autograd.Function):
             @staticmethod
             def forward(input):
-                input_np = to_numpy(input)
+                input_np = to_numpy(input)  # noqa: F821
                 dinput = torch.tensor(3 * input_np ** 2, device=input.device)
                 return torch.tensor(input_np ** 3, device=input.device), dinput
 
@@ -1277,7 +1277,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
 
             @staticmethod
             def forward(input):
-                input_np = to_numpy(input)
+                input_np = to_numpy(input)  # noqa: F821
                 dinput = torch.tensor(3 * input_np ** 2, device=input.device)
                 return torch.tensor(input_np ** 3, device=input.device), dinput
 

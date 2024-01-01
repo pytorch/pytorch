@@ -1389,11 +1389,11 @@ class TestAvgPool(TestCaseMPS):
         return joined_x.view(1, joined_x.numel())
 
     def _avg_pool2d(self, x, kernel_size):
-        size = reduce(operator.mul, kernel_size)
+        size = reduce(operator.mul, kernel_size)  # noqa: F821
         return self._sum_pool2d(x, kernel_size) / size
 
     def _avg_pool3d(self, x, kernel_size):
-        size = reduce(operator.mul, kernel_size)
+        size = reduce(operator.mul, kernel_size)  # noqa: F821
         return self._sum_pool3d(x, kernel_size) / size
 
     def test_avg_pool2d_with_zero_divisor(self):
@@ -6520,7 +6520,7 @@ class TestMPS(TestCaseMPS):
             devices += ['mps']
 
             def _gelu_ref(X):
-                return X * stats.norm.cdf(X)
+                return X * stats.norm.cdf(X)  # noqa: F821
 
             for d in devices:
                 X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]

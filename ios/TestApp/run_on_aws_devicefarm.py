@@ -87,7 +87,7 @@ def upload_file(
         waiting_time = datetime.datetime.now() - start_time
         if waiting_time > datetime.timedelta(seconds=MAX_UPLOAD_WAIT_IN_SECOND):
             raise Exception(
-                f"Uploading {filename} is taking longer than {MAX_WAIT_IN_SECOND} seconds, terminating..."
+                f"Uploading {filename} is taking longer than {MAX_UPLOAD_WAIT_IN_SECOND} seconds, terminating..."
             )
 
         r = client.get_upload(arn=upload_arn)

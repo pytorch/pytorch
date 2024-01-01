@@ -14,7 +14,7 @@ import itertools
 import sympy
 from collections import defaultdict
 from torch.fx.passes import graph_drawer
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Set, Tuple, Union
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
@@ -325,7 +325,8 @@ def _size_of(node: fx.Node) -> int:
     # Only needed since we don't always trace with fake tensors.
     if 'tensor_meta' in node.meta:
         metadata = node.meta['tensor_meta']
-        numel = _prod(map(to_size_hint, metadata.shape))
+        # TODO: What is to_size_hint suppose to be?
+        numel = _prod(map(to_size_hint, metadata.shape))  # noqa: F821
         dtype = metadata.dtype
     else:
         return 0
