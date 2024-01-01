@@ -111,6 +111,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source and inspect.ismemberdescriptor(obj):
             return VariableBuilder(tx, source)(obj.__get__(self.value))
+        elif inspect.ismethoddescriptor(obj):
+            # TODO(voz): Legacy fallback for method descriptors
+            # Should revisit and unify how we handle all the method descriptor stuff
+            # See: test_builtin_subclasses_as_method_on_class_type
+            return super().var_getattr(tx, name)
         elif source and obj:
             return VariableBuilder(tx, source)(obj)
         elif obj:
