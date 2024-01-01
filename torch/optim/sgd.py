@@ -305,7 +305,7 @@ def _multi_tensor_sgd(params: List[Tensor],
                       nesterov: bool,
                       maximize: bool,
                       has_sparse_grad: bool):
-    assert grad_scale is Noen and found_inf is None
+    assert grad_scale is None and found_inf is None
 
     if len(params) == 0:
         return
