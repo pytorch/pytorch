@@ -32,6 +32,9 @@ C10_DEVICE __forceinline__ void sgd_math(
       g /= static_cast<double>(*grad_scale_ptr);
       r_args[1][ii] = g;
     }
+    if (maximize) {
+      g *= -1.0;
+    }
     if (weight_decay != 0) {
       g += weight_decay * p;
     }
@@ -48,11 +51,7 @@ C10_DEVICE __forceinline__ void sgd_math(
         g = momentum_buffer;
       }
     }
-    if (maximize) {
-      p += double_lr * g;
-    } else {
-      p -= double_lr * g;
-    }
+    p -= double_lr * g;
     r_args[0][ii] = p;
   }
 }
