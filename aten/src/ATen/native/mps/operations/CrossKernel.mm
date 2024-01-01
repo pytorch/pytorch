@@ -125,9 +125,6 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
                   .declare_static_shape(out.sizes(), /*squash_dims=*/dim)
                   .build();
 
-  id<MTLBuffer> inputBuffer = getMTLBufferStorage(input);
-  id<MTLBuffer> otherBuffer = getMTLBufferStorage(other);
-  id<MTLBuffer> outputBuffer = getMTLBufferStorage(out);
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const int64_t out_dim_stride = out.stride(dim);
@@ -179,21 +176,14 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
       getMPSProfiler().beginProfileKernel(crossPSO, "cross", {input, other});
 
       [computeEncoder setComputePipelineState:crossPSO];
-      [computeEncoder setBuffer:inputBuffer offset:input.storage_offset() * input.element_size() atIndex:0];
-      [computeEncoder setBuffer:otherBuffer offset:other.storage_offset() * other.element_size() atIndex:1];
-      [computeEncoder setBuffer:outputBuffer offset:out.storage_offset() * out.element_size() atIndex:2];
+      mtl_setBuffer(computeEncoder, input, 0);
+      mtl_setBuffer(computeEncoder, other, 1);
+      mtl_setBuffer(computeEncoder, out, 2);
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
       [computeEncoder setBytes:&out_dim_stride length:sizeof(int64_t) atIndex:4];
       [computeEncoder setBytes:&input_dim_stride length:sizeof(int64_t) atIndex:5];
       [computeEncoder setBytes:&other_dim_stride length:sizeof(int64_t) atIndex:6];
-
-      NSUInteger tgSize = crossPSO.maxTotalThreadsPerThreadgroup;
-      if (tgSize > numThreads) {
-        tgSize = numThreads;
-      }
-
-      MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+      mtl_dispatch1DJob(computeEncoder, crossPSO, numThreads);
 
       getMPSProfiler().endProfileKernel(crossPSO);
     }

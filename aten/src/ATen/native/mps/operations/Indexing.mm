@@ -84,8 +84,6 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
 
   const Tensor& inputTensor = iter.tensor(1);
   Tensor outputTensor = iter.tensor(0);
-  id<MTLBuffer> inputBuffer = getMTLBufferStorage(inputTensor);
-  id<MTLBuffer> outputBuffer = getMTLBufferStorage(outputTensor);
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
@@ -126,13 +124,7 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
       [computeEncoder setBytes:&nOffsets length:sizeof(uint32_t) atIndex:4];
 
-      NSUInteger kernelOffsetsTGSize = kernelDataOffsetsPSO.maxTotalThreadsPerThreadgroup;
-      if (kernelOffsetsTGSize > numThreads) {
-        kernelOffsetsTGSize = numThreads;
-      }
-
-      MTLSize kernelOffsetsThreadGroupSize = MTLSizeMake(kernelOffsetsTGSize, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:kernelOffsetsThreadGroupSize];
+      mtl_dispatch1DJob(computeEncoder, kernelDataOffsetsPSO, numThreads);
 
       std::string indexFunction =
           getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate, serial_index_put);
@@ -184,10 +176,8 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       [computeEncoder setBytes:index_size.data() length:sizeof(index_size[0]) * index_size.size() atIndex:1];
       [computeEncoder setBytes:index_stride.data() length:sizeof(index_stride[0]) * index_stride.size() atIndex:2];
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
-      [computeEncoder setBuffer:inputBuffer offset:inputTensor.storage_offset() * inputTensor.element_size() atIndex:4];
-      [computeEncoder setBuffer:outputBuffer
-                         offset:outputTensor.storage_offset() * outputTensor.element_size()
-                        atIndex:5];
+      mtl_setBuffer(computeEncoder, inputTensor, 4);
+      mtl_setBuffer(computeEncoder, outputTensor, 5);
       [computeEncoder setBytes:&num_indices length:sizeof(uint32_t) atIndex:6];
       if (serial_index_put) {
         [computeEncoder setBytes:&numIters length:sizeof(numIters) atIndex:7];

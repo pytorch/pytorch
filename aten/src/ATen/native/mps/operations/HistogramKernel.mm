@@ -247,11 +247,6 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   TORCH_INTERNAL_ASSERT(thread_histograms.is_contiguous());
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
-  id<MTLBuffer> inputBuffer = getMTLBufferStorage(input);
-  id<MTLBuffer> outputBuffer = getMTLBufferStorage(thread_histograms);
-  id<MTLBuffer> weightBuffer =
-      has_weight ? getMTLBufferStorage(weight.value()) : [[device newBufferWithLength:0 options:0] autorelease];
-  size_t weightOffset = has_weight ? weight.value().storage_offset() * weight.value().element_size() : 0;
   MPSStream* mpsStream = getCurrentMPSStream();
   const uint32_t nDim = input.sizes().size();
 
@@ -292,11 +287,11 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       getMPSProfiler().beginProfileKernel(histogramPSO, "histogram", allTensorsList);
 
       [computeEncoder setComputePipelineState:histogramPSO];
-      [computeEncoder setBuffer:inputBuffer offset:input.storage_offset() * input.element_size() atIndex:0];
-      [computeEncoder setBuffer:weightBuffer offset:weightOffset atIndex:1];
-      [computeEncoder setBuffer:outputBuffer
-                         offset:thread_histograms.storage_offset() * thread_histograms.element_size()
-                        atIndex:2];
+      mtl_setBuffer(computeEncoder, input, 0);
+      if (has_weight) {
+        mtl_setBuffer(computeEncoder, weight.value(), 1);
+      }
+      mtl_setBuffer(computeEncoder, thread_histograms, 2);
       [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:3];
       [computeEncoder setBytes:&D length:sizeof(int64_t) atIndex:4];
       [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset atIndex:5];
@@ -309,13 +304,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       [computeEncoder setBytes:&bin_selection_algorithm length:sizeof(uint8_t) atIndex:10];
       [computeEncoder setBytes:&has_weight length:sizeof(uint8_t) atIndex:11];
 
-      NSUInteger tgSize = histogramPSO.maxTotalThreadsPerThreadgroup;
-      if (tgSize > numThreads) {
-        tgSize = numThreads;
-      }
-      gridSize = MTLSizeMake(numThreads, 1, 1);
-      MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+      mtl_dispatch1DJob(computeEncoder, histogramPSO, numThreads);
 
       getMPSProfiler().endProfileKernel(histogramPSO);
     }
