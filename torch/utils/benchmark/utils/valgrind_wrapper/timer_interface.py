@@ -55,7 +55,7 @@ class FunctionCounts:
     # the print settings. This is simply to allow hermetic unit tests.
     _linewidth: Optional[int] = None
 
-    def __iter__(self) -> Iterator[FunctionCount, None, None]:
+    def __iter__(self) -> Iterator[FunctionCount]:
         yield from self._data
 
     def __len__(self) -> int:
