@@ -115,7 +115,6 @@ select = [
 ]
 
 [tool.ruff.per-file-ignores]
-<<<<<<< HEAD
 "__init__.py" = [
     "F401",
 ]
@@ -123,8 +122,6 @@ select = [
     "F821",
 ]
 "test/torch_np/numpy_tests/**" = [
-"__init__.py" = ["F401"]
-"test/**" = [
     "F821"
 ]
 "test/jit/**" = [
