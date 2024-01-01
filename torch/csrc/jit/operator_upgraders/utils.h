@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <string>
 #include <vector>
+#include <stdint.h>
 
 namespace torch::jit {
 
