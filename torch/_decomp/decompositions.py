@@ -2225,9 +2225,17 @@ def _avg_poolnd(
     for i in range(dim):
         idx = torch.arange(h_out[i] * kernel_size[i], device=x.device)
         if stride[i] != kernel_size[i]:
-            h_range = idx // kernel_size[i]
-            m_range = idx % kernel_size[i]
-            idx = h_range * stride[i] + m_range
+            h_range = (
+                torch.arange(h_out[i], device=x.device)
+                .view(h_out[i], 1)
+                .expand(h_out[i], kernel_size[i])
+            )
+            m_range = (
+                torch.arange(kernel_size[i], device=x.device)
+                .view(1, kernel_size[i])
+                .expand(h_out[i], kernel_size[i])
+            )
+            idx = (h_range * stride[i] + m_range).reshape(h_out[i] * kernel_size[i])
         idx = idx - padding[i]
         idx = idx.reshape(idx.shape[0], *[1] * (dim - 1 - i))
         out_indices.append(idx)
@@ -2251,10 +2259,7 @@ def _avg_poolnd(
         out = aten._masked_index(
             x,
             cond,
-            [
-                *[None] * len(batch),
-                *[out_indices[i] for i in range(dim)],
-            ],
+            [*[None] * len(batch), *out_indices],
             0,
         )
     else:
