@@ -190,7 +190,7 @@ def round_dec(x, decimals=0):
 @pw_cast_for_opmath
 def bmm(self, batch2):
     if config.coordinate_descent_tuning:
-        if self.shape[1] == 1:
+        if self.shape[1] == 1 or batch2.shape[2] == 1:
             out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
             return out
     if self.device.type == "cpu":
