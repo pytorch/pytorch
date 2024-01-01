@@ -2083,7 +2083,7 @@ class ShapeEnv:
                            source: Source,
                            symbolic_context: SymbolicContext
                            ) -> List[sympy.Expr]:
-        return self._produce_dyn_sizes_from_int_tuple(tuple(ex.size()), source, symbolic_context)  # noqa: F821
+        return self._produce_dyn_sizes_from_int_tuple(tuple(ex_size), source, symbolic_context)
 
     def _produce_dyn_sizes_from_int_tuple(self,
                                           tensor_size: Tuple[int],
