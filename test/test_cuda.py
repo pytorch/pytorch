@@ -1289,11 +1289,21 @@ torch.cuda.synchronize()
     # Compare non-fused optimizer vs fused one as the fused one unscales gradients
     # inside its cuda kernel unlike the other.
     def test_grad_scaling_autocast_fused_optimizers(self):
-        for optimizer_ctor, optimizer_kwargs, separate_unscale in product(
+        for optimizer_ctor, optimizer_kwargs, separate_unscale in list(product(
             (torch.optim.Adam, torch.optim.AdamW),
             ({"fused": True, "amsgrad": False}, {"fused": True, "amsgrad": True}),
             (False, True),
-        ):
+        )) + list(product(
+            (torch.optim.SGD,),
+            [
+                {"momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
+                for d, w, n in product((0.0, 0.5), (0.0, 0.5), (False,))
+            ] + [
+                {"momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
+                for d, w, n in product((0.0,), (0.0, 0.5), (True, False))
+            ],
+            (False, True),
+        )):
             with self.subTest(optim=optimizer_ctor, kwargs=optimizer_kwargs, separate_unscale=separate_unscale):
                 self._grad_scaling_autocast_fused_optimizers(
                     optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs, separate_unscale=separate_unscale)
@@ -2886,6 +2896,10 @@ exit(2)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_grad_scaling(self):
+        for foreach, fused in ((False, False), (True, False), (False, True)):
+            self._test_graph_grad_scaling(foreach, fused)
+
+    def _test_graph_grad_scaling(self, foreach, fused):
         torch.cuda.empty_cache()
 
         scaler = torch.cuda.amp.GradScaler(init_scale=4.)
@@ -2893,7 +2907,7 @@ exit(2)
         s = torch.cuda.Stream()
 
         weight = torch.ones((100,), device="cuda", requires_grad=True)
-        opt = torch.optim.SGD([weight], lr=0.1)
+        opt = torch.optim.SGD([weight], lr=0.1, foreach=foreach, fused=fused)
         static_input = torch.ones_like(weight)
         static_grad = torch.ones_like(weight)
 
@@ -3180,12 +3194,22 @@ exit(2)
         cases = [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
-        ]
+        ] + list(product(
+            (torch.optim.SGD,),
+            [
+                {"lr": 0.1, "momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
+                for d, w, n in product((0.0, 0.5), (0.0, 0.5), (False,))
+            ] + [
+                {"lr": 0.1, "momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
+                for d, w, n in product((0.0,), (0.0, 0.5), (True, False))
+            ],
+        ))
 
         steps_warmup = 3
         steps_train = 2
 
         for OptClass, kwargs in cases:
+            has_capturable_arg = OptClass in (torch.optim.Adam, torch.optim.AdamW)
             for actually_do_graphs in (True, False):
                 params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
                 params_control = [p.clone().requires_grad_() for p in params]
@@ -3208,8 +3232,9 @@ exit(2)
                     scaler_for_graphed._lazy_init_scale_growth_tracker(torch.device("cuda"))
 
                 # Control (capturable=False)
-
-                opt = OptClass(params_control, capturable=False, **kwargs)
+                if has_capturable_arg:
+                    kwargs["capturable"] = False
+                opt = OptClass(params_control, **kwargs)
 
                 for i in range(steps_warmup + steps_train):
                     for j, p in enumerate(params_control):
@@ -3218,8 +3243,9 @@ exit(2)
                     scaler_for_control.update()
 
                 # capturable=True
-
-                opt = OptClass(params_graphed, capturable=True, **kwargs)
+                if has_capturable_arg:
+                    kwargs["capturable"] = True
+                opt = OptClass(params_graphed, **kwargs)
 
                 for i in range(steps_warmup):
                     for j, p in enumerate(params_graphed):
