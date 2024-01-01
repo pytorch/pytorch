@@ -1374,7 +1374,7 @@ optim_db: List[OptimizerInfo] = [
         SGD,
         optim_inputs_func=optim_inputs_func_sgd,
         optim_error_inputs_func=optim_error_inputs_func_sgd,
-        supported_impls=("foreach", "differentiable"),
+        supported_impls=("foreach", "differentiable", "fused"),
         supports_sparse_on=("cpu", "cuda"),
         skips=(
             DecorateInfo(
