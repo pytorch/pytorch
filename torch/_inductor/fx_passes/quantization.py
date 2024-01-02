@@ -419,44 +419,66 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
     # * Extra input of binary node comes from dequant pattern
     # * the two inputs of binary node should have attribute "meta" and should be tensors
     # * the two inputs of binary node should have the same shape
+    # * All users of the extra input in this pattern should be
+    #   ancestor nodes of the compute node, except for the binary node
+    #   connected to the compute node.
     def fn(match):
-        qconv2d_node_after_weight_prepack = filter_nodes(
-            match.nodes, torch.ops.onednn.qconv2d_pointwise
-        )[0]
-        if len(qconv2d_node_after_weight_prepack.users) != 1:
+        compute_node = filter_nodes(match.nodes, torch.ops.onednn.qconv2d_pointwise)[0]
+        # qconv2d_pointwise should only have one user
+        if len(compute_node.users) != 1:
             return False
+        binary_node_inputs = next(iter(compute_node.users)).args
+        assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
         if output_dtype is not None:
-            binary_node_inputs = next(
-                iter(qconv2d_node_after_weight_prepack.users)
-            ).args
-            assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
-            extra_input_node = None
+            extra_input_of_binary_node = None
             for arg in binary_node_inputs:
-                if arg != qconv2d_node_after_weight_prepack:
-                    extra_input_node = arg
+                if arg != compute_node:
+                    extra_input_of_binary_node = arg
                     break
-            assert extra_input_node is not None
-            if (not isinstance(extra_input_node, torch.fx.Node)) or (
-                extra_input_node.target != aten.mul.Tensor
+            assert extra_input_of_binary_node is not None
+            # Extra input of binary node comes from dequant pattern
+            if (not isinstance(extra_input_of_binary_node, torch.fx.Node)) or (
+                extra_input_of_binary_node.target != aten.mul.Tensor
             ):
                 return False
-            if not (
-                hasattr(binary_node_inputs[0], "meta")
-                and isinstance(
-                    binary_node_inputs[0].meta.get("val", None), torch.Tensor
+
+        # the two inputs of binary node should have attribute "meta" and should be tensors
+        if not (
+            hasattr(binary_node_inputs[0], "meta")
+            and isinstance(binary_node_inputs[0].meta.get("val", None), torch.Tensor)
+        ) or not (
+            hasattr(binary_node_inputs[1], "meta")
+            and isinstance(binary_node_inputs[1].meta.get("val", None), torch.Tensor)
+        ):
+            return False
+        # the two inputs of binary node should have the same shape
+        if (
+            binary_node_inputs[0].meta["val"].size()
+            != binary_node_inputs[1].meta["val"].size()
+        ):
+            return False
+
+        # All users of the extra input in this pattern should be
+        # ancestor nodes of the compute node, except for the binary node
+        # connected to the compute node.
+
+        from .mkldnn_fusion import _get_remaining_users
+
+        extra_input_of_pattern = (
+            match.kwargs["accum"]
+            if output_dtype is None
+            else match.kwargs["accum_after_dequant"]
+        )
+        if (
+            len(
+                _get_remaining_users(
+                    extra_input_of_pattern,
+                    compute_node,
                 )
-            ) or not (
-                hasattr(binary_node_inputs[1], "meta")
-                and isinstance(
-                    binary_node_inputs[1].meta.get("val", None), torch.Tensor
-                )
-            ):
-                return False
-            if (
-                binary_node_inputs[0].meta["val"].size()
-                != binary_node_inputs[1].meta["val"].size()
-            ):
-                return False
+            )
+            > 1
+        ):
+            return False
         return True
 
     return fn

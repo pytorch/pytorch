@@ -756,6 +756,81 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    def test_qconv2d_add_3(self):
+        r"""
+        This testcase will test below model:
+             x
+           /   \
+        conv1  maxpool
+          \    /   \
+           add    conv2
+            \     /
+              cat
+        Based on default recipe of x86InductorQuantizer, we will see this pattern after convert:
+        qconv1    maxpool
+         \           |
+          \         q1
+           \       /   \
+            \     dq1  qconv2
+             \   /
+              add
+               |
+               q2
+        Since q1 has 2 users and qconv2 is not ancestor node of qconv1, we shouldn't fuse:
+                int8
+                 /
+        qconv1 dq1
+           \   /
+            add
+             |
+             q2
+             |
+            int8
+        Instead we can match and fuse this pattern into qconv_binary:
+        qconv1  fp32
+            \   /
+             add
+              |
+             fp32
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(3, 3, kernel_size=1, stride=1)
+                self.maxpool = torch.nn.MaxPool2d(
+                    kernel_size=3, stride=1, padding=0, dilation=1
+                )
+
+            def forward(self, x):
+                tmp1 = self.conv1(x)
+                tmp2 = self.maxpool(x)
+                add = torch.add(tmp1, tmp2)
+                tmp3 = self.conv2(tmp2)
+                return torch.cat((add, tmp3), dim=1)
+
+        mod = M().eval()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+
+        def matcher_check_fn():
+            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_count"], 1)
+            # The matched qconv binary pattern should have 2 nodes [qconv, add]
+            # instead of 11 which has dequant in binary input and output quant
+            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_nodes"], 2)
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            matcher_check_fn=matcher_check_fn,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
     def test_qat_qconv2d(self):
         r"""
         This testcase will quantize a single Conv2d module with qat flow.
