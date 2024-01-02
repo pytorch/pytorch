@@ -1427,6 +1427,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             enable_grad=False,
             restore_side_effects=False,
             tracer=fwd_tracer,
+            set_subgraph_inputs="manual",
         )
 
         if fwd_freevars:
@@ -1479,7 +1480,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 enable_grad=False,
                 restore_side_effects=False,
                 tracer=bwd_tracer,
-                manually_set_subgraph_inputs=True,
+                set_subgraph_inputs="manual",
             )
 
         # TODO: assert that bwd_graph didn't capture values that were
