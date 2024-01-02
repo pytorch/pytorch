@@ -25,7 +25,7 @@ verbose_progress = False
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
 # use cpp wrapper instead of python wrapper
-cpp_wrapper = False
+cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
 # dead code elimination
 dce = False
