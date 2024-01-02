@@ -1188,7 +1188,6 @@ def main():
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
         "include/c10/xpu/*.h",
-        "include/c10/xpu/impl/*.h",
         "include/torch/*.h",
         "include/torch/csrc/*.h",
         "include/torch/csrc/api/include/torch/*.h",

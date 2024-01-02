@@ -2,10 +2,8 @@
 #include <c10/util/Exception.h>
 #include <c10/xpu/XPUFunctions.h>
 
-#ifndef _WIN32
 #include <sys/wait.h>
 #include <unistd.h>
-#endif
 #include <cmath>
 #include <deque>
 #include <mutex>
